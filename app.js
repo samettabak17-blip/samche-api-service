@@ -579,7 +579,7 @@ app.post("/chat", async (req, res) => {
     return res.status(500).json({ error: "Could not generate chat response." });
   }
 });
-
+```[cite: 1]
 // ----------------------------------------------------------------------------
 // B) WEB CHATBOT (OPENAI) - /api/chat
 // ----------------------------------------------------------------------------
