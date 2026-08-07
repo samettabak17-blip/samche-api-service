@@ -2339,49 +2339,65 @@ ${text}
 
 app.post("/telegram-webhook", async (req, res) => {
   try {
-    // TELEGRAM'DAN GELEN FARKLI MESAJ TİPLERİNİ (GRUP, KANAL VEYA DÜZENLENMİŞ) YAKALAR
+    // TELEGRAM'DAN GELEN MESAJ TİPLERİNİ YAKALA
     const msg = req.body.message || req.body.channel_post || req.body.edited_message;
     if (!msg || !msg.text) return res.sendStatus(200);
 
     const chatId = msg.chat.id.toString();
-    let text = msg.text.trim();
-
-    // Bot adıyla etiketleme geldiyse temizle (ör: /w@samche_bot 971... -> /w 971...)
+    
+    // Görünmez boşlukları (NBSP vb.) standart boşluğa çevir ve temizle
+    let text = msg.text.replace(/\s+/g, " ").trim();
     text = text.replace(/@\w+/g, "");
 
-    if (!text.startsWith("/w ") && !text.startsWith("/end ")) return res.sendStatus(200);
+    // Sadece /w ve /end komutlarını dinle
+    if (!text.startsWith("/w ") && !text.startsWith("/end ")) {
+        return res.sendStatus(200);
+    }
     
-    // Güvenlik: Sadece senin sohbetinden/grubundan gelenleri kabul et
     const envChatId = (process.env.TELEGRAM_CHAT_ID || "").toString().trim();
-    if (chatId !== envChatId) return res.sendStatus(200);
 
+    // 1. DEDEKTİF KONTROLÜ: ID'ler Eşleşiyor mu?
+    if (chatId !== envChatId) {
+        // Eğer ID eşleşmiyorsa, bot sessizce durmak yerine sana hatayı Telegram'dan yazacak!
+        await axios.post(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+            chat_id: chatId,
+            text: `❌ YETKİ HATASI!\n\nSenin Telegram ID'n: ${chatId}\nRender'a Girilen ID: ${envChatId}\n\nÇözüm: Render'daki Environment Variables kısmında TELEGRAM_CHAT_ID değerini tam olarak ${chatId} yapın.`
+        });
+        return res.sendStatus(200);
+    }
+
+    // 2. /w KOMUTU ÇALIŞTIRMA
     if (text.startsWith("/w ")) {
-      // Mesajı güvenle ayırma mantığı
       const parts = text.split(" ");
+      
       if (parts.length < 3) {
-        await sendMessageToTelegram("❌ Format yanlış. Örnek:\n/w 971527288586 Merhaba");
+        await sendMessageToTelegram("❌ Eksik bilgi girdiniz. Doğru format: /w 971527288586 Merhaba");
         return res.sendStatus(200);
       }
 
-      // Numaradaki gereksiz +, harf veya boşlukları tamamen temizler (Tam zırhlı)
+      // Numaradaki +, harf veya boşlukları temizleyip sadece rakamları al
       const to = parts[1].replace(/\D/g, ""); 
       const message = parts.slice(2).join(" ");
 
       if (!to || !message) {
-        await sendMessageToTelegram("❌ Format yanlış. Örnek:\n/w 971527288586 Merhaba");
+        await sendMessageToTelegram("❌ Numarayı veya mesajı okuyamadım. Doğru format: /w 971527288586 Merhaba");
         return res.sendStatus(200);
       }
+
       if (!wpSessions[to]) wpSessions[to] = {};
 
       wpSessions[to].humanOverride = true;
       wpSessions[to].lastMessageTime = Date.now();
       saveSessions();
 
+      // WhatsApp'a Gönder
       await sendMessage(to, message);
-      await sendMessageToTelegram(`✅ Gönderildi → WhatsApp +${to}: ${message}`);
+      // Başarı Bildirimi
+      await sendMessageToTelegram(`✅ Başarıyla Gönderildi → WhatsApp +${to}: ${message}`);
       return res.sendStatus(200);
     }
 
+    // 3. /end KOMUTU ÇALIŞTIRMA
     if (text.startsWith("/end ")) {
       const parts = text.split(" ");
       const cleanTo = parts[1]?.replace(/\D/g, "");
@@ -2395,7 +2411,7 @@ app.post("/telegram-webhook", async (req, res) => {
       wpSessions[cleanTo].humanOverride = false;
       saveSessions();
 
-      let closeMessage = "🔒 Canlı destek oturumu sona ermiştir.\n\nYapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına canlı destek yazmanız yeterlidir. Ekibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.";
+      let closeMessage = "🔒 Canlı destek oturumu sona ermiştir.\n\nYapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına 'canlı destek' yazmanız yeterlidir. Ekibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.";
       if (wpSessions[cleanTo]?.lang === "en") closeMessage = "🔒 The live support session has ended.\n\nYou may continue chatting with our AI assistant, or type live support anytime to reconnect.";
       else if (wpSessions[cleanTo]?.lang === "ar") closeMessage = "🔒 تم إنهاء جلسة الدعم المباشر.\n\nيمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي أو كتابة 'دعم مباشر' للاتصال بممثل.";
       
