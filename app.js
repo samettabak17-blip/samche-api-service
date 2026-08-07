@@ -1,6 +1,6 @@
 // ============================================================================
 // SAMCHE COMPANY LLC - BİRLEŞTİRİLMİŞ API SERVİSİ
-// (WhatsApp Bot + Web Chatbot + Samcheguide Bot + Telegram + Cron + Kayıt)
+// (WhatsApp Bot + Web Chatbot + Samcheguide Bot + Telegram + Cron + Kalıcı Kayıt)
 // ============================================================================
 
 import express from "express";
@@ -29,7 +29,7 @@ const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// Oturumları kaybetmemek için JSON dosyasına okuma/yazma işlemleri
+// Oturumları kaybetmemek için JSON dosyasına okuma/yazma işlemleri (Render uyku modu çözümü)
 const SESSION_FILE = "./wpSessions.json";
 let wpSessions = {};
 
@@ -345,7 +345,7 @@ function detectTopic(text) {
   const t = text.toLowerCase();
   if (t.includes("şirket") || t.includes("company") || t.includes("business setup") || t.includes("company setup")) return "company";
   if (t.includes("oturum") || t.includes("residency") || t.includes("visa") || t.includes("ikamet")) return "residency";
-  if (t.includes("ai") || t.includes("bot") || t.includes("chatbot") || t.includes("webchat")) return "ai";
+  if (t.includes("ai") || t.includes("bot") || t.includes("chatbot") || t.includes("webchat") || t.includes("yapay zeka")) return "ai";
   if (t.includes("maliyet") || t.includes("cost") || t.includes("price") || t.includes("ücret") || t.includes("bütçe") || t.includes("budget")) return "cost";
   return "other";
 }
@@ -1269,7 +1269,7 @@ Kullanıcı “sağlık sistemi nasıl?”, “sigorta sistemi nasıl?”, “ot
 
 • Sağlık sigortası devlet kurumları üzerinden değil, özel sigorta şirketleri üzerinden yapılır
 • Temel paketler genelde acil durum, muayene ve ilaç kapsamı içerir
-• Ücretler yaş, kapsam ve şirket seçimine göre değişir
+• Ücretler yaş, kapsam و şirket seçimine göre değişir
 
 Dipnot:
 • Bu sigorta çalışma izni sağlamaz; sadece sağlık kapsamı içindir
@@ -2245,21 +2245,19 @@ phone: +971 50 179 38 80 - +971 52 728 8586
 
 ولا تقم بتوجيه المستخدم إلى أي جهة.
 
-16. لم يعد تأسيس شركات Mainland يتطلب شريكًا محليًا.
-لذلك لا تستخدم أبدًا عبارات مثل:
-"قد تحتاج إلى شريك/كفيل محلي"
+16. Mainland companies no longer require a local partner. Therefore, NEVER use expressions such as:
+“A local partner/sponsor may be required”
+when providing information about Mainland company formation.
 
-عند شرح تأسيس شركات Mainland.
-
-القطاعات التالية يمكن تأسيسها فقط في MAINLAND ولا يمكن تأسيسها أبدًا في FREEZONE:
-- المطاعم والمقاهي وخدمات الطعام والتموين
-- متاجر التجزئة (الملابس، الإلكترونيات، السوبرماركت، إلخ)
-- شركات الإنشاءات والمقاولات
-- شركات العقارات والوساطة العقارية
-- شركات السياحة والسفر
-- شركات الأمن وأنظمة CCTV
-- شركات التنظيف
-- شركات النقل والخدمات اللوجستية و UBER
+The following sectors can ONLY be established in MAINLAND and can NEVER be established in FREEZONE:
+- Restaurants, cafés, catering, and other food services
+- Retail stores (clothing, electronics, supermarkets, etc.)
+- Construction and contracting companies
+- Real estate companies, brokerage firms, and real estate offices
+- Tourism and travel agencies
+- Security and CCTV companies
+- Cleaning companies
+- Transportation, logistics, and UBER companies
 
 17. إذا سأل المستخدم:
 "ما هي الخدمات التي تقدمونها بعد تأسيس الشركة؟"
@@ -2348,32 +2346,35 @@ app.post("/telegram-webhook", async (req, res) => {
 
     const envChatId = (process.env.TELEGRAM_CHAT_ID || "").toString().trim();
 
-    // 1. KONTROL: Yazan kişi sen misin? (Değilse sessizce reddet)
+    // 1. KONTROL: Eşleşme hatası varsa Telegram'dan bildir!
     if (chatId !== envChatId) {
+        await axios.post(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+            chat_id: chatId,
+            text: `❌ YETKİ HATASI: ID eşleşmiyor!\nSenin ID'n: ${chatId}\n.env ID: ${envChatId}`
+        }).catch(()=>{});
         return res.sendStatus(200);
     }
 
-    // 2. KONTROL: Doğru komut mu?
+    // SADECE TEST İÇİN: Eğer "/w" veya "/end" değilse bile tepki versin
     if (!text.startsWith("/w ") && !text.startsWith("/end ")) {
-        await sendMessageToTelegram("⚠️ Bot çalışıyor ancak komut anlaşılamadı.\nWhatsApp'a mesaj atmak için lütfen formatı şu şekilde kullanın:\n`/w 971527288586 Merhaba`");
+        await sendMessageToTelegram(`🤖 Telegram komut sistemi çalışıyor!\nGönderdiğiniz mesaj: "${text}"\n\nWhatsApp'a yanıt vermek için lütfen şu formatı kullanın:\n/w 971527288586 Merhaba`);
         return res.sendStatus(200);
     }
 
-    // 3. /w KOMUTU ÇALIŞTIRMA
+    // 2. /w KOMUTU
     if (text.startsWith("/w ")) {
       const parts = text.split(" ");
       
       if (parts.length < 3) {
-        await sendMessageToTelegram("❌ Eksik bilgi girdiniz. Doğru format: `/w 971527288586 Merhaba`");
+        await sendMessageToTelegram("❌ Eksik bilgi girdiniz. Doğru format:\n/w 971527288586 Merhaba");
         return res.sendStatus(200);
       }
 
-      // Numaradaki +, harf veya boşlukları temizleyip sadece rakamları al
       const to = parts[1].replace(/\D/g, ""); 
       const message = parts.slice(2).join(" ");
 
       if (!to || !message) {
-        await sendMessageToTelegram("❌ Numarayı veya mesajı okuyamadım. Doğru format: `/w 971527288586 Merhaba`");
+        await sendMessageToTelegram("❌ Numarayı veya mesajı okuyamadım. Doğru format:\n/w 971527288586 Merhaba");
         return res.sendStatus(200);
       }
 
@@ -2381,23 +2382,20 @@ app.post("/telegram-webhook", async (req, res) => {
 
       wpSessions[to].humanOverride = true;
       wpSessions[to].lastMessageTime = Date.now();
-      
       try { saveSessions(); } catch(e) {}
 
-      // WhatsApp'a Gönder
       await sendMessage(to, message);
-      // Başarı Bildirimi
       await sendMessageToTelegram(`✅ Başarıyla Gönderildi → WhatsApp +${to}:\n${message}`);
       return res.sendStatus(200);
     }
 
-    // 4. /end KOMUTU
+    // 3. /end KOMUTU
     if (text.startsWith("/end ")) {
       const parts = text.split(" ");
       const cleanTo = parts[1]?.replace(/\D/g, "");
 
       if (!cleanTo) {
-        await sendMessageToTelegram("❌ Format yanlış. Örnek:\n`/end 971527288586`");
+        await sendMessageToTelegram("❌ Format yanlış. Örnek:\n/end 971527288586");
         return res.sendStatus(200);
       }
       if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
@@ -2405,7 +2403,7 @@ app.post("/telegram-webhook", async (req, res) => {
       wpSessions[cleanTo].humanOverride = false;
       try { saveSessions(); } catch(e) {}
 
-      let closeMessage = "🔒 Canlı destek oturumu sona ermiştir.\n\nYapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına canlı destek yazmanız yeterlidir. Ekibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.";
+      let closeMessage = "🔒 Canlı destek oturumu sona ermiştir.\n\nYapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına 'canlı destek' yazmanız yeterlidir. Ekibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.";
       if (wpSessions[cleanTo]?.lang === "en") closeMessage = "🔒 The live support session has ended.\n\nYou may continue chatting with our AI assistant, or type live support anytime to reconnect.";
       else if (wpSessions[cleanTo]?.lang === "ar") closeMessage = "🔒 تم إنهاء جلسة الدعم المباشر.\n\nيمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي أو كتابة 'دعم مباشر' للاتصال بممثل.";
       
@@ -2413,6 +2411,7 @@ app.post("/telegram-webhook", async (req, res) => {
       await sendMessageToTelegram(`🔒 Canlı destek kapatıldı → +${cleanTo}`);
       return res.sendStatus(200);
     }
+    
     return res.sendStatus(200);
   } catch (err) {
     console.error("Telegram webhook error:", err);
