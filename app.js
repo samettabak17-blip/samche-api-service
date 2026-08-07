@@ -1,6 +1,6 @@
 // ============================================================================
 // SAMCHE COMPANY LLC - BİRLEŞTİRİLMİŞ API SERVİSİ
-// (WhatsApp Bot + Web Chatbot + Samcheguide Bot + Telegram + Cron + Persistence)
+// (WhatsApp Bot + Web Chatbot + Samcheguide Bot + Telegram + Cron + Kayıt)
 // ============================================================================
 
 import express from "express";
@@ -231,7 +231,7 @@ function addWebMemory(userId, role, content) {
 }
 
 // ============================================================================
-// 4. WHATSAPP BOT VERİLERİ (GEMINI 2.5 PRO + CRON)
+// 4. WHATSAPP BOT VERİLERİ (GEMINI 2.5 PRO)
 // ============================================================================
 
 const wpCorporateShortReplyMap = {
@@ -2295,7 +2295,7 @@ ${text}
       return res.sendStatus(200);
     }
 
-    // TÜRKÇE KARAKTER SORUNUNU ÇÖZEN GELİŞMİŞ NORMALİZASYON (İ, ı, Ş, ğ hatalarını önler)
+    // TÜRKÇE KARAKTER SORUNUNU ÇÖZEN GELİŞMİŞ NORMALİZASYON
     const normalizedAi = aiResponse
       .replace(/İ/g, 'i').replace(/I/g, 'i').replace(/ı/g, 'i')
       .replace(/Ş/g, 's').replace(/ş/g, 's')
@@ -2339,39 +2339,32 @@ ${text}
 
 app.post("/telegram-webhook", async (req, res) => {
   try {
-    // TELEGRAM'DAN GELEN MESAJ TİPLERİNİ YAKALA
     const msg = req.body.message || req.body.channel_post || req.body.edited_message;
     if (!msg || !msg.text) return res.sendStatus(200);
 
     const chatId = msg.chat.id.toString();
-    
-    // Görünmez boşlukları (NBSP vb.) standart boşluğa çevir ve temizle
-    let text = msg.text.replace(/\s+/g, " ").trim();
-    text = text.replace(/@\w+/g, "");
+    let text = msg.text.replace(/\s+/g, " ").trim(); 
+    text = text.replace(/@\w+/g, ""); 
 
-    // Sadece /w ve /end komutlarını dinle
-    if (!text.startsWith("/w ") && !text.startsWith("/end ")) {
-        return res.sendStatus(200);
-    }
-    
     const envChatId = (process.env.TELEGRAM_CHAT_ID || "").toString().trim();
 
-    // 1. DEDEKTİF KONTROLÜ: ID'ler Eşleşiyor mu?
+    // 1. KONTROL: Yazan kişi sen misin? (Değilse sessizce reddet)
     if (chatId !== envChatId) {
-        // Eğer ID eşleşmiyorsa, bot sessizce durmak yerine sana hatayı Telegram'dan yazacak!
-        await axios.post(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-            chat_id: chatId,
-            text: `❌ YETKİ HATASI!\n\nSenin Telegram ID'n: ${chatId}\nRender'a Girilen ID: ${envChatId}\n\nÇözüm: Render'daki Environment Variables kısmında TELEGRAM_CHAT_ID değerini tam olarak ${chatId} yapın.`
-        });
         return res.sendStatus(200);
     }
 
-    // 2. /w KOMUTU ÇALIŞTIRMA
+    // 2. KONTROL: Doğru komut mu?
+    if (!text.startsWith("/w ") && !text.startsWith("/end ")) {
+        await sendMessageToTelegram("⚠️ Bot çalışıyor ancak komut anlaşılamadı.\nWhatsApp'a mesaj atmak için lütfen formatı şu şekilde kullanın:\n`/w 971527288586 Merhaba`");
+        return res.sendStatus(200);
+    }
+
+    // 3. /w KOMUTU ÇALIŞTIRMA
     if (text.startsWith("/w ")) {
       const parts = text.split(" ");
       
       if (parts.length < 3) {
-        await sendMessageToTelegram("❌ Eksik bilgi girdiniz. Doğru format: /w 971527288586 Merhaba");
+        await sendMessageToTelegram("❌ Eksik bilgi girdiniz. Doğru format: `/w 971527288586 Merhaba`");
         return res.sendStatus(200);
       }
 
@@ -2380,7 +2373,7 @@ app.post("/telegram-webhook", async (req, res) => {
       const message = parts.slice(2).join(" ");
 
       if (!to || !message) {
-        await sendMessageToTelegram("❌ Numarayı veya mesajı okuyamadım. Doğru format: /w 971527288586 Merhaba");
+        await sendMessageToTelegram("❌ Numarayı veya mesajı okuyamadım. Doğru format: `/w 971527288586 Merhaba`");
         return res.sendStatus(200);
       }
 
@@ -2388,30 +2381,31 @@ app.post("/telegram-webhook", async (req, res) => {
 
       wpSessions[to].humanOverride = true;
       wpSessions[to].lastMessageTime = Date.now();
-      saveSessions();
+      
+      try { saveSessions(); } catch(e) {}
 
       // WhatsApp'a Gönder
       await sendMessage(to, message);
       // Başarı Bildirimi
-      await sendMessageToTelegram(`✅ Başarıyla Gönderildi → WhatsApp +${to}: ${message}`);
+      await sendMessageToTelegram(`✅ Başarıyla Gönderildi → WhatsApp +${to}:\n${message}`);
       return res.sendStatus(200);
     }
 
-    // 3. /end KOMUTU ÇALIŞTIRMA
+    // 4. /end KOMUTU
     if (text.startsWith("/end ")) {
       const parts = text.split(" ");
       const cleanTo = parts[1]?.replace(/\D/g, "");
 
       if (!cleanTo) {
-        await sendMessageToTelegram("❌ Format yanlış. Örnek:\n/end 971527288586");
+        await sendMessageToTelegram("❌ Format yanlış. Örnek:\n`/end 971527288586`");
         return res.sendStatus(200);
       }
       if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
 
       wpSessions[cleanTo].humanOverride = false;
-      saveSessions();
+      try { saveSessions(); } catch(e) {}
 
-      let closeMessage = "🔒 Canlı destek oturumu sona ermiştir.\n\nYapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına 'canlı destek' yazmanız yeterlidir. Ekibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.";
+      let closeMessage = "🔒 Canlı destek oturumu sona ermiştir.\n\nYapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına canlı destek yazmanız yeterlidir. Ekibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.";
       if (wpSessions[cleanTo]?.lang === "en") closeMessage = "🔒 The live support session has ended.\n\nYou may continue chatting with our AI assistant, or type live support anytime to reconnect.";
       else if (wpSessions[cleanTo]?.lang === "ar") closeMessage = "🔒 تم إنهاء جلسة الدعم المباشر.\n\nيمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي أو كتابة 'دعم مباشر' للاتصال بممثل.";
       
