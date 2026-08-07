@@ -736,7 +736,149 @@ If the user already provided sector info, NEVER ask again.`
 });
 
 // ----------------------------------------------------------------------------
-// C) WHATSAPP BOT (GEMINI 2.5 PRO) - /webhook ve /telegram-webhook
+// EKSİKSİZ VE HATASIZ WHATSAPP + TELEGRAM BOT KODU (GEMINI 2.5 PRO)
+// ----------------------------------------------------------------------------
+
+import express from "express";
+import bodyParser from "body-parser";
+import axios from "axios";
+import cron from "node-cron";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+const app = express();
+app.use(bodyParser.json());
+
+// ----------------------------------------------------------------------------
+// HAFIZA VE SABİT METİNLER
+// ----------------------------------------------------------------------------
+const wpSessions = {};
+
+const wpCorporateShortReplyMap = {
+  "1": { tr: "Size nasıl yardımcı olabilirim?", en: "How may I assist you?", ar: "كيف يمكنني مساعدتك؟" },
+  "2": { tr: "Size nasıl yardımcı olabilirim?", en: "How may I assist you?", ar: "كيف يمكنني مساعدتك؟" },
+  "3": { tr: "Size nasıl yardımcı olabilirim?", en: "How may I assist you?", ar: "كيف يمكنني مساعدتك؟" },
+  merhaba: { tr: "Merhaba, size nasıl yardımcı olabilirim?", en: "Hello, how may I assist you today?", ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟" },
+  selam: { tr: "Merhaba, size nasıl yardımcı olabilirim?", en: "Hello, how may I assist you today?", ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟" },
+  hi: { tr: "Merhaba, size nasıl yardımcı olabilirim?", en: "Hello, how may I assist you today?", ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟" },
+  hello: { tr: "Merhaba, size nasıl yardımcı olabilirim?", en: "Hello, how may I assist you today?", ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟" },
+  teşekkürler: { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
+  tesekkurler: { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
+  "thank you": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
+  thanks: { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
+  "ben teşekkür ederim": { tr: "Rica ederim. Her zaman yardımcı olmaktan memnuniyet duyarım.", en: "You're welcome. Always happy to assist.", ar: "على الرحب والسعة. يسعدني دائمًا مساعدتك." },
+  "çok teşekkürler": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
+  "teşekkür ederim": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
+  sağol: { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." },
+  sagol: { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." },
+  eyvallah: { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." },
+  anladım: { tr: "Harika. Nasıl devam etmek istersiniz?", en: "Great. How would you like to proceed?", ar: "جميل. كيف تود المتابعة؟" },
+  anladim: { tr: "Harika. Nasıl devam etmek istersiniz?", en: "Great. How would you like to proceed?", ar: "جميل. كيف تود المتابعة؟" },
+  "got it": { tr: "Anladım. Nasıl devam etmek istersiniz?", en: "Understood. How would you like to proceed?", ar: "فهمت. كيف تود المتابعة؟" },
+  understood: { tr: "Anladım. Nasıl devam etmek istersiniz?", en: "Understood. How would you like to proceed?", ar: "فهمت. كيف تود المتابعة؟" },
+  noted: { tr: "Not aldım. Nasıl devam etmek istersiniz?", en: "Noted. How would you like to proceed?", ar: "تم تدوينه. كيف تود المتابعة؟" },
+  "görüşmek üzere": { tr: "Görüşmek üzere. Dilediğiniz zaman buradayım.", en: "See you soon. I’m here whenever you need assistance.", ar: "أراك قريبًا. أنا هنا كلما احتجت إلى المساعدة." },
+  "gorusmek uzere": { tr: "Görüşmek üzere. Dilediğiniz zaman buradayım.", en: "See you soon. I’m here whenever you need assistance.", ar: "أراك قريبًا. أنا هنا كلما احتجت إلى المساعدة." },
+  "👍": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." },
+  "🙏": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." }
+};
+
+const introAfterLang = {
+  tr: "Merhaba, ben SamChe AI.\n\nSamChe Company LLC'nin yapay zeka destekli danışmanıyım ve size yardımcı olmak için buradayım.\n\nDubai’de şirket kuruluşu, iş planları, iş geliştirme, dijital büyüme, yapay zeka çözümleri, oturum seçenekleri, yaşam maliyetleri ve şirket kuruluşu sonrasında sunduğumuz hizmetler ile ilgili tüm sorularınızı yanıtlayabilirim. Size nasıl yardımcı olabilirim?\n\n",
+  en: "Hello, I am the AI consultant of SamChe Company LLC.\nI can answer your questions about choosing the right region for company formation in the United Arab Emirates, business plans, business strategies, AI solutions, digital growth, and AI chatbot services. You can get all the information you need from me on how to grow your company or how to succeed in the UAE market. How can I help you?\n\n",
+  ar: "مرحبًا، أنا المساعد الذكي لشركة SamChe Company LLC.\nيمكنني الإجابة على أسئلتكم المتعلقة باختيار المنطقة المناسبة لتأسيس شركة في دولة الإمارات العربية المتحدة، وخطط الأعمال، واستراتيجيات الأعمال، وحلول الذكاء الاصطناعي، والنمو الرقمي، وخدمات الشات بوت بالذكاء الاصطناعي. يمكنكم الحصول مني على جميع المعلومات التي تحتاجونها حول كيفية تطوير شركتكم أو تحقيق النجاح في سوق الإمارات. كيف يمكنني مساعدتكم؟\n\n"
+};
+
+const contactText = {
+  tr: "Profesyonel danışmanlık ekibimize ulaşmak için: +971 52 728 8586  WhatsApp hattı üzerinden iletişim sağlayabilirsiniz. Canlı temsilcilerimiz size yardımcı olacaktır.",
+  en: "To reach our professional advisory team, you may contact us via WhatsApp at +971 52 728 8586. Our live consultants will be happy to assist you.",
+  ar: "للتواصل مع فريق الاستشارات المهنية لدينا، يمكنكم مراسلتنا عبر واتساب على ‎+971 52 728 8586. أو  سيقوم مستشارونا المباشرون بمساعدتكم بكل سرور."
+};
+
+// ----------------------------------------------------------------------------
+// YARDIMCI FONKSİYONLAR
+// ----------------------------------------------------------------------------
+async function sendMessage(to, body) {
+  try {
+    if (!body || typeof body !== "string") return;
+    const chunks = [];
+    for (let i = 0; i < body.length; i += 4000) {
+      chunks.push(body.substring(i, i + 4000));
+    }
+    for (const chunk of chunks) {
+      try {
+        await axios.post(
+          `https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
+          { messaging_product: "whatsapp", to, text: { body: chunk } },
+          { headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, "Content-Type": "application/json" } }
+        );
+      } catch (err) {
+        console.error("[WHATSAPP SEND ERROR - CHUNK]:", err.response?.data || err.message);
+        continue;
+      }
+    }
+  } catch (err) {
+    console.error("[WHATSAPP SEND ERROR - MAIN]:", err.response?.data || err.message);
+  }
+}
+
+async function sendMessageToTelegram(text) {
+  try {
+    if (!text) return;
+    const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
+    await axios.post(url, {
+      chat_id: process.env.TELEGRAM_CHAT_ID.trim(),
+      text: text
+    });
+    console.log("[TELEGRAM] Message forwarded");
+  } catch (err) {
+    console.error("[TELEGRAM ERROR]:", err.response?.data || err.message);
+  }
+}
+
+function corporateFallback(lang) {
+  if (lang === "tr") return "Size en doğru bilgiyi sunabilmem için konuyu biraz daha netleştirebilir misiniz? Böylece ihtiyacınıza en uygun yönlendirmeyi sağlayabilirim.";
+  if (lang === "en") return "To provide you with the most accurate guidance, could you clarify your request a little further? This will help me offer the most suitable support.";
+  return "لأتمكن من تقديم الإرشاد الأنسب لكم، هل يمكن توضيح طلبكم بشكل أدق؟ سيساعدني ذلك في تقديم الدعم الأمثل.";
+}
+
+function detectTopic(text) {
+  const t = text.toLowerCase();
+  if (t.includes("şirket") || t.includes("company") || t.includes("business setup") || t.includes("company setup")) return "company";
+  if (t.includes("oturum") || t.includes("residency") || t.includes("visa") || t.includes("ikamet")) return "residency";
+  if (t.includes("ai") || t.includes("bot") || t.includes("chatbot") || t.includes("webchat")) return "ai";
+  if (t.includes("maliyet") || t.includes("cost") || t.includes("price") || t.includes("ücret") || t.includes("bütçe") || t.includes("budget")) return "cost";
+  return "other";
+}
+
+function calculateIntentScore(text, currentScore = 0) {
+  const t = text.toLowerCase();
+  let score = currentScore;
+  if (t.includes("şirket kurmak istiyorum") || t.includes("company setup") || t.includes("i want to open a company")) score += 30;
+  if (t.includes("oturum almak istiyorum") || t.includes("residency") || t.includes("visa application")) score += 25;
+  if (t.includes("bütçe") || t.includes("budget") || t.includes("fiyat") || t.includes("price")) score += 15;
+  if (t.includes("ne kadar sürer") || t.includes("timeline") || t.includes("kaç günde")) score += 10;
+  if (t.includes("merak ettim") || t.includes("sadece soruyorum") || t.includes("just curious")) score -= 10;
+  if (score < 0) score = 0;
+  if (score > 100) score = 100;
+  return score;
+}
+
+async function callWpGemini(prompt) {
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=" + process.env.GEMINI_API_KEY;
+  try {
+    const response = await axios.post(url, { contents: [{ parts: [{ text: prompt }] }] }, { headers: { "Content-Type": "application/json" } });
+    const reply = response.data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
+    return reply?.trim() || null;
+  } catch (err) {
+    console.error("Gemini API error:", err.response?.data || err.message);
+    return null;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// WHATSAPP BOT (GEMINI 2.5 PRO) - /webhook ve /telegram-webhook
 // ----------------------------------------------------------------------------
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
@@ -1474,7 +1616,6 @@ ${historyText}
 Kullanıcı mesajı:
 ${text}
 `;
-  
     } else if (lang === "en") {
       prompt = `You are the Senior AI Consultant of SamChe Company LLC, based in Dubai.  
 Your expertise includes:  
@@ -2266,7 +2407,9 @@ ${text}
     }
 
     const lowerAi = aiResponse.toLowerCase();
-    const needsHuman = lowerAi.includes("canlı destek") || lowerAi.includes("canli destek") || lowerAi.includes("live support") || lowerAi.includes("human_agent") || lowerAi.includes("transfer_to_human");
+    
+    // MÜŞTERİ TEMSİLCİSİ VE BOŞLUK HATALARI GİDERİLDİ
+    const needsHuman = lowerAi.includes("canlı destek") || lowerAi.includes("canli destek") || lowerAi.includes("müşteri temsilci") || lowerAi.includes("musteri temsilci") || lowerAi.includes("live support") || lowerAi.includes("human_agent") || lowerAi.includes("transfer_to_human");
 
     if (!needsHuman) {
       if (!session.history) session.history = [];
@@ -2298,7 +2441,9 @@ app.post("/telegram-webhook", async (req, res) => {
     const text = msg.text.trim();
 
     if (!text.startsWith("/w ") && !text.startsWith("/end ")) return res.sendStatus(200);
-    if (chatId !== process.env.TELEGRAM_CHAT_ID) return res.sendStatus(200);
+    
+    // TELEGRAM ID TRIM() DÜZELTMESİ EKLENDİ
+    if (chatId !== process.env.TELEGRAM_CHAT_ID.trim()) return res.sendStatus(200);
 
     if (text.startsWith("/w ")) {
       const parts = text.split(" ");
@@ -2346,7 +2491,7 @@ app.post("/telegram-webhook", async (req, res) => {
 });
 
 // ============================================================================
-// 6. CRON JOB (WHATSAPP FOLLOW-UP) & YARDIMCI FONKSİYONLAR
+// CRON JOB (WHATSAPP FOLLOW-UP)
 // ============================================================================
 function getPingMessage(lang, topic) {
   const messages = {
@@ -2569,7 +2714,7 @@ cron.schedule("*/10 * * * *", async () => {
 });
 
 // ============================================================================
-// 7. SUNUCU BAŞLATMA
+// SUNUCU BAŞLATMA
 // ============================================================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
