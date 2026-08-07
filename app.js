@@ -792,7 +792,7 @@ app.post("/webhook", async (req, res) => {
     text = (text || "").trim();
 
     try {
-      await sendMessageToTelegram(`WhatsApp → ${from}: ${text}\n\n/w ${from} `);
+      await sendMessageToTelegram(`WhatsApp → +${from}\n💬: ${text}\n\n[Yanıtlamak için kopyalayın👇]\n/w ${from} `);
     } catch (err) {
       console.error("[TELEGRAM FORWARD ERROR]:", err);
     }
@@ -2291,21 +2291,13 @@ ${text}
       return res.sendStatus(200);
     }
 
-    const normalizedAi = aiResponse
-      .replace(/İ/g, 'i').replace(/I/g, 'i').replace(/ı/g, 'i')
-      .replace(/Ş/g, 's').replace(/ş/g, 's')
-      .replace(/Ğ/g, 'g').replace(/ğ/g, 'g')
-      .replace(/Ü/g, 'u').replace(/ü/g, 'u')
-      .replace(/Ö/g, 'o').replace(/ö/g, 'o')
-      .replace(/Ç/g, 'c').replace(/ç/g, 'c')
-      .toLowerCase();
+    const lowerAi = aiResponse.toLowerCase();
 
-    const needsHuman = normalizedAi.includes("canli destek") || 
-                       normalizedAi.includes("temsilci") || 
-                       normalizedAi.includes("live support") || 
-                       normalizedAi.includes("human") || 
-                       normalizedAi.includes("aktariyorum") || 
-                       normalizedAi.includes("transfer");
+    const needsHuman = lowerAi.includes("canlı destek") || 
+                       lowerAi.includes("canli destek") || 
+                       lowerAi.includes("live support") || 
+                       lowerAi.includes("human_agent") || 
+                       lowerAi.includes("transfer_to_human");
 
     if (!needsHuman) {
       if (!session.history) session.history = [];
@@ -2327,7 +2319,7 @@ ${text}
       return res.sendStatus(200);
     }
   } catch (err) {
-    console.error("[WEBHOOK ERROR]:", err);
+    console.error("WhatsApp webhook error:", err);
     return res.sendStatus(200);
   }
 });
@@ -2343,6 +2335,7 @@ app.post("/telegram-webhook", async (req, res) => {
     if (!text.startsWith("/w ") && !text.startsWith("/end ")) {
       return res.sendStatus(200);
     }
+    
     if (chatId !== process.env.TELEGRAM_CHAT_ID) {
       return res.sendStatus(200);
     }
@@ -2354,7 +2347,7 @@ app.post("/telegram-webhook", async (req, res) => {
       const message = parts.slice(2).join(" ");
 
       if (!cleanTo || !message) {
-        await sendMessageToTelegram("Format yanlış. Örnek:\n/w 905551112233 Merhaba");
+        await sendMessageToTelegram("Format yanlış. Örnek:\n/w 971527288586 Merhaba");
         return res.sendStatus(200);
       }
 
@@ -2365,7 +2358,6 @@ app.post("/telegram-webhook", async (req, res) => {
       saveSessions();
 
       await sendMessage(cleanTo, message);
-
       await sendMessageToTelegram(`Gönderildi → WhatsApp ${cleanTo}: ${message}`);
       return res.sendStatus(200);
     }
@@ -2376,7 +2368,7 @@ app.post("/telegram-webhook", async (req, res) => {
       const cleanTo = to.replace("+", "");
 
       if (!cleanTo) {
-        await sendMessageToTelegram("Format yanlış. Örnek:\n/end 905551112233");
+        await sendMessageToTelegram("Format yanlış. Örnek:\n/end 971527288586");
         return res.sendStatus(200);
       }
 
@@ -2416,7 +2408,6 @@ app.post("/telegram-webhook", async (req, res) => {
 // 6. CRON JOB (WHATSAPP FOLLOW-UP) & PING SİSTEMİ
 // ============================================================================
 
-// PING & UYANIK KALMA: Render ücretsiz sunucunun uyumasını engellemek için kendi kendine istek atar
 app.get("/ping", (req, res) => res.send("OK"));
 
 cron.schedule("*/10 * * * *", async () => {
@@ -2424,7 +2415,6 @@ cron.schedule("*/10 * * * *", async () => {
   try {
     const now = Date.now();
 
-    // Kendi kendine uyanık kalma isteği at
     const pingUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${process.env.PORT || 3000}`;
     axios.get(`${pingUrl}/ping`).catch(() => {});
 
@@ -2620,7 +2610,7 @@ function getFollowUpMessage(lang, topic, stage) {
       },
       ai: {
         tr: "Merhaba. AI projenizin birkaç gündür ilerlemediğini fark ettim. Doğru otomasyon yapısı işinizi hızla ileri taşır. Hazırsanız, projenizi birlikte netleştirebiliriz.",
-        en: "Hello. I noticed your AI project hasnt progressed for a few days. The right automation structure accelerates your business significantly. If you're ready, we can refine your project together.",
+        en: "Hello. I noticed your AI project hasn’t progressed for a few days. The right automation structure accelerates your business significantly. If you're ready, we can refine your project together.",
         ar: "مرحبًا. لاحظت أن مشروع الذكاء الاصطناعي لم يتقدم منذ عدة أيام. الهيكل الصحيح للأتمتة يدفع عملكم بسرعة إلى الأمام. إذا كنتم جاهزين، يمكننا تطوير المشروع معًا."
       }
     },
