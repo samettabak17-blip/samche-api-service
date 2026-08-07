@@ -21,12 +21,12 @@ app.use(express.json());
 // ============================================================================
 // 1. GENEL API YAPILANDIRMALARI & OTURUM KAYIT SİSTEMİ
 // ============================================================================
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || "").trim();
 const SAMCHE_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`;
 const WP_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${GEMINI_API_KEY}`;
 
 const openaiClient = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
+  apiKey: (process.env.OPENAI_API_KEY || "").trim()
 });
 
 // Oturumları kaybetmemek için JSON dosyasına okuma/yazma işlemleri (Render uyku modu çözümü)
@@ -286,7 +286,7 @@ async function sendMessage(to, body) {
     for (const chunk of chunks) {
       try {
         await axios.post(
-          `https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
+          `https://graph.facebook.com/v20.0/${(process.env.WHATSAPP_PHONE_ID || "").trim()}/messages`,
           {
             messaging_product: "whatsapp",
             to,
@@ -294,7 +294,7 @@ async function sendMessage(to, body) {
           },
           {
             headers: {
-              Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+              Authorization: `Bearer ${(process.env.WHATSAPP_TOKEN || "").trim()}`,
               "Content-Type": "application/json",
             },
           }
@@ -311,9 +311,10 @@ async function sendMessage(to, body) {
 async function sendMessageToTelegram(text) {
   try {
     if (!text) return;
-    const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
+    const botToken = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
+    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
     await axios.post(url, {
-      chat_id: process.env.TELEGRAM_CHAT_ID.trim(),
+      chat_id: (process.env.TELEGRAM_CHAT_ID || "").toString().trim(),
       text: text
     });
   } catch (err) {
@@ -761,7 +762,7 @@ If the user already provided sector info, NEVER ask again.`
 });
 
 // ----------------------------------------------------------------------------
-// C) WHATSAPP BOT (GEMINI 2.5 PRO) - /webhook ve /telegram-webhook
+// C) WHATSAPP BOT (GEMINI 2.5 PRO) - /webhook
 // ----------------------------------------------------------------------------
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
@@ -1269,7 +1270,7 @@ Kullanıcı “sağlık sistemi nasıl?”, “sigorta sistemi nasıl?”, “ot
 
 • Sağlık sigortası devlet kurumları üzerinden değil, özel sigorta şirketleri üzerinden yapılır
 • Temel paketler genelde acil durum, muayene ve ilaç kapsamı içerir
-• Ücretler yaş, kapsam و şirket seçimine göre değişir
+• Ücretler yaş, kapsam ve şirket seçimine göre değişir
 
 Dipnot:
 • Bu sigorta çalışma izni sağlamaz; sadece sağlık kapsamı içindir
@@ -1804,7 +1805,7 @@ Only provide detailed information and answer the user’s questions.
 7. First provide detailed information, answer questions, and clarify the process. Redirection is only allowed at the payment and document submission stage.
 
 8. NEVER use expressions such as:
-“You can share your documents with me”
+“You share your documents with me”
 “You can send your documents to me”
 If document submission is required, provide the contact information instead.
 
@@ -2340,41 +2341,51 @@ app.post("/telegram-webhook", async (req, res) => {
     const msg = req.body.message || req.body.channel_post || req.body.edited_message;
     if (!msg || !msg.text) return res.sendStatus(200);
 
-    const chatId = msg.chat.id.toString();
-    let text = msg.text.replace(/\s+/g, " ").trim(); 
+    const chatId = msg.chat?.id?.toString() || "";
+    let text = msg.text || "";
+
+    // GÖRÜNMEZ BOŞLUKLARI VE HATALARI ENGELLEYEN KESİN ÇÖZÜM
+    text = text.replace(/\s+/g, " ").trim(); 
     text = text.replace(/@\w+/g, ""); 
+    const lowerText = text.toLowerCase();
 
     const envChatId = (process.env.TELEGRAM_CHAT_ID || "").toString().trim();
 
-    // 1. KONTROL: Eşleşme hatası varsa Telegram'dan bildir!
-    if (chatId !== envChatId) {
-        await axios.post(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
-            chat_id: chatId,
-            text: `❌ YETKİ HATASI: ID eşleşmiyor!\nSenin ID'n: ${chatId}\n.env ID: ${envChatId}`
+    // 1. KONTROL: ID Eşleşmiyorsa Hata Fırlat (Tırnak hatalarını önlemek için replace eklendi)
+    const cleanEnvId = envChatId.replace(/['"]/g, '');
+    const cleanChatId = chatId.replace(/['"]/g, '');
+
+    if (cleanChatId !== cleanEnvId) {
+        // Hata durumunda bunu Telegram'a bas
+        const botToken = (process.env.TELEGRAM_BOT_TOKEN || "").trim().replace(/['"]/g, '');
+        await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            chat_id: cleanChatId,
+            text: `❌ YETKİ HATASI: ID eşleşmiyor!\nSenin ID'n: ${cleanChatId}\n.env ID: ${cleanEnvId}`
         }).catch(()=>{});
         return res.sendStatus(200);
     }
 
-    // SADECE TEST İÇİN: Eğer "/w" veya "/end" değilse bile tepki versin
-    if (!text.startsWith("/w ") && !text.startsWith("/end ")) {
+    // 2. SADECE TEST İÇİN: Bota yazılan herhangi bir şeye tepki versin
+    if (!lowerText.startsWith("/w ") && !lowerText.startsWith("/end ")) {
         await sendMessageToTelegram(`🤖 Telegram komut sistemi çalışıyor!\nGönderdiğiniz mesaj: "${text}"\n\nWhatsApp'a yanıt vermek için lütfen şu formatı kullanın:\n/w 971527288586 Merhaba`);
         return res.sendStatus(200);
     }
 
-    // 2. /w KOMUTU
-    if (text.startsWith("/w ")) {
+    // 3. /w KOMUTU (Zırhlı Ayrıştırma)
+    if (lowerText.startsWith("/w ")) {
       const parts = text.split(" ");
       
       if (parts.length < 3) {
-        await sendMessageToTelegram("❌ Eksik bilgi girdiniz. Doğru format:\n/w 971527288586 Merhaba");
+        await sendMessageToTelegram("❌ Eksik bilgi girdiniz. Doğru format:\n`/w 971527288586 Merhaba`");
         return res.sendStatus(200);
       }
 
+      // Numaradaki +, harf veya boşlukları temizleyip sadece rakamları al
       const to = parts[1].replace(/\D/g, ""); 
-      const message = parts.slice(2).join(" ");
+      const messageText = parts.slice(2).join(" ");
 
-      if (!to || !message) {
-        await sendMessageToTelegram("❌ Numarayı veya mesajı okuyamadım. Doğru format:\n/w 971527288586 Merhaba");
+      if (!to || !messageText) {
+        await sendMessageToTelegram("❌ Numarayı veya mesajı okuyamadım. Doğru format:\n`/w 971527288586 Merhaba`");
         return res.sendStatus(200);
       }
 
@@ -2384,18 +2395,19 @@ app.post("/telegram-webhook", async (req, res) => {
       wpSessions[to].lastMessageTime = Date.now();
       try { saveSessions(); } catch(e) {}
 
-      await sendMessage(to, message);
-      await sendMessageToTelegram(`✅ Başarıyla Gönderildi → WhatsApp +${to}:\n${message}`);
+      // WhatsApp'a Gönder ve Telegram'a Onay Ver
+      await sendMessage(to, messageText);
+      await sendMessageToTelegram(`✅ Başarıyla Gönderildi → WhatsApp +${to}:\n${messageText}`);
       return res.sendStatus(200);
     }
 
-    // 3. /end KOMUTU
-    if (text.startsWith("/end ")) {
+    // 4. /end KOMUTU
+    if (lowerText.startsWith("/end ")) {
       const parts = text.split(" ");
       const cleanTo = parts[1]?.replace(/\D/g, "");
 
       if (!cleanTo) {
-        await sendMessageToTelegram("❌ Format yanlış. Örnek:\n/end 971527288586");
+        await sendMessageToTelegram("❌ Format yanlış. Örnek:\n`/end 971527288586`");
         return res.sendStatus(200);
       }
       if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
