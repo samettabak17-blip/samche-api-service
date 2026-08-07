@@ -21,12 +21,12 @@ app.use(express.json());
 // ============================================================================
 // 1. GENEL API YAPILANDIRMALARI & OTURUM KAYIT SİSTEMİ
 // ============================================================================
-const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || "").trim();
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const SAMCHE_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`;
 const WP_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${GEMINI_API_KEY}`;
 
 const openaiClient = new OpenAI({
-  apiKey: (process.env.OPENAI_API_KEY || "").trim()
+  apiKey: process.env.OPENAI_API_KEY
 });
 
 // Oturumları kaybetmemek için JSON dosyasına okuma/yazma işlemleri (Render uyku modu çözümü)
@@ -286,7 +286,7 @@ async function sendMessage(to, body) {
     for (const chunk of chunks) {
       try {
         await axios.post(
-          `https://graph.facebook.com/v20.0/${(process.env.WHATSAPP_PHONE_ID || "").trim()}/messages`,
+          `https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
           {
             messaging_product: "whatsapp",
             to,
@@ -294,7 +294,7 @@ async function sendMessage(to, body) {
           },
           {
             headers: {
-              Authorization: `Bearer ${(process.env.WHATSAPP_TOKEN || "").trim()}`,
+              Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
               "Content-Type": "application/json",
             },
           }
@@ -311,10 +311,9 @@ async function sendMessage(to, body) {
 async function sendMessageToTelegram(text) {
   try {
     if (!text) return;
-    const botToken = (process.env.TELEGRAM_BOT_TOKEN || "").trim();
-    const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+    const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
     await axios.post(url, {
-      chat_id: (process.env.TELEGRAM_CHAT_ID || "").toString().trim(),
+      chat_id: process.env.TELEGRAM_CHAT_ID,
       text: text
     });
   } catch (err) {
@@ -762,7 +761,7 @@ If the user already provided sector info, NEVER ask again.`
 });
 
 // ----------------------------------------------------------------------------
-// C) WHATSAPP BOT (GEMINI 2.5 PRO) - /webhook
+// C) WHATSAPP BOT (GEMINI 2.5 PRO) - /webhook ve /telegram-webhook
 // ----------------------------------------------------------------------------
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
@@ -781,7 +780,6 @@ app.post("/webhook", async (req, res) => {
     if (!message) return res.sendStatus(200);
 
     const from = message.from;
-    const cleanFrom = from.replace("+", "");
     let text = "";
 
     if (message.text?.body) text = message.text.body;
@@ -794,46 +792,45 @@ app.post("/webhook", async (req, res) => {
     text = (text || "").trim();
 
     try {
-      await sendMessageToTelegram(`📲 WhatsApp → +${cleanFrom}\n💬: ${text}\n\n[Yanıtlamak için kopyalayın👇]\n/w ${cleanFrom} `);
+      await sendMessageToTelegram(`WhatsApp → ${from}: ${text}\n\n/w ${from} `);
     } catch (err) {
       console.error("[TELEGRAM FORWARD ERROR]:", err);
     }
 
-    if (wpSessions[cleanFrom]) {
-      wpSessions[cleanFrom].lastMessageTime = Date.now();
+    if (wpSessions[from]) {
+      wpSessions[from].lastMessageTime = Date.now();
       saveSessions();
     }
 
-    if (wpSessions[cleanFrom]?.humanOverride) {
-      wpSessions[cleanFrom].lastMessageTime = Date.now();
+    if (wpSessions[from]?.humanOverride === true) {
+      wpSessions[from].lastMessageTime = Date.now();
       saveSessions();
       return res.sendStatus(200);
     }
 
     const isInvalid = !text || text === "" || message.type === "audio" || message.type === "voice" || message.type === "video" || message.type === "sticker";
     if (isInvalid) {
-      await sendMessage(cleanFrom, "Gönderdiğiniz içeriği işleyemiyorum. Lütfen mesajınızı yazılı olarak iletin.");
+      await sendMessage(from, "Gönderdiğiniz içeriği işleyemiyorum. Lütfen mesajınızı yazılı olarak iletin.");
       return res.sendStatus(200);
     }
 
-    if (!wpSessions[cleanFrom]) {
-      wpSessions[cleanFrom] = {
+    if (!wpSessions[from]) {
+      wpSessions[from] = {
         lang: null, history: [], lastMessageTime: Date.now(), followUpStage: 0,
         intentScore: 0, topics: [],
         profile: { name: null, country: null, budget: null, interest: null },
         firstMessageTime: Date.now(), pingSentOnce: false, humanOverride: false
       };
-
       saveSessions();
 
       await sendMessage(
-        cleanFrom,
+        from,
         "Welcome to SamChe Company LLC.\nSamChe Company LLC'ye hoş geldiniz.\nمرحبًا بكم.\n\nPlease select your language:\n1️⃣ English\n2️⃣ Türkçe\n3️⃣ العربية\n\nLütfen dil seçiminizi yapınız:\n1️⃣ İngilizce\n2️⃣ Türkçe\n3️⃣ Arapça"
       );
       return res.sendStatus(200);
     }
 
-    const session = wpSessions[cleanFrom];
+    const session = wpSessions[from];
     const smartLangMap = { "türkçe": "tr", "turkce": "tr", "tr": "tr", "turkish": "tr", "english": "en", "ingilizce": "en", "en": "en", "arabic": "ar", "arapça": "ar", "arapca": "ar", "ar": "ar", "arabian": "ar" };
 
     if (!session.lang) {
@@ -843,10 +840,10 @@ app.post("/webhook", async (req, res) => {
       if (detectedLang) {
         session.lang = detectedLang;
         saveSessions();
-        await sendMessage(cleanFrom, introAfterLang[session.lang]);
+        await sendMessage(from, introAfterLang[session.lang]);
         return res.sendStatus(200);
       } else {
-        await sendMessage(cleanFrom, "Please choose 1, 2 or 3.");
+        await sendMessage(from, "Please choose 1, 2 or 3.");
         return res.sendStatus(200);
       }
     }
@@ -855,12 +852,12 @@ app.post("/webhook", async (req, res) => {
     const lower = text.toLowerCase();
 
     if (wpCorporateShortReplyMap[lower]) {
-      await sendMessage(cleanFrom, wpCorporateShortReplyMap[lower][lang]);
+      await sendMessage(from, wpCorporateShortReplyMap[lower][lang]);
       return res.sendStatus(200);
     }
 
     if (lower.includes("contact") || lower.includes("iletişim") || lower.includes("whatsapp") || lower.includes("call") || lower.includes("telefon")) {
-      await sendMessage(cleanFrom, contactText[lang]);
+      await sendMessage(from, contactText[lang]);
       return res.sendStatus(200);
     }
 
@@ -1805,7 +1802,7 @@ Only provide detailed information and answer the user’s questions.
 7. First provide detailed information, answer questions, and clarify the process. Redirection is only allowed at the payment and document submission stage.
 
 8. NEVER use expressions such as:
-“You share your documents with me”
+“You can share your documents with me”
 “You can send your documents to me”
 If document submission is required, provide the contact information instead.
 
@@ -2241,7 +2238,7 @@ phone: +971 50 179 38 80 - +971 52 728 8586
 14. لا تذكر أبدًا الحملات أو العروض أو خطط الدفع ضمن حسابات التكاليف أو التكاليف التقديرية.
 
 15. لا تستخدم أبدًا عبارات مثل:
-"تواصل مع المناطق الحرة مباشرة لتحديد التكلفة الدقيقة"
+"تواصل مع freezone bölgeleri مباشرة لتحديد التكلفة الدقيقة"
 "احصل على عرض سعر محدث"
 
 ولا تقم بتوجيه المستخدم إلى أي جهة.
@@ -2290,11 +2287,10 @@ ${text}
     // AI Cevabı
     const aiResponse = await callWpGemini(prompt);
     if (!aiResponse) {
-      await sendMessage(cleanFrom, corporateFallback(lang));
+      await sendMessage(from, corporateFallback(lang));
       return res.sendStatus(200);
     }
 
-    // TÜRKÇE KARAKTER SORUNUNU ÇÖZEN GELİŞMİŞ NORMALİZASYON
     const normalizedAi = aiResponse
       .replace(/İ/g, 'i').replace(/I/g, 'i').replace(/ı/g, 'i')
       .replace(/Ş/g, 's').replace(/ş/g, 's')
@@ -2315,19 +2311,19 @@ ${text}
       if (!session.history) session.history = [];
       session.history.push({ role: "assistant", text: aiResponse });
       saveSessions();
-      await sendMessage(cleanFrom, aiResponse);
+      await sendMessage(from, aiResponse);
       return res.sendStatus(200);
     } else {
-      // YZ'NİN OLUŞTURDUĞU PROFESYONEL AKTARIM MESAJINI MÜŞTERİYE GÖNDERİYORUZ
-      await sendMessage(cleanFrom, aiResponse);
+      let aktarimMesaji = "Talebinizi canlı müşteri temsilcimize aktardım. Birazdan size buradan yanıt verecek.";
+      if (session.lang === "en") aktarimMesaji = "I have transferred your request to our live representative. They will reply to you shortly.";
+      if (session.lang === "ar") aktarimMesaji = "لقد قمت بتحويل طلبك إلى ممثل الدعم المباشر. سيقوم بالرد عليك خلال لحظات.";
+
+      await sendMessage(from, aktarimMesaji);
       
       session.humanOverride = true;
       session.lastMessageTime = Date.now();
       saveSessions();
 
-      // SİSTEM MESAJINI SANA GÖNDERİP YANITLAMA ŞABLONU VERİYORUZ
-      await sendMessageToTelegram(`⚠️ [SİSTEM BİLGİSİ]\nMüşteri canlı desteğe aktarıldı.\n\n[Yanıtlamak için kopyalayın👇]\n/w ${cleanFrom} `);
-      
       return res.sendStatus(200);
     }
   } catch (err) {
@@ -2338,92 +2334,77 @@ ${text}
 
 app.post("/telegram-webhook", async (req, res) => {
   try {
-    const msg = req.body.message || req.body.channel_post || req.body.edited_message;
+    const msg = req.body.message;
     if (!msg || !msg.text) return res.sendStatus(200);
 
-    const chatId = msg.chat?.id?.toString() || "";
-    let text = msg.text || "";
+    const chatId = msg.chat.id.toString();
+    const text = msg.text.trim();
 
-    // GÖRÜNMEZ BOŞLUKLARI VE HATALARI ENGELLEYEN KESİN ÇÖZÜM
-    text = text.replace(/\s+/g, " ").trim(); 
-    text = text.replace(/@\w+/g, ""); 
-    const lowerText = text.toLowerCase();
-
-    const envChatId = (process.env.TELEGRAM_CHAT_ID || "").toString().trim();
-
-    // 1. KONTROL: ID Eşleşmiyorsa Hata Fırlat (Tırnak hatalarını önlemek için replace eklendi)
-    const cleanEnvId = envChatId.replace(/['"]/g, '');
-    const cleanChatId = chatId.replace(/['"]/g, '');
-
-    if (cleanChatId !== cleanEnvId) {
-        // Hata durumunda bunu Telegram'a bas
-        const botToken = (process.env.TELEGRAM_BOT_TOKEN || "").trim().replace(/['"]/g, '');
-        await axios.post(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-            chat_id: cleanChatId,
-            text: `❌ YETKİ HATASI: ID eşleşmiyor!\nSenin ID'n: ${cleanChatId}\n.env ID: ${cleanEnvId}`
-        }).catch(()=>{});
-        return res.sendStatus(200);
+    if (!text.startsWith("/w ") && !text.startsWith("/end ")) {
+      return res.sendStatus(200);
     }
-
-    // 2. SADECE TEST İÇİN: Bota yazılan herhangi bir şeye tepki versin
-    if (!lowerText.startsWith("/w ") && !lowerText.startsWith("/end ")) {
-        await sendMessageToTelegram(`🤖 Telegram komut sistemi çalışıyor!\nGönderdiğiniz mesaj: "${text}"\n\nWhatsApp'a yanıt vermek için lütfen şu formatı kullanın:\n/w 971527288586 Merhaba`);
-        return res.sendStatus(200);
-    }
-
-    // 3. /w KOMUTU (Zırhlı Ayrıştırma)
-    if (lowerText.startsWith("/w ")) {
-      const parts = text.split(" ");
-      
-      if (parts.length < 3) {
-        await sendMessageToTelegram("❌ Eksik bilgi girdiniz. Doğru format:\n`/w 971527288586 Merhaba`");
-        return res.sendStatus(200);
-      }
-
-      // Numaradaki +, harf veya boşlukları temizleyip sadece rakamları al
-      const to = parts[1].replace(/\D/g, ""); 
-      const messageText = parts.slice(2).join(" ");
-
-      if (!to || !messageText) {
-        await sendMessageToTelegram("❌ Numarayı veya mesajı okuyamadım. Doğru format:\n`/w 971527288586 Merhaba`");
-        return res.sendStatus(200);
-      }
-
-      if (!wpSessions[to]) wpSessions[to] = {};
-
-      wpSessions[to].humanOverride = true;
-      wpSessions[to].lastMessageTime = Date.now();
-      try { saveSessions(); } catch(e) {}
-
-      // WhatsApp'a Gönder ve Telegram'a Onay Ver
-      await sendMessage(to, messageText);
-      await sendMessageToTelegram(`✅ Başarıyla Gönderildi → WhatsApp +${to}:\n${messageText}`);
+    if (chatId !== process.env.TELEGRAM_CHAT_ID) {
       return res.sendStatus(200);
     }
 
-    // 4. /end KOMUTU
-    if (lowerText.startsWith("/end ")) {
+    if (text.startsWith("/w ")) {
       const parts = text.split(" ");
-      const cleanTo = parts[1]?.replace(/\D/g, "");
+      const to = parts[1];
+      const cleanTo = to.replace("+", "");
+      const message = parts.slice(2).join(" ");
 
-      if (!cleanTo) {
-        await sendMessageToTelegram("❌ Format yanlış. Örnek:\n`/end 971527288586`");
+      if (!cleanTo || !message) {
+        await sendMessageToTelegram("Format yanlış. Örnek:\n/w 905551112233 Merhaba");
         return res.sendStatus(200);
       }
+
+      if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
+
+      wpSessions[cleanTo].humanOverride = true;
+      wpSessions[cleanTo].lastMessageTime = Date.now();
+      saveSessions();
+
+      await sendMessage(cleanTo, message);
+
+      await sendMessageToTelegram(`Gönderildi → WhatsApp ${cleanTo}: ${message}`);
+      return res.sendStatus(200);
+    }
+
+    if (text.startsWith("/end ")) {
+      const parts = text.split(" ");
+      const to = parts[1];
+      const cleanTo = to.replace("+", "");
+
+      if (!cleanTo) {
+        await sendMessageToTelegram("Format yanlış. Örnek:\n/end 905551112233");
+        return res.sendStatus(200);
+      }
+
       if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
 
       wpSessions[cleanTo].humanOverride = false;
-      try { saveSessions(); } catch(e) {}
+      saveSessions();
 
-      let closeMessage = "🔒 Canlı destek oturumu sona ermiştir.\n\nYapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına 'canlı destek' yazmanız yeterlidir. Ekibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.";
-      if (wpSessions[cleanTo]?.lang === "en") closeMessage = "🔒 The live support session has ended.\n\nYou may continue chatting with our AI assistant, or type live support anytime to reconnect.";
-      else if (wpSessions[cleanTo]?.lang === "ar") closeMessage = "🔒 تم إنهاء جلسة الدعم المباشر.\n\nيمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي أو كتابة 'دعم مباشر' للاتصال بممثل.";
-      
+      let closeMessage =
+        "🔒 Canlı destek oturumu sona ermiştir.\n\n" +
+        "Yapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına canlı destek yazmanız yeterlidir.Ekibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.";
+
+      if (wpSessions[cleanTo]?.lang === "en") {
+        closeMessage =
+          "🔒 The live support session has ended.\n\n" +
+          "You may continue chatting with our AI assistant, or type live support anytime to reconnect. Our team will be happy to assist you anytime.";
+      } else if (wpSessions[cleanTo]?.lang === "ar") {
+        closeMessage =
+          "🔒 تم إنهاء جلسة الدعم المباشر.\n\n" +
+          "يمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي أو كتابة 'دعم مباشر' للاتصال بممثل.";
+      }
+
       await sendMessage(cleanTo, closeMessage);
-      await sendMessageToTelegram(`🔒 Canlı destek kapatıldı → +${cleanTo}`);
+      await sendMessageToTelegram(`Canlı destek kapatıldı → ${cleanTo}`);
+
       return res.sendStatus(200);
     }
-    
+
     return res.sendStatus(200);
   } catch (err) {
     console.error("Telegram webhook error:", err);
@@ -2639,7 +2620,7 @@ function getFollowUpMessage(lang, topic, stage) {
       },
       ai: {
         tr: "Merhaba. AI projenizin birkaç gündür ilerlemediğini fark ettim. Doğru otomasyon yapısı işinizi hızla ileri taşır. Hazırsanız, projenizi birlikte netleştirebiliriz.",
-        en: "Hello. I noticed your AI project hasn’t progressed for a few days. The right automation structure accelerates your business significantly. If you're ready, we can refine your project together.",
+        en: "Hello. I noticed your AI project hasnt progressed for a few days. The right automation structure accelerates your business significantly. If you're ready, we can refine your project together.",
         ar: "مرحبًا. لاحظت أن مشروع الذكاء الاصطناعي لم يتقدم منذ عدة أيام. الهيكل الصحيح للأتمتة يدفع عملكم بسرعة إلى الأمام. إذا كنتم جاهزين، يمكننا تطوير المشروع معًا."
       }
     },
