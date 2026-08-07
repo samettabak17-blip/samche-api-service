@@ -511,9 +511,12 @@ app.post("/plan", async (req, res) => {
     const { sector } = req.body;
     if (!sector) return res.status(400).json({ error: "Sector value is missing." });
 
+    const cleanSector = String(sector).trim();
+    if (!cleanSector) return res.status(400).json({ error: "Sector value cannot be empty." });[cite: 1]
+
     const payload = {
       contents: [{
-        parts: [{ text: `Generate a structured, strategic UAE business setup proposal for the following industry/sector: "${sector}". Detail whether it fits best in Mainland or Free Zone, required authority approvals, and estimated investment setup. Reply in the language of the prompt.` }]
+        parts: [{ text: `Generate a structured, strategic UAE business setup proposal for the following industry/sector: "${cleanSector}". Detail whether it fits best in Mainland or Free Zone, required authority approvals, and estimated investment setup. Reply in the language of the prompt.` }]
       }],
       systemInstruction: { parts: [{ text: SAMCHEGUIDE_SYSTEM_PROMPT }] }
     };
@@ -541,9 +544,12 @@ app.post("/chat", async (req, res) => {
     const { text } = req.body;
     if (!text) return res.status(400).json({ error: "Message text is missing." });
 
-    const cleanText = text.trim().toLowerCase();
-    if (sgCorporateShortReplyMap[cleanText]) {
-      const replyText = sgCorporateShortReplyMap[cleanText];
+    const cleanText = String(text).trim();
+    if (!cleanText) return res.status(400).json({ error: "Message text cannot be empty." });[cite: 1]
+
+    const lowerCleanText = cleanText.toLowerCase();
+    if (sgCorporateShortReplyMap[lowerCleanText]) {
+      const replyText = sgCorporateShortReplyMap[lowerCleanText];
       return res.json({
         candidates: [{ content: { parts: [{ text: parseLinksToHTML(replyText) }] } }]
       });
@@ -551,7 +557,7 @@ app.post("/chat", async (req, res) => {
 
     const payload = {
       contents: [{
-        parts: [{ text: `User message: "${text}"\nNote: Reply directly without introductory greetings. Automatically detect the user's language and respond in THAT SAME language.` }]
+        parts: [{ text: `User message: "${cleanText}"\nNote: Reply directly without introductory greetings. Automatically detect the user's language and respond in THAT SAME language.` }]
       }],
       systemInstruction: { parts: [{ text: SAMCHEGUIDE_SYSTEM_PROMPT }] }
     };
