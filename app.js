@@ -1,6 +1,6 @@
 // ============================================================================
 // SAMCHE COMPANY LLC - BİRLEŞTİRİLMİŞ API SERVİSİ
-// (WhatsApp Bot + Web Chatbot + Samcheguide Bot + Telegram + Cron + Kalıcı Kayıt)
+// (WhatsApp Bot + Web Chatbot + Samcheguide Bot + Telegram + Cron)
 // ============================================================================
 
 import express from "express";
@@ -10,7 +10,6 @@ import axios from "axios";
 import dotenv from "dotenv";
 import OpenAI from "openai";
 import cron from "node-cron";
-import fs from "fs";
 
 dotenv.config();
 
@@ -19,7 +18,7 @@ app.use(cors());
 app.use(express.json());
 
 // ============================================================================
-// 1. GENEL API YAPILANDIRMALARI & OTURUM KAYIT SİSTEMİ
+// 1. GENEL API YAPILANDIRMALARI
 // ============================================================================
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const SAMCHE_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`;
@@ -28,26 +27,6 @@ const WP_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/g
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
-
-// Oturumları kaybetmemek için JSON dosyasına okuma/yazma işlemleri (Render uyku modu çözümü)
-const SESSION_FILE = "./wpSessions.json";
-let wpSessions = {};
-
-try {
-  if (fs.existsSync(SESSION_FILE)) {
-    wpSessions = JSON.parse(fs.readFileSync(SESSION_FILE, "utf-8"));
-  }
-} catch (e) {
-  console.error("Oturum dosyası yüklenirken hata:", e);
-}
-
-const saveSessions = () => {
-  try {
-    fs.writeFileSync(SESSION_FILE, JSON.stringify(wpSessions, null, 2));
-  } catch (e) {
-    console.error("Oturumlar dosyaya kaydedilirken hata:", e);
-  }
-};
 
 // Ortak Link Dönüştürücü
 const parseLinksToHTML = (text) => {
@@ -231,8 +210,9 @@ function addWebMemory(userId, role, content) {
 }
 
 // ============================================================================
-// 4. WHATSAPP BOT VERİLERİ (GEMINI 2.5 PRO)
+// 4. WHATSAPP BOT VERİLERİ (GEMINI 2.5 PRO + CRON)
 // ============================================================================
+const wpSessions = {};
 
 const wpCorporateShortReplyMap = {
   "1": { tr: "Size nasıl yardımcı olabilirim?", en: "How may I assist you?", ar: "كيف يمكنني مساعدتك؟" },
@@ -275,7 +255,9 @@ const contactText = {
   ar: "للتواصل مع فريق الاستشارات المهنية لدينا، يمكنكم مراسلتنا عبر واتساب على ‎+971 52 728 8586. أو سيقوم مستشارونا المباشرون بمساعدتكم بكل سرور.",
 };
 
-// WhatsApp Helper Functions
+// ============================================================================
+// YARDIMCI FONKSİYONLAR (WHATSAPP & TELEGRAM)
+// ============================================================================
 async function sendMessage(to, body) {
   try {
     if (!body || typeof body !== "string") return;
@@ -313,7 +295,7 @@ async function sendMessageToTelegram(text) {
     if (!text) return;
     const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
     await axios.post(url, {
-      chat_id: process.env.TELEGRAM_CHAT_ID,
+      chat_id: process.env.TELEGRAM_CHAT_ID.trim(),
       text: text
     });
   } catch (err) {
@@ -345,7 +327,7 @@ function detectTopic(text) {
   const t = text.toLowerCase();
   if (t.includes("şirket") || t.includes("company") || t.includes("business setup") || t.includes("company setup")) return "company";
   if (t.includes("oturum") || t.includes("residency") || t.includes("visa") || t.includes("ikamet")) return "residency";
-  if (t.includes("ai") || t.includes("bot") || t.includes("chatbot") || t.includes("webchat") || t.includes("yapay zeka")) return "ai";
+  if (t.includes("ai") || t.includes("bot") || t.includes("chatbot") || t.includes("webchat")) return "ai";
   if (t.includes("maliyet") || t.includes("cost") || t.includes("price") || t.includes("ücret") || t.includes("bütçe") || t.includes("budget")) return "cost";
   return "other";
 }
@@ -371,6 +353,151 @@ function detectLanguage(text) {
   if (tr.test(text)) return "tr";
   return "en"; 
 }
+
+function getPingMessage(lang, topic) {
+  const messages = {
+    tr: {
+      general: "Merhaba. SamChe AI olarak, kısa süre önce Dubai hakkında sorularınızı cevaplamıştım ve size bilgi vermiştim. Kafanıza takılan başka herhangi bir soru varsa lütfen bana sormaktan çekinmeyin. Dubai’deki planlarınıza sizi gerçekten yaklaştıracak adımları birlikte netleştirebiliriz. Dilediğiniz zaman ben buradayım ve Dubai hakkında danışmak istediğiniz her konuda size her zaman yardımcı olmaya hazırım.",
+      company: "Merhaba. Kısa süre önce Dubai’de şirket kuruluşu hakkında konuşmuştuk. Dubai'de şirket kurma planınız için doğru şirket yapısını planlamak ve sizin için en uygun maliyet yapısını belirlemek adına size her zaman destek olmak için buradayım. Paylaştığım bilgiler dışında kafanıza takılan herhangi bir soru olursa her zaman bana sorabilirsiniz.",
+      residency: "Merhaba. Kısa süre önce Dubai’de oturum süreci hakkında konuşmuştuk. Sizin için en uygun oturum planlamasını daha net bir çerçevede yapmak adına size her zaman yardımcı olmaya hazırım. Paylaştığım bilgiler dışında kafanıza takılan herhangi bir soru olursa bana sorabilirsiniz.",
+      cost: "Merhaba. Kısa süre önce Dubai’deki maliyetler hakkında konuşmuştuk. Maliyet planlamanızı daha net bir çerçevede yapmanız için size her zaman yardımcı olmaya hazırım. Paylaştığım bilgiler dışında kafanıza takılan herhangi bir soru olursa bana sorabilirsiniz.",
+      AI: "Merhaba. Kısa süre önce AI ve otomasyon çözümleri hakkında konuşmuştuk. Projenizi daha verimli ve ölçeklenebilir bir yapıya dönüştürmek isterseniz yardımcı olmaya hazırım."
+    },
+    en: {
+      general: "Hello. I noticed we haven’t been in touch for a short while. If you have any additional questions about Dubai, feel free to ask. I’m here to help you move closer to your plans.",
+      company: "Hello. We recently discussed company formation in Dubai. If you're ready, I can help you determine the right structure.",
+      residency: "Hello. We recently discussed the residency process in Dubai. If you're ready, I can help you choose the right path.",
+      cost: "Hello. We recently discussed Dubai’s cost structure. I’m here to help you plan with clarity whenever you’re ready.",
+      AI: "Hello. We recently discussed your AI project. If you're ready, I can help you build a more efficient and scalable structure."
+    },
+    ar: {
+      general: "مرحبًا. تحدثنا مؤخرًا عن دبي. إذا كان لديك أي أسئلة إضافية، فلا تتردد في طرحها. أنا هنا دائمًا لمساعدتك.",
+      company: "مرحبًا. تحدثنا مؤخرًا عن تأسيس شركة في دبي. إذا كنت جاهزًا، يمكنني مساعدتك في اختيار الهيكل المناسب.",
+      residency: "مرحبًا. تحدثنا مؤخرًا عن إجراءات الإقامة في دبي. إذا كنت جاهزًا، يمكنني مساعدتك في اختيار الطريق الأنسب.",
+      cost: "مرحبًا. تحدثنا مؤخرًا عن تكاليف دبي. أنا هنا لمساعدتك في التخطيط بوضوح.",
+      AI: "مرحبًا. تحدثنا مؤخرًا عن مشروع الذكاء الاصطناعي. إذا كنت جاهزًا، يمكنني مساعدتك في تطويره."
+    }
+  };
+  const langSet = messages[lang] || messages["en"];
+  return langSet[topic] || langSet["general"];
+}
+
+function getFollowUpMessage(lang, topic, stage) {
+  const messages = {
+    "3h": {
+      general: {
+        tr: "Merhaba. Bir süredir iletişimde olmadığımızı fark ettim. Dubai ile ilgili konuştuğumuz konular ve sorduğunuz sorular dışında kafanıza takılan başka herhangi bir soru varsa lütfen bana sormaktan çekinmeyin..Dilediğiniz zaman ben buradayım ve Dubai planlarınız hakkında danışmak istediğiniz her konuda size her zaman yardımcı olmaya hazırım.",
+        en: "Hello. I noticed we haven’t been in touch for a while. If you’re ready, we can clarify your next step regarding your Dubai plans.",
+        ar: "مرحبًا. لاحظت أننا لم نتواصل منذ فترة. إذا كنت جاهزًا، يمكننا توضيح خطوتك التالية بخصوص خططك في دبي."
+      },
+      company: {
+        tr: "Merhaba. Bir süredir Dubai'de şirket kurma planlarınız ile ilgili iletişimde olmadığımızı fark ettim. Hazırsanız, şirket yapınızı ve sonraki adımları birlikte netleştirebiliriz.Dilediğiniz zaman ben buradayım ve Dubai planlarınız hakkında danışmak istediğiniz her konuda size her zaman yardımcı olmaya hazırım.",
+        en: "Hello. I noticed we haven’t been in touch regarding your company setup. If you're ready, we can clarify the next steps together.",
+        ar: "مرحبًا. لاحظت أننا لم نتواصل بخصوص تأسيس الشركة منذ فترة. إذا كنت جاهزًا، يمكننا توضيح الخطوات التالية معًا."
+      },
+      residency: {
+        tr: "Merhaba. Bir süredir Dubai'de oturum alma sürecinizle ilgili iletişim sağlayamadığımızı fark ettim. Dilerseniz, oturum alma planlarınız üzerine konuşmaya devam edebilir ve size en uygun oturum türünü belirleyebiliriz. Ben buradayım ve Dubai planlarınız hakkında danışmak istediğiniz her konuda size her zaman yardımcı olmaya hazırım.",
+        en: "Hello. I noticed we haven’t been in touch regarding your residency process. If you're ready, we can define the right path together.",
+        ar: "مرحبًا. لاحظت أننا لم نتواصل بخصوص إجراءات الإقامة منذ فترة. إذا كنت جاهزًا، يمكننا تحديد الطريق الأنسب معًا."
+      },
+      cost: {
+        tr: "Merhaba. Konuştuğumuz konular üzerinden maliyet planlamalarınızla ilgili bir süredir iletişimde olmadığımızı fark ettim. Hazırsanız, maliyet planlamalarınız üzerine konuşmaya devam edebiliriz.Dilediğiniz zaman ben buradayım ve Dubai planlarınız hakkında danışmak istediğiniz her konuda size her zaman yardımcı olmaya hazırım.",
+        en: "Hello. I noticed we haven’t been in touch about your cost planning. If you're ready, we can clarify the numbers together.",
+        ar: "مرحبًا. لاحظت أننا لم نتواصل بخصوص تخطيط التكاليف منذ فترة. إذا كنت جاهزًا، يمكننا توضيح الأرقام معًا."
+      },
+      AI: {
+        tr: "Merhaba. Bir süredir AI projenizle ilgili iletişimde olmadığımızı fark ettim. Hazırsanız, projenizin bir sonraki adımını birlikte netleştirebiliriz.",
+        en: "Hello. I noticed we haven’t been in touch regarding your AI project. If you're ready, we can clarify the next step.",
+        ar: "مرحبًا. لاحظت أننا لم نتواصل بخصوص مشروع الذكاء الاصطناعي منذ فترة. إذا كنت جاهزًا، يمكننا توضيح الخطوة التالية."
+      }
+    },
+    "24h": {
+      general: {
+        tr: "Merhaba. Dün Dubai planlarınız hakkında konuşmuştuk. Dubai planlarınız hakkında daha fazla bilgiye ihtiyacınız olursa lütfen bana sormaktan çekinmeyin. Dubaiye yerleşme sürecinizde size her zaman yardımcı olmaya hazırım. Ayrıca Canlı destek almak isterseniz bu sohbete canlı destek yazabilirsiniz.",
+        en: "Hello. Yesterday we discussed your Dubai plans. If you’re still considering them, we can move forward together. For live support, simply type 'live support'.",
+        ar: "مرحبًا. تحدثنا بالأمس عن خططك في دبي. إذا كنت لا تزال تفكر في الأمر، يمكننا المتابعة معًا. للحصول على دعم مباشر، فقط اكتب 'دعم مباشر'."
+      },
+      company: {
+        tr: "Merhaba. Dün şirket kuruluşu hakkında konuşmuştuk. Şirket kurulum adımları ve süreçleri ile ilgili daha fazla bilgiye ihtiyacınız olursa lütfen bana sormaktan çekinmeyin. Size en uygun şirket türü ve maliyetini belirleyebilir ve bu süreçte size destek sağlayabilirim. Ayrıca Canlı destek almak isterseniz bu sohbete canlı destek yazabilirsiniz.",
+        en: "Hello. Yesterday we discussed your company setup. If you're ready, we can define the right structure. Type 'live support' for assistance.",
+        ar: "مرحبًا. تحدثنا بالأمس عن تأسيس الشركة. إذا كنت جاهزًا، يمكننا تحديد الهيكل الصحيح. للحصول على دعم مباشر، اكتب 'دعم مباشر'."
+      },
+      residency: {
+        tr: "Merhaba. Dün oturum süreci hakkında konuşmuştuk. Oturum süreçleri ile ilgili daha fazla bilgiye ihtiyacınız olursa lütfen bana sormaktan çekinmeyin. Size en uygun oturum türlerini belirleyebilir ve bu süreçte size destek sağlayabilirim. Ayrıca Canlı destek almak isterseniz bu sohbete canlı destek yazabilirsiniz.",
+        en: "Hello. Yesterday we discussed your residency process. If you're ready, we can move the steps forward. Type 'live support' for help.",
+        ar: "مرحبًا. تحدثنا بالأمس عن إجراءات الإقامة. إذا كنت جاهزًا، يمكننا متابعة الخطوات. للحصول على دعم مباشر، اكتب 'دعم مباشر'."
+      },
+      cost: {
+        tr: "Merhaba. Dün maliyet planlamanız hakkında konuşmuştuk. Maliyet ve bütçe planları ile ilgili daha fazla bilgiye ihtiyacınız olursa lütfen bana sormaktan çekinmeyin. Ayrıca Canlı destek almak isterseniz bu sohbete canlı destek yazabilirsiniz.",
+        en: "Hello. Yesterday we discussed your cost planning. If you're ready, we can clarify your budget. Type 'live support' for assistance.",
+        ar: "مرحبًا. تحدثنا بالأمس عن تخطيط التكاليف. إذا كنت جاهزًا، يمكننا توضيح ميزانيتك. للحصول على دعم مباشر، اكتب 'دعم مباشر'."
+      },
+      AI: {
+        tr: "Merhaba. Dün AI projeniz hakkında konuşmuştuk. Hazırsanız, projenizi daha uygulanabilir bir yapıya dönüştürebiliriz. Canlı destek için 'canlı destek' yazabilirsiniz.",
+        en: "Hello. Yesterday we discussed your AI project. If you're ready, we can turn it into a more actionable plan. Type 'live support' for help.",
+        ar: "مرحبًا. تحدثنا بالأمس عن مشروع الذكاء الاصطناعي. إذا كنت جاهزًا، يمكننا تحويله إلى خطة قابلة للتنفيذ. للحصول على دعم مباشر، اكتب 'دعم مباشر'."
+      }
+    },
+    "72h": {
+      general: {
+        tr: "Merhaba. Birkaç gündür iletişimde olmadığımızı fark ettim. Dubai’deki planlarınızın askıda kalmasını istemem. Hazırsanız, sizin için en doğru yolu birlikte netleştirebiliriz.",
+        en: "Hello. I noticed we haven’t been in touch for a few days. I don’t want your Dubai plans to remain on hold. If you're ready, we can clarify the best path forward.",
+        ar: "مرحبًا. لاحظت أننا لم نتواصل منذ عدة أيام. لا أرغب أن تبقى خططكم في دبي معلّقة. إذا كنتم جاهزين، يمكننا تحديد المسار الأنسب لكم."
+      },
+      company: {
+        tr: "Merhaba. Şirket kuruluşu planlarınızın birkaç gündür ilerlemediğini fark ettim. Dubai’de doğru yapı büyük fark yaratır. Hazırsanız, süreci birlikte hızlandırabiliriz.",
+        en: "Hello. I noticed your company setup process hasn’t progressed in the last few days. The right structure in Dubai makes a major difference. If you're ready, we can move forward together.",
+        ar: "مرحبًا. لاحظت أن عملية تأسيس الشركة لم تتقدم منذ عدة أيام. الهيكل الصحيح في دبي يحدث فرقًا كبيرًا. إذا كنتم جاهزين، يمكننا المتابعة معًا."
+      },
+      residency: {
+        tr: "Merhaba. Oturum sürecinizin birkaç gündür ilerlemediğini fark ettim. Dubai’de oturum almak düşündüğünüzden daha hızlı tamamlanabilir. Hazırsanız, süreci netleştirebiliriz.",
+        en: "Hello. I noticed your residency process hasn’t progressed for a few days. Residency in Dubai can be completed faster than expected. If you're ready, we can clarify the next steps.",
+        ar: "مرحبًا. لاحظت أن عملية الإقامة لم تتقدم منذ عدة أيام. يمكن إنهاء الإقامة في دبي أسرع مما تتوقعون. إذا كنتم جاهزين، يمكننا تحديد الخطوات التالية."
+      },
+      cost: {
+        tr: "Merhaba. Bütçe planlamanızın birkaç gündür askıda kaldığını fark ettim. Dubai’de maliyetleri doğru yönetmek önemli avantaj sağlar. Hazırsanız, sizin için en uygun yapıyı belirleyebiliriz.",
+        en: "Hello. I noticed your budgeting process has been on hold for a few days. Managing costs correctly in Dubai provides major advantages. If you're ready, we can define the best structure for you.",
+        ar: "مرحبًا. لاحظت أن خطتكم المالية معلّقة منذ عدة أيام. إدارة التكاليف بشكل صحيح في دبي يمنحكم مزايا كبيرة. إذا كنتم جاهزين، يمكننا تحديد الهيكل الأنسب لكم."
+      },
+      AI: {
+        tr: "Merhaba. AI projenizin birkaç gündür ilerlemediğini fark ettim. Doğru otomasyon yapısı işinizi hızla ileri taşır. Hazırsanız, projenizi birlikte netleştirebiliriz.",
+        en: "Hello. I noticed your AI project hasn’t progressed for a few days. The right automation structure accelerates your business significantly. If you're ready, we can refine your project together.",
+        ar: "مرحبًا. لاحظت أن مشروع الذكاء الاصطناعي لم يتقدم منذ عدة أيام. الهيكل الصحيح للأتمتة يدفع عملكم بسرعة إلى الأمام. إذا كنتم جاهزين، يمكننا تطوير المشروع معًا."
+      }
+    },
+    "7d": {
+      general: {
+        tr: "Merhaba. Bir haftadır iletişimde olmadığımızı fark ettim. Dubai ile ilgili planlarınız hâlâ geçerliyse, sizin için en doğru yolu birlikte belirleyebiliriz. Hazır olduğunuzda buradayım.",
+        en: "Hello. I noticed we haven’t been in touch for a week. If your Dubai plans are still active, we can define the best path together. I’m here whenever you're ready.",
+        ar: "مرحبًا. لاحظت أننا لم نتواصل منذ أسبوع. إذا كانت خططكم في دبي ما زالت قائمة، يمكننا تحديد المسار الأنسب لكم. أنا هنا متى ما كنتم جاهزين."
+      },
+      company: {
+        tr: "Merhaba. Şirket kuruluşu planlarınızla ilgili bir haftadır iletişimde olmadığımızı fark ettim. Dubai’de doğru yapı uzun vadeli avantaj sağlar. Hazır olduğunuzda süreci birlikte ilerletebiliriz.",
+        en: "Hello. I noticed we haven’t followed up on your company setup for a week. The right structure in Dubai provides long-term advantages. Whenever you're ready, we can move forward.",
+        ar: "مرحبًا. لاحظت أننا لم نتابع بخصوص تأسيس الشركة منذ أسبوع. الهيكل الصحيح في دبي يمنحكم مزايا طويلة المدى. أنا هنا متى ما كنتم جاهزين."
+      },
+      residency: {
+        tr: "Merhaba. Oturum sürecinizle ilgili bir haftadır iletişimde olmadığımızı fark ettim. Dubai’de oturum almak düşündüğünüzden daha hızlı ilerleyebilir. Hazır olduğunuzda devam edebiliriz.",
+        en: "Hello. I noticed we haven’t followed up on your residency process for a week. Residency in Dubai can progress faster than expected. We can continue whenever you're ready.",
+        ar: "مرحبًا. لاحظت أننا لم نتابع بخصوص الإقامة منذ أسبوع. يمكن أن تتقدم الإقامة في دبي أسرع مما تتوقعون. أنا هنا متى ما كنتم جاهزين."
+      },
+      cost: {
+        tr: "Merhaba. Bütçe planlamanızla ilgili bir haftadır iletişimde olmadığımızı fark ettim. Dubai’de maliyetleri doğru yönetmek önemli avantaj sağlar. Hazır olduğunuzda sizin için en uygun yapıyı belirleyebiliriz.",
+        en: "Hello. I noticed we haven’t discussed your budgeting for a week. Managing costs correctly in Dubai provides major advantages. We can define the best structure whenever you're ready.",
+        ar: "مرحبًا. لاحظت أننا لم نناقش خطتكم المالية منذ أسبوع. إدارة التكاليف بشكل صحيح في دبي يمنحكم مزايا كبيرة. أنا هنا متى ما كنتم جاهزين."
+      },
+      AI: {
+        tr: "Merhaba. AI projenizle ilgili bir haftadır iletişimde olmadığımızı fark ettim. Doğru otomasyon yapısı işinizi hızla ileri taşır. Hazır olduğunuzda projenizi birlikte netleştirebiliriz.",
+        en: "Hello. I noticed we haven’t followed up on your AI project for a week. The right automation structure can rapidly move your business forward. Whenever you're ready, we can refine your project.",
+        ar: "مرحبًا. لاحظت أننا لم نتابع بخصوص مشروع الذكاء الاصطناعي منذ أسبوع. الهيكل الصحيح للأتمتة يمكن أن يدفع عملكم بسرعة إلى الأمام. أنا هنا متى ما كنتم جاهزين."
+      }
+    }
+  };
+  const stageSet = messages[stage] || messages["3h"];
+  const topicSet = stageSet[topic] || stageSet["general"];
+  return topicSet[lang] || topicSet["en"];
+}
+
 
 // ============================================================================
 // 5. ROUTING (ENDPOINT'LER)
@@ -760,444 +887,9 @@ If the user already provided sector info, NEVER ask again.`
   }
 });
 
-// -------------------------------
-//  SESSION MEMORY
-// -------------------------------
-const sessions = {};
-
-
-// -------------------------------
-//  KISA MESAJ → KURUMSAL CEVAP HARİTASI (YENİ EKLENEN BLOK)
-// -------------------------------
-const corporateShortReplyMap = {
-  // 1 - 2 - 3 (Özel davranış)
-  "1": {
-    tr: "Size nasıl yardımcı olabilirim?",
-    en: "How may I assist you?",
-    ar: "كيف يمكنني مساعدتك؟"
-  },
-  "2": {
-    tr: "Size nasıl yardımcı olabilirim?",
-    en: "How may I assist you?",
-    ar: "كيف يمكنني مساعدتك؟"
-  },
-  "3": {
-    tr: "Size nasıl yardımcı olabilirim?",
-    en: "How may I assist you?",
-    ar: "كيف يمكنني مساعدتك؟"
-  },
-
-  // Selamlama
-  merhaba: {
-    tr: "Merhaba, size nasıl yardımcı olabilirim?",
-    en: "Hello, how may I assist you today?",
-    ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟"
-  },
-  selam: {
-    tr: "Merhaba, size nasıl yardımcı olabilirim?",
-    en: "Hello, how may I assist you today?",
-    ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟"
-  },
-  hi: {
-    tr: "Merhaba, size nasıl yardımcı olabilirim?",
-    en: "Hello, how may I assist you today?",
-    ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟"
-  },
-  hello: {
-    tr: "Merhaba, size nasıl yardımcı olabilirim?",
-    en: "Hello, how may I assist you today?",
-    ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟"
-  },
-
-  // Teşekkür & Kapanış
-  teşekkürler: {
-    tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.",
-    en: "My pleasure. I’m here whenever you need support.",
-    ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة."
-  },
-  tesekkurler: {
-    tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.",
-    en: "My pleasure. I’m here whenever you need support.",
-    ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة."
-  },
-  "thank you": {
-    tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.",
-    en: "My pleasure. I’m here whenever you need support.",
-    ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة."
-  },
-  thanks: {
-    tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.",
-    en: "My pleasure. I’m here whenever you need support.",
-    ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة."
-  },
-  "ben teşekkür ederim": {
-    tr: "Rica ederim. Her zaman yardımcı olmaktan memnuniyet duyarım.",
-    en: "You're welcome. Always happy to assist.",
-    ar: "على الرحب والسعة. يسعدني دائمًا مساعدتك."
-  },
-  "çok teşekkürler": {
-    tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.",
-    en: "My pleasure. I’m here whenever you need support.",
-    ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة."
-  },
-  "teşekkür ederim": {
-    tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.",
-    en: "My pleasure. I’m here whenever you need support.",
-    ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة."
-  },
-
-  // Sağol / Eyvallah
-  sağol: {
-    tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.",
-    en: "You're welcome. I’m here if you need anything.",
-    ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء."
-  },
-  sagol: {
-    tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.",
-    en: "You're welcome. I’m here if you need anything.",
-    ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء."
-  },
-  eyvallah: {
-    tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.",
-    en: "You're welcome. I’m here if you need anything.",
-    ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء."
-  },
-
-  // Anlama / Onay
-  anladım: {
-    tr: "Harika. Nasıl devam etmek istersiniz?",
-    en: "Great. How would you like to proceed?",
-    ar: "جميل. كيف تود المتابعة؟"
-  },
-  anladim: {
-    tr: "Harika. Nasıl devam etmek istersiniz?",
-    en: "Great. How would you like to proceed?",
-    ar: "جميل. كيف تود المتابعة؟"
-  },
-  "got it": {
-    tr: "Anladım. Nasıl devam etmek istersiniz?",
-    en: "Understood. How would you like to proceed?",
-    ar: "فهمت. كيف تود المتابعة؟"
-  },
-  understood: {
-    tr: "Anladım. Nasıl devam etmek istersiniz?",
-    en: "Understood. How would you like to proceed?",
-    ar: "فهمت. كيف تود المتابعة؟"
-  },
-  noted: {
-    tr: "Not aldım. Nasıl devam etmek istersiniz?",
-    en: "Noted. How would you like to proceed?",
-    ar: "تم تدوينه. كيف تود المتابعة؟"
-  },
-
-  // Kapanış
-  "görüşmek üzere": {
-    tr: "Görüşmek üzere. Dilediğiniz zaman buradayım.",
-    en: "See you soon. I’m here whenever you need assistance.",
-    ar: "أراك قريبًا. أنا هنا كلما احتجت إلى المساعدة."
-  },
-  "gorusmek uzere": {
-    tr: "Görüşmek üzere. Dilediğiniz zaman buradayım.",
-    en: "See you soon. I’m here whenever you need assistance.",
-    ar: "أراك قريبًا. أنا هنا كلما احتجت إلى المساعدة."
-  },
-
-  // Emoji
-  "👍": {
-    tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.",
-    en: "You're welcome. I’m here if you need anything.",
-    ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء."
-  },
-  "🙏": {
-    tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.",
-    en: "You're welcome. I’m here if you need anything.",
-    ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء."
-  }
-};
-
-
-// -------------------------------
-//  WHATSAPP SEND (FINAL – STABLE)
-// -------------------------------
-async function sendMessage(to, body) {
-  try {
-    if (!body || typeof body !== "string") return;
-
-    // 4000 karakter güvenli chunk
-    const chunks = [];
-    for (let i = 0; i < body.length; i += 4000) {
-      chunks.push(body.substring(i, i + 4000));
-    }
-
-    for (const chunk of chunks) {
-      try {
-        await axios.post(
-          `https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
-          {
-            messaging_product: "whatsapp",
-            to,
-            text: { body: chunk },
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-              "Content-Type": "application/json",
-            },
-          }
-        );
-      } catch (err) {
-        console.error("[WHATSAPP SEND ERROR - CHUNK]:", err.response?.data || err.message);
-        continue;
-      }
-    }
-
-  } catch (err) {
-    console.error("[WHATSAPP SEND ERROR - MAIN]:", err.response?.data || err.message);
-    return;
-  }
-}
-
-
-
-// -------------------------------
-//  TELEGRAM FORWARD FUNCTION (FINAL – STABLE)
-// -------------------------------
-async function sendMessageToTelegram(text) {
-  try {
-    if (!text) return;
-
-    const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
-
-    await axios.post(url, {
-      chat_id: process.env.TELEGRAM_CHAT_ID,
-      text: text
-    });
-
-    console.log("[TELEGRAM] Message forwarded");
-
-  } catch (err) {
-    console.error("[TELEGRAM ERROR]:", err.response?.data || err.message);
-    return;
-  }
-}
-
-
-// -------------------------------
-//  PREMIUM CORPORATE FALLBACK
-// -------------------------------
-function corporateFallback(lang) {
-  if (lang === "tr") {
-    return (
-      "Size en doğru bilgiyi sunabilmem için konuyu biraz daha netleştirebilir misiniz? " +
-      "Böylece ihtiyacınıza en uygun yönlendirmeyi sağlayabilirim."
-    );
-  }
-
-  if (lang === "en") {
-    return (
-      "To provide you with the most accurate guidance, could you clarify your request a little further? " +
-      "This will help me offer the most suitable support."
-    );
-  }
-
-  return (
-    "لأتمكن من تقديم الإرشاد الأنسب لكم، هل يمكن توضيح طلبكم بشكل أدق؟ " +
-    "سيساعدني ذلك في تقديم الدعم الأمثل."
-  );
-}
-
-// -------------------------------
-//  GEMINI CALL (2.5 PRO EXP - 2026)
-// -------------------------------
-async function callGemini(prompt) {
-  const url =
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=" +
-    process.env.GEMINI_API_KEY;
-
-  try {
-    const response = await axios.post(
-      url,
-      {
-        contents: [
-          {
-            parts: [{ text: prompt }],
-          },
-        ],
-      },
-      {
-        headers: { "Content-Type": "application/json" },
-      }
-    );
-
-    const reply =
-      response.data?.candidates?.[0]?.content?.parts?.[0]?.text || null;
-
-    return reply?.trim() || null;
-  } catch (err) {
-    console.error("Gemini API error:", err.response?.data || err.message);
-    return null;
-  }
-}
-
-// -------------------------------
-//  STATIC TEXTS
-// -------------------------------
-const servicesList = {
-  tr:
-    "SamChe Company LLC olarak sunduğumuz hizmetler:\n" +
-    "1. Şirketlere Özel Yapay Zekâ Sistemleri\n" +
-    "2. Dijital Büyüme & İçerik Stratejisi\n" +
-    "3. Marka Yönetimi & Sosyal Medya\n" +
-    "4. Kitle Büyümesi & Performans Optimizasyonu\n" +
-    "5. BAE Şirket Kurulumu & Pazar Girişi\n" +
-    "6. Serbest Bölge Seçimi & Uyum (Compliance)",
-  en:
-    "SamChe Company LLC provides:\n" +
-    "1. Private AI Systems\n" +
-    "2. Digital Growth & Content Strategy\n" +
-    "3. Branding & Social Media\n" +
-    "4. Audience Growth & Performance Optimization\n" +
-    "5. UAE Business Setup & Market Entry\n" +
-    "6. Free Zone Selection & Compliance",
-  ar:
-    "تقدم SamChe Company LLC:\n" +
-    "1. أنظمة ذكاء اصطناعي خاصة\n" +
-    "2. استراتيجية النمو الرقمي والمحتوى\n" +
-    "3. إدارة العلامة التجارية ووسائل التواصل\n" +
-    "4. نمو الجمهور وتحسين الأداء\n" +
-    "5. تأسيس الأعمال في الإمارات\n" +
-    "6. اختيار المناطق الحرة والامتثال",
-};
-
-const introAfterLang = {
-  tr:
-    "Merhaba, ben SamChe AI.\n\n" +
-    "SamChe Company LLC'nin yapay zeka destekli danışmanıyım ve size yardımcı olmak için buradayım.\n\n" +
-    "Dubai’de şirket kuruluşu, iş planları, iş geliştirme, dijital büyüme, yapay zeka çözümleri, oturum seçenekleri, yaşam maliyetleri ve şirket kuruluşu sonrasında sunduğumuz hizmetler ile ilgili tüm sorularınızı yanıtlayabilirim. Size nasıl yardımcı olabilirim?\n\n",
-  en:
-    "Hello, I am the AI consultant of SamChe Company LLC.\n" +
-    "I can answer your questions about choosing the right region for company formation in the United Arab Emirates, business plans, business strategies, AI solutions, digital growth, and AI chatbot services. You can get all the information you need from me on how to grow your company or how to succeed in the UAE market. How can I help you?\n\n",
-  ar:
-    "مرحبًا، أنا المساعد الذكي لشركة SamChe Company LLC.\n" +
-    "يمكنني الإجابة على أسئلتكم المتعلقة باختيار المنطقة المناسبة لتأسيس شركة في دولة الإمارات العربية المتحدة، وخطط الأعمال، واستراتيجيات الأعمال، وحلول الذكاء الاصطناعي، والنمو الرقمي، وخدمات الشات بوت بالذكاء الاصطناعي. يمكنكم الحصول مني على جميع المعلومات التي تحتاجونها حول كيفية تطوير شركتكم أو تحقيق النجاح في سوق الإمارات. كيف يمكنني مساعدتكم؟\n\n",
-};
-
-const contactText = {
-  tr: "Profesyonel danışmanlık ekibimize ulaşmak için: +971 52 728 8586  WhatsApp hattı üzerinden iletişim sağlayabilirsiniz. Canlı temsilcilerimiz size yardımcı olacaktır.",
-  en: "To reach our professional advisory team, you may contact us via WhatsApp at +971 52 728 8586. Our live consultants will be happy to assist you.",
-  ar: "للتواصل مع فريق الاستشارات المهنية لدينا، يمكنكم مراسلتنا عبر واتساب على ‎+971 52 728 8586. أو  سيقوم مستشارونا المباشرون بمساعدتكم بكل سرور.",
-};
-
-// -------------------------------
-//  TOPIC DETECTION & INTENT SCORE
-// -------------------------------
-function detectTopic(text) {
-  const t = text.toLowerCase();
-
-  if (
-    t.includes("şirket") ||
-    t.includes("company") ||
-    t.includes("business setup") ||
-    t.includes("company setup")
-  )
-    return "company";
-
-  if (
-    t.includes("oturum") ||
-    t.includes("residency") ||
-    t.includes("visa") ||
-    t.includes("ikamet")
-  )
-    return "residency";
-
-  if (
-    t.includes("ai") ||
-    t.includes("bot") ||
-    t.includes("chatbot") ||
-    t.includes("webchat")
-  )
-    return "ai";
-
-  if (
-    t.includes("maliyet") ||
-    t.includes("cost") ||
-    t.includes("price") ||
-    t.includes("ücret") ||
-    t.includes("bütçe") ||
-    t.includes("budget")
-  )
-    return "cost";
-
-  return "other";
-}
-
-function calculateIntentScore(text, currentScore = 0) {
-  const t = text.toLowerCase();
-  let score = currentScore;
-
-  if (
-    t.includes("şirket kurmak istiyorum") ||
-    t.includes("company setup") ||
-    t.includes("i want to open a company")
-  )
-    score += 30;
-
-  if (
-    t.includes("oturum almak istiyorum") ||
-    t.includes("residency") ||
-    t.includes("visa application")
-  )
-    score += 25;
-
-  if (
-    t.includes("bütçe") ||
-    t.includes("budget") ||
-    t.includes("fiyat") ||
-    t.includes("price")
-  )
-    score += 15;
-
-  if (
-    t.includes("ne kadar sürer") ||
-    t.includes("timeline") ||
-    t.includes("kaç günde")
-  )
-    score += 10;
-
-  if (
-    t.includes("merak ettim") ||
-    t.includes("sadece soruyorum") ||
-    t.includes("just curious")
-  )
-    score -= 10;
-
-  if (score < 0) score = 0;
-  if (score > 100) score = 100;
-
-  return score;
-}
-
-// ------------------------------
-// DİL ALGILAMA FONKSİYONU
-// ------------------------------
-function detectLanguage(text) {
-  if (!text) return "en";
-
-  // Arapça karakter kontrolü
-  const ar = /[\u0600-\u06FF]/;
-
-  // Türkçe karakter kontrolü
-  const tr = /[ığüşöçİĞÜŞÖÇ]/i;
-
-  if (ar.test(text)) return "ar";
-  if (tr.test(text)) return "tr";
-
-  return "en"; // Varsayılan İngilizce
-}
-
-// -------------------------------
-//  WEBHOOK VERIFY
-// -------------------------------
+// ----------------------------------------------------------------------------
+// C) WHATSAPP BOT (GEMINI 2.5 PRO) - /webhook ve /telegram-webhook
+// ----------------------------------------------------------------------------
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -1206,208 +898,93 @@ app.get("/webhook", (req, res) => {
   if (mode === "subscribe" && token === process.env.WHATSAPP_VERIFY_TOKEN) {
     return res.status(200).send(challenge);
   }
-
   return res.sendStatus(403);
 });
 
-// -------------------------------
-//  WEBHOOK MESSAGE HANDLER (FINAL – STABLE)
-// -------------------------------
 app.post("/webhook", async (req, res) => {
   try {
-
-    const message =
-      req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-
-    if (!message) {
-      return res.sendStatus(200);
-    }
+    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    if (!message) return res.sendStatus(200);
 
     const from = message.from;
-
-    // -----------------------------
-    //  TÜM MESAJ TÜRLERİNİ YAKALA
-    // -----------------------------
+    const cleanFrom = from.replace("+", "");
     let text = "";
 
-    if (message.text?.body) {
-      text = message.text.body;
-    } else if (message.button?.text) {
-      text = message.button.text;
-    } else if (message.interactive?.button_reply?.title) {
-      text = message.interactive.button_reply.title;
-    } else if (message.interactive?.list_reply?.title) {
-      text = message.interactive.list_reply.title;
-    } else if (message.image?.caption) {
-      text = message.image.caption;
-    } else if (message.document?.caption) {
-      text = message.document.caption;
-    }
+    if (message.text?.body) text = message.text.body;
+    else if (message.button?.text) text = message.button.text;
+    else if (message.interactive?.button_reply?.title) text = message.interactive.button_reply.title;
+    else if (message.interactive?.list_reply?.title) text = message.interactive.list_reply.title;
+    else if (message.image?.caption) text = message.image.caption;
+    else if (message.document?.caption) text = message.document.caption;
 
     text = (text || "").trim();
 
-    // -----------------------------
-    //  WHATSAPP → TELEGRAM FORWARD
-    // -----------------------------
     try {
-      await sendMessageToTelegram(`WhatsApp → ${from}: ${text}`);
+      await sendMessageToTelegram(`WhatsApp → ${cleanFrom}: ${text}`);
     } catch (err) {
       console.error("[TELEGRAM FORWARD ERROR]:", err);
     }
 
-    // Kullanıcı her mesaj attığında zamanlayıcı sıfırlansın
-    if (sessions[from]) {
-      sessions[from].lastMessageTime = Date.now();
+    if (wpSessions[cleanFrom]) {
+      wpSessions[cleanFrom].lastMessageTime = Date.now();
     }
 
-    // -----------------------------
-    //  CANLI DESTEK MODU
-    // -----------------------------
-    if (sessions[from]?.humanOverride) {
-      sessions[from].lastMessageTime = Date.now();
+    if (wpSessions[cleanFrom]?.humanOverride) {
+      wpSessions[cleanFrom].lastMessageTime = Date.now();
       return res.sendStatus(200);
     }
 
-    // -----------------------------
-    //  GEÇERSİZ MESAJ FİLTRESİ
-    // -----------------------------
-    const isInvalid =
-      !text ||
-      text === "" ||
-      message.type === "audio" ||
-      message.type === "voice" ||
-      message.type === "video" ||
-      message.type === "sticker";
-
+    const isInvalid = !text || text === "" || message.type === "audio" || message.type === "voice" || message.type === "video" || message.type === "sticker";
     if (isInvalid) {
-      await sendMessage(
-        from,
-        "Gönderdiğiniz içeriği işleyemiyorum. Lütfen mesajınızı yazılı olarak iletin."
-      );
+      await sendMessage(cleanFrom, "Gönderdiğiniz içeriği işleyemiyorum. Lütfen mesajınızı yazılı olarak iletin.");
       return res.sendStatus(200);
     }
 
-    // -----------------------------
-    //  İLK MESAJ → SESSION OLUŞTUR
-    // -----------------------------
-    if (!sessions[from]) {
-      sessions[from] = {
-        lang: null,
-        history: [],
-        lastMessageTime: Date.now(),
-        followUpStage: 0,
-        intentScore: 0,
-        topics: [],
-        profile: {
-          name: null,
-          country: null,
-          budget: null,
-          interest: null,
-        },
-        firstMessageTime: Date.now(),
-        pingSentOnce: false,
-        humanOverride: false
+    if (!wpSessions[cleanFrom]) {
+      wpSessions[cleanFrom] = {
+        lang: null, history: [], lastMessageTime: Date.now(), followUpStage: 0,
+        intentScore: 0, topics: [],
+        profile: { name: null, country: null, budget: null, interest: null },
+        firstMessageTime: Date.now(), pingSentOnce: false, humanOverride: false
       };
 
       await sendMessage(
-        from,
-        "Welcome to SamChe Company LLC.\n" +
-          "SamChe Company LLC'ye hoş geldiniz.\n" +
-          "مرحبًا بكم.\n\n" +
-          "Please select your language:\n" +
-          "1️⃣ English\n" +
-          "2️⃣ Türkçe\n" +
-          "3️⃣ العربية\n\n" +
-          "Lütfen dil seçiminizi yapınız:\n" +
-          "1️⃣ İngilizce\n" +
-          "2️⃣ Türkçe\n" +
-          "3️⃣ Arapça"
+        cleanFrom,
+        "Welcome to SamChe Company LLC.\nSamChe Company LLC'ye hoş geldiniz.\nمرحبًا بكم.\n\nPlease select your language:\n1️⃣ English\n2️⃣ Türkçe\n3️⃣ العربية\n\nLütfen dil seçiminizi yapınız:\n1️⃣ İngilizce\n2️⃣ Türkçe\n3️⃣ Arapça"
       );
-
       return res.sendStatus(200);
     }
 
-    const session = sessions[from];
-
-    // -----------------------------
-    //  AKILLI DİL ALGILAMA
-    // -----------------------------
-    const smartLangMap = {
-      "türkçe": "tr",
-      "turkce": "tr",
-      "tr": "tr",
-      "turkish": "tr",
-
-      "english": "en",
-      "ingilizce": "en",
-      "en": "en",
-
-      "arabic": "ar",
-      "arapça": "ar",
-      "arapca": "ar",
-      "ar": "ar",
-      "arabian": "ar"
-    };
+    const session = wpSessions[cleanFrom];
+    const smartLangMap = { "türkçe": "tr", "turkce": "tr", "tr": "tr", "turkish": "tr", "english": "en", "ingilizce": "en", "en": "en", "arabic": "ar", "arapça": "ar", "arapca": "ar", "ar": "ar", "arabian": "ar" };
 
     if (!session.lang) {
-      const lower = text.toLowerCase();
-      const detectedLang = smartLangMap[lower];
+      const lowerTest = text.toLowerCase();
+      const detectedLang = smartLangMap[lowerTest] || (text === "1" ? "en" : text === "2" ? "tr" : text === "3" ? "ar" : null);
 
       if (detectedLang) {
         session.lang = detectedLang;
-        await sendMessage(from, introAfterLang[session.lang]);
+        await sendMessage(cleanFrom, introAfterLang[session.lang]);
+        return res.sendStatus(200);
+      } else {
+        await sendMessage(cleanFrom, "Please choose 1, 2 or 3.");
         return res.sendStatus(200);
       }
     }
 
-  
+    const lang = session.lang;
+    const lower = text.toLowerCase();
 
-// -----------------------------
-//  LANGUAGE SELECTION (ORİJİNAL BLOK)
-// -----------------------------
-if (!session.lang) {
-  if (text === "1") session.lang = "en";
-  else if (text === "2") session.lang = "tr";
-  else if (text === "3") session.lang = "ar";
-  else {
-    await sendMessage(from, "Please choose 1, 2 or 3.");
-    return res.sendStatus(200);
-  }
-
-  await sendMessage(from, introAfterLang[session.lang]);
-  return res.sendStatus(200);
-}
-
-const lang = session.lang;
-const lower = text.toLowerCase();
-
-
-    // -----------------------------
-//  KISA MESAJLAR → KURUMSAL CEVAP
-// -----------------------------
-if (corporateShortReplyMap[lower]) {
-  await sendMessage(from, corporateShortReplyMap[lower][lang]);
-  return res.sendStatus(200);
-}
-
-
-    // -----------------------------
-    //  CONTACT
-    // -----------------------------
-    if (
-      lower.includes("contact") ||
-      lower.includes("iletişim") ||
-      lower.includes("whatsapp") ||
-      lower.includes("call") ||
-      lower.includes("telefon")
-    ) {
-      await sendMessage(from, contactText[lang]);
+    if (wpCorporateShortReplyMap[lower]) {
+      await sendMessage(cleanFrom, wpCorporateShortReplyMap[lower][lang]);
       return res.sendStatus(200);
     }
 
-    // -----------------------------
-    //  SESSION UPDATE
-    // -----------------------------
+    if (lower.includes("contact") || lower.includes("iletişim") || lower.includes("whatsapp") || lower.includes("call") || lower.includes("telefon")) {
+      await sendMessage(cleanFrom, contactText[lang]);
+      return res.sendStatus(200);
+    }
+
     session.history.push({ role: "user", text });
     if (session.history.length > 10) session.history.shift();
     session.lastMessageTime = Date.now();
@@ -1419,22 +996,13 @@ if (corporateShortReplyMap[lower]) {
       session.topics.push(topic);
     }
 
-    session.intentScore = calculateIntentScore(
-      text,
-      session.intentScore || 0
-    );
+    session.intentScore = calculateIntentScore(text, session.intentScore || 0);
 
-    const historyText = session.history
-      .map((m) => `${m.role === "user" ? "User" : "Model"}: ${m.text}`)
-      .join("\n");
+    const historyText = session.history.map((m) => `${m.role === "user" ? "User" : "Model"}: ${m.text}`).join("\n");
 
-    // -------------------------------
-    //  PROMPT OLUŞTURMA BAŞLANGICI
-    // -------------------------------
-   let prompt = "";
-        
+    let prompt = "";
     if (lang === "tr") {
-      prompt= `SamChe Company LLC’nin kurumsal yapay zekâ danışmanısın. 
+      prompt = `SamChe Company LLC’nin kurumsal yapay zekâ danışmanısın. 
 Profesyonel, stratejik, analitik ve yol gösterici cevaplar ver. 
 Gemini’nin hazır kalıplarını, prosedür metinlerini, devlet süreçlerini, klasik açıklamalarını ASLA kullanma. 
 KENDİ KALIPLARINI ÜRETME. 
@@ -1754,7 +1322,7 @@ SPONSORLU OTURUM SATIŞ ODAKLI DAVRANIŞ KURALLARI:
 BAE'ye taşınma sürecini önceden planlayabilmesi,
 Kota ve kontenjanın erkenden güvence altına alınması,
 Son dakika fiyat ve prosedür değişikliklerinden etkilenmemesi,
-Evrak ve başvuru hazırlıklarının önceden tamamlanması.
+Evrak و başvuru hazırlıklarının önceden tamamlanması.
 
 Müşteri kararsızsa şu yaklaşımı kullan:
 "Şu aşamada tüm süreci tamamlamanız gerekmiyor. İlk aşamada yalnızca kota rezervasyonunuzu ve dosya açılışınızı gerçekleştirerek yerinizi güvence altına alabiliyoruz."
@@ -2058,15 +1626,8 @@ ${historyText}
 Kullanıcı mesajı:
 ${text}
 `;
-    }
-
-
-
-
-  
-
-else if (lang === "en") {
-  prompt = `You are the Senior AI Consultant of SamChe Company LLC, based in Dubai.  
+    } else if (lang === "en") {
+      prompt = `You are the Senior AI Consultant of SamChe Company LLC, based in Dubai.  
 Your expertise includes:  
 • Private AI systems  
 • Custom AI chatbots for websites and WhatsApp  
@@ -2434,11 +1995,8 @@ ${historyText}
 User message:
 ${text}
 `;
-    }
-
-    
-else if (lang === "ar") {
-  prompt = `أنت المستشار الأول للذكاء الاصطناعي في شركة SamChe Company LLC ومقرها دبي.
+    } else if (lang === "ar") {
+      prompt = `أنت المستشار الأول للذكاء الاصطناعي في شركة SamChe Company LLC ومقرها دبي.
 تشمل خبراتك:
 • أنظمة الذكاء الاصطناعي الخاصة
 • روبوتات الدردشة المخصصة للمواقع الإلكترونية وواتساب
@@ -2672,7 +2230,7 @@ AR:
 
 قاعدة تعطيل وضع التوضيح:
 
-إذا استخدم المستخدم عبارات قصيرة أو غير واضحة مثل:
+إذا استخدم عبارات قصيرة أو غير واضحة مثل:
 "سأفتح شركة"
 "أحتاج فيزا"
 "ساعدني"
@@ -2843,395 +2401,47 @@ ${historyText}
 رسالة المستخدم:
 ${text}
 `;
-}  
+    }
 
+    // Follow-up Resetleri
+    session.lastMessageTime = Date.now();
+    session.followUpStage = 0;
+    session.pingSentOnce = false;
+    session.humanOverride = false;
 
-// -----------------------------
-//  KULLANICI MESAJ YAZDI → FOLLOW-UP RESETLERİ
-// -----------------------------
-session.lastMessageTime = Date.now();      // Sessizlik süresi reset
-session.followUpStage = 0;                 // 3h → 24h → 48h → 72h → 7d sıfırlanır
-session.pingSentOnce = false;              // Ping yeniden aktif olur
-session.humanOverride = false;             // Canlı destek modu kapanır
+    // AI Cevabı
+    const aiResponse = await callWpGemini(prompt);
+    if (!aiResponse) {
+      await sendMessage(cleanFrom, corporateFallback(lang));
+      return res.sendStatus(200);
+    }
 
+    const lowerAi = aiResponse.toLowerCase();
+    
+    // MÜŞTERİ TEMSİLCİSİ VE BOŞLUK HATALARI GİDERİLDİ
+    const needsHuman = lowerAi.includes("canlı destek") || lowerAi.includes("canli destek") || lowerAi.includes("müşteri temsilci") || lowerAi.includes("musteri temsilci") || lowerAi.includes("live support") || lowerAi.includes("human_agent") || lowerAi.includes("transfer_to_human");
 
-// -------------------------------
-//  GEMINI CEVABI
-// -------------------------------
-try {
-  const reply = await callGemini(prompt);
+    if (!needsHuman) {
+      if (!session.history) session.history = [];
+      session.history.push({ role: "assistant", text: aiResponse });
+      await sendMessage(cleanFrom, aiResponse);
+      return res.sendStatus(200);
+    } else {
+      let aktarimMesaji = "Talebinizi canlı müşteri temsilcimize aktardım. Birazdan size buradan yanıt verecek.";
+      if (session.lang === "en") aktarimMesaji = "I have transferred your request to our live representative. They will reply to you shortly.";
+      if (session.lang === "ar") aktarimMesaji = "لقد قمت بتحويل طلبك إلى ممثل الدعم المباشر. سيقوم بالرد عليك خلال لحظات.";
 
-  if (!reply) {
-    await sendMessage(from, corporateFallback(lang));
-    return res.sendStatus(200);
-  }
-
-  if (!session.history) session.history = [];
-  session.history.push({ role: "assistant", text: reply });
-
-  await sendMessage(from, reply);
-
-  return res.sendStatus(200);
-
-} catch (err) {
-  console.error("Gemini error:", err);
-  return res.sendStatus(500);
-}
-
-// -------------------------------
-//  WEBHOOK TRY KAPANIŞI
-// -------------------------------
-} catch (err) {
-  console.error("[WEBHOOK ERROR]:", err);
-  return res.sendStatus(200);
-}
-
-}); // ← WEBHOOK BURADA KAPANIYOR
-
-
-// -----------------------------------------------------
-//  CRON TABANLI 10 DK PING + 3H + 24H + 48H + 72H + 7 GÜN
-// -----------------------------------------------------
-cron.schedule("*/10 * * * *", async () => {
-  console.log("[CRON] Follow-up kontrolü:", new Date().toLocaleString());
-
-  try {
-    const now = Date.now();
-    if (!sessions || typeof sessions !== "object") return;
-
-    const users = Object.keys(sessions);
-    if (!users.length) return;
-
-    for (const user of users) {
-      try {
-        const s = sessions[user];
-        if (!s || typeof s !== "object") continue;
-
-        // -----------------------------
-        // 🔥 ZAMANLARI DOĞRU ŞEKİLDE BAŞLAT
-        // -----------------------------
-        if (!s.lastMessageTime || isNaN(s.lastMessageTime)) {
-          s.lastMessageTime = Date.now();
-        }
-
-        if (!s.followUpStage || isNaN(s.followUpStage)) {
-          s.followUpStage = 0;
-        }
-
-        if (!s.pingSentOnce) {
-          s.pingSentOnce = false;
-        }
-
-        const diffMinutesLast = (now - s.lastMessageTime) / (1000 * 60);
-        const diffHoursLast = (now - s.lastMessageTime) / (1000 * 60 * 60);
-
-        const topics = Array.isArray(s.topics) ? s.topics : [];
-        const lastTopic = topics.length ? topics[topics.length - 1] : "general";
-        const lang = typeof s.lang === "string" ? s.lang : "en";
-
-        // -----------------------------
-        // 🔥 CANLI DESTEK OTOMATİK KAPANMA (10 dakika)
-        // -----------------------------
-        if (s.humanOverride && diffMinutesLast >= 10) {
-          s.humanOverride = false;
-          console.log(`[CRON] ${user} → Canlı destek otomatik kapandı`);
-        }
-
-        // CANLI DESTEK AÇIKKEN HİÇBİR OTOMATİK MESAJ GÖNDERME
-        if (s.humanOverride) continue;
-
-        // -----------------------------
-        // 🔥 10 DAKİKA PING — SADECE 1 KERE
-        // -----------------------------
-        if (diffMinutesLast >= 10 && !s.pingSentOnce) {
-          const pingMessage = getPingMessage(lang, lastTopic);
-
-          if (pingMessage) {
-            try {
-              await sendMessage(user, pingMessage);
-            } catch (e) {
-              console.error("[CRON] sendMessage 10min error:", e);
-            }
-            s.pingSentOnce = true;
-          }
-
-          continue;
-        }
-
-        // Kullanıcı tekrar yazdıysa ping reset
-        if (diffMinutesLast < 10 && s.pingSentOnce) {
-          s.pingSentOnce = false;
-        }
-
-        // -----------------------------
-        // 🔥 FOLLOW-UP ZAMANLAMASI (SON MESAJ ÜZERİNDEN)
-        // -----------------------------
-
-        // 3 SAAT
-        if (s.followUpStage === 0 && diffHoursLast >= 3) {
-          const msg = getFollowUpMessage(lang, lastTopic, "3h");
-          if (msg) {
-            try { await sendMessage(user, msg); } catch {}
-            s.followUpStage = 1;
-          }
-          continue;
-        }
-
-        // 24 SAAT
-        if (s.followUpStage === 1 && diffHoursLast >= 24) {
-          const msg = getFollowUpMessage(lang, lastTopic, "24h");
-          if (msg) {
-            try { await sendMessage(user, msg); } catch {}
-            s.followUpStage = 2;
-          }
-          continue;
-        }
-
-        // 48 SAAT
-        if (s.followUpStage === 2 && diffHoursLast >= 48) {
-          const msg = getFollowUpMessage(lang, lastTopic, "48h");
-          if (msg) {
-            try { await sendMessage(user, msg); } catch {}
-            s.followUpStage = 3;
-          }
-          continue;
-        }
-
-        // 72 SAAT
-        if (s.followUpStage === 3 && diffHoursLast >= 72) {
-          const msg = getFollowUpMessage(lang, lastTopic, "72h");
-          if (msg) {
-            try { await sendMessage(user, msg); } catch {}
-            s.followUpStage = 4;
-          }
-          continue;
-        }
-
-        // 7 GÜN
-        if (s.followUpStage === 4 && diffHoursLast >= 168) {
-          const msg = getFollowUpMessage(lang, lastTopic, "7d");
-          if (msg) {
-            try { await sendMessage(user, msg); } catch {}
-            s.followUpStage = 5;
-          }
-          continue;
-        }
-
-      } catch (err) {
-        console.error("[CRON] User loop error:", err);
-        continue;
-      }
+      await sendMessage(cleanFrom, aktarimMesaji);
+      session.humanOverride = true;
+      session.lastMessageTime = Date.now();
+      return res.sendStatus(200);
     }
   } catch (err) {
-    console.error("[CRON] Genel hata:", err);
+    console.error("[WEBHOOK ERROR]:", err);
+    return res.sendStatus(200);
   }
 });
 
-
-
-
-// -----------------------------------------------------
-// 10 DAKİKA PING MESAJLARI (KURUMSAL – PROFESYONEL – SATIŞ ODAKLI)
-// -----------------------------------------------------
-function getPingMessage(lang, topic) {
-  const messages = {
-    tr: {
-      general:
-        "Merhaba. SamChe AI olarak, kısa süre önce Dubai hakkında sorularınızı cevaplamıştım ve size bilgi vermiştim. Kafanıza takılan başka herhangi bir soru varsa lütfen bana sormaktan çekinmeyin. Dubai’deki planlarınıza sizi gerçekten yaklaştıracak adımları birlikte netleştirebiliriz. Dilediğiniz zaman ben buradayım ve Dubai hakkında danışmak istediğiniz her konuda size her zaman yardımcı olmaya hazırım.",
-
-      company:
-        "Merhaba. Kısa süre önce Dubai’de şirket kuruluşu hakkında konuşmuştuk. Dubai'de şirket kurma planınız için doğru şirket yapısını planlamak ve sizin için en uygun maliyet yapısını belirlemek adına size her zaman destek olmak için buradayım. Paylaştığım bilgiler dışında kafanıza takılan herhangi bir soru olursa her zaman bana sorabilirsiniz.",
-
-      residency:
-        "Merhaba. Kısa süre önce Dubai’de oturum süreci hakkında konuşmuştuk. Sizin için en uygun oturum planlamasını daha net bir çerçevede yapmak adına size her zaman yardımcı olmaya hazırım. Paylaştığım bilgiler dışında kafanıza takılan herhangi bir soru olursa bana sorabilirsiniz.",
-
-      cost:
-        "Merhaba. Kısa süre önce Dubai’deki maliyetler hakkında konuşmuştuk. Maliyet planlamanızı daha net bir çerçevede yapmanız için size her zaman yardımcı olmaya hazırım. Paylaştığım bilgiler dışında kafanıza takılan herhangi bir soru olursa bana sorabilirsiniz.",
-
-      AI:
-        "Merhaba. Kısa süre önce AI ve otomasyon çözümleri hakkında konuşmuştuk. Projenizi daha verimli ve ölçeklenebilir bir yapıya dönüştürmek isterseniz yardımcı olmaya hazırım."
-    },
-
-    en: {
-      general:
-        "Hello. I noticed we haven’t been in touch for a short while. If you have any additional questions about Dubai, feel free to ask. I’m here to help you move closer to your plans.",
-      company:
-        "Hello. We recently discussed company formation in Dubai. If you're ready, I can help you determine the right structure.",
-      residency:
-        "Hello. We recently discussed the residency process in Dubai. If you're ready, I can help you choose the right path.",
-      cost:
-        "Hello. We recently discussed Dubai’s cost structure. I’m here to help you plan with clarity whenever you’re ready.",
-      AI:
-        "Hello. We recently discussed your AI project. If you're ready, I can help you build a more efficient and scalable structure."
-    },
-
-    ar: {
-      general:
-        "مرحبًا. تحدثنا مؤخرًا عن دبي. إذا كان لديك أي أسئلة إضافية، فلا تتردد في طرحها. أنا هنا دائمًا لمساعدتك.",
-      company:
-        "مرحبًا. تحدثنا مؤخرًا عن تأسيس شركة في دبي. إذا كنت جاهزًا، يمكنني مساعدتك في اختيار الهيكل المناسب.",
-      residency:
-        "مرحبًا. تحدثنا مؤخرًا عن إجراءات الإقامة في دبي. إذا كنت جاهزًا، يمكنني مساعدتك في اختيار الطريق الأنسب.",
-      cost:
-        "مرحبًا. تحدثنا مؤخرًا عن تكاليف دبي. أنا هنا لمساعدتك في التخطيط بوضوح.",
-      AI:
-        "مرحبًا. تحدثنا مؤخرًا عن مشروع الذكاء الاصطناعي. إذا كنت جاهزًا، يمكنني مساعدتك في تطويره."
-    }
-  };
-
-  const langSet = messages[lang] || messages["en"];
-  return langSet[topic] || langSet["general"];
-}
-
-
-// -----------------------------------------------------
-// FOLLOW-UP MESAJLARI (3h – 24h – 72h – 7d)
-// -----------------------------------------------------
-function getFollowUpMessage(lang, topic, stage) {
-  const messages = {
-    // -------------------------
-    // 3 SAAT — SENİN İSTEDİĞİN METİN
-    // -------------------------
-    "3h":{
-     general: {
-        tr: "Merhaba. Bir süredir iletişimde olmadığımızı fark ettim. Dubai ile ilgili konuştuğumuz konular ve sorduğunuz sorular dışında kafanıza takılan başka herhangi bir soru varsa lütfen bana sormaktan çekinmeyin..Dilediğiniz zaman ben buradayım ve Dubai planlarınız hakkında danışmak istediğiniz her konuda size her zaman yardımcı olmaya hazırım.",
-        en: "Hello. I noticed we haven’t been in touch for a while. If you’re ready, we can clarify your next step regarding your Dubai plans.",
-        ar: "مرحبًا. لاحظت أننا لم نتواصل منذ فترة. إذا كنت جاهزًا، يمكننا توضيح خطوتك التالية بخصوص خططك في دبي."
-      },
-      company: {
-        tr: "Merhaba. Bir süredir Dubai'de şirket kurma planlarınız ile ilgili iletişimde olmadığımızı fark ettim. Hazırsanız, şirket yapınızı ve sonraki adımları birlikte netleştirebiliriz.Dilediğiniz zaman ben buradayım ve Dubai planlarınız hakkında danışmak istediğiniz her konuda size her zaman yardımcı olmaya hazırım.",
-        en: "Hello. I noticed we haven’t been in touch regarding your company setup. If you're ready, we can clarify the next steps together.",
-        ar: "مرحبًا. لاحظت أننا لم نتواصل بخصوص تأسيس الشركة منذ فترة. إذا كنت جاهزًا، يمكننا توضيح الخطوات التالية معًا."
-      },
-      residency: {
-        tr: "Merhaba. Bir süredir Dubai'de oturum alma sürecinizle ilgili iletişim sağlayamadığımızı fark ettim. Dilerseniz, oturum alma planlarınız üzerine konuşmaya devam edebilir ve size en uygun oturum türünü belirleyebiliriz. Ben buradayım ve Dubai planlarınız hakkında danışmak istediğiniz her konuda size her zaman yardımcı olmaya hazırım.",
-        en: "Hello. I noticed we haven’t been in touch regarding your residency process. If you're ready, we can define the right path together.",
-        ar: "مرحبًا. لاحظت أننا لم نتواصل بخصوص إجراءات الإقامة منذ فترة. إذا كنت جاهزًا، يمكننا تحديد الطريق الأنسب معًا."
-      },
-      cost: {
-        tr: "Merhaba. Konuştuğumuz konular üzerinden maliyet planlamalarınızla ilgili bir süredir iletişimde olmadığımızı fark ettim. Hazırsanız, maliyet planlamalarınız üzerine konuşmaya devam edebiliriz.Dilediğiniz zaman ben buradayım ve Dubai planlarınız hakkında danışmak istediğiniz her konuda size her zaman yardımcı olmaya hazırım.",
-        en: "Hello. I noticed we haven’t been in touch about your cost planning. If you're ready, we can clarify the numbers together.",
-        ar: "مرحبًا. لاحظت أننا لم نتواصل بخصوص تخطيط التكاليف منذ فترة. إذا كنت جاهزًا، يمكننا توضيح الأرقام معًا."
-      },
-      AI: {
-        tr: "Merhaba. Bir süredir AI projenizle ilgili iletişimde olmadığımızı fark ettim. Hazırsanız, projenizin bir sonraki adımını birlikte netleştirebiliriz.",
-        en: "Hello. I noticed we haven’t been in touch regarding your AI project. If you're ready, we can clarify the next step.",
-        ar: "مرحبًا. لاحظت أننا لم نتواصل بخصوص مشروع الذكاء الاصطناعي منذ فترة. إذا كنت جاهزًا، يمكننا توضيح الخطوة التالية."
-      }
-    },
-
-    // -------------------------
-    // 24 SAAT — KURUMSAL & SATIŞ ODAKLI
-    // -------------------------
-    "24h": {
-      general: {
-        tr: "Merhaba. Dün Dubai planlarınız hakkında konuşmuştuk.  Dubai planlarınız hakkında daha fazla bilgiye ihtiyacınız olursa lütfen bana sormaktan çekinmeyin. Dubaiye yerleşme sürecinizde size her zaman yardımcı olmaya hazırım. Ayrıca Canlı destek almak isterseniz bu sohbete canlı destek yazabilirsiniz.",
-        en: "Hello. Yesterday we discussed your Dubai plans. If you’re still considering them, we can move forward together. For live support, simply type 'live support'.",
-        ar: "مرحبًا. تحدثنا بالأمس عن خططك في دبي. إذا كنت لا تزال تفكر في الأمر، يمكننا المتابعة معًا. للحصول على دعم مباشر، فقط اكتب 'دعم مباشر'."
-      },
-      company: {
-        tr: "Merhaba. Dün şirket kuruluşu hakkında konuşmuştuk. Şirket kurulum adımları ve süreçleri ile ilgili daha fazla bilgiye ihtiyacınız olursa lütfen bana sormaktan çekinmeyin. Size en uygun şirket türü ve maliyetini belirleyebilir ve bu süreçte size destek sağlayabilirim. Ayrıca Canlı destek almak isterseniz bu sohbete canlı destek yazabilirsiniz.",
-        en: "Hello. Yesterday we discussed your company setup. If you're ready, we can define the right structure. Type 'live support' for assistance.",
-        ar: "مرحبًا. تحدثنا بالأمس عن تأسيس الشركة. إذا كنت جاهزًا، يمكننا تحديد الهيكل الصحيح. للحصول على دعم مباشر، اكتب 'دعم مباشر'."
-      },
-      residency: {
-        tr: "Merhaba. Dün oturum süreci hakkında konuşmuştuk. Oturum süreçleri ile ilgili daha fazla bilgiye ihtiyacınız olursa lütfen bana sormaktan çekinmeyin. Size en uygun oturum türlerini belirleyebilir ve bu süreçte size destek sağlayabilirim. Ayrıca Canlı destek almak isterseniz bu sohbete canlı destek yazabilirsiniz.",
-        en: "Hello. Yesterday we discussed your residency process. If you're ready, we can move the steps forward. Type 'live support' for help.",
-        ar: "مرحبًا. تحدثنا بالأمس عن إجراءات الإقامة. إذا كنت جاهزًا، يمكننا متابعة الخطوات. للحصول على دعم مباشر، اكتب 'دعم مباشر'."
-      },
-      cost: {
-        tr: "Merhaba. Dün maliyet planlamanız hakkında konuşmuştuk. Maliyet ve bütçe planları ile ilgili daha fazla bilgiye ihtiyacınız olursa lütfen bana sormaktan çekinmeyin. Ayrıca Canlı destek almak isterseniz bu sohbete canlı destek yazabilirsiniz.",
-        en: "Hello. Yesterday we discussed your cost planning. If you're ready, we can clarify your budget. Type 'live support' for assistance.",
-        ar: "مرحبًا. تحدثنا بالأمس عن تخطيط التكاليف. إذا كنت جاهزًا، يمكننا توضيح ميزانيتك. للحصول على دعم مباشر، اكتب 'دعم مباشر'."
-      },
-      AI: {
-        tr: "Merhaba. Dün AI projeniz hakkında konuşmuştuk. Hazırsanız, projenizi daha uygulanabilir bir yapıya dönüştürebiliriz. Canlı destek için 'canlı destek' yazabilirsiniz.",
-        en: "Hello. Yesterday we discussed your AI project. If you're ready, we can turn it into a more actionable plan. Type 'live support' for help.",
-        ar: "مرحبًا. تحدثنا بالأمس عن مشروع الذكاء الاصطناعي. إذا كنت جاهزًا، يمكننا تحويله إلى خطة قابلة للتنفيذ. للحصول على دعم مباشر، اكتب 'دعم مباشر'."
-      }
-    },
-
-    // -----------------------------------------------------
-    // 72 SAAT FOLLOW-UP
-    // -----------------------------------------------------
-    "72h": {
-      general: {
-        tr: "Merhaba. Birkaç gündür iletişimde olmadığımızı fark ettim. Dubai’deki planlarınızın askıda kalmasını istemem. Hazırsanız, sizin için en doğru yolu birlikte netleştirebiliriz.",
-        en: "Hello. I noticed we haven’t been in touch for a few days. I don’t want your Dubai plans to remain on hold. If you're ready, we can clarify the best path forward.",
-        ar: "مرحبًا. لاحظت أننا لم نتواصل منذ عدة أيام. لا أرغب أن تبقى خططكم في دبي معلّقة. إذا كنتم جاهزين، يمكننا تحديد المسار الأنسب لكم."
-      },
-
-      company: {
-        tr: "Merhaba. Şirket kuruluşu planlarınızın birkaç gündür ilerlemediğini fark ettim. Dubai’de doğru yapı büyük fark yaratır. Hazırsanız, süreci birlikte hızlandırabiliriz.",
-        en: "Hello. I noticed your company setup process hasn’t progressed in the last few days. The right structure in Dubai makes a major difference. If you're ready, we can move forward together.",
-        ar: "مرحبًا. لاحظت أن عملية تأسيس الشركة لم تتقدم منذ عدة أيام. الهيكل الصحيح في دبي يحدث فرقًا كبيرًا. إذا كنتم جاهزين، يمكننا المتابعة معًا."
-      },
-
-      residency: {
-        tr: "Merhaba. Oturum sürecinizin birkaç gündür ilerlemediğini fark ettim. Dubai’de oturum almak düşündüğünüzden daha hızlı tamamlanabilir. Hazırsanız, süreci netleştirebiliriz.",
-        en: "Hello. I noticed your residency process hasn’t progressed for a few days. Residency in Dubai can be completed faster than expected. If you're ready, we can clarify the next steps.",
-        ar: "مرحبًا. لاحظت أن عملية الإقامة لم تتقدم منذ عدة أيام. يمكن إنهاء الإقامة في دبي أسرع مما تتوقعون. إذا كنتم جاهزين، يمكننا تحديد الخطوات التالية."
-      },
-
-      cost: {
-        tr: "Merhaba. Bütçe planlamanızın birkaç gündür askıda kaldığını fark ettim. Dubai’de maliyetleri doğru yönetmek önemli avantaj sağlar. Hazırsanız, sizin için en uygun yapıyı belirleyebiliriz.",
-        en: "Hello. I noticed your budgeting process has been on hold for a few days. Managing costs correctly in Dubai provides major advantages. If you're ready, we can define the best structure for you.",
-        ar: "مرحبًا. لاحظت أن خطتكم المالية معلّقة منذ عدة أيام. إدارة التكاليف بشكل صحيح في دبي يمنحكم مزايا كبيرة. إذا كنتم جاهزين، يمكننا تحديد الهيكل الأنسب لكم."
-      },
-
-      AI: {
-        tr: "Merhaba. AI projenizin birkaç gündür ilerlemediğini fark ettim. Doğru otomasyon yapısı işinizi hızla ileri taşır. Hazırsanız, projenizi birlikte netleştirebiliriz.",
-        en: "Hello. I noticed your AI project hasn’t progressed for a few days. The right automation structure accelerates your business significantly. If you're ready, we can refine your project together.",
-        ar: "مرحبًا. لاحظت أن مشروع الذكاء الاصطناعي لم يتقدم منذ عدة أيام. الهيكل الصحيح للأتمتة يدفع عملكم بسرعة إلى الأمام. إذا كنتم جاهزين، يمكننا تطوير المشروع معًا."
-      }
-    },
-
-    // -----------------------------------------------------
-    // 7 GÜN FOLLOW-UP (SON NAZİK HATIRLATMA)
-    // -----------------------------------------------------
-    "7d": {
-      general: {
-        tr: "Merhaba. Bir haftadır iletişimde olmadığımızı fark ettim. Dubai ile ilgili planlarınız hâlâ geçerliyse, sizin için en doğru yolu birlikte belirleyebiliriz. Hazır olduğunuzda buradayım.",
-        en: "Hello. I noticed we haven’t been in touch for a week. If your Dubai plans are still active, we can define the best path together. I’m here whenever you're ready.",
-        ar: "مرحبًا. لاحظت أننا لم نتواصل منذ أسبوع. إذا كانت خططكم في دبي ما زالت قائمة، يمكننا تحديد المسار الأنسب لكم. أنا هنا متى ما كنتم جاهزين."
-      },
-
-      company: {
-        tr: "Merhaba. Şirket kuruluşu planlarınızla ilgili bir haftadır iletişimde olmadığımızı fark ettim. Dubai’de doğru yapı uzun vadeli avantaj sağlar. Hazır olduğunuzda süreci birlikte ilerletebiliriz.",
-        en: "Hello. I noticed we haven’t followed up on your company setup for a week. The right structure in Dubai provides long-term advantages. Whenever you're ready, we can move forward.",
-        ar: "مرحبًا. لاحظت أننا لم نتابع بخصوص تأسيس الشركة منذ أسبوع. الهيكل الصحيح في دبي يمنحكم مزايا طويلة المدى. أنا هنا متى ما كنتم جاهزين."
-      },
-
-      residency: {
-        tr: "Merhaba. Oturum sürecinizle ilgili bir haftadır iletişimde olmadığımızı fark ettim. Dubai’de oturum almak düşündüğünüzden daha hızlı ilerleyebilir. Hazır olduğunuzda devam edebiliriz.",
-        en: "Hello. I noticed we haven’t followed up on your residency process for a week. Residency in Dubai can progress faster than expected. We can continue whenever you're ready.",
-        ar: "مرحبًا. لاحظت أننا لم نتابع بخصوص الإقامة منذ أسبوع. يمكن أن تتقدم الإقامة في دبي أسرع مما تتوقعون. أنا هنا متى ما كنتم جاهزين."
-      },
-
-      cost: {
-        tr: "Merhaba. Bütçe planlamanızla ilgili bir haftadır iletişimde olmadığımızı fark ettim. Dubai’de maliyetleri doğru yönetmek önemli avantaj sağlar. Hazır olduğunuzda sizin için en uygun yapıyı belirleyebiliriz.",
-        en: "Hello. I noticed we haven’t discussed your budgeting for a week. Managing costs correctly in Dubai provides major advantages. We can define the best structure whenever you're ready.",
-        ar: "مرحبًا. لاحظت أننا لم نناقش خطتكم المالية منذ أسبوع. إدارة التكاليف بشكل صحيح في دبي يمنحكم مزايا كبيرة. أنا هنا متى ما كنتم جاهزين."
-      },
-
-      AI: {
-        tr: "Merhaba. AI projenizle ilgili bir haftadır iletişimde olmadığımızı fark ettim. Doğru otomasyon yapısı işinizi hızla ileri taşır. Hazır olduğunuzda projenizi birlikte netleştirebiliriz.",
-        en: "Hello. I noticed we haven’t followed up on your AI project for a week. The right automation structure can rapidly move your business forward. Whenever you're ready, we can refine your project.",
-        ar: "مرحبًا. لاحظت أننا لم نتابع بخصوص مشروع الذكاء الاصطناعي منذ أسبوع. الهيكل الصحيح للأتمتة يمكن أن يدفع عملكم بسرعة إلى الأمام. أنا هنا متى ما كنتم جاهزين."
-      }
-    }
-  };
-
-const stageSet = messages[stage] || messages["3h"];
-const topicSet = stageSet[topic] || stageSet["general"];
-return topicSet[lang] || topicSet["en"];
-}
-
-
-
-// ------------------------------------------------------
-//  TELEGRAM WEBHOOK — NORMAL MESAJ + CANLI DESTEK
-// ------------------------------------------------------
 app.post("/telegram-webhook", async (req, res) => {
   try {
     const msg = req.body.message;
@@ -3240,19 +2450,11 @@ app.post("/telegram-webhook", async (req, res) => {
     const chatId = msg.chat.id.toString();
     const text = msg.text.trim();
 
-    // 1) NORMAL TELEGRAM MESAJLARI TAMAMEN BLOKLANIR
-    // (Komut değilse bot ASLA cevap vermez)
-    if (!text.startsWith("/w ") && !text.startsWith("/end ")) {
-      return res.sendStatus(200);
-    }
-    // 2) SADECE SEN KULLANABİLİRSİN
-    if (chatId !== process.env.TELEGRAM_CHAT_ID) {
-      return res.sendStatus(200);
-    }
+    if (!text.startsWith("/w ") && !text.startsWith("/end ")) return res.sendStatus(200);
+    
+    // TELEGRAM ID TRIM() DÜZELTMESİ EKLENDİ
+    if (chatId !== process.env.TELEGRAM_CHAT_ID.trim()) return res.sendStatus(200);
 
-    // ------------------------------------------------------
-    // 3) /w KOMUTU → CANLI DESTEK BAŞLAT / MESAJ GÖNDER
-    // ------------------------------------------------------
     if (text.startsWith("/w ")) {
       const parts = text.split(" ");
       const to = parts[1];
@@ -3263,58 +2465,34 @@ app.post("/telegram-webhook", async (req, res) => {
         await sendMessageToTelegram("Format yanlış. Örnek:\n/w +905551112233 Merhaba");
         return res.sendStatus(200);
       }
+      if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
 
-      if (!sessions[cleanTo]) sessions[cleanTo] = {};
-
-      // CANLI DESTEK MODUNU AÇ
-      sessions[cleanTo].humanOverride = true;
-      sessions[cleanTo].lastMessageTime = Date.now();
-
-      // SADECE TEMSİLCİ MESAJINI WHATSAPP'A GÖNDER
+      wpSessions[cleanTo].humanOverride = true;
+      wpSessions[cleanTo].lastMessageTime = Date.now();
       await sendMessage(cleanTo, message);
-
       await sendMessageToTelegram(`Gönderildi → WhatsApp ${cleanTo}: ${message}`);
       return res.sendStatus(200);
     }
 
-    // ------------------------------------------------------
-    // 4) /end KOMUTU → CANLI DESTEK KAPAT
-    // ------------------------------------------------------
     if (text.startsWith("/end ")) {
       const parts = text.split(" ");
-      const to = parts[1];
-      const cleanTo = to.replace("+", "");
+      const cleanTo = parts[1]?.replace("+", "");
 
       if (!cleanTo) {
         await sendMessageToTelegram("Format yanlış. Örnek:\n/end +905551112233");
         return res.sendStatus(200);
       }
+      if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
 
-      if (!sessions[cleanTo]) sessions[cleanTo] = {};
-
-      sessions[cleanTo].humanOverride = false;
-
-      // DİL BAZLI KAPANIŞ MESAJI (tek seferlik)
-      let closeMessage =
-        "🔒 Canlı destek oturumu sona ermiştir.\n\n" +
-        "Yapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına canlı destek yazmanız yeterlidir.Ekibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.";
-
-      if (sessions[cleanTo]?.lang === "en") {
-        closeMessage =
-          "🔒 The live support session has ended.\n\n" +
-          "You may continue chatting with our AI assistant, or type live support anytime to reconnect. Our team will be happy to assist you anytime.";
-      } else if (sessions[cleanTo]?.lang === "ar") {
-        closeMessage =
-          "🔒 تم إنهاء جلسة الدعم المباشر.\n\n" +
-          "يمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي أو كتابة 'دعم مباشر' للاتصال بممثل.";
-      }
-
+      wpSessions[cleanTo].humanOverride = false;
+      let closeMessage = "🔒 Canlı destek oturumu sona ermiştir.\n\nYapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına canlı destek yazmanız yeterlidir.Ekibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.";
+      if (wpSessions[cleanTo]?.lang === "en") closeMessage = "🔒 The live support session has ended.\n\nYou may continue chatting with our AI assistant, or type live support anytime to reconnect. Our team will be happy to assist you anytime.";
+      else if (wpSessions[cleanTo]?.lang === "ar") closeMessage = "🔒 تم إنهاء جلسة الدعم المباشر.\n\nيمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي أو كتابة 'دعم مباشر' للاتصال بممثل.";
+      
       await sendMessage(cleanTo, closeMessage);
       await sendMessageToTelegram(`Canlı destek kapatıldı → ${cleanTo}`);
-
       return res.sendStatus(200);
     }
-
     return res.sendStatus(200);
   } catch (err) {
     console.error("Telegram webhook error:", err);
@@ -3322,98 +2500,90 @@ app.post("/telegram-webhook", async (req, res) => {
   }
 });
 
+// ============================================================================
+// 6. CRON JOB (WHATSAPP FOLLOW-UP)
+// ============================================================================
 
-// ------------------------------------------------------
-//  WHATSAPP WEBHOOK (CANLI DESTEK → BOT SUSAR)
-// ------------------------------------------------------
-app.post("/webhook", async (req, res) => {
+cron.schedule("*/10 * * * *", async () => {
+  console.log("[CRON] Follow-up kontrolü:", new Date().toLocaleString());
   try {
-    const body = req.body;
-    const entry = body.entry?.[0];
-    const changes = entry?.changes?.[0];
-    const value = changes?.value;
-    const messages = value?.messages;
+    const now = Date.now();
+    if (!wpSessions || typeof wpSessions !== "object") return;
+    const users = Object.keys(wpSessions);
+    if (!users.length) return;
 
-    if (!messages || !messages[0]) return res.sendStatus(200);
+    for (const user of users) {
+      try {
+        const s = wpSessions[user];
+        if (!s || typeof s !== "object") continue;
 
-    const msg = messages[0];
-    const from = msg.from;
-    const text = msg.text?.body?.trim();
-    if (!text) return res.sendStatus(200);
+        if (!s.lastMessageTime || isNaN(s.lastMessageTime)) s.lastMessageTime = Date.now();
+        if (!s.followUpStage || isNaN(s.followUpStage)) s.followUpStage = 0;
+        if (!s.pingSentOnce) s.pingSentOnce = false;
 
-    const cleanFrom = from.replace("+", "");
+        const diffMinutesLast = (now - s.lastMessageTime) / (1000 * 60);
+        const diffHoursLast = (now - s.lastMessageTime) / (1000 * 60 * 60);
 
-    // DİL TESPİTİ
-    const lang = detectLanguage(text);
-    if (!sessions[cleanFrom]) sessions[cleanFrom] = {};
-    sessions[cleanFrom].lang = lang;
-    sessions[cleanFrom].lastMessageTime = Date.now();
+        const topics = Array.isArray(s.topics) ? s.topics : [];
+        const lastTopic = topics.length ? topics[topics.length - 1] : "general";
+        const lang = typeof s.lang === "string" ? s.lang : "en";
 
-    // 🔥 CANLI DESTEK MODU → BOT TAMAMEN SUSAR, SADECE TELEGRAM'A AKTARIR
-    if (sessions[cleanFrom]?.humanOverride === true) {
-      await sendMessageToTelegram(`WhatsApp → ${cleanFrom}: ${text}`);
-      return res.sendStatus(200);
+        if (s.humanOverride && diffMinutesLast >= 10) {
+          s.humanOverride = false;
+          console.log(`[CRON] ${user} → Canlı destek otomatik kapandı`);
+        }
+
+        if (s.humanOverride) continue;
+
+        if (diffMinutesLast >= 10 && !s.pingSentOnce) {
+          const pingMessage = getPingMessage(lang, lastTopic);
+          if (pingMessage) {
+            try { await sendMessage(user, pingMessage); } catch (e) { console.error("[CRON] 10min err:", e); }
+            s.pingSentOnce = true;
+          }
+          continue;
+        }
+
+        if (diffMinutesLast < 10 && s.pingSentOnce) s.pingSentOnce = false;
+
+        if (s.followUpStage === 0 && diffHoursLast >= 3) {
+          const msg = getFollowUpMessage(lang, lastTopic, "3h");
+          if (msg) { try { await sendMessage(user, msg); } catch {} s.followUpStage = 1; }
+          continue;
+        }
+        if (s.followUpStage === 1 && diffHoursLast >= 24) {
+          const msg = getFollowUpMessage(lang, lastTopic, "24h");
+          if (msg) { try { await sendMessage(user, msg); } catch {} s.followUpStage = 2; }
+          continue;
+        }
+        if (s.followUpStage === 2 && diffHoursLast >= 48) {
+          const msg = getFollowUpMessage(lang, lastTopic, "48h");
+          if (msg) { try { await sendMessage(user, msg); } catch {} s.followUpStage = 3; }
+          continue;
+        }
+        if (s.followUpStage === 3 && diffHoursLast >= 72) {
+          const msg = getFollowUpMessage(lang, lastTopic, "72h");
+          if (msg) { try { await sendMessage(user, msg); } catch {} s.followUpStage = 4; }
+          continue;
+        }
+        if (s.followUpStage === 4 && diffHoursLast >= 168) {
+          const msg = getFollowUpMessage(lang, lastTopic, "7d");
+          if (msg) { try { await sendMessage(user, msg); } catch {} s.followUpStage = 5; }
+          continue;
+        }
+      } catch (err) {
+        console.error("[CRON] User loop error:", err);
+      }
     }
-
-    // ------------------------------------------------------
-    //  NORMAL BOT MODU (AI CEVABI VEYA CANLI DESTEK KARARI)
-    // ------------------------------------------------------
-    const aiResponse = await generateAIResponse(text);
-    const lower = aiResponse.toLowerCase();
-
-    // AI "canlı destek / human" kararı veriyorsa → direkt temsilciye aktar
-    const needsHuman =
-      lower.includes("canlı destek") ||
-      lower.includes("canli destek") ||
-      lower.includes("live support") ||
-      lower.includes("human_agent") ||
-      lower.includes("transfer_to_human");
-
-    if (!needsHuman) {
-      // Normal bot cevabı → sadece AI cevabını gönder
-      await sendMessage(cleanFrom, aiResponse);
-      return res.sendStatus(200);
-    }
-
-    // 🔥 BURADAN SONRASI: CANLI TEMSİLCİYE DİREKT AKTARIM
-    // Ek kuyruk, typing, bekleme mesajı YOK.
-    // Sadece tek seferlik kısa bilgi mesajı istersen bırak, istemezsen tamamen kaldırabilirsin.
-
- let aktarimMesaji = "Talebinizi canlı müşteri temsilcimize aktardım. Birazdan size buradan yanıt verecek.";
-
-if (sessions[cleanFrom]?.lang === "en") {
-  aktarimMesaji = "I have transferred your request to our live representative. They will reply to you shortly.";
-}
-
-if (sessions[cleanFrom]?.lang === "ar") {
-  aktarimMesaji = "لقد قمت بتحويل طلبك إلى ممثل الدعم المباشر. سيقوم بالرد عليك خلال لحظات.";
-}
-
-
-    await sendMessage(cleanFrom, aktarimMesaji);
-
-    // CANLI DESTEK MODUNU AÇ
-    sessions[cleanFrom].humanOverride = true;
-    sessions[cleanFrom].lastMessageTime = Date.now();
-
-    // DİKKAT: startTransferTimers ARTIK YOK, EK MESAJ YOK.
-    // startTransferTimers(cleanFrom);  // ← TAMAMEN KALDIRILDI
-
-    return res.sendStatus(200);
-
   } catch (err) {
-    console.error("WhatsApp webhook error:", err);
-    return res.sendStatus(500);
+    console.error("[CRON] Genel hata:", err);
   }
 });
 
-
-// -------------------------------
-//  SERVER
-// -------------------------------
-const port = process.env.PORT || 3000;
-app.listen(port, () =>
-  console.log("SamChe Bot running on port " + port)
-);
-
-
+// ============================================================================
+// 7. SUNUCU BAŞLATMA
+// ============================================================================
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Sunucu ${PORT} portunda başarıyla çalışıyor.`);
+});
