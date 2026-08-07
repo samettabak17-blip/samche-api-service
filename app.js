@@ -512,7 +512,7 @@ app.post("/plan", async (req, res) => {
     if (!sector) return res.status(400).json({ error: "Sector value is missing." });
 
     const cleanSector = String(sector).trim();
-    if (!cleanSector) return res.status(400).json({ error: "Sector value cannot be empty." });[cite: 1]
+    if (!cleanSector) return res.status(400).json({ error: "Sector value cannot be empty." });
 
     const payload = {
       contents: [{
@@ -545,7 +545,7 @@ app.post("/chat", async (req, res) => {
     if (!text) return res.status(400).json({ error: "Message text is missing." });
 
     const cleanText = String(text).trim();
-    if (!cleanText) return res.status(400).json({ error: "Message text cannot be empty." });[cite: 1]
+    if (!cleanText) return res.status(400).json({ error: "Message text cannot be empty." });
 
     const lowerCleanText = cleanText.toLowerCase();
     if (sgCorporateShortReplyMap[lowerCleanText]) {
