@@ -2326,49 +2326,57 @@ ${text}
 
 app.post("/telegram-webhook", async (req, res) => {
   try {
-    const msg = req.body.message;
-    if (!msg || !msg.text) return res.sendStatus(200);
+    // Telegram'dan gelen veriyi her ihtimale karşı esnek ve güvenli yakala
+    const update = req.body;
+    const msg = update.message || update.edited_message || update.channel_post;
+    
+    if (!msg || !msg.text) {
+      return res.sendStatus(200);
+    }
 
-    const chatId = msg.chat.id.toString();
+    const chatId = msg.chat.id.toString().trim();
     const text = msg.text.trim();
 
-    if (!text.startsWith("/w ") && !text.startsWith("/end ")) {
-      return res.sendStatus(200);
-    }
-    
-    if (chatId !== process.env.TELEGRAM_CHAT_ID) {
+    // Güvenlik: Sadece senin ID'nden gelen komutları işleme al
+    const expectedId = (process.env.TELEGRAM_CHAT_ID || "").toString().trim();
+    if (chatId !== expectedId) {
       return res.sendStatus(200);
     }
 
+    // /w komutu ile WhatsApp'a mesaj gönderme
     if (text.startsWith("/w ")) {
       const parts = text.split(" ");
-      const to = parts[1];
-      const cleanTo = to.replace("+", "");
-      const message = parts.slice(2).join(" ");
-
-      if (!cleanTo || !message) {
-        await sendMessageToTelegram("Format yanlış. Örnek:\n/w 971527288586 Merhaba");
+      if (parts.length < 3) {
+        await sendMessageToTelegram("❌ Eksik kullanım! Örnek:\n/w 971527288586 Merhaba");
         return res.sendStatus(200);
       }
 
-      if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
+      const to = parts[1].replace(/\D/g, ""); // Sadece rakamları al (+ işaretini temizle)
+      const message = parts.slice(2).join(" ");
 
-      wpSessions[cleanTo].humanOverride = true;
-      wpSessions[cleanTo].lastMessageTime = Date.now();
+      if (!to || !message) {
+        await sendMessageToTelegram("❌ Numara veya mesaj okunamadı.");
+        return res.sendStatus(200);
+      }
+
+      if (!wpSessions[to]) wpSessions[to] = {};
+
+      wpSessions[to].humanOverride = true;
+      wpSessions[to].lastMessageTime = Date.now();
       saveSessions();
 
-      await sendMessage(cleanTo, message);
-      await sendMessageToTelegram(`Gönderildi → WhatsApp ${cleanTo}: ${message}`);
+      await sendMessage(to, message);
+      await sendMessageToTelegram(`✅ Başarıyla Gönderildi → WhatsApp +${to}:\n${message}`);
       return res.sendStatus(200);
     }
 
+    // /end komutu ile canlı desteği kapatma
     if (text.startsWith("/end ")) {
       const parts = text.split(" ");
-      const to = parts[1];
-      const cleanTo = to.replace("+", "");
+      const cleanTo = parts[1]?.replace(/\D/g, "");
 
       if (!cleanTo) {
-        await sendMessageToTelegram("Format yanlış. Örnek:\n/end 971527288586");
+        await sendMessageToTelegram("❌ Hatalı format! Örnek:\n/end 971527288586");
         return res.sendStatus(200);
       }
 
@@ -2377,23 +2385,15 @@ app.post("/telegram-webhook", async (req, res) => {
       wpSessions[cleanTo].humanOverride = false;
       saveSessions();
 
-      let closeMessage =
-        "🔒 Canlı destek oturumu sona ermiştir.\n\n" +
-        "Yapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına canlı destek yazmanız yeterlidir.Ekibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.";
-
+      let closeMessage = "🔒 Canlı destek oturumu sona ermiştir.\n\nYapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına canlı destek yazabilirsiniz.";
       if (wpSessions[cleanTo]?.lang === "en") {
-        closeMessage =
-          "🔒 The live support session has ended.\n\n" +
-          "You may continue chatting with our AI assistant, or type live support anytime to reconnect. Our team will be happy to assist you anytime.";
+        closeMessage = "🔒 The live support session has ended. You may continue chatting with our AI assistant.";
       } else if (wpSessions[cleanTo]?.lang === "ar") {
-        closeMessage =
-          "🔒 تم إنهاء جلسة الدعم المباشر.\n\n" +
-          "يمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي أو كتابة 'دعم مباشر' للاتصال بممثل.";
+        closeMessage = "🔒 تم إنهاء جلسة الدعم المباشر.";
       }
 
       await sendMessage(cleanTo, closeMessage);
-      await sendMessageToTelegram(`Canlı destek kapatıldı → ${cleanTo}`);
-
+      await sendMessageToTelegram(`🔒 Canlı destek kapatıldı → +${cleanTo}`);
       return res.sendStatus(200);
     }
 
