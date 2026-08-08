@@ -2575,7 +2575,7 @@ ${text}
 `;
     }
 
-// ============================================================================
+    // ============================================================================
 // 🔥 YENİ: TELEGRAM İÇİN TEKRARLANAN MESAJ HAFIZASI
 // (Bunun dosyanın en üst alanında, route'ların dışında olduğundan emin olun)
 // ============================================================================
@@ -2595,10 +2595,21 @@ const historyContext = (session.history || []).slice(-4).map(m => m.text).join("
 const topicSummary = await callWpGemini(`
 Önceki mesajlar: "${historyContext}"
 Son Kullanıcı Mesajı: "${text}"
-Müşterinin asıl ilgilendiği konuyu (örneğin: Oturum İzni, Şirket Kurulumu, Vize, Fiyat Bilgisi vb.) TEK KISA BAŞLIK olarak özetle.
-Eğer son mesajda sadece canlı temsilci istiyorsa, önceki mesajlara bakarak asıl konuyu bul. "Müşteri Temsilcisi Talebi" veya "Canlı Destek" GİBİ GENEL CEVAPLAR VERME.
+Müşterinin asıl ilgilendiği konuyu (örneğin: Oturum İzni, Şirket Kurulumu, Vize, Fiyat Bilgisi, Yapay Zeka Çözümleri vb.) TEK KISA BAŞLIK olarak özetle.
+Eğer son mesajda sadece canlı temsilci istiyorsa, önceki mesajlara bakarak asıl konuyu bul. "Müşteri Temsilcisi Talebi" GİBİ GENEL CEVAPLAR VERME.
 Sadece konu adı döndür.
 `);
+
+// 🔥 HATA ÇÖZÜMÜ: Konuyu Follow-Up CRON Job'un görebilmesi için hafızaya kaydet
+if (!session.topics) session.topics = [];
+let currentTopic = topicSummary;
+
+// Yapay zeka ile ilgili kelimeler varsa konuyu net şekilde sabitle
+const lowerTextForTopic = text.toLowerCase();
+if (lowerTextForTopic.includes("yapay zeka") || lowerTextForTopic.includes("ai ") || lowerTextForTopic.includes("bot") || lowerTextForTopic.includes("otomasyon")) {
+  currentTopic = "Yapay Zeka / Chatbot";
+}
+session.topics.push(currentTopic);
 
 // --------------------------------------
 // WHATSAPP MANUEL CANLI DESTEK AÇMA  (/w ARTIK %100 ÇALIŞIR)
@@ -2832,7 +2843,6 @@ app.post("/telegram-webhook", async (req, res) => {
 // ============================================================================
 // DİKKAT: 5 dakikalık hassas kontrol yapabilmek için süre * * * * * (her 1 dakika) olarak güncellenmiştir.
 cron.schedule("* * * * *", async () => {
-  // console.log("[CRON] Follow-up kontrolü:", new Date().toLocaleString()); // Konsol kalabalığı yapmaması için yoruma alınabilir.
   try {
     const now = Date.now();
     if (!wpSessions || typeof wpSessions !== "object") return;
@@ -2854,6 +2864,7 @@ cron.schedule("* * * * *", async () => {
         const diffMinutesLast = (now - s.lastMessageTime) / (1000 * 60);
         const diffHoursLast = (now - s.lastMessageTime) / (1000 * 60 * 60);
 
+        // 🔥 KONUYU OTOMATİK ÇEK
         const topics = Array.isArray(s.topics) ? s.topics : [];
         const lastTopic = topics.length ? topics[topics.length - 1] : "general";
         const lang = typeof s.lang === "string" ? s.lang : "en";
@@ -2892,37 +2903,50 @@ cron.schedule("* * * * *", async () => {
         if (diffMinutesLast >= 10 && !s.pingSentOnce) {
           const pingMessage = getPingMessage(lang, lastTopic);
           if (pingMessage) {
-            try { await sendMessage(user, pingMessage); } catch (e) { console.error("[CRON] 10min err:", e); }
-            s.pingSentOnce = true;
+            try { await sendMessage(user, pingMessage); } catch (e) {}
           }
+          // HATA ÇÖZÜMÜ: Mesaj atılsın ya da atılmasın pingSentOnce true yapılarak döngüden çıkılır
+          s.pingSentOnce = true;
           continue;
         }
 
         if (diffMinutesLast < 10 && s.pingSentOnce) s.pingSentOnce = false;
 
+        // 🔥 HATA ÇÖZÜMÜ: followUpStage artırımı (s.followUpStage = 1,2,3..) if (msg) bloğunun DIŞINA alındı.
+        // Böylece getFollowUpMessage null bile dönse, saat dolduğunda sistem aşama atlar ve takılmaz!
+
         if (s.followUpStage === 0 && diffHoursLast >= 3) {
           const msg = getFollowUpMessage(lang, lastTopic, "3h");
-          if (msg) { try { await sendMessage(user, msg); } catch {} s.followUpStage = 1; }
+          if (msg) { try { await sendMessage(user, msg); } catch {} }
+          s.followUpStage = 1; 
           continue;
         }
+        
         if (s.followUpStage === 1 && diffHoursLast >= 24) {
           const msg = getFollowUpMessage(lang, lastTopic, "24h");
-          if (msg) { try { await sendMessage(user, msg); } catch {} s.followUpStage = 2; }
+          if (msg) { try { await sendMessage(user, msg); } catch {} }
+          s.followUpStage = 2; 
           continue;
         }
+        
         if (s.followUpStage === 2 && diffHoursLast >= 48) {
           const msg = getFollowUpMessage(lang, lastTopic, "48h");
-          if (msg) { try { await sendMessage(user, msg); } catch {} s.followUpStage = 3; }
+          if (msg) { try { await sendMessage(user, msg); } catch {} }
+          s.followUpStage = 3; 
           continue;
         }
+        
         if (s.followUpStage === 3 && diffHoursLast >= 72) {
           const msg = getFollowUpMessage(lang, lastTopic, "72h");
-          if (msg) { try { await sendMessage(user, msg); } catch {} s.followUpStage = 4; }
+          if (msg) { try { await sendMessage(user, msg); } catch {} }
+          s.followUpStage = 4; 
           continue;
         }
+        
         if (s.followUpStage === 4 && diffHoursLast >= 168) {
           const msg = getFollowUpMessage(lang, lastTopic, "7d");
-          if (msg) { try { await sendMessage(user, msg); } catch {} s.followUpStage = 5; }
+          if (msg) { try { await sendMessage(user, msg); } catch {} }
+          s.followUpStage = 5; 
           continue;
         }
       } catch (err) {
@@ -2945,3 +2969,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Sunucu ${PORT} portunda başarıyla çalışıyor.`);
 });
+
