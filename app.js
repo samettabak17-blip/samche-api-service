@@ -38,6 +38,11 @@ const parseLinksToHTML = (text) => {
 };
 
 // ============================================================================
+// 🔥 YENİ: TEKRARLANAN MESAJLARI ENGELLEME (RETRY KORUMASI) HAFIZALARI
+// ============================================================================
+const processedWpMessages = new Set();
+const processedTgUpdates = new Set();
+// ============================================================================
 // 2. SAMCHEGUIDE BOTU VERİLERİ (GEMINI 3 FLASH)
 // ============================================================================
 const sgCorporateShortReplyMap = {
@@ -2571,6 +2576,18 @@ ${text}
     }
 
 // --------------------------------------
+// WHATSAPP RETRY (TEKRAR) KORUMASI
+// --------------------------------------
+const wpMessageId = req.body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.id;
+if (wpMessageId && processedWpMessages.has(wpMessageId)) {
+  return res.sendStatus(200); // Aynı mesaj tekrar geldiyse işlemi anında durdur
+}
+if (wpMessageId) {
+  processedWpMessages.add(wpMessageId);
+  setTimeout(() => processedWpMessages.delete(wpMessageId), 10 * 60 * 1000); // 10 dk sonra hafızayı temizle
+}
+
+// --------------------------------------
 // FOLLOW-UP RESETLERİ
 // --------------------------------------
 session.lastMessageTime = Date.now();
@@ -2699,6 +2716,18 @@ return res.sendStatus(200);
 // ============================================================================
 app.post("/telegram-webhook", async (req, res) => {
   try {
+    // --------------------------------------
+    // TELEGRAM RETRY (TEKRAR) KORUMASI
+    // --------------------------------------
+    const updateId = req.body?.update_id;
+    if (updateId && processedTgUpdates.has(updateId)) {
+      return res.sendStatus(200); // Aynı istekse işlemi anında durdur
+    }
+    if (updateId) {
+      processedTgUpdates.add(updateId);
+      setTimeout(() => processedTgUpdates.delete(updateId), 10 * 60 * 1000);
+    }
+
     const msg = req.body.message;
     if (!msg || !msg.text) return res.sendStatus(200);
 
