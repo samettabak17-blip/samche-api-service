@@ -2702,9 +2702,12 @@ session.humanOverride = true;
 session.lastMessageTime = Date.now();
 
 return res.sendStatus(200);
+
+} catch (error) {
+  console.error("Mesaj islenirken hata olustu:", error);
+  return res.sendStatus(500);
+}
 });
-
-
 
 // ============================================================================
 // 6. CRON JOB (WHATSAPP FOLLOW-UP)
