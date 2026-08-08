@@ -2570,7 +2570,7 @@ ${text}
 `;
     }
 
- // --------------------------------------
+// --------------------------------------
 // FOLLOW-UP RESETLERİ
 // --------------------------------------
 session.lastMessageTime = Date.now();
@@ -2716,6 +2716,9 @@ session.humanOverride = true;
 session.lastMessageTime = Date.now();
 
 return res.sendStatus(200);
+}
+
+
 
 // ============================================================================
 // 6. CRON JOB (WHATSAPP FOLLOW-UP)
