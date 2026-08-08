@@ -2589,11 +2589,14 @@ session.followUpStage = 0;
 session.pingSentOnce = false;
 
 // --------------------------------------
-// KONUYU AI İLE OTOMATİK TESPİT ET
+// KONUYU AI İLE OTOMATİK TESPİT ET (GEÇMİŞE BAKARAK)
 // --------------------------------------
+const historyContext = (session.history || []).slice(-4).map(m => m.text).join(" | ");
 const topicSummary = await callWpGemini(`
-Kullanıcı mesajı: "${text}"
-Bu mesajın ana konusunu TEK KISA BAŞLIK olarak özetle.
+Önceki mesajlar: "${historyContext}"
+Son Kullanıcı Mesajı: "${text}"
+Müşterinin asıl ilgilendiği konuyu (örneğin: Oturum İzni, Şirket Kurulumu, Vize, Fiyat Bilgisi vb.) TEK KISA BAŞLIK olarak özetle.
+Eğer son mesajda sadece canlı temsilci istiyorsa, önceki mesajlara bakarak asıl konuyu bul. "Müşteri Temsilcisi Talebi" veya "Canlı Destek" GİBİ GENEL CEVAPLAR VERME.
 Sadece konu adı döndür.
 `);
 
@@ -2620,7 +2623,7 @@ if (
   await sendMessage(cleanFrom, aktarimMesaji);
 
   // 🔥 YENİ: TELEGRAM BİLDİRİMİ (HAZIR KOPYALA-YAPIŞTIR)
-  const alertMsg = `🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nKullanıcıya cevap göndermek için kopyala:\n/w +${cleanFrom} `;
+  const alertMsg = `🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``;
   await sendMessageToTelegram(alertMsg);
 
   return res.sendStatus(200);
@@ -2647,7 +2650,7 @@ if (
 if (session.humanOverride) {
   try {
     // 🔥 YENİ: TELEGRAM'A GİDEN MESAJDA HAZIR KOMUTLAR
-    const forwardMsg = `WhatsApp → +${cleanFrom}:\n${text}\n\nCevaplamak için:\n/w +${cleanFrom} \n\nSohbeti bitirmek için:\n/end +${cleanFrom}`;
+    const forwardMsg = `WhatsApp → +${cleanFrom}:\n${text}\n\nCevaplamak için kopyala:\n\`/w +${cleanFrom} \`\n\nSohbeti bitirmek için kopyala:\n\`/end +${cleanFrom}\``;
     await sendMessageToTelegram(forwardMsg);
   } catch (e) {
     console.error("Telegram'a mesaj iletilemedi:", e);
@@ -2705,7 +2708,7 @@ session.humanOverride = true;
 session.lastMessageTime = Date.now();
 
 // 🔥 YENİ: TELEGRAM BİLDİRİMİ (YAPAY ZEKA AKTARDIĞINDA)
-const alertMsgAi = `🚨 CANLI TEMSİLCİ TALEBİ (Yapay Zeka Yönlendirdi)!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nKullanıcıya cevap göndermek için kopyala:\n/w +${cleanFrom} `;
+const alertMsgAi = `🚨 CANLI TEMSİLCİ TALEBİ (Yapay Zeka Yönlendirdi)!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``;
 await sendMessageToTelegram(alertMsgAi);
 
 return res.sendStatus(200);
@@ -2774,7 +2777,7 @@ app.post("/telegram-webhook", async (req, res) => {
       // SADECE TEMSİLCİ MESAJINI WHATSAPP'A GÖNDER
       await sendMessage(cleanTo, message);
 
-      await sendMessageToTelegram(`Gönderildi → WhatsApp +${cleanTo}:\n${message}`);
+      await sendMessageToTelegram(`Gönderildi → WhatsApp +${cleanTo}:\n${message}\n\nSohbeti bitirmek için kopyala:\n\`/end +${cleanTo}\``);
       return res.sendStatus(200);
     }
 
