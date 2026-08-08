@@ -2695,6 +2695,74 @@ return res.sendStatus(200);
 }
 });
 
+
+// ============================================================================
+// YENİ: TELEGRAM WEBHOOK (TELEGRAM'DAN GELEN KOMUTLARI DİNLER)
+// ============================================================================
+app.post("/telegram-webhook", async (req, res) => {
+  try {
+    const text = req.body?.message?.text || "";
+
+    // --------------------------------------
+    // TELEGRAM → WHATSAPP CANLI DESTEK KÖPRÜSÜ
+    // --------------------------------------
+    if (text.startsWith("/w")) {
+      try {
+        // Komuttan numarayı çıkar
+        const parts = text.split(" ");
+        const targetNumber = parts[1]?.replace("+", "").trim();
+
+        if (!targetNumber || !wpSessions[targetNumber]) {
+          await sendMessageToTelegram("❌ WhatsApp kullanıcısı bulunamadı.");
+          return res.sendStatus(200);
+        }
+
+        const session = wpSessions[targetNumber];
+
+        // Konuyu AI ile tespit et
+        const topicSummary = await callWpGemini(`
+        Kullanıcı mesajı: "${session.history[session.history.length - 1]?.text || ""}"
+        Bu mesajın ana konusunu TEK KISA BAŞLIK olarak özetle.
+        Sadece konu adı döndür.
+        `);
+
+        // Profesyonel aktarım mesajı
+        const msgTR = `${topicSummary} konusuyla ilgili canlı temsilci ile görüşme talebinizi aldım.\n\nSize en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın⌛️.`;
+
+        const msgEN = `I have received your request to speak with a live representative regarding ${topicSummary}.\n\nTo provide you with the best support, I am transferring you to our live customer representative.\nYour request has been queued and you will be connected shortly.\nPlease stay on hold while we connect you⌛️.`;
+
+        const msgAR = `لقد استلمت طلبك للتحدث مع ممثل مباشر بخصوص ${topicSummary}.\n\nلتقديم أفضل دعم لك، سأقوم بتحويلك إلى ممثل خدمة العملاء المباشر.\nتم وضع طلبك في قائمة الانتظار وسيتم ربطك قريبًا.\nيرجى البقاء في الانتظار أثناء الاتصال بك⌛️.`;
+
+        let aktarimMesaji = msgTR;
+        if (session.lang === "en") aktarimMesaji = msgEN;
+        if (session.lang === "ar") aktarimMesaji = msgAR;
+
+        // WhatsApp'a gönder
+        await sendMessage(targetNumber, aktarimMesaji);
+
+        // Canlı destek modunu aç
+        session.humanOverride = true;
+        session.lastMessageTime = Date.now();
+
+        // Telegram'a bilgi ver
+        await sendMessageToTelegram(`✅ ${targetNumber} için canlı destek açıldı.`);
+
+      } catch (err) {
+        console.error("Telegram → WhatsApp /w köprü hatası:", err);
+        await sendMessageToTelegram("❌ Komut işlenirken hata oluştu.");
+      }
+
+      return res.sendStatus(200);
+    }
+
+    return res.sendStatus(200);
+  } catch (error) {
+    console.error("Telegram Webhook Genel Hatası:", error);
+    return res.sendStatus(500);
+  }
+});
+
+
 // ============================================================================
 // 6. CRON JOB (WHATSAPP FOLLOW-UP)
 // ============================================================================
