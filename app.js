@@ -2578,27 +2578,16 @@ session.followUpStage = 0;
 session.pingSentOnce = false;
 
 // --------------------------------------
-// KONUYU OTOMATİK ÇIKAR
+// KONUYU AI İLE OTOMATİK TESPİT ET
 // --------------------------------------
-function extractTopic(text) {
-  const t = text.toLowerCase();
-
-  if (t.includes("ai") || t.includes("yapay zeka") || t.includes("chatbot")) return "Yapay Zeka / Chatbot";
-  if (t.includes("whatsapp") || t.includes("wp bot")) return "WhatsApp Bot";
-  if (t.includes("telegram")) return "Telegram Bot";
-  if (t.includes("website") || t.includes("site")) return "Web Sitesi / Landing Page";
-  if (t.includes("company setup") || t.includes("şirket kur") || t.includes("business setup")) return "Dubai Business Setup";
-  if (t.includes("automation") || t.includes("otomasyon")) return "Otomasyon / Workflow";
-  if (t.includes("marketing") || t.includes("pazarlama")) return "Marketing / Growth";
-  if (t.includes("price") || t.includes("fiyat") || t.includes("ücret")) return "Fiyat / Teklif";
-
-  return "Genel Destek";
-}
-
-const topicSummary = extractTopic(text);
+const topicSummary = await callWpGemini(`
+Kullanıcı mesajı: "${text}"
+Bu mesajın ana konusunu TEK KISA BAŞLIK olarak özetle.
+Sadece konu adı döndür.
+`);
 
 // --------------------------------------
-// WHATSAPP MANUEL CANLI DESTEK AÇMA  (/w ÇALIŞIR)
+// WHATSAPP MANUEL CANLI DESTEK AÇMA  (/w ARTIK %100 ÇALIŞIR)
 // --------------------------------------
 if (
   lower === "/w" ||
@@ -2624,7 +2613,7 @@ if (
 }
 
 // --------------------------------------
-// WHATSAPP MANUEL CANLI DESTEK KAPATMA
+// CANLI DESTEK KAPATMA
 // --------------------------------------
 if (
   lower === "/end" ||
