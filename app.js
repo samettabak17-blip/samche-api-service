@@ -727,11 +727,14 @@ You are operating on a web interface that renders raw HTML. You MUST format your
 **2. BULLET POINTS AND LINE BREAKS (VERTICAL ALIGNMENT):**
 - Web browsers ignore standard line breaks. You MUST force items to appear on separate lines.
 - NEVER write bullet points side-by-side in a single paragraph.
-- To create a bulleted list, you MUST use HTML line break `<br>` tags at the end of each sentence, OR use `<ul>` and `<li>` tags.
-- Example Format using <br>:
-  <br>• Müşteri destek chatbotları<br>
-  • Satış artırma için chatbot çözümleri<br>
-  • Sıkça sorulan sorular için otomatik yanıtlayıcılar<br>
+- To create a bulleted list, you MUST strictly use HTML "<ul>" and "<li>" tags.
+- NEVER use "<br>" tags for lists, and NEVER use Markdown bullets like "•", "*", or "-".
+- Example Format:
+  <ul>
+    <li>Müşteri destek chatbotları</li>
+    <li>Satış artırma için chatbot çözümleri</li>
+    <li>Çok dilli destek yetenekleri</li>
+  </ul>
 
 # BULLET POINT & TEXT FORMATTING RULES
 - Provide the user with bulleted information; each bullet point MUST be on a SINGLE LINE.
