@@ -2578,27 +2578,19 @@ session.followUpStage = 0;
 session.pingSentOnce = false;
 
 // --------------------------------------
-// KONUYU OTOMATİK ÇIKAR (AI + Kullanıcı Mesajı)
+// KONUYU OTOMATİK ÇIKAR
 // --------------------------------------
 function extractTopic(text) {
   const t = text.toLowerCase();
 
-  if (t.includes("ai") || t.includes("yapay zeka") || t.includes("chatbot"))
-    return "Yapay Zeka / Chatbot";
-  if (t.includes("whatsapp") || t.includes("wp bot"))
-    return "WhatsApp Bot";
-  if (t.includes("telegram"))
-    return "Telegram Bot";
-  if (t.includes("website") || t.includes("site"))
-    return "Web Sitesi / Landing Page";
-  if (t.includes("company setup") || t.includes("şirket kur") || t.includes("business setup"))
-    return "Dubai Business Setup";
-  if (t.includes("automation") || t.includes("otomasyon"))
-    return "Otomasyon / Workflow";
-  if (t.includes("marketing") || t.includes("pazarlama"))
-    return "Marketing / Growth";
-  if (t.includes("price") || t.includes("fiyat") || t.includes("ücret"))
-    return "Fiyat / Teklif";
+  if (t.includes("ai") || t.includes("yapay zeka") || t.includes("chatbot")) return "Yapay Zeka / Chatbot";
+  if (t.includes("whatsapp") || t.includes("wp bot")) return "WhatsApp Bot";
+  if (t.includes("telegram")) return "Telegram Bot";
+  if (t.includes("website") || t.includes("site")) return "Web Sitesi / Landing Page";
+  if (t.includes("company setup") || t.includes("şirket kur") || t.includes("business setup")) return "Dubai Business Setup";
+  if (t.includes("automation") || t.includes("otomasyon")) return "Otomasyon / Workflow";
+  if (t.includes("marketing") || t.includes("pazarlama")) return "Marketing / Growth";
+  if (t.includes("price") || t.includes("fiyat") || t.includes("ücret")) return "Fiyat / Teklif";
 
   return "Genel Destek";
 }
@@ -2606,7 +2598,7 @@ function extractTopic(text) {
 const topicSummary = extractTopic(text);
 
 // --------------------------------------
-// WHATSAPP MANUEL CANLI DESTEK AÇMA
+// WHATSAPP MANUEL CANLI DESTEK AÇMA  (/w ÇALIŞIR)
 // --------------------------------------
 if (
   lower === "/w" ||
@@ -2617,13 +2609,15 @@ if (
 ) {
   session.humanOverride = true;
 
-  let aktarimMesajiTR = `Talebinizi canlı müşteri temsilcimize aktardım.\n\n📌 Konu: *${topicSummary}*\n\nEkibimiz birazdan size yardımcı olacak.`;
-  let aktarimMesajiEN = `I have transferred your request to our live representative.\n\n📌 Topic: *${topicSummary}*\n\nOur team will assist you shortly.`;
-  let aktarimMesajiAR = `لقد قمت بتحويل طلبك إلى ممثل الدعم المباشر.\n\n📌 الموضوع: *${topicSummary}*\n\nسوف يساعدك فريقنا خلال لحظات.`;
+  const msgTR = `${topicSummary} konusuyla ilgili canlı temsilci ile görüşme talebinizi aldım.\n\nSize en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın⌛️.`;
 
-  let aktarimMesaji = aktarimMesajiTR;
-  if (session.lang === "en") aktarimMesaji = aktarimMesajiEN;
-  if (session.lang === "ar") aktarimMesaji = aktarimMesajiAR;
+  const msgEN = `I have received your request to speak with a live representative regarding ${topicSummary}.\n\nTo provide you with the best support, I am transferring you to our live customer representative.\nYour request has been queued and you will be connected shortly.\nPlease stay on hold while we connect you⌛️.`;
+
+  const msgAR = `لقد استلمت طلبك للتحدث مع ممثل مباشر بخصوص ${topicSummary}.\n\nلتقديم أفضل دعم لك، سأقوم بتحويلك إلى ممثل خدمة العملاء المباشر.\nتم وضع طلبك في قائمة الانتظار وسيتم ربطك قريبًا.\nيرجى البقاء في الانتظار أثناء الاتصال بك⌛️.`;
+
+  let aktarimMesaji = msgTR;
+  if (session.lang === "en") aktarimMesaji = msgEN;
+  if (session.lang === "ar") aktarimMesaji = msgAR;
 
   await sendMessage(cleanFrom, aktarimMesaji);
   return res.sendStatus(200);
@@ -2639,7 +2633,10 @@ if (
   lower === "kapat"
 ) {
   session.humanOverride = false;
-  await sendMessage(cleanFrom, "Bot modu yeniden aktif.");
+
+  const closeMsg = `🔒 Canlı destek oturumu sona ermiştir.\n\nYapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına 'canlı destek' yazmanız yeterlidir.\nEkibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.`;
+
+  await sendMessage(cleanFrom, closeMsg);
   return res.sendStatus(200);
 }
 
@@ -2686,26 +2683,23 @@ if (!needsHuman) {
 // --------------------------------------
 // AI → CANLI DESTEK ÖNERDİ → KONU ÖZETİ İLE AKTAR
 // --------------------------------------
-let aktarimMesajiTR = `Talebinizi canlı müşteri temsilcimize aktardım.\n\n📌 Konu: *${topicSummary}*\n\nEkibimiz birazdan size yardımcı olacak.`;
-let aktarimMesajiEN = `I have transferred your request to our live representative.\n\n📌 Topic: *${topicSummary}*\n\nOur team will assist you shortly.`;
-let aktarimMesajiAR = `لقد قمت بتحويل طلبك إلى ممثل الدعم المباشر.\n\n📌 الموضوع: *${topicSummary}*\n\nسوف يساعدك فريقنا خلال لحظات.`;
+const aiMsgTR = `${topicSummary} konusuyla ilgili canlı temsilci ile görüşme talebinizi aldım.\n\nSize en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın⌛️.`;
 
-let aktarimMesaji = aktarimMesajiTR;
-if (session.lang === "en") aktarimMesaji = aktarimMesajiEN;
-if (session.lang === "ar") aktarimMesaji = aktarimMesajiAR;
+const aiMsgEN = `I have received your request to speak with a live representative regarding ${topicSummary}.\n\nTo provide you with the best support, I am transferring you to our live customer representative.\nYour request has been queued and you will be connected shortly.\nPlease stay on hold while we connect you⌛️.`;
 
-await sendMessage(cleanFrom, aktarimMesaji);
+const aiMsgAR = `لقد استلمت طلبك للتحدث مع ممثل مباشر بخصوص ${topicSummary}.\n\nلتقديم أفضل دعم لك، سأقوم بتحويلك إلى ممثل خدمة العملاء المباشر.\nتم وضع طلبك في قائمة الانتظار وسيتم ربطك قريبًا.\nيرجى البقاء في الانتظار أثناء الاتصال بك⌛️.`;
+
+let aiAktarimMesaji = aiMsgTR;
+if (session.lang === "en") aiAktarimMesaji = aiMsgEN;
+if (session.lang === "ar") aiAktarimMesaji = aiMsgAR;
+
+await sendMessage(cleanFrom, aiAktarimMesaji);
 
 session.humanOverride = true;
 session.lastMessageTime = Date.now();
 
 return res.sendStatus(200);
 
-} catch (error) {
-  console.error("Hata:", error);
-  return res.sendStatus(500);
-}
-});
 
 // ============================================================================
 // 6. CRON JOB (WHATSAPP FOLLOW-UP)
