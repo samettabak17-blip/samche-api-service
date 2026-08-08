@@ -2588,12 +2588,7 @@ if (
   lower === "live"
 ) {
   session.humanOverride = true;
-
-  await sendMessage(
-    cleanFrom,
-    "Canlı destek modu aktif. Bir temsilci birazdan yanıt verecek."
-  );
-
+  await sendMessage(cleanFrom, "Canlı destek modu aktif. Bir temsilci birazdan yanıt verecek.");
   return res.sendStatus(200);
 }
 
@@ -2607,9 +2602,7 @@ if (
   lower === "kapat"
 ) {
   session.humanOverride = false;
-
   await sendMessage(cleanFrom, "Bot modu yeniden aktif.");
-
   return res.sendStatus(200);
 }
 
@@ -2687,14 +2680,11 @@ const topicSummary = extractTopic(text);
 // AI → NORMAL CEVAP
 // --------------------------------------
 if (!needsHuman) {
-  if (!session.history) session.history = [];
-
   session.history.push({ role: "assistant", text: aiResponse });
-
   await sendMessage(cleanFrom, aiResponse);
-
   return res.sendStatus(200);
 }
+
 // --------------------------------------
 // AI → CANLI DESTEK ÖNERDİ → KONU ÖZETİ İLE AKTAR
 // --------------------------------------
@@ -2702,20 +2692,16 @@ let aktarimMesajiTR = `Talebinizi canlı müşteri temsilcimize aktardım.\n\n�
 let aktarimMesajiEN = `I have transferred your request to our live representative.\n\n📌 Topic: *${topicSummary}*\n\nThey will reply to you shortly.`;
 let aktarimMesajiAR = `لقد قمت بتحويل طلبك إلى ممثل الدعم المباشر.\n\n📌 الموضوع: *${topicSummary}*\n\nسيقوم بالرد عليك خلال لحظات.`;
 
-// Dile göre mesaj seç
 let aktarimMesaji = aktarimMesajiTR;
 if (session.lang === "en") aktarimMesaji = aktarimMesajiEN;
 if (session.lang === "ar") aktarimMesaji = aktarimMesajiAR;
 
-// Kullanıcıya gönder
 await sendMessage(cleanFrom, aktarimMesaji);
 
-// Canlı destek modunu aç
 session.humanOverride = true;
 session.lastMessageTime = Date.now();
 
 return res.sendStatus(200);
-
 
 
 
