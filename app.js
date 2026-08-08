@@ -2773,6 +2773,9 @@ app.post("/telegram-webhook", async (req, res) => {
       // CANLI DESTEK MODUNU AÇ
       wpSessions[cleanTo].humanOverride = true;
       wpSessions[cleanTo].lastMessageTime = Date.now();
+      
+      // Her manuel mesaj atışta 5dk uyarı hakkını sıfırla
+      wpSessions[cleanTo].warning5MinSent = false;
 
       // SADECE TEMSİLCİ MESAJINI WHATSAPP'A GÖNDER
       await sendMessage(cleanTo, message);
@@ -2797,20 +2800,18 @@ app.post("/telegram-webhook", async (req, res) => {
       if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
 
       wpSessions[cleanTo].humanOverride = false;
+      wpSessions[cleanTo].warning5MinSent = false; // Resetle
 
       // DİL BAZLI KAPANIŞ MESAJI (tek seferlik)
       let closeMessage =
-        "🔒 Canlı destek oturumu sona ermiştir.\n\n" +
-        "Yapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına canlı destek yazmanız yeterlidir. Ekibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.";
+        "🔒 Bu sohbet oturumu sona ermiştir.\n\nBaşka sorularınız varsa veya ek yardıma ihtiyacınız olursa, lütfen istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin. Canlı Destek Ekibimiz size yardımcı olmaktan mutluluk duyacaktır.";
 
       if (wpSessions[cleanTo]?.lang === "en") {
         closeMessage =
-          "🔒 The live support session has ended.\n\n" +
-          "You may continue chatting with our AI assistant, or type live support anytime to reconnect. Our team will be happy to assist you anytime.";
+          "🔒 This chat session has ended.\n\nIf you have further questions or need additional assistance, please feel free to reach out again anytime. Our Live Support Team will be happy to assist you.";
       } else if (wpSessions[cleanTo]?.lang === "ar") {
         closeMessage =
-          "🔒 تم إنهاء جلسة الدعم المباشر.\n\n" +
-          "يمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي أو كتابة 'دعم مباشر' للاتصال بممثل.";
+          "🔒 انتهت جلسة الدردشة هذه.\n\nإذا كانت لديك أسئلة أخرى أو احتجت إلى مساعدة إضافية، فلا تتردد في الاتصال بنا مرة أخرى في أي وقت. سيسعد فريق الدعم المباشر لدينا بمساعدتك.";
       }
 
       await sendMessage(cleanTo, closeMessage);
@@ -2829,8 +2830,9 @@ app.post("/telegram-webhook", async (req, res) => {
 // ============================================================================
 // 6. CRON JOB (WHATSAPP FOLLOW-UP)
 // ============================================================================
-cron.schedule("*/10 * * * *", async () => {
-  console.log("[CRON] Follow-up kontrolü:", new Date().toLocaleString());
+// DİKKAT: 5 dakikalık hassas kontrol yapabilmek için süre * * * * * (her 1 dakika) olarak güncellenmiştir.
+cron.schedule("* * * * *", async () => {
+  // console.log("[CRON] Follow-up kontrolü:", new Date().toLocaleString()); // Konsol kalabalığı yapmaması için yoruma alınabilir.
   try {
     const now = Date.now();
     if (!wpSessions || typeof wpSessions !== "object") return;
@@ -2845,6 +2847,9 @@ cron.schedule("*/10 * * * *", async () => {
         if (!s.lastMessageTime || isNaN(s.lastMessageTime)) s.lastMessageTime = Date.now();
         if (!s.followUpStage || isNaN(s.followUpStage)) s.followUpStage = 0;
         if (!s.pingSentOnce) s.pingSentOnce = false;
+        
+        // 5 Dakika uyarı kontrol değişkeni
+        if (s.warning5MinSent === undefined) s.warning5MinSent = false;
 
         const diffMinutesLast = (now - s.lastMessageTime) / (1000 * 60);
         const diffHoursLast = (now - s.lastMessageTime) / (1000 * 60 * 60);
@@ -2853,13 +2858,37 @@ cron.schedule("*/10 * * * *", async () => {
         const lastTopic = topics.length ? topics[topics.length - 1] : "general";
         const lang = typeof s.lang === "string" ? s.lang : "en";
 
-        if (s.humanOverride && diffMinutesLast >= 10) {
-          s.humanOverride = false;
-          console.log(`[CRON] ${user} → Canlı destek otomatik kapandı`);
+        // 🔥 CANLI DESTEKTE 5 DK UYARISI VE 10 DK KAPANIŞI
+        if (s.humanOverride) {
+          if (diffMinutesLast >= 10) {
+            // 10 dakika dolduysa tamamen kapat ve bilgilendir
+            s.humanOverride = false;
+            s.warning5MinSent = false;
+            console.log(`[CRON] ${user} → Canlı destek eylemsizlikten otomatik kapandı.`);
+            
+            const autoCloseMsg = `🔒 Bu sohbet oturumu sona ermiştir.\n\nBaşka sorularınız varsa veya ek yardıma ihtiyacınız olursa, lütfen istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin. Canlı Destek Ekibimiz size yardımcı olmaktan mutluluk duyacaktır.`;
+            
+            try { await sendMessage(user, autoCloseMsg); } catch(e){}
+            try { await sendMessageToTelegram(`Zaman Aşımı: Canlı destek kapatıldı → +${user}`); } catch(e){}
+
+          } else if (diffMinutesLast >= 5 && !s.warning5MinSent) {
+            // 5 dakika dolduysa ve henüz uyarı atılmadıysa uyar
+            s.warning5MinSent = true;
+            
+            const warningMsg = `⚠️Lütfen dikkat, bu sohbet oturumu 5 dakika sonra sona erecektir.\nEkibimizden yanıt beklerken oturumu aktif tutmak için bu sohbette mesaj gönderebilirsiniz.\n\nOturumunuz sona ererse, istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin; daha fazla sorunuzda size yardımcı olmaktan memnuniyet duyarız.`;
+            
+            try { await sendMessage(user, warningMsg); } catch(e){}
+          } else if (diffMinutesLast < 5 && s.warning5MinSent) {
+            // Eğer 5 dakikadan kısa sürede mesajlaşma devam ederse uyarı hakkını sıfırla
+            s.warning5MinSent = false;
+          }
+          
+          continue; // İnsan modundayken alt kısımdaki yapay zeka follow-up'larına geçmesini engelle
         }
 
-        if (s.humanOverride) continue;
-
+        // ==========================================
+        // NORMAL (BOT) FOLLOW-UP İŞLEMLERİ
+        // ==========================================
         if (diffMinutesLast >= 10 && !s.pingSentOnce) {
           const pingMessage = getPingMessage(lang, lastTopic);
           if (pingMessage) {
