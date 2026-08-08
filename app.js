@@ -2578,6 +2578,34 @@ session.followUpStage = 0;
 session.pingSentOnce = false;
 
 // --------------------------------------
+// KONUYU OTOMATİK ÇIKAR (AI + Kullanıcı Mesajı)
+// --------------------------------------
+function extractTopic(text) {
+  const t = text.toLowerCase();
+
+  if (t.includes("ai") || t.includes("yapay zeka") || t.includes("chatbot"))
+    return "Yapay Zeka / Chatbot";
+  if (t.includes("whatsapp") || t.includes("wp bot"))
+    return "WhatsApp Bot";
+  if (t.includes("telegram"))
+    return "Telegram Bot";
+  if (t.includes("website") || t.includes("site"))
+    return "Web Sitesi / Landing Page";
+  if (t.includes("company setup") || t.includes("şirket kur") || t.includes("business setup"))
+    return "Dubai Business Setup";
+  if (t.includes("automation") || t.includes("otomasyon"))
+    return "Otomasyon / Workflow";
+  if (t.includes("marketing") || t.includes("pazarlama"))
+    return "Marketing / Growth";
+  if (t.includes("price") || t.includes("fiyat") || t.includes("ücret"))
+    return "Fiyat / Teklif";
+
+  return "Genel Destek";
+}
+
+const topicSummary = extractTopic(text);
+
+// --------------------------------------
 // WHATSAPP MANUEL CANLI DESTEK AÇMA
 // --------------------------------------
 if (
@@ -2588,7 +2616,16 @@ if (
   lower === "live"
 ) {
   session.humanOverride = true;
-  await sendMessage(cleanFrom, "Canlı destek modu aktif. Bir temsilci birazdan yanıt verecek.");
+
+  let aktarimMesajiTR = `Talebinizi canlı müşteri temsilcimize aktardım.\n\n📌 Konu: *${topicSummary}*\n\nEkibimiz birazdan size yardımcı olacak.`;
+  let aktarimMesajiEN = `I have transferred your request to our live representative.\n\n📌 Topic: *${topicSummary}*\n\nOur team will assist you shortly.`;
+  let aktarimMesajiAR = `لقد قمت بتحويل طلبك إلى ممثل الدعم المباشر.\n\n📌 الموضوع: *${topicSummary}*\n\nسوف يساعدك فريقنا خلال لحظات.`;
+
+  let aktarimMesaji = aktarimMesajiTR;
+  if (session.lang === "en") aktarimMesaji = aktarimMesajiEN;
+  if (session.lang === "ar") aktarimMesaji = aktarimMesajiAR;
+
+  await sendMessage(cleanFrom, aktarimMesaji);
   return res.sendStatus(200);
 }
 
@@ -2638,45 +2675,6 @@ const needsHuman =
   lowerAi.includes("transfer_to_human");
 
 // --------------------------------------
-// KONUYU OTOMATİK ÇIKAR (AI + Kullanıcı Mesajı)
-// --------------------------------------
-function extractTopic(text) {
-  const t = text.toLowerCase();
-
-  if (t.includes("ai") || t.includes("yapay zeka") || t.includes("chatbot"))
-    return "Yapay Zeka / Chatbot";
-
-  if (t.includes("whatsapp") || t.includes("wp bot"))
-    return "WhatsApp Bot";
-
-  if (t.includes("telegram"))
-    return "Telegram Bot";
-
-  if (t.includes("website") || t.includes("site"))
-    return "Web Sitesi / Landing Page";
-
-  if (
-    t.includes("company setup") ||
-    t.includes("şirket kur") ||
-    t.includes("business setup")
-  )
-    return "Dubai Business Setup";
-
-  if (t.includes("automation") || t.includes("otomasyon"))
-    return "Otomasyon / Workflow";
-
-  if (t.includes("marketing") || t.includes("pazarlama"))
-    return "Marketing / Growth";
-
-  if (t.includes("price") || t.includes("fiyat") || t.includes("ücret"))
-    return "Fiyat / Teklif";
-
-  return "Genel Destek";
-}
-
-const topicSummary = extractTopic(text);
-
-// --------------------------------------
 // AI → NORMAL CEVAP
 // --------------------------------------
 if (!needsHuman) {
@@ -2688,9 +2686,9 @@ if (!needsHuman) {
 // --------------------------------------
 // AI → CANLI DESTEK ÖNERDİ → KONU ÖZETİ İLE AKTAR
 // --------------------------------------
-let aktarimMesajiTR = `Talebinizi canlı müşteri temsilcimize aktardım.\n\n📌 Konu: *${topicSummary}*\n\nBirazdan size buradan yanıt verecek.`;
-let aktarimMesajiEN = `I have transferred your request to our live representative.\n\n📌 Topic: *${topicSummary}*\n\nThey will reply to you shortly.`;
-let aktarimMesajiAR = `لقد قمت بتحويل طلبك إلى ممثل الدعم المباشر.\n\n📌 الموضوع: *${topicSummary}*\n\nسيقوم بالرد عليك خلال لحظات.`;
+let aktarimMesajiTR = `Talebinizi canlı müşteri temsilcimize aktardım.\n\n📌 Konu: *${topicSummary}*\n\nEkibimiz birazdan size yardımcı olacak.`;
+let aktarimMesajiEN = `I have transferred your request to our live representative.\n\n📌 Topic: *${topicSummary}*\n\nOur team will assist you shortly.`;
+let aktarimMesajiAR = `لقد قمت بتحويل طلبك إلى ممثل الدعم المباشر.\n\n📌 الموضوع: *${topicSummary}*\n\nسوف يساعدك فريقنا خلال لحظات.`;
 
 let aktarimMesaji = aktarimMesajiTR;
 if (session.lang === "en") aktarimMesaji = aktarimMesajiEN;
@@ -2704,7 +2702,7 @@ session.lastMessageTime = Date.now();
 return res.sendStatus(200);
 
 } catch (error) {
-  console.error("Mesaj islenirken hata olustu:", error);
+  console.error("Hata:", error);
   return res.sendStatus(500);
 }
 });
