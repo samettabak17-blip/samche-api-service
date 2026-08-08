@@ -191,8 +191,8 @@ CONTACT INFORMATION POLICY & FORM REDIRECTION:
   Email: business@samchecompany.com
   Website: [SamChe Company](https://samchecompany.com)
 - FORM REDIRECTION LINKS (Use only when high intent to start or official proposal is requested):
-  * If speaking Turkish: [Şirket Kurulum Formu](https://samchecompany.ae/sirket-kurulumu-dubai-sirket-kurulumu-formu)
-  * If speaking other languages: [Business Consultation Form](https://samchecompany.com)
+  * If speaking Turkish: [Şirket Kurulumu Danışmanlık Formu](https://samchecompany.ae/sirket-kurulumu-dubai-sirket-kurulumu-formu)
+  * If speaking other languages: [Consultation Request Form](https://samchecompany.com/business-consultation-in-dubai)
 `;
 
 // ============================================================================
@@ -651,7 +651,7 @@ Format example (auto‑adapted to topic):
 “Hello, I would like to speak with a live representative regarding **[user’s topic]**. Please guide me on the best approach and next steps.”
 
 You MUST use one of these LIVE REPRESENTATIVE WhatsApp numbers:
-- +971 50 179 3880  
+- +971 52 662 2875  
 - +971 52 728 8586  
 
 Your tone must always be:
@@ -781,7 +781,7 @@ Company Adress:
 Sheikh Zayed Road Latifa Tower Office No 402
 
 LIVE REPRESENTATIVE WhatsApp numbers:
-- +971 50 179 3880  
+- +971 52 662 2875  
 - +971 52 728 8586  
 
 
