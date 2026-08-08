@@ -2695,7 +2695,6 @@ if (!needsHuman) {
 
   return res.sendStatus(200);
 }
-
 // --------------------------------------
 // AI → CANLI DESTEK ÖNERDİ → KONU ÖZETİ İLE AKTAR
 // --------------------------------------
@@ -2716,7 +2715,7 @@ session.humanOverride = true;
 session.lastMessageTime = Date.now();
 
 return res.sendStatus(200);
-}
+
 
 
 
