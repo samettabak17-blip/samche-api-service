@@ -2618,6 +2618,11 @@ if (
   if (session.lang === "ar") aktarimMesaji = msgAR;
 
   await sendMessage(cleanFrom, aktarimMesaji);
+
+  // 🔥 YENİ: TELEGRAM BİLDİRİMİ (HAZIR KOPYALA-YAPIŞTIR)
+  const alertMsg = `🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nKullanıcıya cevap göndermek için kopyala:\n/w +${cleanFrom} `;
+  await sendMessageToTelegram(alertMsg);
+
   return res.sendStatus(200);
 }
 
@@ -2641,7 +2646,9 @@ if (
 // --------------------------------------
 if (session.humanOverride) {
   try {
-    await sendMessageToTelegram(`WhatsApp → ${cleanFrom}: ${text}`);
+    // 🔥 YENİ: TELEGRAM'A GİDEN MESAJDA HAZIR KOMUTLAR
+    const forwardMsg = `WhatsApp → +${cleanFrom}:\n${text}\n\nCevaplamak için:\n/w +${cleanFrom} \n\nSohbeti bitirmek için:\n/end +${cleanFrom}`;
+    await sendMessageToTelegram(forwardMsg);
   } catch (e) {
     console.error("Telegram'a mesaj iletilemedi:", e);
   }
@@ -2696,6 +2703,10 @@ await sendMessage(cleanFrom, aiAktarimMesaji);
 
 session.humanOverride = true;
 session.lastMessageTime = Date.now();
+
+// 🔥 YENİ: TELEGRAM BİLDİRİMİ (YAPAY ZEKA AKTARDIĞINDA)
+const alertMsgAi = `🚨 CANLI TEMSİLCİ TALEBİ (Yapay Zeka Yönlendirdi)!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nKullanıcıya cevap göndermek için kopyala:\n/w +${cleanFrom} `;
+await sendMessageToTelegram(alertMsgAi);
 
 return res.sendStatus(200);
 
@@ -2763,7 +2774,7 @@ app.post("/telegram-webhook", async (req, res) => {
       // SADECE TEMSİLCİ MESAJINI WHATSAPP'A GÖNDER
       await sendMessage(cleanTo, message);
 
-      await sendMessageToTelegram(`Gönderildi → WhatsApp ${cleanTo}: ${message}`);
+      await sendMessageToTelegram(`Gönderildi → WhatsApp +${cleanTo}:\n${message}`);
       return res.sendStatus(200);
     }
 
@@ -2800,7 +2811,7 @@ app.post("/telegram-webhook", async (req, res) => {
       }
 
       await sendMessage(cleanTo, closeMessage);
-      await sendMessageToTelegram(`Canlı destek kapatıldı → ${cleanTo}`);
+      await sendMessageToTelegram(`Canlı destek kapatıldı → +${cleanTo}`);
 
       return res.sendStatus(200);
     }
