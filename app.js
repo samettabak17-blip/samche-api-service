@@ -2575,17 +2575,11 @@ ${text}
 `;
     }
 
-// --------------------------------------
-// WHATSAPP RETRY (TEKRAR) KORUMASI
-// --------------------------------------
-const wpMessageId = req.body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.id;
-if (wpMessageId && processedWpMessages.has(wpMessageId)) {
-  return res.sendStatus(200); // Aynı mesaj tekrar geldiyse işlemi anında durdur
-}
-if (wpMessageId) {
-  processedWpMessages.add(wpMessageId);
-  setTimeout(() => processedWpMessages.delete(wpMessageId), 10 * 60 * 1000); // 10 dk sonra hafızayı temizle
-}
+// ============================================================================
+// 🔥 YENİ: TELEGRAM İÇİN TEKRARLANAN MESAJ HAFIZASI
+// (Bunun dosyanın en üst alanında, route'ların dışında olduğundan emin olun)
+// ============================================================================
+const processedTgUpdates = new Set();
 
 // --------------------------------------
 // FOLLOW-UP RESETLERİ
@@ -2690,13 +2684,13 @@ if (!needsHuman) {
 // --------------------------------------
 // AI → CANLI DESTEK ÖNERDİ → KONU ÖZETİ İLE AKTAR
 // --------------------------------------
-const aiMsgTR = `Canlı temsilci ile görüşme ilgili talebinizi aldım. *${topicSummary}* konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.`;
-const aiMsgEN = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
-const aiMsgAR = `لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص موضوع *${topicSummary}*، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.`;
+let aiAktarimMesaji = "Talebinizi canlı müşteri temsilcimize aktardım. Birazdan size buradan yanıt verecek.";
 
-let aiAktarimMesaji = aiMsgTR;
-if (session.lang === "en") aiAktarimMesaji = aiMsgEN;
-if (session.lang === "ar") aiAktarimMesaji = aiMsgAR;
+if (session.lang === "en") {
+  aiAktarimMesaji = "I have transferred your request to our live representative. They will reply to you shortly.";
+} else if (session.lang === "ar") {
+  aiAktarimMesaji = "لقد قمت بتحويل طلبك إلى ممثل الدعم المباشر. سيقوم بالرد عليك خلال لحظات.";
+}
 
 await sendMessage(cleanFrom, aiAktarimMesaji);
 
@@ -2716,17 +2710,18 @@ return res.sendStatus(200);
 // ============================================================================
 app.post("/telegram-webhook", async (req, res) => {
   try {
-    // --------------------------------------
-    // TELEGRAM RETRY (TEKRAR) KORUMASI
-    // --------------------------------------
+    // ------------------------------------------------------
+    // 🔥 TELEGRAM RETRY (TEKRAR) KORUMASI (EN TEPEDE)
+    // ------------------------------------------------------
     const updateId = req.body?.update_id;
     if (updateId && processedTgUpdates.has(updateId)) {
-      return res.sendStatus(200); // Aynı istekse işlemi anında durdur
+      return res.sendStatus(200); // Aynı istek tekrarlandıysa işlemi anında durdur
     }
     if (updateId) {
       processedTgUpdates.add(updateId);
-      setTimeout(() => processedTgUpdates.delete(updateId), 10 * 60 * 1000);
+      setTimeout(() => processedTgUpdates.delete(updateId), 10 * 60 * 1000); // 10 dk sonra hafızayı temizle
     }
+    // ------------------------------------------------------
 
     const msg = req.body.message;
     if (!msg || !msg.text) return res.sendStatus(200);
