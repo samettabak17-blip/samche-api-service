@@ -2671,9 +2671,9 @@ ${text}
     }
 
 // ============================================================================
-// 🔥 YENİ: TELEGRAM İÇİN TEKRARLANAN MESAJ HAFIZASI
-// (Bunun dosyanın en üst alanında, route'ların dışında olduğundan emin olun)
+// 🔥 TEKRARLANAN MESAJLARI ENGELLEME (RETRY KORUMASI) HAFIZALARI
 // ============================================================================
+const processedWpMessages = new Set();
 const processedTgUpdates = new Set();
 
 // ============================================================================
@@ -2751,7 +2751,7 @@ app.post("/webhook", async (req, res) => {
     session.topics.push(currentTopic);
 
     // --------------------------------------
-    // WHATSAPP MANUEL CANLI DESTEK AÇMA  (/w ARTIK %100 ÇALIŞIR)
+    // WHATSAPP MANUEL CANLI DESTEK AÇMA
     // --------------------------------------
     const lower = text.toLowerCase();
     if (
@@ -2881,11 +2881,11 @@ app.post("/telegram-webhook", async (req, res) => {
     // ------------------------------------------------------
     const updateId = req.body?.update_id;
     if (updateId && processedTgUpdates.has(updateId)) {
-      return res.sendStatus(200);
+      return res.sendStatus(200); 
     }
     if (updateId) {
       processedTgUpdates.add(updateId);
-      setTimeout(() => processedTgUpdates.delete(updateId), 10 * 60 * 1000);
+      setTimeout(() => processedTgUpdates.delete(updateId), 10 * 60 * 1000); 
     }
 
     const msg = req.body.message;
@@ -2921,7 +2921,7 @@ app.post("/telegram-webhook", async (req, res) => {
       if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
       const session = wpSessions[cleanTo];
 
-      // 🔥 YENİ: EĞER TEMSİLCİ MANUEL OLARAK ARAYA GİRİYORSA (Kullanıcı talep etmediyse)
+      // 🔥 YENİ: EĞER TEMSİLCİ MANUEL OLARAK ARAYA GİRİYORSA
       if (!session.humanOverride) {
         session.humanOverride = true;
         session.manualTakeover = true; // Sınırsız süre için bayrak eklendi
@@ -2959,7 +2959,7 @@ app.post("/telegram-webhook", async (req, res) => {
       if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
 
       wpSessions[cleanTo].humanOverride = false;
-      wpSessions[cleanTo].manualTakeover = false; // Bayrağı sıfırla
+      wpSessions[cleanTo].manualTakeover = false;
       wpSessions[cleanTo].warning5MinSent = false;
 
       // DİL BAZLI KAPANIŞ MESAJI
@@ -3017,12 +3017,10 @@ cron.schedule("* * * * *", async () => {
 
         // 🔥 CANLI DESTEK UYARI VE KAPANIŞ KONTROLÜ
         if (s.humanOverride) {
-          // Eğer yönetici manuel girdiyse sınırsız sürelidir, CRON işlem yapmaz
           if (s.manualTakeover) {
-            continue;
+            continue; // Yönetici manuel girdiyse sınırsız sürelidir
           }
 
-          // Eğer talep ile başlanmışsa 5 dk uyarı, 10 dk kapanış kuralı geçerlidir
           if (diffMinutesLast >= 10) {
             s.humanOverride = false;
             s.warning5MinSent = false;
