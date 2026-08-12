@@ -2714,9 +2714,9 @@ app.post("/webhook", async (req, res) => {
     const session = wpSessions[cleanFrom];
     session.lang = lang;
 
-    // 🔥 YENİ: KULLANICININ AYNI MESAJI ÜST ÜSTE GÖNDERMESİNİ (SPAM) ENGELLEME
+    // 🔥 KULLANICININ AYNI MESAJI ÜST ÜSTE GÖNDERMESİNİ (SPAM) ENGELLEME
     if (session.lastUserText === text) {
-      return res.sendStatus(200); // Birebir aynı mesajsa işlemi durdur (token harcama)
+      return res.sendStatus(200); 
     }
     session.lastUserText = text;
 
@@ -2812,6 +2812,7 @@ app.post("/webhook", async (req, res) => {
     // --------------------------------------
     // AI CEVABI ÜRET
     // --------------------------------------
+    // Not: prompt değişkeni yapınıza göre metni temsil ediyorsa onu, yoksa text değişkenini kullanın.
     const aiResponse = await callWpGemini(text);
 
     if (!aiResponse) {
@@ -2921,7 +2922,7 @@ app.post("/telegram-webhook", async (req, res) => {
       if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
       const session = wpSessions[cleanTo];
 
-      // 🔥 YENİ: EĞER TEMSİLCİ MANUEL OLARAK ARAYA GİRİYORSA
+      // 🔥 EĞER TEMSİLCİ MANUEL OLARAK ARAYA GİRİYORSA
       if (!session.humanOverride) {
         session.humanOverride = true;
         session.manualTakeover = true; // Sınırsız süre için bayrak eklendi
@@ -2962,17 +2963,9 @@ app.post("/telegram-webhook", async (req, res) => {
       wpSessions[cleanTo].manualTakeover = false;
       wpSessions[cleanTo].warning5MinSent = false;
 
-      // DİL BAZLI KAPANIŞ MESAJI
-      let closeMessage =
-        "🔒 Bu sohbet oturumu sona ermiştir.\n\nBaşka sorularınız varsa veya ek yardıma ihtiyacınız olursa, lütfen istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin. Canlı Destek Ekibimiz size yardımcı olmaktan mutluluk duyacaktır.";
-
-      if (wpSessions[cleanTo]?.lang === "en") {
-        closeMessage =
-          "🔒 This chat session has ended.\n\nIf you have further questions or need additional assistance, please feel free to reach out again anytime. Our Live Support Team will be happy to assist you.";
-      } else if (wpSessions[cleanTo]?.lang === "ar") {
-        closeMessage =
-          "🔒 انتهت جلسة الدردشة هذه.\n\nإذا كانت لديك أسئلة أخرى أو احتجت إلى مساعدة إضافية، فلا تتردد في الاتصال بنا مرة أخرى في أي وقت. سيسعد فريق الدعم المباشر لدينا بمساعدتك.";
-      }
+      let closeMessage = "🔒 Bu sohbet oturumu sona ermiştir.\n\nBaşka sorularınız varsa veya ek yardıma ihtiyacınız olursa, lütfen istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin. Canlı Destek Ekibimiz size yardımcı olmaktan mutluluk duyacaktır.";
+      if (wpSessions[cleanTo]?.lang === "en") closeMessage = "🔒 This chat session has ended.\n\nIf you have further questions or need additional assistance, please feel free to reach out again anytime. Our Live Support Team will be happy to assist you.";
+      if (wpSessions[cleanTo]?.lang === "ar") closeMessage = "🔒 انتهت جلسة الدردشة هذه.\n\nإذا كانت لديك أسئلة أخرى أو احتجت إلى مساعدة إضافية، فلا تتردد في الاتصال بنا مرة أخرى في أي وقت. سيسعد فريق الدعم المباشر لدينا بمساعدتك.";
 
       await sendMessage(cleanTo, closeMessage);
       await sendMessageToTelegram(`Canlı destek kapatıldı → +${cleanTo}`);
@@ -3015,11 +3008,8 @@ cron.schedule("* * * * *", async () => {
         const lastTopic = topics.length ? topics[topics.length - 1] : "general";
         const lang = typeof s.lang === "string" ? s.lang : "en";
 
-        // 🔥 CANLI DESTEK UYARI VE KAPANIŞ KONTROLÜ
         if (s.humanOverride) {
-          if (s.manualTakeover) {
-            continue; // Yönetici manuel girdiyse sınırsız sürelidir
-          }
+          if (s.manualTakeover) continue; 
 
           if (diffMinutesLast >= 10) {
             s.humanOverride = false;
@@ -3039,13 +3029,9 @@ cron.schedule("* * * * *", async () => {
           } else if (diffMinutesLast < 5 && s.warning5MinSent) {
             s.warning5MinSent = false;
           }
-          
           continue; 
         }
 
-        // ==========================================
-        // NORMAL (BOT) FOLLOW-UP İŞLEMLERİ
-        // ==========================================
         if (diffMinutesLast >= 10 && !s.pingSentOnce) {
           const pingMessage = getPingMessage(lang, lastTopic);
           if (pingMessage) {
@@ -3063,28 +3049,24 @@ cron.schedule("* * * * *", async () => {
           s.followUpStage = 1; 
           continue;
         }
-        
         if (s.followUpStage === 1 && diffHoursLast >= 24) {
           const msg = getFollowUpMessage(lang, lastTopic, "24h");
           if (msg) { try { await sendMessage(user, msg); } catch {} }
           s.followUpStage = 2; 
           continue;
         }
-        
         if (s.followUpStage === 2 && diffHoursLast >= 48) {
           const msg = getFollowUpMessage(lang, lastTopic, "48h");
           if (msg) { try { await sendMessage(user, msg); } catch {} }
           s.followUpStage = 3; 
           continue;
         }
-        
         if (s.followUpStage === 3 && diffHoursLast >= 72) {
           const msg = getFollowUpMessage(lang, lastTopic, "72h");
           if (msg) { try { await sendMessage(user, msg); } catch {} }
           s.followUpStage = 4; 
           continue;
         }
-        
         if (s.followUpStage === 4 && diffHoursLast >= 168) {
           const msg = getFollowUpMessage(lang, lastTopic, "7d");
           if (msg) { try { await sendMessage(user, msg); } catch {} }
