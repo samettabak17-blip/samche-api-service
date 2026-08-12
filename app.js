@@ -1933,7 +1933,7 @@ ${historyText}
 Kullanıcı mesajı:
 ${text}
 `;
-    }
+    
     } else if (lang === "en") {
       prompt = `You are the Senior AI Consultant of SamChe Company LLC, based in Dubai.  
 Your expertise includes:  
