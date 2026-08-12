@@ -934,7 +934,7 @@ If the user already provided sector info, NEVER ask again.`
 });
 
 // ============================================================================
-// C= WHATSAPP CHATBOT* WHATSAPP WEBHOOK (POST) - "TEK TIK" (TIMEOUT) ÇÖZÜMÜ İLE DÜZENLENDİ
+// WHATSAPP WEBHOOK (POST) - "TEK TIK" (TIMEOUT) ÇÖZÜMÜ İLE DÜZENLENDİ
 // ============================================================================
 app.post("/webhook", (req, res) => {
   // 🔥 HAYATİ DÜZELTME: Meta'nın (WhatsApp) 20 saniyelik timeout sınırını aşmak için
@@ -998,12 +998,6 @@ app.post("/webhook", (req, res) => {
       }
       
       const session = wpSessions[cleanFrom];
-
-      // 🔥 CANLI DESTEK AÇIKSA EN ÜSTTE İŞLEMİ BİTİR (BURAYA YAPIŞTIRACAKSINIZ)
-      if (session.humanOverride) {
-        session.lastMessageTime = Date.now();
-        return;
-      }
 
       // Gelen içerik desteklenmiyorsa
       const isInvalid = !text || text === "" || message.type === "audio" || message.type === "voice" || message.type === "video" || message.type === "sticker";
@@ -1888,7 +1882,7 @@ Satış otomasyon sistemleri
 
 BİRLEŞİK ARAP EMİRLİKLERİ İŞ KURMA BİLGİ TABANI VE YETKİ ALANI KURALLARI:
 1. ANA KARA (DET / Dubai Ekonomi ve Turizm):
-- Zorunlu Ejari (fiziksel ofis veya perakende alanı kiralama).
+- Zorunlu Ejari(Ejarinin anlamını mutlaka kullanıcıya ana kara şirkette açıkla ve ejarinin kurulum paketi içinde olduğunu ve  sadece adres çözümü için sunulduğunu açıkla sonrasında perakende alanı ya da fiziksel ofis kiralaması zorunludur sektörüne göre) 
 - SADECE ANA KARADA EV SAHİPLİĞİ YAPABİLİR (Serbest Bölgelerde kesinlikle mümkün değildir):
 * Restoranlar, Kafeler, Catering ve Gıda İşletmeleri (Belediye ve Gıda Güvenliği onaylı)
 * Fiziksel Perakende Mağazaları (Moda, Elektronik, Bakkal, Süpermarketler)
@@ -1905,8 +1899,8 @@ BİRLEŞİK ARAP EMİRLİKLERİ İŞ KURMA BİLGİ TABANI VE YETKİ ALANI KURALL
 
 2. SERBEST BÖLGELER (Denizaşırı/Kara Bölgesi Yetki Alanı Özellikleri):
 - Sanal Ofis / Esnek Masa seçenekleri mevcuttur.
-- Kurumsal Vergi kaydı zorunludur (lisans sonrası kayıt ücreti: 1.300 AED).
-- Standart Danışmanlık Ücreti: Serbest Bölge paketleri genelinde 5.000 AED.
+- Kurumlar Vergisi kaydı zorunludur. (Şirket kurulum paketlerine dahil değildir. Talep edilmesi halinde lisans ve vize işlemlerinin ardından 1.300 AED karşılığında SamChe Company LLC tarafından kayıt ve başvuru süreci yürütülür. Kayıt yükümlülüğünün ilgili süre içerisinde yerine getirilmemesi halinde FTA tarafından 10.000 AED idari ceza uygulanır.)
+- Standart Danışmanlık Ücreti: Serbest Bölge paketleri genelinde 5.500 AED.
 - Yetki Alanına Özgü Ayrıntılar:
 * Meydan Serbest Bölgesi (Dubai): Premium yetki alanı. Yazılım, Yapay Zeka, E-Ticaret, Medya, Kripto/Web3 Danışmanlığı, VIP Saç/Cilt Estetiği vb alanlarını kapsar.
 - ÖZEL ALTIN ​​TİCARET LİSANSI: Altın ve Değerli Metaller Ticaret paketi toplam 40.000 AED'dir (1 vize ve kurulum dahil).
@@ -2691,21 +2685,14 @@ app.post("/telegram-webhook", (req, res) => {
           return;
         }
 
-        if (!wpSessions[cleanTo]) {
-        wpSessions[cleanTo] = {
-          lang: "tr", history: [], lastMessageTime: Date.now(), followUpStage: 0,
-          intentScore: 0, topics: [], profile: { name: null, country: null, budget: null, interest: null },
-          firstMessageTime: Date.now(), pingSentOnce: false, humanOverride: false,
-          manualTakeover: false, lastUserText: ""
-        };
-      }
-      const session = wpSessions[cleanTo];
+        if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
+        const session = wpSessions[cleanTo];
 
-      if (!session.humanOverride) {
-        session.humanOverride = true;
-        session.manualTakeover = true;
+        if (!session.humanOverride) {
+          session.humanOverride = true;
+          session.manualTakeover = true;
 
-          let takeoverMsg =`DİKKAT⚠️ Canlı temsilcimiz bu konuşmayı devralmıştır. Lütfen sohbete bağlanana kadar beklemede kalın ⌛️ \n\n ⚠️Canlı temsilci bu konuşmayı sonlandırmadığı sürece yapay zeka danışmanı devre dışıdır.🔒`;
+          let takeoverMsg = `Canlı temsilcimiz konuşmayı devralmıştır. Lütfen beklemede kalın...\n\nSamChe AI olarak canlı temsilci konuşmanızı sonlandırmadığı sürece AI devre dışıdır.`;
           if (session.lang === "en") takeoverMsg = `Our live representative has taken over the conversation. Please stay on hold...\n\nAs SamChe AI, the AI is deactivated until the live representative ends your conversation.`;
           if (session.lang === "ar") takeoverMsg = `تولى ممثلنا المباشر المحادثة. يرجى البقاء على الخط...\n\nبصفتي SamChe AI، تم إلغاء تنشيط الذكاء الاصطناعي حتى ينهي الممثل المباشر محادثتك.`;
 
