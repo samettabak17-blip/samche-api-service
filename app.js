@@ -44,8 +44,27 @@ const parseLinksToHTML = (text) => {
 };
 
 // ============================================================================
-// 2. SAMCHEGUIDE BOTU VERİLERİ (GEMINI 3 FLASH) - OPTİMİZE EDİLDİ
+// 🔥 ORTAK KULLANICI KİMLİĞİ BULUCU (IP & Header)
 // ============================================================================
+function getUserId(req) {
+  const ip = req.headers["x-forwarded-for"]?.split(',')[0].trim() || req.ip;
+  return req.headers["x-user-id"] || req.headers["session-id"] || ip || "default_user";
+}
+
+// ============================================================================
+// 2. SAMCHEGUIDE BOTU VERİLERİ VE HAFIZASI (GEMINI 3 FLASH)
+// ============================================================================
+const guideMemoryStore = {};
+const MAX_GUIDE_MEMORY = 10;
+
+function addGuideMemory(userId, role, text) {
+  if (!guideMemoryStore[userId]) guideMemoryStore[userId] = [];
+  guideMemoryStore[userId].push({ role, parts: [{ text }] });
+  if (guideMemoryStore[userId].length > MAX_GUIDE_MEMORY) {
+    guideMemoryStore[userId].splice(0, guideMemoryStore[userId].length - MAX_GUIDE_MEMORY);
+  }
+}
+
 const sgCorporateShortReplyMap = {
   "merhaba": "Merhaba, size nasıl yardımcı olabilirim?",
   "selam": "Merhaba, size nasıl yardımcı olabilirim?",
@@ -182,10 +201,6 @@ Form Links (Use ONLY when an official proposal is requested):
 // ============================================================================
 const webMemoryStore = {};
 const MAX_WEB_MEMORY = 10;
-
-function getUserId(req) {
-  return req.headers["x-user-id"] || req.ip || "default_user";
-}
 
 function addWebMemory(userId, role, content) {
   if (!webMemoryStore[userId]) webMemoryStore[userId] = [];
@@ -485,14 +500,18 @@ function getFollowUpMessage(lang, topic, stage) {
   return topicSet[lang] || topicSet["en"];
 }
 
-
 // ============================================================================
 // 5. ROUTING (ENDPOINT'LER)
 // ============================================================================
 
 // ----------------------------------------------------------------------------
-// A) SAMCHEGUIDE BOT (GEMINI) - /plan ve /chat
+// A) SAMCHEGUIDE BOT (GEMINI) - /plan, /chat ve /chat/history (YENİ EKLENDİ)
 // ----------------------------------------------------------------------------
+app.get("/chat/history", (req, res) => {
+  const userId = getUserId(req);
+  res.json(guideMemoryStore[userId] || []);
+});
+
 app.post("/plan", async (req, res) => {
   try {
     const { sector } = req.body;
@@ -534,7 +553,9 @@ app.post("/chat", async (req, res) => {
     const cleanText = String(text).trim();
     if (!cleanText) return res.status(400).json({ error: "Message text cannot be empty." });
 
+    const userId = getUserId(req);
     const lowerCleanText = cleanText.toLowerCase();
+
     if (sgCorporateShortReplyMap[lowerCleanText]) {
       const replyText = sgCorporateShortReplyMap[lowerCleanText];
       return res.json({
@@ -542,10 +563,22 @@ app.post("/chat", async (req, res) => {
       });
     }
 
+    addGuideMemory(userId, "user", cleanText);
+    const history = guideMemoryStore[userId] || [];
+
+    // Geçmişi harmanlayarak gönderiyoruz
+    const contents = history.map((msg, index) => {
+      if (index === history.length - 1 && msg.role === "user") {
+        return {
+          role: "user",
+          parts: [{ text: `User message: "${cleanText}"\nNote: Reply directly without introductory greetings. Automatically detect the user's language and respond in THAT SAME language.` }]
+        };
+      }
+      return msg;
+    });
+
     const payload = {
-      contents: [{
-        parts: [{ text: `User message: "${cleanText}"\nNote: Reply directly without introductory greetings. Automatically detect the user's language and respond in THAT SAME language.` }]
-      }],
+      contents: contents,
       systemInstruction: { parts: [{ text: SAMCHEGUIDE_SYSTEM_PROMPT }] }
     };
 
@@ -559,6 +592,7 @@ app.post("/chat", async (req, res) => {
     if (data.candidates && data.candidates[0]?.content?.parts?.[0]) {
       let originalText = data.candidates[0].content.parts[0].text;
       data.candidates[0].content.parts[0].text = parseLinksToHTML(originalText);
+      addGuideMemory(userId, "model", originalText);
     }
     return res.json(data);
   } catch (err) {
@@ -568,8 +602,13 @@ app.post("/chat", async (req, res) => {
 });
 
 // ----------------------------------------------------------------------------
-// B) WEB CHATBOT (OPENAI) - /api/chat
+// B) WEB CHATBOT (OPENAI) - /api/chat ve /api/chat/history (YENİ EKLENDİ)
 // ----------------------------------------------------------------------------
+app.get("/api/chat/history", (req, res) => {
+  const userId = getUserId(req);
+  res.json(webMemoryStore[userId] || []);
+});
+
 app.post("/api/chat", async (req, res) => {
   try {
     const userMessage = req.body.message;
@@ -933,8 +972,22 @@ If the user already provided sector info, NEVER ask again.`
   }
 });
 
+// ----------------------------------------------------------------------------
+// C) WHATSAPP BOT (GEMINI 2.5 PRO) - /webhook ve /telegram-webhook
+// ----------------------------------------------------------------------------
+app.get("/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (mode === "subscribe" && token === process.env.WHATSAPP_VERIFY_TOKEN) {
+    return res.status(200).send(challenge);
+  }
+  return res.sendStatus(403);
+});
+
 // ============================================================================
-// WHATSAPP WEBHOOK (POST) - "TEK TIK" (TIMEOUT) ÇÖZÜMÜ İLE DÜZENLENDİ
+// WHATSAPP WEBHOOK (POST) - "TEK TIK" (TIMEOUT) VE KİLİTLENME ÇÖZÜMÜ
 // ============================================================================
 app.post("/webhook", (req, res) => {
   // 🔥 HAYATİ DÜZELTME: Meta'nın (WhatsApp) 20 saniyelik timeout sınırını aşmak için
@@ -962,6 +1015,17 @@ app.post("/webhook", (req, res) => {
 
       const from = message.from;
       if (!from) return; 
+
+      // 🔥 MAVİ TIK (OKUNDU) ONAYI - MESAJIN TEK TIKTA KALMASINI ENGELLER
+      try {
+        await axios.post(
+          `https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
+          { messaging_product: "whatsapp", status: "read", message_id: wpMessageId },
+          { headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, "Content-Type": "application/json" } }
+        );
+      } catch (e) {
+        console.error("Read status error:", e.response?.data || e.message);
+      }
 
       const cleanFrom = from.replace("+", "");
       let text = "";
@@ -998,6 +1062,28 @@ app.post("/webhook", (req, res) => {
       }
       
       const session = wpSessions[cleanFrom];
+      const lower = text.toLowerCase();
+
+      // ====================================================================
+      // 🔥 CANLI DESTEK AÇIKSA BOT BURADA DURUR VE SADECE DİNLER 🔥
+      // ====================================================================
+      if (session.humanOverride) {
+        // Müşteri "bot" veya "kapat" yazıp canlı desteği sonlandırmak isterse:
+        if (lower === "/end" || lower === "/bot" || lower === "bot" || lower === "kapat") {
+          session.humanOverride = false;
+          session.manualTakeover = false;
+          let closeMsg = `🔒 Canlı destek oturumu sona ermiştir.\n\nYapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına 'canlı destek' yazmanız yeterlidir.\nEkibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.`;
+          if (session.lang === "en") closeMsg = `🔒 This chat session has ended.\n\nYou may continue chatting with our AI assistant, or type 'live support' anytime to reconnect. Our team will be happy to assist you anytime.`;
+          if (session.lang === "ar") closeMsg = `🔒 انتهت جلسة الدردشة هذه.\n\nيمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي أو كتابة 'دعم مباشر' للاتصال بممثل.`;
+          await sendMessage(cleanFrom, closeMsg);
+          await sendMessageToTelegram(`Canlı destek kapatıldı → +${cleanFrom}`);
+          return;
+        }
+
+        session.lastMessageTime = Date.now();
+        return; // Botu susturuyoruz, hiçbir işlem (dil tespiti, AI vb.) yapmadan çıkıyor.
+      }
+      // ====================================================================
 
       // Gelen içerik desteklenmiyorsa
       const isInvalid = !text || text === "" || message.type === "audio" || message.type === "voice" || message.type === "video" || message.type === "sticker";
@@ -1036,7 +1122,6 @@ app.post("/webhook", (req, res) => {
       }
 
       const lang = session.lang;
-      const lower = text.toLowerCase();
 
       // --------------------------------------
       // FOLLOW-UP RESETLERİ
@@ -1076,28 +1161,6 @@ app.post("/webhook", (req, res) => {
         const alertMsg = `🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``;
         await sendMessageToTelegram(alertMsg);
 
-        return;
-      }
-
-      // --------------------------------------
-      // CANLI DESTEK KAPATMA /end
-      // --------------------------------------
-      if (lower === "/end" || lower === "/bot" || lower === "bot" || lower === "kapat") {
-        session.humanOverride = false;
-        session.manualTakeover = false;
-        
-        let closeMsg = `🔒 Canlı destek oturumu sona ermiştir.\n\nYapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına 'canlı destek' yazmanız yeterlidir.\nEkibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.`;
-        if (lang === "en") closeMsg = `🔒 This chat session has ended.\n\nYou may continue chatting with our AI assistant, or type 'live support' anytime to reconnect. Our team will be happy to assist you anytime.`;
-        if (lang === "ar") closeMsg = `🔒 انتهت جلسة الدردشة هذه.\n\nيمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي أو كتابة 'دعم مباشر' للاتصال بممثل.`;
-
-        await sendMessage(cleanFrom, closeMsg);
-        return;
-      }
-
-      // --------------------------------------
-      // CANLI DESTEK AÇIKSA BOT SUSAR
-      // --------------------------------------
-      if (session.humanOverride) {
         return;
       }
 
@@ -2685,7 +2748,14 @@ app.post("/telegram-webhook", (req, res) => {
           return;
         }
 
-        if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
+        if (!wpSessions[cleanTo]) {
+          wpSessions[cleanTo] = {
+            lang: "tr", history: [], lastMessageTime: Date.now(), followUpStage: 0,
+            intentScore: 0, topics: [], profile: { name: null, country: null, budget: null, interest: null },
+            firstMessageTime: Date.now(), pingSentOnce: false, humanOverride: false,
+            manualTakeover: false, lastUserText: ""
+          };
+        }
         const session = wpSessions[cleanTo];
 
         if (!session.humanOverride) {
