@@ -963,15 +963,6 @@ app.post("/webhook", (req, res) => {
       const from = message.from;
       if (!from) return; 
 
-      // 🔥 MAVİ TIK (OKUNDU) ONAYI - MESAJIN TEK TIKTA KALMASINI ENGELLER
-      try {
-        await axios.post(
-          `https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
-          { messaging_product: "whatsapp", status: "read", message_id: wpMessageId },
-          { headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, "Content-Type": "application/json" } }
-        );
-      } catch (e) {}
-
       const cleanFrom = from.replace("+", "");
       let text = "";
 
