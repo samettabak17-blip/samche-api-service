@@ -934,212 +934,209 @@ If the user already provided sector info, NEVER ask again.`
 });
 
 // ============================================================================
-// WHATSAPP WEBHOOK (POST) - "TEK TIK" (TIMEOUT) ÇÖZÜMÜ İLE DÜZENLENDİ
+// C= WHATSAPP CHATBOT* WHATSAPP WEBHOOK (POST) - "TEK TIK" (TIMEOUT) ÇÖZÜMÜ İLE DÜZENLENDİ
 // ============================================================================
-app.post("/webhook", async (req, res) => {
-  // 🔥 HAYATİ DÜZELTME: Meta'nın (WhatsApp) 20 saniyelik timeout sınırına takılmamak ve 
-  // mesajların "tek tık"ta kalmasını engellemek için anında 200 OK yanıtı dönüyoruz.
-  // İşlemler arka planda yapılmaya devam eder.
+app.post("/webhook", (req, res) => {
+  // 🔥 HAYATİ DÜZELTME: Meta'nın (WhatsApp) 20 saniyelik timeout sınırını aşmak için
+  // anında senkron olarak 200 OK yanıtı dönüyoruz. Bağlantı hemen kapanır.
   res.status(200).send("OK");
 
-  try {
-    const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    if (!message) return; // Zaten 200 gönderdik, sadece fonksiyondan çıkıyoruz.
-
-    // --------------------------------------
-    // WHATSAPP RETRY (TEKRAR) KORUMASI
-    // --------------------------------------
-    const wpMessageId = message.id;
-    if (wpMessageId && processedWpMessages.has(wpMessageId)) {
-      return; 
-    }
-    if (wpMessageId) {
-      processedWpMessages.add(wpMessageId);
-      setTimeout(() => processedWpMessages.delete(wpMessageId), 10 * 60 * 1000); 
-    }
-
-    const from = message.from;
-    // 🔥 GÜVENLİK KALKANI: Numarasız sistem mesajlarında çökmeyi önler
-    if (!from) return; 
-
-    const cleanFrom = from.replace("+", "");
-    let text = "";
-
-    if (message.text?.body) text = message.text.body;
-    else if (message.button?.text) text = message.button.text;
-    else if (message.interactive?.button_reply?.title) text = message.interactive.button_reply.title;
-    else if (message.interactive?.list_reply?.title) text = message.interactive.list_reply.title;
-    else if (message.image?.caption) text = message.image.caption;
-    else if (message.document?.caption) text = message.document.caption;
-
-    text = (text || "").trim();
-
-    // --------------------------------------
-    // TELEGRAMA BİLDİRİM FORWARD ET
-    // --------------------------------------
+  // 🔥 ARKA PLAN MİMARİSİ: Ağır yapay zeka işlemleri arka planda asenkron çalışır. 
+  // Böylece mesajlar anında "çift tık" olur, takılı kalmaz.
+  setImmediate(async () => {
     try {
-      await sendMessageToTelegram(`WhatsApp → +${cleanFrom}: ${text}`);
-    } catch (err) {
-      console.error("[TELEGRAM FORWARD ERROR]:", err);
-    }
+      const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+      if (!message) return; 
 
-    // --------------------------------------
-    // SESSION OLUŞTURMA VE BAŞLANGIÇ
-    // --------------------------------------
-    if (!wpSessions[cleanFrom]) {
-      wpSessions[cleanFrom] = {
-        lang: null, history: [], lastMessageTime: Date.now(), followUpStage: 0,
-        intentScore: 0, topics: [],
-        profile: { name: null, country: null, budget: null, interest: null },
-        firstMessageTime: Date.now(), pingSentOnce: false, humanOverride: false,
-        manualTakeover: false, lastUserText: ""
-      };
-    }
-    
-    const session = wpSessions[cleanFrom];
-
-    // Gelen içerik desteklenmiyorsa
-    const isInvalid = !text || text === "" || message.type === "audio" || message.type === "voice" || message.type === "video" || message.type === "sticker";
-    if (isInvalid) {
-      if (!session.humanOverride) {
-        await sendMessage(cleanFrom, "Gönderdiğiniz içeriği işleyemiyorum. Lütfen mesajınızı yazılı olarak iletin.");
+      // --------------------------------------
+      // WHATSAPP RETRY (TEKRAR) KORUMASI
+      // --------------------------------------
+      const wpMessageId = message.id;
+      if (wpMessageId && processedWpMessages.has(wpMessageId)) {
+        return; 
       }
-      return;
-    }
-
-    // 🔥 KULLANICININ AYNI MESAJI ÜST ÜSTE GÖNDERMESİNİ (SPAM) ENGELLEME
-    if (session.lastUserText === text) {
-      return; 
-    }
-    session.lastUserText = text;
-
-    // --------------------------------------
-    // DİL TESPİTİ VE İLK MESAJLAR
-    // --------------------------------------
-    if (!session.lang) {
-      const smartLangMap = { "türkçe": "tr", "turkce": "tr", "tr": "tr", "turkish": "tr", "english": "en", "ingilizce": "en", "en": "en", "arabic": "ar", "arapça": "ar", "arapca": "ar", "ar": "ar", "arabian": "ar" };
-      const lowerTest = text.toLowerCase();
-      const detectedLang = smartLangMap[lowerTest] || (text === "1" ? "en" : text === "2" ? "tr" : text === "3" ? "ar" : null);
-
-      if (detectedLang) {
-        session.lang = detectedLang;
-        await sendMessage(cleanFrom, introAfterLang[session.lang]);
-        return;
-      } else {
-        await sendMessage(
-          cleanFrom,
-          "Welcome to SamChe Company LLC.\nSamChe Company LLC'ye hoş geldiniz.\nمرحبًا بكم.\n\nPlease select your language:\n1️⃣ English\n2️⃣ Türkçe\n3️⃣ العربية\n\nLütfen dil seçiminizi yapınız:\n1️⃣ İngilizce\n2️⃣ Türkçe\n3️⃣ Arapça"
-        );
-        return;
+      if (wpMessageId) {
+        processedWpMessages.add(wpMessageId);
+        setTimeout(() => processedWpMessages.delete(wpMessageId), 10 * 60 * 1000); 
       }
-    }
 
-    const lang = session.lang;
-    const lower = text.toLowerCase();
+      const from = message.from;
+      if (!from) return; 
 
-    // --------------------------------------
-    // FOLLOW-UP RESETLERİ
-    // --------------------------------------
-    session.lastMessageTime = Date.now();
-    session.followUpStage = 0;
-    session.pingSentOnce = false;
+      const cleanFrom = from.replace("+", "");
+      let text = "";
 
-    // --------------------------------------
-    // KONUYU AI İLE OTOMATİK TESPİT ET (GEÇMİŞE BAKARAK)
-    // --------------------------------------
-    const historyContext = (session.history || []).slice(-4).map(m => m.text).join(" | ");
-    let topicSummary = await callWpGemini(`
-    Önceki mesajlar: "${historyContext}"
-    Son Kullanıcı Mesajı: "${text}"
-    Müşterinin asıl ilgilendiği konuyu (örneğin: Oturum İzni, Şirket Kurulumu, Vize, Fiyat Bilgisi, Yapay Zeka Çözümleri vb.) TEK KISA BAŞLIK olarak özetle.
-    Eğer son mesajda sadece canlı temsilci istiyorsa, önceki mesajlara bakarak asıl konuyu bul. "Müşteri Temsilcisi Talebi" GİBİ GENEL CEVAPLAR VERME.
-    Sadece konu adı döndür.
-    `);
-    
-    if (!topicSummary) topicSummary = "Genel Destek";
+      if (message.text?.body) text = message.text.body;
+      else if (message.button?.text) text = message.button.text;
+      else if (message.interactive?.button_reply?.title) text = message.interactive.button_reply.title;
+      else if (message.interactive?.list_reply?.title) text = message.interactive.list_reply.title;
+      else if (message.image?.caption) text = message.image.caption;
+      else if (message.document?.caption) text = message.document.caption;
 
-    if (!session.topics) session.topics = [];
-    let currentTopic = topicSummary;
+      text = (text || "").trim();
 
-    // Yapay zeka ile ilgili kelimeler varsa konuyu net şekilde sabitle
-    if (lower.includes("yapay zeka") || lower.includes("ai ") || lower.includes("bot") || lower.includes("otomasyon")) {
-      currentTopic = "Yapay Zeka / Chatbot";
-    }
-    session.topics.push(currentTopic);
+      // --------------------------------------
+      // TELEGRAMA BİLDİRİM FORWARD ET
+      // --------------------------------------
+      try {
+        await sendMessageToTelegram(`WhatsApp → +${cleanFrom}: ${text}`);
+      } catch (err) {
+        console.error("[TELEGRAM FORWARD ERROR]:", err);
+      }
 
-    // --------------------------------------
-    // WHATSAPP MANUEL CANLI DESTEK AÇMA /w
-    // --------------------------------------
-    if (lower === "/w" || lower === "/n" || lower === "canlı destek" || lower === "canli destek" || lower === "live") {
-      session.humanOverride = true;
-      session.manualTakeover = false; // Kullanıcı talep ettiği için 10 dk kuralı işler
-
-      let aktarimMesaji = `Canlı temsilci ile görüşme ilgili talebinizi aldım. *${topicSummary}* konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.`;
-      if (lang === "en") aktarimMesaji = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
-      if (lang === "ar") aktarimMesaji = `لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص موضوع *${topicSummary}*، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.`;
-
-      await sendMessage(cleanFrom, aktarimMesaji);
-
-      const alertMsg = `🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``;
-      await sendMessageToTelegram(alertMsg);
-
-      return;
-    }
-
-    // --------------------------------------
-    // CANLI DESTEK KAPATMA /end
-    // --------------------------------------
-    if (lower === "/end" || lower === "/bot" || lower === "bot" || lower === "kapat") {
-      session.humanOverride = false;
-      session.manualTakeover = false;
+      // --------------------------------------
+      // SESSION OLUŞTURMA VE BAŞLANGIÇ
+      // --------------------------------------
+      if (!wpSessions[cleanFrom]) {
+        wpSessions[cleanFrom] = {
+          lang: null, history: [], lastMessageTime: Date.now(), followUpStage: 0,
+          intentScore: 0, topics: [],
+          profile: { name: null, country: null, budget: null, interest: null },
+          firstMessageTime: Date.now(), pingSentOnce: false, humanOverride: false,
+          manualTakeover: false, lastUserText: ""
+        };
+      }
       
-      let closeMsg = `🔒 Canlı destek oturumu sona ermiştir.\n\nYapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına 'canlı destek' yazmanız yeterlidir.\nEkibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.`;
-      if (lang === "en") closeMsg = `🔒 This chat session has ended.\n\nYou may continue chatting with our AI assistant, or type 'live support' anytime to reconnect. Our team will be happy to assist you anytime.`;
-      if (lang === "ar") closeMsg = `🔒 انتهت جلسة الدردشة هذه.\n\nيمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي أو كتابة 'دعم مباشر' للاتصال بممثل.`;
+      const session = wpSessions[cleanFrom];
 
-      await sendMessage(cleanFrom, closeMsg);
-      return;
-    }
+      // Gelen içerik desteklenmiyorsa
+      const isInvalid = !text || text === "" || message.type === "audio" || message.type === "voice" || message.type === "video" || message.type === "sticker";
+      if (isInvalid) {
+        if (!session.humanOverride) {
+          await sendMessage(cleanFrom, "Gönderdiğiniz içeriği işleyemiyorum. Lütfen mesajınızı yazılı olarak iletin.");
+        }
+        return;
+      }
 
-    // --------------------------------------
-    // CANLI DESTEK AÇIKSA BOT SUSAR
-    // --------------------------------------
-    if (session.humanOverride) {
-      // (Telegrama forward en üstte yapıldığı için bot sadece return eder)
-      return;
-    }
+      // 🔥 KULLANICININ AYNI MESAJI ÜST ÜSTE GÖNDERMESİNİ (SPAM) ENGELLEME
+      if (session.lastUserText === text) {
+        return; 
+      }
+      session.lastUserText = text;
 
-    // --------------------------------------
-    // KISA CEVAPLAR
-    // --------------------------------------
-    if (wpCorporateShortReplyMap && wpCorporateShortReplyMap[lower]) {
-      await sendMessage(cleanFrom, wpCorporateShortReplyMap[lower][lang]);
-      return;
-    }
-    if (lower.includes("contact") || lower.includes("iletişim") || lower.includes("whatsapp") || lower.includes("call") || lower.includes("telefon")) {
-      if(contactText && contactText[lang]) await sendMessage(cleanFrom, contactText[lang]);
-      return;
-    }
+      // --------------------------------------
+      // DİL TESPİTİ VE İLK MESAJLAR
+      // --------------------------------------
+      if (!session.lang) {
+        const smartLangMap = { "türkçe": "tr", "turkce": "tr", "tr": "tr", "turkish": "tr", "english": "en", "ingilizce": "en", "en": "en", "arabic": "ar", "arapça": "ar", "arapca": "ar", "ar": "ar", "arabian": "ar" };
+        const lowerTest = text.toLowerCase();
+        const detectedLang = smartLangMap[lowerTest] || (text === "1" ? "en" : text === "2" ? "tr" : text === "3" ? "ar" : null);
 
-    // --------------------------------------
-    // TARİHÇE VE SKOR
-    // --------------------------------------
-    session.history.push({ role: "user", text });
-    if (session.history.length > 10) session.history.shift();
+        if (detectedLang) {
+          session.lang = detectedLang;
+          await sendMessage(cleanFrom, introAfterLang[session.lang]);
+          return;
+        } else {
+          await sendMessage(
+            cleanFrom,
+            "Welcome to SamChe Company LLC.\nSamChe Company LLC'ye hoş geldiniz.\nمرحبًا بكم.\n\nPlease select your language:\n1️⃣ English\n2️⃣ Türkçe\n3️⃣ العربية\n\nLütfen dil seçiminizi yapınız:\n1️⃣ İngilizce\n2️⃣ Türkçe\n3️⃣ Arapça"
+          );
+          return;
+        }
+      }
 
-    const topic = detectTopic(text);
-    if (topic !== "other" && !session.topics.includes(topic)) session.topics.push(topic);
-    session.intentScore = calculateIntentScore(text, session.intentScore || 0);
+      const lang = session.lang;
+      const lower = text.toLowerCase();
 
-    const historyText = session.history.map((m) => `${m.role === "user" ? "User" : "Model"}: ${m.text}`).join("\n");
+      // --------------------------------------
+      // FOLLOW-UP RESETLERİ
+      // --------------------------------------
+      session.lastMessageTime = Date.now();
+      session.followUpStage = 0;
+      session.pingSentOnce = false;
 
-    // --------------------------------------
-    // BÜYÜK DİL PROMPTLARI (EKSİKSİZ)
-    // --------------------------------------
-    let prompt = "";
+      // 🔥 PERFORMANS OPTİMİZASYONU: Konu özetini sadece canlı desteğe aktarırken çağırırız.
+      const fetchTopicSummary = async () => {
+        const historyContext = (session.history || []).slice(-4).map(m => m.text).join(" | ");
+        let summary = await callWpGemini(`
+        Önceki mesajlar: "${historyContext}"
+        Son Kullanıcı Mesajı: "${text}"
+        Müşterinin asıl ilgilendiği konuyu (örneğin: Oturum İzni, Şirket Kurulumu, Vize, Fiyat Bilgisi, Yapay Zeka Çözümleri vb.) TEK KISA BAŞLIK olarak özetle.
+        Eğer son mesajda sadece canlı temsilci istiyorsa, önceki mesajlara bakarak asıl konuyu bul. "Müşteri Temsilcisi Talebi" GİBİ GENEL CEVAPLAR VERME.
+        Sadece konu adı döndür.
+        `);
+        return summary || "Genel Destek";
+      };
 
-    if (lang === "tr") {
-      prompt = `SamChe Company LLC’nin kurumsal yapay zekâ danışmanısın. 
+      // --------------------------------------
+      // WHATSAPP MANUEL CANLI DESTEK AÇMA /w
+      // --------------------------------------
+      if (lower === "/w" || lower === "/n" || lower === "canlı destek" || lower === "canli destek" || lower === "live") {
+        session.humanOverride = true;
+        session.manualTakeover = false; // Kullanıcı talep ettiği için 10 dk kuralı işler
+
+        const topicSummary = await fetchTopicSummary();
+
+        let aktarimMesaji = `Canlı temsilci ile görüşme ilgili talebinizi aldım. *${topicSummary}* konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.`;
+        if (lang === "en") aktarimMesaji = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
+        if (lang === "ar") aktarimMesaji = `لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص موضوع *${topicSummary}*، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.`;
+
+        await sendMessage(cleanFrom, aktarimMesaji);
+
+        const alertMsg = `🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``;
+        await sendMessageToTelegram(alertMsg);
+
+        return;
+      }
+
+      // --------------------------------------
+      // CANLI DESTEK KAPATMA /end
+      // --------------------------------------
+      if (lower === "/end" || lower === "/bot" || lower === "bot" || lower === "kapat") {
+        session.humanOverride = false;
+        session.manualTakeover = false;
+        
+        let closeMsg = `🔒 Canlı destek oturumu sona ermiştir.\n\nYapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına 'canlı destek' yazmanız yeterlidir.\nEkibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.`;
+        if (lang === "en") closeMsg = `🔒 This chat session has ended.\n\nYou may continue chatting with our AI assistant, or type 'live support' anytime to reconnect. Our team will be happy to assist you anytime.`;
+        if (lang === "ar") closeMsg = `🔒 انتهت جلسة الدردشة هذه.\n\nيمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي أو كتابة 'دعم مباشر' للاتصال بممثل.`;
+
+        await sendMessage(cleanFrom, closeMsg);
+        return;
+      }
+
+      // --------------------------------------
+      // CANLI DESTEK AÇIKSA BOT SUSAR
+      // --------------------------------------
+      if (session.humanOverride) {
+        return;
+      }
+
+      // --------------------------------------
+      // KISA CEVAPLAR
+      // --------------------------------------
+      if (wpCorporateShortReplyMap && wpCorporateShortReplyMap[lower]) {
+        await sendMessage(cleanFrom, wpCorporateShortReplyMap[lower][lang]);
+        return;
+      }
+      if (lower.includes("contact") || lower.includes("iletişim") || lower.includes("whatsapp") || lower.includes("call") || lower.includes("telefon")) {
+        if(contactText && contactText[lang]) await sendMessage(cleanFrom, contactText[lang]);
+        return;
+      }
+
+      // --------------------------------------
+      // TARİHÇE VE SKOR
+      // --------------------------------------
+      session.history.push({ role: "user", text });
+      if (session.history.length > 10) session.history.shift();
+
+      const topic = detectTopic(text);
+      if (!session.topics) session.topics = [];
+      if (topic !== "other" && !session.topics.includes(topic)) session.topics.push(topic);
+      session.intentScore = calculateIntentScore(text, session.intentScore || 0);
+      
+      if (lower.includes("yapay zeka") || lower.includes("ai ") || lower.includes("bot") || lower.includes("otomasyon")) {
+        if (!session.topics.includes("Yapay Zeka / Chatbot")) session.topics.push("Yapay Zeka / Chatbot");
+      }
+
+      const historyText = session.history.map((m) => `${m.role === "user" ? "User" : "Model"}: ${m.text}`).join("\n");
+
+      // --------------------------------------
+      // BÜYÜK DİL PROMPTLARI (EKSİKSİZ ORİJİNAL)
+      // --------------------------------------
+      let prompt = "";
+
+      if (lang === "tr") {
+        prompt = `SamChe Company LLC’nin kurumsal yapay zekâ danışmanısın. 
 Profesyonel, stratejik, analitik ve yol gösterici cevaplar ver. 
 Gemini’nin hazır kalıplarını, prosedür metinlerini, devlet süreçlerini, klasik açıklamalarını ASLA kullanma. 
 KENDİ KALIPLARINI ÜRETME. 
@@ -1918,8 +1915,8 @@ ${historyText}
 Kullanıcı mesajı:
 ${text}
 `;
-    } else if (lang === "en") {
-      prompt = `You are the Senior AI Consultant of SamChe Company LLC, based in Dubai.  
+      } else if (lang === "en") {
+        prompt = `You are the Senior AI Consultant of SamChe Company LLC, based in Dubai.  
 Your expertise includes:  
 • Private AI systems  
 • Custom AI chatbots for websites and WhatsApp  
@@ -2229,8 +2226,8 @@ ${historyText}
 User message:
 ${text}
 `;
-    } else if (lang === "ar") {
-      prompt = `أنت المستشار الأول للذكاء الاصطناعي في شركة SamChe Company LLC ومقرها دبي.
+      } else if (lang === "ar") {
+        prompt = `أنت المستشار الأول للذكاء الاصطناعي في شركة SamChe Company LLC ومقرها دبي.
 تشمل خبراتك:
 • أنظمة الذكاء الاصطناعي الخاصة
 • روبوتات الدردشة المخصصة للمواقع الإلكترونية وواتساب
@@ -2584,160 +2581,165 @@ ${historyText}
 رسالة المستخدم:
 ${text}
 `;
+      }
+
+      // --------------------------------------
+      // YAPAY ZEKA API ÇAĞRISI
+      // --------------------------------------
+      const aiResponse = await callWpGemini(prompt);
+
+      if (!aiResponse) {
+        await sendMessage(cleanFrom, corporateFallback(session.lang || "en"));
+        return; 
+      }
+
+      const lowerAi = aiResponse.toLowerCase();
+
+      // --------------------------------------
+      // AI → CANLI DESTEK ÖNERİYOR MU?
+      // --------------------------------------
+      const needsHuman =
+        lowerAi.includes("canlı destek") ||
+        lowerAi.includes("canli destek") ||
+        lowerAi.includes("müşteri temsilci") ||
+        lowerAi.includes("musteri temsilci") ||
+        lowerAi.includes("live support") ||
+        lowerAi.includes("human_agent") ||
+        lowerAi.includes("transfer_to_human");
+
+      // --------------------------------------
+      // NORMAL CEVAP VEYA AKTARIM İŞLEMİ
+      // --------------------------------------
+      if (!needsHuman) {
+        session.history.push({ role: "assistant", text: aiResponse });
+        await sendMessage(cleanFrom, aiResponse);
+        return;
+      } else {
+        const topicSummary = await fetchTopicSummary();
+
+        let aiAktarimMesaji = `Canlı temsilci ile görüşme ilgili talebinizi aldım. *${topicSummary}* konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.`;
+        if (lang === "en") aiAktarimMesaji = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
+        if (lang === "ar") aiAktarimMesaji = `لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص موضوع *${topicSummary}*، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.`;
+
+        await sendMessage(cleanFrom, aiAktarimMesaji);
+
+        session.humanOverride = true;
+        session.manualTakeover = false; 
+        session.lastMessageTime = Date.now();
+
+        const alertMsgAi = `🚨 CANLI TEMSİLCİ TALEBİ (Yapay Zeka Yönlendirdi)!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``;
+        await sendMessageToTelegram(alertMsgAi);
+
+        return;
+      }
+
+    } catch (error) {
+      console.error("WhatsApp webhook error:", error);
     }
-
-    // --------------------------------------
-    // YAPAY ZEKA API ÇAĞRISI
-    // --------------------------------------
-    const aiResponse = await callWpGemini(prompt);
-
-    if (!aiResponse) {
-      await sendMessage(cleanFrom, corporateFallback(session.lang || "en"));
-      return; 
-    }
-
-    const lowerAi = aiResponse.toLowerCase();
-
-    // --------------------------------------
-    // AI → CANLI DESTEK ÖNERİYOR MU?
-    // --------------------------------------
-    const needsHuman =
-      lowerAi.includes("canlı destek") ||
-      lowerAi.includes("canli destek") ||
-      lowerAi.includes("müşteri temsilci") ||
-      lowerAi.includes("musteri temsilci") ||
-      lowerAi.includes("live support") ||
-      lowerAi.includes("human_agent") ||
-      lowerAi.includes("transfer_to_human");
-
-    // --------------------------------------
-    // NORMAL CEVAP VEYA AKTARIM İŞLEMİ
-    // --------------------------------------
-    if (!needsHuman) {
-      session.history.push({ role: "assistant", text: aiResponse });
-      await sendMessage(cleanFrom, aiResponse);
-      return;
-    } else {
-      let aiAktarimMesaji = `Canlı temsilci ile görüşme ilgili talebinizi aldım. *${topicSummary}* konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.`;
-      if (lang === "en") aiAktarimMesaji = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
-      if (lang === "ar") aiAktarimMesaji = `لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص موضوع *${topicSummary}*، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.`;
-
-      await sendMessage(cleanFrom, aiAktarimMesaji);
-
-      session.humanOverride = true;
-      session.manualTakeover = false; 
-      session.lastMessageTime = Date.now();
-
-      const alertMsgAi = `🚨 CANLI TEMSİLCİ TALEBİ (Yapay Zeka Yönlendirdi)!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``;
-      await sendMessageToTelegram(alertMsgAi);
-
-      return;
-    }
-
-  } catch (error) {
-    console.error("WhatsApp webhook error:", error);
-  }
+  }); // setImmediate kapanışı
 }); // WHATSAPP WEBHOOK KAPANIŞI
 
 // ============================================================================
 // TELEGRAM WEBHOOK — NORMAL MESAJ + CANLI DESTEK
 // ============================================================================
-app.post("/telegram-webhook", async (req, res) => {
+app.post("/telegram-webhook", (req, res) => {
   // Telegram Timeout'unu Engellemek İçin Anında Dönüş Yapıyoruz
   res.status(200).send("OK");
 
-  try {
-    const updateId = req.body?.update_id;
-    if (updateId && processedTgUpdates.has(updateId)) {
-      return; 
-    }
-    if (updateId) {
-      processedTgUpdates.add(updateId);
-      setTimeout(() => processedTgUpdates.delete(updateId), 10 * 60 * 1000); 
-    }
+  setImmediate(async () => {
+    try {
+      const updateId = req.body?.update_id;
+      if (updateId && processedTgUpdates.has(updateId)) {
+        return; 
+      }
+      if (updateId) {
+        processedTgUpdates.add(updateId);
+        setTimeout(() => processedTgUpdates.delete(updateId), 10 * 60 * 1000); 
+      }
 
-    const msg = req.body.message;
-    if (!msg || !msg.text) return;
+      const msg = req.body.message;
+      if (!msg || !msg.text) return;
 
-    const chatId = msg.chat.id.toString();
-    const text = msg.text.trim();
+      const chatId = msg.chat.id.toString();
+      const text = msg.text.trim();
 
-    if (!text.startsWith("/w ") && !text.startsWith("/end ")) {
-      return;
-    }
-    
-    if (process.env.TELEGRAM_CHAT_ID && chatId !== process.env.TELEGRAM_CHAT_ID) {
-      return;
-    }
-
-    // ------------------------------------------------------
-    // 3) /w KOMUTU → CANLI DESTEK BAŞLAT / MESAJ GÖNDER
-    // ------------------------------------------------------
-    if (text.startsWith("/w ")) {
-      const parts = text.split(" ");
-      const to = parts[1];
-      const cleanTo = to?.replace("+", "");
-      const message = parts.slice(2).join(" ");
-
-      if (!cleanTo || !message) {
-        await sendMessageToTelegram("Format yanlış. Örnek:\n/w +905551112233 Merhaba");
+      if (!text.startsWith("/w ") && !text.startsWith("/end ")) {
+        return;
+      }
+      
+      if (process.env.TELEGRAM_CHAT_ID && chatId !== process.env.TELEGRAM_CHAT_ID) {
         return;
       }
 
-      if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
-      const session = wpSessions[cleanTo];
+      // ------------------------------------------------------
+      // 3) /w KOMUTU → CANLI DESTEK BAŞLAT / MESAJ GÖNDER
+      // ------------------------------------------------------
+      if (text.startsWith("/w ")) {
+        const parts = text.split(" ");
+        const to = parts[1];
+        const cleanTo = to?.replace("+", "");
+        const message = parts.slice(2).join(" ");
 
-      if (!session.humanOverride) {
-        session.humanOverride = true;
-        session.manualTakeover = true;
+        if (!cleanTo || !message) {
+          await sendMessageToTelegram("Format yanlış. Örnek:\n/w +905551112233 Merhaba");
+          return;
+        }
 
-        let takeoverMsg = `DİKKAT⚠️ Canlı temsilcimiz bu konuşmayı devralmıştır. Lütfen sohbete bağlanana kadar beklemede kalın ⌛️ \n\n ⚠️Canlı temsilci bu konuşmayı sonlandırmadığı sürece yapay zeka danışmanı devre dışıdır.🔒`;
-        if (session.lang === "en") takeoverMsg = `Our live representative has taken over the conversation. Please stay on hold...\n\nAs SamChe AI, the AI is deactivated until the live representative ends your conversation.`;
-        if (session.lang === "ar") takeoverMsg = `تولى ممثلنا المباشر المحادثة. يرجى البقاء على الخط...\n\nبصفتي SamChe AI، تم إلغاء تنشيط الذكاء الاصطناعي حتى ينهي الممثل المباشر محادثتك.`;
+        if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
+        const session = wpSessions[cleanTo];
 
-        await sendMessage(cleanTo, takeoverMsg);
-      }
+        if (!session.humanOverride) {
+          session.humanOverride = true;
+          session.manualTakeover = true;
 
-      session.lastMessageTime = Date.now();
-      session.warning5MinSent = false;
+          let takeoverMsg =`DİKKAT⚠️ Canlı temsilcimiz bu konuşmayı devralmıştır. Lütfen sohbete bağlanana kadar beklemede kalın ⌛️ \n\n ⚠️Canlı temsilci bu konuşmayı sonlandırmadığı sürece yapay zeka danışmanı devre dışıdır.🔒`;
+          if (session.lang === "en") takeoverMsg = `Our live representative has taken over the conversation. Please stay on hold...\n\nAs SamChe AI, the AI is deactivated until the live representative ends your conversation.`;
+          if (session.lang === "ar") takeoverMsg = `تولى ممثلنا المباشر المحادثة. يرجى البقاء على الخط...\n\nبصفتي SamChe AI، تم إلغاء تنشيط الذكاء الاصطناعي حتى ينهي الممثل المباشر محادثتك.`;
 
-      await sendMessage(cleanTo, message);
-      await sendMessageToTelegram(`Gönderildi → WhatsApp +${cleanTo}:\n${message}\n\nSohbeti bitirmek için kopyala:\n\`/end +${cleanTo}\``);
-      return;
-    }
+          await sendMessage(cleanTo, takeoverMsg);
+        }
 
-    // ------------------------------------------------------
-    // 4) /end KOMUTU → CANLI DESTEK KAPAT
-    // ------------------------------------------------------
-    if (text.startsWith("/end ")) {
-      const parts = text.split(" ");
-      const to = parts[1];
-      const cleanTo = to?.replace("+", "");
+        session.lastMessageTime = Date.now();
+        session.warning5MinSent = false;
 
-      if (!cleanTo) {
-        await sendMessageToTelegram("Format yanlış. Örnek:\n/end +905551112233");
+        await sendMessage(cleanTo, message);
+        await sendMessageToTelegram(`Gönderildi → WhatsApp +${cleanTo}:\n${message}\n\nSohbeti bitirmek için kopyala:\n\`/end +${cleanTo}\``);
         return;
       }
 
-      if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
+      // ------------------------------------------------------
+      // 4) /end KOMUTU → CANLI DESTEK KAPAT
+      // ------------------------------------------------------
+      if (text.startsWith("/end ")) {
+        const parts = text.split(" ");
+        const to = parts[1];
+        const cleanTo = to?.replace("+", "");
 
-      wpSessions[cleanTo].humanOverride = false;
-      wpSessions[cleanTo].manualTakeover = false;
-      wpSessions[cleanTo].warning5MinSent = false;
+        if (!cleanTo) {
+          await sendMessageToTelegram("Format yanlış. Örnek:\n/end +905551112233");
+          return;
+        }
 
-      let closeMessage = "🔒 Bu sohbet oturumu sona ermiştir.\n\nBaşka sorularınız varsa veya ek yardıma ihtiyacınız olursa, lütfen istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin. Canlı Destek Ekibimiz size yardımcı olmaktan mutluluk duyacaktır.";
-      if (wpSessions[cleanTo]?.lang === "en") closeMessage = "🔒 This chat session has ended.\n\nIf you have further questions or need additional assistance, please feel free to reach out again anytime. Our Live Support Team will be happy to assist you.";
-      if (wpSessions[cleanTo]?.lang === "ar") closeMessage = "🔒 انتهت جلسة الدردشة هذه.\n\nإذا كانت لديك أسئلة أخرى أو احتجت إلى مساعدة إضافية، فلا تتردد في الاتصال بنا مرة أخرى في أي وقت. سيسعد فريق الدعم المباشر لدينا بمساعدتك.";
+        if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
 
-      await sendMessage(cleanTo, closeMessage);
-      await sendMessageToTelegram(`Canlı destek kapatıldı → +${cleanTo}`);
+        wpSessions[cleanTo].humanOverride = false;
+        wpSessions[cleanTo].manualTakeover = false;
+        wpSessions[cleanTo].warning5MinSent = false;
 
-      return;
+        let closeMessage = "🔒 Bu sohbet oturumu sona ermiştir.\n\nBaşka sorularınız varsa veya ek yardıma ihtiyacınız olursa, lütfen istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin. Canlı Destek Ekibimiz size yardımcı olmaktan mutluluk duyacaktır.";
+        if (wpSessions[cleanTo]?.lang === "en") closeMessage = "🔒 This chat session has ended.\n\nIf you have further questions or need additional assistance, please feel free to reach out again anytime. Our Live Support Team will be happy to assist you.";
+        if (wpSessions[cleanTo]?.lang === "ar") closeMessage = "🔒 انتهت جلسة الدردشة هذه.\n\nإذا كانت لديك أسئلة أخرى أو احتجت إلى مساعدة إضافية، فلا تتردد في الاتصال بنا مرة أخرى في أي وقت. سيسعد فريق الدعم المباشر لدينا بمساعدتك.";
+
+        await sendMessage(cleanTo, closeMessage);
+        await sendMessageToTelegram(`Canlı destek kapatıldı → +${cleanTo}`);
+
+        return;
+      }
+
+    } catch (err) {
+      console.error("Telegram webhook error:", err);
     }
-
-  } catch (err) {
-    console.error("Telegram webhook error:", err);
-  }
+  });
 });
 
 // ============================================================================
