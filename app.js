@@ -2774,7 +2774,7 @@ app.post("/webhook", async (req, res) => {
 
       await sendMessage(cleanFrom, aktarimMesaji);
 
-      const alertMsg = `🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``;
+      const alertMsg = `🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için kopyala:\n/w +${cleanFrom} `;
       await sendMessageToTelegram(alertMsg);
 
       return res.sendStatus(200);
@@ -2801,7 +2801,7 @@ app.post("/webhook", async (req, res) => {
     // --------------------------------------
     if (session.humanOverride) {
       try {
-        const forwardMsg = `WhatsApp → +${cleanFrom}:\n${text}\n\nCevaplamak için kopyala:\n\`/w +${cleanFrom} \`\n\nSohbeti bitirmek için kopyala:\n\`/end +${cleanFrom}\``;
+        const forwardMsg = `WhatsApp → +${cleanFrom}:\n${text}\n\nCevaplamak için kopyala:\n/w +${cleanFrom} \n\nSohbeti bitirmek için kopyala:\n/end +${cleanFrom}`;
         await sendMessageToTelegram(forwardMsg);
       } catch (e) {
         console.error("Telegram'a mesaj iletilemedi:", e);
@@ -2812,7 +2812,7 @@ app.post("/webhook", async (req, res) => {
     // --------------------------------------
     // AI CEVABI ÜRET
     // --------------------------------------
-    // Not: prompt değişkeni yapınıza göre metni temsil ediyorsa onu, yoksa text değişkenini kullanın.
+    // Not: Yapınızda text değişkenini mi yoksa prompt değişkenini mi gönderdiğinize dikkat edin.
     const aiResponse = await callWpGemini(text);
 
     if (!aiResponse) {
@@ -2861,7 +2861,7 @@ app.post("/webhook", async (req, res) => {
     session.manualTakeover = false; // Yapay zeka aktardığı için 10 dk kuralı işler
     session.lastMessageTime = Date.now();
 
-    const alertMsgAi = `🚨 CANLI TEMSİLCİ TALEBİ (Yapay Zeka Yönlendirdi)!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``;
+    const alertMsgAi = `🚨 CANLI TEMSİLCİ TALEBİ (Yapay Zeka Yönlendirdi)!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için kopyala:\n/w +${cleanFrom} `;
     await sendMessageToTelegram(alertMsgAi);
 
     return res.sendStatus(200);
@@ -2940,7 +2940,7 @@ app.post("/telegram-webhook", async (req, res) => {
       // SADECE TEMSİLCİ MESAJINI WHATSAPP'A GÖNDER
       await sendMessage(cleanTo, message);
 
-      await sendMessageToTelegram(`Gönderildi → WhatsApp +${cleanTo}:\n${message}\n\nSohbeti bitirmek için kopyala:\n\`/end +${cleanTo}\``);
+      await sendMessageToTelegram(`Gönderildi → WhatsApp +${cleanTo}:\n${message}\n\nSohbeti bitirmek için kopyala:\n/end +${cleanTo}`);
       return res.sendStatus(200);
     }
 
