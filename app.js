@@ -18,8 +18,7 @@ app.use(cors());
 app.use(express.json());
 
 // ============================================================================
-// 🔥 YENİ: TEKRARLANAN MESAJLARI ENGELLEME (RETRY KORUMASI) HAFIZALARI
-// (Dosyanın en üstünde, rotaların dışında güvenle saklanır)
+// 🔥 TEKRARLANAN MESAJLARI ENGELLEME (RETRY KORUMASI) HAFIZALARI
 // ============================================================================
 const processedWpMessages = new Set();
 const processedTgUpdates = new Set();
@@ -45,7 +44,7 @@ const parseLinksToHTML = (text) => {
 };
 
 // ============================================================================
-// 2. SAMCHEGUIDE BOTU VERİLERİ (GEMINI 3 FLASH)
+// 2. SAMCHEGUIDE BOTU VERİLERİ (GEMINI 3 FLASH) - OPTİMİZE EDİLDİ
 // ============================================================================
 const sgCorporateShortReplyMap = {
   "merhaba": "Merhaba, size nasıl yardımcı olabilirim?",
@@ -949,19 +948,24 @@ app.get("/webhook", (req, res) => {
 });
 
 // ============================================================================
-// WHATSAPP WEBHOOK (POST) - TÜM SYNTAX HATALARI DÜZELTİLDİ
+// WHATSAPP WEBHOOK (POST) - "TEK TIK" (TIMEOUT) ÇÖZÜMÜ İLE DÜZENLENDİ
 // ============================================================================
 app.post("/webhook", async (req, res) => {
+  // 🔥 HAYATİ DÜZELTME: Meta'nın (WhatsApp) 20 saniyelik timeout sınırına takılmamak ve 
+  // mesajların "tek tık"ta kalmasını engellemek için anında 200 OK yanıtı dönüyoruz.
+  // İşlemler arka planda yapılmaya devam eder.
+  res.status(200).send("OK");
+
   try {
     const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    if (!message) return res.sendStatus(200);
+    if (!message) return; // Zaten 200 gönderdik, sadece fonksiyondan çıkıyoruz.
 
     // --------------------------------------
-    // WHATSAPP RETRY (TEKRAR) KORUMASI (EN TEPEDE)
+    // WHATSAPP RETRY (TEKRAR) KORUMASI
     // --------------------------------------
     const wpMessageId = message.id;
     if (wpMessageId && processedWpMessages.has(wpMessageId)) {
-      return res.sendStatus(200); 
+      return; 
     }
     if (wpMessageId) {
       processedWpMessages.add(wpMessageId);
@@ -969,9 +973,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     const from = message.from;
-    
-    // 🔥 GÜVENLİK KALKANI: Eğer WhatsApp'tan gelen veride numara yoksa (boşsa), çökmeden işlemi bitir.
-    if (!from) return res.sendStatus(200); 
+    if (!from) return; 
 
     const cleanFrom = from.replace("+", "");
     let text = "";
@@ -1015,12 +1017,12 @@ app.post("/webhook", async (req, res) => {
       if (!session.humanOverride) {
         await sendMessage(cleanFrom, "Gönderdiğiniz içeriği işleyemiyorum. Lütfen mesajınızı yazılı olarak iletin.");
       }
-      return res.sendStatus(200);
+      return;
     }
 
     // 🔥 KULLANICININ AYNI MESAJI ÜST ÜSTE GÖNDERMESİNİ (SPAM) ENGELLEME
     if (session.lastUserText === text) {
-      return res.sendStatus(200); 
+      return; 
     }
     session.lastUserText = text;
 
@@ -1035,13 +1037,13 @@ app.post("/webhook", async (req, res) => {
       if (detectedLang) {
         session.lang = detectedLang;
         await sendMessage(cleanFrom, introAfterLang[session.lang]);
-        return res.sendStatus(200);
+        return;
       } else {
         await sendMessage(
           cleanFrom,
           "Welcome to SamChe Company LLC.\nSamChe Company LLC'ye hoş geldiniz.\nمرحبًا بكم.\n\nPlease select your language:\n1️⃣ English\n2️⃣ Türkçe\n3️⃣ العربية\n\nLütfen dil seçiminizi yapınız:\n1️⃣ İngilizce\n2️⃣ Türkçe\n3️⃣ Arapça"
         );
-        return res.sendStatus(200);
+        return;
       }
     }
 
@@ -1071,8 +1073,7 @@ app.post("/webhook", async (req, res) => {
     let currentTopic = topicSummary;
 
     // Yapay zeka ile ilgili kelimeler varsa konuyu net şekilde sabitle
-    const lowerTextForTopic = text.toLowerCase();
-    if (lowerTextForTopic.includes("yapay zeka") || lowerTextForTopic.includes("ai ") || lowerTextForTopic.includes("bot") || lowerTextForTopic.includes("otomasyon")) {
+    if (lower.includes("yapay zeka") || lower.includes("ai ") || lower.includes("bot") || lower.includes("otomasyon")) {
       currentTopic = "Yapay Zeka / Chatbot";
     }
     session.topics.push(currentTopic);
@@ -1090,10 +1091,10 @@ app.post("/webhook", async (req, res) => {
 
       await sendMessage(cleanFrom, aktarimMesaji);
 
-      const alertMsg = `🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n/w +${cleanFrom} `;
+      const alertMsg = `🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``;
       await sendMessageToTelegram(alertMsg);
 
-      return res.sendStatus(200);
+      return;
     }
 
     // --------------------------------------
@@ -1108,7 +1109,7 @@ app.post("/webhook", async (req, res) => {
       if (lang === "ar") closeMsg = `🔒 انتهت جلسة الدردشة هذه.\n\nيمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي أو كتابة 'دعم مباشر' للاتصال بممثل.`;
 
       await sendMessage(cleanFrom, closeMsg);
-      return res.sendStatus(200);
+      return;
     }
 
     // --------------------------------------
@@ -1116,7 +1117,7 @@ app.post("/webhook", async (req, res) => {
     // --------------------------------------
     if (session.humanOverride) {
       // (Telegrama forward en üstte yapıldığı için bot sadece return eder)
-      return res.sendStatus(200);
+      return;
     }
 
     // --------------------------------------
@@ -1124,11 +1125,11 @@ app.post("/webhook", async (req, res) => {
     // --------------------------------------
     if (wpCorporateShortReplyMap[lower]) {
       await sendMessage(cleanFrom, wpCorporateShortReplyMap[lower][lang]);
-      return res.sendStatus(200);
+      return;
     }
     if (lower.includes("contact") || lower.includes("iletişim") || lower.includes("whatsapp") || lower.includes("call") || lower.includes("telefon")) {
       await sendMessage(cleanFrom, contactText[lang]);
-      return res.sendStatus(200);
+      return;
     }
 
     // --------------------------------------
@@ -1144,7 +1145,7 @@ app.post("/webhook", async (req, res) => {
     const historyText = session.history.map((m) => `${m.role === "user" ? "User" : "Model"}: ${m.text}`).join("\n");
 
     // --------------------------------------
-    // BÜYÜK DİL PROMPTLARI (HİÇBİR EKSİK OLMADAN)
+    // BÜYÜK DİL PROMPTLARI 
     // --------------------------------------
     let prompt = "";
 
@@ -1379,7 +1380,7 @@ Chatbot asla:
 * Sponsor firmanın iletişim bilgilerini paylaşmaz.
 * Sponsor firmanın web sitesini paylaşmaz.
 * Sponsor firma ile doğrudan iletişime yönlendirme yapmaz.
-* العمل شركاء hakkında detay vermez.
+* İş ortakları hakkında detay vermez.
 
 Kullanıcı ısrar ederse nazikçe aynı politikayı tekrarlar و görüşmeyi süreç و başvuru aşamalarına yönlendirir.
 
@@ -1465,7 +1466,7 @@ SPONSORLU OTURUM SATIŞ ODAKLI DAVRANIŞ KURALLARI:
 - Müşteriye süreci bugün başlatabileceğini hatırlat.
 - Müşteri birkaç ay sonra taşınacak olsa bile kota rezervasyonunun şimdi yapılabileceğini belirt.
 - Müşterinin karar vermesini kolaylaştırmak için "Şu an tüm oturum ücretini ödemeniz gerekmiyor, ilk aşamada yalnızca 4.000 AED ile sürecinizi güvence altına alıyoruz." yaklaşımını kullan.
-- Her görüşmenin sonunda uygun durumlarda ödeme veya başvuruya yönlendiren çağrı yap.
+- Her görüşmenin sonunda uygun durumlarda ödeme veya başvuruya yönlendiren bir çağrı yap.
 Örnek kapanış:
 "Planladığınız tarihlere uygun şekilde sürecinizi organize edebiliriz. Dilerseniz banka bilgilerimizi paylaşayım ve kota rezervasyonunuzu bugün başlatalım."
  
@@ -2712,7 +2713,7 @@ ${text}
 
     if (!aiResponse) {
       await sendMessage(cleanFrom, corporateFallback(session.lang || "en"));
-      return res.sendStatus(200);
+      return; // Tek tık sorununu çözmek için sendStatus yerine return kullanıldı.
     }
 
     const lowerAi = aiResponse.toLowerCase();
@@ -2735,7 +2736,7 @@ ${text}
     if (!needsHuman) {
       session.history.push({ role: "assistant", text: aiResponse });
       await sendMessage(cleanFrom, aiResponse);
-      return res.sendStatus(200);
+      return;
     } else {
       let aiAktarimMesaji = `Canlı temsilci ile görüşme ilgili talebinizi aldım. *${topicSummary}* konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.`;
       if (lang === "en") aiAktarimMesaji = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
@@ -2744,18 +2745,17 @@ ${text}
       await sendMessage(cleanFrom, aiAktarimMesaji);
 
       session.humanOverride = true;
-      session.manualTakeover = false; // Yapay zeka aktardığı için 10 dk kuralı işler
+      session.manualTakeover = false; 
       session.lastMessageTime = Date.now();
 
-      const alertMsgAi = `🚨 CANLI TEMSİLCİ TALEBİ (Yapay Zeka Yönlendirdi)!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için kopyala:\n/w +${cleanFrom} `;
+      const alertMsgAi = `🚨 CANLI TEMSİLCİ TALEBİ (Yapay Zeka Yönlendirdi)!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``;
       await sendMessageToTelegram(alertMsgAi);
 
-      return res.sendStatus(200);
+      return;
     }
 
   } catch (error) {
     console.error("WhatsApp webhook error:", error);
-    return res.sendStatus(500);
   }
 }); // WHATSAPP WEBHOOK KAPANIŞI
 
@@ -2763,13 +2763,13 @@ ${text}
 // TELEGRAM WEBHOOK — NORMAL MESAJ + CANLI DESTEK
 // ============================================================================
 app.post("/telegram-webhook", async (req, res) => {
+  // Telegram Timeout'unu Engellemek İçin Anında Dönüş Yapıyoruz
+  res.status(200).send("OK");
+
   try {
-    // ------------------------------------------------------
-    // 🔥 TELEGRAM RETRY (TEKRAR) KORUMASI (EN TEPEDE)
-    // ------------------------------------------------------
     const updateId = req.body?.update_id;
     if (updateId && processedTgUpdates.has(updateId)) {
-      return res.sendStatus(200); 
+      return; 
     }
     if (updateId) {
       processedTgUpdates.add(updateId);
@@ -2777,19 +2777,17 @@ app.post("/telegram-webhook", async (req, res) => {
     }
 
     const msg = req.body.message;
-    if (!msg || !msg.text) return res.sendStatus(200);
+    if (!msg || !msg.text) return;
 
     const chatId = msg.chat.id.toString();
     const text = msg.text.trim();
 
-    // 1) NORMAL TELEGRAM MESAJLARI TAMAMEN BLOKLANIR
     if (!text.startsWith("/w ") && !text.startsWith("/end ")) {
-      return res.sendStatus(200);
+      return;
     }
     
-    // 2) SADECE YETKİLİ KULLANABİLİR
     if (process.env.TELEGRAM_CHAT_ID && chatId !== process.env.TELEGRAM_CHAT_ID) {
-      return res.sendStatus(200);
+      return;
     }
 
     // ------------------------------------------------------
@@ -2803,16 +2801,15 @@ app.post("/telegram-webhook", async (req, res) => {
 
       if (!cleanTo || !message) {
         await sendMessageToTelegram("Format yanlış. Örnek:\n/w +905551112233 Merhaba");
-        return res.sendStatus(200);
+        return;
       }
 
       if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
       const session = wpSessions[cleanTo];
 
-      // 🔥 EĞER TEMSİLCİ MANUEL OLARAK ARAYA GİRİYORSA
       if (!session.humanOverride) {
         session.humanOverride = true;
-        session.manualTakeover = true; // Sınırsız süre için bayrak eklendi
+        session.manualTakeover = true;
 
         let takeoverMsg = `Canlı temsilcimiz konuşmayı devralmıştır. Lütfen beklemede kalın...\n\nSamChe AI olarak canlı temsilci konuşmanızı sonlandırmadığı sürece AI devre dışıdır.`;
         if (session.lang === "en") takeoverMsg = `Our live representative has taken over the conversation. Please stay on hold...\n\nAs SamChe AI, the AI is deactivated until the live representative ends your conversation.`;
@@ -2824,11 +2821,9 @@ app.post("/telegram-webhook", async (req, res) => {
       session.lastMessageTime = Date.now();
       session.warning5MinSent = false;
 
-      // SADECE TEMSİLCİ MESAJINI WHATSAPP'A GÖNDER
       await sendMessage(cleanTo, message);
-
-      await sendMessageToTelegram(`Gönderildi → WhatsApp +${cleanTo}:\n${message}\n\nSohbeti bitirmek için kopyala:\n/end +${cleanTo}`);
-      return res.sendStatus(200);
+      await sendMessageToTelegram(`Gönderildi → WhatsApp +${cleanTo}:\n${message}\n\nSohbeti bitirmek için kopyala:\n\`/end +${cleanTo}\``);
+      return;
     }
 
     // ------------------------------------------------------
@@ -2841,7 +2836,7 @@ app.post("/telegram-webhook", async (req, res) => {
 
       if (!cleanTo) {
         await sendMessageToTelegram("Format yanlış. Örnek:\n/end +905551112233");
-        return res.sendStatus(200);
+        return;
       }
 
       if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
@@ -2857,13 +2852,11 @@ app.post("/telegram-webhook", async (req, res) => {
       await sendMessage(cleanTo, closeMessage);
       await sendMessageToTelegram(`Canlı destek kapatıldı → +${cleanTo}`);
 
-      return res.sendStatus(200);
+      return;
     }
 
-    return res.sendStatus(200);
   } catch (err) {
     console.error("Telegram webhook error:", err);
-    return res.sendStatus(500);
   }
 });
 
