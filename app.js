@@ -969,6 +969,10 @@ app.post("/webhook", async (req, res) => {
     }
 
     const from = message.from;
+    
+    // 🔥 GÜVENLİK KALKANI: Eğer WhatsApp'tan gelen veride numara yoksa (boşsa), çökmeden işlemi bitir.
+    if (!from) return res.sendStatus(200); 
+
     const cleanFrom = from.replace("+", "");
     let text = "";
 
