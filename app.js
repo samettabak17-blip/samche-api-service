@@ -963,6 +963,15 @@ app.post("/webhook", (req, res) => {
       const from = message.from;
       if (!from) return; 
 
+      // 🔥 MAVİ TIK (OKUNDU) ONAYI - MESAJIN TEK TIKTA KALMASINI ENGELLER
+      try {
+        await axios.post(
+          `https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
+          { messaging_product: "whatsapp", status: "read", message_id: wpMessageId },
+          { headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, "Content-Type": "application/json" } }
+        );
+      } catch (e) {}
+
       const cleanFrom = from.replace("+", "");
       let text = "";
 
@@ -998,6 +1007,12 @@ app.post("/webhook", (req, res) => {
       }
       
       const session = wpSessions[cleanFrom];
+
+      // 🔥 CANLI DESTEK AÇIKSA EN ÜSTTE İŞLEMİ BİTİR (BURAYA YAPIŞTIRACAKSINIZ)
+      if (session.humanOverride) {
+        session.lastMessageTime = Date.now();
+        return;
+      }
 
       // Gelen içerik desteklenmiyorsa
       const isInvalid = !text || text === "" || message.type === "audio" || message.type === "voice" || message.type === "video" || message.type === "sticker";
@@ -2685,12 +2700,19 @@ app.post("/telegram-webhook", (req, res) => {
           return;
         }
 
-        if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
-        const session = wpSessions[cleanTo];
+        if (!wpSessions[cleanTo]) {
+        wpSessions[cleanTo] = {
+          lang: "tr", history: [], lastMessageTime: Date.now(), followUpStage: 0,
+          intentScore: 0, topics: [], profile: { name: null, country: null, budget: null, interest: null },
+          firstMessageTime: Date.now(), pingSentOnce: false, humanOverride: false,
+          manualTakeover: false, lastUserText: ""
+        };
+      }
+      const session = wpSessions[cleanTo];
 
-        if (!session.humanOverride) {
-          session.humanOverride = true;
-          session.manualTakeover = true;
+      if (!session.humanOverride) {
+        session.humanOverride = true;
+        session.manualTakeover = true;
 
           let takeoverMsg =`DİKKAT⚠️ Canlı temsilcimiz bu konuşmayı devralmıştır. Lütfen sohbete bağlanana kadar beklemede kalın ⌛️ \n\n ⚠️Canlı temsilci bu konuşmayı sonlandırmadığı sürece yapay zeka danışmanı devre dışıdır.🔒`;
           if (session.lang === "en") takeoverMsg = `Our live representative has taken over the conversation. Please stay on hold...\n\nAs SamChe AI, the AI is deactivated until the live representative ends your conversation.`;
