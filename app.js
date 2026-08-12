@@ -933,20 +933,6 @@ If the user already provided sector info, NEVER ask again.`
   }
 });
 
-// ----------------------------------------------------------------------------
-// C) WHATSAPP BOT (GEMINI 2.5 PRO) - /webhook ve /telegram-webhook
-// ----------------------------------------------------------------------------
-app.get("/webhook", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode === "subscribe" && token === process.env.WHATSAPP_VERIFY_TOKEN) {
-    return res.status(200).send(challenge);
-  }
-  return res.sendStatus(403);
-});
-
 // ============================================================================
 // WHATSAPP WEBHOOK (POST) - "TEK TIK" (TIMEOUT) ÇÖZÜMÜ İLE DÜZENLENDİ
 // ============================================================================
@@ -1126,7 +1112,6 @@ app.post("/webhook", async (req, res) => {
     // --------------------------------------
     // KISA CEVAPLAR
     // --------------------------------------
-    // wpCorporateShortReplyMap dosyanızın en üstünde tanımlı olmalıdır.
     if (wpCorporateShortReplyMap && wpCorporateShortReplyMap[lower]) {
       await sendMessage(cleanFrom, wpCorporateShortReplyMap[lower][lang]);
       return;
@@ -1153,7 +1138,7 @@ app.post("/webhook", async (req, res) => {
     // --------------------------------------
     let prompt = "";
 
- if (lang === "tr") {
+    if (lang === "tr") {
       prompt = `SamChe Company LLC’nin kurumsal yapay zekâ danışmanısın. 
 Profesyonel, stratejik, analitik ve yol gösterici cevaplar ver. 
 Gemini’nin hazır kalıplarını, prosedür metinlerini, devlet süreçlerini, klasik açıklamalarını ASLA kullanma. 
@@ -1933,7 +1918,6 @@ ${historyText}
 Kullanıcı mesajı:
 ${text}
 `;
-    
     } else if (lang === "en") {
       prompt = `You are the Senior AI Consultant of SamChe Company LLC, based in Dubai.  
 Your expertise includes:  
@@ -2707,7 +2691,7 @@ app.post("/telegram-webhook", async (req, res) => {
         session.humanOverride = true;
         session.manualTakeover = true;
 
-        let takeoverMsg = `DİKKAT⚠️ Canlı temsilcimiz bu konuşmayı devralmıştır. Lütfen sohbete bağlanana kadar beklemede kalın ⌛️ \n\n ⚠️Canlı temsilci bu konuşmayı sonlandırmadığı sürece yapay zeka danışmanı devre dışıdır.🔒`;
+        let takeoverMsg = `Canlı temsilcimiz konuşmayı devralmıştır. Lütfen beklemede kalın...\n\nSamChe AI olarak canlı temsilci konuşmanızı sonlandırmadığı sürece AI devre dışıdır.`;
         if (session.lang === "en") takeoverMsg = `Our live representative has taken over the conversation. Please stay on hold...\n\nAs SamChe AI, the AI is deactivated until the live representative ends your conversation.`;
         if (session.lang === "ar") takeoverMsg = `تولى ممثلنا المباشر المحادثة. يرجى البقاء على الخط...\n\nبصفتي SamChe AI، تم إلغاء تنشيط الذكاء الاصطناعي حتى ينهي الممثل المباشر محادثتك.`;
 
