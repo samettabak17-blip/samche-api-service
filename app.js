@@ -10,12 +10,18 @@ import axios from "axios";
 import dotenv from "dotenv";
 import OpenAI from "openai";
 import cron from "node-cron";
+import https from "https";
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// ============================================================================
+// 🔥 BAĞLANTI HAVUZU (SİSTEM YAVAŞLAMASINI ÖNLEMEK İÇİN)
+// ============================================================================
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 100 });
 
 // ============================================================================
 // 🔥 TEKRARLANAN MESAJLARI ENGELLEME (RETRY KORUMASI) HAFIZALARI
@@ -44,11 +50,10 @@ const parseLinksToHTML = (text) => {
 };
 
 // ============================================================================
-// 🔥 ORTAK KULLANICI KİMLİĞİ BULUCU (IP & Header)
+// 🔥 ORTAK KULLANICI KİMLİĞİ BULUCU (IP & Header) - HAFIZA İÇİN GÜÇLENDİRİLDİ
 // ============================================================================
 function getUserId(req) {
-  const ip = req.headers["x-forwarded-for"]?.split(',')[0].trim() || req.socket?.remoteAddress || req.ip;
-  return req.headers["x-user-id"] || req.headers["session-id"] || ip || "default_user";
+  return req.headers["x-user-id"] || req.headers["session-id"] || req.headers["x-forwarded-for"]?.split(',')[0].trim() || req.socket?.remoteAddress || req.ip || "default_user";
 }
 
 // ============================================================================
@@ -199,7 +204,7 @@ Form Links (Use ONLY when an official proposal is requested):
 `;
 
 // ============================================================================
-// WHATSAPP İÇİN KISA CEVAPLAR VE SABİT METİNLER (HATA BURADAYDI, EKLENDİ)
+// WHATSAPP İÇİN KISA CEVAPLAR VE SABİT METİNLER
 // ============================================================================
 const wpSessions = {};
 
@@ -264,6 +269,7 @@ async function sendMessage(to, body) {
             text: { body: chunk },
           },
           {
+            httpsAgent,
             headers: {
               Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
               "Content-Type": "application/json",
@@ -284,7 +290,7 @@ async function sendMessageToTelegram(text) {
   try {
     if (!text) return;
     const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
-    axios.post(url, { chat_id: process.env.TELEGRAM_CHAT_ID.trim(), text: text }, { timeout: 10000 }).catch(() => {});
+    axios.post(url, { chat_id: process.env.TELEGRAM_CHAT_ID.trim(), text: text }, { httpsAgent, timeout: 10000 }).catch(() => {});
   } catch (err) {
     console.error("[TELEGRAM ERROR]:", err.message);
   }
@@ -302,6 +308,7 @@ async function callWpGemini(prompt) {
       WP_GEMINI_URL,
       { contents: [{ parts: [{ text: prompt }] }] },
       { 
+        httpsAgent,
         headers: { "Content-Type": "application/json" },
         timeout: 15000 
       }
@@ -507,6 +514,7 @@ app.post("/plan", async (req, res) => {
 
     const cleanSector = String(sector).trim();
     if (!cleanSector) return res.status(400).json({ error: "Sector value cannot be empty." });
+    const userId = getUserId(req);
 
     const payload = {
       contents: [{
@@ -525,6 +533,9 @@ app.post("/plan", async (req, res) => {
     if (data.candidates && data.candidates[0]?.content?.parts?.[0]) {
       let originalText = data.candidates[0].content.parts[0].text;
       data.candidates[0].content.parts[0].text = parseLinksToHTML(originalText);
+      // 🔥 HAFIZAYA EKLE (Sayfa yenilendiğinde unutmaması için)
+      addGuideMemory(userId, "user", `Generate a structured, strategic UAE business setup proposal for the following industry/sector: "${cleanSector}".`);
+      addGuideMemory(userId, "model", originalText);
     }
     return res.json(data);
   } catch (err) {
@@ -634,8 +645,8 @@ You DO NOT create your own templates.
 You ONLY give answers that comply with the rules defined in this prompt.
 
 Your primary goal is SALES CONVERSION — but with QUALIFICATION.  
-You do NOT send every user to WhatsApp.  
-You ONLY direct users to WhatsApp LIVE REPRESENTATIVE if they show strong intent, seriousness, and readiness to proceed.
+You do NOT send every user to WhatsApp immediately.  
+First, you MUST collect necessary information from the user (e.g., how many visas they need, which sector they are in). Ask these details or answer their specific questions.
 
 For every question the user asks — whether it is about:
 - private AI systems  
@@ -654,8 +665,8 @@ You ALWAYS respond using this structure:
 2. Explain that SamChe Company provides exactly this service  
 3. Highlight why SamChe is the best choice (expertise, speed, precision, UAE specialization, AI mastery)  
 4. Give a clear next step:
-   - If the user shows low or unclear intent → ask a qualifying question  
-   - If the user shows strong intent → direct them to WhatsApp LIVE REPRESENTATIVE with a topic‑specific professional message
+   - If the user shows low or unclear intent, or asks unnecessary questions and keeps the system busy → direct them to the CONTACT FORM (Form Links). Do not send them to WhatsApp.
+   - If the user shows strong, serious intent AND you have gathered their information (sector, visa count, etc.) → direct them to WhatsApp LIVE REPRESENTATIVE with a topic-specific corporate transfer message.
 
 QUALIFYING QUESTIONS you may ask include:
 - “What stage are you currently in”  
@@ -664,15 +675,18 @@ QUALIFYING QUESTIONS you may ask include:
 - “Do you already have a budget range in mind”  
 - “Is this for a new project or an existing business”  
 
-When directing a user to WhatsApp, you MUST generate a short, professional, topic‑specific message summarizing their request.  
-This message must be automatically adapted to the user’s topic.
+When directing a serious user to WhatsApp, you MUST generate a short, professional, corporate transfer message summarizing their request (including their sector, visa count, and gathered details) and provide the appropriate WhatsApp number based on language rules.
 
-Format example (auto‑adapted to topic):
-“Hello, I would like to speak with a live representative regarding **[user’s topic]**. Please guide me on the best approach and next steps.”
+WHATSAPP NUMBER RULES BASED ON LANGUAGE:
+- For Turkish language (tr): You MUST use +971 52 728 8586
+- For English and all other languages: You MUST use +971 52 662 2875
 
-You MUST use one of these LIVE REPRESENTATIVE WhatsApp numbers:
-- +971 52 662 2875  
-- +971 52 728 8586  
+Format example for WhatsApp transfer (auto‑adapted to topic & language):
+"İlgili talebinizi aldım. Size en doğru desteği sağlayabilmek adına, [Sektör] sektöründeki şirket kurulumu ve [Vize Sayısı] vize talebinizle ilgili uzman ekibimize aktarıyorum. Lütfen aşağıdaki numaradan iletişime geçin: +971 52 728 8586"
+
+Form Links (for low-intent users or busywork):
+- Turkish: <a href="https://samchecompany.ae/sirket-kurulumu-dubai-sirket-kurulumu-formu" target="_blank">Şirket Kurulumu Danışmanlık Formu</a>
+- Other Languages: <a href="https://samchecompany.com/business-consultation-in-dubai" target="_blank">Consultation Request Form</a>
 
 Your tone must always be:
 - premium  
@@ -683,7 +697,7 @@ Your tone must always be:
 - selective (you do NOT chase low‑intent users)
 
 Your goal is simple:  
-Turn every question into a clear, confident, premium SamChe Company sales answer — while filtering out low‑intent users and escalating only qualified leads to WhatsApp with a topic‑specific professional message.
+Turn every question into a clear, confident, premium SamChe Company sales answer — while filtering out low‑intent users to forms and escalating only qualified, serious leads to WhatsApp with a professional summary message.
 
 
 GENERAL BEHAVIOR RULES:
@@ -785,7 +799,7 @@ First explain the types of residency in Dubai and Dubai’s OFFICIAL residency a
 • Visa Stamping
 After explaining the official procedure, ask which type of residency they want. Do not give information about residency without explaining the official procedure and AFTER explaining the official procedure, DEFINITELY learn which type of residency they choose.
 
-• Do not suggest a live consultant until the user shows clear and advanced intent such as “let’s start the process”, “I want to send documents”.
+• Do not suggest a live consultant until the user shows clear and advanced intent such as “let’s start the process”, “I want to send documents” AND you have gathered the required parameters.
 • When the user asks about payment and document submission process or document list process, state that a passport valid for at least 3 years (PDF copy) and a biometric photo are sufficient and provide contact information (via email or our communication channels) to send them. When the user asks questions like “payment, bank details, where to pay?”, provide bank details.
 • NEVER use expressions like “you can share your documents with me, you can send your documents to me.” If document submission is required, provide contact information.
 • NEVER recommend another company, freezone authority, lawyer or consultancy. You are already the corporate consultant of SamChe Company LLC; expressions like “get support from a consultant” are STRICTLY forbidden.
@@ -848,8 +862,8 @@ Company Adress:
 Sheikh Zayed Road Latifa Tower Office No 402
 
 LIVE REPRESENTATIVE WhatsApp numbers:
-- +971 52 662 2875  
-- +971 52 728 8586  
+- For Turkish language (tr): You MUST use +971 52 728 8586
+- For English and all other languages: You MUST use +971 52 662 2875
 
 
 If the user asks about travel to Dubai, residency, work permit, company formation, investment, cost, process, procedure:
@@ -1029,7 +1043,7 @@ app.post("/webhook", (req, res) => {
         axios.post(
           `https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
           { messaging_product: "whatsapp", status: "read", message_id: wpMessageId },
-          { headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, "Content-Type": "application/json" }, timeout: 10000 }
+          { httpsAgent, headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, "Content-Type": "application/json" }, timeout: 10000 }
         ).catch(() => {});
       }
 
@@ -1049,6 +1063,18 @@ app.post("/webhook", (req, res) => {
       const session = wpSessions[cleanFrom];
       const lower = text.toLowerCase();
 
+      const now = Date.now();
+      
+      // 🔥 SPAM FİLTRESİ HATA ÇÖZÜMÜ: SADECE BOT MODUNDAYKEN SPAM FİLTRESİ ÇALIŞIR
+      // Canlı destek devredeyken (humanOverride = true) kullanıcı ard arda "tamam", "ok" gibi
+      // kısa mesajlar attığında mesajlarının telegrama gitmeme (iletilmeme) sorunu çözülmüştür.
+      if (!session.humanOverride && session.lastUserText === text && (now - session.lastMessageTime) < 30000) {
+        return; 
+      }
+      
+      session.lastUserText = text;
+      session.lastMessageTime = now;
+
       // ====================================================================
       // 🔥 CANLI DESTEK AÇIKSA BOT BURADA DURUR VE SADECE DİNLER 🔥
       // ====================================================================
@@ -1066,8 +1092,7 @@ app.post("/webhook", (req, res) => {
           return;
         }
 
-        session.lastMessageTime = Date.now();
-        return; // Botu susturuyoruz.
+        return; // Botu susturuyoruz. İletim zaten yukarıda Telegram'a yapıldı.
       }
 
       // Gelen içerik desteklenmiyorsa
@@ -1078,14 +1103,6 @@ app.post("/webhook", (req, res) => {
         }
         return;
       }
-
-      const now = Date.now();
-      // 🔥 SPAM FİLTRESİ HATA ÇÖZÜMÜ: 30 saniye içinde tamamen aynı mesajı atarsa engelle
-      if (session.lastUserText === text && (now - session.lastMessageTime) < 30000) {
-        return; 
-      }
-      session.lastUserText = text;
-      session.lastMessageTime = now;
 
       // --------------------------------------
       // DİL TESPİTİ VE İLK MESAJLAR
@@ -2303,7 +2320,7 @@ https://aichatbot.samchecompany.com/”
 • جميع الرسائل والردود (بما في ذلك أثناء التحويل إلى الدعم المباشر) يجب أن تكون بنفس اللغة التي كتب بها المستخدم أصلًا. هذه قاعدة صارمة ويُمنع مخالفتها تمامًا.
 • في كل رسالة، حدّد أولًا الموضوع الرئيسي الحالي للمحادثة. قيّم علاقة الرسالة الجديدة بهذا الموضوع. إذا كانت مرتبطة، استمر ضمن نفس الموضوع. وإذا لم تكن مرتبطة، تعامل معها كموضوع فرعي مع عدم نسيان السياق الرئيسي أبدًا.
 • حتى إذا غيّر المستخدم الموضوع، لا تفقد السياق السابق أبدًا. قيّم كل رسالة جديدة ضمن سياق المحادثة الحالي أولًا. لا تقم بإعادة تعيين السياق أو التصرف وكأن المحادثة جديدة بالكامل.
-• عندما يبدأ المستخدم موضوعًا جديدًا، قم أولًا بتحليل علاقته بالموضوع السابق. إذا كان هناك ارتباط، استمر بدمج السياقات. وإذا لم يكن هناك ارتباط، احتفظ بالسياق السابق وانتقل بشكل منطقي.
+• عندما يبدأ المستخدم موضوعًا جديدًا، قم أولًا بتحليل علاقته بالموضوع السابق. إذا كان هناك ارتباط، استمر بدمج السياقات. وإذا لم تكن هناك ارتباط، احتفظ بالسياق السابق وانتقل بشكل منطقي.
 • إذا تم إنشاء رسالة Ping أو FOLLOW-UP، فيجب أن تكون دائمًا مرتبطة بآخر المواضيع التي تمت مناقشتها. يُمنع تمامًا إنشاء رسائل Ping أو Follow-up غير مرتبطة أو غير ذات صلة أو تبدأ موضوعًا جديدًا.
 • إذا طلب المستخدم فقط معلومات التواصل وليس ممثلًا مباشرًا، فلا تستخدم رسالة Fallback. استخدم الرسالة التالية بدلًا من ذلك:
 "قبل مشاركة معلومات التواصل الخاصة بنا معكم، أحتاج إلى توضيح بعض التفاصيل المهمة المتعلقة بالموضوع لضمان سير العملية بالشكل الصحيح لكم. الموضوع الذي نتحدث عنه حاليًا هو: [الموضوع]. عادةً ما يتم اتباع الخطوات التالية في هذه العملية: [...]. ويمكننا معًا تحديد الخيار الأنسب لحالتكم."
@@ -2359,7 +2376,7 @@ https://aichatbot.samchecompany.com/”
 - يجب الحفاظ على هذا التنسيق كما هو تمامًا في جميع اللغات (TR, EN, AR).
 
 قاعدة أسئلة الثقة:
-إذا استخدم المستخدم عبارات مثل:
+إذا استخدم عبارات مثل:
 "كيف يمكنني الوثوق بكم؟"
 "هل هذا حقيقي؟"
 "لا أريد أن أتعرض للاحتيال"
@@ -2585,9 +2602,9 @@ Oldukça yaklaşık maliyetleri ver sadece, Kullanıcının ASLA bir freezone ot
 -Perakende mağazalar (giyim, elektronik, market vb.) 
 -İnşaat ve müteahhitlik şirketleri 
 -Gayrimenkul şirketi, brokerlık ve emlak ofisleri 
--Turizm ve seyahat acenteleri -Güvenlik ve CCTV şirketleri 
+-Turizm و seyahat acenteleri -Güvenlik و CCTV şirketleri 
 -Temizlik şirketleri 
--Taşımacılık ve transport ve UBER şirketleri"
+-Taşımacılık و transport و UBER şirketleri"
 
 17. Kullanıcı:
 "şirket kurulum sonrası verdiğiniz hizmetler neler"
@@ -2633,15 +2650,15 @@ BİRLEŞİK ARAP EMİRLİKLERİ İŞ KURMA BİLGİ TABANI VE YETKİ ALANI KURALL
 1. ANA KARA (DET / Dubai Ekonomi ve Turizm):
 - Zorunlu Ejari (Ejarinin anlamını mutlaka kullanıcıya ana kara şirkette açıkla ve ejarinin kurulum paketi içinde olduğunu ve sadece adres çözümü için sunulduğunu açıkla sonrasında perakende alanı ya da fiziksel ofis kiralaması zorunludur sektörüne göre) 
 - SADECE ANA KARADA EV SAHİPLİĞİ YAPABİLİR (Serbest Bölgelerde kesinlikle mümkün değildir):
-* Restoranlar, Kafeler, Catering ve Gıda İşletmeleri (Belediye ve Gıda Güvenliği onaylı)
+* Restoranlar, Kafeler, Catering و Gıda İşletmeleri (Belediye ve Gıda Güvenliği onaylı)
 * Fiziksel Perakende Mağazaları (Moda, Elektronik, Bakkal, Süpermarketler)
-* İnşaat, Genel Müteahhitlik ve Mühendislik Firmaları
-* Gayrimenkul Danışmanlığı ve Emlak Acenteleri (RERA onaylı)
-* Seyahat Acenteleri, Turizm ve Operatör Lisansları
+* İnşaat, Genel Müteahhitlik و Mühendislik Firmaları
+* Gayrimenkul Danışmanlığı و Emlak Acenteleri (RERA onaylı)
+* Seyahat Acenteleri, Turizm و Operatör Lisansları
 * Araç Kiralama (Rent-a-Car) ve Taşımacılık/UBER Filo Yönetimi (RTA onaylı)
-* Güvenlik ve CCTV Sistemleri Hizmetleri (SIRA onaylı)
-* Endüstriyel ve Bina Temizlik Hizmetleri (Belediye onaylı)
-* Sağlık Tesisleri, Klinikler ve Tıp Merkezleri (DHA onaylı)
+* Güvenlik و CCTV Sistemleri Hizmetleri (SIRA onaylı)
+* Endüstriyel و Bina Temizlik Hizmetleri (Belediye onaylı)
+* Sağlık Tesisleri, Klinikler و Tıp Merkezleri (DHA onaylı)
 - Ana Kara Danışmanlık Fiyatlandırma Politikası:
 * Standart Profesyonel ve Hizmetler: 8.000 AED Danışmanlık Ücreti.
 * Yüksek Onay Gerektiren ve Karmaşık Sektörler (RERA, RTA, DHA, SIRA, Belediye onayları gereklidir): 10.000 AED - 12.000 AED Danışmanlık Ücreti.
@@ -2653,9 +2670,9 @@ BİRLEŞİK ARAP EMİRLİKLERİ İŞ KURMA BİLGİ TABANI VE YETKİ ALANI KURALL
 - Yetki Alanına Özgü Ayrıntılar:
 * Meydan Serbest Bölgesi (Dubai): Premium yetki alanı. Yazılım, Yapay Zeka, E-Ticaret, Medya, Kripto/Web3 Danışmanlığı, VIP Saç/Cilt Estetiği vb alanlarını kapsar.
 - ÖZEL ALTIN ​​TİCARET LİSANSI: Altın ve Değerli Metaller Ticaret paketi toplam 40.000 AED'dir (1 vize ve kurulum dahil).
-* Dubai South: Havacılık, Lojistik, Yazılım, Bulut ve E-Ticaret desteği konusunda uzmanlaşmıştır.
-* Sharjah (SPCFZ / IFZA): E-Ticaret Portalları, Web Tasarımı, Medya, Yayıncılık ve Akademiler için son derece esnektir.
-* RAKEZ (Ras Al Khaimah) ve Ajman Serbest Bölgesi: Dijital/çevrimiçi işletmeler, BT kodlama ve sosyal medya için uygun maliyetlidir.
+* Dubai South: Havacılık, Lojistik, Yazılım, Bulut و E-Ticaret desteği konusunda uzmanlaşmıştır.
+* Sharjah (SPCFZ / IFZA): E-Ticaret Portalları, Web Tasarımı, Medya, Yayıncılık و Akademiler için son derece esnektir.
+* RAKEZ (Ras Al Khaimah) و Ajman Serbest Bölgesi: Dijital/çevrimiçi işletmeler, BT kodlama و sosyal medya için uygun maliyetlidir.
 - RAKEZ VE AJMAN İÇİN ÖZEL NOT: Yıllık paket/lisans-vize yenileme gereksinimleriyle "Ömür Boyu Vize" seçenekleri sunmaktadır. Her yıl şirket kuruluşu ile birlikte ödenen tutar aynı ücret ödenmek zorundadır. Bu bölgelerde Kripto/Web3 ve Altın Ticareti kısıtlıdır.
 
 Sohbet geçmişi:
@@ -2786,15 +2803,20 @@ app.post("/telegram-webhook", (req, res) => {
           if (session.lang === "en") takeoverMsg = `Our live representative has taken over the conversation. Please stay on hold...\n\nAs SamChe AI, the AI is deactivated until the live representative ends your conversation.`;
           if (session.lang === "ar") takeoverMsg = `تولى ممثلنا المباشر المحادثة. يرجى البقاء على الخط...\n\nبصفتي SamChe AI، تم إلغاء تنشيط الذكاء الاصطناعي حتى ينهي الممثل المباشر محادثتك.`;
 
-          await sendMessage(cleanTo, takeoverMsg);
+          try { await sendMessage(cleanTo, takeoverMsg); } catch(e) {}
         }
 
         session.lastMessageTime = Date.now();
         session.warning5MinSent = false;
-        session.lastUserText = "";
+        session.lastUserText = ""; // KİLİTLENMEYİ ÖNLER
 
-        await sendMessage(cleanTo, message);
-        sendMessageToTelegram(`Gönderildi → WhatsApp +${cleanTo}:\n${message}\n\nSohbeti bitirmek için kopyala:\n\`/end +${cleanTo}\``).catch(()=>{});
+        try { 
+          await sendMessage(cleanTo, message); 
+          sendMessageToTelegram(`Gönderildi → WhatsApp +${cleanTo}:\n${message}\n\nSohbeti bitirmek için kopyala:\n\`/end +${cleanTo}\``).catch(()=>{});
+        } catch(e) {
+          sendMessageToTelegram(`Mesaj iletilemedi! Lütfen tekrar deneyin.`).catch(()=>{});
+        }
+        
         return;
       }
 
@@ -2822,7 +2844,7 @@ app.post("/telegram-webhook", (req, res) => {
         if (wpSessions[cleanTo]?.lang === "en") closeMessage = "🔒 This chat session has ended.\n\nIf you have further questions or need additional assistance, please feel free to reach out again anytime. Our Live Support Team will be happy to assist you.";
         if (wpSessions[cleanTo]?.lang === "ar") closeMessage = "🔒 انتهت جلسة الدردشة هذه.\n\nإذا كانت لديك أسئلة أخرى أو احتجت إلى مساعدة إضافية، فلا تتردد في الاتصال بنا مرة أخرى في أي وقت. سيسعد فريق الدعم المباشر لدينا بمساعدتك.";
 
-        await sendMessage(cleanTo, closeMessage);
+        try { await sendMessage(cleanTo, closeMessage); } catch (e) {}
         sendMessageToTelegram(`Canlı destek kapatıldı → +${cleanTo}`).catch(()=>{});
 
         return;
