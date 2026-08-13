@@ -198,7 +198,39 @@ Form Links (Use ONLY when an official proposal is requested):
 - IF the user asks about BOTH: First provide AI services info, then add the Chatbot link at the bottom.
 `;
 
+// ============================================================================
+// WHATSAPP İÇİN KISA CEVAPLAR VE SABİT METİNLER (HATA BURADAYDI, EKLENDİ)
+// ============================================================================
 const wpSessions = {};
+
+const wpCorporateShortReplyMap = {
+  "1": { tr: "Size nasıl yardımcı olabilirim?", en: "How may I assist you?", ar: "كيف يمكنني مساعدتك؟" },
+  "2": { tr: "Size nasıl yardımcı olabilirim?", en: "How may I assist you?", ar: "كيف يمكنني مساعدتك؟" },
+  "3": { tr: "Size nasıl yardımcı olabilirim?", en: "How may I assist you?", ar: "كيف يمكنني مساعدتك؟" },
+  "merhaba": { tr: "Merhaba, size nasıl yardımcı olabilirim?", en: "Hello, how may I assist you today?", ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟" },
+  "selam": { tr: "Merhaba, size nasıl yardımcı olabilirim?", en: "Hello, how may I assist you today?", ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟" },
+  "hi": { tr: "Merhaba, size nasıl yardımcı olabilirim?", en: "Hello, how may I assist you today?", ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟" },
+  "hello": { tr: "Merhaba, size nasıl yardımcı olabilirim?", en: "Hello, how may I assist you today?", ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟" },
+  "teşekkürler": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
+  "tesekkurler": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
+  "thank you": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
+  "thanks": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
+  "ben teşekkür ederim": { tr: "Rica ederim. Her zaman yardımcı olmaktan memnuniyet duyarım.", en: "You're welcome. Always happy to assist.", ar: "على الرحب والسعة. يسعدني دائمًا مساعدتك." },
+  "çok teşekkürler": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
+  "teşekkür ederim": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
+  "sağol": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." },
+  "sagol": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." },
+  "eyvallah": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." },
+  "anladım": { tr: "Harika. Nasıl devam etmek istersiniz?", en: "Great. How would you like to proceed?", ar: "جميل. كيف تود المتابعة؟" },
+  "anladim": { tr: "Harika. Nasıl devam etmek istersiniz?", en: "Great. How would you like to proceed?", ar: "جميل. كيف تود المتابعة؟" },
+  "got it": { tr: "Anladım. Nasıl devam etmek istersiniz?", en: "Understood. How would you like to proceed?", ar: "فهمت. كيف تود المتابعة؟" },
+  "understood": { tr: "Anladım. Nasıl devam etmek istersiniz?", en: "Understood. How would you like to proceed?", ar: "فهمت. كيف تود المتابعة؟" },
+  "noted": { tr: "Not aldım. Nasıl devam etmek istersiniz?", en: "Noted. How would you like to proceed?", ar: "تم تدوينه. كيف تود المتابعة؟" },
+  "görüşmek üzere": { tr: "Görüşmek üzere. Dilediğiniz zaman buradayım.", en: "See you soon. I’m here whenever you need assistance.", ar: "أراك قريبًا. أنا هنا كلما احتجت إلى المساعدة." },
+  "gorusmek uzere": { tr: "Görüşmek üzere. Dilediğiniz zaman buradayım.", en: "See you soon. I’m here whenever you need assistance.", ar: "أراك قريبًا. أنا هنا كلما احتجت إلى المساعدة." },
+  "👍": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." },
+  "🙏": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." }
+};
 
 const introAfterLang = {
   tr: "Merhaba, ben SamChe AI.\n\nSamChe Company LLC'nin yapay zeka destekli danışmanıyım ve size yardımcı olmak için buradayım.\n\nDubai’de şirket kuruluşu, iş planları, iş geliştirme, dijital büyüme, yapay zeka çözümleri, oturum seçenekleri, yaşam maliyetleri ve şirket kuruluşu sonrasında sunduğumuz hizmetler ile ilgili tüm sorularınızı yanıtlayabilirim. Size nasıl yardımcı olabilirim?\n\n",
@@ -252,7 +284,6 @@ async function sendMessageToTelegram(text) {
   try {
     if (!text) return;
     const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
-    // Telegram bildirimini fire-and-forget yapıyoruz ki botu yavaşlatmasın
     axios.post(url, { chat_id: process.env.TELEGRAM_CHAT_ID.trim(), text: text }, { timeout: 10000 }).catch(() => {});
   } catch (err) {
     console.error("[TELEGRAM ERROR]:", err.message);
@@ -302,6 +333,15 @@ function calculateIntentScore(text, currentScore = 0) {
   if (score < 0) score = 0;
   if (score > 100) score = 100;
   return score;
+}
+
+function detectLanguage(text) {
+  if (!text) return "en";
+  const ar = /[\u0600-\u06FF]/;
+  const tr = /[ığüşöçİĞÜŞÖÇ]/i;
+  if (ar.test(text)) return "ar";
+  if (tr.test(text)) return "tr";
+  return "en"; 
 }
 
 function getPingMessage(lang, topic) {
@@ -383,7 +423,7 @@ function getFollowUpMessage(lang, topic, stage) {
         ar: "مرحبًا. تحدثنا بالأمس عن تخطيط التكاليف. إذا كنت جاهزًا، يمكننا توضيح ميزانيتك. للحصول على دعم مباشر، اكتب 'دعم مباشر'."
       },
       AI: {
-        tr: "Merhaba. Dün AI projeniz hakkında konuşmuştuk. Hazırsanız, projenizi daha uygulanabilir yapıya dönüştürebiliriz. Canlı destek için 'canlı destek' yazabilirsiniz.",
+        tr: "Merhaba. Dün AI projeniz hakkında konuşmuştuk. Hazırsanız, projenizi daha uygulanabilir bir yapıya dönüştürebiliriz. Canlı destek için 'canlı destek' yazabilirsiniz.",
         en: "Hello. Yesterday we discussed your AI project. If you're ready, we can turn it into a more actionable plan. Type 'live support' for help.",
         ar: "مرحبًا. تحدثنا بالأمس عن مشروع الذكاء الاصطناعي. إذا كنت جاهزًا، يمكننا تحويله إلى خطة قابلة للتنفيذ. للحصول على دعم مباشر، اكتب 'دعم مباشر'."
       }
@@ -932,7 +972,7 @@ If the user already provided sector info, NEVER ask again.`
 });
 
 // ----------------------------------------------------------------------------
-// C) WHATSAPP BOT (GEMINI PRO) - /webhook ve /telegram-webhook
+// C) WHATSAPP BOT (GEMINI 2.5 PRO) - /webhook ve /telegram-webhook
 // ----------------------------------------------------------------------------
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
@@ -1129,7 +1169,7 @@ app.post("/webhook", (req, res) => {
       // --------------------------------------
       let prompt = "";
 
-     if (lang === "tr") {
+      if (lang === "tr") {
         prompt = `SamChe Company LLC’nin kurumsal yapay zekâ danışmanısın. 
 Profesyonel, stratejik, analitik ve yol gösterici cevaplar ver. 
 Gemini’nin hazır kalıplarını, prosedür metinlerini, devlet süreçlerini, klasik açıklamalarını ASLA kullanma. 
@@ -1910,6 +1950,7 @@ Kullanıcı mesajı:
 ${text}
 `;
 
+
       } else if (lang === "en") {
         prompt = `You are the Senior AI Consultant of SamChe Company LLC, based in Dubai.  
 Your expertise includes:  
@@ -2532,48 +2573,95 @@ phone: +971 50 179 38 80 - +971 52 728 8586
 - شركات التنظيف
 - شركات النقل والخدمات اللوجستية و UBER
 
-13. عند الحديث عن تكاليف تأسيس الشركات، لا تذكر أبدًا حملات أو عروض أو خطط دفع خاصة بالمناطق الحرة.
-قدّم فقط التكاليف التقريبية.
-ولا تخبر المستخدم أبدًا بمتابعة أو مراجعة أي جهة منطقة حرة.
+13. عند الحديث عن تكاليف تأسيس الشركات، لا تذكر أبدًا حملات veya عروض veya planları gibi ifadeleri asla KULLANMA.
+Oldukça yaklaşık maliyetleri ver sadece, Kullanıcının ASLA bir freezone otoritesine bakmasını ya da takip etmesini söyleme.
 
-14. لا تذكر أبدًا الحملات أو العروض أو خطط الدفع ضمن حسابات التكاليف أو التكاليف التقديرية.
+14. Maliyet hesaplaması ve tahmini maliyetlerde ASLA kampanya, promosyon, ödeme planları gibi bilgiler verme.
 
-15. لا تستخدم أبدًا عبارات مثل:
-"تواصل مع المناطق الحرة مباشرة لتحديد التكلفة الدقيقة"
-"احصل على عرض سعر محدث"
-ولا تقم بتوجيه المستخدم إلى أي جهة.
+15. "Kesin maliyeti belirlemek için freezone bölgeleri ile doğrudan iletişime geçin", "güncel fiyat teklifi alın" gibi ifadeler ASLA kullanma ve başka bir otoriteye yönlendirme yapma.
 
-16. لم يعد تأسيس شركات Mainland يتطلب شريكًا محليًا.
-لذلك لا تستخدم أبدًا عبارات مثل:
-"قد تحتاج إلى شريك/كفيل محلي"
-عند شرح تأسيس شركات Mainland.
+16. Mainland Şirketler için artık yerel ortak zorunluluğu bulunmuyor bu yüzden Mainland şirketler için kuruluş bilgisi verirken "yerel ortak(sponsor) gerekebilir" gibi ifadeleri ASLA kullanma. SADECE MAINLAND DA (FREEZONE BÖLGESİNDE KURULAMAYAN ŞİRKET TÜRLERİ (SEKTÖR) LİSTESİ AŞAĞIDAKİ GİBİDİR. KULLANICI AŞAĞIDAKİ SEKTÖRLERDEN BİRİNDE ŞİRKET KURMAK İSTEDİĞİNDE SADECE MAİNLAND TA KURABİLİR, "KULLANICI AŞAĞIDAKİ SEKTÖRLERDEN BİRİNİ SEÇERSE SADECE MAINLAND KURABİLİR.
+-Restoran, cafe, catering ve diğer gıda hizmetleri
+-Perakende mağazalar (giyim, elektronik, market vb.) 
+-İnşaat ve müteahhitlik şirketleri 
+-Gayrimenkul şirketi, brokerlık ve emlak ofisleri 
+-Turizm ve seyahat acenteleri -Güvenlik ve CCTV şirketleri 
+-Temizlik şirketleri 
+-Taşımacılık ve transport ve UBER şirketleri"
 
-القطاعات التالية يمكن تأسيسها فقط في MAINLAND ولا يمكن تأسيسها أبدًا في FREEZONE:
-- المطاعم والمقاهي وخدمات الطعام والتموين
-- متاجر التجزئة (الملابس، الإلكترونيات، السوبرماركت، إلخ)
-- شركات الإنشاءات والمقاولات
-- شركات العقارات والوساطة العقارية
-- شركات السياحة والسفر
-- شركات الأمن وأنظمة CCTV
-- شركات التنظيف
-- شركات النقل والخدمات اللوجستية و UBER
+17. Kullanıcı:
+"şirket kurulum sonrası verdiğiniz hizmetler neler"
+"Şirket kurulum sonrası desteğiniz neler" gibi sorular sorarsa SamChe Company LLC'nin şirket kurulumu sonrası verdiği destekleri aşağıdaki gibi sırala:
+1️⃣ PRO (Government Relations) Hizmetleri
+Çalışan Vize başvuruları 
+Investor(yatırımcı) / Partner (aile) vizeleri
+Çalışanların çalışma vizelerinin yenilenmesi
+Emirates ID işlemleri
+Medical test ve biometrik işlemler
+Immigration ve labour card işlemleri
+Şirket Lisans yenileme
+Şirket belgelerinin resmi işlemleri
+Çalışanların kontratlarının yenilenmesi
+Vize Kotaları Yönetimi
+2️⃣ Muhasebe ve Finans Hizmetleri
+Aylık muhasebe kayıtları
+VAT (KDV) kaydı
+VAT beyanı ve raporlaması
+Corporate Tax danışmanlığı
+Financial statement hazırlama
+3️⃣ Banka Hesabı Açılış Desteği
+Kurumsal banka hesabı açılışı
+KYC evrak hazırlığı
+4️⃣ Ofis ve Operasyon Hizmetleri
+Flexi desk / ofis kiralama
+Virtual office
+Meeting room kullanımı
+Telefon numarası ve mail yönetimi
+5️⃣ İş Geliştirme ve Pazarlama Hizmetleri
+Website kurulumu
+Digital marketing Hizmetleri
+Sosyal Medya Pazarlaması
+6️⃣ Yapay Zekâ ve Otomasyon Çözümleri
+AI chatbot kurulumu
+Instagram / WhatsApp otomasyonu
+CRM entegrasyonu
+Satış otomasyon sistemleri
 
-17. إذا سأل المستخدم:
-"ما هي الخدمات التي تقدمونها بعد تأسيس الشركة؟"
-"ما هو الدعم الذي تقدمونه بعد تأسيس الشركة؟"
+18. Kullanıcı daha önce sektör bilgisini verdiyse, bir daha ASLA sektör sorma. Kullanıcı diğer vize türlerini sorarsa (freelance vize alma vb. sorular sorduğunda) freelance vize öner; Freelance Permit kurallarını uygula.
 
-فقم بسرد خدمات SamChe Company LLC بعد تأسيس الشركات كما يلي:
-    1. Private AI Systems
-    2. Digital Growth & Content Strategy
-    3. Branding & Social Media
-    4. Audience Growth & Performance Optimization
-    
-18. إذا كان المستخدم قد ذكر القطاع مسبقًا، فلا تسأله عن القطاع مرة أخرى أبدًا.
+BİRLEŞİK ARAP EMİRLİKLERİ İŞ KURMA BİLGİ TABANI VE YETKİ ALANI KURALLARI:
+1. ANA KARA (DET / Dubai Ekonomi ve Turizm):
+- Zorunlu Ejari (Ejarinin anlamını mutlaka kullanıcıya ana kara şirkette açıkla ve ejarinin kurulum paketi içinde olduğunu ve sadece adres çözümü için sunulduğunu açıkla sonrasında perakende alanı ya da fiziksel ofis kiralaması zorunludur sektörüne göre) 
+- SADECE ANA KARADA EV SAHİPLİĞİ YAPABİLİR (Serbest Bölgelerde kesinlikle mümkün değildir):
+* Restoranlar, Kafeler, Catering ve Gıda İşletmeleri (Belediye ve Gıda Güvenliği onaylı)
+* Fiziksel Perakende Mağazaları (Moda, Elektronik, Bakkal, Süpermarketler)
+* İnşaat, Genel Müteahhitlik ve Mühendislik Firmaları
+* Gayrimenkul Danışmanlığı ve Emlak Acenteleri (RERA onaylı)
+* Seyahat Acenteleri, Turizm ve Operatör Lisansları
+* Araç Kiralama (Rent-a-Car) ve Taşımacılık/UBER Filo Yönetimi (RTA onaylı)
+* Güvenlik ve CCTV Sistemleri Hizmetleri (SIRA onaylı)
+* Endüstriyel ve Bina Temizlik Hizmetleri (Belediye onaylı)
+* Sağlık Tesisleri, Klinikler ve Tıp Merkezleri (DHA onaylı)
+- Ana Kara Danışmanlık Fiyatlandırma Politikası:
+* Standart Profesyonel ve Hizmetler: 8.000 AED Danışmanlık Ücreti.
+* Yüksek Onay Gerektiren ve Karmaşık Sektörler (RERA, RTA, DHA, SIRA, Belediye onayları gereklidir): 10.000 AED - 12.000 AED Danışmanlık Ücreti.
 
-Conversation history:
+2. SERBEST BÖLGELER (Denizaşırı/Kara Bölgesi Yetki Alanı Özellikleri):
+- Sanal Ofis / Esnek Masa seçenekleri mevcuttur.
+- Kurumlar Vergisi kaydı zorunludur. (Şirket kurulum paketlerine dahil değildir. Talep edilmesi halinde lisans ve vize işlemlerinin ardından 1.300 AED karşılığında SamChe Company LLC tarafından kayıt ve başvuru süreci yürütülür. Kayıt yükümlülüğünün ilgili süre içerisinde yerine getirilmemesi halinde FTA tarafından 10.000 AED idari ceza uygulanır.)
+- Standart Danışmanlık Ücreti: Serbest Bölge paketleri genelinde 5.500 AED.
+- Yetki Alanına Özgü Ayrıntılar:
+* Meydan Serbest Bölgesi (Dubai): Premium yetki alanı. Yazılım, Yapay Zeka, E-Ticaret, Medya, Kripto/Web3 Danışmanlığı, VIP Saç/Cilt Estetiği vb alanlarını kapsar.
+- ÖZEL ALTIN ​​TİCARET LİSANSI: Altın ve Değerli Metaller Ticaret paketi toplam 40.000 AED'dir (1 vize ve kurulum dahil).
+* Dubai South: Havacılık, Lojistik, Yazılım, Bulut ve E-Ticaret desteği konusunda uzmanlaşmıştır.
+* Sharjah (SPCFZ / IFZA): E-Ticaret Portalları, Web Tasarımı, Medya, Yayıncılık ve Akademiler için son derece esnektir.
+* RAKEZ (Ras Al Khaimah) ve Ajman Serbest Bölgesi: Dijital/çevrimiçi işletmeler, BT kodlama ve sosyal medya için uygun maliyetlidir.
+- RAKEZ VE AJMAN İÇİN ÖZEL NOT: Yıllık paket/lisans-vize yenileme gereksinimleriyle "Ömür Boyu Vize" seçenekleri sunmaktadır. Her yıl şirket kuruluşu ile birlikte ödenen tutar aynı ücret ödenmek zorundadır. Bu bölgelerde Kripto/Web3 ve Altın Ticareti kısıtlıdır.
+
+Sohbet geçmişi:
 ${historyText}
 
-User message:
+Kullanıcı mesajı:
 ${text}
 `;
       }
