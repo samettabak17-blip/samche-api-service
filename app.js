@@ -19,7 +19,18 @@ app.use(cors());
 app.use(express.json());
 
 // ============================================================================
-// 🔥 BAĞLANTI HAVUZU (SİSTEM YAVAŞLAMASINI ÖNLEMEK İÇİN)
+// 🔥 GLOBAL HATA YAKALAYICILAR (SUNUCUNUN ÇÖKMESİNİ KESİN ENGELLER)
+// ============================================================================
+process.on('uncaughtException', (err) => {
+  console.error('Kritik Hata (Uncaught Exception):', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Yakalanamayan Promise Hatası (Unhandled Rejection):', reason);
+});
+
+// ============================================================================
+// 🔥 BAĞLANTI HAVUZU (SİSTEM YAVAŞLAMASINI VE SOKET TÜKENMESİNİ ÖNLER)
 // ============================================================================
 const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 100 });
 
@@ -274,7 +285,7 @@ async function sendMessage(to, body) {
               Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
               "Content-Type": "application/json",
             },
-            timeout: 10000 
+            timeout: 20000 // 🔥 Zaman aşımı 20 saniyeye çıkarıldı (WhatsApp iletişimi güvenliği)
           }
         );
       } catch (err) {
@@ -290,7 +301,7 @@ async function sendMessageToTelegram(text) {
   try {
     if (!text) return;
     const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
-    axios.post(url, { chat_id: process.env.TELEGRAM_CHAT_ID.trim(), text: text }, { httpsAgent, timeout: 10000 }).catch(() => {});
+    axios.post(url, { chat_id: process.env.TELEGRAM_CHAT_ID.trim(), text: text }, { httpsAgent, timeout: 20000 }).catch(() => {});
   } catch (err) {
     console.error("[TELEGRAM ERROR]:", err.message);
   }
@@ -310,7 +321,7 @@ async function callWpGemini(prompt) {
       { 
         httpsAgent,
         headers: { "Content-Type": "application/json" },
-        timeout: 15000 
+        timeout: 60000 // 🔥 SORUN BURADAYDI: Çökme/timeout hatalarını kökten çözmek için 60 saniyeye yükseltildi!
       }
     );
     return response.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
@@ -1066,8 +1077,6 @@ app.post("/webhook", (req, res) => {
       const now = Date.now();
       
       // 🔥 SPAM FİLTRESİ HATA ÇÖZÜMÜ: SADECE BOT MODUNDAYKEN SPAM FİLTRESİ ÇALIŞIR
-      // Canlı destek devredeyken (humanOverride = true) kullanıcı ard arda "tamam", "ok" gibi
-      // kısa mesajlar attığında mesajlarının telegrama gitmeme (iletilmeme) sorunu çözülmüştür.
       if (!session.humanOverride && session.lastUserText === text && (now - session.lastMessageTime) < 30000) {
         return; 
       }
@@ -2585,24 +2594,7 @@ phone: +971 50 179 38 80 - +971 52 728 8586
 - متاجر التجزئة (الملابس، الإلكترونيات، السوبرماركت، إلخ)
 - شركات الإنشاءات والمقاولات
 - شركات العقارات والوساطة العقارية
-- شركات السياحة والسفر
-- شركات الأمن وأنظمة CCTV
-- شركات التنظيف
-- شركات النقل والخدمات اللوجستية و UBER
-
-13. عند الحديث عن تكاليف تأسيس الشركات، لا تذكر أبدًا حملات veya عروض veya planları gibi ifadeleri asla KULLANMA.
-Oldukça yaklaşık maliyetleri ver sadece, Kullanıcının ASLA bir freezone otoritesine bakmasını ya da takip etmesini söyleme.
-
-14. Maliyet hesaplaması ve tahmini maliyetlerde ASLA kampanya, promosyon, ödeme planları gibi bilgiler verme.
-
-15. "Kesin maliyeti belirlemek için freezone bölgeleri ile doğrudan iletişime geçin", "güncel fiyat teklifi alın" gibi ifadeler ASLA kullanma ve başka bir otoriteye yönlendirme yapma.
-
-16. Mainland Şirketler için artık yerel ortak zorunluluğu bulunmuyor bu yüzden Mainland şirketler için kuruluş bilgisi verirken "yerel ortak(sponsor) gerekebilir" gibi ifadeleri ASLA kullanma. SADECE MAINLAND DA (FREEZONE BÖLGESİNDE KURULAMAYAN ŞİRKET TÜRLERİ (SEKTÖR) LİSTESİ AŞAĞIDAKİ GİBİDİR. KULLANICI AŞAĞIDAKİ SEKTÖRLERDEN BİRİNDE ŞİRKET KURMAK İSTEDİĞİNDE SADECE MAİNLAND TA KURABİLİR, "KULLANICI AŞAĞIDAKİ SEKTÖRLERDEN BİRİNİ SEÇERSE SADECE MAINLAND KURABİLİR.
--Restoran, cafe, catering ve diğer gıda hizmetleri
--Perakende mağazalar (giyim, elektronik, market vb.) 
--İnşaat ve müteahhitlik şirketleri 
--Gayrimenkul şirketi, brokerlık ve emlak ofisleri 
--Turizm و seyahat acenteleri -Güvenlik و CCTV şirketleri 
+- شركات السياحة و seyahat acenteleri -Güvenlik و CCTV şirketleri 
 -Temizlik şirketleri 
 -Taşımacılık و transport و UBER şirketleri"
 
