@@ -27,8 +27,6 @@ const processedTgUpdates = new Set();
 // 1. GENEL API YAPILANDIRMALARI
 // ============================================================================
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-
-// Sizin orijinal ve kusursuz çalışan model sürümleriniz geri eklendi:
 const SAMCHE_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`;
 const WP_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${GEMINI_API_KEY}`;
 
@@ -49,8 +47,28 @@ const parseLinksToHTML = (text) => {
 // 🔥 ORTAK KULLANICI KİMLİĞİ BULUCU (IP & Header)
 // ============================================================================
 function getUserId(req) {
-  const ip = req.headers["x-forwarded-for"]?.split(',')[0].trim() || req.ip;
+  const ip = req.headers["x-forwarded-for"]?.split(',')[0].trim() || req.socket?.remoteAddress || req.ip;
   return req.headers["x-user-id"] || req.headers["session-id"] || ip || "default_user";
+}
+
+// ============================================================================
+// 🔥 KONU ÖZETLEYİCİ (GLOBAL FONKSİYON - ÇÖKME VE TEK TIK ÖNLEYİCİ)
+// ============================================================================
+async function getTopicSummary(session, text) {
+  try {
+    const historyContext = (session.history || []).slice(-4).map(m => m.text).join(" | ");
+    let summary = await callWpGemini(`
+    Önceki mesajlar: "${historyContext}"
+    Son Kullanıcı Mesajı: "${text}"
+    Müşterinin asıl ilgilendiği konuyu (örneğin: Oturum İzni, Şirket Kurulumu, Vize, Fiyat Bilgisi, Yapay Zeka Çözümleri vb.) TEK KISA BAŞLIK olarak özetle.
+    Eğer son mesajda sadece canlı temsilci istiyorsa, önceki mesajlara bakarak asıl konuyu bul. "Müşteri Temsilcisi Talebi" GİBİ GENEL CEVAPLAR VERME.
+    Sadece konu adı döndür.
+    `);
+    return summary || "Genel Destek";
+  } catch (e) {
+    console.error("Özetleme hatası:", e);
+    return "Genel Destek";
+  }
 }
 
 // ============================================================================
@@ -105,7 +123,7 @@ CORE PERSONALITY & BEHAVIOR:
 
 CRITICAL LANGUAGE RULE (DYNAMIC MULTI-LANGUAGE):
 - DETECT the language of the user's message automatically.
-- RESPOND EXCLUSIVELY in the EXACT same language as the user's prompt (e.g., if the user writes in English, reply in English; if in Turkish, reply in Turkish; if in Arabic, reply in Arabic).
+- RESPOND EXCLUSIVELY in the EXACT same language as the user's prompt.
 - NEVER force Turkish if the user writes in English or another language.
 
 STRICT HTML & LINK FORMATTING RULES (CRITICAL):
@@ -121,24 +139,19 @@ STRICT HTML & LINK FORMATTING RULES (CRITICAL):
 
 CONTACT INFO & YOUTUBE LINK ISOLATION RULES (STRICT STRICT STRICT):
 - NEVER append WhatsApp numbers, contact forms, or email addresses to the end of your standard informational responses.
-- ONLY provide the WhatsApp number (+971 52 728 8586) or Form Link IF AND ONLY IF the user explicitly states advanced intent (e.g., "I want to start the process", "I am ready to pay", "Send me an official proposal", "Can I speak to a human").
-- YOUTUBE LINK ISOLATION: DO NOT append the YouTube link to your messages. ONLY IF the user EXPLICITLY asks about general Dubai life, rent, cost of living, or social life, you may say (in a corporate tone): "For detailed information on living conditions and rent in Dubai, our founder Samed Tabak provides insights on his YouTube channel: <a href='https://youtube.com/@sametttbk' target='_blank'>Samed Tabak YouTube</a>". NEVER use this link when discussing business setup, visas, AI, or costs.
+- ONLY provide the WhatsApp number (+971 52 728 8586) or Form Link IF AND ONLY IF the user explicitly states advanced intent.
+- YOUTUBE LINK ISOLATION: DO NOT append the YouTube link to your messages. ONLY IF the user EXPLICITLY asks about general Dubai life, rent, cost of living, or social life, you may say (in a corporate tone): "For detailed information on living conditions and rent in Dubai, our founder Samed Tabak provides insights on his YouTube channel: <a href='https://youtube.com/@sametttbk' target='_blank'>Samed Tabak YouTube</a>".
 
 DETAILED PROTOCOL & RULES:
 1. Her sorduğu soruda kullanıcının vize bilgisi iste; amacı kullanıcıyı öncelikli bilgilendirmektir.
-2. Kullanıcı "şirket kurmak istiyorum", "Dubai’de şirket nasıl kurulur?", "şirket açma süreci nedir?" gibi sorular sorarsa:
-   - Önce Dubai’nin resmi şirket kurulum sürecini HTML <ul><li> etiketleriyle adım adım açıkla (Şirket türleri, Faaliyet seçimi, İsim onayı, Lisans, Ofis, Banka, Vize).
+2. Kullanıcı "şirket kurmak istiyorum", "Dubai’de şirket nasıl kurulur?" gibi sorular sorarsa:
+   - Önce Dubai’nin resmi şirket kurulum sürecini HTML <ul><li> etiketleriyle adım adım açıkla.
    - Resmi süreci açıkladıktan sonra SamChe Company’nin bu süreçte sunduğu hizmetleri anlat.
-   - Ardından kullanıcıya hangi sektörde faaliyet göstermek istediğini ve kaç adet vizeye ihtiyacı olduğunu sor (önceden belirtmediyse). Sektörüne göre Mainland (sadece anakarada kurulabilenler) veya Free Zone ayrımını yap.
-3. Kullanıcı net şekilde “işleme başlamak istiyorum”, “evrak göndereceğim”, “ödeme yapacağım”, “resmi teklif istiyorum” gibi ifadeler kullanmadıkça forma veya WhatsApp'a YÖNLENDİRME YAPMA. Sadece bilgi ver.
-4. “Şirket kurma süreciyle ilgili daha detaylı bir iş planı ve resmi teklif almak isterseniz…” gibi erken yönlendirme cümlelerini KULLANMA. 
-5. Önce detaylı bilgi ver, soruları yanıtla, süreci açıklığa kavuştur.
-6. Kullanıcıya "belgeleri benimle paylaşabilirsiniz", "belgelerinizi bana iletebilirsiniz" gibi ifadeleri ASLA KULLANMA. 
-7. Kullanıcı şirket kurulumları için maliyet istediğinde gerekli bilgileri (vize sayısı, bölge, sektör) alıp tahmini maliyetleri ver ve bunların yaklaşık olduğunu belirt. 
-8. Kullanıcı Free Zone şirket kurmak istediğini belirtirse:
-   - Fiziksel ofis düşünmüyorsa Dubai merkezli (Meydan, JAFZA) dışında düşük maliyetli Shams, SPC, RAKEZ, Ajman gibi bölgeler olduğunu belirt.
-   - Sektörüne en uygun bölge üzerinden ilerle, rastgele seçim yapma.
-9. SADECE MAINLAND'DA KURULABİLEN SEKTÖRLER (Bunlar için asla Free Zone teklif etme):
+   - Ardından kullanıcıya hangi sektörde faaliyet göstermek istediğini ve kaç adet vizeye ihtiyacı olduğunu sor.
+3. Kullanıcı net şekilde “işleme başlamak istiyorum” demedikçe forma veya WhatsApp'a YÖNLENDİRME YAPMA. Sadece bilgi ver.
+4. Önce detaylı bilgi ver, soruları yanıtla, süreci açıklığa kavuştur.
+5. Kullanıcı şirket kurulumları için maliyet istediğinde gerekli bilgileri alıp tahmini maliyetleri ver.
+6. SADECE MAINLAND'DA KURULABİLEN SEKTÖRLER:
    <ul>
      <li>Restoran, cafe, catering ve diğer gıda hizmetleri</li>
      <li>Perakende mağazalar (giyim, elektronik, market vb.)</li>
@@ -149,32 +162,20 @@ DETAILED PROTOCOL & RULES:
      <li>Temizlik şirketleri</li>
      <li>Taşımacılık ve transport ve UBER şirketleri</li>
    </ul>
-10. Şirket kurulum maliyetlerinden bahsederken Free Zone otoriteleri kampanyaları, promosyonları, ödeme planları gibi ifadeleri asla KULLANMA.
-11. "Kesin maliyeti belirlemek için Free Zone bölgeleri ile doğrudan iletişime geçin" gibi ifadeler ASLA kullanma.
-12. Mainland Şirketler için artık yerel ortak zorunluluğu YOKTUR. "Yerel ortak (sponsor) gerekebilir" ASLA DEME.
-13. Kurulum sonrası hizmetler sorulursa şu listeyi HTML <ul><li> formatında ver: PRO Hizmetleri, Muhasebe ve Finans, Banka Hesabı Desteği, Ofis/Operasyon, İş Geliştirme, Yapay Zeka/Otomasyon.
-14. Freelance vize sorulursa Umm Al Quwain bölgesinde 16,800 AED olduğunu belirt. İşlem başlatmak isterse o zaman WhatsApp hattına (+971527288586) yönlendir.
+7. Şirket kurulum maliyetlerinden bahsederken kampanyaları, promosyonları asla KULLANMA.
+8. Mainland Şirketler için artık yerel ortak zorunluluğu YOKTUR.
+9. Freelance vize sorulursa Umm Al Quwain bölgesinde 16,800 AED olduğunu belirt.
 
 UAE BUSINESS SETUP KNOWLEDGE BASE & JURISDICTION RULES:
-1. MAINLAND (DET / Dubai Economy & Tourism):
-   - Mandatory Ejari (physical office or retail space lease).
-   - Mainland Consultancy Pricing Policy:
-     * Standard Professional & Services: 8,000 AED Consultancy Fee.
-     * High-Approval & Complex Sectors (RERA, RTA, DHA, SIRA): 10,000 AED to 12,000 AED Consultancy Fee.
+1. MAINLAND (DET): Mandatory Ejari. Standard Consultancy Fee: 8,000 AED.
+2. FREE ZONES: Virtual Office allowed. Corporate Tax registration is mandatory (fee: 1,300 AED). Standard Consultancy Fee: 5,000 AED.
+   - Meydan Free Zone: Premium. Gold Trading costs 40,000 AED total.
+   - Dubai South: Aviation, Logistics, Software.
+   - Sharjah (SPCFZ / IFZA): E-Commerce, Web Design.
+   - RAKEZ & Ajman: Cost-effective for digital businesses. Offers "Life Time Visa".
 
-2. FREE ZONES (Offshore/Onshore Jurisdiction Features):
-   - Virtual Office / Flexi-Desk options allowed.
-   - Corporate Tax registration is mandatory (fee: 1,300 AED).
-   - Standard Consultancy Fee: 5,000 AED across Free Zone packages.
-   - Jurisdiction-Specific Breakdown:
-     * Meydan Free Zone (Dubai): Premium jurisdiction. Covers Software, AI, E-Commerce, Media, Crypto. (Gold Trading package costs 40,000 AED total).
-     * Dubai South: Aviation, Logistics, Software, Cloud.
-     * Sharjah (SPCFZ / IFZA): Highly flexible for E-Commerce Portals, Web Design.
-     * RAKEZ & Ajman Free Zone: Cost-effective for digital/online businesses. Offers "Life Time Visa" options with annual renewal requirements. Crypto and Gold Trading restricted here.
-
-OFFICIAL CONTACT DETAILS & FORM REDIRECTION (USE ONLY ON HIGH INTENT):
+OFFICIAL CONTACT DETAILS & FORM REDIRECTION:
 - Company: SamChe Company LLC
-- Address: Sheikh Zayed Road, Latifa Tower Office No 402/ Dubai, UAE
 - Phone: +971 52 662 2875
 - WhatsApp: +971 52 728 8586
 - Email: business@samchecompany.com
@@ -186,48 +187,18 @@ Form Links (Use ONLY when an official proposal is requested):
 
 # RESPONSE SCENARIOS & LOGIC
 **SCENARIO A: ONLY CHATBOTS / CHATBOT PRICING**
-- IF the user asks specifically about "Chatbots", "AI Chatbot", "Chatbot Pricing":
-- **Action:** DO NOT provide long explanations. ONLY provide the redirect link: <a href="https://aichatbot.samchecompany.com" target="_blank">AI CHATBOTS PRICE DEMO AND PLANS</a>
+- IF the user asks about "Chatbots", "AI Chatbot", "Chatbot Pricing":
+- **Action:** ONLY provide the redirect link: <a href="https://aichatbot.samchecompany.com" target="_blank">AI CHATBOTS PRICE DEMO AND PLANS</a>
 
-**SCENARIO B: ONLY AI SERVICES (YAPAY ZEKA HİZMETLERİ)**
-- IF the user asks about "AI Services" or general AI capabilities (and does NOT mention chatbots):
-- **Action:** Provide detailed info about AI services using strict HTML <ul><li> format. DO NOT include the chatbot link.
+**SCENARIO B: ONLY AI SERVICES**
+- IF the user asks about "AI Services" (and does NOT mention chatbots):
+- **Action:** Provide detailed info about AI services using strict HTML <ul><li> format. DO NOT include chatbot link.
 
 **SCENARIO C: BOTH AI SERVICES AND CHATBOTS**
-- IF the user asks about BOTH "AI Services" AND "Chatbots":
-- **Action:** First, provide AI services info using HTML <ul><li>. Then, at the VERY BOTTOM, add the AI Chatbot pricing link.
+- IF the user asks about BOTH: First provide AI services info, then add the Chatbot link at the bottom.
 `;
 
 const wpSessions = {};
-
-const wpCorporateShortReplyMap = {
-  "1": { tr: "Size nasıl yardımcı olabilirim?", en: "How may I assist you?", ar: "كيف يمكنني مساعدتك؟" },
-  "2": { tr: "Size nasıl yardımcı olabilirim?", en: "How may I assist you?", ar: "كيف يمكنني مساعدتك؟" },
-  "3": { tr: "Size nasıl yardımcı olabilirim?", en: "How may I assist you?", ar: "كيف يمكنني مساعدتك؟" },
-  "merhaba": { tr: "Merhaba, size nasıl yardımcı olabilirim?", en: "Hello, how may I assist you today?", ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟" },
-  "selam": { tr: "Merhaba, size nasıl yardımcı olabilirim?", en: "Hello, how may I assist you today?", ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟" },
-  "hi": { tr: "Merhaba, size nasıl yardımcı olabilirim?", en: "Hello, how may I assist you today?", ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟" },
-  "hello": { tr: "Merhaba, size nasıl yardımcı olabilirim?", en: "Hello, how may I assist you today?", ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟" },
-  "teşekkürler": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
-  "tesekkurler": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
-  "thank you": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
-  "thanks": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
-  "ben teşekkür ederim": { tr: "Rica ederim. Her zaman yardımcı olmaktan memnuniyet duyarım.", en: "You're welcome. Always happy to assist.", ar: "على الرحب والسعة. يسعدني دائمًا مساعدتك." },
-  "çok teşekkürler": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
-  "teşekkür ederim": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
-  "sağol": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." },
-  "sagol": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." },
-  "eyvallah": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." },
-  "anladım": { tr: "Harika. Nasıl devam etmek istersiniz?", en: "Great. How would you like to proceed?", ar: "جميل. كيف تود المتابعة؟" },
-  "anladim": { tr: "Harika. Nasıl devam etmek istersiniz?", en: "Great. How would you like to proceed?", ar: "جميل. كيف تود المتابعة؟" },
-  "got it": { tr: "Anladım. Nasıl devam etmek istersiniz?", en: "Understood. How would you like to proceed?", ar: "فهمت. كيف تود المتابعة؟" },
-  "understood": { tr: "Anladım. Nasıl devam etmek istersiniz?", en: "Understood. How would you like to proceed?", ar: "فهمت. كيف تود المتابعة؟" },
-  "noted": { tr: "Not aldım. Nasıl devam etmek istersiniz?", en: "Noted. How would you like to proceed?", ar: "تم تدوينه. كيف تود المتابعة؟" },
-  "görüşmek üzere": { tr: "Görüşmek üzere. Dilediğiniz zaman buradayım.", en: "See you soon. I’m here whenever you need assistance.", ar: "أراك قريبًا. أنا هنا كلما احتجت إلى المساعدة." },
-  "gorusmek uzere": { tr: "Görüşmek üzere. Dilediğiniz zaman buradayım.", en: "See you soon. I’m here whenever you need assistance.", ar: "أراك قريبًا. أنا هنا كلما احتجت إلى المساعدة." },
-  "👍": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." },
-  "🙏": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." }
-};
 
 const introAfterLang = {
   tr: "Merhaba, ben SamChe AI.\n\nSamChe Company LLC'nin yapay zeka destekli danışmanıyım ve size yardımcı olmak için buradayım.\n\nDubai’de şirket kuruluşu, iş planları, iş geliştirme, dijital büyüme, yapay zeka çözümleri, oturum seçenekleri, yaşam maliyetleri ve şirket kuruluşu sonrasında sunduğumuz hizmetler ile ilgili tüm sorularınızı yanıtlayabilirim. Size nasıl yardımcı olabilirim?\n\n",
@@ -265,6 +236,7 @@ async function sendMessage(to, body) {
               Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
               "Content-Type": "application/json",
             },
+            timeout: 10000 
           }
         );
       } catch (err) {
@@ -280,12 +252,10 @@ async function sendMessageToTelegram(text) {
   try {
     if (!text) return;
     const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
-    await axios.post(url, {
-      chat_id: process.env.TELEGRAM_CHAT_ID.trim(),
-      text: text
-    });
+    // Telegram bildirimini fire-and-forget yapıyoruz ki botu yavaşlatmasın
+    axios.post(url, { chat_id: process.env.TELEGRAM_CHAT_ID.trim(), text: text }, { timeout: 10000 }).catch(() => {});
   } catch (err) {
-    console.error("[TELEGRAM ERROR]:", err.response?.data || err.message);
+    console.error("[TELEGRAM ERROR]:", err.message);
   }
 }
 
@@ -300,7 +270,10 @@ async function callWpGemini(prompt) {
     const response = await axios.post(
       WP_GEMINI_URL,
       { contents: [{ parts: [{ text: prompt }] }] },
-      { headers: { "Content-Type": "application/json" } }
+      { 
+        headers: { "Content-Type": "application/json" },
+        timeout: 15000 
+      }
     );
     return response.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
   } catch (err) {
@@ -329,15 +302,6 @@ function calculateIntentScore(text, currentScore = 0) {
   if (score < 0) score = 0;
   if (score > 100) score = 100;
   return score;
-}
-
-function detectLanguage(text) {
-  if (!text) return "en";
-  const ar = /[\u0600-\u06FF]/;
-  const tr = /[ığüşöçİĞÜŞÖÇ]/i;
-  if (ar.test(text)) return "ar";
-  if (tr.test(text)) return "tr";
-  return "en"; 
 }
 
 function getPingMessage(lang, topic) {
@@ -419,7 +383,7 @@ function getFollowUpMessage(lang, topic, stage) {
         ar: "مرحبًا. تحدثنا بالأمس عن تخطيط التكاليف. إذا كنت جاهزًا، يمكننا توضيح ميزانيتك. للحصول على دعم مباشر، اكتب 'دعم مباشر'."
       },
       AI: {
-        tr: "Merhaba. Dün AI projeniz hakkında konuşmuştuk. Hazırsanız, projenizi daha uygulanabilir bir yapıya dönüştürebiliriz. Canlı destek için 'canlı destek' yazabilirsiniz.",
+        tr: "Merhaba. Dün AI projeniz hakkında konuşmuştuk. Hazırsanız, projenizi daha uygulanabilir yapıya dönüştürebiliriz. Canlı destek için 'canlı destek' yazabilirsiniz.",
         en: "Hello. Yesterday we discussed your AI project. If you're ready, we can turn it into a more actionable plan. Type 'live support' for help.",
         ar: "مرحبًا. تحدثنا بالأمس عن مشروع الذكاء الاصطناعي. إذا كنت جاهزًا، يمكننا تحويله إلى خطة قابلة للتنفيذ. للحصول على دعم مباشر، اكتب 'دعم مباشر'."
       }
@@ -593,6 +557,7 @@ const MAX_WEB_MEMORY = 10;
 function addWebMemory(userId, role, content) {
   if (!webMemoryStore[userId]) webMemoryStore[userId] = [];
   webMemoryStore[userId].push({ role, content });
+
   if (webMemoryStore[userId].length > MAX_WEB_MEMORY) {
     webMemoryStore[userId].splice(0, webMemoryStore[userId].length - MAX_WEB_MEMORY);
   }
@@ -967,15 +932,25 @@ If the user already provided sector info, NEVER ask again.`
 });
 
 // ----------------------------------------------------------------------------
-// C) WHATSAPP BOT (GEMINI 1.5 PRO) - /webhook ve /telegram-webhook
+// C) WHATSAPP BOT (GEMINI PRO) - /webhook ve /telegram-webhook
 // ----------------------------------------------------------------------------
+app.get("/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (mode === "subscribe" && token === process.env.WHATSAPP_VERIFY_TOKEN) {
+    return res.status(200).send(challenge);
+  }
+  return res.sendStatus(403);
+});
+
+// ============================================================================
+// WHATSAPP WEBHOOK (POST) - "TEK TIK" VE KİLİTLENME KESİN ÇÖZÜMÜ
+// ============================================================================
 app.post("/webhook", (req, res) => {
-  // 🔥 HAYATİ DÜZELTME: Meta'nın (WhatsApp) 20 saniyelik timeout sınırını aşmak için
-  // anında senkron olarak 200 OK yanıtı dönüyoruz. Bağlantı hemen kapanır.
   res.status(200).send("OK");
 
-  // 🔥 ARKA PLAN MİMARİSİ: Ağır yapay zeka işlemleri arka planda asenkron çalışır. 
-  // Böylece mesajlar anında "çift tık" olur, Meta sunucuyu beklerken iptal etmez.
   (async () => {
     try {
       const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
@@ -985,12 +960,10 @@ app.post("/webhook", (req, res) => {
       // WHATSAPP RETRY (TEKRAR) KORUMASI
       // --------------------------------------
       const wpMessageId = message.id;
-      if (wpMessageId && processedWpMessages.has(wpMessageId)) {
-        return; 
-      }
+      if (wpMessageId && processedWpMessages.has(wpMessageId)) return; 
       if (wpMessageId) {
         processedWpMessages.add(wpMessageId);
-        setTimeout(() => processedWpMessages.delete(wpMessageId), 10 * 60 * 1000); 
+        setTimeout(() => processedWpMessages.delete(wpMessageId), 2 * 60 * 1000); 
       }
 
       const from = message.from;
@@ -1008,13 +981,16 @@ app.post("/webhook", (req, res) => {
 
       text = (text || "").trim();
 
-      // --------------------------------------
-      // TELEGRAMA BİLDİRİM FORWARD ET
-      // --------------------------------------
-      try {
-        await sendMessageToTelegram(`WhatsApp → +${cleanFrom}: ${text}`);
-      } catch (err) {
-        console.error("[TELEGRAM FORWARD ERROR]:", err);
+      // 🔥 TELEGRAMA BİLDİRİM FORWARD ET (Ateşle ve Unut)
+      sendMessageToTelegram(`WhatsApp → +${cleanFrom}: ${text}`).catch(() => {});
+
+      // 🔥 MAVİ TIK (OKUNDU) ONAYI (Ateşle ve Unut)
+      if (wpMessageId) {
+        axios.post(
+          `https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
+          { messaging_product: "whatsapp", status: "read", message_id: wpMessageId },
+          { headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, "Content-Type": "application/json" }, timeout: 10000 }
+        ).catch(() => {});
       }
 
       // --------------------------------------
@@ -1037,22 +1013,22 @@ app.post("/webhook", (req, res) => {
       // 🔥 CANLI DESTEK AÇIKSA BOT BURADA DURUR VE SADECE DİNLER 🔥
       // ====================================================================
       if (session.humanOverride) {
-        // Müşteri "bot" veya "kapat" yazıp canlı desteği sonlandırmak isterse:
+        // Müşteri canlı desteği sonlandırmak isterse:
         if (lower === "/end" || lower === "/bot" || lower === "bot" || lower === "kapat") {
           session.humanOverride = false;
           session.manualTakeover = false;
+          session.lastUserText = ""; // KİLİTLENMEYİ ÖNLER
           let closeMsg = `🔒 Canlı destek oturumu sona ermiştir.\n\nYapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına 'canlı destek' yazmanız yeterlidir.\nEkibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.`;
           if (session.lang === "en") closeMsg = `🔒 This chat session has ended.\n\nYou may continue chatting with our AI assistant, or type 'live support' anytime to reconnect. Our team will be happy to assist you anytime.`;
           if (session.lang === "ar") closeMsg = `🔒 انتهت جلسة الدردشة هذه.\n\nيمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي أو كتابة 'دعم مباشر' للاتصال بممثل.`;
-          await sendMessage(cleanFrom, closeMsg);
-          await sendMessageToTelegram(`Canlı destek kapatıldı → +${cleanFrom}`);
+          sendMessage(cleanFrom, closeMsg).catch(()=>{});
+          sendMessageToTelegram(`Canlı destek kapatıldı → +${cleanFrom}`).catch(()=>{});
           return;
         }
 
         session.lastMessageTime = Date.now();
-        return; // Botu susturuyoruz, hiçbir işlem (dil tespiti, AI vb.) yapmadan çıkıyor.
+        return; // Botu susturuyoruz.
       }
-      // ====================================================================
 
       // Gelen içerik desteklenmiyorsa
       const isInvalid = !text || text === "" || message.type === "audio" || message.type === "voice" || message.type === "video" || message.type === "sticker";
@@ -1063,11 +1039,13 @@ app.post("/webhook", (req, res) => {
         return;
       }
 
-      // 🔥 KULLANICININ AYNI MESAJI ÜST ÜSTE GÖNDERMESİNİ (SPAM) ENGELLEME
-      if (session.lastUserText === text) {
+      const now = Date.now();
+      // 🔥 SPAM FİLTRESİ HATA ÇÖZÜMÜ: 30 saniye içinde tamamen aynı mesajı atarsa engelle
+      if (session.lastUserText === text && (now - session.lastMessageTime) < 30000) {
         return; 
       }
       session.lastUserText = text;
+      session.lastMessageTime = now;
 
       // --------------------------------------
       // DİL TESPİTİ VE İLK MESAJLAR
@@ -1095,7 +1073,6 @@ app.post("/webhook", (req, res) => {
       // --------------------------------------
       // FOLLOW-UP RESETLERİ
       // --------------------------------------
-      session.lastMessageTime = Date.now();
       session.followUpStage = 0;
       session.pingSentOnce = false;
 
@@ -1104,23 +1081,17 @@ app.post("/webhook", (req, res) => {
       // --------------------------------------
       if (lower === "/w" || lower === "/n" || lower === "canlı destek" || lower === "canli destek" || lower === "live") {
         session.humanOverride = true;
-        session.manualTakeover = false;
+        session.manualTakeover = false; 
+        session.lastUserText = ""; // KİLİTLENMEYİ ÖNLER
 
-        const historyContext = (session.history || []).slice(-4).map(m => m.text).join(" | ");
-        let topicSummary = await callWpGemini(`
-        Önceki mesajlar: "${historyContext}"
-        Son Kullanıcı Mesajı: "${text}"
-        Müşterinin asıl ilgilendiği konuyu TEK KISA BAŞLIK olarak özetle.
-        Sadece konu adı döndür.
-        `);
-        if (!topicSummary) topicSummary = "Genel Destek";
+        const topicSummary = await getTopicSummary(session, text);
 
         let aktarimMesaji = `Canlı temsilci ile görüşme ilgili talebinizi aldım. *${topicSummary}* konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.`;
         if (lang === "en") aktarimMesaji = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
         if (lang === "ar") aktarimMesaji = `لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص موضوع *${topicSummary}*، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.`;
 
         await sendMessage(cleanFrom, aktarimMesaji);
-        await sendMessageToTelegram(`🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``);
+        sendMessageToTelegram(`🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``).catch(()=>{});
         return;
       }
 
@@ -1154,11 +1125,11 @@ app.post("/webhook", (req, res) => {
       const historyText = session.history.map((m) => `${m.role === "user" ? "User" : "Model"}: ${m.text}`).join("\n");
 
       // --------------------------------------
-      // BÜYÜK DİL PROMPTLARI
+      // BÜYÜK DİL PROMPTLARI 
       // --------------------------------------
       let prompt = "";
 
-      if (lang === "tr") {
+     if (lang === "tr") {
         prompt = `SamChe Company LLC’nin kurumsal yapay zekâ danışmanısın. 
 Profesyonel, stratejik, analitik ve yol gösterici cevaplar ver. 
 Gemini’nin hazır kalıplarını, prosedür metinlerini, devlet süreçlerini, klasik açıklamalarını ASLA kullanma. 
@@ -2592,17 +2563,17 @@ phone: +971 50 179 38 80 - +971 52 728 8586
 "ما هو الدعم الذي تقدمونه بعد تأسيس الشركة؟"
 
 فقم بسرد خدمات SamChe Company LLC بعد تأسيس الشركات كما يلي:
-    1. أنظمة الذكاء الاصطناعي الخاصة
-    2. النمو الرقمي واستراتيجية المحتوى
-    3. العلامة التجارية ووسائل التواصل الاجتماعي
-    4. تنمية الجمهور وتحسين الأداء
+    1. Private AI Systems
+    2. Digital Growth & Content Strategy
+    3. Branding & Social Media
+    4. Audience Growth & Performance Optimization
     
 18. إذا كان المستخدم قد ذكر القطاع مسبقًا، فلا تسأله عن القطاع مرة أخرى أبدًا.
 
-سياق المحادثة:
+Conversation history:
 ${historyText}
 
-رسالة المستخدم:
+User message:
 ${text}
 `;
       }
@@ -2639,7 +2610,7 @@ ${text}
         await sendMessage(cleanFrom, aiResponse);
         return;
       } else {
-        const topicSummary = await fetchTopicSummary();
+        const topicSummary = await getTopicSummary(session, text);
 
         let aiAktarimMesaji = `Canlı temsilci ile görüşme ilgili talebinizi aldım. *${topicSummary}* konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.`;
         if (lang === "en") aiAktarimMesaji = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
@@ -2650,9 +2621,10 @@ ${text}
         session.humanOverride = true;
         session.manualTakeover = false; 
         session.lastMessageTime = Date.now();
+        session.lastUserText = ""; // Kilitlenmeyi önler
 
         const alertMsgAi = `🚨 CANLI TEMSİLCİ TALEBİ (Yapay Zeka Yönlendirdi)!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``;
-        await sendMessageToTelegram(alertMsgAi);
+        sendMessageToTelegram(alertMsgAi).catch(()=>{});
 
         return;
       }
@@ -2661,7 +2633,7 @@ ${text}
       console.error("WhatsApp webhook error:", error);
     }
   })();
-});
+}); // WHATSAPP WEBHOOK KAPANIŞI
 
 // ============================================================================
 // TELEGRAM WEBHOOK — NORMAL MESAJ + CANLI DESTEK
@@ -2704,7 +2676,7 @@ app.post("/telegram-webhook", (req, res) => {
         const message = parts.slice(2).join(" ");
 
         if (!cleanTo || !message) {
-          await sendMessageToTelegram("Format yanlış. Örnek:\n/w +905551112233 Merhaba");
+          sendMessageToTelegram("Format yanlış. Örnek:\n/w +905551112233 Merhaba").catch(()=>{});
           return;
         }
 
@@ -2731,9 +2703,10 @@ app.post("/telegram-webhook", (req, res) => {
 
         session.lastMessageTime = Date.now();
         session.warning5MinSent = false;
+        session.lastUserText = "";
 
         await sendMessage(cleanTo, message);
-        await sendMessageToTelegram(`Gönderildi → WhatsApp +${cleanTo}:\n${message}\n\nSohbeti bitirmek için kopyala:\n\`/end +${cleanTo}\``);
+        sendMessageToTelegram(`Gönderildi → WhatsApp +${cleanTo}:\n${message}\n\nSohbeti bitirmek için kopyala:\n\`/end +${cleanTo}\``).catch(()=>{});
         return;
       }
 
@@ -2746,7 +2719,7 @@ app.post("/telegram-webhook", (req, res) => {
         const cleanTo = to?.replace("+", "");
 
         if (!cleanTo) {
-          await sendMessageToTelegram("Format yanlış. Örnek:\n/end +905551112233");
+          sendMessageToTelegram("Format yanlış. Örnek:\n/end +905551112233").catch(()=>{});
           return;
         }
 
@@ -2755,13 +2728,14 @@ app.post("/telegram-webhook", (req, res) => {
         wpSessions[cleanTo].humanOverride = false;
         wpSessions[cleanTo].manualTakeover = false;
         wpSessions[cleanTo].warning5MinSent = false;
+        wpSessions[cleanTo].lastUserText = ""; // KİLİTLENMEYİ ÖNLER
 
         let closeMessage = "🔒 Bu sohbet oturumu sona ermiştir.\n\nBaşka sorularınız varsa veya ek yardıma ihtiyacınız olursa, lütfen istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin. Canlı Destek Ekibimiz size yardımcı olmaktan mutluluk duyacaktır.";
         if (wpSessions[cleanTo]?.lang === "en") closeMessage = "🔒 This chat session has ended.\n\nIf you have further questions or need additional assistance, please feel free to reach out again anytime. Our Live Support Team will be happy to assist you.";
         if (wpSessions[cleanTo]?.lang === "ar") closeMessage = "🔒 انتهت جلسة الدردشة هذه.\n\nإذا كانت لديك أسئلة أخرى أو احتجت إلى مساعدة إضافية، فلا تتردد في الاتصال بنا مرة أخرى في أي وقت. سيسعد فريق الدعم المباشر لدينا بمساعدتك.";
 
         await sendMessage(cleanTo, closeMessage);
-        await sendMessageToTelegram(`Canlı destek kapatıldı → +${cleanTo}`);
+        sendMessageToTelegram(`Canlı destek kapatıldı → +${cleanTo}`).catch(()=>{});
 
         return;
       }
@@ -2806,6 +2780,7 @@ cron.schedule("* * * * *", async () => {
           if (diffMinutesLast >= 10) {
             s.humanOverride = false;
             s.warning5MinSent = false;
+            s.lastUserText = ""; // KİLİTLENMEYİ ÖNLER
             
             const autoCloseMsg = `🔒 Bu sohbet oturumu sona ermiştir.\n\nBaşka sorularınız varsa veya ek yardıma ihtiyacınız olursa, lütfen istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin. Canlı Destek Ekibimiz size yardımcı olmaktan mutluluk duyacaktır.`;
             
