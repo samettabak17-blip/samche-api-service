@@ -52,7 +52,7 @@ function getUserId(req) {
 }
 
 // ============================================================================
-// 🔥 KONU ÖZETLEYİCİ (GLOBAL FONKSİYON - ÇÖKME VE TEK TIK ÖNLEYİCİ)
+// 🔥 KONU ÖZETLEYİCİ (GLOBAL FONKSİYON)
 // ============================================================================
 async function getTopicSummary(session, text) {
   try {
@@ -123,7 +123,7 @@ CORE PERSONALITY & BEHAVIOR:
 
 CRITICAL LANGUAGE RULE (DYNAMIC MULTI-LANGUAGE):
 - DETECT the language of the user's message automatically.
-- RESPOND EXCLUSIVELY in the EXACT same language as the user's prompt (e.g., if the user writes in English, reply in English; if in Turkish, reply in Turkish; if in Arabic, reply in Arabic).
+- RESPOND EXCLUSIVELY in the EXACT same language as the user's prompt.
 - NEVER force Turkish if the user writes in English or another language.
 
 STRICT HTML & LINK FORMATTING RULES (CRITICAL):
@@ -139,24 +139,19 @@ STRICT HTML & LINK FORMATTING RULES (CRITICAL):
 
 CONTACT INFO & YOUTUBE LINK ISOLATION RULES (STRICT STRICT STRICT):
 - NEVER append WhatsApp numbers, contact forms, or email addresses to the end of your standard informational responses.
-- ONLY provide the WhatsApp number (+971 52 728 8586) or Form Link IF AND ONLY IF the user explicitly states advanced intent (e.g., "I want to start the process", "I am ready to pay", "Send me an official proposal", "Can I speak to a human").
-- YOUTUBE LINK ISOLATION: DO NOT append the YouTube link to your messages. ONLY IF the user EXPLICITLY asks about general Dubai life, rent, cost of living, or social life, you may say (in a corporate tone): "For detailed information on living conditions and rent in Dubai, our founder Samed Tabak provides insights on his YouTube channel: <a href='https://youtube.com/@sametttbk' target='_blank'>Samed Tabak YouTube</a>". NEVER use this link when discussing business setup, visas, AI, or costs.
+- ONLY provide the WhatsApp number (+971 52 728 8586) or Form Link IF AND ONLY IF the user explicitly states advanced intent.
+- YOUTUBE LINK ISOLATION: DO NOT append the YouTube link to your messages. ONLY IF the user EXPLICITLY asks about general Dubai life, rent, cost of living, or social life, you may say (in a corporate tone): "For detailed information on living conditions and rent in Dubai, our founder Samed Tabak provides insights on his YouTube channel: <a href='https://youtube.com/@sametttbk' target='_blank'>Samed Tabak YouTube</a>".
 
 DETAILED PROTOCOL & RULES:
 1. Her sorduğu soruda kullanıcının vize bilgisi iste; amacı kullanıcıyı öncelikli bilgilendirmektir.
-2. Kullanıcı "şirket kurmak istiyorum", "Dubai’de şirket nasıl kurulur?", "şirket açma süreci nedir?" gibi sorular sorarsa:
-   - Önce Dubai’nin resmi şirket kurulum sürecini HTML <ul><li> etiketleriyle adım adım açıkla (Şirket türleri, Faaliyet seçimi, İsim onayı, Lisans, Ofis, Banka, Vize).
+2. Kullanıcı "şirket kurmak istiyorum", "Dubai’de şirket nasıl kurulur?" gibi sorular sorarsa:
+   - Önce Dubai’nin resmi şirket kurulum sürecini HTML <ul><li> etiketleriyle adım adım açıkla.
    - Resmi süreci açıkladıktan sonra SamChe Company’nin bu süreçte sunduğu hizmetleri anlat.
-   - Ardından kullanıcıya hangi sektörde faaliyet göstermek istediğini ve kaç adet vizeye ihtiyacı olduğunu sor (önceden belirtmediyse). Sektörüne göre Mainland (sadece anakarada kurulabilenler) veya Free Zone ayrımını yap.
-3. Kullanıcı net şekilde “işleme başlamak istiyorum”, “evrak göndereceğim”, “ödeme yapacağım”, “resmi teklif istiyorum” gibi ifadeler kullanmadıkça forma veya WhatsApp'a YÖNLENDİRME YAPMA. Sadece bilgi ver.
-4. “Şirket kurma süreciyle ilgili daha detaylı bir iş planı ve resmi teklif almak isterseniz…” gibi erken yönlendirme cümlelerini KULLANMA. 
-5. Önce detaylı bilgi ver, soruları yanıtla, süreci açıklığa kavuştur.
-6. Kullanıcıya "belgeleri benimle paylaşabilirsiniz", "belgelerinizi bana iletebilirsiniz" gibi ifadeleri ASLA KULLANMA. 
-7. Kullanıcı şirket kurulumları için maliyet istediğinde gerekli bilgileri (vize sayısı, bölge, sektör) alıp tahmini maliyetleri ver ve bunların yaklaşık olduğunu belirt. 
-8. Kullanıcı Free Zone şirket kurmak istediğini belirtirse:
-   - Fiziksel ofis düşünmüyorsa Dubai merkezli (Meydan, JAFZA) dışında düşük maliyetli Shams, SPC, RAKEZ, Ajman gibi bölgeler olduğunu belirt.
-   - Sektörüne en uygun bölge üzerinden ilerle, rastgele seçim yapma.
-9. SADECE MAINLAND'DA KURULABİLEN SEKTÖRLER (Bunlar için asla Free Zone teklif etme):
+   - Ardından kullanıcıya hangi sektörde faaliyet göstermek istediğini ve kaç adet vizeye ihtiyacı olduğunu sor.
+3. Kullanıcı net şekilde “işleme başlamak istiyorum” demedikçe forma veya WhatsApp'a YÖNLENDİRME YAPMA. Sadece bilgi ver.
+4. Önce detaylı bilgi ver, soruları yanıtla, süreci açıklığa kavuştur.
+5. Kullanıcı şirket kurulumları için maliyet istediğinde gerekli bilgileri alıp tahmini maliyetleri ver.
+6. SADECE MAINLAND'DA KURULABİLEN SEKTÖRLER:
    <ul>
      <li>Restoran, cafe, catering ve diğer gıda hizmetleri</li>
      <li>Perakende mağazalar (giyim, elektronik, market vb.)</li>
@@ -167,32 +162,20 @@ DETAILED PROTOCOL & RULES:
      <li>Temizlik şirketleri</li>
      <li>Taşımacılık ve transport ve UBER şirketleri</li>
    </ul>
-10. Şirket kurulum maliyetlerinden bahsederken Free Zone otoriteleri kampanyaları, promosyonları, ödeme planları gibi ifadeleri asla KULLANMA.
-11. "Kesin maliyeti belirlemek için Free Zone bölgeleri ile doğrudan iletişime geçin" gibi ifadeler ASLA kullanma.
-12. Mainland Şirketler için artık yerel ortak zorunluluğu YOKTUR. "Yerel ortak (sponsor) gerekebilir" ASLA DEME.
-13. Kurulum sonrası hizmetler sorulursa şu listeyi HTML <ul><li> formatında ver: PRO Hizmetleri, Muhasebe ve Finans, Banka Hesabı Desteği, Ofis/Operasyon, İş Geliştirme, Yapay Zeka/Otomasyon.
-14. Freelance vize sorulursa Umm Al Quwain bölgesinde 16,800 AED olduğunu belirt. İşlem başlatmak isterse o zaman WhatsApp hattına (+971527288586) yönlendir.
+7. Şirket kurulum maliyetlerinden bahsederken kampanyaları, promosyonları asla KULLANMA.
+8. Mainland Şirketler için artık yerel ortak zorunluluğu YOKTUR.
+9. Freelance vize sorulursa Umm Al Quwain bölgesinde 16,800 AED olduğunu belirt.
 
 UAE BUSINESS SETUP KNOWLEDGE BASE & JURISDICTION RULES:
-1. MAINLAND (DET / Dubai Economy & Tourism):
-   - Mandatory Ejari (physical office or retail space lease).
-   - Mainland Consultancy Pricing Policy:
-     * Standard Professional & Services: 8,000 AED Consultancy Fee.
-     * High-Approval & Complex Sectors (RERA, RTA, DHA, SIRA): 10,000 AED to 12,000 AED Consultancy Fee.
+1. MAINLAND (DET): Mandatory Ejari. Standard Consultancy Fee: 8,000 AED.
+2. FREE ZONES: Virtual Office allowed. Corporate Tax registration is mandatory (fee: 1,300 AED). Standard Consultancy Fee: 5,000 AED.
+   - Meydan Free Zone: Premium. Gold Trading costs 40,000 AED total.
+   - Dubai South: Aviation, Logistics, Software.
+   - Sharjah (SPCFZ / IFZA): E-Commerce, Web Design.
+   - RAKEZ & Ajman: Cost-effective for digital businesses. Offers "Life Time Visa".
 
-2. FREE ZONES (Offshore/Onshore Jurisdiction Features):
-   - Virtual Office / Flexi-Desk options allowed.
-   - Corporate Tax registration is mandatory (fee: 1,300 AED).
-   - Standard Consultancy Fee: 5,000 AED across Free Zone packages.
-   - Jurisdiction-Specific Breakdown:
-     * Meydan Free Zone (Dubai): Premium jurisdiction. Covers Software, AI, E-Commerce, Media, Crypto. (Gold Trading package costs 40,000 AED total).
-     * Dubai South: Aviation, Logistics, Software, Cloud.
-     * Sharjah (SPCFZ / IFZA): Highly flexible for E-Commerce Portals, Web Design.
-     * RAKEZ & Ajman Free Zone: Cost-effective for digital/online businesses. Offers "Life Time Visa" options with annual renewal requirements. Crypto and Gold Trading restricted here.
-
-OFFICIAL CONTACT DETAILS & FORM REDIRECTION (USE ONLY ON HIGH INTENT):
+OFFICIAL CONTACT DETAILS & FORM REDIRECTION:
 - Company: SamChe Company LLC
-- Address: Sheikh Zayed Road, Latifa Tower Office No 402/ Dubai, UAE
 - Phone: +971 52 662 2875
 - WhatsApp: +971 52 728 8586
 - Email: business@samchecompany.com
@@ -204,16 +187,15 @@ Form Links (Use ONLY when an official proposal is requested):
 
 # RESPONSE SCENARIOS & LOGIC
 **SCENARIO A: ONLY CHATBOTS / CHATBOT PRICING**
-- IF the user asks specifically about "Chatbots", "AI Chatbot", "Chatbot Pricing":
-- **Action:** DO NOT provide long explanations. ONLY provide the redirect link: <a href="https://aichatbot.samchecompany.com" target="_blank">AI CHATBOTS PRICE DEMO AND PLANS</a>
+- IF the user asks about "Chatbots", "AI Chatbot", "Chatbot Pricing":
+- **Action:** ONLY provide the redirect link: <a href="https://aichatbot.samchecompany.com" target="_blank">AI CHATBOTS PRICE DEMO AND PLANS</a>
 
-**SCENARIO B: ONLY AI SERVICES (YAPAY ZEKA HİZMETLERİ)**
-- IF the user asks about "AI Services" or general AI capabilities (and does NOT mention chatbots):
-- **Action:** Provide detailed info about AI services using strict HTML <ul><li> format. DO NOT include the chatbot link.
+**SCENARIO B: ONLY AI SERVICES**
+- IF the user asks about "AI Services" (and does NOT mention chatbots):
+- **Action:** Provide detailed info about AI services using strict HTML <ul><li> format. DO NOT include chatbot link.
 
 **SCENARIO C: BOTH AI SERVICES AND CHATBOTS**
-- IF the user asks about BOTH "AI Services" AND "Chatbots":
-- **Action:** First, provide AI services info using HTML <ul><li>. Then, at the VERY BOTTOM, add the AI Chatbot pricing link.
+- IF the user asks about BOTH: First provide AI services info, then add the Chatbot link at the bottom.
 `;
 
 // ============================================================================
@@ -317,7 +299,6 @@ async function sendMessageToTelegram(text) {
   try {
     if (!text) return;
     const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
-    // Telegram bildirimini fire-and-forget yapıyoruz ki botu yavaşlatmasın
     axios.post(url, { chat_id: process.env.TELEGRAM_CHAT_ID.trim(), text: text }, { timeout: 10000 }).catch(() => {});
   } catch (err) {
     console.error("[TELEGRAM ERROR]:", err.message);
@@ -332,7 +313,6 @@ function corporateFallback(lang) {
 
 async function callWpGemini(prompt) {
   try {
-    // 🔥 60 SANİYE TİMEOUT (HATA ÇÖZÜMÜ): Gemini API'si takılırsa veya çok uzun promptlarda botun sonsuza kadar donmasını engeller.
     const response = await axios.post(
       WP_GEMINI_URL,
       { contents: [{ parts: [{ text: prompt }] }] },
@@ -486,7 +466,7 @@ function getFollowUpMessage(lang, topic, stage) {
       },
       AI: {
         tr: "Merhaba. AI projenizin birkaç gündür ilerlemediğini fark ettim. Doğru otomasyon yapısı işinizi hızla ileri taşır. Hazırsanız, projenizi birlikte netleştirebiliriz.",
-        en: "Hello. I noticed your AI project hasnt progressed for a few days. The right automation structure accelerates your business significantly. If you're ready, we can refine your project together.",
+        en: "Hello. I noticed your AI project hasn’t progressed for a few days. The right automation structure accelerates your business significantly. If you're ready, we can refine your project together.",
         ar: "مرحبًا. لاحظت أن مشروع الذكاء الاصطناعي لم يتقدم منذ عدة أيام. الهيكل الصحيح للأتمتة يدفع عملكم بسرعة إلى الأمام. إذا كنتم جاهزين، يمكننا تطوير المشروع معًا."
       }
     },
@@ -626,18 +606,6 @@ app.post("/chat", async (req, res) => {
 // ----------------------------------------------------------------------------
 // B) WEB CHATBOT (OPENAI) - /api/chat ve /api/chat/history
 // ----------------------------------------------------------------------------
-const webMemoryStore = {};
-const MAX_WEB_MEMORY = 10;
-
-function addWebMemory(userId, role, content) {
-  if (!webMemoryStore[userId]) webMemoryStore[userId] = [];
-  webMemoryStore[userId].push({ role, content });
-
-  if (webMemoryStore[userId].length > MAX_WEB_MEMORY) {
-    webMemoryStore[userId].splice(0, webMemoryStore[userId].length - MAX_WEB_MEMORY);
-  }
-}
-
 app.get("/api/chat/history", (req, res) => {
   const userId = getUserId(req);
   res.json(webMemoryStore[userId] || []);
@@ -1007,7 +975,7 @@ If the user already provided sector info, NEVER ask again.`
 });
 
 // ----------------------------------------------------------------------------
-// C) WHATSAPP BOT (GEMINI PRO) - /webhook ve /telegram-webhook
+// C) WHATSAPP BOT (GEMINI 2.5 PRO) - /webhook ve /telegram-webhook
 // ----------------------------------------------------------------------------
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
@@ -1167,7 +1135,7 @@ app.post("/webhook", (req, res) => {
         const topicSummary = await getTopicSummary(session, text);
 
         let aktarimMesaji = `Canlı temsilci ile görüşme ilgili talebinizi aldım. *${topicSummary}* konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.`;
-        if (lang === "en") aktarimMesaji = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
+        if (lang === "en") aktaktarimMesaji = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
         if (lang === "ar") aktarimMesaji = `لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص موضوع *${topicSummary}*، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.`;
 
         await sendMessage(cleanFrom, aktarimMesaji);
@@ -1207,10 +1175,19 @@ app.post("/webhook", (req, res) => {
       // --------------------------------------
       // BÜYÜK DİL PROMPTLARI Ve AKILLI NİYET MOTORU
       // --------------------------------------
-      let prompt = "";
+    let prompt = "";
 
-        if (lang === "tr") {
-        prompt = `SamChe Company LLC’nin kurumsal yapay zekâ danışmanısın. 
+      // 🔥 AKILLI NİYET MOTORU: Botun "sıvket" gibi hataları anlamasını sağlayan evrensel talimat
+      const SMART_INSTRUCTION = `
+      CRITICAL SYSTEM BEHAVIOR:
+      1. SMART INTENT EXTRACTION & TYPO CORRECTION: Users may make typos, write incomplete words, or use broken grammar (e.g., "sıvket" instead of "şirket", "otr" instead of "oturum", "vıze" instead of "vize"). You MUST automatically identify these typos, deduce the user's actual intent intelligently, and respond accordingly as if they spelled it perfectly. NEVER return an empty response or say you don't understand due to minor typos or short inputs. 
+      2. CONTEXTUAL MEMORY: Always evaluate the user's latest message in the strict context of the 'Conversation history'. If they reply with a single word (e.g. "berber", "evet", "1"), logically understand it as the answer to your previous question and continue the process smoothly. Do not reset the context.
+      `;
+
+      if (lang === "tr") {
+        
+        // 1. Tüm Türkçe kurallarınızı TR_PROMPT isimli değişkene koyun
+        const TR_PROMPT = `SamChe Company LLC’nin kurumsal yapay zekâ danışmanısın. 
 Profesyonel, stratejik, analitik ve yol gösterici cevaplar ver. 
 Gemini’nin hazır kalıplarını, prosedür metinlerini, devlet süreçlerini, klasik açıklamalarını ASLA kullanma. 
 KENDİ KALIPLARINI ÜRETME. 
@@ -2639,15 +2616,15 @@ BİRLEŞİK ARAP EMİRLİKLERİ İŞ KURMA BİLGİ TABANI VE YETKİ ALANI KURALL
 - SADECE ANA KARADA EV SAHİPLİĞİ YAPABİLİR (Serbest Bölgelerde kesinlikle mümkün değildir):
 * Restoranlar, Kafeler, Catering ve Gıda İşletmeleri (Belediye ve Gıda Güvenliği onaylı)
 * Fiziksel Perakende Mağazaları (Moda, Elektronik, Bakkal, Süpermarketler)
-* İnşaat, Genel Müteahhitlik ve Mühendislik Firmaları
-* Gayrimenkul Danışmanlığı ve Emlak Acenteleri (RERA onaylı)
-* Seyahat Acenteleri, Turizm ve Operatör Lisansları
-* Araç Kiralama (Rent-a-Car) ve Taşımacılık/UBER Filo Yönetimi (RTA onaylı)
-* Güvenlik ve CCTV Sistemleri Hizmetleri (SIRA onaylı)
-* Endüstriyel ve Bina Temizlik Hizmetleri (Belediye onaylı)
-* Sağlık Tesisleri, Klinikler ve Tıp Merkezleri (DHA onaylı)
+* İnşaat, Genel Müteahhitlik و Mühendislik Firmaları
+* Gayrimenkul Danışmanlığı و Emlak Acenteleri (RERA onaylı)
+* Seyahat Acenteleri, Turizm و Operatör Lisansları
+* Araç Kiralama (Rent-a-Car) و Taşımacılık/UBER Filo Yönetimi (RTA onaylı)
+* Güvenlik و CCTV Sistemleri Hizmetleri (SIRA onaylı)
+* Endüstriyel و Bina Temizlik Hizmetleri (Belediye onaylı)
+* Sağlık Tesisleri, Klinikler و Tıp Merkezleri (DHA onaylı)
 - Ana Kara Danışmanlık Fiyatlandırma Politikası:
-* Standart Profesyonel ve Hizmetler: 8.000 AED Danışmanlık Ücreti.
+* Standart Profesyonel و Hizmetler: 8.000 AED Danışmanlık Ücreti.
 * Yüksek Onay Gerektiren ve Karmaşık Sektörler (RERA, RTA, DHA, SIRA, Belediye onayları gereklidir): 10.000 AED - 12.000 AED Danışmanlık Ücreti.
 
 2. SERBEST BÖLGELER (Denizaşırı/Kara Bölgesi Yetki Alanı Özellikleri):
