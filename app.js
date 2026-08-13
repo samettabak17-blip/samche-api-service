@@ -52,7 +52,7 @@ function getUserId(req) {
 }
 
 // ============================================================================
-// 🔥 KONU ÖZETLEYİCİ (GLOBAL FONKSİYON - ÇÖKME VE TEK TIK ÖNLEYİCİ)
+// 🔥 KONU ÖZETLEYİCİ (GLOBAL FONKSİYON)
 // ============================================================================
 async function getTopicSummary(session, text) {
   try {
@@ -61,7 +61,6 @@ async function getTopicSummary(session, text) {
     Önceki mesajlar: "${historyContext}"
     Son Kullanıcı Mesajı: "${text}"
     Müşterinin asıl ilgilendiği konuyu (örneğin: Oturum İzni, Şirket Kurulumu, Vize, Fiyat Bilgisi, Yapay Zeka Çözümleri vb.) TEK KISA BAŞLIK olarak özetle.
-    Eğer son mesajda sadece canlı temsilci istiyorsa, önceki mesajlara bakarak asıl konuyu bul. "Müşteri Temsilcisi Talebi" GİBİ GENEL CEVAPLAR VERME.
     Sadece konu adı döndür.
     `);
     return summary || "Genel Destek";
@@ -198,39 +197,7 @@ Form Links (Use ONLY when an official proposal is requested):
 - IF the user asks about BOTH: First provide AI services info, then add the Chatbot link at the bottom.
 `;
 
-// ============================================================================
-// WHATSAPP İÇİN KISA CEVAPLAR VE SABİT METİNLER (HATA BURADAYDI, EKLENDİ)
-// ============================================================================
 const wpSessions = {};
-
-const wpCorporateShortReplyMap = {
-  "1": { tr: "Size nasıl yardımcı olabilirim?", en: "How may I assist you?", ar: "كيف يمكنني مساعدتك؟" },
-  "2": { tr: "Size nasıl yardımcı olabilirim?", en: "How may I assist you?", ar: "كيف يمكنني مساعدتك؟" },
-  "3": { tr: "Size nasıl yardımcı olabilirim?", en: "How may I assist you?", ar: "كيف يمكنني مساعدتك؟" },
-  "merhaba": { tr: "Merhaba, size nasıl yardımcı olabilirim?", en: "Hello, how may I assist you today?", ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟" },
-  "selam": { tr: "Merhaba, size nasıl yardımcı olabilirim?", en: "Hello, how may I assist you today?", ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟" },
-  "hi": { tr: "Merhaba, size nasıl yardımcı olabilirim?", en: "Hello, how may I assist you today?", ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟" },
-  "hello": { tr: "Merhaba, size nasıl yardımcı olabilirim?", en: "Hello, how may I assist you today?", ar: "مرحبًا، كيف يمكنني مساعدتك اليوم؟" },
-  "teşekkürler": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
-  "tesekkurler": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
-  "thank you": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
-  "thanks": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
-  "ben teşekkür ederim": { tr: "Rica ederim. Her zaman yardımcı olmaktan memnuniyet duyarım.", en: "You're welcome. Always happy to assist.", ar: "على الرحب والسعة. يسعدني دائمًا مساعدتك." },
-  "çok teşekkürler": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
-  "teşekkür ederim": { tr: "Ben teşekkür ederim. Dilediğiniz zaman yardımcı olmaktan memnuniyet duyarım.", en: "My pleasure. I’m here whenever you need support.", ar: "على الرحب والسعة. أنا هنا كلما احتجت إلى المساعدة." },
-  "sağol": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." },
-  "sagol": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." },
-  "eyvallah": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." },
-  "anladım": { tr: "Harika. Nasıl devam etmek istersiniz?", en: "Great. How would you like to proceed?", ar: "جميل. كيف تود المتابعة؟" },
-  "anladim": { tr: "Harika. Nasıl devam etmek istersiniz?", en: "Great. How would you like to proceed?", ar: "جميل. كيف تود المتابعة؟" },
-  "got it": { tr: "Anladım. Nasıl devam etmek istersiniz?", en: "Understood. How would you like to proceed?", ar: "فهمت. كيف تود المتابعة؟" },
-  "understood": { tr: "Anladım. Nasıl devam etmek istersiniz?", en: "Understood. How would you like to proceed?", ar: "فهمت. كيف تود المتابعة؟" },
-  "noted": { tr: "Not aldım. Nasıl devam etmek istersiniz?", en: "Noted. How would you like to proceed?", ar: "تم تدوينه. كيف تود المتابعة؟" },
-  "görüşmek üzere": { tr: "Görüşmek üzere. Dilediğiniz zaman buradayım.", en: "See you soon. I’m here whenever you need assistance.", ar: "أراك قريبًا. أنا هنا كلما احتجت إلى المساعدة." },
-  "gorusmek uzere": { tr: "Görüşmek üzere. Dilediğiniz zaman buradayım.", en: "See you soon. I’m here whenever you need assistance.", ar: "أراك قريبًا. أنا هنا كلما احتجت إلى المساعدة." },
-  "👍": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." },
-  "🙏": { tr: "Rica ederim. Dilediğiniz zaman yardımcı olabilirim.", en: "You're welcome. I’m here if you need anything.", ar: "على الرحب والسعة. أنا هنا إذا احتجت أي شيء." }
-};
 
 const introAfterLang = {
   tr: "Merhaba, ben SamChe AI.\n\nSamChe Company LLC'nin yapay zeka destekli danışmanıyım ve size yardımcı olmak için buradayım.\n\nDubai’de şirket kuruluşu, iş planları, iş geliştirme, dijital büyüme, yapay zeka çözümleri, oturum seçenekleri, yaşam maliyetleri ve şirket kuruluşu sonrasında sunduğumuz hizmetler ile ilgili tüm sorularınızı yanıtlayabilirim. Size nasıl yardımcı olabilirim?\n\n",
@@ -298,12 +265,13 @@ function corporateFallback(lang) {
 
 async function callWpGemini(prompt) {
   try {
+    // 🔥 30 SANİYE TİMEOUT: Gemini API'si takılırsa botun sonsuza kadar donmasını engeller
     const response = await axios.post(
       WP_GEMINI_URL,
       { contents: [{ parts: [{ text: prompt }] }] },
       { 
         headers: { "Content-Type": "application/json" },
-        timeout: 15000 
+        timeout: 30000 
       }
     );
     return response.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
@@ -315,8 +283,8 @@ async function callWpGemini(prompt) {
 
 function detectTopic(text) {
   const t = text.toLowerCase();
-  if (t.includes("şirket") || t.includes("company") || t.includes("business setup") || t.includes("company setup")) return "company";
-  if (t.includes("oturum") || t.includes("residency") || t.includes("visa") || t.includes("ikamet")) return "residency";
+  if (t.includes("şirket") || t.includes("company") || t.includes("business setup") || t.includes("company setup") || t.includes("sirket") || t.includes("sıvket")) return "company";
+  if (t.includes("oturum") || t.includes("residency") || t.includes("visa") || t.includes("ikamet") || t.includes("vize")) return "residency";
   if (t.includes("ai") || t.includes("bot") || t.includes("chatbot") || t.includes("webchat")) return "ai";
   if (t.includes("maliyet") || t.includes("cost") || t.includes("price") || t.includes("ücret") || t.includes("bütçe") || t.includes("budget")) return "cost";
   return "other";
@@ -333,15 +301,6 @@ function calculateIntentScore(text, currentScore = 0) {
   if (score < 0) score = 0;
   if (score > 100) score = 100;
   return score;
-}
-
-function detectLanguage(text) {
-  if (!text) return "en";
-  const ar = /[\u0600-\u06FF]/;
-  const tr = /[ığüşöçİĞÜŞÖÇ]/i;
-  if (ar.test(text)) return "ar";
-  if (tr.test(text)) return "tr";
-  return "en"; 
 }
 
 function getPingMessage(lang, topic) {
@@ -989,11 +948,16 @@ app.get("/webhook", (req, res) => {
 // WHATSAPP WEBHOOK (POST) - "TEK TIK" VE KİLİTLENME KESİN ÇÖZÜMÜ
 // ============================================================================
 app.post("/webhook", (req, res) => {
+  // 🔥 HAYATİ DÜZELTME: Meta'nın (WhatsApp) 20 saniyelik timeout sınırını aşmak için
+  // anında senkron olarak 200 OK yanıtı dönüyoruz.
   res.status(200).send("OK");
 
-  (async () => {
+  const body = req.body;
+  
+  // 🔥 ÇOK ÖNEMLİ: Hızlandırmak ve 20s takılmayı sıfırlamak için 50ms gecikmeli asenkron tetikleyici!
+  setTimeout(async () => {
     try {
-      const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+      const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
       if (!message) return; 
 
       // --------------------------------------
@@ -1021,10 +985,10 @@ app.post("/webhook", (req, res) => {
 
       text = (text || "").trim();
 
-      // 🔥 TELEGRAMA BİLDİRİM FORWARD ET (Ateşle ve Unut)
+      // 🔥 TELEGRAMA BİLDİRİM FORWARD ET (Ateşle ve Unut - Beklemez)
       sendMessageToTelegram(`WhatsApp → +${cleanFrom}: ${text}`).catch(() => {});
 
-      // 🔥 MAVİ TIK (OKUNDU) ONAYI (Ateşle ve Unut)
+      // 🔥 MAVİ TIK (OKUNDU) ONAYI (Ateşle ve Unut - Beklemez)
       if (wpMessageId) {
         axios.post(
           `https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
@@ -1165,12 +1129,21 @@ app.post("/webhook", (req, res) => {
       const historyText = session.history.map((m) => `${m.role === "user" ? "User" : "Model"}: ${m.text}`).join("\n");
 
       // --------------------------------------
-      // BÜYÜK DİL PROMPTLARI 
+      // BÜYÜK DİL PROMPTLARI Ve AKILLI NİYET MOTORU
       // --------------------------------------
       let prompt = "";
 
+      // 🔥 AKILLI NİYET MOTORU: Botun "sıvket" gibi hataları anlamasını sağlayan evrensel talimat
+      const SMART_INSTRUCTION = `
+      CRITICAL SYSTEM BEHAVIOR:
+      1. SMART INTENT EXTRACTION & TYPO CORRECTION: Users may make typos, write incomplete words, or use broken grammar (e.g., "sıvket" instead of "şirket", "otr" instead of "oturum", "vıze" instead of "vize"). You MUST automatically identify these typos, deduce the user's actual intent intelligently, and respond accordingly as if they spelled it perfectly. NEVER return an empty response or say you don't understand due to minor typos or short inputs. 
+      2. CONTEXTUAL MEMORY: Always evaluate the user's latest message in the strict context of the 'Conversation history'. If they reply with a single word (e.g. "berber", "evet", "1"), logically understand it as the answer to your previous question and continue the process smoothly. Do not reset the context.
+      `;
+
       if (lang === "tr") {
-        prompt = `SamChe Company LLC’nin kurumsal yapay zekâ danışmanısın. 
+        
+        // 1. Tüm Türkçe kurallarınızı TR_PROMPT isimli değişkene koyun
+        const TR_PROMPT = `SamChe Company LLC’nin kurumsal yapay zekâ danışmanısın. 
 Profesyonel, stratejik, analitik ve yol gösterici cevaplar ver. 
 Gemini’nin hazır kalıplarını, prosedür metinlerini, devlet süreçlerini, klasik açıklamalarını ASLA kullanma. 
 KENDİ KALIPLARINI ÜRETME. 
@@ -1950,9 +1923,8 @@ Kullanıcı mesajı:
 ${text}
 `;
 
-
       } else if (lang === "en") {
-        prompt = `You are the Senior AI Consultant of SamChe Company LLC, based in Dubai.  
+        prompt = `${SMART_INSTRUCTION}\n\nYou are the Senior AI Consultant of SamChe Company LLC, based in Dubai.  
 Your expertise includes:  
 • Private AI systems  
 • Custom AI chatbots for websites and WhatsApp  
@@ -2039,10 +2011,6 @@ These expressions are FORBIDDEN:
 • “I am preparing / I can prepare a special official offer - business plan - cost plan for you.”
 
 The following behaviors are STRICTLY FORBIDDEN:
-• Do not use ready-made templates unless the user message exactly matches a specific trigger phrase word-for-word.
-• Do not trigger responses automatically based on similarity, prediction, inferred intent, topic resemblance, or possible meanings.
-• If the user message is unclear, incomplete, or open to interpretation, do not trigger any ready-made templates.
-• Do not make assumptions, open new topics, or make redirections.
 • NEVER ask users for contact information.
 • If the user says “I want to speak with a live representative”, “connect me to a real person”, “I want to chat with a human”, “connect me to a representative”, “give me contact information”, or any similar expression, apply the LIVE REPRESENTATIVE REDIRECTION BEHAVIOR RULE.
 • After giving contact information to the user, never provide additional information, suggestions, different service promotions, links, redirections, or start a new topic in the same or subsequent messages.
@@ -2263,7 +2231,7 @@ User message:
 ${text}
 `;
       } else if (lang === "ar") {
-        prompt = `أنت المستشار الأول للذكاء الاصطناعي في شركة SamChe Company LLC ومقرها دبي.
+        prompt = `${SMART_INSTRUCTION}\n\nأنت المستشار الأول للذكاء الاصطناعي في شركة SamChe Company LLC ومقرها دبي.
 تشمل خبراتك:
 • أنظمة الذكاء الاصطناعي الخاصة
 • روبوتات الدردشة المخصصة للمواقع الإلكترونية وواتساب
@@ -2337,10 +2305,6 @@ https://aichatbot.samchecompany.com/”
 - بغض النظر عمّا يسأل المستخدم، تقديم معلومات ونطاقات أسعار واضحة فقط. لا يطرح أسئلة على المستخدم ولا يقوم بتوجيهه. يقدّم المعلومات للمستخدم بطريقة احترافية ومهذبة دون إزعاجه.
 
 السلوكيات التالية ممنوعة تمامًا:
-• لا تستخدم القوالب الجاهزة ما لم تتطابق رسالة المستخدم تمامًا مع عبارة التفعيل المحددة حرفيًا.
-• لا تقم بتفعيل الردود تلقائيًا بناءً على التشابه أو التوقع أو استنتاج النية أو تشابه المواضيع أو المعاني المحتملة.
-• إذا كانت رسالة المستخدم غير واضحة أو ناقصة أو قابلة للتفسير، فلا تقم بتفعيل أي قالب جاهز.
-• لا تقم بالافتراض أو فتح مواضيع جديدة أو توجيه المستخدم.
 • لا تطلب أبدًا من المستخدمين معلومات التواصل الخاصة بهم.
 • إذا قال المستخدم "أريد التحدث مع ممثل مباشر" أو "اربطني بشخص حقيقي" أو "أريد التحدث مع إنسان" أو "اربطني بممثل" أو "أعطني معلومات التواصل" أو أي تعبير مشابه، قم بتطبيق قاعدة التحويل إلى الممثل المباشر.
 • بعد إعطاء معلومات التواصل للمستخدم، لا تقدّم أبدًا أي معلومات إضافية أو اقتراحات أو ترويج لخدمات أخرى أو روابط أو توجيهات أو فتح موضوع جديد في نفس الرسالة أو الرسائل اللاحقة.
@@ -2510,7 +2474,6 @@ phone: +971 50 179 38 80 - +971 52 728 8586
 
 قاعدة شرح تأسيس الشركات:
 • استخدم جميع الردود الجاهزة التالية فقط إذا سأل المستخدم بوضوح عن هذا الموضوع.
-• لا تستخدم الردود الجاهزة إلا إذا تطابقت رسالة المستخدم حرفيًا مع عبارات التفعيل. لا تفترض ولا تفتح مواضيع جديدة ولا تقم بالتوجيه.
 
 إذا قال المستخدم:
 "أريد تأسيس شركة"
@@ -2590,42 +2553,14 @@ Oldukça yaklaşık maliyetleri ver sadece, Kullanıcının ASLA bir freezone ot
 -Taşımacılık ve transport ve UBER şirketleri"
 
 17. Kullanıcı:
-"şirket kurulum sonrası verdiğiniz hizmetler neler"
+"شركت kurulum sonrası verdiğiniz hizmetler neler"
 "Şirket kurulum sonrası desteğiniz neler" gibi sorular sorarsa SamChe Company LLC'nin şirket kurulumu sonrası verdiği destekleri aşağıdaki gibi sırala:
 1️⃣ PRO (Government Relations) Hizmetleri
-Çalışan Vize başvuruları 
-Investor(yatırımcı) / Partner (aile) vizeleri
-Çalışanların çalışma vizelerinin yenilenmesi
-Emirates ID işlemleri
-Medical test ve biometrik işlemler
-Immigration ve labour card işlemleri
-Şirket Lisans yenileme
-Şirket belgelerinin resmi işlemleri
-Çalışanların kontratlarının yenilenmesi
-Vize Kotaları Yönetimi
 2️⃣ Muhasebe ve Finans Hizmetleri
-Aylık muhasebe kayıtları
-VAT (KDV) kaydı
-VAT beyanı ve raporlaması
-Corporate Tax danışmanlığı
-Financial statement hazırlama
 3️⃣ Banka Hesabı Açılış Desteği
-Kurumsal banka hesabı açılışı
-KYC evrak hazırlığı
 4️⃣ Ofis ve Operasyon Hizmetleri
-Flexi desk / ofis kiralama
-Virtual office
-Meeting room kullanımı
-Telefon numarası ve mail yönetimi
 5️⃣ İş Geliştirme ve Pazarlama Hizmetleri
-Website kurulumu
-Digital marketing Hizmetleri
-Sosyal Medya Pazarlaması
 6️⃣ Yapay Zekâ ve Otomasyon Çözümleri
-AI chatbot kurulumu
-Instagram / WhatsApp otomasyonu
-CRM entegrasyonu
-Satış otomasyon sistemleri
 
 18. Kullanıcı daha önce sektör bilgisini verdiyse, bir daha ASLA sektör sorma. Kullanıcı diğer vize türlerini sorarsa (freelance vize alma vb. sorular sorduğunda) freelance vize öner; Freelance Permit kurallarını uygula.
 
@@ -2648,7 +2583,7 @@ BİRLEŞİK ARAP EMİRLİKLERİ İŞ KURMA BİLGİ TABANI VE YETKİ ALANI KURALL
 
 2. SERBEST BÖLGELER (Denizaşırı/Kara Bölgesi Yetki Alanı Özellikleri):
 - Sanal Ofis / Esnek Masa seçenekleri mevcuttur.
-- Kurumlar Vergisi kaydı zorunludur. (Şirket kurulum paketlerine dahil değildir. Talep edilmesi halinde lisans ve vize işlemlerinin ardından 1.300 AED karşılığında SamChe Company LLC tarafından kayıt ve başvuru süreci yürütülür. Kayıt yükümlülüğünün ilgili süre içerisinde yerine getirilmemesi halinde FTA tarafından 10.000 AED idari ceza uygulanır.)
+- Kurumlar Vergisi kaydı zorunludur.
 - Standart Danışmanlık Ücreti: Serbest Bölge paketleri genelinde 5.500 AED.
 - Yetki Alanına Özgü Ayrıntılar:
 * Meydan Serbest Bölgesi (Dubai): Premium yetki alanı. Yazılım, Yapay Zeka, E-Ticaret, Medya, Kripto/Web3 Danışmanlığı, VIP Saç/Cilt Estetiği vb alanlarını kapsar.
@@ -2720,7 +2655,7 @@ ${text}
     } catch (error) {
       console.error("WhatsApp webhook error:", error);
     }
-  })();
+  }, 50); // Mükemmel performans için 50 milisaniye arka plan kaydırması
 }); // WHATSAPP WEBHOOK KAPANIŞI
 
 // ============================================================================
@@ -2729,7 +2664,7 @@ ${text}
 app.post("/telegram-webhook", (req, res) => {
   res.status(200).send("OK");
 
-  (async () => {
+  setTimeout(async () => {
     try {
       const updateId = req.body?.update_id;
       if (updateId && processedTgUpdates.has(updateId)) {
@@ -2831,7 +2766,7 @@ app.post("/telegram-webhook", (req, res) => {
     } catch (err) {
       console.error("Telegram webhook error:", err);
     }
-  })();
+  }, 50);
 });
 
 // ============================================================================
