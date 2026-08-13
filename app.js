@@ -52,7 +52,7 @@ function getUserId(req) {
 }
 
 // ============================================================================
-// 🔥 KONU ÖZETLEYİCİ (GLOBAL FONKSİYON)
+// 🔥 KONU ÖZETLEYİCİ (GLOBAL FONKSİYON - ÇÖKME VE TEK TIK ÖNLEYİCİ)
 // ============================================================================
 async function getTopicSummary(session, text) {
   try {
@@ -199,22 +199,7 @@ Form Links (Use ONLY when an official proposal is requested):
 `;
 
 // ============================================================================
-// 3. WEB CHATBOT VERİLERİ VE HAFIZASI (OPENAI)
-// ============================================================================
-const webMemoryStore = {};
-const MAX_WEB_MEMORY = 10;
-
-function addWebMemory(userId, role, content) {
-  if (!webMemoryStore[userId]) webMemoryStore[userId] = [];
-  webMemoryStore[userId].push({ role, content });
-
-  if (webMemoryStore[userId].length > MAX_WEB_MEMORY) {
-    webMemoryStore[userId].splice(0, webMemoryStore[userId].length - MAX_WEB_MEMORY);
-  }
-}
-
-// ============================================================================
-// 4. WHATSAPP BOT VERİLERİ (GEMINI 2.5 PRO + CRON)
+// WHATSAPP İÇİN KISA CEVAPLAR VE SABİT METİNLER (HATA BURADAYDI, EKLENDİ)
 // ============================================================================
 const wpSessions = {};
 
@@ -318,7 +303,7 @@ async function callWpGemini(prompt) {
       { contents: [{ parts: [{ text: prompt }] }] },
       { 
         headers: { "Content-Type": "application/json" },
-        timeout: 60000 
+        timeout: 15000 
       }
     );
     return response.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
@@ -330,8 +315,8 @@ async function callWpGemini(prompt) {
 
 function detectTopic(text) {
   const t = text.toLowerCase();
-  if (t.includes("şirket") || t.includes("company") || t.includes("business setup") || t.includes("company setup") || t.includes("sirket") || t.includes("sıvket")) return "company";
-  if (t.includes("oturum") || t.includes("residency") || t.includes("visa") || t.includes("ikamet") || t.includes("vize") || t.includes("vıze")) return "residency";
+  if (t.includes("şirket") || t.includes("company") || t.includes("business setup") || t.includes("company setup")) return "company";
+  if (t.includes("oturum") || t.includes("residency") || t.includes("visa") || t.includes("ikamet")) return "residency";
   if (t.includes("ai") || t.includes("bot") || t.includes("chatbot") || t.includes("webchat")) return "ai";
   if (t.includes("maliyet") || t.includes("cost") || t.includes("price") || t.includes("ücret") || t.includes("bütçe") || t.includes("budget")) return "cost";
   return "other";
@@ -606,6 +591,18 @@ app.post("/chat", async (req, res) => {
 // ----------------------------------------------------------------------------
 // B) WEB CHATBOT (OPENAI) - /api/chat ve /api/chat/history
 // ----------------------------------------------------------------------------
+const webMemoryStore = {};
+const MAX_WEB_MEMORY = 10;
+
+function addWebMemory(userId, role, content) {
+  if (!webMemoryStore[userId]) webMemoryStore[userId] = [];
+  webMemoryStore[userId].push({ role, content });
+
+  if (webMemoryStore[userId].length > MAX_WEB_MEMORY) {
+    webMemoryStore[userId].splice(0, webMemoryStore[userId].length - MAX_WEB_MEMORY);
+  }
+}
+
 app.get("/api/chat/history", (req, res) => {
   const userId = getUserId(req);
   res.json(webMemoryStore[userId] || []);
@@ -992,16 +989,11 @@ app.get("/webhook", (req, res) => {
 // WHATSAPP WEBHOOK (POST) - "TEK TIK" VE KİLİTLENME KESİN ÇÖZÜMÜ
 // ============================================================================
 app.post("/webhook", (req, res) => {
-  // 🔥 HAYATİ DÜZELTME: Meta'nın (WhatsApp) 20 saniyelik timeout sınırını aşmak için
-  // anında senkron olarak 200 OK yanıtı dönüyoruz. Bağlantı hemen kapanır.
   res.status(200).send("OK");
 
-  const body = req.body;
-  
-  // 🔥 ÇOK ÖNEMLİ: Hızlandırmak ve 20s takılmayı sıfırlamak için 50ms gecikmeli asenkron tetikleyici!
-  setTimeout(async () => {
+  (async () => {
     try {
-      const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+      const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
       if (!message) return; 
 
       // --------------------------------------
@@ -1029,10 +1021,10 @@ app.post("/webhook", (req, res) => {
 
       text = (text || "").trim();
 
-      // 🔥 TELEGRAMA BİLDİRİM FORWARD ET (Ateşle ve Unut - Beklemez)
+      // 🔥 TELEGRAMA BİLDİRİM FORWARD ET (Ateşle ve Unut)
       sendMessageToTelegram(`WhatsApp → +${cleanFrom}: ${text}`).catch(() => {});
 
-      // 🔥 MAVİ TIK (OKUNDU) ONAYI (Ateşle ve Unut - Beklemez)
+      // 🔥 MAVİ TIK (OKUNDU) ONAYI (Ateşle ve Unut)
       if (wpMessageId) {
         axios.post(
           `https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
@@ -1135,7 +1127,7 @@ app.post("/webhook", (req, res) => {
         const topicSummary = await getTopicSummary(session, text);
 
         let aktarimMesaji = `Canlı temsilci ile görüşme ilgili talebinizi aldım. *${topicSummary}* konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.`;
-        if (lang === "en") aktaktarimMesaji = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
+        if (lang === "en") aktarimMesaji = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
         if (lang === "ar") aktarimMesaji = `لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص موضوع *${topicSummary}*، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.`;
 
         await sendMessage(cleanFrom, aktarimMesaji);
@@ -1173,7 +1165,7 @@ app.post("/webhook", (req, res) => {
       const historyText = session.history.map((m) => `${m.role === "user" ? "User" : "Model"}: ${m.text}`).join("\n");
 
       // --------------------------------------
-      // BÜYÜK DİL PROMPTLARI Ve AKILLI NİYET MOTORU
+      // BÜYÜK DİL PROMPTLARI 
       // --------------------------------------
     let prompt = "";
 
@@ -1958,19 +1950,13 @@ BİRLEŞİK ARAP EMİRLİKLERİ İŞ KURMA BİLGİ TABANI VE YETKİ ALANI KURALL
 * Dubai South: Havacılık, Lojistik, Yazılım, Bulut ve E-Ticaret desteği konusunda uzmanlaşmıştır.
 * Sharjah (SPCFZ / IFZA): E-Ticaret Portalları, Web Tasarımı, Medya, Yayıncılık ve Akademiler için son derece esnektir.
 * RAKEZ (Ras Al Khaimah) ve Ajman Serbest Bölgesi: Dijital/çevrimiçi işletmeler, BT kodlama ve sosyal medya için uygun maliyetlidir.
-- RAKEZ VE AJMAN İÇİN ÖZEL NOT: Yıllık paket/lisans-vize yenileme gereksinimleriyle "Ömür Boyu Vize" seçenekleri sunmaktadır.Her yıl şirket kurulışu ile birlikte ödenen tutar aynı ücret ödenmek zorundandır.Bu bölgelerde Kripto/Web3 ve Altın Ticareti kısıtlıdır.
+- RAKEZ VE AJMAN İÇİN ÖZEL NOT: Yıllık paket/lisans-vize yenileme gereksinimleriyle "Ömür Boyu Vize" seçenekleri sunmaktadır.Her yıl şirket kurulışu ile birlikte ödenen tutar aynı ücret ödenmek zorundandır.Bu bölgelerde Kripto/Web3 ve Altın Ticareti kısıtlıdır.`;
 
-Sohbet geçmişi:
-${historyText}
+prompt = `${SMART_INSTRUCTION}\n\n${TR_PROMPT}\n\nSohbet geçmişi:\n${historyText}\n\nKullanıcı mesajı:\n${text}`;
 
-Kullanıcı mesajı:
-${text}
-`;
-        
-        prompt = `${SMART_INSTRUCTION}\n\n${TR_PROMPT}\n\nSohbet geçmişi:\n${historyText}\n\nKullanıcı mesajı:\n${text}`;
-
+    
       } else if (lang === "en") {
-        prompt = `${SMART_INSTRUCTION}\n\nYou are the Senior AI Consultant of SamChe Company LLC, based in Dubai.  
+        prompt = `You are the Senior AI Consultant of SamChe Company LLC, based in Dubai.  
 Your expertise includes:  
 • Private AI systems  
 • Custom AI chatbots for websites and WhatsApp  
@@ -2057,6 +2043,10 @@ These expressions are FORBIDDEN:
 • “I am preparing / I can prepare a special official offer - business plan - cost plan for you.”
 
 The following behaviors are STRICTLY FORBIDDEN:
+• Do not use ready-made templates unless the user message exactly matches a specific trigger phrase word-for-word.
+• Do not trigger responses automatically based on similarity, prediction, inferred intent, topic resemblance, or possible meanings.
+• If the user message is unclear, incomplete, or open to interpretation, do not trigger any ready-made templates.
+• Do not make assumptions, open new topics, or make redirections.
 • NEVER ask users for contact information.
 • If the user says “I want to speak with a live representative”, “connect me to a real person”, “I want to chat with a human”, “connect me to a representative”, “give me contact information”, or any similar expression, apply the LIVE REPRESENTATIVE REDIRECTION BEHAVIOR RULE.
 • After giving contact information to the user, never provide additional information, suggestions, different service promotions, links, redirections, or start a new topic in the same or subsequent messages.
@@ -2277,7 +2267,7 @@ User message:
 ${text}
 `;
       } else if (lang === "ar") {
-        prompt = `${SMART_INSTRUCTION}\n\nأنت المستشار الأول للذكاء الاصطناعي في شركة SamChe Company LLC ومقرها دبي.
+        prompt = `أنت المستشار الأول للذكاء الاصطناعي في شركة SamChe Company LLC ومقرها دبي.
 تشمل خبراتك:
 • أنظمة الذكاء الاصطناعي الخاصة
 • روبوتات الدردشة المخصصة للمواقع الإلكترونية وواتساب
@@ -2351,6 +2341,10 @@ https://aichatbot.samchecompany.com/”
 - بغض النظر عمّا يسأل المستخدم، تقديم معلومات ونطاقات أسعار واضحة فقط. لا يطرح أسئلة على المستخدم ولا يقوم بتوجيهه. يقدّم المعلومات للمستخدم بطريقة احترافية ومهذبة دون إزعاجه.
 
 السلوكيات التالية ممنوعة تمامًا:
+• لا تستخدم القوالب الجاهزة ما لم تتطابق رسالة المستخدم تمامًا مع عبارة التفعيل المحددة حرفيًا.
+• لا تقم بتفعيل الردود تلقائيًا بناءً على التشابه أو التوقع أو استنتاج النية أو تشابه المواضيع أو المعاني المحتملة.
+• إذا كانت رسالة المستخدم غير واضحة أو ناقصة أو قابلة للتفسير، فلا تقم بتفعيل أي قالب جاهز.
+• لا تقم بالافتراض أو فتح مواضيع جديدة أو توجيه المستخدم.
 • لا تطلب أبدًا من المستخدمين معلومات التواصل الخاصة بهم.
 • إذا قال المستخدم "أريد التحدث مع ممثل مباشر" أو "اربطني بشخص حقيقي" أو "أريد التحدث مع إنسان" أو "اربطني بممثل" أو "أعطني معلومات التواصل" أو أي تعبير مشابه، قم بتطبيق قاعدة التحويل إلى الممثل المباشر.
 • بعد إعطاء معلومات التواصل للمستخدم، لا تقدّم أبدًا أي معلومات إضافية أو اقتراحات أو ترويج لخدمات أخرى أو روابط أو توجيهات أو فتح موضوع جديد في نفس الرسالة أو الرسائل اللاحقة.
@@ -2520,6 +2514,7 @@ phone: +971 50 179 38 80 - +971 52 728 8586
 
 قاعدة شرح تأسيس الشركات:
 • استخدم جميع الردود الجاهزة التالية فقط إذا سأل المستخدم بوضوح عن هذا الموضوع.
+• لا تستخدم الردود الجاهزة إلا إذا تطابقت رسالة المستخدم حرفيًا مع عبارات التفعيل. لا تفترض ولا تفتح مواضيع جديدة ولا تقم بالتوجيه.
 
 إذا قال المستخدم:
 "أريد تأسيس شركة"
@@ -2599,50 +2594,78 @@ Oldukça yaklaşık maliyetleri ver sadece, Kullanıcının ASLA bir freezone ot
 -Taşımacılık ve transport ve UBER şirketleri"
 
 17. Kullanıcı:
-"شركت kurulum sonrası verdiğiniz hizmetler neler"
+"şirket kurulum sonrası verdiğiniz hizmetler neler"
 "Şirket kurulum sonrası desteğiniz neler" gibi sorular sorarsa SamChe Company LLC'nin şirket kurulumu sonrası verdiği destekleri aşağıdaki gibi sırala:
 1️⃣ PRO (Government Relations) Hizmetleri
+Çalışan Vize başvuruları 
+Investor(yatırımcı) / Partner (aile) vizeleri
+Çalışanların çalışma vizelerinin yenilenmesi
+Emirates ID işlemleri
+Medical test ve biometrik işlemler
+Immigration ve labour card işlemleri
+Şirket Lisans yenileme
+Şirket belgelerinin resmi işlemleri
+Çalışanların kontratlarının yenilenmesi
+Vize Kotaları Yönetimi
 2️⃣ Muhasebe ve Finans Hizmetleri
+Aylık muhasebe kayıtları
+VAT (KDV) kaydı
+VAT beyanı ve raporlaması
+Corporate Tax danışmanlığı
+Financial statement hazırlama
 3️⃣ Banka Hesabı Açılış Desteği
+Kurumsal banka hesabı açılışı
+KYC evrak hazırlığı
 4️⃣ Ofis ve Operasyon Hizmetleri
+Flexi desk / ofis kiralama
+Virtual office
+Meeting room kullanımı
+Telefon numarası ve mail yönetimi
 5️⃣ İş Geliştirme ve Pazarlama Hizmetleri
+Website kurulumu
+Digital marketing Hizmetleri
+Sosyal Medya Pazarlaması
 6️⃣ Yapay Zekâ ve Otomasyon Çözümleri
+AI chatbot kurulumu
+Instagram / WhatsApp otomasyonu
+CRM entegrasyonu
+Satış otomasyon sistemleri
 
 18. Kullanıcı daha önce sektör bilgisini verdiyse, bir daha ASLA sektör sorma. Kullanıcı diğer vize türlerini sorarsa (freelance vize alma vb. sorular sorduğunda) freelance vize öner; Freelance Permit kurallarını uygula.
 
 BİRLEŞİK ARAP EMİRLİKLERİ İŞ KURMA BİLGİ TABANI VE YETKİ ALANI KURALLARI:
-1. ANA KARA (DET / Dubai Ekonomi و Turizm):
+1. ANA KARA (DET / Dubai Ekonomi ve Turizm):
 - Zorunlu Ejari (Ejarinin anlamını mutlaka kullanıcıya ana kara şirkette açıkla ve ejarinin kurulum paketi içinde olduğunu ve sadece adres çözümü için sunulduğunu açıkla sonrasında perakende alanı ya da fiziksel ofis kiralaması zorunludur sektörüne göre) 
 - SADECE ANA KARADA EV SAHİPLİĞİ YAPABİLİR (Serbest Bölgelerde kesinlikle mümkün değildir):
 * Restoranlar, Kafeler, Catering ve Gıda İşletmeleri (Belediye ve Gıda Güvenliği onaylı)
 * Fiziksel Perakende Mağazaları (Moda, Elektronik, Bakkal, Süpermarketler)
-* İnşaat, Genel Müteahhitlik و Mühendislik Firmaları
-* Gayrimenkul Danışmanlığı و Emlak Acenteleri (RERA onaylı)
-* Seyahat Acenteleri, Turizm و Operatör Lisansları
-* Araç Kiralama (Rent-a-Car) و Taşımacılık/UBER Filo Yönetimi (RTA onaylı)
-* Güvenlik و CCTV Sistemleri Hizmetleri (SIRA onaylı)
-* Endüstriyel و Bina Temizlik Hizmetleri (Belediye onaylı)
-* Sağlık Tesisleri, Klinikler و Tıp Merkezleri (DHA onaylı)
+* İnşaat, Genel Müteahhitlik ve Mühendislik Firmaları
+* Gayrimenkul Danışmanlığı ve Emlak Acenteleri (RERA onaylı)
+* Seyahat Acenteleri, Turizm ve Operatör Lisansları
+* Araç Kiralama (Rent-a-Car) ve Taşımacılık/UBER Filo Yönetimi (RTA onaylı)
+* Güvenlik ve CCTV Sistemleri Hizmetleri (SIRA onaylı)
+* Endüstriyel ve Bina Temizlik Hizmetleri (Belediye onaylı)
+* Sağlık Tesisleri, Klinikler ve Tıp Merkezleri (DHA onaylı)
 - Ana Kara Danışmanlık Fiyatlandırma Politikası:
-* Standart Profesyonel و Hizmetler: 8.000 AED Danışmanlık Ücreti.
+* Standart Profesyonel ve Hizmetler: 8.000 AED Danışmanlık Ücreti.
 * Yüksek Onay Gerektiren ve Karmaşık Sektörler (RERA, RTA, DHA, SIRA, Belediye onayları gereklidir): 10.000 AED - 12.000 AED Danışmanlık Ücreti.
 
 2. SERBEST BÖLGELER (Denizaşırı/Kara Bölgesi Yetki Alanı Özellikleri):
 - Sanal Ofis / Esnek Masa seçenekleri mevcuttur.
-- Kurumlar Vergisi kaydı zorunludur.
+- Kurumlar Vergisi kaydı zorunludur. (Şirket kurulum paketlerine dahil değildir. Talep edilmesi halinde lisans ve vize işlemlerinin ardından 1.300 AED karşılığında SamChe Company LLC tarafından kayıt ve başvuru süreci yürütülür. Kayıt yükümlülüğünün ilgili süre içerisinde yerine getirilmemesi halinde FTA tarafından 10.000 AED idari ceza uygulanır.)
 - Standart Danışmanlık Ücreti: Serbest Bölge paketleri genelinde 5.500 AED.
 - Yetki Alanına Özgü Ayrıntılar:
 * Meydan Serbest Bölgesi (Dubai): Premium yetki alanı. Yazılım, Yapay Zeka, E-Ticaret, Medya, Kripto/Web3 Danışmanlığı, VIP Saç/Cilt Estetiği vb alanlarını kapsar.
 - ÖZEL ALTIN ​​TİCARET LİSANSI: Altın ve Değerli Metaller Ticaret paketi toplam 40.000 AED'dir (1 vize ve kurulum dahil).
-* Dubai South: Havacılık, Lojistik, Yazılım, Bulut و E-Ticaret desteği konusunda uzmanlaşmıştır.
-* Sharjah (SPCFZ / IFZA): E-Ticaret Portalları, Web Tasarımı, Medya, Yayıncılık و Akademiler için son derece esnektir.
-* RAKEZ (Ras Al Khaimah) و Ajman Serbest Bölgesi: Dijital/çevrimiçi işletmeler, BT kodlama و sosyal medya için uygun maliyetlidir.
-- RAKEZ VE AJMAN İÇİN ÖZEL NOT: Yıllık paket/lisans-vize yenileme gereksinimleriyle "Ömür Boyu Vize" seçenekleri sunmaktadır. Her yıl şirket kuruluşu ile birlikte ödenen tutar aynı ücret ödenmek zorundadır. Bu bölgelerde Kripto/Web3 و Altın Ticareti kısıtlıdır.
+* Dubai South: Havacılık, Lojistik, Yazılım, Bulut ve E-Ticaret desteği konusunda uzmanlaşmıştır.
+* Sharjah (SPCFZ / IFZA): E-Ticaret Portalları, Web Tasarımı, Medya, Yayıncılık ve Akademiler için son derece esnektir.
+* RAKEZ (Ras Al Khaimah) ve Ajman Serbest Bölgesi: Dijital/çevrimiçi işletmeler, BT kodlama ve sosyal medya için uygun maliyetlidir.
+- RAKEZ VE AJMAN İÇİN ÖZEL NOT: Yıllık paket/lisans-vize yenileme gereksinimleriyle "Ömür Boyu Vize" seçenekleri sunmaktadır. Her yıl şirket kuruluşu ile birlikte ödenen tutar aynı ücret ödenmek zorundadır. Bu bölgelerde Kripto/Web3 ve Altın Ticareti kısıtlıdır.
 
-سياق المحادثة:
+Sohbet geçmişi:
 ${historyText}
 
-رسالة المستخدم:
+Kullanıcı mesajı:
 ${text}
 `;
       }
@@ -2701,7 +2724,7 @@ ${text}
     } catch (error) {
       console.error("WhatsApp webhook error:", error);
     }
-  }, 50); // Mükemmel performans için 50 milisaniye arka plan kaydırması
+  })();
 }); // WHATSAPP WEBHOOK KAPANIŞI
 
 // ============================================================================
@@ -2710,7 +2733,7 @@ ${text}
 app.post("/telegram-webhook", (req, res) => {
   res.status(200).send("OK");
 
-  setTimeout(async () => {
+  (async () => {
     try {
       const updateId = req.body?.update_id;
       if (updateId && processedTgUpdates.has(updateId)) {
@@ -2812,7 +2835,7 @@ app.post("/telegram-webhook", (req, res) => {
     } catch (err) {
       console.error("Telegram webhook error:", err);
     }
-  }, 50);
+  })();
 });
 
 // ============================================================================
