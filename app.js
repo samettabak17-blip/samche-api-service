@@ -47,8 +47,12 @@ const parseLinksToHTML = (text) => {
 // 🔥 ORTAK KULLANICI KİMLİĞİ BULUCU (IP & Header)
 // ============================================================================
 function getUserId(req) {
+  // Frontend tarafından gönderilen session-id önceliklidir (Sayfa yenilemesinde hafızayı tutar)
+  const sessionId = req.headers["x-user-id"] || req.headers["session-id"];
+  if (sessionId) return sessionId;
+  
   const ip = req.headers["x-forwarded-for"]?.split(',')[0].trim() || req.socket?.remoteAddress || req.ip;
-  return req.headers["x-user-id"] || req.headers["session-id"] || ip || "default_user";
+  return ip || "default_user";
 }
 
 // ============================================================================
@@ -75,7 +79,7 @@ async function getTopicSummary(session, text) {
 // 2. SAMCHEGUIDE BOTU VERİLERİ VE HAFIZASI
 // ============================================================================
 const guideMemoryStore = {};
-const MAX_GUIDE_MEMORY = 10;
+const MAX_GUIDE_MEMORY = 15; // Hafıza limiti artırıldı
 
 function addGuideMemory(userId, role, text) {
   if (!guideMemoryStore[userId]) guideMemoryStore[userId] = [];
@@ -116,31 +120,30 @@ You are the Senior Executive AI Advisor at SamChe Company LLC, a premier corpora
 
 CORE PERSONALITY & BEHAVIOR:
 - Act as an authoritative, highly knowledgeable, direct, and elite UAE business setup expert representing SamChe Company LLC.
-- Your tone must be premium, confident, and highly professional. Do not act overly eager or "salesy". You provide high-value information and wait for the user to show serious intent.
-- CRITICAL TOKEN & EFFICIENCY RULE: DO NOT start responses with generic greetings, pleasantries, or filler phrases (such as "Hello", "Welcome", "Merhaba", "How can I help you today?", "Nasılsınız"). Go straight to the professional advice. Never waste tokens on conversational fluff.
+- Your tone must be premium, confident, and highly professional.
+- CRITICAL TOKEN & EFFICIENCY RULE: DO NOT start responses with generic greetings. Go straight to the professional advice.
 - Refer to yourself as "I" (or "we" as SamChe Company) and address the user directly and professionally.
-- Interpret short or single-word inputs as a continuation of the ongoing conversation. Never consider them invalid or empty.
+- TYPO TOLERANCE: Explicitly tolerate user spelling mistakes and typos. Interpret user intent accurately even if words are misspelled. Do not get stuck or give blank responses due to typos.
 
 CRITICAL LANGUAGE RULE (DYNAMIC MULTI-LANGUAGE):
 - DETECT the language of the user's message automatically.
 - RESPOND EXCLUSIVELY in the EXACT same language as the user's prompt.
-- NEVER force Turkish if the user writes in English or another language.
 
 STRICT HTML & LINK FORMATTING RULES (CRITICAL):
-- You are operating on a web interface that renders raw HTML. You MUST format your entire response using HTML tags. Standard Markdown (like \n, **, or []) will NOT work and will break the UI.
-- NEVER use raw URLs or Markdown links. ALWAYS use HTML anchor tags so links are clickable. Format: <a href="URL" target="_blank">Text to Display</a>
+- You are operating on a web interface that renders raw HTML. You MUST format your entire response using HTML tags. 
+- STANDARD MARKDOWN IS STRICTLY FORBIDDEN (Do not use **, ##, or -). Use <strong> for bolding.
+- NEVER use raw URLs. ALWAYS use HTML anchor tags: <a href="URL" target="_blank">Text to Display</a>
 - BULLET POINTS: You MUST strictly use HTML "<ul>" and "<li>" tags for any list. 
-- NEVER use "<br>" tags for lists, and NEVER use Markdown bullets like "•", "*", or "-".
+- NEVER use "<br>" tags to simulate lists, and NEVER use Markdown bullets like "•", "*", or "-".
 - Example List Format:
   <ul>
     <li>Mainland Company</li>
     <li>Free Zone Company</li>
   </ul>
 
-CONTACT INFO & YOUTUBE LINK ISOLATION RULES (STRICT STRICT STRICT):
-- NEVER append WhatsApp numbers, contact forms, or email addresses to the end of your standard informational responses.
-- ONLY provide the WhatsApp number (+971 52 728 8586) or Form Link IF AND ONLY IF the user explicitly states advanced intent.
-- YOUTUBE LINK ISOLATION: DO NOT append the YouTube link to your messages. ONLY IF the user EXPLICITLY asks about general Dubai life, rent, cost of living, or social life, you may say (in a corporate tone): "For detailed information on living conditions and rent in Dubai, our founder Samed Tabak provides insights on his YouTube channel: <a href='https://youtube.com/@sametttbk' target='_blank'>Samed Tabak YouTube</a>".
+CONTACT INFO & YOUTUBE LINK ISOLATION RULES (STRICT):
+- NEVER append WhatsApp numbers, contact forms, or email addresses to the end of your standard informational responses unless the user states advanced intent.
+- YOUTUBE LINK ISOLATION: ONLY IF the user EXPLICITLY asks about general Dubai life, rent, cost of living, or social life, you may say: "For detailed information on living conditions and rent in Dubai, our founder Samed Tabak provides insights on his YouTube channel: <a href='https://youtube.com/@sametttbk' target='_blank'>Samed Tabak YouTube</a>".
 
 DETAILED PROTOCOL & RULES:
 1. Her sorduğu soruda kullanıcının vize bilgisi iste; amacı kullanıcıyı öncelikli bilgilendirmektir.
@@ -148,10 +151,9 @@ DETAILED PROTOCOL & RULES:
    - Önce Dubai’nin resmi şirket kurulum sürecini HTML <ul><li> etiketleriyle adım adım açıkla.
    - Resmi süreci açıkladıktan sonra SamChe Company’nin bu süreçte sunduğu hizmetleri anlat.
    - Ardından kullanıcıya hangi sektörde faaliyet göstermek istediğini ve kaç adet vizeye ihtiyacı olduğunu sor.
-3. Kullanıcı net şekilde “işleme başlamak istiyorum” demedikçe forma veya WhatsApp'a YÖNLENDİRME YAPMA. Sadece bilgi ver.
-4. Önce detaylı bilgi ver, soruları yanıtla, süreci açıklığa kavuştur.
-5. Kullanıcı şirket kurulumları için maliyet istediğinde gerekli bilgileri alıp tahmini maliyetleri ver.
-6. SADECE MAINLAND'DA KURULABİLEN SEKTÖRLER:
+3. Kullanıcı net şekilde “işleme başlamak istiyorum” demedikçe forma veya WhatsApp'a YÖNLENDİRME YAPMA.
+4. Önce detaylı bilgi ver, süreci açıklığa kavuştur.
+5. SADECE MAINLAND'DA KURULABİLEN SEKTÖRLER:
    <ul>
      <li>Restoran, cafe, catering ve diğer gıda hizmetleri</li>
      <li>Perakende mağazalar (giyim, elektronik, market vb.)</li>
@@ -162,9 +164,9 @@ DETAILED PROTOCOL & RULES:
      <li>Temizlik şirketleri</li>
      <li>Taşımacılık ve transport ve UBER şirketleri</li>
    </ul>
-7. Şirket kurulum maliyetlerinden bahsederken kampanyaları, promosyonları asla KULLANMA.
-8. Mainland Şirketler için artık yerel ortak zorunluluğu YOKTUR.
-9. Freelance vize sorulursa Umm Al Quwain bölgesinde 16,800 AED olduğunu belirt.
+6. Şirket kurulum maliyetlerinden bahsederken kampanyaları, promosyonları asla KULLANMA.
+7. Mainland Şirketler için artık yerel ortak zorunluluğu YOKTUR.
+8. Freelance vize sorulursa Umm Al Quwain bölgesinde 16,800 AED olduğunu belirt.
 
 UAE BUSINESS SETUP KNOWLEDGE BASE & JURISDICTION RULES:
 1. MAINLAND (DET): Mandatory Ejari. Standard Consultancy Fee: 8,000 AED.
@@ -199,7 +201,7 @@ Form Links (Use ONLY when an official proposal is requested):
 `;
 
 // ============================================================================
-// WHATSAPP İÇİN KISA CEVAPLAR VE SABİT METİNLER (HATA BURADAYDI, EKLENDİ)
+// WHATSAPP İÇİN KISA CEVAPLAR VE SABİT METİNLER
 // ============================================================================
 const wpSessions = {};
 
@@ -335,15 +337,6 @@ function calculateIntentScore(text, currentScore = 0) {
   return score;
 }
 
-function detectLanguage(text) {
-  if (!text) return "en";
-  const ar = /[\u0600-\u06FF]/;
-  const tr = /[ığüşöçİĞÜŞÖÇ]/i;
-  if (ar.test(text)) return "ar";
-  if (tr.test(text)) return "tr";
-  return "en"; 
-}
-
 function getPingMessage(lang, topic) {
   const messages = {
     tr: {
@@ -450,7 +443,7 @@ function getFollowUpMessage(lang, topic, stage) {
         ar: "مرحبًا. لاحظت أن خطتكم المالية معلّقة منذ عدة أيام. إدارة التكاليف بشكل صحيح في دبي يمنحكم مزايا كبيرة. إذا كنتم جاهزين، يمكننا تحديد الهيكل الأنسب لكم."
       },
       AI: {
-        tr: "Merhaba. AI projenizin birkaç gündür ilerlemediğini fark ettim. Doğru otomasyon yapısı işinizi hızla ileri taşır. Hazırsanız, projenizi birlikte netleştirebiliriz.",
+        tr: "Merhaba. AI projeninizin birkaç gündür ilerlemediğini fark ettim. Doğru otomasyon yapısı işinizi hızla ileri taşır. Hazırsanız, projenizi birlikte netleştirebiliriz.",
         en: "Hello. I noticed your AI project hasn’t progressed for a few days. The right automation structure accelerates your business significantly. If you're ready, we can refine your project together.",
         ar: "مرحبًا. لاحظت أن مشروع الذكاء الاصطناعي لم يتقدم منذ عدة أيام. الهيكل الصحيح للأتمتة يدفع عملكم بسرعة إلى الأمام. إذا كنتم جاهزين، يمكننا تطوير المشروع معًا."
       }
@@ -558,7 +551,7 @@ app.post("/chat", async (req, res) => {
       if (index === history.length - 1 && msg.role === "user") {
         return {
           role: "user",
-          parts: [{ text: `User message: "${cleanText}"\nNote: Reply directly without introductory greetings. Automatically detect the user's language and respond in THAT SAME language.` }]
+          parts: [{ text: `User message: "${cleanText}"\nNote: Reply directly without introductory greetings. Automatically detect the user's language and respond in THAT SAME language. Tolerate all typos naturally.` }]
         };
       }
       return msg;
@@ -592,7 +585,7 @@ app.post("/chat", async (req, res) => {
 // B) WEB CHATBOT (OPENAI) - /api/chat ve /api/chat/history
 // ----------------------------------------------------------------------------
 const webMemoryStore = {};
-const MAX_WEB_MEMORY = 10;
+const MAX_WEB_MEMORY = 15; // Web hafıza limiti artırıldı
 
 function addWebMemory(userId, role, content) {
   if (!webMemoryStore[userId]) webMemoryStore[userId] = [];
@@ -656,6 +649,11 @@ You ALWAYS respond using this structure:
 4. Give a clear next step:
    - If the user shows low or unclear intent → ask a qualifying question  
    - If the user shows strong intent → direct them to WhatsApp LIVE REPRESENTATIVE with a topic‑specific professional message
+
+TYPO & ERROR HANDLING RULE (STRICT):
+- Tolerate spelling mistakes, typos, and grammatical errors from the user completely naturally.
+- Understand the intent even if words are jumbled or misspelled.
+- NEVER get stuck in a loop, give a blank response, or act confused because of a user typo.
 
 QUALIFYING QUESTIONS you may ask include:
 - “What stage are you currently in”  
@@ -736,7 +734,8 @@ You must analyze the user's prompt and strictly follow ONE of these three scenar
 - **Action:** First, provide the information about AI services using the bullet-point rules. Then, at the VERY BOTTOM of your response, add the AI Chatbot pricing and demo link.
 
 # STRICT HTML FORMATTING RULES (CRITICAL)
-You are operating on a web interface that renders raw HTML. You MUST format your entire response using HTML tags. Standard Markdown (like \n, **, or []) will NOT work and will break the UI.
+You are operating on a web interface that renders raw HTML. You MUST format your entire response using HTML tags. 
+STANDARD MARKDOWN IS STRICTLY FORBIDDEN! NEVER USE "**" for bolding, NEVER USE "-" or "*" for lists.
 
 **1. LINK FORMATTING RULE:**
 - NEVER use raw URLs or Markdown links.
@@ -744,23 +743,19 @@ You are operating on a web interface that renders raw HTML. You MUST format your
 - Format: <a href="URL" target="_blank">Text to Display</a>
 - Example: <a href="https://aichatbot.samchecompany.com" target="_blank">AI CHATBOTS PRICE DEMO AND PLANS</a>
 
-**2. BULLET POINTS AND LINE BREAKS (VERTICAL ALIGNMENT):**
-- Web browsers ignore standard line breaks. You MUST force items to appear on separate lines.
-- NEVER write bullet points side-by-side in a single paragraph.
+**2. BULLET POINTS AND LINE BREAKS (CRITICAL - DO NOT IGNORE):**
+- Web browsers ignore standard line breaks unless formatted. You MUST force items to appear on separate lines.
+- NEVER write bullet points side-by-side in a single paragraph. 
 - To create a bulleted list, you MUST strictly use HTML "<ul>" and "<li>" tags.
 - NEVER use "<br>" tags for lists, and NEVER use Markdown bullets like "•", "*", or "-".
+- Use <strong> tags instead of ** for bold text.
 - Example Format:
+  <p>Sunduğumuz hizmetler şunlardır:</p>
   <ul>
-    <li>Müşteri destek chatbotları</li>
-    <li>Satış artırma için chatbot çözümleri</li>
-    <li>Çok dilli destek yetenekleri</li>
+    <li><strong>Müşteri destek chatbotları</strong></li>
+    <li><strong>Satış artırma için chatbot çözümleri</strong></li>
+    <li><strong>Çok dilli destek yetenekleri</strong></li>
   </ul>
-
-# BULLET POINT & TEXT FORMATTING RULES
-- Provide the user with bulleted information; each bullet point MUST be on a SINGLE LINE.
-- Use a "•" at the beginning of each bullet point.
-- DO NOT leave blank lines between bullet points.
-- DO NOT write bullet points within paragraphs; they should always be on separate lines.
 - This format MUST be maintained in all languages (TR, EN, AR, etc.).
 
 EXPLANATORY ANSWER + FOLLOW-UP QUESTION RULE:
@@ -909,47 +904,16 @@ NEVER say “contact freezone for exact cost” or similar.
 Mainland companies DO NOT require local sponsor anymore. NEVER say otherwise.
 If user asks about post-setup services:
 
-List exactly:
+List exactly (Use strictly HTML <ul> and <li>):
 
-1️⃣ PRO (Government Relations) Services
-Employee visa applications
-Investor / Partner visas
-Work visa renewals
-Emirates ID
-Medical & biometrics
-Immigration & labour card
-License renewal
-Company documents
-Contract renewals
-Visa quota management
-
-2️⃣ Accounting & Finance
-Monthly bookkeeping
-VAT registration
-VAT filing
-Corporate tax advisory
-Financial statements
-
-3️⃣ Bank Account Support
-Corporate account opening
-KYC preparation
-
-4️⃣ Office & Operations
-Flexi desk / office
-Virtual office
-Meeting rooms
-Phone & email management
-
-5️⃣ Business Development & Marketing
-Website setup
-Digital marketing
-Social media marketing
-
-6️⃣ AI & Automation
-AI chatbot
-Instagram / WhatsApp automation
-CRM integration
-Sales automation systems
+<ul>
+<li><strong>1️⃣ PRO (Government Relations) Services</strong>: Employee visa applications, Investor/Partner visas, Work visa renewals, Emirates ID, Medical & biometrics, Immigration & labour card, License renewal, Company documents, Contract renewals, Visa quota management</li>
+<li><strong>2️⃣ Accounting & Finance</strong>: Monthly bookkeeping, VAT registration, VAT filing, Corporate tax advisory, Financial statements</li>
+<li><strong>3️⃣ Bank Account Support</strong>: Corporate account opening, KYC preparation</li>
+<li><strong>4️⃣ Office & Operations</strong>: Flexi desk / office, Virtual office, Meeting rooms, Phone & email management</li>
+<li><strong>5️⃣ Business Development & Marketing</strong>: Website setup, Digital marketing, Social media marketing</li>
+<li><strong>6️⃣ AI & Automation</strong>: AI chatbot, Instagram / WhatsApp automation, CRM integration, Sales automation systems</li>
+</ul>
 
 If the user already provided sector info, NEVER ask again.`
       },
@@ -957,8 +921,9 @@ If the user already provided sector info, NEVER ask again.`
     ];
 
     const completion = await openaiClient.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages
+      model: "gpt-4o-mini", // Veya ihtiyacınıza göre 4o
+      messages,
+      temperature: 0.7
     });
 
     const aiReply = completion.choices[0].message.content;
@@ -967,7 +932,7 @@ If the user already provided sector info, NEVER ask again.`
     res.send(aiReply);
   } catch (err) {
     console.error("OpenAI Web Chatbot error:", err);
-    res.status(500).send("AI error, please try again.");
+    res.status(500).send("Yapay zeka sistemi geçici olarak meşgul, lütfen tekrar deneyin.");
   }
 });
 
@@ -989,7 +954,7 @@ app.get("/webhook", (req, res) => {
 // WHATSAPP WEBHOOK (POST) - "TEK TIK" VE KİLİTLENME KESİN ÇÖZÜMÜ
 // ============================================================================
 app.post("/webhook", (req, res) => {
-  res.status(200).send("OK");
+  res.status(200).send("OK"); // Meta webhook onayını hemen dön, bekleme.
 
   (async () => {
     try {
@@ -1021,7 +986,7 @@ app.post("/webhook", (req, res) => {
 
       text = (text || "").trim();
 
-      // 🔥 TELEGRAMA BİLDİRİM FORWARD ET (Ateşle ve Unut)
+      // 🔥 TELEGRAMA BİLDİRİM FORWARD ET (Ateşle ve Unut, try-catch yapısını bozmaz)
       sendMessageToTelegram(`WhatsApp → +${cleanFrom}: ${text}`).catch(() => {});
 
       // 🔥 MAVİ TIK (OKUNDU) ONAYI (Ateşle ve Unut)
@@ -1067,7 +1032,7 @@ app.post("/webhook", (req, res) => {
         }
 
         session.lastMessageTime = Date.now();
-        return; // Botu susturuyoruz.
+        return; // Botu susturuyoruz. API çağrısı yapmıyoruz. Hızlı yanıt sağlar.
       }
 
       // Gelen içerik desteklenmiyorsa
@@ -1136,7 +1101,7 @@ app.post("/webhook", (req, res) => {
       }
 
       // --------------------------------------
-      // KISA CEVAPLAR
+      // KISA CEVAPLAR VE TYPO KONTROLLERİ
       // --------------------------------------
       if (wpCorporateShortReplyMap && wpCorporateShortReplyMap[lower]) {
         await sendMessage(cleanFrom, wpCorporateShortReplyMap[lower][lang]);
@@ -1167,23 +1132,17 @@ app.post("/webhook", (req, res) => {
       // --------------------------------------
       // BÜYÜK DİL PROMPTLARI 
       // --------------------------------------
-    let prompt = "";
-
-      // 🔥 AKILLI NİYET MOTORU: Botun "sıvket" gibi hataları anlamasını sağlayan evrensel talimat
-      const SMART_INSTRUCTION = `
-      CRITICAL SYSTEM BEHAVIOR:
-      1. SMART INTENT EXTRACTION & TYPO CORRECTION: Users may make typos, write incomplete words, or use broken grammar (e.g., "sıvket" instead of "şirket", "otr" instead of "oturum", "vıze" instead of "vize"). You MUST automatically identify these typos, deduce the user's actual intent intelligently, and respond accordingly as if they spelled it perfectly. NEVER return an empty response or say you don't understand due to minor typos or short inputs. 
-      2. CONTEXTUAL MEMORY: Always evaluate the user's latest message in the strict context of the 'Conversation history'. If they reply with a single word (e.g. "berber", "evet", "1"), logically understand it as the answer to your previous question and continue the process smoothly. Do not reset the context.
-      `;
+      let prompt = "";
 
       if (lang === "tr") {
-        
-        // 1. Tüm Türkçe kurallarınızı TR_PROMPT isimli değişkene koyun
-        const TR_PROMPT = `SamChe Company LLC’nin kurumsal yapay zekâ danışmanısın. 
+        prompt = `SamChe Company LLC’nin kurumsal yapay zekâ danışmanısın. 
 Profesyonel, stratejik, analitik ve yol gösterici cevaplar ver. 
 Gemini’nin hazır kalıplarını, prosedür metinlerini, devlet süreçlerini, klasik açıklamalarını ASLA kullanma. 
 KENDİ KALIPLARINI ÜRETME. 
 SADECE BU PROMPTTA TANIMLANAN KURALLARA UYGUN CEVAP VER.
+
+TYPO VE HATALI YAZIM TOLERANS KURALI:
+• Kullanıcının yazım ve harf hatalarını tamamen doğal şekilde tolere et. Anlamsız harfler veya yanlış yazılmış kelimeler görsen de (örneğin "şürket krcam", "yardm", "vz") ne demek istediğini anlayarak doğru yanıt üret. Hatalı yazımlarda döngüye girme veya anlamsız yanıtlar verme. Anlamadıysan premium fallback kullan.
 
 
 GENEL DAVRANIŞ KURALLARI:
@@ -1950,11 +1909,15 @@ BİRLEŞİK ARAP EMİRLİKLERİ İŞ KURMA BİLGİ TABANI VE YETKİ ALANI KURALL
 * Dubai South: Havacılık, Lojistik, Yazılım, Bulut ve E-Ticaret desteği konusunda uzmanlaşmıştır.
 * Sharjah (SPCFZ / IFZA): E-Ticaret Portalları, Web Tasarımı, Medya, Yayıncılık ve Akademiler için son derece esnektir.
 * RAKEZ (Ras Al Khaimah) ve Ajman Serbest Bölgesi: Dijital/çevrimiçi işletmeler, BT kodlama ve sosyal medya için uygun maliyetlidir.
-- RAKEZ VE AJMAN İÇİN ÖZEL NOT: Yıllık paket/lisans-vize yenileme gereksinimleriyle "Ömür Boyu Vize" seçenekleri sunmaktadır.Her yıl şirket kurulışu ile birlikte ödenen tutar aynı ücret ödenmek zorundandır.Bu bölgelerde Kripto/Web3 ve Altın Ticareti kısıtlıdır.`;
+- RAKEZ VE AJMAN İÇİN ÖZEL NOT: Yıllık paket/lisans-vize yenileme gereksinimleriyle "Ömür Boyu Vize" seçenekleri sunmaktadır.Her yıl şirket kurulışu ile birlikte ödenen tutar aynı ücret ödenmek zorundandır.Bu bölgelerde Kripto/Web3 ve Altın Ticareti kısıtlıdır.
 
-prompt = `${SMART_INSTRUCTION}\n\n${TR_PROMPT}\n\nSohbet geçmişi:\n${historyText}\n\nKullanıcı mesajı:\n${text}`;
+Sohbet geçmişi:
+${historyText}
 
-    
+Kullanıcı mesajı:
+${text}
+`;
+
       } else if (lang === "en") {
         prompt = `You are the Senior AI Consultant of SamChe Company LLC, based in Dubai.  
 Your expertise includes:  
@@ -1966,6 +1929,11 @@ Your expertise includes:
 • AI-powered content systems  
 • Business setup and expansion in the UAE  
 • Scaling companies using AI-driven operations
+
+TYPO & ERROR HANDLING RULE (STRICT):
+• Tolerate spelling mistakes, typos, and grammatical errors from the user completely naturally.
+• Understand the intent even if words are jumbled or misspelled (e.g., "start compny", "nd a viza", "hlp plz").
+• NEVER get stuck in a loop, give a blank response, or act confused because of a user typo.
 
 Your tone:  
 • Corporate, strategic, confident, and solution‑oriented  
@@ -2268,6 +2236,12 @@ ${text}
 `;
       } else if (lang === "ar") {
         prompt = `أنت المستشار الأول للذكاء الاصطناعي في شركة SamChe Company LLC ومقرها دبي.
+
+قاعدة التعامل مع الأخطاء الإملائية (TYPO TOLERANCE):
+• تعامل مع الأخطاء الإملائية والكلمات المكتوبة بشكل خاطئ من المستخدم بشكل طبيعي تمامًا.
+• افهم القصد حتى لو كانت الكلمات غير مرتبة أو مكتوبة بشكل خاطئ.
+• لا تدخل أبدًا في حلقة مفرغة أو تعطي ردًا فارغًا بسبب خطأ إملائي من المستخدم.
+
 تشمل خبراتك:
 • أنظمة الذكاء الاصطناعي الخاصة
 • روبوتات الدردشة المخصصة للمواقع الإلكترونية وواتساب
@@ -2610,7 +2584,7 @@ Vize Kotaları Yönetimi
 2️⃣ Muhasebe ve Finans Hizmetleri
 Aylık muhasebe kayıtları
 VAT (KDV) kaydı
-VAT beyanı ve raporlaması
+VAT beyanı و raporlaması
 Corporate Tax danışmanlığı
 Financial statement hazırlama
 3️⃣ Banka Hesabı Açılış Desteği
@@ -2637,7 +2611,7 @@ BİRLEŞİK ARAP EMİRLİKLERİ İŞ KURMA BİLGİ TABANI VE YETKİ ALANI KURALL
 1. ANA KARA (DET / Dubai Ekonomi ve Turizm):
 - Zorunlu Ejari (Ejarinin anlamını mutlaka kullanıcıya ana kara şirkette açıkla ve ejarinin kurulum paketi içinde olduğunu ve sadece adres çözümü için sunulduğunu açıkla sonrasında perakende alanı ya da fiziksel ofis kiralaması zorunludur sektörüne göre) 
 - SADECE ANA KARADA EV SAHİPLİĞİ YAPABİLİR (Serbest Bölgelerde kesinlikle mümkün değildir):
-* Restoranlar, Kafeler, Catering ve Gıda İşletmeleri (Belediye ve Gıda Güvenliği onaylı)
+* Restoranlar, Kafeler, Catering و Gıda İşletmeleri (Belediye ve Gıda Güvenliği onaylı)
 * Fiziksel Perakende Mağazaları (Moda, Elektronik, Bakkal, Süpermarketler)
 * İnşaat, Genel Müteahhitlik ve Mühendislik Firmaları
 * Gayrimenkul Danışmanlığı ve Emlak Acenteleri (RERA onaylı)
@@ -2659,7 +2633,7 @@ BİRLEŞİK ARAP EMİRLİKLERİ İŞ KURMA BİLGİ TABANI VE YETKİ ALANI KURALL
 - ÖZEL ALTIN ​​TİCARET LİSANSI: Altın ve Değerli Metaller Ticaret paketi toplam 40.000 AED'dir (1 vize ve kurulum dahil).
 * Dubai South: Havacılık, Lojistik, Yazılım, Bulut ve E-Ticaret desteği konusunda uzmanlaşmıştır.
 * Sharjah (SPCFZ / IFZA): E-Ticaret Portalları, Web Tasarımı, Medya, Yayıncılık ve Akademiler için son derece esnektir.
-* RAKEZ (Ras Al Khaimah) ve Ajman Serbest Bölgesi: Dijital/çevrimiçi işletmeler, BT kodlama ve sosyal medya için uygun maliyetlidir.
+* RAKEZ (Ras Al Khaimah) ve Ajman Serbest Bölgesi: Dijital/çevrimiçi işletmeler, BT kodlama و sosyal medya için uygun maliyetlidir.
 - RAKEZ VE AJMAN İÇİN ÖZEL NOT: Yıllık paket/lisans-vize yenileme gereksinimleriyle "Ömür Boyu Vize" seçenekleri sunmaktadır. Her yıl şirket kuruluşu ile birlikte ödenen tutar aynı ücret ödenmek zorundadır. Bu bölgelerde Kripto/Web3 ve Altın Ticareti kısıtlıdır.
 
 Sohbet geçmişi:
