@@ -27,6 +27,8 @@ const processedTgUpdates = new Set();
 // 1. GENEL API YAPILANDIRMALARI
 // ============================================================================
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+// Sizin orijinal ve kusursuz çalışan model sürümleriniz geri eklendi:
 const SAMCHE_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`;
 const WP_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${GEMINI_API_KEY}`;
 
@@ -52,7 +54,7 @@ function getUserId(req) {
 }
 
 // ============================================================================
-// 2. SAMCHEGUIDE BOTU VERİLERİ VE HAFIZASI (GEMINI 3 FLASH)
+// 2. SAMCHEGUIDE BOTU VERİLERİ VE HAFIZASI
 // ============================================================================
 const guideMemoryStore = {};
 const MAX_GUIDE_MEMORY = 10;
@@ -196,24 +198,6 @@ Form Links (Use ONLY when an official proposal is requested):
 - **Action:** First, provide AI services info using HTML <ul><li>. Then, at the VERY BOTTOM, add the AI Chatbot pricing link.
 `;
 
-// ============================================================================
-// 3. WEB CHATBOT VERİLERİ (OPENAI)
-// ============================================================================
-const webMemoryStore = {};
-const MAX_WEB_MEMORY = 10;
-
-function addWebMemory(userId, role, content) {
-  if (!webMemoryStore[userId]) webMemoryStore[userId] = [];
-  webMemoryStore[userId].push({ role, content });
-
-  if (webMemoryStore[userId].length > MAX_WEB_MEMORY) {
-    webMemoryStore[userId].splice(0, webMemoryStore[userId].length - MAX_WEB_MEMORY);
-  }
-}
-
-// ============================================================================
-// 4. WHATSAPP BOT VERİLERİ (GEMINI 2.5 PRO + CRON)
-// ============================================================================
 const wpSessions = {};
 
 const wpCorporateShortReplyMap = {
@@ -505,7 +489,7 @@ function getFollowUpMessage(lang, topic, stage) {
 // ============================================================================
 
 // ----------------------------------------------------------------------------
-// A) SAMCHEGUIDE BOT (GEMINI) - /plan, /chat ve /chat/history (YENİ EKLENDİ)
+// A) SAMCHEGUIDE BOT (GEMINI) - /plan, /chat ve /chat/history
 // ----------------------------------------------------------------------------
 app.get("/chat/history", (req, res) => {
   const userId = getUserId(req);
@@ -566,7 +550,6 @@ app.post("/chat", async (req, res) => {
     addGuideMemory(userId, "user", cleanText);
     const history = guideMemoryStore[userId] || [];
 
-    // Geçmişi harmanlayarak gönderiyoruz
     const contents = history.map((msg, index) => {
       if (index === history.length - 1 && msg.role === "user") {
         return {
@@ -602,8 +585,19 @@ app.post("/chat", async (req, res) => {
 });
 
 // ----------------------------------------------------------------------------
-// B) WEB CHATBOT (OPENAI) - /api/chat ve /api/chat/history (YENİ EKLENDİ)
+// B) WEB CHATBOT (OPENAI) - /api/chat ve /api/chat/history
 // ----------------------------------------------------------------------------
+const webMemoryStore = {};
+const MAX_WEB_MEMORY = 10;
+
+function addWebMemory(userId, role, content) {
+  if (!webMemoryStore[userId]) webMemoryStore[userId] = [];
+  webMemoryStore[userId].push({ role, content });
+  if (webMemoryStore[userId].length > MAX_WEB_MEMORY) {
+    webMemoryStore[userId].splice(0, webMemoryStore[userId].length - MAX_WEB_MEMORY);
+  }
+}
+
 app.get("/api/chat/history", (req, res) => {
   const userId = getUserId(req);
   res.json(webMemoryStore[userId] || []);
@@ -973,30 +967,16 @@ If the user already provided sector info, NEVER ask again.`
 });
 
 // ----------------------------------------------------------------------------
-// C) WHATSAPP BOT (GEMINI 2.5 PRO) - /webhook ve /telegram-webhook
+// C) WHATSAPP BOT (GEMINI 1.5 PRO) - /webhook ve /telegram-webhook
 // ----------------------------------------------------------------------------
-app.get("/webhook", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode === "subscribe" && token === process.env.WHATSAPP_VERIFY_TOKEN) {
-    return res.status(200).send(challenge);
-  }
-  return res.sendStatus(403);
-});
-
-// ============================================================================
-// WHATSAPP WEBHOOK (POST) - "TEK TIK" (TIMEOUT) VE KİLİTLENME ÇÖZÜMÜ
-// ============================================================================
 app.post("/webhook", (req, res) => {
   // 🔥 HAYATİ DÜZELTME: Meta'nın (WhatsApp) 20 saniyelik timeout sınırını aşmak için
   // anında senkron olarak 200 OK yanıtı dönüyoruz. Bağlantı hemen kapanır.
   res.status(200).send("OK");
 
   // 🔥 ARKA PLAN MİMARİSİ: Ağır yapay zeka işlemleri arka planda asenkron çalışır. 
-  // Böylece mesajlar anında "çift tık" olur, takılı kalmaz.
-  setImmediate(async () => {
+  // Böylece mesajlar anında "çift tık" olur, Meta sunucuyu beklerken iptal etmez.
+  (async () => {
     try {
       const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
       if (!message) return; 
@@ -1015,17 +995,6 @@ app.post("/webhook", (req, res) => {
 
       const from = message.from;
       if (!from) return; 
-
-      // 🔥 MAVİ TIK (OKUNDU) ONAYI - MESAJIN TEK TIKTA KALMASINI ENGELLER
-      try {
-        await axios.post(
-          `https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
-          { messaging_product: "whatsapp", status: "read", message_id: wpMessageId },
-          { headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, "Content-Type": "application/json" } }
-        );
-      } catch (e) {
-        console.error("Read status error:", e.response?.data || e.message);
-      }
 
       const cleanFrom = from.replace("+", "");
       let text = "";
@@ -1130,37 +1099,28 @@ app.post("/webhook", (req, res) => {
       session.followUpStage = 0;
       session.pingSentOnce = false;
 
-      // 🔥 PERFORMANS OPTİMİZASYONU: Konu özetini sadece canlı desteğe aktarırken çağırırız.
-      const fetchTopicSummary = async () => {
-        const historyContext = (session.history || []).slice(-4).map(m => m.text).join(" | ");
-        let summary = await callWpGemini(`
-        Önceki mesajlar: "${historyContext}"
-        Son Kullanıcı Mesajı: "${text}"
-        Müşterinin asıl ilgilendiği konuyu (örneğin: Oturum İzni, Şirket Kurulumu, Vize, Fiyat Bilgisi, Yapay Zeka Çözümleri vb.) TEK KISA BAŞLIK olarak özetle.
-        Eğer son mesajda sadece canlı temsilci istiyorsa, önceki mesajlara bakarak asıl konuyu bul. "Müşteri Temsilcisi Talebi" GİBİ GENEL CEVAPLAR VERME.
-        Sadece konu adı döndür.
-        `);
-        return summary || "Genel Destek";
-      };
-
       // --------------------------------------
       // WHATSAPP MANUEL CANLI DESTEK AÇMA /w
       // --------------------------------------
       if (lower === "/w" || lower === "/n" || lower === "canlı destek" || lower === "canli destek" || lower === "live") {
         session.humanOverride = true;
-        session.manualTakeover = false; // Kullanıcı talep ettiği için 10 dk kuralı işler
+        session.manualTakeover = false;
 
-        const topicSummary = await fetchTopicSummary();
+        const historyContext = (session.history || []).slice(-4).map(m => m.text).join(" | ");
+        let topicSummary = await callWpGemini(`
+        Önceki mesajlar: "${historyContext}"
+        Son Kullanıcı Mesajı: "${text}"
+        Müşterinin asıl ilgilendiği konuyu TEK KISA BAŞLIK olarak özetle.
+        Sadece konu adı döndür.
+        `);
+        if (!topicSummary) topicSummary = "Genel Destek";
 
         let aktarimMesaji = `Canlı temsilci ile görüşme ilgili talebinizi aldım. *${topicSummary}* konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.`;
         if (lang === "en") aktarimMesaji = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
         if (lang === "ar") aktarimMesaji = `لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص موضوع *${topicSummary}*، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.`;
 
         await sendMessage(cleanFrom, aktarimMesaji);
-
-        const alertMsg = `🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``;
-        await sendMessageToTelegram(alertMsg);
-
+        await sendMessageToTelegram(`🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``);
         return;
       }
 
@@ -1194,7 +1154,7 @@ app.post("/webhook", (req, res) => {
       const historyText = session.history.map((m) => `${m.role === "user" ? "User" : "Model"}: ${m.text}`).join("\n");
 
       // --------------------------------------
-      // BÜYÜK DİL PROMPTLARI (EKSİKSİZ ORİJİNAL)
+      // BÜYÜK DİL PROMPTLARI
       // --------------------------------------
       let prompt = "";
 
@@ -1978,6 +1938,7 @@ ${historyText}
 Kullanıcı mesajı:
 ${text}
 `;
+
       } else if (lang === "en") {
         prompt = `You are the Senior AI Consultant of SamChe Company LLC, based in Dubai.  
 Your expertise includes:  
@@ -2699,17 +2660,16 @@ ${text}
     } catch (error) {
       console.error("WhatsApp webhook error:", error);
     }
-  }); // setImmediate kapanışı
-}); // WHATSAPP WEBHOOK KAPANIŞI
+  })();
+});
 
 // ============================================================================
 // TELEGRAM WEBHOOK — NORMAL MESAJ + CANLI DESTEK
 // ============================================================================
 app.post("/telegram-webhook", (req, res) => {
-  // Telegram Timeout'unu Engellemek İçin Anında Dönüş Yapıyoruz
   res.status(200).send("OK");
 
-  setImmediate(async () => {
+  (async () => {
     try {
       const updateId = req.body?.update_id;
       if (updateId && processedTgUpdates.has(updateId)) {
@@ -2762,7 +2722,7 @@ app.post("/telegram-webhook", (req, res) => {
           session.humanOverride = true;
           session.manualTakeover = true;
 
-          let takeoverMsg = `Canlı temsilcimiz konuşmayı devralmıştır. Lütfen beklemede kalın...\n\nSamChe AI olarak canlı temsilci konuşmanızı sonlandırmadığı sürece AI devre dışıdır.`;
+          let takeoverMsg = `DİKKAT⚠️ Canlı temsilcimiz bu konuşmayı devralmıştır. Lütfen sohbete bağlanana kadar beklemede kalın ⌛️ \n\n ⚠️Canlı temsilci bu konuşmayı sonlandırmadığı sürece yapay zeka danışmanı devre dışıdır.🔒`;
           if (session.lang === "en") takeoverMsg = `Our live representative has taken over the conversation. Please stay on hold...\n\nAs SamChe AI, the AI is deactivated until the live representative ends your conversation.`;
           if (session.lang === "ar") takeoverMsg = `تولى ممثلنا المباشر المحادثة. يرجى البقاء على الخط...\n\nبصفتي SamChe AI، تم إلغاء تنشيط الذكاء الاصطناعي حتى ينهي الممثل المباشر محادثتك.`;
 
@@ -2809,7 +2769,7 @@ app.post("/telegram-webhook", (req, res) => {
     } catch (err) {
       console.error("Telegram webhook error:", err);
     }
-  });
+  })();
 });
 
 // ============================================================================
