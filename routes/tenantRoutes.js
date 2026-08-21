@@ -1,13 +1,11 @@
 import express from 'express';
 import { query } from '../config/db.js';
-
 import {
     authenticateToken,
     requireTenantAccess,
     requireOwner,
     requireTenantAdmin
 } from '../middleware/auth.js';
-
 import {
     isValidUUID,
     isValidTenantRole
@@ -15,54 +13,49 @@ import {
 
 const router = express.Router();
 
-/*
-|--------------------------------------------------------------------------
-| AUTHENTICATION
-|--------------------------------------------------------------------------
-*/
-
 router.use(authenticateToken);
 
+// ==========================================
+// TENANT BASE ROUTES
+// ==========================================
 
-/*
-|--------------------------------------------------------------------------
-| GET ALL TENANTS
-|--------------------------------------------------------------------------
-*/
-
+// GET /api/v1/tenants
 router.get('/', async (req, res) => {
     try {
         if (req.user.system_role === 'OWNER') {
             const result = await query(`
-                SELECT
-                    id,
-                    name,
-                    status,
-                    created_at
+                SELECT id, name, status, created_at
                 FROM tenants
                 ORDER BY created_at DESC
             `);
 
-            return res.status(200).json(result.rows);
+            return res.json(result.rows);
         }
 
-        const result = await query(`
-            SELECT
-                t.id,
-                t.name,
-                t.status,
-                t.created_at,
-                tu.tenant_role
-            FROM tenants t
-            INNER JOIN tenant_users tu
-                ON t.id = tu.tenant_id
-            WHERE tu.user_id = $1
-        `, [req.user.user_id]);
+        if (req.user.system_role === 'CUSTOMER') {
+            const result = await query(`
+                SELECT
+                    t.id,
+                    t.name,
+                    t.status,
+                    t.created_at,
+                    tu.tenant_role
+                FROM tenants t
+                INNER JOIN tenant_users tu
+                    ON t.id = tu.tenant_id
+                WHERE tu.user_id = $1
+                ORDER BY t.created_at DESC
+            `, [req.user.id]);
 
-        return res.status(200).json(result.rows);
+            return res.json(result.rows);
+        }
+
+        return res.status(403).json({
+            error: 'Invalid system role'
+        });
 
     } catch (err) {
-        console.error('[GET /tenants] Error:', err);
+        console.error('Fetch tenants error:', err);
 
         return res.status(500).json({
             error: 'Server error'
@@ -70,37 +63,27 @@ router.get('/', async (req, res) => {
     }
 });
 
-
-/*
-|--------------------------------------------------------------------------
-| CREATE TENANT
-|--------------------------------------------------------------------------
-*/
-
+// POST /api/v1/tenants
 router.post('/', requireOwner, async (req, res) => {
+    const { name } = req.body;
+
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+        return res.status(400).json({
+            error: 'Tenant name is required'
+        });
+    }
+
     try {
-        const { name } = req.body;
-
-        if (!name || typeof name !== 'string' || name.trim().length === 0) {
-            return res.status(400).json({
-                error: 'Tenant name is required'
-            });
-        }
-
         const result = await query(`
             INSERT INTO tenants (name)
             VALUES ($1)
-            RETURNING
-                id,
-                name,
-                status,
-                created_at
+            RETURNING id, name, status, created_at
         `, [name.trim()]);
 
         return res.status(201).json(result.rows[0]);
 
     } catch (err) {
-        console.error('[POST /tenants] Error:', err);
+        console.error('Create tenant error:', err);
 
         return res.status(500).json({
             error: 'Server error'
@@ -108,65 +91,13 @@ router.post('/', requireOwner, async (req, res) => {
     }
 });
 
+// ==========================================
+// OWNER-ONLY TENANT USER MANAGEMENT
+// ==========================================
 
-/*
-|--------------------------------------------------------------------------
-| GET SINGLE TENANT
-|--------------------------------------------------------------------------
-*/
-
-router.get('/:tenantId', requireTenantAccess, async (req, res) => {
-    try {
-        const tenantId = req.verified_tenant_id;
-
-        const result = await query(`
-            SELECT
-                id,
-                name,
-                status,
-                created_at
-            FROM tenants
-            WHERE id = $1
-        `, [tenantId]);
-
-        if (result.rowCount === 0) {
-            return res.status(404).json({
-                error: 'Tenant not found'
-            });
-        }
-
-        return res.status(200).json(result.rows[0]);
-
-    } catch (err) {
-        console.error('[GET /tenants/:tenantId] Error:', err);
-
-        return res.status(500).json({
-            error: 'Server error'
-        });
-    }
-});
-
-
-/*
-|--------------------------------------------------------------------------
-| TENANT USERS - GET
-|--------------------------------------------------------------------------
-*/
-
-router.post('/:tenantId/users', requireOwner, async (req, res) => {
+// GET /api/v1/tenants/:tenantId/users
+router.get('/:tenantId/users', requireOwner, async (req, res) => {
     const { tenantId } = req.params;
-    const { user_id, tenant_role } = req.body;
-
-    console.log('==========================================');
-    console.log('[POST TENANT USER] ROUTE HIT');
-    console.log('[POST TENANT USER] tenantId:', tenantId);
-    console.log('[POST TENANT USER] user_id:', user_id);
-    console.log('[POST TENANT USER] tenant_role:', tenant_role);
-    console.log('[POST TENANT USER] authenticated user:', req.user);
-
-    // ------------------------------------------
-    // VALIDATION
-    // ------------------------------------------
 
     if (!isValidUUID(tenantId)) {
         return res.status(400).json({
@@ -174,266 +105,9 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
         });
     }
 
-    if (!isValidUUID(user_id)) {
-        return res.status(400).json({
-            error: 'Invalid user ID'
-        });
-    }
-
-    if (!isValidTenantRole(tenant_role)) {
-        return res.status(400).json({
-            error: 'Invalid tenant role. Allowed values: ADMIN or AGENT'
-        });
-    }
-
     try {
-        // ------------------------------------------
-        // 1. CHECK TENANT
-        // ------------------------------------------
-
         const tenantCheck = await query(
-            `
-            SELECT id, name, status
-            FROM tenants
-            WHERE CAST(id AS TEXT) = $1
-            LIMIT 1
-            `,
-            [tenantId]
-        );
-
-        console.log('[POST TENANT USER] tenantCheck:', tenantCheck.rows);
-
-        if (tenantCheck.rowCount === 0) {
-            return res.status(404).json({
-                error: 'Tenant not found',
-                tenant_id: tenantId
-            });
-        }
-
-        // ------------------------------------------
-        // 2. FIND USER
-        // ------------------------------------------
-        // CAST(id AS TEXT) makes this work whether
-        // users.id is UUID or text/varchar.
-
-        const userCheck = await query(
-            `
-            SELECT
-                id,
-                email,
-                system_role
-            FROM users
-            WHERE CAST(id AS TEXT) = $1
-            LIMIT 1
-            `,
-            [user_id]
-        );
-
-        console.log('[POST TENANT USER] userCheck rowCount:', userCheck.rowCount);
-        console.log('[POST TENANT USER] userCheck rows:', userCheck.rows);
-
-        if (userCheck.rowCount === 0) {
-
-            // Diagnostic query - show what database actually sees
-            const allUsers = await query(
-                `
-                SELECT
-                    CAST(id AS TEXT) AS id,
-                    email,
-                    system_role
-                FROM users
-                ORDER BY email
-                `
-            );
-
-            console.log(
-                '[POST TENANT USER] ALL USERS:',
-                allUsers.rows
-            );
-
-            return res.status(404).json({
-                error: 'User not found',
-                searched_user_id: user_id,
-                available_users: allUsers.rows
-            });
-        }
-
-        const targetUser = userCheck.rows[0];
-
-        console.log(
-            '[POST TENANT USER] target user:',
-            targetUser
-        );
-
-        // ------------------------------------------
-        // 3. USER MUST BE CUSTOMER
-        // ------------------------------------------
-
-        if (targetUser.system_role !== 'CUSTOMER') {
-            return res.status(400).json({
-                error: 'Target user must be a CUSTOMER',
-                user: targetUser
-            });
-        }
-
-        // ------------------------------------------
-        // 4. CHECK EXISTING TENANT ASSIGNMENT
-        // ------------------------------------------
-
-        const existingAssignment = await query(
-            `
-            SELECT
-                tenant_id,
-                user_id,
-                tenant_role
-            FROM tenant_users
-            WHERE CAST(tenant_id AS TEXT) = $1
-              AND CAST(user_id AS TEXT) = $2
-            LIMIT 1
-            `,
-            [tenantId, user_id]
-        );
-
-        console.log(
-            '[POST TENANT USER] existing assignment:',
-            existingAssignment.rows
-        );
-
-        if (existingAssignment.rowCount > 0) {
-            return res.status(409).json({
-                error: 'User is already assigned to this tenant',
-                assignment: existingAssignment.rows[0]
-            });
-        }
-
-        // ------------------------------------------
-        // 5. CREATE TENANT USER ASSIGNMENT
-        // ------------------------------------------
-
-        const result = await query(
-            `
-            INSERT INTO tenant_users (
-                tenant_id,
-                user_id,
-                tenant_role
-            )
-            VALUES ($1, $2, $3)
-            RETURNING
-                tenant_id,
-                user_id,
-                tenant_role,
-                created_at
-            `,
-            [
-                tenantId,
-                user_id,
-                tenant_role
-            ]
-        );
-
-        console.log(
-            '[POST TENANT USER] CREATED:',
-            result.rows[0]
-        );
-
-        console.log('==========================================');
-
-        return res.status(201).json({
-            message: 'User assigned to tenant successfully',
-            assignment: result.rows[0]
-        });
-
-    } catch (err) {
-
-        console.error('==========================================');
-        console.error('[POST TENANT USER] ERROR');
-        console.error(err);
-        console.error('==========================================');
-
-        // PostgreSQL duplicate key
-        if (err.code === '23505') {
-            return res.status(409).json({
-                error: 'User is already assigned to this tenant'
-            });
-        }
-
-        // PostgreSQL foreign key
-        if (err.code === '23503') {
-            return res.status(400).json({
-                error: 'Invalid tenant or user reference',
-                detail: err.detail || null
-            });
-        }
-
-        return res.status(500).json({
-            error: 'Server error',
-            detail: process.env.NODE_ENV === 'production'
-                ? undefined
-                : err.message
-        });
-    }
-});
-
-/*
-|--------------------------------------------------------------------------
-| TENANT USERS - POST
-|--------------------------------------------------------------------------
-|
-| OWNER assigns an existing CUSTOMER user to a tenant.
-|
-*/
-
-router.post('/:tenantId/users', requireOwner, async (req, res) => {
-    console.log('==========================================');
-    console.log('[POST TENANT USER] ROUTE HIT');
-    console.log('==========================================');
-
-    try {
-        const { tenantId } = req.params;
-        const { user_id, tenant_role } = req.body;
-
-        console.log('[POST TENANT USER] tenantId:', tenantId);
-        console.log('[POST TENANT USER] user_id:', user_id);
-        console.log('[POST TENANT USER] tenant_role:', tenant_role);
-        console.log('[POST TENANT USER] authenticated user:', req.user);
-
-        /*
-        |--------------------------------------------------------------------------
-        | VALIDATION
-        |--------------------------------------------------------------------------
-        */
-
-        if (!isValidUUID(tenantId)) {
-            return res.status(400).json({
-                error: 'Invalid tenant ID'
-            });
-        }
-
-        if (!isValidUUID(user_id)) {
-            return res.status(400).json({
-                error: 'Invalid user ID'
-            });
-        }
-
-        if (!isValidTenantRole(tenant_role)) {
-            return res.status(400).json({
-                error: 'Invalid tenant role. Allowed values: ADMIN or AGENT'
-            });
-        }
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | CHECK TENANT
-        |--------------------------------------------------------------------------
-        */
-
-        const tenantCheck = await query(
-            `
-            SELECT id, name, status
-            FROM tenants
-            WHERE id = $1
-            `,
+            'SELECT id, name FROM tenants WHERE id = $1',
             [tenantId]
         );
 
@@ -443,84 +117,159 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
             });
         }
 
+        const result = await query(`
+            SELECT
+                u.id,
+                u.email,
+                u.system_role,
+                tu.tenant_role,
+                tu.created_at
+            FROM tenant_users tu
+            INNER JOIN users u
+                ON tu.user_id = u.id
+            WHERE tu.tenant_id = $1
+            ORDER BY tu.created_at ASC
+        `, [tenantId]);
 
-        /*
-        |--------------------------------------------------------------------------
-        | CHECK USER
-        |--------------------------------------------------------------------------
-        */
+        return res.json(result.rows);
 
-        const userCheck = await query(
-            `
+    } catch (err) {
+        console.error('Fetch tenant users error:', err);
+
+        return res.status(500).json({
+            error: 'Server error'
+        });
+    }
+});
+
+// ==========================================
+// POST TENANT USER
+// ==========================================
+
+router.post('/:tenantId/users', requireOwner, async (req, res) => {
+    const { tenantId } = req.params;
+    const { user_id, tenant_role } = req.body;
+
+    if (!isValidUUID(tenantId)) {
+        return res.status(400).json({
+            error: 'Invalid tenant ID'
+        });
+    }
+
+    if (!user_id || !isValidUUID(user_id)) {
+        return res.status(400).json({
+            error: 'Invalid user ID'
+        });
+    }
+
+    if (!tenant_role || !isValidTenantRole(tenant_role)) {
+        return res.status(400).json({
+            error: 'Invalid tenant role. Allowed roles: ADMIN or AGENT'
+        });
+    }
+
+    try {
+        // ==========================================
+        // CHECK TENANT
+        // ==========================================
+
+        const tenantCheck = await query(
+            'SELECT id, name FROM tenants WHERE id = $1',
+            [tenantId]
+        );
+
+        if (tenantCheck.rowCount === 0) {
+            return res.status(404).json({
+                error: 'Tenant not found'
+            });
+        }
+
+        // ==========================================
+        // CHECK USER
+        // ==========================================
+
+        const normalizedUserId = String(user_id)
+            .trim()
+            .toLowerCase();
+
+        const userCheck = await query(`
             SELECT
                 id,
                 email,
                 system_role
             FROM users
-            WHERE id = $1
-            `,
-            [user_id]
-        );
+            WHERE LOWER(TRIM(id::text)) = $1
+            LIMIT 1
+        `, [normalizedUserId]);
+
+        console.log('[POST TENANT USER] user lookup:', {
+            requested_user_id: user_id,
+            normalized_user_id: normalizedUserId,
+            rowCount: userCheck.rowCount,
+            rows: userCheck.rows
+        });
 
         if (userCheck.rowCount === 0) {
+
+            let availableUsers = [];
+
+            if (process.env.NODE_ENV !== 'production') {
+                const allUsers = await query(`
+                    SELECT
+                        id,
+                        email,
+                        system_role
+                    FROM users
+                    ORDER BY email
+                `);
+
+                availableUsers = allUsers.rows;
+            }
+
             return res.status(404).json({
-                error: 'User not found'
+                error: 'User not found',
+                searched_user_id: normalizedUserId,
+                available_users: availableUsers
             });
         }
 
-        const targetUser = userCheck.rows[0];
+        // ==========================================
+        // USER MUST BE CUSTOMER
+        // ==========================================
 
-        console.log('[POST TENANT USER] Target user:', targetUser);
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | ONLY CUSTOMER USERS CAN BE ASSIGNED
-        |--------------------------------------------------------------------------
-        */
-
-        if (targetUser.system_role !== 'CUSTOMER') {
+        if (userCheck.rows[0].system_role !== 'CUSTOMER') {
             return res.status(400).json({
-                error: 'Target user must have system_role CUSTOMER'
+                error: 'Target must be an existing CUSTOMER user'
             });
         }
 
+        // ==========================================
+        // CHECK EXISTING ASSIGNMENT
+        // ==========================================
 
-        /*
-        |--------------------------------------------------------------------------
-        | CHECK EXISTING ASSIGNMENT
-        |--------------------------------------------------------------------------
-        */
-
-        const existingAssignment = await query(
-            `
+        const existingMapping = await query(`
             SELECT
                 tenant_id,
-                user_id,
-                tenant_role
+                user_id
             FROM tenant_users
             WHERE tenant_id = $1
               AND user_id = $2
-            `,
-            [tenantId, user_id]
-        );
+        `, [
+            tenantId,
+            userCheck.rows[0].id
+        ]);
 
-        if (existingAssignment.rowCount > 0) {
+        if (existingMapping.rowCount > 0) {
             return res.status(409).json({
-                error: 'User is already assigned to this tenant',
-                assignment: existingAssignment.rows[0]
+                error: 'User is already assigned to this tenant'
             });
         }
 
+        // ==========================================
+        // CREATE ASSIGNMENT
+        // ==========================================
 
-        /*
-        |--------------------------------------------------------------------------
-        | CREATE ASSIGNMENT
-        |--------------------------------------------------------------------------
-        */
-
-        const result = await query(
-            `
+        const result = await query(`
             INSERT INTO tenant_users (
                 tenant_id,
                 user_id,
@@ -531,25 +280,11 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
                 tenant_id,
                 user_id,
                 tenant_role
-            `,
-            [
-                tenantId,
-                user_id,
-                tenant_role
-            ]
-        );
-
-
-        /*
-        |--------------------------------------------------------------------------
-        | SUCCESS
-        |--------------------------------------------------------------------------
-        */
-
-        console.log(
-            '[POST TENANT USER] Assignment created:',
-            result.rows[0]
-        );
+        `, [
+            tenantId,
+            userCheck.rows[0].id,
+            tenant_role
+        ]);
 
         return res.status(201).json({
             message: 'User assigned to tenant successfully',
@@ -557,17 +292,7 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
         });
 
     } catch (err) {
-
-        console.error('==========================================');
-        console.error('[POST TENANT USER] ERROR');
-        console.error(err);
-        console.error('==========================================');
-
-        /*
-        |--------------------------------------------------------------------------
-        | PostgreSQL UNIQUE VIOLATION
-        |--------------------------------------------------------------------------
-        */
+        console.error('Assign user error:', err);
 
         if (err.code === '23505') {
             return res.status(409).json({
@@ -581,103 +306,126 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
     }
 });
 
+// ==========================================
+// DELETE TENANT USER
+// ==========================================
 
-/*
-|--------------------------------------------------------------------------
-| REMOVE USER FROM TENANT
-|--------------------------------------------------------------------------
-*/
+router.delete('/:tenantId/users/:userId', requireOwner, async (req, res) => {
+    const { tenantId, userId } = req.params;
 
-router.delete(
-    '/:tenantId/users/:userId',
-    requireOwner,
-    async (req, res) => {
+    if (!isValidUUID(tenantId)) {
+        return res.status(400).json({
+            error: 'Invalid tenant ID'
+        });
+    }
 
-        try {
-            const { tenantId, userId } = req.params;
+    if (!isValidUUID(userId)) {
+        return res.status(400).json({
+            error: 'Invalid user ID'
+        });
+    }
 
-            if (!isValidUUID(tenantId)) {
-                return res.status(400).json({
-                    error: 'Invalid tenant ID'
-                });
-            }
+    try {
+        const result = await query(`
+            DELETE FROM tenant_users
+            WHERE tenant_id = $1
+              AND user_id = $2
+            RETURNING
+                tenant_id,
+                user_id,
+                tenant_role
+        `, [
+            tenantId,
+            userId
+        ]);
 
-            if (!isValidUUID(userId)) {
-                return res.status(400).json({
-                    error: 'Invalid user ID'
-                });
-            }
-
-            const result = await query(
-                `
-                DELETE FROM tenant_users
-                WHERE tenant_id = $1
-                  AND user_id = $2
-                RETURNING tenant_id, user_id
-                `,
-                [tenantId, userId]
-            );
-
-            if (result.rowCount === 0) {
-                return res.status(404).json({
-                    error: 'User assignment not found in this tenant'
-                });
-            }
-
-            return res.status(200).json({
-                message: 'User removed from tenant successfully'
-            });
-
-        } catch (err) {
-            console.error('[DELETE TENANT USER] Error:', err);
-
-            return res.status(500).json({
-                error: 'Server error'
+        if (result.rowCount === 0) {
+            return res.status(404).json({
+                error: 'User assignment not found in this tenant'
             });
         }
+
+        return res.json({
+            message: 'User removed from tenant successfully',
+            assignment: result.rows[0]
+        });
+
+    } catch (err) {
+        console.error('Delete tenant user error:', err);
+
+        return res.status(500).json({
+            error: 'Server error'
+        });
     }
-);
+});
 
+// ==========================================
+// SINGLE TENANT
+// ==========================================
 
-/*
-|--------------------------------------------------------------------------
-| ASSISTANTS
-|--------------------------------------------------------------------------
-*/
+// GET /api/v1/tenants/:tenantId
+router.get('/:tenantId', requireTenantAccess, async (req, res) => {
+    try {
+        const result = await query(`
+            SELECT
+                id,
+                name,
+                status,
+                created_at
+            FROM tenants
+            WHERE id = $1
+        `, [req.verified_tenant_id]);
 
-router.get(
-    '/:tenantId/assistants',
-    requireTenantAccess,
-    async (req, res) => {
-
-        try {
-            const result = await query(
-                `
-                SELECT
-                    id,
-                    name,
-                    model,
-                    status,
-                    created_at
-                FROM ai_assistants
-                WHERE tenant_id = $1
-                ORDER BY created_at DESC
-                `,
-                [req.verified_tenant_id]
-            );
-
-            return res.status(200).json(result.rows);
-
-        } catch (err) {
-            console.error('[GET ASSISTANTS] Error:', err);
-
-            return res.status(500).json({
-                error: 'Server error'
+        if (result.rowCount === 0) {
+            return res.status(404).json({
+                error: 'Tenant not found'
             });
         }
-    }
-);
 
+        return res.json(result.rows[0]);
+
+    } catch (err) {
+        console.error('Fetch tenant error:', err);
+
+        return res.status(500).json({
+            error: 'Server error'
+        });
+    }
+});
+
+// ==========================================
+// ASSISTANT MANAGEMENT
+// ==========================================
+
+// GET /api/v1/tenants/:tenantId/assistants
+router.get('/:tenantId/assistants', requireTenantAccess, async (req, res) => {
+    try {
+        const result = await query(`
+            SELECT
+                id,
+                name,
+                model,
+                status,
+                created_at
+            FROM ai_assistants
+            WHERE tenant_id = $1
+            ORDER BY created_at DESC
+        `, [req.verified_tenant_id]);
+
+        return res.json(result.rows);
+
+    } catch (err) {
+        console.error('Fetch assistants error:', err);
+
+        return res.status(500).json({
+            error: 'Server error'
+        });
+    }
+});
+
+// ==========================================
+// CREATE ASSISTANT
+// ==========================================
 
 router.post(
     '/:tenantId/assistants',
@@ -685,21 +433,24 @@ router.post(
     requireTenantAdmin,
     async (req, res) => {
 
+        const {
+            name,
+            system_prompt,
+            model
+        } = req.body;
+
+        if (
+            !name ||
+            typeof name !== 'string' ||
+            name.trim().length === 0
+        ) {
+            return res.status(400).json({
+                error: 'Assistant name is required'
+            });
+        }
+
         try {
-            const {
-                name,
-                system_prompt,
-                model
-            } = req.body;
-
-            if (!name || name.trim().length === 0) {
-                return res.status(400).json({
-                    error: 'Assistant name is required'
-                });
-            }
-
-            const result = await query(
-                `
+            const result = await query(`
                 INSERT INTO ai_assistants (
                     tenant_id,
                     name,
@@ -713,19 +464,17 @@ router.post(
                     model,
                     status,
                     created_at
-                `,
-                [
-                    req.verified_tenant_id,
-                    name.trim(),
-                    system_prompt || null,
-                    model || 'gpt-4o-mini'
-                ]
-            );
+            `, [
+                req.verified_tenant_id,
+                name.trim(),
+                system_prompt || null,
+                model || 'gpt-4o-mini'
+            ]);
 
             return res.status(201).json(result.rows[0]);
 
         } catch (err) {
-            console.error('[POST ASSISTANT] Error:', err);
+            console.error('Create assistant error:', err);
 
             return res.status(500).json({
                 error: 'Server error'
@@ -734,33 +483,33 @@ router.post(
     }
 );
 
+// ==========================================
+// GET SINGLE ASSISTANT
+// ==========================================
 
 router.get(
     '/:tenantId/assistants/:assistantId',
     requireTenantAccess,
     async (req, res) => {
 
+        const { assistantId } = req.params;
+
+        if (!isValidUUID(assistantId)) {
+            return res.status(400).json({
+                error: 'Invalid Assistant ID format'
+            });
+        }
+
         try {
-            const { assistantId } = req.params;
-
-            if (!isValidUUID(assistantId)) {
-                return res.status(400).json({
-                    error: 'Invalid Assistant ID format'
-                });
-            }
-
-            const result = await query(
-                `
+            const result = await query(`
                 SELECT *
                 FROM ai_assistants
                 WHERE id = $1
                   AND tenant_id = $2
-                `,
-                [
-                    assistantId,
-                    req.verified_tenant_id
-                ]
-            );
+            `, [
+                assistantId,
+                req.verified_tenant_id
+            ]);
 
             if (result.rowCount === 0) {
                 return res.status(404).json({
@@ -768,10 +517,10 @@ router.get(
                 });
             }
 
-            return res.status(200).json(result.rows[0]);
+            return res.json(result.rows[0]);
 
         } catch (err) {
-            console.error('[GET ASSISTANT] Error:', err);
+            console.error('Fetch assistant error:', err);
 
             return res.status(500).json({
                 error: 'Server error'
@@ -780,6 +529,9 @@ router.get(
     }
 );
 
+// ==========================================
+// UPDATE ASSISTANT
+// ==========================================
 
 router.put(
     '/:tenantId/assistants/:assistantId',
@@ -787,23 +539,23 @@ router.put(
     requireTenantAdmin,
     async (req, res) => {
 
+        const { assistantId } = req.params;
+
+        const {
+            name,
+            system_prompt,
+            model,
+            status
+        } = req.body;
+
+        if (!isValidUUID(assistantId)) {
+            return res.status(400).json({
+                error: 'Invalid Assistant ID format'
+            });
+        }
+
         try {
-            const { assistantId } = req.params;
-            const {
-                name,
-                system_prompt,
-                model,
-                status
-            } = req.body;
-
-            if (!isValidUUID(assistantId)) {
-                return res.status(400).json({
-                    error: 'Invalid Assistant ID format'
-                });
-            }
-
-            const result = await query(
-                `
+            const result = await query(`
                 UPDATE ai_assistants
                 SET
                     name = COALESCE($1, name),
@@ -814,16 +566,14 @@ router.put(
                 WHERE id = $5
                   AND tenant_id = $6
                 RETURNING *
-                `,
-                [
-                    name,
-                    system_prompt,
-                    model,
-                    status,
-                    assistantId,
-                    req.verified_tenant_id
-                ]
-            );
+            `, [
+                name,
+                system_prompt,
+                model,
+                status,
+                assistantId,
+                req.verified_tenant_id
+            ]);
 
             if (result.rowCount === 0) {
                 return res.status(404).json({
@@ -831,10 +581,10 @@ router.put(
                 });
             }
 
-            return res.status(200).json(result.rows[0]);
+            return res.json(result.rows[0]);
 
         } catch (err) {
-            console.error('[PUT ASSISTANT] Error:', err);
+            console.error('Update assistant error:', err);
 
             return res.status(500).json({
                 error: 'Server error'
@@ -843,6 +593,9 @@ router.put(
     }
 );
 
+// ==========================================
+// DELETE ASSISTANT
+// ==========================================
 
 router.delete(
     '/:tenantId/assistants/:assistantId',
@@ -850,27 +603,24 @@ router.delete(
     requireTenantAdmin,
     async (req, res) => {
 
+        const { assistantId } = req.params;
+
+        if (!isValidUUID(assistantId)) {
+            return res.status(400).json({
+                error: 'Invalid Assistant ID format'
+            });
+        }
+
         try {
-            const { assistantId } = req.params;
-
-            if (!isValidUUID(assistantId)) {
-                return res.status(400).json({
-                    error: 'Invalid Assistant ID format'
-                });
-            }
-
-            const result = await query(
-                `
+            const result = await query(`
                 DELETE FROM ai_assistants
                 WHERE id = $1
                   AND tenant_id = $2
                 RETURNING id
-                `,
-                [
-                    assistantId,
-                    req.verified_tenant_id
-                ]
-            );
+            `, [
+                assistantId,
+                req.verified_tenant_id
+            ]);
 
             if (result.rowCount === 0) {
                 return res.status(404).json({
@@ -878,12 +628,12 @@ router.delete(
                 });
             }
 
-            return res.status(200).json({
+            return res.json({
                 message: 'Assistant deleted successfully'
             });
 
         } catch (err) {
-            console.error('[DELETE ASSISTANT] Error:', err);
+            console.error('Delete assistant error:', err);
 
             return res.status(500).json({
                 error: 'Server error'
@@ -892,11 +642,9 @@ router.delete(
     }
 );
 
-
-/*
-|--------------------------------------------------------------------------
-| EXPORT
-|--------------------------------------------------------------------------
-*/
+// ==========================================
+// EXPORT ROUTER
+// ==========================================
 
 export default router;
+
