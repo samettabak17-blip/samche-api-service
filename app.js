@@ -13,6 +13,7 @@ import cron from "node-cron";
 import https from "https";
 import authRoutes from "./routes/authRoutes.js";
 import tenantRoutes from "./routes/tenantRoutes.js";
+import pool from "./config/db.js";
 
 dotenv.config();
 
@@ -25,19 +26,34 @@ app.use(express.json());
 // ROOT / HEALTH ROUTES
 // ==========================================
 
-app.get("/", (req, res) => {
-  res.json({
-    service: "SamChe API Service",
-    status: "ok",
-    environment: process.env.NODE_ENV || "staging"
-  });
-});
-
 app.get("/api/v1/health", (req, res) => {
   res.json({
     status: "ok",
     timestamp: new Date().toISOString()
   });
+});
+
+app.get("/api/v1/health/db", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        NOW() AS server_time,
+        current_database() AS database_name
+    `);
+
+    res.json({
+      status: "ok",
+      database: result.rows[0].database_name,
+      server_time: result.rows[0].server_time
+    });
+  } catch (error) {
+    console.error("Database health check failed:", error);
+
+    res.status(500).json({
+      status: "error",
+      message: error.message
+    });
+  }
 });
 
 // ==========================================
