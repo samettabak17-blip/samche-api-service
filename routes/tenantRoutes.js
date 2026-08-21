@@ -45,7 +45,7 @@ router.get('/', async (req, res) => {
                     ON t.id = tu.tenant_id
                 WHERE tu.user_id = $1
                 ORDER BY t.created_at DESC
-            `, [req.user.id]);
+            `, [req.user.user_id]);
 
             return res.json(result.rows);
         }
@@ -219,7 +219,7 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
                 email,
                 system_role
             FROM users
-            WHERE id = $1
+            WHERE LOWER(TRIM(id::text)) = LOWER(TRIM($1::text))
             LIMIT 1
             `,
             [user_id]
