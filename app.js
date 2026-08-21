@@ -17,14 +17,35 @@ import tenantRoutes from "./routes/tenantRoutes.js";
 dotenv.config();
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
-// ============================================================================
-// NEW MULTI-TENANT API ROUTES (V1) - ADDITIVE LAYER
-// ============================================================================
-app.get('/api/v1/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/tenants', tenantRoutes);
+
+// ==========================================
+// ROOT / HEALTH ROUTES
+// ==========================================
+
+app.get("/", (req, res) => {
+  res.json({
+    service: "SamChe API Service",
+    status: "ok",
+    environment: process.env.NODE_ENV || "staging"
+  });
+});
+
+app.get("/api/v1/health", (req, res) => {
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ==========================================
+// V1 ROUTES
+// ==========================================
+
+app.use("/api/v1/auth", authRoutes);
+app.use("/api/v1/tenants", tenantRoutes);
 
 // ============================================================================
 // 🔥 GLOBAL HATA YAKALAYICILAR (SUNUCUNUN ÇÖKMESİNİ KESİN ENGELLER)
