@@ -11,12 +11,20 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 import cron from "node-cron";
 import https from "https";
+import authRoutes from "./routes/authRoutes.js";
+import tenantRoutes from "./routes/tenantRoutes.js";
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+// ============================================================================
+// NEW MULTI-TENANT API ROUTES (V1) - ADDITIVE LAYER
+// ============================================================================
+app.get('/api/v1/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
+app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/tenants', tenantRoutes);
 
 // ============================================================================
 // 🔥 GLOBAL HATA YAKALAYICILAR (SUNUCUNUN ÇÖKMESİNİ KESİN ENGELLER)
