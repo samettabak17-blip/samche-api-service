@@ -154,71 +154,54 @@ router.get('/:tenantId', requireTenantAccess, async (req, res) => {
 */
 
 router.post('/:tenantId/users', requireOwner, async (req, res) => {
-
-    const tenantId = String(req.params.tenantId || '').trim();
-    const rawUserId = String(req.body?.user_id || '').trim();
-    const tenantRole = String(req.body?.tenant_role || '')
-        .trim()
-        .toUpperCase();
+    const { tenantId } = req.params;
+    const { user_id, tenant_role } = req.body;
 
     console.log('==========================================');
-    console.log('[POST TENANT USER]');
-    console.log('tenantId:', tenantId);
-    console.log('rawUserId:', rawUserId);
-    console.log('rawUserId length:', rawUserId.length);
-    console.log('tenantRole:', tenantRole);
-    console.log('authenticated user:', req.user);
-    console.log('==========================================');
+    console.log('[POST TENANT USER] ROUTE HIT');
+    console.log('[POST TENANT USER] tenantId:', tenantId);
+    console.log('[POST TENANT USER] user_id:', user_id);
+    console.log('[POST TENANT USER] tenant_role:', tenant_role);
+    console.log('[POST TENANT USER] authenticated user:', req.user);
 
-    // ==========================================
+    // ------------------------------------------
     // VALIDATION
-    // ==========================================
+    // ------------------------------------------
 
     if (!isValidUUID(tenantId)) {
         return res.status(400).json({
-            error: 'Invalid tenant ID',
-            tenant_id: tenantId
+            error: 'Invalid tenant ID'
         });
     }
 
-    if (!isValidUUID(rawUserId)) {
+    if (!isValidUUID(user_id)) {
         return res.status(400).json({
-            error: 'Invalid user ID',
-            user_id: rawUserId
+            error: 'Invalid user ID'
         });
     }
 
-    if (!isValidTenantRole(tenantRole)) {
+    if (!isValidTenantRole(tenant_role)) {
         return res.status(400).json({
             error: 'Invalid tenant role. Allowed values: ADMIN or AGENT'
         });
     }
 
-    // Normalize UUID
-    const userId = rawUserId.toLowerCase();
-
     try {
-
-        // ==========================================
+        // ------------------------------------------
         // 1. CHECK TENANT
-        // ==========================================
+        // ------------------------------------------
 
         const tenantCheck = await query(
             `
-            SELECT
-                id,
-                name,
-                status
+            SELECT id, name, status
             FROM tenants
-            WHERE id::text = $1::text
+            WHERE CAST(id AS TEXT) = $1
+            LIMIT 1
             `,
             [tenantId]
         );
 
-        console.log(
-            '[POST TENANT USER] tenantCheck:',
-            tenantCheck.rows
-        );
+        console.log('[POST TENANT USER] tenantCheck:', tenantCheck.rows);
 
         if (tenantCheck.rowCount === 0) {
             return res.status(404).json({
@@ -227,12 +210,11 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
             });
         }
 
-
-        // ==========================================
+        // ------------------------------------------
         // 2. FIND USER
-        // IMPORTANT:
-        // Compare UUID as TEXT
-        // ==========================================
+        // ------------------------------------------
+        // CAST(id AS TEXT) makes this work whether
+        // users.id is UUID or text/varchar.
 
         const userCheck = await query(
             `
@@ -241,93 +223,62 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
                 email,
                 system_role
             FROM users
-            WHERE LOWER(TRIM(id::text)) = LOWER(TRIM($1::text))
+            WHERE CAST(id AS TEXT) = $1
             LIMIT 1
             `,
-            [userId]
+            [user_id]
         );
 
-        console.log(
-            '[POST TENANT USER] userCheck rowCount:',
-            userCheck.rowCount
-        );
-
-        console.log(
-            '[POST TENANT USER] userCheck rows:',
-            userCheck.rows
-        );
-
-
-        // ==========================================
-        // 3. USER NOT FOUND
-        // ==========================================
+        console.log('[POST TENANT USER] userCheck rowCount:', userCheck.rowCount);
+        console.log('[POST TENANT USER] userCheck rows:', userCheck.rows);
 
         if (userCheck.rowCount === 0) {
 
-            const availableUsers = await query(
+            // Diagnostic query - show what database actually sees
+            const allUsers = await query(
                 `
                 SELECT
-                    id,
+                    CAST(id AS TEXT) AS id,
                     email,
-                    system_role,
-                    LENGTH(id::text) AS id_length
+                    system_role
                 FROM users
                 ORDER BY email
                 `
             );
 
-            console.error(
-                '[POST TENANT USER] USER NOT FOUND'
-            );
-
-            console.error(
-                '[POST TENANT USER] SEARCHED ID:',
-                userId
-            );
-
-            console.error(
-                '[POST TENANT USER] SEARCHED ID LENGTH:',
-                userId.length
-            );
-
-            console.error(
-                '[POST TENANT USER] AVAILABLE USERS:',
-                availableUsers.rows
+            console.log(
+                '[POST TENANT USER] ALL USERS:',
+                allUsers.rows
             );
 
             return res.status(404).json({
                 error: 'User not found',
-                searched_user_id: userId,
-                searched_user_id_length: userId.length,
-                available_users: availableUsers.rows
+                searched_user_id: user_id,
+                available_users: allUsers.rows
             });
         }
-
-
-        // ==========================================
-        // 4. VERIFY CUSTOMER
-        // ==========================================
 
         const targetUser = userCheck.rows[0];
 
         console.log(
-            '[POST TENANT USER] TARGET USER:',
+            '[POST TENANT USER] target user:',
             targetUser
         );
 
-        if (
-            String(targetUser.system_role).toUpperCase() !== 'CUSTOMER'
-        ) {
+        // ------------------------------------------
+        // 3. USER MUST BE CUSTOMER
+        // ------------------------------------------
+
+        if (targetUser.system_role !== 'CUSTOMER') {
             return res.status(400).json({
                 error: 'Target user must be a CUSTOMER',
                 user: targetUser
             });
         }
 
-
-        // ==========================================
-        // 5. CHECK EXISTING ASSIGNMENT
-        // ==========================================
+        // ------------------------------------------
+        // 4. CHECK EXISTING TENANT ASSIGNMENT
+        // ------------------------------------------
 
         const existingAssignment = await query(
             `
@@ -336,18 +287,15 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
                 user_id,
                 tenant_role
             FROM tenant_users
-            WHERE tenant_id::text = $1::text
-              AND user_id::text = $2::text
+            WHERE CAST(tenant_id AS TEXT) = $1
+              AND CAST(user_id AS TEXT) = $2
             LIMIT 1
             `,
-            [
-                tenantId,
-                targetUser.id
-            ]
+            [tenantId, user_id]
         );
 
         console.log(
-            '[POST TENANT USER] existingAssignment:',
+            '[POST TENANT USER] existing assignment:',
             existingAssignment.rows
         );
 
@@ -358,23 +306,18 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
             });
         }
 
+        // ------------------------------------------
+        // 5. CREATE TENANT USER ASSIGNMENT
+        // ------------------------------------------
 
-        // ==========================================
-        // 6. INSERT
-        // ==========================================
-
-        const insertResult = await query(
+        const result = await query(
             `
             INSERT INTO tenant_users (
                 tenant_id,
                 user_id,
                 tenant_role
             )
-            VALUES (
-                $1,
-                $2,
-                $3
-            )
+            VALUES ($1, $2, $3)
             RETURNING
                 tenant_id,
                 user_id,
@@ -383,71 +326,50 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
             `,
             [
                 tenantId,
-                targetUser.id,
-                tenantRole
+                user_id,
+                tenant_role
             ]
         );
 
         console.log(
-            '[POST TENANT USER] INSERT SUCCESS:',
-            insertResult.rows[0]
+            '[POST TENANT USER] CREATED:',
+            result.rows[0]
         );
 
-
-        // ==========================================
-        // 7. RESPONSE
-        // ==========================================
+        console.log('==========================================');
 
         return res.status(201).json({
             message: 'User assigned to tenant successfully',
-
-            assignment: insertResult.rows[0],
-
-            user: {
-                id: targetUser.id,
-                email: targetUser.email,
-                system_role: targetUser.system_role
-            }
+            assignment: result.rows[0]
         });
 
     } catch (err) {
 
         console.error('==========================================');
-        console.error('[POST TENANT USER] DATABASE ERROR');
-        console.error('code:', err.code);
-        console.error('message:', err.message);
-        console.error('detail:', err.detail);
-        console.error('constraint:', err.constraint);
-        console.error('table:', err.table);
-        console.error('column:', err.column);
+        console.error('[POST TENANT USER] ERROR');
+        console.error(err);
         console.error('==========================================');
 
-        // Duplicate
+        // PostgreSQL duplicate key
         if (err.code === '23505') {
             return res.status(409).json({
                 error: 'User is already assigned to this tenant'
             });
         }
 
-        // Foreign key
+        // PostgreSQL foreign key
         if (err.code === '23503') {
             return res.status(400).json({
                 error: 'Invalid tenant or user reference',
-                detail: err.detail
-            });
-        }
-
-        // Invalid UUID
-        if (err.code === '22P02') {
-            return res.status(400).json({
-                error: 'Invalid UUID value',
-                detail: err.message
+                detail: err.detail || null
             });
         }
 
         return res.status(500).json({
             error: 'Server error',
-            detail: err.message
+            detail: process.env.NODE_ENV === 'production'
+                ? undefined
+                : err.message
         });
     }
 });
