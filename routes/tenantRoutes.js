@@ -219,7 +219,7 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
                 email,
                 system_role
             FROM users
-            WHERE id = $1
+            WHERE LOWER(TRIM(id::text)) = LOWER(TRIM($1::text))
             LIMIT 1
             `,
             [user_id]
