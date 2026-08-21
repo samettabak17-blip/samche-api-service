@@ -5,9 +5,9 @@
   "main": "app.js",
   "type": "module",
   "scripts": {
-  "start": "node migrate.js && node app.js",
+  "start": "node scripts/migrate.js && node app.js",
   "dev": "nodemon app.js",
-  "migrate": "node migrate.js",
+  "migrate": "node scripts/migrate.js",
   "bootstrap-owner": "node scripts/bootstrap_owner.js"
   },
   "dependencies": {
