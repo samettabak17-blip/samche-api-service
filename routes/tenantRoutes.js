@@ -1,5 +1,5 @@
 import express from 'express';
-import { query } from '../config/db.js';
+import pool, { query } from '../config/db.js';
 import {
     authenticateToken,
     requireTenantAccess,
@@ -212,18 +212,51 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
         // 2. CHECK USER
         // ------------------------------------------
 
-        const userCheck = await query(
-            `
-            SELECT
-                id,
-                email,
-                system_role
-            FROM users
-            WHERE LOWER(TRIM(id::text)) = LOWER(TRIM($1::text))
-            LIMIT 1
-            `,
-            [user_id]
-        );
+        const diagnosticClient = await pool.connect();
+        let userCheck;
+
+        try {
+            const databaseResult = await diagnosticClient.query(
+                'SELECT current_database() AS database, current_schema() AS schema'
+            );
+            const searchPathResult = await diagnosticClient.query('SHOW search_path');
+            const allUsersResult = await diagnosticClient.query(`
+                SELECT id::text, email, system_role, pg_typeof(id)::text AS id_type
+                FROM users
+                ORDER BY email
+            `);
+
+            console.log('[POST TENANT USER] diagnostics:', {
+                database: databaseResult.rows[0],
+                search_path: searchPathResult.rows[0]?.search_path,
+                requested_user_id: user_id,
+                requested_user_id_type: typeof user_id,
+                requested_user_id_json: JSON.stringify(user_id),
+                requested_user_id_length: typeof user_id === 'string' ? user_id.length : null,
+                users_count: allUsersResult.rowCount,
+                users: allUsersResult.rows
+            });
+
+            userCheck = await diagnosticClient.query(
+                `
+                SELECT
+                    id,
+                    email,
+                    system_role
+                FROM users
+                WHERE LOWER(TRIM(id::text)) = LOWER(TRIM($1::text))
+                LIMIT 1
+                `,
+                [user_id]
+            );
+
+            console.log('[POST TENANT USER] exact lookup:', {
+                rowCount: userCheck.rowCount,
+                rows: userCheck.rows
+            });
+        } finally {
+            diagnosticClient.release();
+        }
 
         console.log(
             '[POST TENANT USER] userCheck:',
