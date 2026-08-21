@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node app.js",
     "dev": "nodemon app.js",
-    "migrate": "node migrate.js",
+    "migrate": "node scripts/migrate.js",
     "bootstrap-owner": "node scripts/bootstrap_owner.js"
   },
   "dependencies": {
