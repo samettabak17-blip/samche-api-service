@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { Assistant, Conversation, ConversationMessage, CrmLead, CrmLeadList, CrmPipelineStage, KnowledgeDocument, TeamMember, TenantChannel } from '../../types/api';
+import type { AgentMessageResponse, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmLead, CrmLeadList, CrmPipelineStage, KnowledgeDocument, TeamMember, TenantChannel } from '../../types/api';
 
 const tenantRoot = (tenantId: string) => `/api/v1/tenants/${tenantId}`;
 export const tenantKeys = {
@@ -13,6 +13,7 @@ export const tenantKeys = {
   conversations: (tenantId: string, limit: number, offset: number) => ['tenant', tenantId, 'conversations', limit, offset] as const,
   conversation: (tenantId: string, conversationId: string) => ['tenant', tenantId, 'conversation', conversationId] as const,
   messages: (tenantId: string, conversationId: string, limit: number, offset: number) => ['tenant', tenantId, 'conversation', conversationId, 'messages', limit, offset] as const,
+  conversationEvents: (tenantId: string, conversationId: string) => ['tenant', tenantId, 'conversation', conversationId, 'events'] as const,
   leads: (tenantId: string, filters: string) => ['tenant', tenantId, 'leads', filters] as const,
   lead: (tenantId: string, leadId: string) => ['tenant', tenantId, 'lead', leadId] as const,
   pipelines: (tenantId: string) => ['tenant', tenantId, 'pipelines'] as const,
@@ -40,6 +41,17 @@ export const tenantApi = {
   listConversations: (tenantId: string, page: { limit: number; offset: number }) => apiClient.get<Conversation[]>(`${tenantRoot(tenantId)}/conversations?limit=${page.limit}&offset=${page.offset}`),
   getConversation: (tenantId: string, conversationId: string) => apiClient.get<Conversation>(`${tenantRoot(tenantId)}/conversations/${conversationId}`),
   listMessages: (tenantId: string, conversationId: string, page: { limit: number; offset: number }) => apiClient.get<ConversationMessage[]>(`${tenantRoot(tenantId)}/conversations/${conversationId}/messages?limit=${page.limit}&offset=${page.offset}`),
+  listConversationEvents: (tenantId: string, conversationId: string) => apiClient.get<ConversationAuditEvent[]>(`${tenantRoot(tenantId)}/conversations/${conversationId}/events`),
+  takeoverConversation: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/takeover`, {}),
+  returnConversationToAi: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/return-to-ai`, {}),
+  pauseConversationAi: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/pause`, {}),
+  resumeConversationAi: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/resume`, {}),
+  closeConversation: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/close`, {}),
+  sendAgentMessage: (tenantId: string, conversationId: string, content: string, idempotencyKey: string) => apiClient.post<AgentMessageResponse>(
+    `${tenantRoot(tenantId)}/conversations/${conversationId}/messages`,
+    { content },
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ),
   listLeads: (tenantId: string, filters: LeadFilters) => apiClient.get<CrmLeadList>(`${tenantRoot(tenantId)}/leads?${leadQuery(filters)}`),
   getLead: (tenantId: string, leadId: string) => apiClient.get<CrmLead>(`${tenantRoot(tenantId)}/leads/${leadId}`),
   listPipelines: (tenantId: string) => apiClient.get<CrmPipelineStage[]>(`${tenantRoot(tenantId)}/pipelines`),
