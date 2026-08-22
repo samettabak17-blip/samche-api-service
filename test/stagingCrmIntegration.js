@@ -50,5 +50,5 @@ export async function createFixtureLifecycle({ client, label, passwordHash }) {
 export async function withFixtureLifecycle({ client, label, passwordHash, run }) {
   let fixture;
   try { fixture = await createFixtureLifecycle({ client, label, passwordHash }); return await run(fixture); }
-  finally { if (fixture) await cleanupFixtureRun({ client, tenantIds:[fixture.tenantId], names:{tenantA:fixture.names.tenantA,tenantB:fixture.names.tenantA}, agentId:fixture.agentId, adminId:fixture.adminId, adminEmail:'ci-crm-admin-' + label + '@example.test' }).catch(()=>{}); }
+  finally { if (fixture) await cleanupFixtureRun({ client, tenantIds:[fixture.tenantId], names:{tenantA:fixture.names.tenantA,tenantB:fixture.names.tenantA,agentEmail:fixture.names.agentEmail}, agentId:fixture.agentId, adminId:fixture.adminId, adminEmail:'ci-crm-admin-' + label + '@example.test' }).catch(()=>{}); }
 }
