@@ -64,6 +64,36 @@ async function insertMessage(client, { tenantId, conversationId, senderType, con
   return result.rows[0] ?? null;
 }
 
+
+export async function getSamcheguidePublicHistory({ externalSessionId }) {
+  const client = await pool.connect();
+  try {
+    const integration = await loadSamcheguideIntegration(client);
+    if (!integration || integration.channel_status !== 'active') return null;
+
+    const result = await client.query(
+      `SELECT m.sender_type, m.content, m.created_at
+         FROM conversations c
+         JOIN conversation_messages m
+           ON m.conversation_id = c.id AND m.tenant_id = c.tenant_id
+        WHERE c.tenant_id = $1
+          AND c.channel_id = $2
+          AND c.external_conversation_id = $3
+        ORDER BY m.created_at ASC
+        LIMIT 100`,
+      [integration.tenant_id, integration.channel_id, publicConversationKey(externalSessionId)]
+    );
+
+    return result.rows.map((message) => ({
+      role: message.sender_type === 'CUSTOMER' ? 'user' : 'assistant',
+      content: message.content,
+      created_at: message.created_at,
+    }));
+  } finally {
+    client.release();
+  }
+}
+
 export async function persistSamcheguideInbound({ externalSessionId, content, idempotencyKey = null }) {
   const client = await pool.connect();
   try {
