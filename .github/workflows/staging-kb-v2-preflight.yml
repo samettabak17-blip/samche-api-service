@@ -1,0 +1,56 @@
+name: Knowledge Base V2 staging preflight
+on:
+  push:
+    branches: [staging]
+    paths:
+      - .github/workflows/staging-kb-v2-preflight.yml
+  workflow_dispatch:
+
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install database client
+        run: npm install --no-save pg@8.16.3
+      - name: Inspect pgvector availability without exposing credentials
+        shell: bash
+        run: |
+          node <<'NODE'
+          const { Pool } = require('pg');
+
+          (async () => {
+            const pool = new Pool({
+              connectionString: process.env.STAGING_DATABASE_URL,
+              ssl: { rejectUnauthorized: false },
+            });
+            try {
+              const result = await pool.query(`
+                SELECT
+                  current_setting('server_version') AS server_version,
+                  EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS vector_installed,
+                  EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'vector') AS vector_available,
+                  has_database_privilege(current_database(), 'CREATE') AS can_create_in_database
+              `);
+              const row = result.rows[0];
+              console.log('POSTGRES_VERSION: ' + row.server_version);
+              console.log('PGVECTOR_INSTALLED: ' + (row.vector_installed ? 'yes' : 'no'));
+              console.log('PGVECTOR_AVAILABLE: ' + (row.vector_available ? 'yes' : 'no'));
+              console.log('DATABASE_CREATE_PRIVILEGE: ' + (row.can_create_in_database ? 'yes' : 'no'));
+              if (!row.vector_available) {
+                console.log('KBV2_PREFLIGHT: BLOCKED_PGVECTOR_UNAVAILABLE');
+                process.exitCode = 2;
+              } else {
+                console.log('KBV2_PREFLIGHT: PGVECTOR_COMPATIBLE');
+              }
+            } finally {
+              await pool.end();
+            }
+          })().catch((error) => {
+            console.error('KBV2_PREFLIGHT: DATABASE_CHECK_FAILED');
+            process.exitCode = 1;
+          });
+          NODE
