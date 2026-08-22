@@ -22,6 +22,9 @@ jobs:
       - name: Install dashboard dependencies
         run: npm --prefix dashboard install --no-audit --no-fund
 
+      - name: Show dashboard toolchain resolution
+        run: npm --prefix dashboard ls vite vitest @vitejs/plugin-react typescript --depth=2
+
       - name: Validate Task 3 paths and package scripts
         run: |
           test -f package.json
@@ -31,6 +34,7 @@ jobs:
           test -f routes/crmRoutes.js
           test -f dashboard/src/features/leads/leads-page.tsx
           test -f dashboard/src/features/leads/leads-page.test.tsx
+          test -f dashboard/vitest.config.ts
           test -f tests/crm-lead-detail-service.test.js
           test -f tests/crm-read-provider-boundary.test.js
           test -f tests/lead-qualification-service.test.js
