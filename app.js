@@ -11,7 +11,7 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 import cron from "node-cron";
 import https from "https";
-import { createHmac, timingSafeEqual } from "crypto";
+import { verifyWhatsAppSignature } from "./middleware/whatsappSignature.js";
 import authRoutes from "./routes/authRoutes.js";
 import tenantRoutes from "./routes/tenantRoutes.js";
 import pool from "./config/db.js";
@@ -1157,35 +1157,6 @@ app.get("/webhook", (req, res) => {
 // ============================================================================
 // WHATSAPP WEBHOOK (POST) - "TEK TIK" VE KİLİTLENME KESİN ÇÖZÜMÜ
 // ============================================================================
-function verifyWhatsAppSignature(req, res, next) {
-  const appSecret = process.env.WHATSAPP_APP_SECRET;
-  const signature = req.get("x-hub-signature-256");
-
-  if (!appSecret) {
-    console.error("WHATSAPP_APP_SECRET is not configured.");
-    return res.sendStatus(500);
-  }
-
-  if (!signature || !req.rawBody) {
-    return res.sendStatus(401);
-  }
-
-  const expectedSignature = `sha256=${createHmac("sha256", appSecret)
-    .update(req.rawBody)
-    .digest("hex")}`;
-  const expectedBuffer = Buffer.from(expectedSignature, "utf8");
-  const receivedBuffer = Buffer.from(signature, "utf8");
-
-  if (
-    expectedBuffer.length !== receivedBuffer.length ||
-    !timingSafeEqual(expectedBuffer, receivedBuffer)
-  ) {
-    return res.sendStatus(401);
-  }
-
-  return next();
-}
-
 app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
   res.status(200).send("OK");
 
