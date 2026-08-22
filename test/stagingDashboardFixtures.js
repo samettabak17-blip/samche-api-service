@@ -97,11 +97,20 @@ try {
       );
       if (tenants.rowCount !== 2) throw new Error('Refusing cleanup: fixture tenants do not match the generated label');
 
+      // CRM graph: every delete is constrained to the verified generated fixture tenants.
+      await client.query('DELETE FROM crm_lead_analyses WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
+      await client.query('DELETE FROM crm_activities WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
+      await client.query('DELETE FROM crm_deals WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
+      await client.query('DELETE FROM crm_leads WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
       await client.query('DELETE FROM conversation_messages WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
+      await client.query('UPDATE conversations SET contact_id = NULL WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
       await client.query('DELETE FROM conversations WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
+      await client.query('DELETE FROM crm_contacts WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
+      await client.query('DELETE FROM crm_companies WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
       await client.query('DELETE FROM knowledge_base_documents WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
       await client.query('DELETE FROM tenant_channels WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
       await client.query('DELETE FROM ai_assistants WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
+      await client.query('DELETE FROM crm_pipeline_stages WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
       await client.query('DELETE FROM tenant_users WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
 
       const deletedUser = await client.query(
