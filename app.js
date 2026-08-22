@@ -22,7 +22,22 @@ dotenv.config();
 
 const app = express();
 
-app.use(cors());
+const allowedCorsOrigins = [
+  process.env.DASHBOARD_ALLOWED_ORIGIN,
+  ...(process.env.CORS_ALLOWED_ORIGINS?.split(',') ?? []),
+]
+  .map((origin) => origin?.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedCorsOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Origin is not allowed by CORS'));
+  },
+}));
 app.use(express.json({
   verify: (req, res, buffer) => {
     if (req.originalUrl?.split("?")[0] === "/webhook") {
