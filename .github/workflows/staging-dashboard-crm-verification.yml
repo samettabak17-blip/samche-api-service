@@ -11,9 +11,6 @@ jobs:
     steps:
       - name: Checkout selected staging revision
         uses: actions/checkout@v4
-        with:
-          ref: staging
-
       - name: Set up Node 22
         uses: actions/setup-node@v4
         with:
