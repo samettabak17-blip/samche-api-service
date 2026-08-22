@@ -13,6 +13,8 @@ on:
       - 'scripts/cleanup_live_inbox_fixture.js'
       - 'dashboard/**'
       - '.github/workflows/staging-live-inbox-schema.yml'
+      - '.github/workflows/staging-bootstrap-samcheguide-mapping.yml'
+      - 'scripts/bootstrap_samcheguide_mapping.js'
   workflow_dispatch:
 
 jobs:
@@ -33,6 +35,7 @@ jobs:
           node --check services/live-event-bus.js
           node --check scripts/acceptance_live_inbox.js
           node --check scripts/cleanup_live_inbox_fixture.js
+          node --check scripts/bootstrap_samcheguide_mapping.js
       - name: Verify dashboard tests and production build
         run: |
           npm --prefix dashboard install
