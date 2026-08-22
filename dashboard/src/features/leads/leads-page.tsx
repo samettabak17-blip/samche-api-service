@@ -12,7 +12,7 @@ import { useTenant } from '../tenants/tenant-context';
 
 const pageSize = 25;
 const unknown = 'Not provided';
-const humanize = (value?: string | null) => value ? value.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) : unknown;
+const humanize = (value?: string | null) => value ? value.toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) : unknown;
 const contactIdentity = (lead: CrmLead) => lead.display_name || lead.email || lead.phone || unknown;
 const temperatureClass: Record<string, string> = { HOT: 'bg-red-500/15 text-red-300 border-red-500/30', WARM: 'bg-gold/10 text-gold border-gold/30', COLD: 'bg-sky-400/10 text-sky-200 border-sky-400/20', UNQUALIFIED: 'bg-white/5 text-stone-400 border-white/10' };
 
