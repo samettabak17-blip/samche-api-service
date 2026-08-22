@@ -8,8 +8,21 @@ on:
       - '.github/workflows/staging-bootstrap-samcheguide-mapping.yml'
 
 jobs:
+  verify_dependencies:
+    # Push runs validate the workflow environment only; they never access staging data.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install backend dependencies
+        run: npm install --omit=dev
+      - name: Verify PostgreSQL dependency resolves
+        run: node -e "import('pg').then(() => console.log('PASS | CI | pg dependency resolves'))"
+
   bootstrap:
-    # The push trigger only registers this staging-only workflow in Actions.
     # Database work is deliberately limited to an explicit manual dispatch.
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
@@ -19,5 +32,12 @@ jobs:
       SAMCHEGUIDE_ASSISTANT_ID: ${{ secrets.STAGING_SAMCHEGUIDE_ASSISTANT_ID }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install backend dependencies
+        run: npm install --omit=dev
+      - name: Verify PostgreSQL dependency resolves
+        run: node -e "import('pg').then(() => console.log('PASS | CI | pg dependency resolves'))"
       - name: Bootstrap explicit Samcheguide mapping
         run: node scripts/bootstrap_samcheguide_mapping.js
