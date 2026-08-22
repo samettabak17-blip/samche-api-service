@@ -9,6 +9,8 @@ on:
       - 'services/**'
       - 'migrations/003_live_inbox_handoff.sql'
       - 'tests/conversation-permissions.test.js'
+      - 'tests/samcheguide-runtime.test.js'
+      - 'services/samcheguide-runtime.js'
       - 'scripts/acceptance_live_inbox.js'
       - 'scripts/cleanup_live_inbox_fixture.js'
       - 'dashboard/**'
@@ -26,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify operator permission rules
-        run: node --test tests/conversation-permissions.test.js
+        run: node --test tests/conversation-permissions.test.js tests/samcheguide-runtime.test.js
       - name: Verify live inbox syntax
         run: |
           node --check app.js
