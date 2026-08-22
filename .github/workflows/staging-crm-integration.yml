@@ -1,0 +1,40 @@
+name: Staging CRM Integration
+
+on:
+  workflow_dispatch:
+
+jobs:
+  crm-integration:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout selected staging revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install repository dependencies
+        run: npm install --omit=dev --no-audit --no-fund
+
+      - name: Validate Task 2 scripts
+        run: |
+          node --check test/stagingCrmHttpAcceptance.js
+          node --check test/stagingCrmIntegration.js
+          node --check tests/crm-read-provider-boundary.test.js
+
+      - name: Layer A - provider-boundary verification
+        run: node --test tests/crm-read-provider-boundary.test.js tests/lead-qualification-service.test.js
+
+      - name: Layer B - deployed staging CRM HTTP acceptance
+        env:
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          STAGING_OWNER_TOKEN: ${{ secrets.STAGING_OWNER_TOKEN }}
+          STAGING_API_BASE_URL: https://samche-api-staging.onrender.com
+        run: node test/stagingCrmHttpAcceptance.js
+
