@@ -1,0 +1,26 @@
+name: Staging dashboard integration
+on:
+  workflow_dispatch:
+jobs:
+  integration:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    env:
+      API: https://samche-api-staging.onrender.com
+      TENANT: b85d7e7b-d52e-4541-92e7-284a6a67024b
+      STAGING_OWNER_TOKEN: ${{ secrets.STAGING_OWNER_TOKEN }}
+      STAGING_ADMIN_TOKEN: ${{ secrets.STAGING_ADMIN_TOKEN }}
+    steps:
+      - name: Authenticated dashboard checks
+        run: |
+          set -euo pipefail
+          check(){ role=$1; method=$2; path=$3; token=$4; want=$5; code=$(curl -sS -o /tmp/body -w '%{http_code}' -X "$method" "$API$path" -H "Authorization: Bearer $token"); [ "$code" = "$want" ] && echo "PASS | $role | $method $path | $code" || { echo "FAIL | $role | $method $path | expected $want got $code"; cat /tmp/body; exit 1; }; }
+          check PUBLIC GET /api/v1/health '' 200
+          check PUBLIC GET /api/v1/health/db '' 200
+          check ADMIN GET /api/v1/auth/me "$STAGING_ADMIN_TOKEN" 200
+          check OWNER GET /api/v1/tenants "$STAGING_OWNER_TOKEN" 200
+          check ADMIN GET "/api/v1/tenants/$TENANT/channels" "$STAGING_ADMIN_TOKEN" 200
+          check ADMIN GET "/api/v1/tenants/$TENANT/conversations?limit=1&offset=0" "$STAGING_ADMIN_TOKEN" 200
+          check ADMIN GET "/api/v1/tenants/$TENANT/knowledge-base" "$STAGING_ADMIN_TOKEN" 200
+          check ADMIN GET "/api/v1/tenants/$TENANT/team" "$STAGING_ADMIN_TOKEN" 200
+          check PUBLIC POST /webhook '' 401
