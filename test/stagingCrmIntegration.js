@@ -7,7 +7,8 @@ export function cleanupPlan(tenantIds) {
 }
 export async function cleanupFixtureRun({ client, tenantIds, names, agentId, adminId = null, adminEmail = null }) {
   const tenants=await client.query('SELECT id FROM tenants WHERE id = ANY($1::uuid[]) AND name = ANY($2::text[])',[tenantIds,[names.tenantA,names.tenantB]]);
-  if (tenants.rowCount === 0) return;\n  if(tenants.rowCount!==tenantIds.length) throw new Error('FIXTURE_SCOPE_MISMATCH');
+  if (tenants.rowCount === 0) return;
+  if(tenants.rowCount!==tenantIds.length) throw new Error('FIXTURE_SCOPE_MISMATCH');
   const q=async(sql)=>client.query(sql,[tenantIds]);
   await q('DELETE FROM crm_lead_analyses WHERE tenant_id = ANY($1::uuid[])');
   await q('DELETE FROM crm_activities WHERE tenant_id = ANY($1::uuid[])');
@@ -23,7 +24,8 @@ export async function cleanupFixtureRun({ client, tenantIds, names, agentId, adm
   await q('DELETE FROM ai_assistants WHERE tenant_id = ANY($1::uuid[])');
   await q('DELETE FROM crm_pipeline_stages WHERE tenant_id = ANY($1::uuid[])');
   await q('DELETE FROM tenant_users WHERE tenant_id = ANY($1::uuid[])');
-  await client.query('DELETE FROM users WHERE id = $1 AND email = $2',[agentId,names.agentEmail]);\n  if (adminId && adminEmail) await client.query('DELETE FROM users WHERE id = $1 AND email = $2',[adminId,adminEmail]);
+  await client.query('DELETE FROM users WHERE id = $1 AND email = $2',[agentId,names.agentEmail]);
+  if (adminId && adminEmail) await client.query('DELETE FROM users WHERE id = $1 AND email = $2',[adminId,adminEmail]);
   await client.query('DELETE FROM tenants WHERE id = ANY($1::uuid[]) AND name = ANY($2::text[])',[tenantIds,[names.tenantA,names.tenantB]]);
 }
 
