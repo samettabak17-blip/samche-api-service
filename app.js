@@ -16,7 +16,7 @@ import authRoutes from "./routes/authRoutes.js";
 import tenantRoutes from "./routes/tenantRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
-import { persistAssistantResponseIfCurrent, persistSamcheguideInbound } from "./services/live-inbox-service.js";
+import { getSamcheguidePublicHistory, persistAssistantResponseIfCurrent, persistSamcheguideInbound } from "./services/live-inbox-service.js";
 import { startLiveEventListener } from "./services/live-event-bus.js";
 import pool from "./config/db.js";
 import { runMigrations } from "./migrations/runMigrations.js";
@@ -658,9 +658,16 @@ function getFollowUpMessage(lang, topic, stage) {
 // ----------------------------------------------------------------------------
 // A) SAMCHEGUIDE BOT (GEMINI) - /plan, /chat ve /chat/history
 // ----------------------------------------------------------------------------
-app.get("/chat/history", (req, res) => {
+app.get("/chat/history", async (req, res) => {
   const userId = getUserId(req);
-  res.json(guideMemoryStore[userId] || []);
+  try {
+    const persistedHistory = await getSamcheguidePublicHistory({ externalSessionId: userId });
+    if (persistedHistory) return res.json(persistedHistory);
+    return res.json(guideMemoryStore[userId] || []);
+  } catch (error) {
+    console.error("Samcheguide history error:", error?.code || error?.name || "unknown");
+    return res.status(503).json({ error: "Conversation history is temporarily unavailable." });
+  }
 });
 
 app.post("/plan", async (req, res) => {
