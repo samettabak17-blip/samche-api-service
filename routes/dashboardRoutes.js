@@ -36,7 +36,20 @@ router.get('/:tenantId/team', requireTenantAccess, async (req,res)=> {
   const r=await query('SELECT u.id,u.email,u.system_role,tu.tenant_role,tu.created_at FROM tenant_users tu JOIN users u ON u.id=tu.user_id WHERE tu.tenant_id=$1 ORDER BY tu.created_at',[req.verified_tenant_id]);
   res.json(r.rows);
 });
-router.get('/:tenantId/channels', requireTenantAccess, async(req,res)=>{ if(!tenant(req,res))return; const r=await query('SELECT id,tenant_id,assistant_id,channel_type,display_name,external_channel_id,status,created_at,updated_at FROM tenant_channels WHERE tenant_id=$1 ORDER BY created_at DESC',[req.verified_tenant_id]);res.json(r.rows);});
+router.get('/:tenantId/channels', requireTenantAccess, async (req, res) => {
+  if (!tenant(req, res)) return;
+
+  try {
+    const result = await query(
+      'SELECT id,tenant_id,assistant_id,channel_type,display_name,external_channel_id,status,created_at,updated_at FROM tenant_channels WHERE tenant_id=$1 ORDER BY created_at DESC',
+      [req.verified_tenant_id]
+    );
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('Fetch tenant channels error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
 router.post('/:tenantId/channels', requireTenantAccess, requireTenantAdmin, async(req,res)=>{if(!tenant(req,res))return; const b=await channelBody(req,res);if(!b)return;try{const r=await query('INSERT INTO tenant_channels(channel_type,display_name,external_channel_id,assistant_id,status,tenant_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[...b,req.verified_tenant_id]);res.status(201).json(r.rows[0]);}catch(e){res.status(e.code==='23505'?409:500).json({error:e.code==='23505'?'Channel already exists':'Server error'});}});
 router.get('/:tenantId/channels/:channelId', requireTenantAccess, async(req,res)=>{if(!tenant(req,res)||!isValidUUID(req.params.channelId))return res.status(400).json({error:'Invalid channel ID'});const r=await query('SELECT * FROM tenant_channels WHERE id=$1 AND tenant_id=$2',[req.params.channelId,req.verified_tenant_id]);if(!r.rowCount)return res.status(404).json({error:'Channel not found'});res.json(r.rows[0]);});
 router.put('/:tenantId/channels/:channelId', requireTenantAccess, requireTenantAdmin, async(req,res)=>{if(!tenant(req,res)||!isValidUUID(req.params.channelId))return res.status(400).json({error:'Invalid channel ID'});const b=await channelBody(req,res);if(!b)return;const r=await query('UPDATE tenant_channels SET channel_type=$1,display_name=$2,external_channel_id=$3,assistant_id=$4,status=$5,updated_at=CURRENT_TIMESTAMP WHERE id=$6 AND tenant_id=$7 RETURNING *',[...b,req.params.channelId,req.verified_tenant_id]);if(!r.rowCount)return res.status(404).json({error:'Channel not found'});res.json(r.rows[0]);});
