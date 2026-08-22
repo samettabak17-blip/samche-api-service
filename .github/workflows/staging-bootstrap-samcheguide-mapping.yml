@@ -2,10 +2,16 @@ name: Bootstrap Staging Samcheguide Mapping
 
 on:
   workflow_dispatch:
+  push:
+    branches: [staging]
+    paths:
+      - '.github/workflows/staging-bootstrap-samcheguide-mapping.yml'
 
 jobs:
   bootstrap:
-    if: github.ref == 'refs/heads/staging'
+    # The push trigger only registers this staging-only workflow in Actions.
+    # Database work is deliberately limited to an explicit manual dispatch.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
     env:
       STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
