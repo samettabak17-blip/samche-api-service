@@ -50,7 +50,7 @@ async function cleanup(client, fixture, value) {
   return cleanupFixtureRun({
     client,
     tenantIds: [fixture.tenantId],
-    names: { tenantA: fixture.names.tenantA, tenantB: fixture.names.tenantA },
+    names: { tenantA: fixture.names.tenantA, tenantB: fixture.names.tenantA, agentEmail: fixture.names.agentEmail },
     agentId: fixture.agentId,
     adminId: fixture.adminId,
     adminEmail: adminEmail(value)

@@ -6,9 +6,12 @@ export function cleanupPlan(tenantIds) {
   return ['crm_lead_analyses','crm_activities','crm_deals','crm_leads','conversation_messages','detach_conversation_contacts','conversations','crm_contacts','crm_companies','knowledge_base_documents','tenant_channels','ai_assistants','crm_pipeline_stages','tenant_users'].map((step)=>({step,tenantIds}));
 }
 export async function cleanupFixtureRun({ client, tenantIds, names, agentId, adminId = null, adminEmail = null }) {
-  const tenants=await client.query('SELECT id FROM tenants WHERE id = ANY($1::uuid[]) AND name = ANY($2::text[])',[tenantIds,[names.tenantA,names.tenantB]]);
+  const tenants=await client.query('SELECT id, name FROM tenants WHERE id = ANY($1::uuid[])',[tenantIds]);
   if (tenants.rowCount === 0) return;
-  if(tenants.rowCount!==tenantIds.length) throw new Error('FIXTURE_SCOPE_MISMATCH');
+  const expectedTenantNames = new Set([names.tenantA, names.tenantB]);
+  if (tenants.rowCount !== tenantIds.length || tenants.rows.some((tenant) => !expectedTenantNames.has(tenant.name))) {
+    throw new Error('FIXTURE_SCOPE_MISMATCH');
+  }
   const q=async(sql)=>client.query(sql,[tenantIds]);
   await q('DELETE FROM crm_lead_analyses WHERE tenant_id = ANY($1::uuid[])');
   await q('DELETE FROM crm_activities WHERE tenant_id = ANY($1::uuid[])');
