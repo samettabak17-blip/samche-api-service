@@ -23,6 +23,15 @@ function summary(value) {
   }
 }
 
+function pass(role, method, path, status, detail = '') {
+  console.log('PASS | ' + role + ' | ' + method + ' ' + path + ' | HTTP ' + status + (detail ? ' | ' + detail : ''));
+}
+
+function fail(role, method, path, status, detail = '') {
+  console.log('FAIL | ' + role + ' | ' + method + ' ' + path + ' | ' + status + (detail ? ' | ' + detail : ''));
+  failures += 1;
+}
+
 async function request({ role, method, path, expected, body, headers = {} }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
@@ -40,12 +49,11 @@ async function request({ role, method, path, expected, body, headers = {} }) {
     let data = text;
     try { data = text ? JSON.parse(text) : null; } catch { /* response may be plain text */ }
     const passed = Array.isArray(expected) ? expected.includes(response.status) : response.status === expected;
-    console.log((passed ? 'PASS' : 'FAIL') + ' | ' + role + ' | ' + method + ' ' + path + ' | HTTP ' + response.status + (passed ? '' : ' | ' + summary(data)));
-    if (!passed) failures += 1;
+    if (passed) pass(role, method, path, response.status);
+    else fail(role, method, path, 'HTTP ' + response.status, summary(data));
     return { response, data, passed };
   } catch (error) {
-    console.log('FAIL | ' + role + ' | ' + method + ' ' + path + ' | ' + (error.name === 'AbortError' ? 'TIMEOUT' : 'NETWORK_ERROR'));
-    failures += 1;
+    fail(role, method, path, error.name === 'AbortError' ? 'TIMEOUT' : 'NETWORK_ERROR');
     return { response: null, data: null, passed: false };
   } finally {
     clearTimeout(timeout);
@@ -56,27 +64,91 @@ function conversationKey(value) {
   return 'samcheguide:' + crypto.createHash('sha256').update(String(value)).digest('hex');
 }
 
+function hasMessage(messages, senderType, content) {
+  return Array.isArray(messages) && messages.some((message) => message?.sender_type === senderType && message?.content === content);
+}
+
+async function startLiveStream(tenantId, token) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const response = await fetch(apiBaseUrl + '/api/v1/tenants/' + tenantId + '/conversations/live', {
+      headers: { Authorization: 'Bearer ' + token },
+      signal: controller.signal,
+    });
+    if (response.status !== 200 || !response.body) {
+      clearTimeout(timeout);
+      fail('ADMIN', 'GET', '/api/v1/tenants/' + tenantId + '/conversations/live', 'HTTP ' + response.status);
+      return null;
+    }
+    return {
+      async waitFor(conversationId, eventType) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const frames = buffer.split('\n\n');
+            buffer = frames.pop() ?? '';
+            for (const frame of frames) {
+              if (!frame.includes('event: conversation')) continue;
+              const line = frame.split('\n').find((entry) => entry.startsWith('data: '));
+              if (!line) continue;
+              const event = JSON.parse(line.slice(6));
+              if (event?.conversation_id === conversationId && event?.type === eventType) {
+                pass('ADMIN', 'SSE', '/api/v1/tenants/' + tenantId + '/conversations/live', 200, eventType);
+                return true;
+              }
+            }
+          }
+        } catch {
+          // The assertion below reports the failure without leaking any stream data.
+        } finally {
+          clearTimeout(timeout);
+          controller.abort();
+        }
+        fail('ADMIN', 'SSE', '/api/v1/tenants/' + tenantId + '/conversations/live', 'EVENT_TIMEOUT', eventType);
+        return false;
+      },
+    };
+  } catch {
+    clearTimeout(timeout);
+    fail('ADMIN', 'GET', '/api/v1/tenants/' + tenantId + '/conversations/live', 'NETWORK_ERROR');
+    return null;
+  }
+}
+
+async function listMessages(tenantId, conversationId, headers) {
+  const result = await request({
+    role: 'ADMIN',
+    method: 'GET',
+    path: '/api/v1/tenants/' + tenantId + '/conversations/' + conversationId + '/messages?limit=100&offset=0',
+    expected: 200,
+    headers,
+  });
+  return result.passed && Array.isArray(result.data) ? result.data : null;
+}
+
 async function main() {
   const sessionHeaders = { 'x-user-id': sessionId };
   const adminHeaders = { Authorization: 'Bearer ' + adminToken };
+  const ownerHeaders = { Authorization: 'Bearer ' + ownerToken };
 
-  const chat = await request({
+  const initialCustomerText = 'hello';
+  const initial = await request({
     role: 'PUBLIC',
     method: 'POST',
     path: '/chat',
     expected: 200,
-    body: { text: 'hello' },
+    body: { text: initialCustomerText },
     headers: sessionHeaders,
   });
-  if (!chat.passed) return;
+  if (!initial.passed) return;
 
-  const tenants = await request({
-    role: 'ADMIN',
-    method: 'GET',
-    path: '/api/v1/tenants',
-    expected: 200,
-    headers: adminHeaders,
-  });
+  const tenants = await request({ role: 'ADMIN', method: 'GET', path: '/api/v1/tenants', expected: 200, headers: adminHeaders });
   if (!tenants.passed || !Array.isArray(tenants.data)) return;
 
   const externalConversationId = conversationKey(sessionId);
@@ -97,54 +169,23 @@ async function main() {
       }
     }
   }
-
   if (!match) {
-    console.log('FAIL | ADMIN | GET tenant conversations | HTTP 404 | Persisted Samcheguide conversation was not found in an ADMIN workspace');
-    failures += 1;
+    fail('ADMIN', 'GET', 'tenant conversations', 'NOT_FOUND', 'Persisted Samcheguide conversation was not found');
     return;
   }
 
   await request({ role: 'ADMIN', method: 'GET', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId, expected: 200, headers: adminHeaders });
-  await request({ role: 'ADMIN', method: 'POST', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/takeover', expected: 200, headers: adminHeaders });
-
-  const agentReply = 'Live inbox acceptance reply ' + sessionId;
-  await request({
-    role: 'ADMIN',
-    method: 'POST',
-    path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/messages',
-    expected: 201,
-    body: { content: agentReply },
-    headers: { ...adminHeaders, 'Idempotency-Key': 'acceptance-' + sessionId },
-  });
-
-  const publicHistory = await request({
-    role: 'PUBLIC',
-    method: 'GET',
-    path: '/chat/history',
-    expected: 200,
-    headers: sessionHeaders,
-  });
-  if (publicHistory.passed && (!Array.isArray(publicHistory.data) || !publicHistory.data.some((message) => message?.parts?.[0]?.text === agentReply))) {
-    console.log('FAIL | PUBLIC | GET /chat/history | HTTP 200 | Agent reply missing from persisted Samcheguide feed');
-    failures += 1;
-  }
-
-  await request({ role: 'ADMIN', method: 'GET', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/messages?limit=50&offset=0', expected: 200, headers: adminHeaders });
-  await request({ role: 'ADMIN', method: 'GET', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/events', expected: 200, headers: adminHeaders });
-  await request({ role: 'ADMIN', method: 'POST', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/return-to-ai', expected: 200, headers: adminHeaders });
+  let messages = await listMessages(match.tenantId, match.conversationId, adminHeaders);
+  if (!hasMessage(messages, 'CUSTOMER', initialCustomerText)) fail('ADMIN', 'VERIFY', 'initial CUSTOMER persistence', 'MISSING');
+  else pass('ADMIN', 'VERIFY', 'initial CUSTOMER persistence', 200);
+  if (!Array.isArray(messages) || !messages.some((message) => message?.sender_type === 'ASSISTANT')) fail('ADMIN', 'VERIFY', 'initial ASSISTANT persistence', 'MISSING');
+  else pass('ADMIN', 'VERIFY', 'initial ASSISTANT persistence', 200);
 
   const agentPassword = crypto.randomUUID() + 'Aa1!';
-  const registration = await request({
-    role: 'PUBLIC',
-    method: 'POST',
-    path: '/api/v1/auth/register',
-    expected: 201,
-    body: { email: agentEmail, password: agentPassword },
-  });
+  const registration = await request({ role: 'PUBLIC', method: 'POST', path: '/api/v1/auth/register', expected: 201, body: { email: agentEmail, password: agentPassword } });
   const agentUserId = registration.data?.user?.id;
   if (!registration.passed || !agentUserId) return;
 
-  const ownerHeaders = { Authorization: 'Bearer ' + ownerToken };
   const assignment = await request({
     role: 'OWNER',
     method: 'POST',
@@ -155,36 +196,93 @@ async function main() {
   });
   if (!assignment.passed) return;
 
-  const login = await request({
-    role: 'AGENT',
-    method: 'POST',
-    path: '/api/v1/auth/login',
-    expected: 200,
-    body: { email: agentEmail, password: agentPassword },
-  });
+  const login = await request({ role: 'AGENT', method: 'POST', path: '/api/v1/auth/login', expected: 200, body: { email: agentEmail, password: agentPassword } });
   const agentToken = login.data?.token;
   if (!login.passed || typeof agentToken !== 'string') return;
   const agentHeaders = { Authorization: 'Bearer ' + agentToken };
 
   const agentTenants = await request({ role: 'AGENT', method: 'GET', path: '/api/v1/tenants', expected: 200, headers: agentHeaders });
-  if (agentTenants.passed && (!Array.isArray(agentTenants.data) || !agentTenants.data.some((tenant) => tenant.id === match.tenantId && tenant.tenant_role === 'AGENT'))) {
-    console.log('FAIL | AGENT | GET /api/v1/tenants | HTTP 200 | Assigned AGENT tenant role was not returned');
-    failures += 1;
+  if (!Array.isArray(agentTenants.data) || !agentTenants.data.some((tenant) => tenant.id === match.tenantId && tenant.tenant_role === 'AGENT')) {
+    fail('AGENT', 'VERIFY', 'tenant assignment', 'MISSING_AGENT_ROLE');
+  } else {
+    pass('AGENT', 'VERIFY', 'tenant assignment', 200, 'AGENT');
   }
 
-  await request({ role: 'AGENT', method: 'GET', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId, expected: 200, headers: agentHeaders });
-  await request({ role: 'AGENT', method: 'POST', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/takeover', expected: 200, headers: agentHeaders });
+  const stream = await startLiveStream(match.tenantId, adminToken);
+  const takeoverRequest = request({ role: 'AGENT', method: 'POST', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/takeover', expected: 200, headers: agentHeaders });
+  const takeoverEvent = stream ? stream.waitFor(match.conversationId, 'TAKEOVER') : Promise.resolve(false);
+  const takeover = await takeoverRequest;
+  await takeoverEvent;
+  if (takeover.passed && takeover.data?.conversation?.handling_mode === 'HUMAN') pass('AGENT', 'VERIFY', 'takeover state', 200, 'HUMAN');
+  else fail('AGENT', 'VERIFY', 'takeover state', 'INVALID_STATE');
+
+  const humanModeCustomerText = 'human mode customer message ' + sessionId;
+  const humanModeCustomer = await request({ role: 'PUBLIC', method: 'POST', path: '/chat', expected: 202, body: { text: humanModeCustomerText }, headers: sessionHeaders });
+  if (humanModeCustomer.passed && humanModeCustomer.data?.status === 'human_handling') pass('PUBLIC', 'VERIFY', 'AI suppression in HUMAN mode', 202);
+  else fail('PUBLIC', 'VERIFY', 'AI suppression in HUMAN mode', 'INVALID_RESPONSE');
+  messages = await listMessages(match.tenantId, match.conversationId, adminHeaders);
+  if (!hasMessage(messages, 'CUSTOMER', humanModeCustomerText)) fail('ADMIN', 'VERIFY', 'HUMAN mode CUSTOMER persistence', 'MISSING');
+  else pass('ADMIN', 'VERIFY', 'HUMAN mode CUSTOMER persistence', 200);
+
+  const humanReply = 'Agent acceptance reply ' + sessionId;
   await request({
     role: 'AGENT',
     method: 'POST',
     path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/messages',
     expected: 201,
-    body: { content: 'Agent acceptance reply ' + sessionId },
+    body: { content: humanReply },
     headers: { ...agentHeaders, 'Idempotency-Key': 'agent-acceptance-' + sessionId },
   });
+  messages = await listMessages(match.tenantId, match.conversationId, adminHeaders);
+  if (!hasMessage(messages, 'AGENT', humanReply)) fail('ADMIN', 'VERIFY', 'AGENT message persistence', 'MISSING');
+  else pass('ADMIN', 'VERIFY', 'AGENT message persistence', 200);
+
+  const publicHistory = await request({ role: 'PUBLIC', method: 'GET', path: '/chat/history', expected: 200, headers: sessionHeaders });
+  if (publicHistory.passed && Array.isArray(publicHistory.data) && publicHistory.data.some((message) => message?.parts?.[0]?.text === humanReply)) {
+    pass('PUBLIC', 'VERIFY', 'Samcheguide agent reply feed', 200);
+  } else {
+    fail('PUBLIC', 'VERIFY', 'Samcheguide agent reply feed', 'MISSING');
+  }
+
   await request({ role: 'AGENT', method: 'POST', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/pause', expected: 403, headers: agentHeaders });
-  await request({ role: 'AGENT', method: 'POST', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/close', expected: 403, headers: agentHeaders });
   await request({ role: 'AGENT', method: 'POST', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/return-to-ai', expected: 200, headers: agentHeaders });
+
+  const returnedAiText = 'hello';
+  await request({ role: 'PUBLIC', method: 'POST', path: '/chat', expected: 200, body: { text: returnedAiText }, headers: sessionHeaders });
+  messages = await listMessages(match.tenantId, match.conversationId, adminHeaders);
+  const assistantCountAfterReturn = Array.isArray(messages) ? messages.filter((message) => message?.sender_type === 'ASSISTANT').length : 0;
+  if (assistantCountAfterReturn >= 2) pass('ADMIN', 'VERIFY', 'AI resumed after return-to-ai', 200);
+  else fail('ADMIN', 'VERIFY', 'AI resumed after return-to-ai', 'MISSING_ASSISTANT_RESPONSE');
+
+  await request({ role: 'ADMIN', method: 'POST', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/pause', expected: 200, headers: adminHeaders });
+  const beforePausedAssistantCount = assistantCountAfterReturn;
+  const pausedCustomerText = 'paused customer message ' + sessionId;
+  const paused = await request({ role: 'PUBLIC', method: 'POST', path: '/chat', expected: 202, body: { text: pausedCustomerText }, headers: sessionHeaders });
+  if (paused.passed && paused.data?.status === 'paused') pass('PUBLIC', 'VERIFY', 'AI suppression in PAUSED mode', 202);
+  else fail('PUBLIC', 'VERIFY', 'AI suppression in PAUSED mode', 'INVALID_RESPONSE');
+  messages = await listMessages(match.tenantId, match.conversationId, adminHeaders);
+  const pausedAssistantCount = Array.isArray(messages) ? messages.filter((message) => message?.sender_type === 'ASSISTANT').length : -1;
+  if (hasMessage(messages, 'CUSTOMER', pausedCustomerText) && pausedAssistantCount === beforePausedAssistantCount) pass('ADMIN', 'VERIFY', 'PAUSED message persistence without AI reply', 200);
+  else fail('ADMIN', 'VERIFY', 'PAUSED message persistence without AI reply', 'INVALID_HISTORY');
+
+  await request({ role: 'ADMIN', method: 'POST', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/resume', expected: 200, headers: adminHeaders });
+  await request({ role: 'PUBLIC', method: 'POST', path: '/chat', expected: 200, body: { text: 'hello' }, headers: sessionHeaders });
+  messages = await listMessages(match.tenantId, match.conversationId, adminHeaders);
+  const assistantCountAfterResume = Array.isArray(messages) ? messages.filter((message) => message?.sender_type === 'ASSISTANT').length : 0;
+  if (assistantCountAfterResume === beforePausedAssistantCount + 1) pass('ADMIN', 'VERIFY', 'AI resumed after PAUSED mode', 200);
+  else fail('ADMIN', 'VERIFY', 'AI resumed after PAUSED mode', 'MISSING_ASSISTANT_RESPONSE');
+
+  await request({ role: 'ADMIN', method: 'POST', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/close', expected: 200, headers: adminHeaders });
+  const events = await request({ role: 'ADMIN', method: 'GET', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/events', expected: 200, headers: adminHeaders });
+  const eventTypes = new Set(Array.isArray(events.data) ? events.data.map((event) => event.event_type) : []);
+  for (const eventType of ['TAKEOVER', 'HUMAN_MESSAGE', 'RETURN_TO_AI', 'PAUSE', 'RESUME', 'CLOSE']) {
+    if (!eventTypes.has(eventType)) fail('ADMIN', 'VERIFY', 'audit event ' + eventType, 'MISSING');
+    else pass('ADMIN', 'VERIFY', 'audit event ' + eventType, 200);
+  }
+
+  const finalMessages = await listMessages(match.tenantId, match.conversationId, adminHeaders);
+  if (Array.isArray(finalMessages) && finalMessages.length >= 8) pass('ADMIN', 'VERIFY', 'full conversation history retained after close', 200);
+  else fail('ADMIN', 'VERIFY', 'full conversation history retained after close', 'INCOMPLETE');
 }
 
 await main();
