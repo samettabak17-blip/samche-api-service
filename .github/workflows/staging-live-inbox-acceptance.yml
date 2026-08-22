@@ -1,0 +1,25 @@
+name: Staging Live Inbox Acceptance
+
+on:
+  workflow_dispatch:
+
+jobs:
+  acceptance:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      STAGING_API_BASE_URL: https://samche-api-staging.onrender.com
+      STAGING_OWNER_TOKEN: ${{ secrets.STAGING_OWNER_TOKEN }}
+      STAGING_ADMIN_TOKEN: ${{ secrets.STAGING_ADMIN_TOKEN }}
+      STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      LIVE_INBOX_SESSION_ID: live-inbox-acceptance-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install acceptance dependencies
+        run: npm install --ignore-scripts
+      - name: Run live inbox acceptance flow
+        run: node scripts/acceptance_live_inbox.js
+      - name: Clean up live inbox fixture
+        if: always()
+        run: node scripts/cleanup_live_inbox_fixture.js
