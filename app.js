@@ -105,6 +105,53 @@ const parseLinksToHTML = (text) => {
   );
 };
 
+const GEMINI_REQUEST_TIMEOUT_MS = 20000;
+
+async function requestGemini(payload) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), GEMINI_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(SAMCHE_GEMINI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      const error = new Error(`Gemini request failed with status ${response.status}`);
+      error.status = 502;
+      throw error;
+    }
+
+    const responseText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (typeof responseText !== "string" || responseText.trim().length === 0) {
+      const error = new Error("Gemini returned no usable response.");
+      error.status = 502;
+      throw error;
+    }
+
+    return data;
+  } catch (error) {
+    if (error.name === "AbortError") {
+      const timeoutError = new Error("Gemini request timed out.");
+      timeoutError.status = 504;
+      throw timeoutError;
+    }
+
+    if (error.status) throw error;
+
+    const upstreamError = new Error("Gemini request failed.");
+    upstreamError.status = 502;
+    throw upstreamError;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
 // ============================================================================
 // 🔥 ORTAK KULLANICI KİMLİĞİ BULUCU (IP & Header) - HAFIZA İÇİN GÜÇLENDİRİLDİ
 // ============================================================================
@@ -589,9 +636,11 @@ app.get("/chat/history", (req, res) => {
 app.post("/plan", async (req, res) => {
   try {
     const { sector } = req.body;
-    if (!sector) return res.status(400).json({ error: "Sector value is missing." });
+    if (typeof sector !== "string") {
+      return res.status(400).json({ error: "Sector must be a non-empty string." });
+    }
 
-    const cleanSector = String(sector).trim();
+    const cleanSector = sector.trim();
     if (!cleanSector) return res.status(400).json({ error: "Sector value cannot be empty." });
     const userId = getUserId(req);
 
@@ -602,13 +651,7 @@ app.post("/plan", async (req, res) => {
       systemInstruction: { parts: [{ text: SAMCHEGUIDE_SYSTEM_PROMPT }] }
     };
 
-    const response = await fetch(SAMCHE_GEMINI_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    const data = await response.json();
+    const data = await requestGemini(payload);
     if (data.candidates && data.candidates[0]?.content?.parts?.[0]) {
       let originalText = data.candidates[0].content.parts[0].text;
       data.candidates[0].content.parts[0].text = parseLinksToHTML(originalText);
@@ -619,16 +662,18 @@ app.post("/plan", async (req, res) => {
     return res.json(data);
   } catch (err) {
     console.error("Samcheguide Plan error:", err);
-    return res.status(500).json({ error: "Could not generate strategy plan." });
+    return res.status(err.status || 500).json({ error: "Could not generate strategy plan." });
   }
 });
 
 app.post("/chat", async (req, res) => {
   try {
     const { text } = req.body;
-    if (!text) return res.status(400).json({ error: "Message text is missing." });
+    if (typeof text !== "string") {
+      return res.status(400).json({ error: "Message text must be a non-empty string." });
+    }
 
-    const cleanText = String(text).trim();
+    const cleanText = text.trim();
     if (!cleanText) return res.status(400).json({ error: "Message text cannot be empty." });
 
     const userId = getUserId(req);
@@ -659,13 +704,7 @@ app.post("/chat", async (req, res) => {
       systemInstruction: { parts: [{ text: SAMCHEGUIDE_SYSTEM_PROMPT }] }
     };
 
-    const response = await fetch(SAMCHE_GEMINI_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-    const data = await response.json();
+    const data = await requestGemini(payload);
     if (data.candidates && data.candidates[0]?.content?.parts?.[0]) {
       let originalText = data.candidates[0].content.parts[0].text;
       data.candidates[0].content.parts[0].text = parseLinksToHTML(originalText);
@@ -674,7 +713,7 @@ app.post("/chat", async (req, res) => {
     return res.json(data);
   } catch (err) {
     console.error("Samcheguide Chat error:", err);
-    return res.status(500).json({ error: "Could not generate chat response." });
+    return res.status(err.status || 500).json({ error: "Could not generate chat response." });
   }
 });
 
