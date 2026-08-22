@@ -701,9 +701,15 @@ app.get("/api/chat/history", (req, res) => {
 app.post("/api/chat", async (req, res) => {
   try {
     const userMessage = req.body.message;
-    const userId = getUserId(req);
 
-    addWebMemory(userId, "user", userMessage);
+    if (typeof userMessage !== "string" || userMessage.trim().length === 0) {
+      return res.status(400).json({ error: "A non-empty message is required." });
+    }
+
+    const userId = getUserId(req);
+    const normalizedMessage = userMessage.trim();
+
+    addWebMemory(userId, "user", normalizedMessage);
 
     const rawMemory = webMemoryStore[userId] || [];
     const cleanMemory = rawMemory.map(msg => ({
