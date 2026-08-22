@@ -7,20 +7,22 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 async function migrate() {
-    const migrationPath = path.join(
-        __dirname,
-        '../migrations/001_multitenant_foundation.sql'
-    );
+    const migrationsDirectory = path.join(__dirname, '../migrations');
 
     try {
-        console.log('Starting database migration...');
-        console.log(`Migration file: ${migrationPath}`);
+        console.log('Starting database migrations...');
 
-        const sql = fs.readFileSync(migrationPath, 'utf8');
+        const migrationFiles = fs.readdirSync(migrationsDirectory)
+            .filter((file) => file.endsWith('.sql'))
+            .sort();
 
-        await pool.query(sql);
+        for (const file of migrationFiles) {
+            const migrationPath = path.join(migrationsDirectory, file);
+            console.log(`Migration file: ${migrationPath}`);
+            await pool.query(fs.readFileSync(migrationPath, 'utf8'));
+        }
 
-        console.log('Database migration completed successfully.');
+        console.log('Database migrations completed successfully.');
     } catch (error) {
         console.error('Database migration failed:', error);
         process.exitCode = 1;
