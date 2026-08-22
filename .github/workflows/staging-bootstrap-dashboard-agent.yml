@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install staging-only database dependencies
-        run: npm install --no-save --ignore-scripts pg@8.16.3 argon2@0.44.0
+        run: npm install --no-save pg@8.16.3 argon2@0.44.0
       - name: Reset, assign, and verify dashboard E2E agent
         shell: bash
         run: |
