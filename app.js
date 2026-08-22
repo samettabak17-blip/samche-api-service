@@ -826,7 +826,7 @@ app.post("/chat", async (req, res) => {
       if (!persisted.delivered) {
         return res.status(202).json({
           status: "human_handling",
-          conversation_id: inboxState.conversation.id,
+          conversation_session: publicSession.token,
         });
       }
     }
