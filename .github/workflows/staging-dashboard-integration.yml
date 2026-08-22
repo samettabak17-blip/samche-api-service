@@ -15,8 +15,9 @@ jobs:
       - name: Authenticated dashboard checks
         shell: bash
         run: |
-          set -euo pipefail
-          request(){ role=$1; method=$2; path=$3; token=$4; expected=$5; attempt=1; while [ $attempt -le 5 ]; do code=$(curl --connect-timeout 10 --max-time 25 -sS -o /tmp/body -w '%{http_code}' -X "$method" "$API$path" ${token:+-H "Authorization: Bearer $token"}); type=$(file -b --mime-type /tmp/body || true); if [[ "$code" =~ ^(502|503|504)$ ]]; then echo "TRANSIENT_RENDER_GATEWAY | $role | $method $path | HTTP $code | attempt $attempt | $type"; sleep $((2 ** attempt)); attempt=$((attempt+1)); continue; fi; if [ "$code" = "$expected" ]; then echo "PASS | $role | $method $path | HTTP $code"; return 0; fi; echo "FAIL | $role | $method $path | expected $expected got $code | $(head -c 300 /tmp/body)"; return 1; done; echo "FAIL | $role | $method $path | transient gateway retries exhausted"; return 1; }
+          set -uo pipefail
+          failures=0
+          request(){ role=$1; method=$2; path=$3; token=$4; expected=$5; echo "START | $role | $method | $path"; attempt=1; while [ $attempt -le 5 ]; do code=$(curl --connect-timeout 10 --max-time 25 -sS -o /tmp/body -w '%{http_code}' -X "$method" "$API$path" ${token:+-H "Authorization: Bearer $token"}); curl_exit=$?; if [ "$curl_exit" = 28 ]; then echo "FAIL | $role | $method $path | TIMEOUT"; failures=$((failures+1)); return 0; fi; if [[ "$code" =~ ^(502|503|504)$ ]]; then echo "TRANSIENT_RENDER_GATEWAY | $role | $method $path | HTTP $code | attempt $attempt | $type"; sleep $((2 ** attempt)); attempt=$((attempt+1)); continue; fi; if [ "$code" = "$expected" ]; then echo "PASS | $role | $method $path | HTTP $code"; return 0; fi; echo "FAIL | $role | $method $path | expected $expected got $code | $(head -c 300 /tmp/body)"; return 1; done; echo "FAIL | $role | $method $path | transient gateway retries exhausted"; return 1; }
           for i in {1..8}; do request PUBLIC GET /api/v1/health '' 200 && break; [ $i -eq 8 ] && exit 1; sleep $((2 ** i)); done
           request PUBLIC GET /api/v1/health/db '' 200
           request ADMIN GET /api/v1/auth/me "$STAGING_ADMIN_TOKEN" 200
@@ -26,3 +27,4 @@ jobs:
           request ADMIN GET "/api/v1/tenants/$TENANT/knowledge-base" "$STAGING_ADMIN_TOKEN" 200
           request ADMIN GET "/api/v1/tenants/$TENANT/team" "$STAGING_ADMIN_TOKEN" 200
           request PUBLIC POST /webhook '' 401
+          [ "$failures" -eq 0 ]
