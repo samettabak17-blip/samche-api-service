@@ -9,6 +9,7 @@ on:
       - 'services/**'
       - 'migrations/003_live_inbox_handoff.sql'
       - 'tests/conversation-permissions.test.js'
+      - 'dashboard/**'
       - '.github/workflows/staging-live-inbox-schema.yml'
   workflow_dispatch:
 
@@ -28,6 +29,11 @@ jobs:
           node --check routes/conversationRoutes.js
           node --check services/live-inbox-service.js
           node --check services/live-event-bus.js
+      - name: Verify dashboard tests and production build
+        run: |
+          npm --prefix dashboard install
+          npm --prefix dashboard test
+          npm --prefix dashboard run build
       - name: Verify live inbox schema
         run: |
           npm install --no-save pg@8.16.3
