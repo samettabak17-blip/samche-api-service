@@ -14,6 +14,7 @@ import https from "https";
 import { verifyWhatsAppSignature } from "./middleware/whatsappSignature.js";
 import authRoutes from "./routes/authRoutes.js";
 import tenantRoutes from "./routes/tenantRoutes.js";
+import dashboardRoutes from "./routes/dashboardRoutes.js";
 import pool from "./config/db.js";
 
 dotenv.config();
@@ -69,6 +70,7 @@ app.get("/api/v1/health/db", async (req, res) => {
 
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/tenants", tenantRoutes);
+app.use("/api/v1/tenants", dashboardRoutes);
 
 // ============================================================================
 // 🔥 GLOBAL HATA YAKALAYICILAR (SUNUCUNUN ÇÖKMESİNİ KESİN ENGELLER)
