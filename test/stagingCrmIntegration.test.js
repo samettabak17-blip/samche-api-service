@@ -1,0 +1,3 @@
+import test from 'node:test'; import assert from 'node:assert/strict'; import { fixtureNames, cleanupPlan } from './stagingCrmIntegration.js';
+test('fixture names are isolated',()=>{const a=fixtureNames('a');const b=fixtureNames('b');assert.notEqual(a.tenantA,b.tenantA);});
+test('cleanup order removes CRM dependents first',()=>{const p=cleanupPlan(['a','b']).map(x=>x.step);assert.deepEqual(p.slice(0,4),['crm_lead_analyses','crm_activities','crm_deals','crm_leads']);assert.ok(p.indexOf('crm_contacts')>p.indexOf('conversations'));});
