@@ -1,8 +1,7 @@
 import { apiClient } from '../../lib/api-client';
-import type { Assistant, Conversation, ConversationAuditEvent, ConversationMessage, KnowledgeDocument, TeamMember, TenantChannel } from '../../types/api';
+import type { Assistant, Conversation, ConversationMessage, CrmLead, CrmLeadList, CrmPipelineStage, KnowledgeDocument, TeamMember, TenantChannel } from '../../types/api';
 
 const tenantRoot = (tenantId: string) => `/api/v1/tenants/${tenantId}`;
-
 export const tenantKeys = {
   assistants: (tenantId: string) => ['tenant', tenantId, 'assistants'] as const,
   assistant: (tenantId: string, assistantId: string) => ['tenant', tenantId, 'assistant', assistantId] as const,
@@ -14,8 +13,12 @@ export const tenantKeys = {
   conversations: (tenantId: string, limit: number, offset: number) => ['tenant', tenantId, 'conversations', limit, offset] as const,
   conversation: (tenantId: string, conversationId: string) => ['tenant', tenantId, 'conversation', conversationId] as const,
   messages: (tenantId: string, conversationId: string, limit: number, offset: number) => ['tenant', tenantId, 'conversation', conversationId, 'messages', limit, offset] as const,
-  conversationEvents: (tenantId: string, conversationId: string) => ['tenant', tenantId, 'conversation', conversationId, 'events'] as const,
+  leads: (tenantId: string, filters: string) => ['tenant', tenantId, 'leads', filters] as const,
+  lead: (tenantId: string, leadId: string) => ['tenant', tenantId, 'lead', leadId] as const,
+  pipelines: (tenantId: string) => ['tenant', tenantId, 'pipelines'] as const,
 };
+export interface LeadFilters { limit: number; offset: number; temperature?: string; stage?: string; source?: string; assigned_user_id?: string; conversation_id?: string; }
+const leadQuery = (filters: LeadFilters) => new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined && value !== '').map(([key, value]) => [key, String(value)])).toString();
 
 export const tenantApi = {
   listAssistants: (tenantId: string) => apiClient.get<Assistant[]>(`${tenantRoot(tenantId)}/assistants`),
@@ -37,12 +40,10 @@ export const tenantApi = {
   listConversations: (tenantId: string, page: { limit: number; offset: number }) => apiClient.get<Conversation[]>(`${tenantRoot(tenantId)}/conversations?limit=${page.limit}&offset=${page.offset}`),
   getConversation: (tenantId: string, conversationId: string) => apiClient.get<Conversation>(`${tenantRoot(tenantId)}/conversations/${conversationId}`),
   listMessages: (tenantId: string, conversationId: string, page: { limit: number; offset: number }) => apiClient.get<ConversationMessage[]>(`${tenantRoot(tenantId)}/conversations/${conversationId}/messages?limit=${page.limit}&offset=${page.offset}`),
-  listConversationEvents: (tenantId: string, conversationId: string) => apiClient.get<ConversationAuditEvent[]>(`${tenantRoot(tenantId)}/conversations/${conversationId}/events`),
-  takeoverConversation: (tenantId: string, conversationId: string) => apiClient.post<{ conversation: Conversation }>(`${tenantRoot(tenantId)}/conversations/${conversationId}/takeover`),
-  returnConversationToAi: (tenantId: string, conversationId: string) => apiClient.post<{ conversation: Conversation }>(`${tenantRoot(tenantId)}/conversations/${conversationId}/return-to-ai`),
-  pauseConversationAi: (tenantId: string, conversationId: string) => apiClient.post<{ conversation: Conversation }>(`${tenantRoot(tenantId)}/conversations/${conversationId}/pause`),
-  resumeConversationAi: (tenantId: string, conversationId: string) => apiClient.post<{ conversation: Conversation }>(`${tenantRoot(tenantId)}/conversations/${conversationId}/resume`),
-  closeConversation: (tenantId: string, conversationId: string) => apiClient.post<{ conversation: Conversation }>(`${tenantRoot(tenantId)}/conversations/${conversationId}/close`),
-  sendAgentMessage: (tenantId: string, conversationId: string, content: string, idempotencyKey: string) => apiClient.post<{ duplicate: boolean; message?: ConversationMessage; delivery?: string }>(`${tenantRoot(tenantId)}/conversations/${conversationId}/messages`, { content }, { headers: { 'Idempotency-Key': idempotencyKey } }),
+  listLeads: (tenantId: string, filters: LeadFilters) => apiClient.get<CrmLeadList>(`${tenantRoot(tenantId)}/leads?${leadQuery(filters)}`),
+  getLead: (tenantId: string, leadId: string) => apiClient.get<CrmLead>(`${tenantRoot(tenantId)}/leads/${leadId}`),
+  listPipelines: (tenantId: string) => apiClient.get<CrmPipelineStage[]>(`${tenantRoot(tenantId)}/pipelines`),
+  assignLead: (tenantId: string, leadId: string, userId: string) => apiClient.post<CrmLead>(`${tenantRoot(tenantId)}/leads/${leadId}/assign`, { user_id: userId }),
+  setLeadStage: (tenantId: string, leadId: string, stageId: string) => apiClient.post<CrmLead>(`${tenantRoot(tenantId)}/leads/${leadId}/stage`, { pipeline_stage_id: stageId }),
+  rescoreLead: (tenantId: string, leadId: string) => apiClient.post<{ status: string; lead_id: string }>(`${tenantRoot(tenantId)}/leads/${leadId}/rescore`, {}),
 };
-
