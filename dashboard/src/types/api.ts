@@ -35,7 +35,7 @@ export interface TenantChannel {
   id: string;
   tenant_id: string;
   assistant_id?: string | null;
-  channel_type: 'WEB_CHAT' | 'WHATSAPP';
+  channel_type: 'WEB_CHAT' | 'WHATSAPP' | 'SAMCHEGUIDE';
   display_name: string;
   external_channel_id?: string | null;
   status: 'active' | 'inactive';
@@ -52,6 +52,18 @@ export interface Conversation {
   status: 'open' | 'closed' | 'archived';
   created_at?: string;
   updated_at?: string;
+  handling_mode?: 'AI' | 'HUMAN' | 'PAUSED';
+  assigned_agent_user_id?: string | null;
+  assigned_agent_email?: string | null;
+  handoff_requested?: boolean;
+  handoff_reason?: string | null;
+  handling_version?: number;
+  last_activity_at?: string;
+  channel_type?: TenantChannel['channel_type'];
+  channel_display_name?: string;
+  assistant_name?: string | null;
+  last_message_preview?: string | null;
+  last_message_at?: string | null;
 }
 
 export type SenderType = 'CUSTOMER' | 'ASSISTANT' | 'AGENT' | 'SYSTEM';
@@ -63,6 +75,18 @@ export interface ConversationMessage {
   external_message_id?: string | null;
   sender_type: SenderType;
   content: string;
+  created_at?: string;
+  actor_user_id?: string | null;
+  actor_email?: string | null;
+}
+
+export interface ConversationAuditEvent {
+  id: string;
+  tenant_id: string;
+  conversation_id: string;
+  event_type: 'TAKEOVER' | 'RETURN_TO_AI' | 'PAUSE' | 'RESUME' | 'CLOSE' | 'ASSIGNMENT' | 'HANDOFF_REQUESTED' | 'HUMAN_MESSAGE';
+  metadata: Record<string, unknown>;
+  actor_email?: string | null;
   created_at?: string;
 }
 
