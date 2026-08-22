@@ -79,7 +79,7 @@ async function createConversationPrerequisite(client, fixture, value) {
      VALUES ($1, $2, $3, 'CUSTOMER', $4)`,
     [fixture.tenantId, conversation.rows[0].id, `task2-message-${value}`, 'Please prepare a company formation proposal for two visas within two weeks.']
   );
-  await client.query('UPDATE crm_leads SET conversation_id = $1 WHERE tenant_id = $2 AND id = $3', [conversation.rows[0].id, fixture.tenantId, fixture.leadId]);
+  await client.query("UPDATE crm_leads SET conversation_id = $1, source_channel = 'CI' WHERE tenant_id = $2 AND id = $3", [conversation.rows[0].id, fixture.tenantId, fixture.leadId]);
 }
 
 async function createCrossTenantFixture(client, value) {
@@ -114,7 +114,7 @@ async function run() {
     const t = `/api/v1/tenants/${fixture.tenantId}`;
 
     const baseline = await snapshotReadState(client, fixture);
-    await request('ADMIN', adminToken, 'GET', `${t}/leads?limit=1&offset=0&temperature=COLD`, undefined, 200);
+    await request('ADMIN', adminToken, 'GET', `${t}/leads?limit=1&offset=0&temperature=COLD&source=CI`, undefined, 200);
     await request('ADMIN', adminToken, 'GET', `${t}/leads/${fixture.leadId}`, undefined, 200);
     await request('ADMIN', adminToken, 'GET', `${t}/contacts?limit=1&offset=0`, undefined, 200);
     await request('ADMIN', adminToken, 'GET', `${t}/contacts/${fixture.contactId}`, undefined, 200);
@@ -125,7 +125,7 @@ async function run() {
     expect(JSON.stringify(afterReads) === JSON.stringify(baseline), 'ordinary CRM reads mutated qualification state');
     log('PASS', 'DB', 'CHECK', 'crm qualification state', 'read snapshot unchanged');
 
-    const created = await request('OWNER', ownerToken, 'POST', `${t}/leads`, { contact_id: fixture.contactId, intent: 'FORMATION' }, 201);
+    const created = await request('OWNER', ownerToken, 'POST', `${t}/leads`, { contact_id: fixture.contactId, intent: 'FORMATION', source_channel: 'CI' }, 201);
     const createdLeadId = created.id;
     await request('ADMIN', adminToken, 'GET', `${t}/leads?limit=1&offset=1`, undefined, 200);
     await request('ADMIN', adminToken, 'PUT', `${t}/leads/${createdLeadId}`, { service_interest: 'Free Zone company formation' }, 200);
