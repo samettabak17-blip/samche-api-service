@@ -3,8 +3,9 @@ import pg from 'pg';
 
 const databaseUrl = process.env.STAGING_DATABASE_URL;
 const sessionId = process.env.LIVE_INBOX_SESSION_ID;
+const agentEmail = process.env.LIVE_INBOX_AGENT_EMAIL;
 
-if (!databaseUrl || !sessionId) {
+if (!databaseUrl || !sessionId || !agentEmail) {
   console.error('Required staging cleanup configuration is missing.');
   process.exit(1);
 }
@@ -37,6 +38,13 @@ try {
       [conversation.tenant_id, conversation.id]
     );
   }
+
+  await client.query(
+    `DELETE FROM tenant_users
+      WHERE user_id IN (SELECT id FROM users WHERE email = $1)`,
+    [agentEmail]
+  );
+  await client.query('DELETE FROM users WHERE email = $1', [agentEmail]);
 
   await client.query('COMMIT');
   console.log('PASS | CLEANUP | live inbox fixture records removed');
