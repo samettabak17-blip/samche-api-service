@@ -9,6 +9,8 @@ on:
       - 'services/**'
       - 'migrations/003_live_inbox_handoff.sql'
       - 'tests/conversation-permissions.test.js'
+      - 'scripts/acceptance_live_inbox.js'
+      - 'scripts/cleanup_live_inbox_fixture.js'
       - 'dashboard/**'
       - '.github/workflows/staging-live-inbox-schema.yml'
   workflow_dispatch:
@@ -29,6 +31,8 @@ jobs:
           node --check routes/conversationRoutes.js
           node --check services/live-inbox-service.js
           node --check services/live-event-bus.js
+          node --check scripts/acceptance_live_inbox.js
+          node --check scripts/cleanup_live_inbox_fixture.js
       - name: Verify dashboard tests and production build
         run: |
           npm --prefix dashboard install
