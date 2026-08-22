@@ -9,7 +9,7 @@ on:
 
 jobs:
   acceptance:
-    if: github.ref == 'refs/heads/staging' && (github.event_name == 'workflow_dispatch' || github.event.head_commit.message == 'test(inbox): run staging live acceptance')
+    if: github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
