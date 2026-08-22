@@ -1,0 +1,17 @@
+name: Bootstrap Staging Samcheguide Mapping
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bootstrap:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    env:
+      STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      SAMCHEGUIDE_TENANT_ID: ${{ secrets.STAGING_SAMCHEGUIDE_TENANT_ID }}
+      SAMCHEGUIDE_ASSISTANT_ID: ${{ secrets.STAGING_SAMCHEGUIDE_ASSISTANT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap explicit Samcheguide mapping
+        run: node scripts/bootstrap_samcheguide_mapping.js
