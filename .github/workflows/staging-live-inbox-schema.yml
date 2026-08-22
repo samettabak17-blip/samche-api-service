@@ -1,6 +1,15 @@
 name: Staging Live Inbox Schema Checks
 
 on:
+  push:
+    branches: [staging]
+    paths:
+      - 'app.js'
+      - 'routes/conversationRoutes.js'
+      - 'services/**'
+      - 'migrations/003_live_inbox_handoff.sql'
+      - 'tests/conversation-permissions.test.js'
+      - '.github/workflows/staging-live-inbox-schema.yml'
   workflow_dispatch:
 
 jobs:
