@@ -96,9 +96,9 @@ export async function runLeadQualification({ tenantId, conversationId, force = f
   }
 }
 
-export function queueLeadQualification({ tenantId, conversationId }) {
+export function queueLeadQualification({ tenantId, conversationId, force = false }) {
   queueMicrotask(() => {
-    void runLeadQualification({ tenantId, conversationId }).catch((error) => {
+    void runLeadQualification({ tenantId, conversationId, force }).catch((error) => {
       console.error('Lead qualification deferred:', error?.message || 'LEAD_QUALIFICATION_FAILED');
     });
   });

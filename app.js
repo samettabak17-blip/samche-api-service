@@ -15,6 +15,7 @@ import { verifyWhatsAppSignature } from "./middleware/whatsappSignature.js";
 import authRoutes from "./routes/authRoutes.js";
 import tenantRoutes from "./routes/tenantRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
+import crmRoutes from "./routes/crmRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
 import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound } from "./services/live-inbox-service.js";
 import { startLiveEventListener, subscribeTenantEvents } from "./services/live-event-bus.js";
@@ -93,6 +94,7 @@ app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/tenants", tenantRoutes);
 app.use("/api/v1/tenants", conversationRoutes);
 app.use("/api/v1/tenants", dashboardRoutes);
+app.use("/api/v1/tenants", crmRoutes);
 void startLiveEventListener();
 
 // ============================================================================
