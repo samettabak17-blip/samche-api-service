@@ -85,9 +85,8 @@ export async function getSamcheguidePublicHistory({ externalSessionId }) {
     );
 
     return result.rows.map((message) => ({
-      role: message.sender_type === 'CUSTOMER' ? 'user' : 'assistant',
-      content: message.content,
-      created_at: message.created_at,
+      role: message.sender_type === 'CUSTOMER' ? 'user' : 'model',
+      parts: [{ text: message.content }],
     }));
   } finally {
     client.release();
