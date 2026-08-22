@@ -5,7 +5,7 @@ export function fixtureNames(label) {
 export function cleanupPlan(tenantIds) {
   return ['crm_lead_analyses','crm_activities','crm_deals','crm_leads','conversation_messages','detach_conversation_contacts','conversations','crm_contacts','crm_companies','knowledge_base_documents','tenant_channels','ai_assistants','crm_pipeline_stages','tenant_users'].map((step)=>({step,tenantIds}));
 }
-export async function cleanupFixtureRun({ client, tenantIds, names, agentId }) {
+export async function cleanupFixtureRun({ client, tenantIds, names, agentId, adminId = null, adminEmail = null }) {
   const tenants=await client.query('SELECT id FROM tenants WHERE id = ANY($1::uuid[]) AND name = ANY($2::text[])',[tenantIds,[names.tenantA,names.tenantB]]);
   if(tenants.rowCount!==tenantIds.length) throw new Error('FIXTURE_SCOPE_MISMATCH');
   const q=async(sql)=>client.query(sql,[tenantIds]);
@@ -23,7 +23,7 @@ export async function cleanupFixtureRun({ client, tenantIds, names, agentId }) {
   await q('DELETE FROM ai_assistants WHERE tenant_id = ANY($1::uuid[])');
   await q('DELETE FROM crm_pipeline_stages WHERE tenant_id = ANY($1::uuid[])');
   await q('DELETE FROM tenant_users WHERE tenant_id = ANY($1::uuid[])');
-  await client.query('DELETE FROM users WHERE id = $1 AND email = $2',[agentId,names.agentEmail]);
+  await client.query('DELETE FROM users WHERE id = $1 AND email = $2',[agentId,names.agentEmail]);\n  if (adminId && adminEmail) await client.query('DELETE FROM users WHERE id = $1 AND email = $2',[adminId,adminEmail]);
   await client.query('DELETE FROM tenants WHERE id = ANY($1::uuid[]) AND name = ANY($2::text[])',[tenantIds,[names.tenantA,names.tenantB]]);
 }
 
@@ -48,5 +48,5 @@ export async function createFixtureLifecycle({ client, label, passwordHash }) {
 export async function withFixtureLifecycle({ client, label, passwordHash, run }) {
   let fixture;
   try { fixture = await createFixtureLifecycle({ client, label, passwordHash }); return await run(fixture); }
-  finally { if (fixture) await cleanupFixtureRun({ client, tenantIds:[fixture.tenantId], names:{tenantA:fixture.names.tenantA,tenantB:fixture.names.tenantA}, agentId:fixture.agentId }).catch(()=>{}); }
+  finally { if (fixture) await cleanupFixtureRun({ client, tenantIds:[fixture.tenantId], names:{tenantA:fixture.names.tenantA,tenantB:fixture.names.tenantA}, agentId:fixture.agentId, adminId:fixture.adminId, adminEmail:'ci-crm-admin-' + label + '@example.test' }).catch(()=>{}); }
 }
