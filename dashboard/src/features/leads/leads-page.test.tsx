@@ -11,7 +11,7 @@ describe('CRM leads presentation', () => {
     render(<MemoryRouter><LeadTable leads={[lead]} tenantId="tenant-a" /><LeadDetailPanel lead={lead} tenantId="tenant-a" canManage={false} /></MemoryRouter>);
     expect(screen.getAllByText('HOT').length).toBeGreaterThan(0);
     expect(screen.getAllByText('78').length).toBeGreaterThan(0);
-    expect(screen.getByText('Samcheguide')).toBeInTheDocument();
+    expect(screen.getAllByText('Samcheguide')).toHaveLength(2);
     expect(screen.getAllByText('Not provided').length).toBeGreaterThan(0);
   });
   it('does not render mutation controls for a read-only agent', () => {
