@@ -1,0 +1,51 @@
+name: Staging Live Inbox Schema Checks
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    env:
+      STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify operator permission rules
+        run: node --test tests/conversation-permissions.test.js
+      - name: Verify live inbox schema
+        run: |
+          npm install --no-save pg@8.16.3
+          node <<'NODE'
+          const { Pool } = require('pg');
+          (async () => {
+            const pool = new Pool({
+              connectionString: process.env.STAGING_DATABASE_URL,
+              ssl: { rejectUnauthorized: false },
+            });
+            try {
+              const result = await pool.query(
+                `SELECT
+                    to_regclass('public.channel_integrations') IS NOT NULL AS has_mapping_table,
+                    to_regclass('public.conversation_audit_events') IS NOT NULL AS has_audit_table,
+                    EXISTS (
+                      SELECT 1
+                      FROM information_schema.columns
+                      WHERE table_schema = 'public'
+                        AND table_name = 'conversations'
+                        AND column_name = 'handling_mode'
+                    ) AS has_handling_mode`
+              );
+              const row = result.rows[0];
+              if (!row.has_mapping_table || !row.has_audit_table || !row.has_handling_mode) {
+                throw new Error('Live inbox migration is not applied');
+              }
+              console.log('PASS | STAGING | live inbox schema migration');
+            } finally {
+              await pool.end();
+            }
+          })().catch((error) => {
+            console.error('FAIL | STAGING | live inbox schema migration');
+            process.exitCode = 1;
+          });
+          NODE
