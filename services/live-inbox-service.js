@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import pool, { query } from '../config/db.js';
 import { canOperateConversation } from './conversation-permissions.js';
 import { ensureConversationCrmIdentity } from './crm-lead-service.js';
+import { queueLeadQualification } from './lead-qualification-runner.js';
 
 export class ConversationOperationError extends Error {
   constructor(status, message, code = 'CONVERSATION_OPERATION_FAILED') {
@@ -158,6 +159,7 @@ export async function persistSamcheguideInbound({ externalSessionId, content, id
     );
     await notify(client, integration.tenant_id, conversationId, 'CUSTOMER_MESSAGE');
     await client.query('COMMIT');
+    queueLeadQualification({ tenantId: integration.tenant_id, conversationId });
 
     return {
       integration,
