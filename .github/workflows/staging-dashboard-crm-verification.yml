@@ -1,0 +1,47 @@
+name: Staging Dashboard CRM Verification
+
+on:
+  workflow_dispatch:
+
+jobs:
+  dashboard-crm-verification:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout selected staging revision
+        uses: actions/checkout@v4
+        with:
+          ref: staging
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install backend dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install dashboard dependencies
+        run: npm --prefix dashboard install --no-audit --no-fund
+
+      - name: Validate Task 3 script paths
+        run: |
+          node --check services/crm-lead-detail-service.js
+          node --check services/crm-read-service.js
+          node --check routes/crmRoutes.js
+          test -f dashboard/src/features/leads/leads-page.tsx
+          test -f dashboard/src/features/leads/leads-page.test.tsx
+
+      - name: Dashboard Vitest suite
+        run: npm --prefix dashboard test
+
+      - name: Dashboard TypeScript project check
+        run: cd dashboard && ./node_modules/.bin/tsc -b --pretty false
+
+      - name: Dashboard Vite production build
+        run: npm --prefix dashboard run build
+
+      - name: Backend CRM regression suite
+        run: |
+          node --test             tests/crm-lead-detail-service.test.js             tests/crm-read-provider-boundary.test.js             tests/lead-qualification-service.test.js             tests/crm-lead-service.test.js             tests/crm-permissions.test.js             tests/conversation-permissions.test.js
