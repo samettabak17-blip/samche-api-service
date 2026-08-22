@@ -1,7 +1,7 @@
 // CRM read paths deliberately have no dependency on qualification execution.
 // They are kept separate so listing/viewing CRM data can never invoke a model.
 
-export async function listLeads(queryFn, { tenantId, limit, offset, temperature, stageId, assignedUserId }) {
+export async function listLeads(queryFn, { tenantId, limit, offset, temperature, stageId, assignedUserId, source }) {
   const values = [tenantId];
   const where = ['l.tenant_id = $1'];
   if (temperature) {
@@ -15,6 +15,10 @@ export async function listLeads(queryFn, { tenantId, limit, offset, temperature,
   if (assignedUserId) {
     values.push(assignedUserId);
     where.push(`l.assigned_user_id = $${values.length}`);
+  }
+  if (source) {
+    values.push(source);
+    where.push(`l.source_channel = $${values.length}`);
   }
   values.push(limit, offset);
   const result = await queryFn(
