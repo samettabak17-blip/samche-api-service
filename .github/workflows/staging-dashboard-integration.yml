@@ -182,10 +182,12 @@ jobs:
             await request('AGENT', 'GET', b + '/knowledge-base', fx.agentToken, 200);
             await request('AGENT', 'GET', b + '/knowledge-base/' + agentDocId, fx.agentToken, 200);
             await request('AGENT', 'POST', b + '/knowledge-base', fx.agentToken, 403, { title: 'blocked', content: 'blocked' });
+            await request('AGENT', 'PUT', b + '/knowledge-base/' + agentDocId, fx.agentToken, 403, { title: 'blocked', content: 'blocked' });
             await request('AGENT', 'DELETE', b + '/knowledge-base/' + agentDocId, fx.agentToken, 403);
             await request('ADMIN', 'GET', a + '/knowledge-base/' + agentDocId, adminToken, 404);
             await request('ADMIN', 'POST', a + '/knowledge-base', adminToken, 400, { title: '', content: '' });
             await request('ADMIN', 'POST', a + '/knowledge-base', adminToken, 400, { title: 'wrong assistant', content: 'fixture', assistant_id: assistantBId });
+            await request('ADMIN', 'DELETE', a + '/knowledge-base/' + adminDocId, adminToken, 200);
 
             await request('ADMIN', 'GET', a + '/conversations?limit=1&offset=0', adminToken, 200);
             await request('AGENT', 'GET', b + '/conversations?limit=1&offset=0', fx.agentToken, 200);
@@ -194,12 +196,15 @@ jobs:
 
             log('BLOCKED', 'PUBLIC', 'GET', a + '/conversations/:conversationId/messages', 'No conversation/message creation or fixture access exists in the API');
             log('BLOCKED', 'OWNER', 'DELETE', a + '/channels/:channelId', 'RESTRICT needs a persisted conversation; no API fixture path exists');
+            failures += 1;
 
             const assistantCrud = await request('ADMIN', 'POST', a + '/assistants', adminToken, 201, { name: 'CI assistant CRUD', system_prompt: 'test', model: 'gpt-4o-mini' });
             const assistantCrudId = requireId(assistantCrud, 'id');
             await request('ADMIN', 'GET', a + '/assistants/' + assistantCrudId, adminToken, 200);
             await request('ADMIN', 'PUT', a + '/assistants/' + assistantCrudId, adminToken, 200, { name: 'CI assistant CRUD updated' });
             await request('ADMIN', 'DELETE', a + '/assistants/' + assistantCrudId, adminToken, 200);
+
+            await request('ADMIN', 'DELETE', a + '/channels/' + adminChannelId, adminToken, 200);
 
             await request('PUBLIC', 'POST', '/api/chat', '', 400, { message: '' });
             await request('PUBLIC', 'POST', '/chat', '', 200, { text: 'merhaba' });
