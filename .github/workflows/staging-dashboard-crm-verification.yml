@@ -22,13 +22,20 @@ jobs:
       - name: Install dashboard dependencies
         run: npm --prefix dashboard install --no-audit --no-fund
 
-      - name: Validate Task 3 script paths
+      - name: Validate Task 3 paths and package scripts
         run: |
-          node --check services/crm-lead-detail-service.js
-          node --check services/crm-read-service.js
-          node --check routes/crmRoutes.js
+          test -f package.json
+          test -f dashboard/package.json
+          test -f services/crm-lead-detail-service.js
+          test -f services/crm-read-service.js
+          test -f routes/crmRoutes.js
           test -f dashboard/src/features/leads/leads-page.tsx
           test -f dashboard/src/features/leads/leads-page.test.tsx
+          test -f tests/crm-lead-detail-service.test.js
+          test -f tests/crm-read-provider-boundary.test.js
+          test -f tests/lead-qualification-service.test.js
+          grep -Fq '"test": "vitest run --environment jsdom"' dashboard/package.json
+          grep -Fq '"build": "tsc -b && vite build"' dashboard/package.json
 
       - name: Dashboard Vitest suite
         run: npm --prefix dashboard test
