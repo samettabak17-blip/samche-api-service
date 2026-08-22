@@ -16,6 +16,7 @@ import authRoutes from "./routes/authRoutes.js";
 import tenantRoutes from "./routes/tenantRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
 import pool from "./config/db.js";
+import { runMigrations } from "./migrations/runMigrations.js";
 
 dotenv.config();
 
@@ -3148,6 +3149,17 @@ app.get("/ping", (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Sunucu ${PORT} portunda başarıyla çalışıyor.`);
-});
+
+async function startServer() {
+  try {
+    await runMigrations();
+    app.listen(PORT, () => {
+      console.log(`Sunucu ${PORT} portunda başarıyla çalışıyor.`);
+    });
+  } catch (error) {
+    console.error('Database migration failed:', error);
+    process.exit(1);
+  }
+}
+
+startServer();
