@@ -65,32 +65,37 @@ async function insertMessage(client, { tenantId, conversationId, senderType, con
 }
 
 
-export async function getSamcheguidePublicHistory({ externalSessionId }) {
+export async function getSamcheguidePublicFeed({ externalSessionId }) {
   const client = await pool.connect();
   try {
     const integration = await loadSamcheguideIntegration(client);
     if (!integration || integration.channel_status !== 'active') return null;
-
     const result = await client.query(
-      `SELECT m.sender_type, m.content, m.created_at
+      `SELECT c.id AS conversation_id, m.id, m.sender_type, m.content, m.created_at
          FROM conversations c
-         JOIN conversation_messages m
-           ON m.conversation_id = c.id AND m.tenant_id = c.tenant_id
-        WHERE c.tenant_id = $1
-          AND c.channel_id = $2
-          AND c.external_conversation_id = $3
-        ORDER BY m.created_at ASC
+         JOIN conversation_messages m ON m.conversation_id = c.id AND m.tenant_id = c.tenant_id
+        WHERE c.tenant_id = $1 AND c.channel_id = $2 AND c.external_conversation_id = $3
+        ORDER BY m.created_at ASC, m.id ASC
         LIMIT 100`,
       [integration.tenant_id, integration.channel_id, publicConversationKey(externalSessionId)]
     );
-
-    return result.rows.map((message) => ({
-      role: message.sender_type === 'CUSTOMER' ? 'user' : 'model',
-      parts: [{ text: message.content }],
-    }));
+    return {
+      tenantId: integration.tenant_id,
+      conversationId: result.rows[0]?.conversation_id ?? null,
+      messages: result.rows.map(({ id, sender_type, content, created_at }) => ({ id, sender_type, content, created_at })),
+    };
   } finally {
     client.release();
   }
+}
+
+export async function getSamcheguidePublicHistory({ externalSessionId }) {
+  const feed = await getSamcheguidePublicFeed({ externalSessionId });
+  if (!feed) return null;
+  return feed.messages.map((message) => ({
+    role: message.sender_type === 'CUSTOMER' ? 'user' : 'model',
+    parts: [{ text: message.content }],
+  }));
 }
 
 export async function persistSamcheguideInbound({ externalSessionId, content, idempotencyKey = null }) {

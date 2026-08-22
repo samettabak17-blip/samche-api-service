@@ -16,8 +16,9 @@ import authRoutes from "./routes/authRoutes.js";
 import tenantRoutes from "./routes/tenantRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
-import { getSamcheguidePublicHistory, persistAssistantResponseIfCurrent, persistSamcheguideInbound } from "./services/live-inbox-service.js";
-import { startLiveEventListener } from "./services/live-event-bus.js";
+import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound } from "./services/live-inbox-service.js";
+import { startLiveEventListener, subscribeTenantEvents } from "./services/live-event-bus.js";
+import { configuredPublicConversationSessionSecret, issuePublicConversationSession, PublicConversationSessionError, verifyPublicConversationSession } from "./services/public-conversation-session.js";
 import pool from "./config/db.js";
 import { runMigrations } from "./migrations/runMigrations.js";
 
@@ -27,6 +28,7 @@ const app = express();
 
 const allowedCorsOrigins = [
   process.env.DASHBOARD_ALLOWED_ORIGIN,
+  process.env.SAMCHEGUIDE_ALLOWED_ORIGIN,
   ...(process.env.CORS_ALLOWED_ORIGINS?.split(',') ?? []),
 ]
   .map((origin) => origin?.trim())
@@ -658,15 +660,66 @@ function getFollowUpMessage(lang, topic, stage) {
 // ----------------------------------------------------------------------------
 // A) SAMCHEGUIDE BOT (GEMINI) - /plan, /chat ve /chat/history
 // ----------------------------------------------------------------------------
-app.get("/chat/history", async (req, res) => {
-  const userId = getUserId(req);
+function resolvePublicConversationSession(req) {
+  const secret = configuredPublicConversationSessionSecret();
+  if (!secret) {
+    const error = new PublicConversationSessionError('PUBLIC_SESSION_CONFIGURATION');
+    error.status = 503;
+    throw error;
+  }
+  const token = req.get('X-Samcheguide-Session');
+  if (!token) {
+    const error = new PublicConversationSessionError('PUBLIC_SESSION_REQUIRED');
+    error.status = 401;
+    throw error;
+  }
   try {
-    const persistedHistory = await getSamcheguidePublicHistory({ externalSessionId: userId });
-    if (persistedHistory) return res.json(persistedHistory);
-    return res.json(guideMemoryStore[userId] || []);
+    return { token, ...verifyPublicConversationSession(token, { secret }) };
   } catch (error) {
-    console.error("Samcheguide history error:", error?.code || error?.name || "unknown");
-    return res.status(503).json({ error: "Conversation history is temporarily unavailable." });
+    error.status = 401;
+    throw error;
+  }
+}
+
+function issueOrResolvePublicConversationSession(req) {
+  const token = req.get('X-Samcheguide-Session');
+  if (token) return resolvePublicConversationSession(req);
+  const secret = configuredPublicConversationSessionSecret();
+  if (!secret) {
+    const error = new PublicConversationSessionError('PUBLIC_SESSION_CONFIGURATION');
+    error.status = 503;
+    throw error;
+  }
+  return issuePublicConversationSession({ secret });
+}
+
+app.get("/chat/history", async (req, res) => {
+  try {
+    const session = resolvePublicConversationSession(req);
+    const feed = await getSamcheguidePublicFeed({ externalSessionId: session.sessionId });
+    if (!feed) return res.status(404).json({ error: "Conversation is unavailable." });
+    return res.json({ messages: feed.messages });
+  } catch (error) {
+    return res.status(error.status || 503).json({ error: error.status === 401 ? "Conversation session is invalid." : "Conversation history is temporarily unavailable." });
+  }
+});
+
+app.get("/chat/live", async (req, res) => {
+  try {
+    const session = resolvePublicConversationSession(req);
+    const feed = await getSamcheguidePublicFeed({ externalSessionId: session.sessionId });
+    if (!feed?.conversationId) return res.status(404).json({ error: "Conversation is unavailable." });
+
+    res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+    res.flushHeaders?.();
+    res.write('event: connected\ndata: {}\n\n');
+    const unsubscribe = subscribeTenantEvents(feed.tenantId, (event) => {
+      if (event.conversation_id === feed.conversationId) res.write(`event: conversation\ndata: ${JSON.stringify({ type: event.type })}\n\n`);
+    });
+    const heartbeat = setInterval(() => res.write(': keepalive\n\n'), 25000);
+    req.on('close', () => { clearInterval(heartbeat); unsubscribe(); });
+  } catch (error) {
+    return res.status(error.status || 503).json({ error: error.status === 401 ? "Conversation session is invalid." : "Conversation feed is temporarily unavailable." });
   }
 });
 
@@ -713,7 +766,8 @@ app.post("/chat", async (req, res) => {
     const cleanText = text.trim();
     if (!cleanText) return res.status(400).json({ error: "Message text cannot be empty." });
 
-    const userId = getUserId(req);
+    const publicSession = issueOrResolvePublicConversationSession(req);
+    const userId = publicSession.sessionId;
     const inboxState = await persistSamcheguideInbound({
       externalSessionId: userId,
       content: cleanText,
@@ -723,12 +777,12 @@ app.post("/chat", async (req, res) => {
     // An explicit staging mapping opts this request into the tenant inbox.
     // Without one, legacy Samcheguide behavior remains unchanged.
     if (inboxState?.duplicate) {
-      return res.status(202).json({ status: "duplicate", conversation_id: inboxState.conversation.id });
+      return res.status(202).json({ status: "duplicate", conversation_session: publicSession.token });
     }
     if (inboxState && !inboxState.shouldInvokeAi) {
       return res.status(202).json({
         status: inboxState.conversation.handling_mode === "PAUSED" ? "paused" : "human_handling",
-        conversation_id: inboxState.conversation.id,
+        conversation_session: publicSession.token,
       });
     }
 
@@ -779,6 +833,7 @@ app.post("/chat", async (req, res) => {
 
     addGuideMemory(userId, "model", originalText);
     return res.json({
+      conversation_session: publicSession.token,
       candidates: [{ content: { parts: [{ text: parseLinksToHTML(originalText) }] } }]
     });
   } catch (err) {
