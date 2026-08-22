@@ -15,6 +15,9 @@ import { verifyWhatsAppSignature } from "./middleware/whatsappSignature.js";
 import authRoutes from "./routes/authRoutes.js";
 import tenantRoutes from "./routes/tenantRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
+import conversationRoutes from "./routes/conversationRoutes.js";
+import { persistAssistantResponseIfCurrent, persistSamcheguideInbound } from "./services/live-inbox-service.js";
+import { startLiveEventListener } from "./services/live-event-bus.js";
 import pool from "./config/db.js";
 import { runMigrations } from "./migrations/runMigrations.js";
 
@@ -86,7 +89,9 @@ app.get("/api/v1/health/db", async (req, res) => {
 
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/tenants", tenantRoutes);
+app.use("/api/v1/tenants", conversationRoutes);
 app.use("/api/v1/tenants", dashboardRoutes);
+void startLiveEventListener();
 
 // ============================================================================
 // 🔥 GLOBAL HATA YAKALAYICILAR (SUNUCUNUN ÇÖKMESİNİ KESİN ENGELLER)
@@ -702,42 +707,75 @@ app.post("/chat", async (req, res) => {
     if (!cleanText) return res.status(400).json({ error: "Message text cannot be empty." });
 
     const userId = getUserId(req);
-    const lowerCleanText = cleanText.toLowerCase();
+    const inboxState = await persistSamcheguideInbound({
+      externalSessionId: userId,
+      content: cleanText,
+      idempotencyKey: req.get("Idempotency-Key") || null,
+    });
 
-    if (sgCorporateShortReplyMap[lowerCleanText]) {
-      const replyText = sgCorporateShortReplyMap[lowerCleanText];
-      return res.json({
-        candidates: [{ content: { parts: [{ text: parseLinksToHTML(replyText) }] } }]
+    // An explicit staging mapping opts this request into the tenant inbox.
+    // Without one, legacy Samcheguide behavior remains unchanged.
+    if (inboxState?.duplicate) {
+      return res.status(202).json({ status: "duplicate", conversation_id: inboxState.conversation.id });
+    }
+    if (inboxState && !inboxState.shouldInvokeAi) {
+      return res.status(202).json({
+        status: inboxState.conversation.handling_mode === "PAUSED" ? "paused" : "human_handling",
+        conversation_id: inboxState.conversation.id,
       });
     }
 
-    addGuideMemory(userId, "user", cleanText);
-    const history = guideMemoryStore[userId] || [];
+    const lowerCleanText = cleanText.toLowerCase();
+    let originalText;
 
-    const contents = history.map((msg, index) => {
-      if (index === history.length - 1 && msg.role === "user") {
-        return {
-          role: "user",
-          parts: [{ text: `User message: "${cleanText}"\nNote: Reply directly without introductory greetings. Automatically detect the user's language and respond in THAT SAME language.` }]
-        };
+    if (sgCorporateShortReplyMap[lowerCleanText]) {
+      originalText = sgCorporateShortReplyMap[lowerCleanText];
+    } else {
+      addGuideMemory(userId, "user", cleanText);
+      const history = guideMemoryStore[userId] || [];
+      const contents = history.map((msg, index) => {
+        if (index === history.length - 1 && msg.role === "user") {
+          return {
+            role: "user",
+            parts: [{ text: `User message: "${cleanText}"\nNote: Reply directly without introductory greetings. Automatically detect the user's language and respond in THAT SAME language.` }]
+          };
+        }
+        return msg;
+      });
+
+      const data = await requestGemini({
+        contents,
+        systemInstruction: { parts: [{ text: SAMCHEGUIDE_SYSTEM_PROMPT }] }
+      });
+      originalText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (typeof originalText !== "string" || !originalText.trim()) {
+        const error = new Error("Gemini returned no usable response.");
+        error.status = 502;
+        throw error;
       }
-      return msg;
-    });
-
-    const payload = {
-      contents: contents,
-      systemInstruction: { parts: [{ text: SAMCHEGUIDE_SYSTEM_PROMPT }] }
-    };
-
-    const data = await requestGemini(payload);
-    if (data.candidates && data.candidates[0]?.content?.parts?.[0]) {
-      let originalText = data.candidates[0].content.parts[0].text;
-      data.candidates[0].content.parts[0].text = parseLinksToHTML(originalText);
-      addGuideMemory(userId, "model", originalText);
     }
-    return res.json(data);
+
+    if (inboxState) {
+      const persisted = await persistAssistantResponseIfCurrent({
+        tenantId: inboxState.integration.tenant_id,
+        conversationId: inboxState.conversation.id,
+        content: originalText,
+        handlingVersion: inboxState.handlingVersion,
+      });
+      if (!persisted.delivered) {
+        return res.status(202).json({
+          status: "human_handling",
+          conversation_id: inboxState.conversation.id,
+        });
+      }
+    }
+
+    addGuideMemory(userId, "model", originalText);
+    return res.json({
+      candidates: [{ content: { parts: [{ text: parseLinksToHTML(originalText) }] } }]
+    });
   } catch (err) {
-    console.error("Samcheguide Chat error:", err);
+    console.error("Samcheguide Chat error:", err?.code || err?.name || "unknown");
     return res.status(err.status || 500).json({ error: "Could not generate chat response." });
   }
 });
