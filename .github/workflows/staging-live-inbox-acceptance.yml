@@ -14,6 +14,7 @@ jobs:
       STAGING_ADMIN_TOKEN: ${{ secrets.STAGING_ADMIN_TOKEN }}
       STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
       LIVE_INBOX_SESSION_ID: live-inbox-acceptance-${{ github.run_id }}
+      LIVE_INBOX_AGENT_EMAIL: live-inbox-agent-${{ github.run_id }}@samche-staging.test
     steps:
       - uses: actions/checkout@v4
       - name: Install acceptance dependencies
