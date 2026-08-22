@@ -11,17 +11,10 @@ import { SettingsPage } from '../features/settings/settings-page';
 import { AssistantsPage } from '../features/assistants/assistants-page';
 import { ChannelsPage } from '../features/channels/channels-page';
 import { KnowledgeBasePage } from '../features/knowledge-base/knowledge-base-page';
+import { LeadsPage } from '../features/leads/leads-page';
 
-function LoadingScreen() {
-  return <div className="grid min-h-screen place-items-center bg-canvas text-sm text-stone-500">Loading workspace…</div>;
-}
-
-function RequireAuth({ children }: { children: ReactNode }) {
-  const { status } = useAuth();
-  if (status === 'checking') return <LoadingScreen />;
-  return status === 'authenticated' ? <>{children}</> : <Navigate to="/login" replace />;
-}
-
+function LoadingScreen() { return <div className="grid min-h-screen place-items-center bg-canvas text-sm text-stone-500">Loading workspace…</div>; }
+function RequireAuth({ children }: { children: ReactNode }) { const { status } = useAuth(); if (status === 'checking') return <LoadingScreen />; return status === 'authenticated' ? <>{children}</> : <Navigate to="/login" replace />; }
 function DashboardEntry() {
   const { isLoading, selectedTenant, error } = useTenant();
   if (isLoading) return <LoadingScreen />;
@@ -29,20 +22,14 @@ function DashboardEntry() {
   if (!selectedTenant) return <div className="panel max-w-xl p-7"><p className="eyebrow">No workspace access</p><h1 className="mt-2 text-xl font-semibold">No tenant is assigned to this account.</h1><p className="mt-2 text-sm text-stone-600">Contact your SamChe workspace owner to request access.</p></div>;
   return <Navigate to={`/app/${selectedTenant.id}/overview`} replace />;
 }
-
 function TenantRoute({ children }: { children: ReactNode }) {
   const { tenantId } = useParams();
   const { tenants, selectedTenant, isLoading, selectTenant } = useTenant();
   if (isLoading) return <LoadingScreen />;
-  if (!tenantId || !tenants.some((tenant) => tenant.id === tenantId)) return <Navigate to="/app" replace />;
-  if (selectedTenant?.id !== tenantId) {
-    selectTenant(tenantId);
-    return <LoadingScreen />;
-  }
-
+  if (!tenantId || !tenants.some((item) => item.id === tenantId)) return <Navigate to="/app" replace />;
+  if (selectedTenant?.id !== tenantId) { selectTenant(tenantId); return <LoadingScreen />; }
   return <AppShell>{children}</AppShell>;
 }
-
 export function AppRouter() {
   return <Routes>
     <Route path="/login" element={<LoginPage />} />
@@ -50,6 +37,8 @@ export function AppRouter() {
     <Route path="/app/:tenantId/overview" element={<RequireAuth><TenantRoute><OverviewPage /></TenantRoute></RequireAuth>} />
     <Route path="/app/:tenantId/conversations" element={<RequireAuth><TenantRoute><ConversationsPage /></TenantRoute></RequireAuth>} />
     <Route path="/app/:tenantId/conversations/:conversationId" element={<RequireAuth><TenantRoute><ConversationsPage /></TenantRoute></RequireAuth>} />
+    <Route path="/app/:tenantId/leads" element={<RequireAuth><TenantRoute><LeadsPage /></TenantRoute></RequireAuth>} />
+    <Route path="/app/:tenantId/leads/:leadId" element={<RequireAuth><TenantRoute><LeadsPage /></TenantRoute></RequireAuth>} />
     <Route path="/app/:tenantId/team" element={<RequireAuth><TenantRoute><TeamPage /></TenantRoute></RequireAuth>} />
     <Route path="/app/:tenantId/settings" element={<RequireAuth><TenantRoute><SettingsPage /></TenantRoute></RequireAuth>} />
     <Route path="/app/:tenantId/assistants" element={<RequireAuth><TenantRoute><AssistantsPage /></TenantRoute></RequireAuth>} />
@@ -61,4 +50,3 @@ export function AppRouter() {
     <Route path="*" element={<Navigate to="/app" replace />} />
   </Routes>;
 }
-
