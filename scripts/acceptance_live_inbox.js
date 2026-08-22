@@ -2,9 +2,11 @@ import crypto from 'crypto';
 
 const apiBaseUrl = (process.env.STAGING_API_BASE_URL || 'https://samche-api-staging.onrender.com').replace(/\/$/, '');
 const adminToken = process.env.STAGING_ADMIN_TOKEN;
+const ownerToken = process.env.STAGING_OWNER_TOKEN;
+const agentEmail = process.env.LIVE_INBOX_AGENT_EMAIL;
 const sessionId = process.env.LIVE_INBOX_SESSION_ID;
 
-if (!adminToken || !sessionId) {
+if (!adminToken || !ownerToken || !agentEmail || !sessionId) {
   console.error('Required staging acceptance configuration is missing.');
   process.exit(1);
 }
@@ -130,6 +132,59 @@ async function main() {
   await request({ role: 'ADMIN', method: 'GET', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/messages?limit=50&offset=0', expected: 200, headers: adminHeaders });
   await request({ role: 'ADMIN', method: 'GET', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/events', expected: 200, headers: adminHeaders });
   await request({ role: 'ADMIN', method: 'POST', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/return-to-ai', expected: 200, headers: adminHeaders });
+
+  const agentPassword = crypto.randomUUID() + 'Aa1!';
+  const registration = await request({
+    role: 'PUBLIC',
+    method: 'POST',
+    path: '/api/v1/auth/register',
+    expected: 201,
+    body: { email: agentEmail, password: agentPassword },
+  });
+  const agentUserId = registration.data?.user?.id;
+  if (!registration.passed || !agentUserId) return;
+
+  const ownerHeaders = { Authorization: 'Bearer ' + ownerToken };
+  const assignment = await request({
+    role: 'OWNER',
+    method: 'POST',
+    path: '/api/v1/tenants/' + match.tenantId + '/users',
+    expected: 201,
+    body: { user_id: agentUserId, tenant_role: 'AGENT' },
+    headers: ownerHeaders,
+  });
+  if (!assignment.passed) return;
+
+  const login = await request({
+    role: 'AGENT',
+    method: 'POST',
+    path: '/api/v1/auth/login',
+    expected: 200,
+    body: { email: agentEmail, password: agentPassword },
+  });
+  const agentToken = login.data?.token;
+  if (!login.passed || typeof agentToken !== 'string') return;
+  const agentHeaders = { Authorization: 'Bearer ' + agentToken };
+
+  const agentTenants = await request({ role: 'AGENT', method: 'GET', path: '/api/v1/tenants', expected: 200, headers: agentHeaders });
+  if (agentTenants.passed && (!Array.isArray(agentTenants.data) || !agentTenants.data.some((tenant) => tenant.id === match.tenantId && tenant.tenant_role === 'AGENT'))) {
+    console.log('FAIL | AGENT | GET /api/v1/tenants | HTTP 200 | Assigned AGENT tenant role was not returned');
+    failures += 1;
+  }
+
+  await request({ role: 'AGENT', method: 'GET', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId, expected: 200, headers: agentHeaders });
+  await request({ role: 'AGENT', method: 'POST', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/takeover', expected: 200, headers: agentHeaders });
+  await request({
+    role: 'AGENT',
+    method: 'POST',
+    path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/messages',
+    expected: 201,
+    body: { content: 'Agent acceptance reply ' + sessionId },
+    headers: { ...agentHeaders, 'Idempotency-Key': 'agent-acceptance-' + sessionId },
+  });
+  await request({ role: 'AGENT', method: 'POST', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/pause', expected: 403, headers: agentHeaders });
+  await request({ role: 'AGENT', method: 'POST', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/close', expected: 403, headers: agentHeaders });
+  await request({ role: 'AGENT', method: 'POST', path: '/api/v1/tenants/' + match.tenantId + '/conversations/' + match.conversationId + '/return-to-ai', expected: 200, headers: agentHeaders });
 }
 
 await main();
