@@ -1,4 +1,4 @@
-name: Bootstrap staging dashboard E2E admin
+name: Verify staging dashboard E2E admin
 on:
   push:
     branches: [staging]
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  bootstrap:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
@@ -16,6 +16,7 @@ jobs:
       STAGING_OWNER_TOKEN: ${{ secrets.STAGING_OWNER_TOKEN }}
       STAGING_ADMIN_TOKEN: ${{ secrets.STAGING_ADMIN_TOKEN }}
       STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      STAGING_DASHBOARD_ADMIN_PASSWORD: ${{ secrets.STAGING_DASHBOARD_ADMIN_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - name: Install staging-only database dependencies
@@ -24,17 +25,17 @@ jobs:
         shell: bash
         run: |
           node <<'NODE'
-          const crypto = require('node:crypto');
-          const fs = require('node:fs');
           const { Pool } = require('pg');
           const argon2 = require('argon2');
 
           const api = process.env.API;
           const tenantId = process.env.TEST_TENANT_ID;
           const email = 'dashboard-e2e-admin-20260822@samche-staging.test';
-          const password = crypto.randomBytes(24).toString('base64url') + 'Aa1!';
+          const password = process.env.STAGING_DASHBOARD_ADMIN_PASSWORD;
           const ownerToken = process.env.STAGING_OWNER_TOKEN;
           const adminToken = process.env.STAGING_ADMIN_TOKEN;
+
+          if (!password) throw new Error('STAGING_DASHBOARD_ADMIN_PASSWORD is required');
 
           async function request(method, path, token, body) {
             const response = await fetch(api + path, {
@@ -90,7 +91,6 @@ jobs:
             const membership = Array.isArray(tenants.json) && tenants.json.find((tenant) => tenant.id === tenantId);
             if (!membership || membership.tenant_role !== 'ADMIN') throw new Error('ADMIN tenant role was not returned');
 
-            fs.writeFileSync('dashboard-e2e-admin-credentials.json', JSON.stringify({ email, password }, null, 2));
             console.log('PASS | ADMIN | POST | /api/v1/auth/login | HTTP 200');
             console.log('PASS | ADMIN | GET | /api/v1/auth/me | HTTP 200');
             console.log('PASS | ADMIN | GET | /api/v1/tenants | HTTP 200');
@@ -100,10 +100,3 @@ jobs:
             process.exit(1);
           });
           NODE
-      - name: Upload verified credential artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: staging-dashboard-e2e-admin
-          path: dashboard-e2e-admin-credentials.json
-          if-no-files-found: error
-          retention-days: 1
