@@ -217,7 +217,11 @@ jobs:
             await request('AGENT', 'GET', b + '/conversations?limit=1&offset=0', fx.agentToken, 200);
             await request('AGENT', 'GET', b + '/conversations/' + conversationB.conversationId, fx.agentToken, 200);
             await request('AGENT', 'GET', b + '/conversations/' + conversationB.conversationId + '/messages?limit=1&offset=0', fx.agentToken, 200);
-            await request('OWNER', 'DELETE', a + '/channels/' + adminChannelId, ownerToken, 409);
+            const linkedChannelDelete = await request('OWNER', 'DELETE', a + '/channels/' + adminChannelId, ownerToken, 409);
+            if (linkedChannelDelete.json?.error !== 'Channel cannot be deleted while conversations are linked to it') {
+              failures += 1;
+              log('FAIL', 'OWNER', 'DELETE', a + '/channels/' + adminChannelId, '409 response body did not describe linked conversations');
+            }
             await request('ADMIN', 'GET', a + '/team', adminToken, 200);
             await request('AGENT', 'GET', b + '/team', fx.agentToken, 200);
 
