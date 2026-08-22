@@ -1,0 +1,109 @@
+name: Bootstrap staging dashboard E2E agent
+on:
+  push:
+    branches: [staging]
+    paths:
+      - .github/workflows/staging-bootstrap-dashboard-agent.yml
+  workflow_dispatch:
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      API: https://samche-api-staging.onrender.com
+      TEST_TENANT_ID: b85d7e7b-d52e-4541-92e7-284a6a67024b
+      STAGING_OWNER_TOKEN: ${{ secrets.STAGING_OWNER_TOKEN }}
+      STAGING_ADMIN_TOKEN: ${{ secrets.STAGING_ADMIN_TOKEN }}
+      STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install staging-only database dependencies
+        run: npm install --no-save --ignore-scripts pg@8.16.3 argon2@0.44.0
+      - name: Reset, assign, and verify dashboard E2E agent
+        shell: bash
+        run: |
+          node <<'NODE'
+          const crypto = require('node:crypto');
+          const fs = require('node:fs');
+          const { Pool } = require('pg');
+          const argon2 = require('argon2');
+
+          const api = process.env.API;
+          const tenantId = process.env.TEST_TENANT_ID;
+          const email = 'dashboard-e2e-agent-20260822@samche-staging.test';
+          const password = crypto.randomBytes(24).toString('base64url') + 'Aa1!';
+          const ownerToken = process.env.STAGING_OWNER_TOKEN;
+          const adminToken = process.env.STAGING_ADMIN_TOKEN;
+
+          async function request(method, path, token, body) {
+            const response = await fetch(api + path, {
+              method,
+              headers: {
+                ...(token ? { Authorization: 'Bearer ' + token } : {}),
+                ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+              },
+              ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+            });
+            const text = await response.text();
+            let json = null;
+            try { json = text ? JSON.parse(text) : null; } catch {}
+            return { status: response.status, json };
+          }
+
+          (async () => {
+            const adminTenant = await request('GET', '/api/v1/tenants/' + tenantId, adminToken);
+            if (adminTenant.status !== 200) throw new Error('ADMIN does not have access to the configured staging test tenant');
+
+            const pool = new Pool({ connectionString: process.env.STAGING_DATABASE_URL, ssl: { rejectUnauthorized: false } });
+            let user;
+            try {
+              const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
+              const result = await pool.query(
+                `INSERT INTO users (email, password_hash, system_role, status)
+                 VALUES ($1, $2, 'CUSTOMER', 'active')
+                 ON CONFLICT (email) DO UPDATE
+                   SET password_hash = EXCLUDED.password_hash,
+                       system_role = 'CUSTOMER',
+                       status = 'active'
+                 RETURNING id, email`,
+                [email, passwordHash],
+              );
+              user = result.rows[0];
+            } finally {
+              await pool.end();
+            }
+
+            const assignment = await request('POST', '/api/v1/tenants/' + tenantId + '/users', ownerToken, {
+              user_id: user.id,
+              tenant_role: 'AGENT',
+            });
+            if (![201, 409].includes(assignment.status)) throw new Error('AGENT assignment failed with HTTP ' + assignment.status);
+
+            const login = await request('POST', '/api/v1/auth/login', '', { email, password });
+            if (login.status !== 200 || !login.json?.token) throw new Error('POST /auth/login did not return HTTP 200');
+            const token = login.json.token;
+            const me = await request('GET', '/api/v1/auth/me', token);
+            if (me.status !== 200) throw new Error('GET /auth/me did not return HTTP 200');
+            const tenants = await request('GET', '/api/v1/tenants', token);
+            if (tenants.status !== 200) throw new Error('GET /tenants did not return HTTP 200');
+            const membership = Array.isArray(tenants.json) && tenants.json.find((tenant) => tenant.id === tenantId);
+            if (!membership || membership.tenant_role !== 'AGENT') throw new Error('AGENT tenant role was not returned');
+
+            fs.writeFileSync('dashboard-e2e-agent-credentials.json', JSON.stringify({ email, password }, null, 2));
+            console.log('PASS | AGENT | POST | /api/v1/auth/login | HTTP 200');
+            console.log('PASS | AGENT | GET | /api/v1/auth/me | HTTP 200');
+            console.log('PASS | AGENT | GET | /api/v1/tenants | HTTP 200');
+            console.log('PASS | AGENT | ASSERT | tenant_role | AGENT');
+          })().catch((error) => {
+            console.error(error.message);
+            process.exit(1);
+          });
+          NODE
+      - name: Upload verified credential artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-dashboard-e2e-agent
+          path: dashboard-e2e-agent-credentials.json
+          if-no-files-found: error
+          retention-days: 1
