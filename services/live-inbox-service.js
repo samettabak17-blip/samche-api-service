@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import pool, { query } from '../config/db.js';
 import { canOperateConversation } from './conversation-permissions.js';
+import { ensureConversationCrmIdentity } from './crm-lead-service.js';
 
 export class ConversationOperationError extends Error {
   constructor(status, message, code = 'CONVERSATION_OPERATION_FAILED') {
@@ -125,6 +126,13 @@ export async function persistSamcheguideInbound({ externalSessionId, content, id
       [conversationId, integration.tenant_id]
     );
     const conversation = locked.rows[0];
+
+    await ensureConversationCrmIdentity(client, {
+      tenantId: integration.tenant_id,
+      conversationId,
+      source: 'SAMCHEGUIDE',
+      externalCustomerId: conversation.customer_external_id,
+    });
 
     const customerMessage = await insertMessage(client, {
       tenantId: integration.tenant_id,
