@@ -155,6 +155,9 @@ router.get('/:tenantId/conversations/:conversationId/messages', requireTenantAcc
   if (!isValidUUID(req.params.conversationId)) return res.status(400).json({ error: 'Invalid conversation ID' });
 
   try {
+    const details = await conversationContext(currentTenantId, req.params.conversationId);
+    if (!details) return res.status(404).json({ error: 'Conversation not found' });
+
     const { query } = await import('../config/db.js');
     const result = await query(
       `SELECT m.*, u.email AS actor_email
