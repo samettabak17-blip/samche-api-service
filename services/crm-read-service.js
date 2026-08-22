@@ -1,25 +1,14 @@
 // CRM read paths deliberately have no dependency on qualification execution.
 // They are kept separate so listing/viewing CRM data can never invoke a model.
 
-export async function listLeads(queryFn, { tenantId, limit, offset, temperature, stageId, assignedUserId, source }) {
+export async function listLeads(queryFn, { tenantId, limit, offset, temperature, stageId, assignedUserId, source, conversationId }) {
   const values = [tenantId];
   const where = ['l.tenant_id = $1'];
-  if (temperature) {
-    values.push(temperature);
-    where.push(`l.temperature = $${values.length}`);
-  }
-  if (stageId) {
-    values.push(stageId);
-    where.push(`l.pipeline_stage_id = $${values.length}`);
-  }
-  if (assignedUserId) {
-    values.push(assignedUserId);
-    where.push(`l.assigned_user_id = $${values.length}`);
-  }
-  if (source) {
-    values.push(source);
-    where.push(`l.source_channel = $${values.length}`);
-  }
+  if (temperature) { values.push(temperature); where.push(`l.temperature = $${values.length}`); }
+  if (stageId) { values.push(stageId); where.push(`l.pipeline_stage_id = $${values.length}`); }
+  if (assignedUserId) { values.push(assignedUserId); where.push(`l.assigned_user_id = $${values.length}`); }
+  if (source) { values.push(source); where.push(`l.source_channel = $${values.length}`); }
+  if (conversationId) { values.push(conversationId); where.push(`l.conversation_id = $${values.length}`); }
   values.push(limit, offset);
   const result = await queryFn(
     `SELECT l.*, c.display_name, c.email, c.phone, s.name AS pipeline_stage, s.stage_key,
@@ -51,31 +40,21 @@ export async function getLead(queryFn, { tenantId, leadId }) {
 }
 
 export async function listContacts(queryFn, { tenantId, limit, offset }) {
-  const result = await queryFn(
-    'SELECT *, COUNT(*) OVER() AS total FROM crm_contacts WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
-    [tenantId, limit, offset]
-  );
+  const result = await queryFn('SELECT *, COUNT(*) OVER() AS total FROM crm_contacts WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',[tenantId, limit, offset]);
   return { items: result.rows, total: Number(result.rows[0]?.total ?? 0), limit, offset };
 }
-
 export async function getContact(queryFn, { tenantId, contactId }) {
   const result = await queryFn('SELECT * FROM crm_contacts WHERE tenant_id = $1 AND id = $2', [tenantId, contactId]);
   return result.rows[0] ?? null;
 }
-
 export async function listCompanies(queryFn, { tenantId, limit, offset }) {
-  const result = await queryFn(
-    'SELECT *, COUNT(*) OVER() AS total FROM crm_companies WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
-    [tenantId, limit, offset]
-  );
+  const result = await queryFn('SELECT *, COUNT(*) OVER() AS total FROM crm_companies WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',[tenantId, limit, offset]);
   return { items: result.rows, total: Number(result.rows[0]?.total ?? 0), limit, offset };
 }
-
 export async function listPipelineStages(queryFn, { tenantId }) {
   const result = await queryFn('SELECT * FROM crm_pipeline_stages WHERE tenant_id = $1 ORDER BY position', [tenantId]);
   return result.rows;
 }
-
 export async function listDeals(queryFn, { tenantId, limit, offset }) {
   const result = await queryFn(
     `SELECT d.*, l.contact_id, s.name AS pipeline_stage, COUNT(*) OVER() AS total
@@ -89,4 +68,3 @@ export async function listDeals(queryFn, { tenantId, limit, offset }) {
   );
   return { items: result.rows, total: Number(result.rows[0]?.total ?? 0), limit, offset };
 }
-
