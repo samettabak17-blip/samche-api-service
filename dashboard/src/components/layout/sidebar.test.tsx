@@ -11,10 +11,10 @@ describe('Sidebar', () => {
       </MemoryRouter>,
     );
 
+    expect(screen.getByRole('img', { name: 'SamChe Company LLC' })).toBeTruthy();
     expect(screen.getByText('Agent tenant')).toBeTruthy();
     expect(screen.getByText('Read-only access')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'AI Assistants' })).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Channels' })).toBeTruthy();
   });
 });
-

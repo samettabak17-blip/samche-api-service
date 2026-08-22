@@ -8,6 +8,7 @@ import {
   UsersRound,
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
+import samcheLogo from '../../assets/branding/samche-company-llc-logo.png';
 import type { TenantRole } from '../../types/api';
 
 interface SidebarProps {
@@ -32,12 +33,9 @@ export function Sidebar({ tenantId, tenantName, tenantRole, onNavigate }: Sideba
 
   return (
     <aside className="flex h-full w-72 flex-col bg-ink px-4 py-5 text-white">
-      <div className="mb-10 flex items-center gap-3 px-3">
-        <div className="grid h-9 w-9 place-items-center rounded-xl bg-signal text-sm font-bold">S</div>
-        <div>
-          <p className="text-sm font-semibold tracking-tight">SamChe</p>
-          <p className="text-xs text-stone-400">AI Platform</p>
-        </div>
+      <div className="mb-10 px-3">
+        <img src={samcheLogo} alt="SamChe Company LLC" className="h-16 w-40 object-contain object-left" />
+        <p className="mt-1 text-xs font-medium uppercase tracking-[0.18em] text-gold">AI Platform</p>
       </div>
 
       <div className="mb-7 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-3">
@@ -65,4 +63,3 @@ export function Sidebar({ tenantId, tenantName, tenantRole, onNavigate }: Sideba
     </aside>
   );
 }
-
