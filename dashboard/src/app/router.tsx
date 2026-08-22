@@ -8,6 +8,9 @@ import { OverviewPage } from '../features/overview/overview-page';
 import { ConversationsPage } from '../features/conversations/conversations-page';
 import { TeamPage } from '../features/team/team-page';
 import { SettingsPage } from '../features/settings/settings-page';
+import { AssistantsPage } from '../features/assistants/assistants-page';
+import { ChannelsPage } from '../features/channels/channels-page';
+import { KnowledgeBasePage } from '../features/knowledge-base/knowledge-base-page';
 
 function LoadingScreen() {
   return <div className="grid min-h-screen place-items-center bg-canvas text-sm text-stone-500">Loading workspace…</div>;
@@ -40,10 +43,6 @@ function TenantRoute({ children }: { children: ReactNode }) {
   return <AppShell>{children}</AppShell>;
 }
 
-function PlaceholderPage({ title, description }: { title: string; description: string }) {
-  return <section className="panel px-6 py-8 sm:px-8"><p className="eyebrow">Coming in Phase 4</p><h1 className="page-title mt-3">{title}</h1><p className="mt-3 max-w-xl text-sm leading-6 text-stone-600">{description}</p></section>;
-}
-
 export function AppRouter() {
   return <Routes>
     <Route path="/login" element={<LoginPage />} />
@@ -53,9 +52,12 @@ export function AppRouter() {
     <Route path="/app/:tenantId/conversations/:conversationId" element={<RequireAuth><TenantRoute><ConversationsPage /></TenantRoute></RequireAuth>} />
     <Route path="/app/:tenantId/team" element={<RequireAuth><TenantRoute><TeamPage /></TenantRoute></RequireAuth>} />
     <Route path="/app/:tenantId/settings" element={<RequireAuth><TenantRoute><SettingsPage /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/assistants" element={<RequireAuth><TenantRoute><PlaceholderPage title="AI Assistants" description="Assistant management is the next functional module." /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/channels" element={<RequireAuth><TenantRoute><PlaceholderPage title="Channels" description="Channel configuration will be introduced with backend-backed CRUD controls." /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/knowledge-base" element={<RequireAuth><TenantRoute><PlaceholderPage title="Knowledge Base" description="Text document management will be introduced with backend-backed CRUD controls." /></TenantRoute></RequireAuth>} />
+    <Route path="/app/:tenantId/assistants" element={<RequireAuth><TenantRoute><AssistantsPage /></TenantRoute></RequireAuth>} />
+    <Route path="/app/:tenantId/assistants/:assistantId" element={<RequireAuth><TenantRoute><AssistantsPage /></TenantRoute></RequireAuth>} />
+    <Route path="/app/:tenantId/channels" element={<RequireAuth><TenantRoute><ChannelsPage /></TenantRoute></RequireAuth>} />
+    <Route path="/app/:tenantId/channels/:channelId" element={<RequireAuth><TenantRoute><ChannelsPage /></TenantRoute></RequireAuth>} />
+    <Route path="/app/:tenantId/knowledge-base" element={<RequireAuth><TenantRoute><KnowledgeBasePage /></TenantRoute></RequireAuth>} />
+    <Route path="/app/:tenantId/knowledge-base/:documentId" element={<RequireAuth><TenantRoute><KnowledgeBasePage /></TenantRoute></RequireAuth>} />
     <Route path="*" element={<Navigate to="/app" replace />} />
   </Routes>;
 }

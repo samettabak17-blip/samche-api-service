@@ -51,5 +51,25 @@ describe('apiClient', () => {
     });
     expect(session.getToken()).toBe('test-token');
   });
+
+  it('serializes PUT payloads and sends DELETE requests', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', apiBaseUrl);
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ id: 'resource-1' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.put('/api/v1/tenants/tenant-a/channels/channel-a', { display_name: 'Support' });
+    await apiClient.delete('/api/v1/tenants/tenant-a/channels/channel-a');
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, expect.any(String), expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ display_name: 'Support' }),
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, expect.any(String), expect.objectContaining({ method: 'DELETE' }));
+  });
 });
 
