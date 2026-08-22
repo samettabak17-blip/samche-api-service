@@ -53,7 +53,36 @@ router.get('/:tenantId/channels', requireTenantAccess, async (req, res) => {
 router.post('/:tenantId/channels', requireTenantAccess, requireTenantAdmin, async(req,res)=>{if(!tenant(req,res))return; const b=await channelBody(req,res);if(!b)return;try{const r=await query('INSERT INTO tenant_channels(channel_type,display_name,external_channel_id,assistant_id,status,tenant_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[...b,req.verified_tenant_id]);res.status(201).json(r.rows[0]);}catch(e){res.status(e.code==='23505'?409:500).json({error:e.code==='23505'?'Channel already exists':'Server error'});}});
 router.get('/:tenantId/channels/:channelId', requireTenantAccess, async(req,res)=>{if(!tenant(req,res)||!isValidUUID(req.params.channelId))return res.status(400).json({error:'Invalid channel ID'});const r=await query('SELECT * FROM tenant_channels WHERE id=$1 AND tenant_id=$2',[req.params.channelId,req.verified_tenant_id]);if(!r.rowCount)return res.status(404).json({error:'Channel not found'});res.json(r.rows[0]);});
 router.put('/:tenantId/channels/:channelId', requireTenantAccess, requireTenantAdmin, async(req,res)=>{if(!tenant(req,res)||!isValidUUID(req.params.channelId))return res.status(400).json({error:'Invalid channel ID'});const b=await channelBody(req,res);if(!b)return;const r=await query('UPDATE tenant_channels SET channel_type=$1,display_name=$2,external_channel_id=$3,assistant_id=$4,status=$5,updated_at=CURRENT_TIMESTAMP WHERE id=$6 AND tenant_id=$7 RETURNING *',[...b,req.params.channelId,req.verified_tenant_id]);if(!r.rowCount)return res.status(404).json({error:'Channel not found'});res.json(r.rows[0]);});
-router.delete('/:tenantId/channels/:channelId', requireTenantAccess, requireTenantAdmin, async(req,res)=>{if(!tenant(req,res)||!isValidUUID(req.params.channelId))return res.status(400).json({error:'Invalid channel ID'});try{const r=await query('DELETE FROM tenant_channels WHERE id=$1 AND tenant_id=$2 RETURNING id',[req.params.channelId,req.verified_tenant_id]);if(!r.rowCount)return res.status(404).json({error:'Channel not found'});res.json({message:'Channel deleted successfully'});}catch(e){res.status(e.code==='23503'?409:500).json({error:e.code==='23503'?'Channel has conversations':'Server error'});}});
+router.delete('/:tenantId/channels/:channelId', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  if (!tenant(req, res) || !isValidUUID(req.params.channelId)) {
+    return res.status(400).json({ error: 'Invalid channel ID' });
+  }
+
+  const channelId = req.params.channelId;
+  const tenantId = req.verified_tenant_id;
+  const conflict = { error: 'Channel cannot be deleted while conversations are linked to it' };
+
+  try {
+    const linkedConversation = await query(
+      'SELECT 1 FROM conversations WHERE channel_id = $1 AND tenant_id = $2 LIMIT 1',
+      [channelId, tenantId]
+    );
+    if (linkedConversation.rowCount > 0) {
+      return res.status(409).json(conflict);
+    }
+
+    const result = await query(
+      'DELETE FROM tenant_channels WHERE id = $1 AND tenant_id = $2 RETURNING id',
+      [channelId, tenantId]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: 'Channel not found' });
+    return res.json({ message: 'Channel deleted successfully' });
+  } catch (error) {
+    if (error?.code === '23503') return res.status(409).json(conflict);
+    console.error('Delete tenant channel error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
 router.get('/:tenantId/conversations', requireTenantAccess, async(req,res)=>{if(!tenant(req,res))return;const p=page(req,res);if(!p)return;const r=await query('SELECT * FROM conversations WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',[req.verified_tenant_id,p.limit,p.offset]);res.json(r.rows);});
 router.get('/:tenantId/conversations/:conversationId', requireTenantAccess, async(req,res)=>{if(!tenant(req,res)||!isValidUUID(req.params.conversationId))return res.status(400).json({error:'Invalid conversation ID'});const r=await query('SELECT * FROM conversations WHERE id=$1 AND tenant_id=$2',[req.params.conversationId,req.verified_tenant_id]);if(!r.rowCount)return res.status(404).json({error:'Conversation not found'});res.json(r.rows[0]);});
 router.get('/:tenantId/conversations/:conversationId/messages', requireTenantAccess, async(req,res)=>{if(!tenant(req,res)||!isValidUUID(req.params.conversationId))return res.status(400).json({error:'Invalid conversation ID'});const p=page(req,res);if(!p)return;const r=await query('SELECT m.* FROM conversation_messages m JOIN conversations c ON c.id=m.conversation_id AND c.tenant_id=m.tenant_id WHERE m.conversation_id=$1 AND m.tenant_id=$2 ORDER BY m.created_at ASC LIMIT $3 OFFSET $4',[req.params.conversationId,req.verified_tenant_id,p.limit,p.offset]);res.json(r.rows);});
