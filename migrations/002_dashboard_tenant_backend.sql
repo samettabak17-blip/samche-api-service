@@ -1,3 +1,9 @@
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_ai_assistants_id_tenant') THEN
+    ALTER TABLE ai_assistants ADD CONSTRAINT uq_ai_assistants_id_tenant UNIQUE (id, tenant_id);
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS tenant_channels (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
@@ -69,8 +75,3 @@ CREATE INDEX IF NOT EXISTS idx_conversations_tenant_created ON conversations(ten
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation_created ON conversation_messages(conversation_id, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_knowledge_base_documents_tenant_id ON knowledge_base_documents(tenant_id);
 
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_ai_assistants_id_tenant') THEN
-    ALTER TABLE ai_assistants ADD CONSTRAINT uq_ai_assistants_id_tenant UNIQUE (id, tenant_id);
-  END IF;
-END $$;
