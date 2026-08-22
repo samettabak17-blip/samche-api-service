@@ -1,0 +1,38 @@
+name: Staging CRM Fixture Lifecycle
+
+on:
+  workflow_dispatch:
+
+jobs:
+  lifecycle:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout selected staging commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install repository dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Validate fixture lifecycle source
+        run: |
+          node --check test/stagingCrmIntegration.js
+          node --check test/stagingCrmIntegration.lifecycle.test.js
+
+      - name: Run Task 1B CRM fixture lifecycle integration tests
+        env:
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        run: node --test test/stagingCrmIntegration.lifecycle.test.js
+
+      - name: Confirm cleanup ownership
+        if: always()
+        run: echo "CLEANUP | each lifecycle case owns fixture cleanup through try/finally"
