@@ -28,7 +28,7 @@ test('all CRM read services stay on the database boundary and invoke zero qualif
   let providerCalls = 0;
   const provider = async () => { providerCalls += 1; throw new Error('read must not invoke provider'); };
 
-  await listLeads(queryFn, { tenantId, limit: 10, offset: 5, temperature: 'HOT', stageId: resourceId, assignedUserId: resourceId });
+  await listLeads(queryFn, { tenantId, limit: 10, offset: 5, temperature: 'HOT', stageId: resourceId, assignedUserId: resourceId, source: 'SAMCHEGUIDE' });
   await getLead(queryFn, { tenantId, leadId: resourceId });
   await listContacts(queryFn, { tenantId, limit: 10, offset: 0 });
   await getContact(queryFn, { tenantId, contactId: resourceId });
@@ -41,6 +41,7 @@ test('all CRM read services stay on the database boundary and invoke zero qualif
   assert.ok(calls.every(({ params }) => params[0] === tenantId), 'every read is tenant-scoped');
   assert.ok(calls.some(({ params }) => params.includes(10) && params.includes(5)), 'pagination is exercised');
   assert.ok(calls.some(({ params }) => params.includes('HOT')), 'filtering is exercised');
+  assert.ok(calls.some(({ params }) => params.includes('SAMCHEGUIDE')), 'source filtering is exercised');
   // Keep the provider double in scope: a read path has no route to it.
   assert.equal(typeof provider, 'function');
 });
