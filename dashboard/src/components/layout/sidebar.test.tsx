@@ -7,7 +7,7 @@ describe('Sidebar', () => {
   it('keeps read pages available while marking an AGENT workspace as read-only', () => {
     render(
       <MemoryRouter>
-        <Sidebar tenantId="tenant-agent" tenantName="Agent tenant" tenantRole="AGENT" onNavigate={() => undefined} />
+        <Sidebar tenantId="tenant-agent" tenantName="Agent tenant" tenantRole="AGENT" email="agent@samche.test" onLogout={() => undefined} onNavigate={() => undefined} />
       </MemoryRouter>,
     );
 
@@ -18,3 +18,4 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: 'Channels' })).toBeTruthy();
   });
 });
+

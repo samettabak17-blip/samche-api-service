@@ -31,7 +31,7 @@ export function AssistantForm({ canManage, initial, onSubmit, isPending = false 
     <label className="block text-sm font-medium text-ink">System prompt<textarea aria-label="System prompt" value={systemPrompt ?? ''} onChange={(e) => setSystemPrompt(e.target.value)} rows={5} className="mt-1.5 w-full resize-y rounded-lg border border-line px-3 py-2 text-sm" /></label>
     <label className="block text-sm font-medium text-ink">Status<select aria-label="Status" value={status ?? 'active'} onChange={(e) => setStatus(e.target.value)} className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm"><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
     {validationError && <p role="alert" className="text-sm text-red-700">{validationError}</p>}
-    <button type="submit" disabled={isPending} className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white hover:bg-graphite disabled:opacity-60">{isPending ? 'Saving…' : initial ? 'Save changes' : 'Create assistant'}</button>
+    <button type="submit" disabled={isPending} className="rounded-lg bg-signal px-4 py-2 text-sm font-semibold text-white hover:bg-[#B81920] disabled:opacity-60">{isPending ? 'Saving…' : initial ? 'Save changes' : 'Create assistant'}</button>
   </form>;
 }
 
