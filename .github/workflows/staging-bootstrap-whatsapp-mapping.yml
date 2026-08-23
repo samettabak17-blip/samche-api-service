@@ -21,4 +21,5 @@ jobs:
         env:
           STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
           STAGING_WHATSAPP_TENANT_ID: ${{ secrets.STAGING_WHATSAPP_TENANT_ID }}
+          STAGING_WHATSAPP_PHONE_ID: ${{ secrets.STAGING_WHATSAPP_PHONE_ID }}
         run: node scripts/bootstrap_whatsapp_mapping.js
