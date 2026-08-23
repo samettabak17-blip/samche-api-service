@@ -1,19 +1,28 @@
 import crypto from 'node:crypto';
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+} from '@aws-sdk/client-s3';
 import {
   buildPutObjectInput,
   createConversationResourceStorage,
   createConversationStorageClient,
   getSafeStorageFailureDiagnostic,
-  getSafeStorageProviderDiagnostic,
 } from '../services/conversation-resource-storage.js';
 
 const prefix = `conversation-resources-preflight/${crypto.randomUUID()}`;
 const minimalKey = `${prefix}/minimal`;
 const applicationKey = `${prefix}/application`;
 const body = Buffer.from(`samche-storage-preflight:${crypto.randomUUID()}`, 'utf8');
-const connection = createConversationStorageClient();
-const storage = createConversationResourceStorage(process.env, connection);
+
+const configuredConnection = createConversationStorageClient();
+const virtualHostConnection = createConversationStorageClient(process.env, { forcePathStyle: false });
+const pathStyleConnection = createConversationStorageClient(process.env, { forcePathStyle: true });
+const storage = createConversationResourceStorage(process.env, configuredConnection);
 
 async function read(stream) {
   const chunks = [];
@@ -25,7 +34,7 @@ function shapeSummary({ name, present, length, leadingOrTrailingWhitespace, cont
   return `${name}{present=${present};length=${length};edge_ws=${leadingOrTrailingWhitespace};cr=${containsCR};lf=${containsLF};tab=${containsTAB};control=${containsControlCharacter}}`;
 }
 
-function safeDiagnosticFields(error, optionNames = []) {
+function safeDiagnosticFields(error, connection, optionNames = []) {
   const diagnostic = getSafeStorageFailureDiagnostic(error, connection.getDiagnostics(optionNames));
   const provider = diagnostic.provider;
   const fields = [
@@ -35,6 +44,8 @@ function safeDiagnosticFields(error, optionNames = []) {
     ['argument_name', provider.argumentName],
     ['http_status', provider.httpStatus],
     ['request_id', provider.requestId],
+    ['extended_request_id', provider.extendedRequestId],
+    ['fault', provider.fault],
     ['sdk_operation', diagnostic.request?.operation],
   ].filter(([, value]) => value !== null && value !== undefined)
     .map(([name, value]) => `${name}=${value}`);
@@ -55,15 +66,29 @@ function safeDiagnosticFields(error, optionNames = []) {
   return fields.join('; ');
 }
 
-async function phase(name, operation, optionNames = []) {
+async function phase(name, connection, operation, optionNames = []) {
   try {
     await operation();
     console.log(`CONVERSATION_STORAGE_PREFLIGHT: ${name}: PASS`);
     return true;
   } catch (error) {
-    console.error(`CONVERSATION_STORAGE_PREFLIGHT: ${name}: FAIL (${safeDiagnosticFields(error, optionNames) || 'provider_name=UNKNOWN'})`);
+    console.error(`CONVERSATION_STORAGE_PREFLIGHT: ${name}: FAIL (${safeDiagnosticFields(error, connection, optionNames) || 'provider_name=UNKNOWN'})`);
     return false;
   }
+}
+
+async function runAuthenticationProbes(label, connection) {
+  const headBucket = await phase(
+    `AUTH_${label}_HEAD_BUCKET`,
+    connection,
+    () => connection.client.send(new HeadBucketCommand({ Bucket: connection.bucket }))
+  );
+  const listObjects = await phase(
+    `AUTH_${label}_LIST_OBJECTS`,
+    connection,
+    () => connection.client.send(new ListObjectsV2Command({ Bucket: connection.bucket, MaxKeys: 1 }))
+  );
+  return { headBucket, listObjects };
 }
 
 let minimalStored = false;
@@ -71,30 +96,51 @@ let applicationStored = false;
 let failed = false;
 
 try {
-  const connected = await phase('CLIENT_CONNECTIVITY', () => storage.connectivity(prefix));
-  if (!connected) {
+  console.log(`CONVERSATION_STORAGE_PREFLIGHT: AUTH_CONFIGURED_MODE: force_path_style=${configuredConnection.addressing.forcePathStyle}`);
+
+  const virtualHost = await runAuthenticationProbes('VIRTUAL_HOST', virtualHostConnection);
+  const pathStyle = await runAuthenticationProbes('PATH_STYLE', pathStyleConnection);
+  const configuredAuthentication = configuredConnection.addressing.forcePathStyle ? pathStyle : virtualHost;
+
+  if (!configuredAuthentication.headBucket && !configuredAuthentication.listObjects) {
     failed = true;
+    console.error('CONVERSATION_STORAGE_PREFLIGHT: MINIMAL_PUT: SKIPPED (CONFIGURED_AUTHENTICATION_FAILED)');
+    console.error('CONVERSATION_STORAGE_PREFLIGHT: APPLICATION_PUT: SKIPPED (CONFIGURED_AUTHENTICATION_FAILED)');
   } else {
-    const minimalInput = buildPutObjectInput({ bucket: connection.bucket, key: minimalKey, body });
-    minimalStored = await phase('MINIMAL_PUT', () => connection.client.send(new PutObjectCommand(minimalInput)), Object.keys(minimalInput).sort());
+    const minimalInput = buildPutObjectInput({ bucket: configuredConnection.bucket, key: minimalKey, body });
+    minimalStored = await phase(
+      'MINIMAL_PUT',
+      configuredConnection,
+      () => configuredConnection.client.send(new PutObjectCommand(minimalInput)),
+      Object.keys(minimalInput).sort()
+    );
     if (!minimalStored) {
       failed = true;
       console.error('CONVERSATION_STORAGE_PREFLIGHT: APPLICATION_PUT: SKIPPED (MINIMAL_PUT_FAILED)');
     } else {
-      const minimalHead = await phase('MINIMAL_HEAD', () => connection.client.send(new HeadObjectCommand({ Bucket: connection.bucket, Key: minimalKey })));
-      const minimalGet = await phase('MINIMAL_GET', async () => {
-        const response = await connection.client.send(new GetObjectCommand({ Bucket: connection.bucket, Key: minimalKey }));
+      const minimalHead = await phase(
+        'MINIMAL_HEAD',
+        configuredConnection,
+        () => configuredConnection.client.send(new HeadObjectCommand({ Bucket: configuredConnection.bucket, Key: minimalKey }))
+      );
+      const minimalGet = await phase('MINIMAL_GET', configuredConnection, async () => {
+        const response = await configuredConnection.client.send(new GetObjectCommand({ Bucket: configuredConnection.bucket, Key: minimalKey }));
         const actual = await read(response.Body);
         if (!actual.equals(body)) throw new Error('MINIMAL_GET_BODY_MISMATCH');
       });
       if (!minimalHead || !minimalGet) failed = true;
 
-      applicationStored = await phase('APPLICATION_PUT', () => storage.put({ key: applicationKey, body, mimeType: 'text/plain' }), ['Body', 'Bucket', 'ContentType', 'Key']);
+      applicationStored = await phase(
+        'APPLICATION_PUT',
+        configuredConnection,
+        () => storage.put({ key: applicationKey, body, mimeType: 'text/plain' }),
+        ['Body', 'Bucket', 'ContentType', 'Key']
+      );
       if (!applicationStored) {
         failed = true;
       } else {
-        const applicationHead = await phase('HEAD', () => storage.head({ key: applicationKey }));
-        const applicationGet = await phase('GET', async () => {
+        const applicationHead = await phase('HEAD', configuredConnection, () => storage.head({ key: applicationKey }));
+        const applicationGet = await phase('GET', configuredConnection, async () => {
           const actual = await read(await storage.get({ key: applicationKey }));
           if (!actual.equals(body)) throw new Error('GET_BODY_MISMATCH');
         });
@@ -104,12 +150,17 @@ try {
   }
 } finally {
   if (applicationStored) {
-    const deleted = await phase('DELETE', () => storage.remove({ key: applicationKey }));
+    const deleted = await phase('DELETE', configuredConnection, () => storage.remove({ key: applicationKey }));
     if (!deleted) failed = true;
   }
   if (minimalStored) {
-    const deleted = await phase('MINIMAL_DELETE', () => connection.client.send(new DeleteObjectCommand({ Bucket: connection.bucket, Key: minimalKey })));
+    const deleted = await phase(
+      'MINIMAL_DELETE',
+      configuredConnection,
+      () => configuredConnection.client.send(new DeleteObjectCommand({ Bucket: configuredConnection.bucket, Key: minimalKey }))
+    );
     if (!deleted) failed = true;
   }
 }
+
 if (failed) process.exitCode = 1;

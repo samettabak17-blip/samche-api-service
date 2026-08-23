@@ -1,4 +1,12 @@
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadBucketCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 
 const CONFIGURATION_FIELDS = [
   'CONVERSATION_STORAGE_DRIVER',
@@ -51,6 +59,8 @@ function safeDiagnostic(value = {}) {
     argumentName: safeToken(value.argumentName),
     httpStatus: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null,
     requestId: safeToken(value.requestId),
+    extendedRequestId: safeToken(value.extendedRequestId),
+    fault: safeToken(value.fault),
   };
 }
 
@@ -73,16 +83,23 @@ function isVirtualHostCompatibleBucket(value) {
     && /^(?=.{3,63}$)(?!-)(?!.*\.\.)(?!.*\.$)[a-z0-9][a-z0-9.-]*[a-z0-9]$/.test(value);
 }
 
+function configuredForcePathStyle(env) {
+  return env.CONVERSATION_S3_FORCE_PATH_STYLE === 'true';
+}
+
 export function describeStorageConfiguration(env = process.env) {
   return CONFIGURATION_FIELDS.map((name) => ({ name, ...stringShape(env[name]) }));
 }
 
-export function describeStorageAddressing(env = process.env) {
+export function describeStorageAddressing(env = process.env, forcePathStyleOverride = undefined) {
+  const forcePathStyle = typeof forcePathStyleOverride === 'boolean'
+    ? forcePathStyleOverride
+    : configuredForcePathStyle(env);
   return {
     endpoint: describeEndpoint(env.CONVERSATION_S3_ENDPOINT),
     bucketVirtualHostCompatible: bool(isVirtualHostCompatibleBucket(env.CONVERSATION_S3_BUCKET)),
     regionIsAuto: bool(env.CONVERSATION_S3_REGION === 'auto'),
-    forcePathStyle: bool(env.CONVERSATION_S3_FORCE_PATH_STYLE === 'true'),
+    forcePathStyle: bool(forcePathStyle),
   };
 }
 
@@ -110,10 +127,12 @@ export function getSafeStorageProviderDiagnostic(error) {
   return safeDiagnostic({
     providerErrorName: provider?.name,
     providerErrorCode: provider?.Code ?? provider?.code,
-    providerMessage: provider?.message,
+    providerMessage: provider?.Message ?? provider?.message,
     argumentName: provider?.ArgumentName ?? provider?.argumentName ?? provider?.Argument ?? provider?.argument,
     httpStatus: metadata.httpStatusCode,
-    requestId: metadata.requestId ?? metadata.extendedRequestId,
+    requestId: metadata.requestId,
+    extendedRequestId: metadata.extendedRequestId ?? metadata.cfId,
+    fault: provider?.$fault,
   });
 }
 
@@ -168,7 +187,7 @@ export function buildPutObjectInput({ bucket, key, body, mimeType = undefined })
   };
 }
 
-export function createConversationStorageClient(env = process.env) {
+export function createConversationStorageClient(env = process.env, options = {}) {
   const driver = String(env.CONVERSATION_STORAGE_DRIVER ?? '').toLowerCase();
   if (driver !== 's3') {
     throw new ConversationResourceStorageError('RESOURCE_STORAGE_UNAVAILABLE', 'No durable conversation storage provider is configured');
@@ -179,15 +198,18 @@ export function createConversationStorageClient(env = process.env) {
   const accessKeyId = required(env, 'CONVERSATION_S3_ACCESS_KEY_ID');
   const secretAccessKey = required(env, 'CONVERSATION_S3_SECRET_ACCESS_KEY');
   const endpoint = env.CONVERSATION_S3_ENDPOINT || undefined;
+  const forcePathStyle = typeof options.forcePathStyle === 'boolean'
+    ? options.forcePathStyle
+    : configuredForcePathStyle(env);
   const configuration = describeStorageConfiguration(env);
-  const addressing = describeStorageAddressing(env);
+  const addressing = describeStorageAddressing(env, forcePathStyle);
   let request = null;
   const client = new S3Client(buildS3ClientConfig({
     region,
     endpoint,
     accessKeyId,
     secretAccessKey,
-    forcePathStyle: env.CONVERSATION_S3_FORCE_PATH_STYLE === 'true',
+    forcePathStyle,
   }));
 
   client.middlewareStack.addRelativeTo(
@@ -277,6 +299,9 @@ export function createConversationResourceStorage(env = process.env, connection 
     },
     async connectivity(prefix) {
       return client.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, MaxKeys: 1 }));
+    },
+    async headBucket() {
+      return client.send(new HeadBucketCommand({ Bucket: bucket }));
     },
   };
 }

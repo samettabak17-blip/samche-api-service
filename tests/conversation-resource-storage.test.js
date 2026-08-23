@@ -20,16 +20,16 @@ test('minimal R2 PutObject input has exactly bucket key and body, while adapter 
   assert.equal(Object.hasOwn(application, 'ChecksumSHA256'), false);
 });
 
-test('R2 client configuration retains only protocol-required SDK checksum behavior', () => {
+test('R2 client configuration retains auto region, selected addressing, and required-only checksum behavior', () => {
   const config = buildS3ClientConfig({
     region: 'auto',
     endpoint: 'https://account.r2.cloudflarestorage.com',
     accessKeyId: 'access-key',
     secretAccessKey: 'secret-key',
-    forcePathStyle: false,
+    forcePathStyle: true,
   });
   assert.equal(config.region, 'auto');
-  assert.equal(config.forcePathStyle, false);
+  assert.equal(config.forcePathStyle, true);
   assert.equal(config.requestChecksumCalculation, 'WHEN_REQUIRED');
   assert.equal(config.responseChecksumValidation, 'WHEN_REQUIRED');
 });
@@ -62,31 +62,43 @@ test('safe configuration and signed-request diagnostics reveal 0/1 shapes but ne
     regionIsAuto: 1,
     forcePathStyle: 0,
   });
+  assert.deepEqual(describeStorageAddressing(environment, true).forcePathStyle, 1);
   const request = describeSafeHttpRequest({
     headers: { authorization: 'AWS4-HMAC\ninvalid', host: 'account.r2.cloudflarestorage.com' },
-  }, 'PutObjectCommand');
-  assert.equal(request.operation, 'PutObjectCommand');
+  }, 'HeadBucketCommand');
+  assert.equal(request.operation, 'HeadBucketCommand');
   assert.equal(request.headers.find((header) => header.name === 'authorization').containsLF, 1);
   assert.equal(JSON.stringify({ config, request }).includes('secret\tvalue'), false);
   assert.equal(JSON.stringify({ config, request }).includes('AWS4-HMAC'), false);
 });
 
-test('provider diagnostics preserve safe XML-style error fields and no sensitive error details', () => {
+test('provider diagnostics preserve safe XML-style error fields and exclude unsafe argument values', () => {
   const error = Object.assign(new Error('Invalid argument'), {
     name: 'InvalidArgument',
     code: 'InvalidArgument',
-    ArgumentName: 'ContentType',
-    $metadata: { httpStatusCode: 400, requestId: 'r2-request-id_123' },
+    Code: 'InvalidArgument',
+    Message: 'Invalid argument',
+    ArgumentName: 'max-keys',
+    ArgumentValue: 'not-reported',
+    $fault: 'client',
+    $metadata: {
+      httpStatusCode: 400,
+      requestId: 'r2-request-id_123',
+      extendedRequestId: 'r2-extended-id_456',
+    },
   });
   const expected = {
     providerErrorName: 'InvalidArgument',
     providerErrorCode: 'InvalidArgument',
     providerMessage: 'Invalid argument',
-    argumentName: 'ContentType',
+    argumentName: 'max-keys',
     httpStatus: 400,
     requestId: 'r2-request-id_123',
+    extendedRequestId: 'r2-extended-id_456',
+    fault: 'client',
   };
   assert.deepEqual(getSafeStorageProviderDiagnostic(error), expected);
-  const fallback = { configuration: [], addressing: null, request: { operation: 'PutObjectCommand', headers: [] }, putObjectOptionNames: ['Body', 'Bucket', 'Key'] };
-  assert.deepEqual(getSafeStorageFailureDiagnostic(error, fallback).putObjectOptionNames, ['Body', 'Bucket', 'Key']);
+  const fallback = { configuration: [], addressing: null, request: { operation: 'ListObjectsV2Command', headers: [] }, putObjectOptionNames: [] };
+  assert.deepEqual(getSafeStorageFailureDiagnostic(error, fallback).provider, expected);
+  assert.equal(JSON.stringify(getSafeStorageProviderDiagnostic(error)).includes('not-reported'), false);
 });
