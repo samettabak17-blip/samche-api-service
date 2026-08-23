@@ -18,6 +18,10 @@ import dashboardRoutes from "./routes/dashboardRoutes.js";
 import crmRoutes from "./routes/crmRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
 import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound } from "./services/live-inbox-service.js";
+import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
+import { createWhatsAppMediaRetriever, extractWhatsAppMediaDescriptor } from "./services/whatsapp-multimodal-service.js";
+import { ensureConversationCrmIdentity } from "./services/crm-lead-service.js";
+import { queueLeadQualification } from "./services/lead-qualification-runner.js";
 import { startLiveEventListener, subscribeTenantEvents } from "./services/live-event-bus.js";
 import { configuredPublicConversationSessionSecret, issuePublicConversationSession, PublicConversationSessionError, verifyPublicConversationSession } from "./services/public-conversation-session.js";
 import pool from "./config/db.js";
@@ -462,11 +466,13 @@ function corporateFallback(lang) {
   return "لأتمكن من تقديم الإرشاد الأنسب لكم، هل يمكن توضيح طلبكم بشكل أدق؟ سيساعدني ذلك في تقديم الدعم الأمثل.";
 }
 
-async function callWpGemini(prompt) {
+async function callWpGemini(prompt, multimodalPart = null) {
   try {
+    const parts = [{ text: prompt }];
+    if (multimodalPart) parts.push(multimodalPart);
     const response = await axios.post(
       WP_GEMINI_URL,
-      { contents: [{ parts: [{ text: prompt }] }] },
+      { contents: [{ parts }] },
       { 
         httpsAgent,
         headers: { "Content-Type": "application/json" },
@@ -1299,6 +1305,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       if (!from) return; 
 
       const cleanFrom = from.replace("+", "");
+      const phoneNumberId = req.body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
       let text = "";
 
       if (message.text?.body) text = message.text.body;
@@ -1309,6 +1316,45 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       else if (message.document?.caption) text = message.document.caption;
 
       text = (text || "").trim();
+      const mediaDescriptor = extractWhatsAppMediaDescriptor(message);
+      let whatsappInbox = null;
+      try {
+        if (!phoneNumberId) {
+          console.error('WHATSAPP_INBOUND_UNMAPPED_PHONE');
+          return;
+        }
+        let mediaBytes = null;
+        if (mediaDescriptor) {
+          const retrieveMedia = createWhatsAppMediaRetriever({
+            http: axios,
+            accessToken: process.env.WHATSAPP_TOKEN,
+          });
+          const media = await retrieveMedia(mediaDescriptor.externalMediaId);
+          mediaDescriptor.declaredMimeType = media.declaredMimeType || mediaDescriptor.declaredMimeType;
+          mediaDescriptor.originalFilename = media.filename || mediaDescriptor.originalFilename;
+          mediaBytes = media.bytes;
+        }
+        whatsappInbox = await persistWhatsAppInbound({
+          pool,
+          phoneNumberId,
+          customerPhone: cleanFrom,
+          externalMessageId: wpMessageId,
+          content: text,
+          descriptor: mediaDescriptor,
+          bytes: mediaBytes,
+          ensureConversationCrmIdentity,
+          queueLeadQualification,
+        });
+        if (!whatsappInbox) {
+          console.error('WHATSAPP_INBOUND_UNMAPPED_PHONE');
+          return;
+        }
+        if (whatsappInbox.duplicate || !whatsappInbox.shouldInvokeAi) return;
+        if (!text && mediaDescriptor) text = 'Customer shared an attachment.';
+      } catch (error) {
+        console.error('WHATSAPP_MEDIA_INGESTION_FAILED', error?.code ?? 'UNKNOWN');
+        return;
+      }
 
       // 🔥 TELEGRAMA BİLDİRİM FORWARD ET (Ateşle ve Unut)
       sendMessageToTelegram(`WhatsApp → +${cleanFrom}: ${text}`).catch(() => {});
@@ -1369,7 +1415,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       }
 
       // Gelen içerik desteklenmiyorsa
-      const isInvalid = !text || text === "" || message.type === "audio" || message.type === "voice" || message.type === "video" || message.type === "sticker";
+      const isInvalid = ((!text || text === "") && !mediaDescriptor) || message.type === "audio" || message.type === "voice" || message.type === "video" || message.type === "sticker";
       if (isInvalid) {
         if (!session.humanOverride) {
           await sendMessage(cleanFrom, "Gönderdiğiniz içeriği işleyemiyorum. Lütfen mesajınızı yazılı olarak iletin.");
@@ -2985,7 +3031,7 @@ ${text}
       // --------------------------------------
       // YAPAY ZEKA API ÇAĞRISI
       // --------------------------------------
-      const aiResponse = await callWpGemini(prompt);
+      const aiResponse = await callWpGemini(prompt, whatsappInbox?.aiContextPart ?? null);
 
       if (!aiResponse) {
         await sendMessage(cleanFrom, corporateFallback(session.lang || "en"));
@@ -3010,6 +3056,15 @@ ${text}
       // NORMAL CEVAP VEYA AKTARIM İŞLEMİ
       // --------------------------------------
       if (!needsHuman) {
+        if (whatsappInbox) {
+          const persisted = await persistAssistantResponseIfCurrent({
+            tenantId: whatsappInbox.integration.tenant_id,
+            conversationId: whatsappInbox.conversation.id,
+            content: aiResponse,
+            handlingVersion: whatsappInbox.handlingVersion,
+          });
+          if (!persisted.delivered) return;
+        }
         session.history.push({ role: "assistant", text: aiResponse });
         await sendMessage(cleanFrom, aiResponse);
         return;
