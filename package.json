@@ -11,7 +11,7 @@
   "bootstrap-owner": "node scripts/bootstrap_owner.js"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.917.0",
+    "@aws-sdk/client-s3": "^3.540.0",
     "argon2": "^0.44.0",
     "axios": "^1.6.0",
     "body-parser": "^1.20.2",
