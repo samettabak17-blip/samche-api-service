@@ -12,6 +12,7 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 const supportedMimeTypes = new Map([
   ['application/pdf', 'DOCUMENT'],
+  ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'DOCUMENT'],
   ['text/plain', 'DOCUMENT'],
   ['image/jpeg', 'IMAGE'],
   ['image/png', 'IMAGE'],
@@ -34,6 +35,10 @@ function isWebp(buffer) {
   return buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
 }
 
+function isZip(buffer) {
+  return buffer.length >= 4 && buffer.subarray(0, 4).toString('ascii') === 'PK\\x03\\x04';
+}
+
 function isText(buffer) {
   if (!buffer.length) return false;
   return !buffer.subarray(0, Math.min(buffer.length, 4096)).includes(0);
@@ -44,6 +49,7 @@ function hasExpectedSignature(mimeType, buffer) {
   if (mimeType === 'image/png') return isPng(buffer);
   if (mimeType === 'image/jpeg') return isJpeg(buffer);
   if (mimeType === 'image/webp') return isWebp(buffer);
+  if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return isZip(buffer);
   if (mimeType === 'text/plain') return isText(buffer);
   return false;
 }
