@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
 export class ConversationResourceStorageError extends Error {
   constructor(code, message, cause = null) {
@@ -52,6 +52,14 @@ export function createConversationResourceStorage(env = process.env) {
         return response.Body;
       } catch (error) {
         throw new ConversationResourceStorageError('RESOURCE_STORAGE_READ_FAILED', 'Unable to read attachment', error);
+      }
+    },
+    async head({ key }) {
+      try {
+        const response = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+        return { mimeType: response.ContentType ?? null, sizeBytes: Number(response.ContentLength ?? 0) };
+      } catch (error) {
+        throw new ConversationResourceStorageError('RESOURCE_STORAGE_METADATA_FAILED', 'Unable to read attachment metadata', error);
       }
     },
     async remove({ key }) {

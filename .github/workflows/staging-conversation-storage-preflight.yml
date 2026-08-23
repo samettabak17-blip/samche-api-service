@@ -1,0 +1,27 @@
+name: Staging Conversation Storage Preflight
+
+on:
+  workflow_dispatch:
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install
+      - name: Verify private conversation object storage
+        env:
+          CONVERSATION_STORAGE_DRIVER: ${{ secrets.CONVERSATION_STORAGE_DRIVER }}
+          CONVERSATION_S3_BUCKET: ${{ secrets.CONVERSATION_S3_BUCKET }}
+          CONVERSATION_S3_REGION: ${{ secrets.CONVERSATION_S3_REGION }}
+          CONVERSATION_S3_ACCESS_KEY_ID: ${{ secrets.CONVERSATION_S3_ACCESS_KEY_ID }}
+          CONVERSATION_S3_SECRET_ACCESS_KEY: ${{ secrets.CONVERSATION_S3_SECRET_ACCESS_KEY }}
+          CONVERSATION_S3_ENDPOINT: ${{ secrets.CONVERSATION_S3_ENDPOINT }}
+          CONVERSATION_S3_FORCE_PATH_STYLE: ${{ secrets.CONVERSATION_S3_FORCE_PATH_STYLE }}
+        run: node scripts/staging_conversation_storage_preflight.js
+

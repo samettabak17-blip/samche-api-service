@@ -169,7 +169,23 @@ router.get('/:tenantId/conversations/:conversationId/messages', requireTenantAcc
        LIMIT $3 OFFSET $4`,
       [currentTenantId, req.params.conversationId, page.limit, page.offset]
     );
-    return res.json(result.rows);
+    const messageIds = result.rows.map((message) => message.id);
+    const resources = messageIds.length ? await query(
+      `SELECT id, tenant_id, conversation_id, message_id, source_type, media_category,
+              original_filename, mime_type, size_bytes, processing_status, failure_code,
+              created_at, processed_at, updated_at
+         FROM conversation_resources
+        WHERE tenant_id = $1 AND conversation_id = $2 AND message_id = ANY($3::uuid[])
+        ORDER BY created_at ASC, id ASC`,
+      [currentTenantId, req.params.conversationId, messageIds]
+    ) : { rows: [] };
+    const resourcesByMessage = new Map();
+    for (const resource of resources.rows) {
+      const items = resourcesByMessage.get(resource.message_id) ?? [];
+      items.push(resource);
+      resourcesByMessage.set(resource.message_id, items);
+    }
+    return res.json(result.rows.map((message) => ({ ...message, resources: resourcesByMessage.get(message.id) ?? [] })));
   } catch (error) {
     console.error('List conversation messages error:', error?.code ?? error?.name ?? 'unknown');
     return res.status(500).json({ error: 'Server error' });

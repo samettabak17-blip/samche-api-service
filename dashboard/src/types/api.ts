@@ -34,6 +34,23 @@ export interface Conversation extends ConversationRecord {
   last_message_at: string | null;
 }
 export type SenderType = 'CUSTOMER' | 'ASSISTANT' | 'AGENT' | 'SYSTEM';
+export type ConversationResourceStatus = 'UPLOADING' | 'PROCESSING' | 'READY' | 'FAILED';
+export interface ConversationResource {
+  id: string;
+  tenant_id: string;
+  conversation_id: string;
+  message_id: string;
+  source_type: 'UPLOAD' | 'WHATSAPP_MEDIA' | 'URL';
+  media_category: 'DOCUMENT' | 'IMAGE' | 'LINK';
+  original_filename: string | null;
+  mime_type: string | null;
+  size_bytes: number | null;
+  processing_status: ConversationResourceStatus;
+  failure_code: string | null;
+  created_at: string;
+  processed_at: string | null;
+  updated_at: string;
+}
 export interface ConversationMessage {
   id: string;
   tenant_id: string;
@@ -45,6 +62,7 @@ export interface ConversationMessage {
   idempotency_key: string | null;
   created_at: string;
   actor_email: string | null;
+  resources: ConversationResource[];
 }
 export type ConversationAuditEventType = 'TAKEOVER' | 'RETURN_TO_AI' | 'PAUSE' | 'RESUME' | 'CLOSE' | 'ASSIGNMENT' | 'HANDOFF_REQUESTED' | 'HUMAN_MESSAGE';
 export interface ConversationAuditEvent {
