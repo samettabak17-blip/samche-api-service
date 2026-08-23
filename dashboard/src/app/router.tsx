@@ -12,6 +12,7 @@ import { AssistantsPage } from '../features/assistants/assistants-page';
 import { ChannelsPage } from '../features/channels/channels-page';
 import { KnowledgeBasePage } from '../features/knowledge-base/knowledge-base-page';
 import { LeadsPage } from '../features/leads/leads-page';
+import { PipelinePage } from '../features/pipeline/pipeline-page';
 
 function LoadingScreen() { return <div className="grid min-h-screen place-items-center bg-canvas text-sm text-stone-500">Loading workspace…</div>; }
 function RequireAuth({ children }: { children: ReactNode }) { const { status } = useAuth(); if (status === 'checking') return <LoadingScreen />; return status === 'authenticated' ? <>{children}</> : <Navigate to="/login" replace />; }
@@ -39,6 +40,8 @@ export function AppRouter() {
     <Route path="/app/:tenantId/conversations/:conversationId" element={<RequireAuth><TenantRoute><ConversationsPage /></TenantRoute></RequireAuth>} />
     <Route path="/app/:tenantId/leads" element={<RequireAuth><TenantRoute><LeadsPage /></TenantRoute></RequireAuth>} />
     <Route path="/app/:tenantId/leads/:leadId" element={<RequireAuth><TenantRoute><LeadsPage /></TenantRoute></RequireAuth>} />
+    <Route path="/app/:tenantId/pipeline" element={<RequireAuth><TenantRoute><PipelinePage /></TenantRoute></RequireAuth>} />
+    <Route path="/app/:tenantId/pipeline/:dealId" element={<RequireAuth><TenantRoute><PipelinePage /></TenantRoute></RequireAuth>} />
     <Route path="/app/:tenantId/team" element={<RequireAuth><TenantRoute><TeamPage /></TenantRoute></RequireAuth>} />
     <Route path="/app/:tenantId/settings" element={<RequireAuth><TenantRoute><SettingsPage /></TenantRoute></RequireAuth>} />
     <Route path="/app/:tenantId/assistants" element={<RequireAuth><TenantRoute><AssistantsPage /></TenantRoute></RequireAuth>} />

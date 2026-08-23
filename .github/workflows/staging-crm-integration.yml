@@ -27,9 +27,13 @@ jobs:
           node --check test/stagingCrmHttpAcceptance.js
           node --check test/stagingCrmIntegration.js
           node --check tests/crm-read-provider-boundary.test.js
+          node --check services/crm-deal-service.js
+          node --check services/crm-read-service.js
+          node --check routes/crmRoutes.js
+          test -f migrations/005_crm_deals_pipeline_metrics.sql
 
       - name: Layer A - provider-boundary verification
-        run: node --test tests/crm-read-provider-boundary.test.js tests/lead-qualification-service.test.js
+        run: node --test tests/crm-read-provider-boundary.test.js tests/crm-deal-service.test.js tests/crm-deal-read-service.test.js tests/crm-deals-migration.test.js tests/lead-qualification-service.test.js
 
       - name: Layer B - deployed staging CRM HTTP acceptance
         env:

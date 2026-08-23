@@ -1,4 +1,4 @@
-import { BadgeDollarSign, BookOpenText, Bot, Cable, LayoutDashboard, MessagesSquare, Settings, UsersRound } from 'lucide-react';
+import { BadgeDollarSign, BookOpenText, Bot, Cable, KanbanSquare, LayoutDashboard, MessagesSquare, Settings, UsersRound } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import samcheLogo from '../../assets/branding/samche-company-llc-logo.png';
 import type { TenantRole } from '../../types/api';
@@ -9,6 +9,7 @@ const navigation = [
   { label: 'AI Assistants', suffix: '/assistants', icon: Bot },
   { label: 'Conversations', suffix: '/conversations', icon: MessagesSquare },
   { label: 'Leads', suffix: '/leads', icon: BadgeDollarSign },
+  { label: 'Pipeline', suffix: '/pipeline', icon: KanbanSquare },
   { label: 'Channels', suffix: '/channels', icon: Cable },
   { label: 'Knowledge Base', suffix: '/knowledge-base', icon: BookOpenText },
   { label: 'Team', suffix: '/team', icon: UsersRound },

@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { AgentMessageResponse, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmLead, CrmLeadList, CrmPipelineStage, KnowledgeDocument, TeamMember, TenantChannel } from '../../types/api';
+import type { AgentMessageResponse, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmContact, CrmContactList, CrmDeal, CrmDealList, CrmLead, CrmLeadList, CrmOverviewMetrics, CrmPipelineStage, CrmPipelineSummary, KnowledgeDocument, TeamMember, TenantChannel } from '../../types/api';
 
 const tenantRoot = (tenantId: string) => `/api/v1/tenants/${tenantId}`;
 export const tenantKeys = {
@@ -17,9 +17,18 @@ export const tenantKeys = {
   leads: (tenantId: string, filters: string) => ['tenant', tenantId, 'leads', filters] as const,
   lead: (tenantId: string, leadId: string) => ['tenant', tenantId, 'lead', leadId] as const,
   pipelines: (tenantId: string) => ['tenant', tenantId, 'pipelines'] as const,
+  pipelineSummary: (tenantId: string) => ['tenant', tenantId, 'pipeline-summary'] as const,
+  contacts: (tenantId: string, filters: string) => ['tenant', tenantId, 'contacts', filters] as const,
+  contact: (tenantId: string, contactId: string) => ['tenant', tenantId, 'contact', contactId] as const,
+  deals: (tenantId: string, filters: string) => ['tenant', tenantId, 'deals', filters] as const,
+  deal: (tenantId: string, dealId: string) => ['tenant', tenantId, 'deal', dealId] as const,
+  crmOverview: (tenantId: string) => ['tenant', tenantId, 'crm-overview'] as const,
 };
 export interface LeadFilters { limit: number; offset: number; temperature?: string; stage?: string; source?: string; assigned_user_id?: string; conversation_id?: string; }
+export interface DealFilters { limit: number; offset: number; stage?: string; contact_id?: string; owner_user_id?: string; status?: string; source?: string; include_archived?: boolean; }
+export interface DealPayload { contact_id: string; lead_id?: string | null; title: string; pipeline_stage_id?: string; value?: number | null; currency?: string | null; probability?: number | null; expected_close_date?: string | null; owner_user_id?: string | null; source?: string | null; notes?: string | null; }
 const leadQuery = (filters: LeadFilters) => new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined && value !== '').map(([key, value]) => [key, String(value)])).toString();
+const dealQuery = (filters: DealFilters) => new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined && value !== '').map(([key, value]) => [key, String(value)])).toString();
 
 export const tenantApi = {
   listAssistants: (tenantId: string) => apiClient.get<Assistant[]>(`${tenantRoot(tenantId)}/assistants`),
@@ -55,6 +64,16 @@ export const tenantApi = {
   listLeads: (tenantId: string, filters: LeadFilters) => apiClient.get<CrmLeadList>(`${tenantRoot(tenantId)}/leads?${leadQuery(filters)}`),
   getLead: (tenantId: string, leadId: string) => apiClient.get<CrmLead>(`${tenantRoot(tenantId)}/leads/${leadId}`),
   listPipelines: (tenantId: string) => apiClient.get<CrmPipelineStage[]>(`${tenantRoot(tenantId)}/pipelines`),
+  listPipelineSummary: (tenantId: string) => apiClient.get<CrmPipelineSummary[]>(`${tenantRoot(tenantId)}/pipelines/summary`),
+  getCrmOverview: (tenantId: string) => apiClient.get<CrmOverviewMetrics>(`${tenantRoot(tenantId)}/crm/overview`),
+  listContacts: (tenantId: string, page: { limit: number; offset: number }) => apiClient.get<CrmContactList>(`${tenantRoot(tenantId)}/contacts?limit=${page.limit}&offset=${page.offset}`),
+  getContact: (tenantId: string, contactId: string) => apiClient.get<CrmContact>(`${tenantRoot(tenantId)}/contacts/${contactId}`),
+  listDeals: (tenantId: string, filters: DealFilters) => apiClient.get<CrmDealList>(`${tenantRoot(tenantId)}/deals?${dealQuery(filters)}`),
+  getDeal: (tenantId: string, dealId: string) => apiClient.get<CrmDeal>(`${tenantRoot(tenantId)}/deals/${dealId}`),
+  createDeal: (tenantId: string, body: DealPayload) => apiClient.post<CrmDeal>(`${tenantRoot(tenantId)}/deals`, body),
+  updateDeal: (tenantId: string, dealId: string, body: Partial<DealPayload>) => apiClient.put<CrmDeal>(`${tenantRoot(tenantId)}/deals/${dealId}`, body),
+  setDealStage: (tenantId: string, dealId: string, stageId: string) => apiClient.post<CrmDeal>(`${tenantRoot(tenantId)}/deals/${dealId}/stage`, { pipeline_stage_id: stageId }),
+  archiveDeal: (tenantId: string, dealId: string) => apiClient.delete<void>(`${tenantRoot(tenantId)}/deals/${dealId}`),
   assignLead: (tenantId: string, leadId: string, userId: string) => apiClient.post<CrmLead>(`${tenantRoot(tenantId)}/leads/${leadId}/assign`, { user_id: userId }),
   setLeadStage: (tenantId: string, leadId: string, stageId: string) => apiClient.post<CrmLead>(`${tenantRoot(tenantId)}/leads/${leadId}/stage`, { pipeline_stage_id: stageId }),
   rescoreLead: (tenantId: string, leadId: string) => apiClient.post<{ status: string; lead_id: string }>(`${tenantRoot(tenantId)}/leads/${leadId}/rescore`, {}),

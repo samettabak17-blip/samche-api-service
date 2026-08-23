@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   getContact,
+  getCrmOverviewMetrics,
   getLead,
+  getPipelineSummary,
   listCompanies,
   listContacts,
   listDeals,
@@ -35,8 +37,10 @@ test('all CRM read services stay on the database boundary and invoke zero qualif
   await listCompanies(queryFn, { tenantId, limit: 10, offset: 0 });
   await listPipelineStages(queryFn, { tenantId });
   await listDeals(queryFn, { tenantId, limit: 10, offset: 0 });
+  await getPipelineSummary(queryFn, { tenantId });
+  await getCrmOverviewMetrics(queryFn, { tenantId });
 
-  assert.equal(calls.length, 7);
+  assert.equal(calls.length, 10);
   assert.equal(providerCalls, 0);
   assert.ok(calls.every(({ params }) => params[0] === tenantId), 'every read is tenant-scoped');
   assert.ok(calls.some(({ params }) => params.includes(10) && params.includes(5)), 'pagination is exercised');

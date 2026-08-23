@@ -31,12 +31,19 @@ jobs:
           test -f dashboard/package.json
           test -f services/crm-lead-detail-service.js
           test -f services/crm-read-service.js
+          test -f services/crm-deal-service.js
+          test -f migrations/005_crm_deals_pipeline_metrics.sql
           test -f routes/crmRoutes.js
           test -f dashboard/src/features/leads/leads-page.tsx
           test -f dashboard/src/features/leads/leads-page.test.tsx
+          test -f dashboard/src/features/pipeline/pipeline-page.tsx
+          test -f dashboard/src/features/pipeline/pipeline-page.test.tsx
           test -f dashboard/vitest.config.ts
           test -f tests/crm-lead-detail-service.test.js
           test -f tests/crm-read-provider-boundary.test.js
+          test -f tests/crm-deal-service.test.js
+          test -f tests/crm-deal-read-service.test.js
+          test -f tests/crm-deals-migration.test.js
           test -f tests/lead-qualification-service.test.js
           grep -Fq '"test": "vitest run --environment jsdom"' dashboard/package.json
           grep -Fq '"build": "tsc -b && vite build"' dashboard/package.json
@@ -52,4 +59,4 @@ jobs:
 
       - name: Backend CRM regression suite
         run: |
-          node --test             tests/crm-lead-detail-service.test.js             tests/crm-read-provider-boundary.test.js             tests/lead-qualification-service.test.js             tests/crm-lead-service.test.js             tests/crm-permissions.test.js             tests/conversation-permissions.test.js
+          node --test             tests/crm-lead-detail-service.test.js             tests/crm-read-provider-boundary.test.js             tests/crm-deal-service.test.js             tests/crm-deal-read-service.test.js             tests/crm-deals-migration.test.js             tests/crm-migration.test.js             tests/lead-qualification-service.test.js             tests/crm-lead-service.test.js             tests/crm-permissions.test.js             tests/conversation-permissions.test.js

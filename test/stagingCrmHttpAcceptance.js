@@ -93,7 +93,7 @@ async function createCrossTenantFixture(client, value) {
   );
   const company = await client.query('INSERT INTO crm_companies (tenant_id, name) VALUES ($1, $2) RETURNING id', [tenantId, `Cross tenant ${value}`]);
   const lead = await client.query('INSERT INTO crm_leads (tenant_id, contact_id, pipeline_stage_id) VALUES ($1, $2, $3) RETURNING id', [tenantId, contact.rows[0].id, stage.rows[0].id]);
-  return { tenantId, stageId: stage.rows[0].id, leadId: lead.rows[0].id, companyId: company.rows[0].id };
+  return { tenantId, stageId: stage.rows[0].id, leadId: lead.rows[0].id, companyId: company.rows[0].id, contactId: contact.rows[0].id };
 }
 
 async function run() {
@@ -143,8 +143,18 @@ async function run() {
     await request('ADMIN', adminToken, 'PUT', `${t}/leads/${cross.leadId}`, { intent: 'cross tenant' }, 404);
 
     const deal = await request('OWNER', ownerToken, 'POST', `${t}/deals`, { lead_id: fixture.leadId, pipeline_stage_id: qualified.id, title: 'Task 2 fixture deal', value: 1000, currency: 'AED' }, 201);
-    await request('ADMIN', adminToken, 'PUT', `${t}/deals/${deal.id}`, { title: 'Updated task 2 fixture deal' }, 200);
+    await request('ADMIN', adminToken, 'GET', `${t}/deals/${deal.id}`, undefined, 200);
+    await request('ADMIN', adminToken, 'PUT', `${t}/deals/${deal.id}`, { title: 'Updated task 2 fixture deal', probability: 75, notes: 'Persisted fixture note' }, 200);
     await request('AGENT', agentToken, 'GET', `${t}/deals`, undefined, 200);
+    const won = pipeline.find((stage) => stage.stage_key === 'WON');
+    expect(won?.id, 'fixture pipeline lacks WON stage');
+    await request('ADMIN', adminToken, 'POST', `${t}/deals/${deal.id}/stage`, { pipeline_stage_id: won.id }, 200);
+    await request('ADMIN', adminToken, 'GET', `${t}/pipelines/summary`, undefined, 200);
+    await request('ADMIN', adminToken, 'GET', `${t}/crm/overview`, undefined, 200);
+    const directDeal = await request('ADMIN', adminToken, 'POST', `${t}/deals`, { contact_id: fixture.contactId, title: 'Direct contact opportunity', value: 2000, currency: 'AED', probability: 60, source: 'CI' }, 201);
+    await request('ADMIN', adminToken, 'DELETE', `${t}/deals/${directDeal.id}`, undefined, 204);
+    await request('ADMIN', adminToken, 'GET', `${t}/deals/${directDeal.id}`, undefined, 404);
+    await request('ADMIN', adminToken, 'POST', `${t}/deals`, { contact_id: cross.contactId, title: 'Invalid cross-tenant contact' }, 409);
     await request('ADMIN', adminToken, 'POST', `${t}/deals`, { lead_id: fixture.leadId, pipeline_stage_id: cross.stageId, title: 'Invalid cross-tenant stage' }, 409);
     await request('ADMIN', adminToken, 'POST', `${t}/leads`, { contact_id: cross.companyId }, 409);
   } finally {
