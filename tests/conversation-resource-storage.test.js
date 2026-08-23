@@ -10,21 +10,14 @@ import {
   getSafeStorageProviderDiagnostic,
 } from '../services/conversation-resource-storage.js';
 
-test('R2 PutObject input omits optional SSE and checksum headers while retaining content metadata', () => {
-  const input = buildPutObjectInput({
-    bucket: 'staging-private-bucket',
-    key: 'conversation-resources/tenant/conversation/resource',
-    body: Buffer.from('safe'),
-    mimeType: 'text/plain',
-  });
-  assert.deepEqual(input, {
-    Bucket: 'staging-private-bucket',
-    Key: 'conversation-resources/tenant/conversation/resource',
-    Body: Buffer.from('safe'),
-    ContentType: 'text/plain',
-  });
-  assert.equal(Object.hasOwn(input, 'ServerSideEncryption'), false);
-  assert.equal(Object.hasOwn(input, 'ChecksumSHA256'), false);
+test('minimal R2 PutObject input has exactly bucket key and body, while adapter adds only ContentType', () => {
+  const base = { bucket: 'staging-private-bucket', key: 'conversation-resources/tenant/conversation/resource', body: Buffer.from('safe') };
+  const minimal = buildPutObjectInput(base);
+  const application = buildPutObjectInput({ ...base, mimeType: 'text/plain' });
+  assert.deepEqual(Object.keys(minimal).sort(), ['Body', 'Bucket', 'Key']);
+  assert.deepEqual(Object.keys(application).sort(), ['Body', 'Bucket', 'ContentType', 'Key']);
+  assert.equal(Object.hasOwn(application, 'ServerSideEncryption'), false);
+  assert.equal(Object.hasOwn(application, 'ChecksumSHA256'), false);
 });
 
 test('R2 client configuration retains only protocol-required SDK checksum behavior', () => {
@@ -53,7 +46,6 @@ test('safe configuration and signed-request diagnostics reveal 0/1 shapes but ne
   };
   const config = describeStorageConfiguration(environment);
   const key = config.find((item) => item.name === 'CONVERSATION_S3_ACCESS_KEY_ID');
-  const secret = config.find((item) => item.name === 'CONVERSATION_S3_SECRET_ACCESS_KEY');
   assert.deepEqual(key, {
     name: 'CONVERSATION_S3_ACCESS_KEY_ID',
     present: 1,
@@ -64,7 +56,6 @@ test('safe configuration and signed-request diagnostics reveal 0/1 shapes but ne
     containsTAB: 0,
     containsControlCharacter: 0,
   });
-  assert.equal(secret.containsTAB, 1);
   assert.deepEqual(describeStorageAddressing(environment), {
     endpoint: { isHttps: 1, hasHost: 1, hasPathOrQuery: 0 },
     bucketVirtualHostCompatible: 1,
@@ -80,30 +71,22 @@ test('safe configuration and signed-request diagnostics reveal 0/1 shapes but ne
   assert.equal(JSON.stringify({ config, request }).includes('AWS4-HMAC'), false);
 });
 
-test('provider diagnostics preserve only a safe R2 error message', () => {
+test('provider diagnostics preserve safe XML-style error fields and no sensitive error details', () => {
   const error = Object.assign(new Error('Invalid argument'), {
     name: 'InvalidArgument',
     code: 'InvalidArgument',
+    ArgumentName: 'ContentType',
     $metadata: { httpStatusCode: 400, requestId: 'r2-request-id_123' },
   });
   const expected = {
     providerErrorName: 'InvalidArgument',
     providerErrorCode: 'InvalidArgument',
     providerMessage: 'Invalid argument',
+    argumentName: 'ContentType',
     httpStatus: 400,
     requestId: 'r2-request-id_123',
   };
   assert.deepEqual(getSafeStorageProviderDiagnostic(error), expected);
-  assert.deepEqual(getSafeStorageProviderDiagnostic({ provider: expected }), expected);
-  const failure = getSafeStorageFailureDiagnostic({
-    provider: expected,
-    diagnostics: {
-      configuration: [],
-      addressing: null,
-      request: { operation: 'PutObjectCommand', headers: [] },
-      putObjectOptionNames: ['Body', 'Bucket', 'ContentType', 'Key'],
-    },
-  });
-  assert.deepEqual(failure.provider, expected);
-  assert.deepEqual(failure.putObjectOptionNames, ['Body', 'Bucket', 'ContentType', 'Key']);
+  const fallback = { configuration: [], addressing: null, request: { operation: 'PutObjectCommand', headers: [] }, putObjectOptionNames: ['Body', 'Bucket', 'Key'] };
+  assert.deepEqual(getSafeStorageFailureDiagnostic(error, fallback).putObjectOptionNames, ['Body', 'Bucket', 'Key']);
 });

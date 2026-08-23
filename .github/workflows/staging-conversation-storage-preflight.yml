@@ -9,14 +9,39 @@ jobs:
     environment: staging
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: 22
+
       - name: Install dependencies
         run: npm install
-      - name: Report installed S3 SDK version
+
+      - name: Report installed S3 SDK versions
+        shell: bash
         run: |
-          node -p "'AWS_S3_SDK_VERSION: ' + require('./node_modules/@aws-sdk/client-s3/package.json').version"
+          node <<'NODE'
+          const packages = [
+            '@aws-sdk/client-s3',
+            '@aws-sdk/signature-v4',
+            '@smithy/signature-v4',
+            '@smithy/protocol-http',
+            '@smithy/node-http-handler',
+          ];
+          for (const packageName of packages) {
+            try {
+              const { version } = require(`${packageName}/package.json`);
+              console.log(`AWS_S3_SDK_VERSION | ${packageName} | ${version}`);
+            } catch {
+              console.log(`AWS_S3_SDK_VERSION | ${packageName} | not-installed`);
+            }
+          }
+          NODE
+
+      - name: Run storage adapter regression tests
+        run: node --test tests/conversation-resource-storage.test.js
+
       - name: Verify private conversation object storage
         env:
           CONVERSATION_STORAGE_DRIVER: ${{ secrets.CONVERSATION_STORAGE_DRIVER }}

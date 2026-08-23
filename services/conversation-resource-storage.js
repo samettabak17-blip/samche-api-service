@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
 const CONFIGURATION_FIELDS = [
   'CONVERSATION_STORAGE_DRIVER',
@@ -33,17 +33,6 @@ function stringShape(value) {
   };
 }
 
-function safeDiagnostic(value = {}) {
-  const status = Number(value.httpStatus);
-  return {
-    providerErrorName: safeToken(value.providerErrorName),
-    providerErrorCode: safeToken(value.providerErrorCode),
-    providerMessage: safeProviderMessage(value.providerMessage),
-    httpStatus: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null,
-    requestId: safeToken(value.requestId),
-  };
-}
-
 function safeProviderMessage(value) {
   if (typeof value !== 'string') return null;
   const normalized = value.trim();
@@ -51,6 +40,18 @@ function safeProviderMessage(value) {
   if (!/^[A-Za-z0-9 .,:;()\[\]{}_'/-]+$/.test(normalized)) return null;
   if (/(authorization|credential|signature|secret|token|access[ _-]?key|https?:|x-amz|endpoint)/i.test(normalized)) return null;
   return normalized;
+}
+
+function safeDiagnostic(value = {}) {
+  const status = Number(value.httpStatus);
+  return {
+    providerErrorName: safeToken(value.providerErrorName),
+    providerErrorCode: safeToken(value.providerErrorCode),
+    providerMessage: safeProviderMessage(value.providerMessage),
+    argumentName: safeToken(value.argumentName),
+    httpStatus: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null,
+    requestId: safeToken(value.requestId),
+  };
 }
 
 function describeEndpoint(value) {
@@ -110,18 +111,23 @@ export function getSafeStorageProviderDiagnostic(error) {
     providerErrorName: provider?.name,
     providerErrorCode: provider?.Code ?? provider?.code,
     providerMessage: provider?.message,
+    argumentName: provider?.ArgumentName ?? provider?.argumentName ?? provider?.Argument ?? provider?.argument,
     httpStatus: metadata.httpStatusCode,
     requestId: metadata.requestId ?? metadata.extendedRequestId,
   });
 }
 
-export function getSafeStorageFailureDiagnostic(error) {
+export function getSafeStorageFailureDiagnostic(error, fallback = null) {
   return {
     provider: getSafeStorageProviderDiagnostic(error),
-    configuration: Array.isArray(error?.diagnostics?.configuration) ? error.diagnostics.configuration : [],
-    addressing: error?.diagnostics?.addressing ?? null,
-    request: error?.diagnostics?.request ?? null,
-    putObjectOptionNames: Array.isArray(error?.diagnostics?.putObjectOptionNames) ? error.diagnostics.putObjectOptionNames : [],
+    configuration: Array.isArray(error?.diagnostics?.configuration)
+      ? error.diagnostics.configuration
+      : (fallback?.configuration ?? []),
+    addressing: error?.diagnostics?.addressing ?? fallback?.addressing ?? null,
+    request: error?.diagnostics?.request ?? fallback?.request ?? null,
+    putObjectOptionNames: Array.isArray(error?.diagnostics?.putObjectOptionNames)
+      ? error.diagnostics.putObjectOptionNames
+      : (fallback?.putObjectOptionNames ?? []),
   };
 }
 
@@ -153,16 +159,16 @@ export function buildS3ClientConfig({ region, endpoint, accessKeyId, secretAcces
   };
 }
 
-export function buildPutObjectInput({ bucket, key, body, mimeType }) {
+export function buildPutObjectInput({ bucket, key, body, mimeType = undefined }) {
   return {
     Bucket: bucket,
     Key: key,
     Body: body,
-    ContentType: mimeType,
+    ...(mimeType ? { ContentType: mimeType } : {}),
   };
 }
 
-export function createConversationResourceStorage(env = process.env) {
+export function createConversationStorageClient(env = process.env) {
   const driver = String(env.CONVERSATION_STORAGE_DRIVER ?? '').toLowerCase();
   if (driver !== 's3') {
     throw new ConversationResourceStorageError('RESOURCE_STORAGE_UNAVAILABLE', 'No durable conversation storage provider is configured');
@@ -197,12 +203,25 @@ export function createConversationResourceStorage(env = process.env) {
     }
   );
 
-  const failureDiagnostics = (putObjectOptionNames = []) => ({
+  return {
+    client,
+    bucket,
     configuration,
     addressing,
-    request,
-    putObjectOptionNames,
-  });
+    getRequest: () => request,
+    getDiagnostics: (putObjectOptionNames = []) => ({
+      configuration,
+      addressing,
+      request,
+      putObjectOptionNames,
+    }),
+  };
+}
+
+export function createConversationResourceStorage(env = process.env, connection = null) {
+  const storageConnection = connection ?? createConversationStorageClient(env);
+  const { client, bucket } = storageConnection;
+  const failureDiagnostics = (putObjectOptionNames = []) => storageConnection.getDiagnostics(putObjectOptionNames);
 
   return {
     async put({ key, body, mimeType }) {
@@ -255,6 +274,9 @@ export function createConversationResourceStorage(env = process.env) {
           failureDiagnostics()
         );
       }
+    },
+    async connectivity(prefix) {
+      return client.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, MaxKeys: 1 }));
     },
   };
 }
