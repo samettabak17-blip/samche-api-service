@@ -25,6 +25,7 @@ function safeDiagnosticFields(error) {
     ['operation', error?.code],
     ['provider_name', provider.providerErrorName],
     ['provider_code', provider.providerErrorCode],
+    ['provider_message', provider.providerMessage],
     ['http_status', provider.httpStatus],
     ['request_id', provider.requestId],
     ['sdk_operation', diagnostic.request?.operation],
@@ -34,6 +35,13 @@ function safeDiagnosticFields(error) {
   if (diagnostic.configuration.length) {
     fields.push(`config_shape=${diagnostic.configuration.map(shapeSummary).join(',')}`);
   }
+  if (diagnostic.addressing) {
+    const { endpoint, bucketVirtualHostCompatible, regionIsAuto, forcePathStyle } = diagnostic.addressing;
+    fields.push(`addressing={endpoint_https=${endpoint.isHttps};endpoint_host=${endpoint.hasHost};endpoint_path_or_query=${endpoint.hasPathOrQuery};bucket_virtual_host_compatible=${bucketVirtualHostCompatible};region_auto=${regionIsAuto};force_path_style=${forcePathStyle}}`);
+  }
+  if (diagnostic.putObjectOptionNames.length) {
+    fields.push(`put_object_options=${diagnostic.putObjectOptionNames.join(',')}`);
+  }
   if (diagnostic.request?.headers?.length) {
     fields.push(`request_header_shape=${diagnostic.request.headers.map(shapeSummary).join(',')}`);
   }
@@ -41,7 +49,7 @@ function safeDiagnosticFields(error) {
 }
 
 try {
-  await storage.put({ key, body, mimeType: 'text/plain', checksum: crypto.createHash('sha256').update(body).digest('base64') });
+  await storage.put({ key, body, mimeType: 'text/plain' });
   const metadata = await storage.head({ key });
   const actual = await read(await storage.get({ key }));
   if (!actual.equals(body) || metadata.sizeBytes !== body.length || metadata.mimeType !== 'text/plain') {
