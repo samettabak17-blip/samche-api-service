@@ -7,7 +7,6 @@ import { cleanupFixtureRun, createFixtureLifecycle, fixtureNames } from './stagi
 
 const apiBase = (process.env.STAGING_API_BASE_URL || 'https://samche-api-staging.onrender.com').replace(/\/$/, '');
 const databaseUrl = process.env.STAGING_DATABASE_URL;
-const ownerToken = process.env.STAGING_OWNER_TOKEN;
 const rawPassword = 'Task2-Crm-Fixture-Only-2026!';
 let failures = 0;
 
@@ -98,7 +97,6 @@ async function createCrossTenantFixture(client, value) {
 
 async function run() {
   expect(databaseUrl, 'STAGING_DATABASE_URL is required');
-  expect(ownerToken, 'STAGING_OWNER_TOKEN is required');
   const pool = new pg.Pool({ connectionString: databaseUrl, ssl: { rejectUnauthorized: false } });
   const client = await pool.connect();
   const value = label();
@@ -109,6 +107,7 @@ async function run() {
     fixture = await createFixtureLifecycle({ client, label: value, passwordHash });
     cross = await createCrossTenantFixture(client, value);
     await createConversationPrerequisite(client, fixture, value);
+    const ownerToken = await login(fixture.names.ownerEmail);
     const adminToken = await login(`ci-crm-admin-${value}@example.test`);
     const agentToken = await login(fixture.names.agentEmail);
     const t = `/api/v1/tenants/${fixture.tenantId}`;

@@ -1,11 +1,11 @@
 // Staging CRM fixture harness. Runtime API is never imported or modified.
 export function fixtureNames(label) {
-  return { tenantA: '__ci_crm_a_' + label, tenantB: '__ci_crm_b_' + label, agentEmail: 'ci-crm-agent-' + label + '@example.test' };
+  return { tenantA: '__ci_crm_a_' + label, tenantB: '__ci_crm_b_' + label, ownerEmail: 'ci-crm-owner-' + label + '@example.test', agentEmail: 'ci-crm-agent-' + label + '@example.test' };
 }
 export function cleanupPlan(tenantIds) {
   return ['crm_lead_analyses','crm_activities','crm_deals','crm_leads','conversation_messages','detach_conversation_contacts','conversations','crm_contacts','crm_companies','knowledge_base_documents','tenant_channels','ai_assistants','crm_pipeline_stages','tenant_users'].map((step)=>({step,tenantIds}));
 }
-export async function cleanupFixtureRun({ client, tenantIds, names, agentId, adminId = null, adminEmail = null }) {
+export async function cleanupFixtureRun({ client, tenantIds, names, ownerId = null, ownerEmail = null, agentId, adminId = null, adminEmail = null }) {
   const tenants=await client.query('SELECT id, name FROM tenants WHERE id = ANY($1::uuid[])',[tenantIds]);
   if (tenants.rowCount === 0) return;
   const expectedTenantNames = new Set([names.tenantA, names.tenantB]);
@@ -29,6 +29,7 @@ export async function cleanupFixtureRun({ client, tenantIds, names, agentId, adm
   await q('DELETE FROM tenant_users WHERE tenant_id = ANY($1::uuid[])');
   await client.query('DELETE FROM users WHERE id = $1 AND email = $2',[agentId,names.agentEmail]);
   if (adminId && adminEmail) await client.query('DELETE FROM users WHERE id = $1 AND email = $2',[adminId,adminEmail]);
+  if (ownerId && ownerEmail) await client.query('DELETE FROM users WHERE id = $1 AND email = $2',[ownerId,ownerEmail]);
   await client.query('DELETE FROM tenants WHERE id = ANY($1::uuid[]) AND name = ANY($2::text[])',[tenantIds,[names.tenantA,names.tenantB]]);
 }
 
@@ -38,6 +39,7 @@ export async function createFixtureLifecycle({ client, label, passwordHash }) {
   try {
     const tenant = await client.query("INSERT INTO tenants (name) VALUES ($1) RETURNING id", [names.tenantA]);
     const tenantId = tenant.rows[0].id;
+    const owner = await client.query("INSERT INTO users (email,password_hash,system_role) VALUES ($1,$2,'OWNER') RETURNING id", [names.ownerEmail, passwordHash]);
     const admin = await client.query("INSERT INTO users (email,password_hash,system_role) VALUES ($1,$2,'CUSTOMER') RETURNING id", ['ci-crm-admin-' + label + '@example.test', passwordHash]);
     const agent = await client.query("INSERT INTO users (email,password_hash,system_role) VALUES ($1,$2,'CUSTOMER') RETURNING id", [names.agentEmail, passwordHash]);
     await client.query("INSERT INTO tenant_users (tenant_id,user_id,tenant_role) VALUES ($1,$2,'ADMIN'),($1,$3,'AGENT')", [tenantId,admin.rows[0].id,agent.rows[0].id]);
@@ -46,12 +48,12 @@ export async function createFixtureLifecycle({ client, label, passwordHash }) {
     const lead = await client.query("INSERT INTO crm_leads (tenant_id,contact_id,pipeline_stage_id) VALUES ($1,$2,$3) RETURNING id",[tenantId,contact.rows[0].id,stage.rows[0].id]);
     const deal = await client.query("INSERT INTO crm_deals (tenant_id,contact_id,lead_id,title,pipeline_stage_id) VALUES ($1,$2,$3,'CI CRM fixture',$4) RETURNING id",[tenantId,contact.rows[0].id,lead.rows[0].id,stage.rows[0].id]);
     await client.query('COMMIT');
-    return { tenantId, adminId: admin.rows[0].id, agentId: agent.rows[0].id, contactId: contact.rows[0].id, leadId: lead.rows[0].id, dealId: deal.rows[0].id, names };
+    return { tenantId, ownerId: owner.rows[0].id, adminId: admin.rows[0].id, agentId: agent.rows[0].id, contactId: contact.rows[0].id, leadId: lead.rows[0].id, dealId: deal.rows[0].id, names };
   } catch (error) { await client.query('ROLLBACK').catch(()=>{}); throw error; }
 }
 
 export async function withFixtureLifecycle({ client, label, passwordHash, run }) {
   let fixture;
   try { fixture = await createFixtureLifecycle({ client, label, passwordHash }); return await run(fixture); }
-  finally { if (fixture) await cleanupFixtureRun({ client, tenantIds:[fixture.tenantId], names:{tenantA:fixture.names.tenantA,tenantB:fixture.names.tenantA,agentEmail:fixture.names.agentEmail}, agentId:fixture.agentId, adminId:fixture.adminId, adminEmail:'ci-crm-admin-' + label + '@example.test' }).catch(()=>{}); }
+  finally { if (fixture) await cleanupFixtureRun({ client, tenantIds:[fixture.tenantId], names:{tenantA:fixture.names.tenantA,tenantB:fixture.names.tenantA,ownerEmail:fixture.names.ownerEmail,agentEmail:fixture.names.agentEmail}, ownerId:fixture.ownerId, ownerEmail:fixture.names.ownerEmail, agentId:fixture.agentId, adminId:fixture.adminId, adminEmail:'ci-crm-admin-' + label + '@example.test' }).catch(()=>{}); }
 }

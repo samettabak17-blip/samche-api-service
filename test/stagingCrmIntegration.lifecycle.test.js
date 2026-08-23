@@ -50,7 +50,9 @@ async function cleanup(client, fixture, value) {
   return cleanupFixtureRun({
     client,
     tenantIds: [fixture.tenantId],
-    names: { tenantA: fixture.names.tenantA, tenantB: fixture.names.tenantA, agentEmail: fixture.names.agentEmail },
+    names: { tenantA: fixture.names.tenantA, tenantB: fixture.names.tenantA, ownerEmail: fixture.names.ownerEmail, agentEmail: fixture.names.agentEmail },
+    ownerId: fixture.ownerId,
+    ownerEmail: fixture.names.ownerEmail,
     agentId: fixture.agentId,
     adminId: fixture.adminId,
     adminEmail: adminEmail(value)
@@ -83,7 +85,7 @@ async function assertNoFixtureResiduals(client, fixture, value) {
   }
   const users = await client.query(
     'SELECT COUNT(*)::int AS count FROM users WHERE id = ANY($1::uuid[])',
-    [[fixture.adminId, fixture.agentId]]
+    [[fixture.ownerId, fixture.adminId, fixture.agentId]]
   );
   assert.equal(users.rows[0].count, 0, 'fixture users remain');
   const tenants = await client.query(
@@ -113,6 +115,7 @@ if (!databaseUrl) {
           captured = fixture;
           await createDependentRows(client, fixture, value);
           assert.ok(fixture.tenantId);
+          assert.ok(fixture.ownerId);
           assert.ok(fixture.adminId);
           assert.ok(fixture.agentId);
           assert.ok(fixture.contactId);
@@ -189,6 +192,8 @@ if (!databaseUrl) {
           client,
           tenantIds: [fixture.tenantId],
           names: { tenantA: '__not_fixture__', tenantB: '__not_fixture__' },
+          ownerId: fixture.ownerId,
+          ownerEmail: fixture.names.ownerEmail,
           agentId: fixture.agentId,
           adminId: fixture.adminId,
           adminEmail: adminEmail(value)
