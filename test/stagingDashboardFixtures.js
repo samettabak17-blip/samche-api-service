@@ -64,6 +64,10 @@ try {
     try {
       await client.query('BEGIN');
       await client.query(
+        'DELETE FROM conversation_resources WHERE message_id = $1 AND conversation_id = $2 AND tenant_id = $3',
+        [messageId, conversationId, tenantId]
+      );
+      await client.query(
         'DELETE FROM conversation_messages WHERE id = $1 AND conversation_id = $2 AND tenant_id = $3',
         [messageId, conversationId, tenantId]
       );
@@ -97,11 +101,11 @@ try {
       );
       if (tenants.rowCount !== 2) throw new Error('Refusing cleanup: fixture tenants do not match the generated label');
 
-      // CRM graph: every delete is constrained to the verified generated fixture tenants.
       await client.query('DELETE FROM crm_lead_analyses WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
       await client.query('DELETE FROM crm_activities WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
       await client.query('DELETE FROM crm_deals WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
       await client.query('DELETE FROM crm_leads WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
+      await client.query('DELETE FROM conversation_resources WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
       await client.query('DELETE FROM conversation_messages WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
       await client.query('UPDATE conversations SET contact_id = NULL WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
       await client.query('DELETE FROM conversations WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);

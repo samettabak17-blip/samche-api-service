@@ -3,7 +3,7 @@ export function fixtureNames(label) {
   return { tenantA: '__ci_crm_a_' + label, tenantB: '__ci_crm_b_' + label, ownerEmail: 'ci-crm-owner-' + label + '@example.test', agentEmail: 'ci-crm-agent-' + label + '@example.test' };
 }
 export function cleanupPlan(tenantIds) {
-  return ['crm_lead_analyses','crm_activities','crm_deals','crm_leads','conversation_messages','detach_conversation_contacts','conversations','crm_contacts','crm_companies','knowledge_base_documents','tenant_channels','ai_assistants','crm_pipeline_stages','tenant_users'].map((step)=>({step,tenantIds}));
+  return ['crm_lead_analyses','crm_activities','crm_deals','crm_leads','conversation_resources','conversation_messages','detach_conversation_contacts','conversations','crm_contacts','crm_companies','knowledge_base_documents','tenant_channels','ai_assistants','crm_pipeline_stages','tenant_users'].map((step)=>({step,tenantIds}));
 }
 export async function cleanupFixtureRun({ client, tenantIds, names, ownerId = null, ownerEmail = null, agentId, adminId = null, adminEmail = null }) {
   const tenants=await client.query('SELECT id, name FROM tenants WHERE id = ANY($1::uuid[])',[tenantIds]);
@@ -17,6 +17,7 @@ export async function cleanupFixtureRun({ client, tenantIds, names, ownerId = nu
   await q('DELETE FROM crm_activities WHERE tenant_id = ANY($1::uuid[])');
   await q('DELETE FROM crm_deals WHERE tenant_id = ANY($1::uuid[])');
   await q('DELETE FROM crm_leads WHERE tenant_id = ANY($1::uuid[])');
+  await q('DELETE FROM conversation_resources WHERE tenant_id = ANY($1::uuid[])');
   await q('DELETE FROM conversation_messages WHERE tenant_id = ANY($1::uuid[])');
   await q('UPDATE conversations SET contact_id = NULL WHERE tenant_id = ANY($1::uuid[])');
   await q('DELETE FROM conversations WHERE tenant_id = ANY($1::uuid[])');
