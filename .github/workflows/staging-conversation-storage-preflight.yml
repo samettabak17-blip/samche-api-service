@@ -42,6 +42,18 @@ jobs:
       - name: Run storage adapter regression tests
         run: node --test tests/conversation-resource-storage.test.js
 
+      - name: Diagnose R2 authentication and addressing
+        continue-on-error: true
+        env:
+          CONVERSATION_STORAGE_DRIVER: ${{ secrets.CONVERSATION_STORAGE_DRIVER }}
+          CONVERSATION_S3_BUCKET: ${{ secrets.CONVERSATION_S3_BUCKET }}
+          CONVERSATION_S3_REGION: ${{ secrets.CONVERSATION_S3_REGION }}
+          CONVERSATION_S3_ACCESS_KEY_ID: ${{ secrets.CONVERSATION_S3_ACCESS_KEY_ID }}
+          CONVERSATION_S3_SECRET_ACCESS_KEY: ${{ secrets.CONVERSATION_S3_SECRET_ACCESS_KEY }}
+          CONVERSATION_S3_ENDPOINT: ${{ secrets.CONVERSATION_S3_ENDPOINT }}
+          CONVERSATION_S3_FORCE_PATH_STYLE: ${{ secrets.CONVERSATION_S3_FORCE_PATH_STYLE }}
+        run: node scripts/staging_r2_auth_probe.js
+
       - name: Verify private conversation object storage
         env:
           CONVERSATION_STORAGE_DRIVER: ${{ secrets.CONVERSATION_STORAGE_DRIVER }}
