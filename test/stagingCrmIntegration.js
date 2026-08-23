@@ -44,7 +44,7 @@ export async function createFixtureLifecycle({ client, label, passwordHash }) {
     const stage = await client.query("SELECT id FROM crm_pipeline_stages WHERE tenant_id=$1 AND stage_key='NEW_LEAD'",[tenantId]);
     const contact = await client.query("INSERT INTO crm_contacts (tenant_id,identity_kind,identity_hash,source) VALUES ($1,'ANONYMOUS_SESSION',$2,'CI') RETURNING id",[tenantId,'ci-'+label.padEnd(61,'0').slice(0,64)]);
     const lead = await client.query("INSERT INTO crm_leads (tenant_id,contact_id,pipeline_stage_id) VALUES ($1,$2,$3) RETURNING id",[tenantId,contact.rows[0].id,stage.rows[0].id]);
-    const deal = await client.query("INSERT INTO crm_deals (tenant_id,lead_id,title,pipeline_stage_id) VALUES ($1,$2,'CI CRM fixture',$3) RETURNING id",[tenantId,lead.rows[0].id,stage.rows[0].id]);
+    const deal = await client.query("INSERT INTO crm_deals (tenant_id,contact_id,lead_id,title,pipeline_stage_id) VALUES ($1,$2,$3,'CI CRM fixture',$4) RETURNING id",[tenantId,contact.rows[0].id,lead.rows[0].id,stage.rows[0].id]);
     await client.query('COMMIT');
     return { tenantId, adminId: admin.rows[0].id, agentId: agent.rows[0].id, contactId: contact.rows[0].id, leadId: lead.rows[0].id, dealId: deal.rows[0].id, names };
   } catch (error) { await client.query('ROLLBACK').catch(()=>{}); throw error; }
