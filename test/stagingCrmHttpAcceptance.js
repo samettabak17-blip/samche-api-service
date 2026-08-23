@@ -46,7 +46,7 @@ async function login(email) {
     body: JSON.stringify({ email, password: rawPassword }), signal: AbortSignal.timeout(25_000),
   });
   const body = await response.json().catch(() => ({}));
-  expect(response.status === 200 && typeof body.token === 'string', `fixture login failed for ${email}`);
+  expect(response.status === 200 && typeof body.token === 'string', `fixture login failed for ${email}: HTTP ${response.status} ${safeSummary(body)}`);
   return body.token;
 }
 
