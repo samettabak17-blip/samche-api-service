@@ -58,7 +58,7 @@ async function insertCustomerMessage(client, { tenantId, conversationId, externa
 }
 
 async function persistResource(client, {
-  tenantId, conversationId, messageId, descriptor, bytes, storage, extract = extractDocumentText,
+  tenantId, conversationId, messageId, descriptor, bytes, storage, extract = extractDocumentText, onStored,
 }) {
   const validated = validateConversationUpload({
     buffer: bytes,
@@ -69,6 +69,7 @@ async function persistResource(client, {
   const resourceId = randomUUID();
   const storageKey = buildConversationStorageKey({ tenantId, conversationId, resourceId });
   await storage.put({ key: storageKey, body: bytes, mimeType: validated.mimeType, checksum: validated.contentHash });
+  onStored?.(storageKey);
   const resource = await createConversationResource(client, {
     tenantId,
     conversationId,
@@ -176,6 +177,7 @@ export async function persistWhatsAppInbound({
       activeStorage = resourceStorage;
       const result = await persistResource(client, {
         tenantId: integration.tenant_id, conversationId, messageId: customerMessage.id, descriptor, bytes, storage: resourceStorage,
+        onStored: (key) => { uploadedStorageKey = key; },
       });
       resource = result.resource;
       aiContextPart = result.aiContextPart;
