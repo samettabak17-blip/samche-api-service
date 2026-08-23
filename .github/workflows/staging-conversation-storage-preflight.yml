@@ -14,6 +14,8 @@ jobs:
           node-version: '22'
       - name: Install dependencies
         run: npm install
+      - name: Report installed S3 SDK version
+        run: node -p "'AWS_S3_SDK_VERSION: ' + require('./node_modules/@aws-sdk/client-s3/package.json').version"
       - name: Verify private conversation object storage
         env:
           CONVERSATION_STORAGE_DRIVER: ${{ secrets.CONVERSATION_STORAGE_DRIVER }}
@@ -24,4 +26,3 @@ jobs:
           CONVERSATION_S3_ENDPOINT: ${{ secrets.CONVERSATION_S3_ENDPOINT }}
           CONVERSATION_S3_FORCE_PATH_STYLE: ${{ secrets.CONVERSATION_S3_FORCE_PATH_STYLE }}
         run: node scripts/staging_conversation_storage_preflight.js
-

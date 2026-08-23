@@ -6,16 +6,29 @@ function safeToken(value, maxLength = 128) {
   return normalized || null;
 }
 
-export function getSafeStorageProviderDiagnostic(error) {
-  const provider = error?.provider ?? error?.cause ?? error;
-  const metadata = provider?.$metadata && typeof provider.$metadata === 'object' ? provider.$metadata : {};
-  const status = Number(metadata.httpStatusCode);
+function safeDiagnostic(value = {}) {
+  const status = Number(value.httpStatus);
   return {
-    providerErrorName: safeToken(provider?.name),
-    providerErrorCode: safeToken(provider?.Code ?? provider?.code),
+    providerErrorName: safeToken(value.providerErrorName),
+    providerErrorCode: safeToken(value.providerErrorCode),
     httpStatus: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null,
-    requestId: safeToken(metadata.requestId ?? metadata.extendedRequestId),
+    requestId: safeToken(value.requestId),
   };
+}
+
+export function getSafeStorageProviderDiagnostic(error) {
+  if (error?.provider && typeof error.provider === 'object' && Object.hasOwn(error.provider, 'providerErrorName')) {
+    return safeDiagnostic(error.provider);
+  }
+
+  const provider = error?.cause ?? error;
+  const metadata = provider?.$metadata && typeof provider.$metadata === 'object' ? provider.$metadata : {};
+  return safeDiagnostic({
+    providerErrorName: provider?.name,
+    providerErrorCode: provider?.Code ?? provider?.code,
+    httpStatus: metadata.httpStatusCode,
+    requestId: metadata.requestId ?? metadata.extendedRequestId,
+  });
 }
 
 export class ConversationResourceStorageError extends Error {
@@ -32,13 +45,25 @@ function required(env, name) {
   return value;
 }
 
-export function buildPutObjectInput({ bucket, key, body, mimeType, checksum }) {
+export function buildS3ClientConfig({ region, endpoint, accessKeyId, secretAccessKey, forcePathStyle }) {
+  return {
+    region,
+    endpoint,
+    forcePathStyle,
+    // R2 does not implement every optional S3 checksum extension. Preserve only
+    // protocol-required integrity behavior; content hashes remain persisted by the app.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
+    credentials: { accessKeyId, secretAccessKey },
+  };
+}
+
+export function buildPutObjectInput({ bucket, key, body, mimeType }) {
   return {
     Bucket: bucket,
     Key: key,
     Body: body,
     ContentType: mimeType,
-    ChecksumSHA256: checksum || undefined,
   };
 }
 
@@ -53,17 +78,18 @@ export function createConversationResourceStorage(env = process.env) {
   const accessKeyId = required(env, 'CONVERSATION_S3_ACCESS_KEY_ID');
   const secretAccessKey = required(env, 'CONVERSATION_S3_SECRET_ACCESS_KEY');
   const endpoint = env.CONVERSATION_S3_ENDPOINT || undefined;
-  const client = new S3Client({
+  const client = new S3Client(buildS3ClientConfig({
     region,
     endpoint,
+    accessKeyId,
+    secretAccessKey,
     forcePathStyle: env.CONVERSATION_S3_FORCE_PATH_STYLE === 'true',
-    credentials: { accessKeyId, secretAccessKey },
-  });
+  }));
 
   return {
-    async put({ key, body, mimeType, checksum }) {
+    async put({ key, body, mimeType }) {
       try {
-        await client.send(new PutObjectCommand(buildPutObjectInput({ bucket, key, body, mimeType, checksum })));
+        await client.send(new PutObjectCommand(buildPutObjectInput({ bucket, key, body, mimeType })));
       } catch (error) {
         throw new ConversationResourceStorageError('RESOURCE_STORAGE_WRITE_FAILED', 'Unable to store attachment', error);
       }
@@ -81,7 +107,7 @@ export function createConversationResourceStorage(env = process.env) {
         const response = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
         return { mimeType: response.ContentType ?? null, sizeBytes: Number(response.ContentLength ?? 0) };
       } catch (error) {
-        throw new ConversationResourceStorageError('RESOURCE_STORAGE_METADATA_FAILED', 'Unable to read attachment', error);
+        throw new ConversationResourceStorageError('RESOURCE_STORAGE_METADATA_FAILED', 'Unable to read attachment metadata', error);
       }
     },
     async remove({ key }) {
