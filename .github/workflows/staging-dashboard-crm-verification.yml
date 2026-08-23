@@ -60,3 +60,4 @@ jobs:
       - name: Backend CRM regression suite
         run: |
           node --test             tests/crm-lead-detail-service.test.js             tests/crm-read-provider-boundary.test.js             tests/crm-deal-service.test.js             tests/crm-deal-read-service.test.js             tests/crm-deals-migration.test.js             tests/crm-migration.test.js             tests/lead-qualification-service.test.js             tests/crm-lead-service.test.js             tests/crm-permissions.test.js             tests/conversation-permissions.test.js
+            tests/conversation-resource-validation.test.js             tests/conversation-resource-service.test.js             tests/conversation-resources-migration.test.js             tests/conversation-document-extraction-service.test.js             tests/whatsapp-inbound-message.test.js
