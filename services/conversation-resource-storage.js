@@ -1,9 +1,32 @@
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
+const CONFIGURATION_FIELDS = [
+  'CONVERSATION_STORAGE_DRIVER',
+  'CONVERSATION_S3_BUCKET',
+  'CONVERSATION_S3_REGION',
+  'CONVERSATION_S3_ACCESS_KEY_ID',
+  'CONVERSATION_S3_SECRET_ACCESS_KEY',
+  'CONVERSATION_S3_ENDPOINT',
+  'CONVERSATION_S3_FORCE_PATH_STYLE',
+];
+
 function safeToken(value, maxLength = 128) {
   if (typeof value !== 'string' && typeof value !== 'number') return null;
   const normalized = String(value).replace(/[^A-Za-z0-9._:-]/g, '_').slice(0, maxLength);
   return normalized || null;
+}
+
+function stringShape(value) {
+  const text = typeof value === 'string' ? value : '';
+  return {
+    present: typeof value === 'string' && text.length > 0,
+    length: text.length,
+    leadingOrTrailingWhitespace: /^\s|\s$/.test(text),
+    containsCR: text.includes('\r'),
+    containsLF: text.includes('\n'),
+    containsTAB: text.includes('\t'),
+    containsControlCharacter: /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(text),
+  };
 }
 
 function safeDiagnostic(value = {}) {
@@ -13,6 +36,20 @@ function safeDiagnostic(value = {}) {
     providerErrorCode: safeToken(value.providerErrorCode),
     httpStatus: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null,
     requestId: safeToken(value.requestId),
+  };
+}
+
+export function describeStorageConfiguration(env = process.env) {
+  return CONFIGURATION_FIELDS.map((name) => ({ name, ...stringShape(env[name]) }));
+}
+
+export function describeSafeHttpRequest(request, operation = null) {
+  const headers = request?.headers && typeof request.headers === 'object' ? request.headers : {};
+  return {
+    operation: safeToken(operation),
+    headers: Object.entries(headers)
+      .map(([name, value]) => ({ name: safeToken(name), ...stringShape(value) }))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name))),
   };
 }
 
@@ -31,11 +68,20 @@ export function getSafeStorageProviderDiagnostic(error) {
   });
 }
 
+export function getSafeStorageFailureDiagnostic(error) {
+  return {
+    provider: getSafeStorageProviderDiagnostic(error),
+    configuration: Array.isArray(error?.diagnostics?.configuration) ? error.diagnostics.configuration : [],
+    request: error?.diagnostics?.request ?? null,
+  };
+}
+
 export class ConversationResourceStorageError extends Error {
-  constructor(code, message, cause = null) {
+  constructor(code, message, cause = null, diagnostics = null) {
     super(message, cause ? { cause } : undefined);
     this.code = code;
     this.provider = cause ? getSafeStorageProviderDiagnostic(cause) : null;
+    this.diagnostics = diagnostics;
   }
 }
 
@@ -78,6 +124,8 @@ export function createConversationResourceStorage(env = process.env) {
   const accessKeyId = required(env, 'CONVERSATION_S3_ACCESS_KEY_ID');
   const secretAccessKey = required(env, 'CONVERSATION_S3_SECRET_ACCESS_KEY');
   const endpoint = env.CONVERSATION_S3_ENDPOINT || undefined;
+  const configuration = describeStorageConfiguration(env);
+  let request = null;
   const client = new S3Client(buildS3ClientConfig({
     region,
     endpoint,
@@ -86,12 +134,30 @@ export function createConversationResourceStorage(env = process.env) {
     forcePathStyle: env.CONVERSATION_S3_FORCE_PATH_STYLE === 'true',
   }));
 
+  client.middlewareStack.addRelativeTo(
+    (next, context) => async (args) => {
+      request = describeSafeHttpRequest(args.request, context.commandName);
+      return next(args);
+    },
+    {
+      relation: 'after',
+      toMiddleware: 'awsAuthMiddleware',
+      name: 'captureSafeConversationStorageRequest',
+      step: 'finalizeRequest',
+    }
+  );
+
   return {
     async put({ key, body, mimeType }) {
       try {
         await client.send(new PutObjectCommand(buildPutObjectInput({ bucket, key, body, mimeType })));
       } catch (error) {
-        throw new ConversationResourceStorageError('RESOURCE_STORAGE_WRITE_FAILED', 'Unable to store attachment', error);
+        throw new ConversationResourceStorageError(
+          'RESOURCE_STORAGE_WRITE_FAILED',
+          'Unable to store attachment',
+          error,
+          { configuration, request }
+        );
       }
     },
     async get({ key }) {
@@ -99,7 +165,12 @@ export function createConversationResourceStorage(env = process.env) {
         const response = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
         return response.Body;
       } catch (error) {
-        throw new ConversationResourceStorageError('RESOURCE_STORAGE_READ_FAILED', 'Unable to read attachment', error);
+        throw new ConversationResourceStorageError(
+          'RESOURCE_STORAGE_READ_FAILED',
+          'Unable to read attachment',
+          error,
+          { configuration, request }
+        );
       }
     },
     async head({ key }) {
@@ -107,14 +178,24 @@ export function createConversationResourceStorage(env = process.env) {
         const response = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
         return { mimeType: response.ContentType ?? null, sizeBytes: Number(response.ContentLength ?? 0) };
       } catch (error) {
-        throw new ConversationResourceStorageError('RESOURCE_STORAGE_METADATA_FAILED', 'Unable to read attachment metadata', error);
+        throw new ConversationResourceStorageError(
+          'RESOURCE_STORAGE_METADATA_FAILED',
+          'Unable to read attachment',
+          error,
+          { configuration, request }
+        );
       }
     },
     async remove({ key }) {
       try {
         await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
       } catch (error) {
-        throw new ConversationResourceStorageError('RESOURCE_STORAGE_DELETE_FAILED', 'Unable to delete attachment', error);
+        throw new ConversationResourceStorageError(
+          'RESOURCE_STORAGE_DELETE_FAILED',
+          'Unable to delete attachment',
+          error,
+          { configuration, request }
+        );
       }
     },
   };

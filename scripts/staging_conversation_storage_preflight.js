@@ -1,5 +1,8 @@
 import crypto from 'node:crypto';
-import { createConversationResourceStorage, getSafeStorageProviderDiagnostic } from '../services/conversation-resource-storage.js';
+import {
+  createConversationResourceStorage,
+  getSafeStorageFailureDiagnostic,
+} from '../services/conversation-resource-storage.js';
 
 const storage = createConversationResourceStorage();
 const key = `conversation-resources-preflight/${crypto.randomUUID()}`;
@@ -11,17 +14,30 @@ async function read(stream) {
   return Buffer.concat(chunks);
 }
 
+function shapeSummary({ name, present, length, leadingOrTrailingWhitespace, containsCR, containsLF, containsTAB, containsControlCharacter }) {
+  return `${name}{present=${present};length=${length};edge_ws=${leadingOrTrailingWhitespace};cr=${containsCR};lf=${containsLF};tab=${containsTAB};control=${containsControlCharacter}}`;
+}
+
 function safeDiagnosticFields(error) {
-  const diagnostic = getSafeStorageProviderDiagnostic(error);
-  return [
+  const diagnostic = getSafeStorageFailureDiagnostic(error);
+  const provider = diagnostic.provider;
+  const fields = [
     ['operation', error?.code],
-    ['provider_name', diagnostic.providerErrorName],
-    ['provider_code', diagnostic.providerErrorCode],
-    ['http_status', diagnostic.httpStatus],
-    ['request_id', diagnostic.requestId],
+    ['provider_name', provider.providerErrorName],
+    ['provider_code', provider.providerErrorCode],
+    ['http_status', provider.httpStatus],
+    ['request_id', provider.requestId],
+    ['sdk_operation', diagnostic.request?.operation],
   ].filter(([, value]) => value !== null && value !== undefined)
-    .map(([name, value]) => `${name}=${value}`)
-    .join('; ');
+    .map(([name, value]) => `${name}=${value}`);
+
+  if (diagnostic.configuration.length) {
+    fields.push(`config_shape=${diagnostic.configuration.map(shapeSummary).join(',')}`);
+  }
+  if (diagnostic.request?.headers?.length) {
+    fields.push(`request_header_shape=${diagnostic.request.headers.map(shapeSummary).join(',')}`);
+  }
+  return fields.join('; ');
 }
 
 try {
