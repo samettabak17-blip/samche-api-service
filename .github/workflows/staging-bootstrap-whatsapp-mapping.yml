@@ -1,0 +1,24 @@
+name: Bootstrap Staging WhatsApp Mapping
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bootstrap:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install repository dependencies
+        run: npm install --no-audit --no-fund
+      - name: Validate mapping bootstrap syntax
+        run: node --check scripts/bootstrap_whatsapp_mapping.js
+      - name: Bootstrap and verify tenant-safe WhatsApp mapping
+        env:
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          STAGING_WHATSAPP_TENANT_ID: ${{ secrets.STAGING_WHATSAPP_TENANT_ID }}
+        run: node scripts/bootstrap_whatsapp_mapping.js
