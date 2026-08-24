@@ -16,3 +16,11 @@ export function shouldUpdateCommunicationLanguage({ currentLanguage, candidateLa
   if (!candidate || candidate === current || confidence !== 'high') return false;
   return current === 'und' || substantive === true;
 }
+
+export function inferConservativeWhatsAppLanguage(content) {
+  const text = String(content ?? '').trim();
+  if (!text) return null;
+  if (/[\u0600-\u06FF]/u.test(text)) return 'ar';
+  if (/[ığüşöçİĞÜŞÖÇ]/u.test(text)) return 'tr';
+  return null;
+}
