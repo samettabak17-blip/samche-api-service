@@ -45,9 +45,13 @@ export function buildSafePdfExtractionDiagnostic({ mimeType, byteLength, error, 
 }
 
 function emitStagingPdfExtractionDiagnostic(diagnostic) {
-  if (process.env.NODE_ENV === 'staging' || process.env.RENDER_SERVICE_NAME === 'samche-api-staging') {
-    console.error('WHATSAPP_PDF_EXTRACTION_FAILURE', JSON.stringify(diagnostic));
-  }
+  console.error('WHATSAPP_PDF_EXTRACTION_FAILURE', JSON.stringify(diagnostic));
+}
+
+export async function getPdfParserRuntimeInfo() {
+  const module = await import('pdf-parse');
+  const parser = module.default ?? module;
+  return { parser_version: resolvedPdfParseVersion(), node_version: process.version, parser_callable: typeof parser === 'function' };
 }
 
 async function defaultPdfExtractor(bytes) {
