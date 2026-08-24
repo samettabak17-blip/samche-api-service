@@ -17,6 +17,31 @@ function normalizeText(value) {
     .slice(0, 200000);
 }
 
+function sanitizePdfParserMessage(value) {
+  const text = String(value ?? '').replace(/https?:\\/\\/\\S+/gi, '[redacted-url]').replace(/['"][^'"]{1,160}['"]/g, '[redacted]').replace(/[\\r\\n\\t]/g, ' ').trim();
+  return text && !/[A-Za-z]{3,}[:=][^ ]{4,}/.test(text) ? text.slice(0, 180) : 'PDF parser failure';
+}
+
+export function buildSafePdfExtractionDiagnostic({ mimeType, byteLength, error, extractedCharacterCount = null }) {
+  return {
+    parser_name: 'pdf-parse',
+    parser_version: null,
+    mime_type: mimeType,
+    byte_length: Number(byteLength) || 0,
+    exception_name: error?.name ?? 'Error',
+    exception_code: error?.code ?? null,
+    sanitized_exception_message: sanitizePdfParserMessage(error?.message),
+    extracted_character_count: Number.isInteger(extractedCharacterCount) ? extractedCharacterCount : null,
+    extraction_phase: 'pdf_parse',
+  };
+}
+
+function emitStagingPdfExtractionDiagnostic(diagnostic) {
+  if (process.env.NODE_ENV === 'staging' || process.env.RENDER_SERVICE_NAME === 'samche-api-staging') {
+    console.error('WHATSAPP_PDF_EXTRACTION_FAILURE', JSON.stringify(diagnostic));
+  }
+}
+
 async function defaultPdfExtractor(bytes) {
   const module = await import('pdf-parse');
   const parse = module.default ?? module;
@@ -62,6 +87,7 @@ export async function extractDocumentText({
       throw new ConversationResourceExtractionError('RESOURCE_EXTRACTION_UNSUPPORTED', 'Document type cannot be extracted');
     }
   } catch (error) {
+    if (mimeType === 'application/pdf') emitStagingPdfExtractionDiagnostic(buildSafePdfExtractionDiagnostic({ mimeType, byteLength: bytes?.length, error }));
     if (error instanceof ConversationResourceExtractionError) throw error;
     throw new ConversationResourceExtractionError('RESOURCE_EXTRACTION_FAILED', 'Document could not be processed');
   }
