@@ -41,3 +41,14 @@ test('detects Arabic script without treating business terms as language switches
 test('leaves ambiguous Latin fragments unresolved', () => {
   assert.equal(inferConservativeWhatsAppLanguage('2 visa'), null);
 });
+
+
+test('recognizes a Turkish greeting and mixed company request as Turkish', () => {
+  assert.equal(inferConservativeWhatsAppLanguage('merhaba'), 'tr');
+  assert.equal(inferConservativeWhatsAppLanguage("Dubai'de company kurmak istiyorum"), 'tr');
+});
+
+test('recognizes English greeting while leaving ambiguous fragments unresolved', () => {
+  assert.equal(inferConservativeWhatsAppLanguage('hello'), 'en');
+  assert.equal(inferConservativeWhatsAppLanguage('2 visa'), null);
+});

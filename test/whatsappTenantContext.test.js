@@ -30,3 +30,10 @@ test('empty optional knowledge still produces a mapped tenant context prompt', (
   assert.match(prompt, /Example Company LLC/);
   assert.match(prompt, /FIRST_RESPONSE_GREETING/);
 });
+
+
+test('resolved Turkish language is mandatory even when tenant knowledge is English', () => {
+  const prompt = buildWhatsAppTenantPrompt({ tenant, history: [], customerText: 'merhaba', communicationLanguage: 'tr' });
+  assert.match(prompt, /MANDATORY RESPONSE LANGUAGE: Turkish/);
+  assert.match(prompt, /Never answer with only a generic greeting/);
+});
