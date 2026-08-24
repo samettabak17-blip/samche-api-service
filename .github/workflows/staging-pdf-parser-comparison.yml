@@ -14,7 +14,8 @@ jobs:
         with:
           node-version: '24'
       - run: npm install --ignore-scripts
-      - name: Baseline pdf-parse 1.1.4
+      - name: Baseline pdf-parse 1.1.4 (expected diagnostic failure)
+        continue-on-error: true
         run: node scripts/staging_pdf_extraction_probe.js
       - name: Install diagnostic pdf-parse v2 candidate
         run: npm install --no-save --ignore-scripts pdf-parse@2.4.5
