@@ -1,4 +1,7 @@
 import crypto from 'node:crypto';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
 
 export class ConversationResourceExtractionError extends Error {
   constructor(code, message) {
@@ -27,14 +30,17 @@ function sanitizePdfParserMessage(value) {
 export function buildSafePdfExtractionDiagnostic({ mimeType, byteLength, error, extractedCharacterCount = null }) {
   return {
     parser_name: 'pdf-parse',
-    parser_version: null,
+    parser_version: resolvedPdfParseVersion(),
     mime_type: mimeType,
     byte_length: Number(byteLength) || 0,
     exception_name: error?.name ?? 'Error',
     exception_code: error?.code ?? null,
-    sanitized_exception_message: sanitizePdfParserMessage(error?.message),
+    ...safePdfParserMessage(error),
     extracted_character_count: Number.isInteger(extractedCharacterCount) ? extractedCharacterCount : null,
     extraction_phase: 'pdf_parse',
+    parser_callable: error?.pdfParserInput?.parser_callable ?? null,
+    input_is_buffer: error?.pdfParserInput?.input_is_buffer ?? null,
+    input_byte_length: error?.pdfParserInput?.input_byte_length ?? null,
   };
 }
 
@@ -47,8 +53,13 @@ function emitStagingPdfExtractionDiagnostic(diagnostic) {
 async function defaultPdfExtractor(bytes) {
   const module = await import('pdf-parse');
   const parse = module.default ?? module;
-  const result = await parse(bytes);
-  return result.text;
+  try {
+    const result = await parse(Buffer.from(bytes));
+    return result.text;
+  } catch (error) {
+    error.pdfParserInput = { parser_callable: typeof parse === 'function', input_is_buffer: Buffer.isBuffer(bytes), input_byte_length: bytes?.length ?? 0 };
+    throw error;
+  }
 }
 
 async function defaultDocxExtractor(bytes) {
