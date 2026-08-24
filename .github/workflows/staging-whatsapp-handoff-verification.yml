@@ -29,8 +29,10 @@ jobs:
           node --check services/whatsapp-delivery-service.js
           node --check services/live-inbox-service.js
           node --check services/whatsapp-tenant-context-service.js
+          node --check services/conversation-communication-language.js
           node --check test/liveInboxWhatsAppOperatorDelivery.test.js
           node --check test/whatsappTenantContext.test.js
+          node --check test/conversationCommunicationLanguage.test.js
 
       - name: Run WhatsApp operator delivery and handoff regressions
         env:
@@ -41,6 +43,7 @@ jobs:
           test/liveInboxWhatsAppOperatorDelivery.test.js
           test/whatsappAssistantTimelinePersistence.test.js
           test/whatsappTenantContext.test.js
+          test/conversationCommunicationLanguage.test.js
           test/whatsappSequentialResourceContext.test.js
           test/whatsappResourceFollowUpRouting.test.js
           test/whatsappResourceRetry.test.js
