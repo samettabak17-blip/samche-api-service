@@ -8,7 +8,11 @@ test('first greeting is tenant-aware and contains no selector options', () => {
   const prompt = buildWhatsAppTenantPrompt({ tenant, history: [], customerText: 'Merhaba', communicationLanguage: 'tr' });
   assert.match(prompt, /Example Company LLC/);
   assert.match(prompt, /Example AI/);
-  assert.match(prompt, /FIRST_RESPONSE_GREETING/);
+  assert.match(prompt, /Resolved communication language: tr\./);
+  assert.match(prompt, /MANDATORY RESPONSE LANGUAGE: Turkish/);
+  assert.match(prompt, /FIRST_RESPONSE: Begin by briefly identifying yourself as the named AI assistant for the named tenant/);
+  assert.match(prompt, /Never answer with only a generic greeting/);
+  assert.match(prompt, /Customer message: Merhaba/);
   assert.doesNotMatch(prompt, /1️⃣|2️⃣|3️⃣/);
 });
 
@@ -28,7 +32,11 @@ test('context carries only the mapped tenant identity', () => {
 test('empty optional knowledge still produces a mapped tenant context prompt', () => {
   const prompt = buildWhatsAppTenantPrompt({ tenant: { ...tenant, knowledge: [] }, history: [], customerText: 'Merhaba', communicationLanguage: 'tr' });
   assert.match(prompt, /Example Company LLC/);
-  assert.match(prompt, /FIRST_RESPONSE_GREETING/);
+  assert.match(prompt, /Resolved communication language: tr\./);
+  assert.match(prompt, /MANDATORY RESPONSE LANGUAGE: Turkish/);
+  assert.match(prompt, /FIRST_RESPONSE: Begin by briefly identifying yourself as the named AI assistant for the named tenant/);
+  assert.match(prompt, /Never answer with only a generic greeting/);
+  assert.match(prompt, /Customer message: Merhaba/);
 });
 
 
