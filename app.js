@@ -25,6 +25,7 @@ import {
   getSafeStorageFailureDiagnostic,
 } from "./services/conversation-resource-storage.js";
 import { createWhatsAppMediaRetriever, extractWhatsAppMediaDescriptor } from "./services/whatsapp-multimodal-service.js";
+import { planStandaloneWhatsAppMediaResponse } from "./services/whatsapp-standalone-media-ack.js";
 import { ensureConversationCrmIdentity } from "./services/crm-lead-service.js";
 import { queueLeadQualification } from "./services/lead-qualification-runner.js";
 import { startLiveEventListener, subscribeTenantEvents } from "./services/live-event-bus.js";
@@ -1379,6 +1380,25 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           return;
         }
         if (whatsappInbox.duplicate || !whatsappInbox.shouldInvokeAi) return;
+        const standaloneMediaPlan = planStandaloneWhatsAppMediaResponse({
+          customerText: text,
+          descriptor: mediaDescriptor,
+          shouldInvokeAi: whatsappInbox.shouldInvokeAi,
+          duplicate: whatsappInbox.duplicate,
+          language: wpSessions[cleanFrom]?.lang ?? 'tr',
+        });
+        if (standaloneMediaPlan.action === 'ACKNOWLEDGE') {
+          const acknowledgement = await persistAssistantResponseIfCurrent({
+            tenantId: whatsappInbox.integration.tenant_id,
+            conversationId: whatsappInbox.conversation.id,
+            content: standaloneMediaPlan.message,
+            handlingVersion: whatsappInbox.handlingVersion,
+          });
+          if (acknowledgement.delivered) {
+            await sendMessage(cleanFrom, standaloneMediaPlan.message);
+          }
+          return;
+        }
         if (!text && mediaDescriptor) text = 'Customer shared an attachment.';
       } catch (error) {
         if (error?.code === 'RESOURCE_STORAGE_WRITE_FAILED') {
