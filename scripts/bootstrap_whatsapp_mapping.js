@@ -142,7 +142,8 @@ try {
     );
     const verified = await client.query(
       `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id, ci.enabled,
-              tc.channel_type, tc.status channel_status, a.status assistant_status, a.model
+              tc.channel_type, tc.status channel_status, a.status assistant_status, a.model,
+              a.name assistant_name, a.system_prompt
          FROM channel_integrations ci
          JOIN tenant_channels tc ON tc.id = ci.channel_id AND tc.tenant_id = ci.tenant_id
          JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
@@ -150,10 +151,15 @@ try {
       [mapping.rows[0].id]
     );
     const row = verified.rows[0];
+    const verifiedPolicySha256 = row
+      ? createHash('sha256').update(String(row.system_prompt ?? ''), 'utf8').digest('hex')
+      : null;
     if (!row || row.tenant_id !== tenantId || row.channel_id !== channel.channel.id ||
         row.assistant_id !== assistant.assistant.id || row.enabled !== true ||
         row.channel_type !== 'WHATSAPP' || row.channel_status !== 'active' ||
-        row.assistant_status !== 'active' || row.model !== runtimeAssistant.model) fail('MAPPING_VERIFICATION_FAILED');
+        row.assistant_status !== 'active' || row.model !== runtimeAssistant.model ||
+        row.assistant_name !== runtimeAssistant.name ||
+        verifiedPolicySha256 !== expectedMasterPolicySha256) fail('MAPPING_VERIFICATION_FAILED');
     await client.query('COMMIT');
     console.log('WHATSAPP_MAPPING: READY (assistant=' + assistant.outcome + '; channel=' + channel.outcome + ')');
   } catch (error) {
