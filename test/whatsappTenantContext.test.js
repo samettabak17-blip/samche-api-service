@@ -12,7 +12,7 @@ test('first greeting is tenant-aware and contains no selector options', () => {
   assert.match(prompt, /MANDATORY RESPONSE LANGUAGE: Turkish/);
   assert.match(prompt, /FIRST_RESPONSE: Briefly identify yourself as the named AI assistant/);
   assert.match(prompt, /Never answer with only a generic greeting/);
-  assert.match(prompt, /Customer message: Merhaba/);
+  assert.match(prompt, /Current customer message:\nMerhaba/);
   assert.doesNotMatch(prompt, /1️⃣|2️⃣|3️⃣/);
 });
 
@@ -36,7 +36,7 @@ test('empty optional knowledge still produces a mapped tenant context prompt', (
   assert.match(prompt, /MANDATORY RESPONSE LANGUAGE: Turkish/);
   assert.match(prompt, /FIRST_RESPONSE: Briefly identify yourself as the named AI assistant/);
   assert.match(prompt, /Never answer with only a generic greeting/);
-  assert.match(prompt, /Customer message: Merhaba/);
+  assert.match(prompt, /Current customer message:\nMerhaba/);
 });
 
 

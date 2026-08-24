@@ -44,7 +44,8 @@ test('uses the same complete authoritative policy for Turkish English and Arabic
     });
     assert.ok(context.systemInstruction.includes(masterPolicy));
     assert.match(context.systemInstruction, new RegExp(`MANDATORY RESPONSE LANGUAGE: ${expected}`));
-    assert.doesNotMatch(context.systemInstruction, /1️⃣|2️⃣|3️⃣|select a language/i);
+    assert.doesNotMatch(context.systemInstruction, /Please select your language|Lütfen dil seçiminizi yapınız/i);
+    assert.doesNotMatch(context.userPrompt, /1️⃣|2️⃣|3️⃣/);
   }
 });
 
