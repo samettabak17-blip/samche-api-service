@@ -70,19 +70,32 @@ function emitStagingPdfExtractionDiagnostic(diagnostic) {
 }
 
 export async function getPdfParserRuntimeInfo() {
-  const module = await import('pdf-parse');
-  const parser = module.default ?? module;
-  return { parser_version: resolvedPdfParseVersion(), node_version: process.version, parser_callable: typeof parser === 'function' };
+  const { PDFParse } = await import('pdf-parse');
+  return { parser_version: resolvedPdfParseVersion(), node_version: process.version, parser_callable: typeof PDFParse === 'function' };
 }
 
 async function defaultPdfExtractor(bytes) {
-  const module = await import('pdf-parse');
-  const parse = module.default ?? module;
+  let PDFParse;
+  const input = Buffer.from(bytes);
   try {
-    const result = await parse(Buffer.from(bytes));
-    return result.text;
+    ({ PDFParse } = await import('pdf-parse'));
+    const parser = new PDFParse({ data: input });
+    try {
+      const result = await parser.getText();
+      return result.text;
+    } finally {
+      await parser.destroy();
+    }
   } catch (error) {
-    error.pdfParserInput = { parser_callable: typeof parse === 'function', input_is_buffer: Buffer.isBuffer(bytes), input_byte_length: bytes?.length ?? 0 };
+    try {
+      error.pdfParserInput = {
+        parser_callable: typeof PDFParse === 'function',
+        input_is_buffer: Buffer.isBuffer(input),
+        input_byte_length: input.length,
+      };
+    } catch {
+      // Preserve the parser failure even if its object is not extensible.
+    }
     throw error;
   }
 }
