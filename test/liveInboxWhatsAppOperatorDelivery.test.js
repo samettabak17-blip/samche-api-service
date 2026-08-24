@@ -29,7 +29,7 @@ function createDatabase({ conversation = humanWhatsAppConversation(), mapping = 
       calls.push({ sql, parameters });
       if (sql.includes('FROM conversations c')) return { rows: conversation ? [conversation] : [] };
       if (sql.includes('FROM tenant_channels tc') && sql.includes('channel_integrations')) {
-        return { rows: mapping ? [{ external_channel_id: conversation.external_channel_id, integration_key: `WHATSAPP:${conversation.external_channel_id}` }] : [] };
+        return mapping ? { rowCount: 1, rows: [{ external_channel_id: conversation.external_channel_id, integration_key: `WHATSAPP:${conversation.external_channel_id}` }] } : { rowCount: 0, rows: [] };
       }
       if (sql.includes('SELECT * FROM conversation_messages') && sql.includes('idempotency_key')) return { rows: [] };
       if (sql.includes('INSERT INTO conversation_messages')) return { rows: [{ id: '55555555-5555-4555-8555-555555555555', sender_type: 'AGENT' }] };
