@@ -5,12 +5,15 @@ import { selectRecentWhatsAppResourceContext, shouldSelectRecentWhatsAppResource
 const tenantId = '11111111-1111-4111-8111-111111111111';
 const conversationId = '22222222-2222-4222-8222-222222222222';
 
-function queryClient(rows) {
+function explicitResourceQueryClient(rows) {
   return {
     async query(sql, parameters) {
       assert.match(sql, /tenant_id = \$1/);
       assert.match(sql, /conversation_id = \$2/);
-      assert.match(sql, /processing_status = 'READY'/);
+      assert.match(sql, /SELECT id, storage_key, media_category, mime_type, extracted_text, processing_status/);
+      // Explicit references deliberately see the newest status so FAILED and PROCESSING
+      // resources can produce deterministic responses instead of falling back to older files.
+      assert.doesNotMatch(sql, /AND processing_status IN \('READY', 'PROCESSING'\)/);
       assert.equal(parameters[0], tenantId);
       assert.equal(parameters[1], conversationId);
       return { rows };
@@ -20,10 +23,11 @@ function queryClient(rows) {
 
 test('selects the recent same-conversation document for an explicit sequential PDF question', async () => {
   const selected = await selectRecentWhatsAppResourceContext({
-    client: queryClient([{
+    client: explicitResourceQueryClient([{
       id: 'resource-document',
       media_category: 'DOCUMENT',
       mime_type: 'application/pdf',
+      processing_status: 'READY',
       extracted_text: 'Reference: SC-WP-92817\nAmount: 37,450 AED',
     }]),
     tenantId,
@@ -38,11 +42,12 @@ test('selects the recent same-conversation document for an explicit sequential P
 
 test('selects a recent same-conversation image as a vision part for a sequential question', async () => {
   const selected = await selectRecentWhatsAppResourceContext({
-    client: queryClient([{
+    client: explicitResourceQueryClient([{
       id: 'resource-image',
       storage_key: 'conversation-resources/private-key',
       media_category: 'IMAGE',
       mime_type: 'image/png',
+      processing_status: 'READY',
     }]),
     tenantId,
     conversationId,
@@ -58,10 +63,10 @@ test('selects a recent same-conversation image as a vision part for a sequential
 
 test('bounds historic resource context and never queries outside the current tenant conversation', async () => {
   const selected = await selectRecentWhatsAppResourceContext({
-    client: queryClient([
-      { id: 'latest', media_category: 'DOCUMENT', extracted_text: 'A'.repeat(20_000) },
-      { id: 'older', media_category: 'DOCUMENT', extracted_text: 'B'.repeat(20_000) },
-      { id: 'outside-bound', media_category: 'DOCUMENT', extracted_text: 'C'.repeat(20_000) },
+    client: explicitResourceQueryClient([
+      { id: 'latest', media_category: 'DOCUMENT', processing_status: 'READY', extracted_text: 'A'.repeat(20_000) },
+      { id: 'older', media_category: 'DOCUMENT', processing_status: 'READY', extracted_text: 'B'.repeat(20_000) },
+      { id: 'outside-bound', media_category: 'DOCUMENT', processing_status: 'READY', extracted_text: 'C'.repeat(20_000) },
     ]),
     tenantId,
     conversationId,
