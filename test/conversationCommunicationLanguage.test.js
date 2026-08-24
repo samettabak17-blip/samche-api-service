@@ -52,3 +52,14 @@ test('recognizes English greeting while leaving ambiguous fragments unresolved',
   assert.equal(inferConservativeWhatsAppLanguage('hello'), 'en');
   assert.equal(inferConservativeWhatsAppLanguage('2 visa'), null);
 });
+
+
+test('recognizes anchored informal Turkish WhatsApp greetings and greeting-leading messages', () => {
+  for (const greeting of ['merhaba', 'mrb!', 'slm,', 'selam :)', 'Selamün Aleyküm', 'selamun aleykum', 'selamunaleykum', 's.a.', 'sa', 'mrb şirket kurmak istiyorum', 'slm dubai company setup hakkında bilgi alabilir miyim', 'selam 2 visa lazım', "s.a Dubai'de şirket açmak istiyorum"]) {
+    assert.equal(inferConservativeWhatsAppLanguage(greeting), 'tr', greeting);
+  }
+});
+
+test('does not treat an English greeting with business terminology as Turkish', () => {
+  assert.equal(inferConservativeWhatsAppLanguage('Hello, Dubai company setup?'), 'en');
+});
