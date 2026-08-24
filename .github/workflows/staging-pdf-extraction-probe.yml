@@ -1,0 +1,33 @@
+name: Staging PDF Extraction Probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Probe pdf-parse on Node 24
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout selected staging commit
+        uses: actions/checkout@v4
+        with:
+          ref: staging
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install repository dependencies
+        run: npm install --ignore-scripts
+
+      - name: Validate probe syntax
+        run: |
+          node --check services/conversation-document-extraction-service.js
+          node --check scripts/staging_pdf_extraction_probe.js
+
+      - name: Run PDF extraction probe
+        run: node scripts/staging_pdf_extraction_probe.js
