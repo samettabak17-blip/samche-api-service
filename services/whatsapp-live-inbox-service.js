@@ -52,9 +52,10 @@ async function notify(client, tenantId, conversationId, type) {
 
 export async function resolveWhatsAppIntegration(client, phoneNumberId) {
   const result = await client.query(
-    `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id, tc.channel_type, tc.status AS channel_status, a.status AS assistant_status
+    `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id, tc.channel_type, tc.status AS channel_status, a.status AS assistant_status, t.name AS tenant_name, a.name AS assistant_name, a.system_prompt AS assistant_system_prompt
        FROM channel_integrations ci
        JOIN tenant_channels tc ON tc.id = ci.channel_id AND tc.tenant_id = ci.tenant_id
+       JOIN tenants t ON t.id = ci.tenant_id AND t.status = 'active'
        JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
       WHERE ci.integration_key = $1
         AND ci.integration_type = 'WHATSAPP'
@@ -323,6 +324,34 @@ export async function persistWhatsAppInbound({
         [candidateLanguage, conversationId, integration.tenant_id]
       );
     }
+
+    const historyResult = await client.query(
+      `SELECT sender_type, content
+         FROM conversation_messages
+        WHERE tenant_id = $1 AND conversation_id = $2
+        ORDER BY created_at DESC, id DESC
+        LIMIT 12`,
+      [integration.tenant_id, conversationId]
+    );
+    const conversationHistory = historyResult.rows.reverse();
+    const knowledgeResult = await client.query(
+      `SELECT content
+         FROM knowledge_base_documents
+        WHERE tenant_id = $1
+          AND status = 'active'
+          AND (assistant_id IS NULL OR assistant_id = $2)
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 6`,
+      [integration.tenant_id, integration.assistant_id]
+    );
+    const tenantContext = {
+      companyName: integration.tenant_name,
+      assistantName: integration.assistant_name,
+      systemPrompt: integration.assistant_system_prompt,
+      knowledge: knowledgeResult.rows.map((row) => row.content),
+      communicationLanguage: candidateLanguage ?? conversation.communication_language ?? 'und',
+    };
+    const isFirstAssistantResponse = !conversationHistory.some((message) => message.sender_type === 'ASSISTANT');
 
     let resource = null;
     let aiContextPart = null;
