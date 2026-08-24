@@ -1,6 +1,8 @@
 import crypto from 'crypto';
 import pool, { query } from '../config/db.js';
 import { canOperateConversation } from './conversation-permissions.js';
+import { deliverWhatsAppText, WhatsAppDeliveryError } from './whatsapp-delivery-service.js';
+import { whatsappIntegrationKey } from './whatsapp-multimodal-service.js';
 import { ensureConversationCrmIdentity } from './crm-lead-service.js';
 import { queueLeadQualification } from './lead-qualification-runner.js';
 
@@ -345,12 +347,42 @@ export async function operateConversation({ tenantId, conversationId, actor, act
   }
 }
 
-export async function appendAgentMessage({ tenantId, conversationId, actor, content, idempotencyKey = null }) {
-  const client = await pool.connect();
+async function loadWhatsAppAgentDelivery(client, conversation) {
+  const phoneNumberId = String(conversation.external_channel_id ?? '').trim();
+  if (!phoneNumberId) return null;
+  const result = await client.query(
+    `SELECT tc.external_channel_id, ci.integration_key
+       FROM tenant_channels tc
+       JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id
+       JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
+      WHERE tc.id = $1
+        AND tc.tenant_id = $2
+        AND tc.channel_type = 'WHATSAPP'
+        AND tc.status = 'active'
+        AND ci.integration_type = 'WHATSAPP'
+        AND ci.enabled = TRUE
+        AND ci.integration_key = $3
+        AND a.status = 'active'
+      LIMIT 2`,
+    [conversation.channel_id, conversation.tenant_id, whatsappIntegrationKey(phoneNumberId)]
+  );
+  return result.rowCount === 1 ? result.rows[0] : null;
+}
+
+export async function appendAgentMessage({
+  tenantId,
+  conversationId,
+  actor,
+  content,
+  idempotencyKey = null,
+  database = pool,
+  deliverWhatsApp = deliverWhatsAppText,
+}) {
+  const client = await database.connect();
   try {
     await client.query('BEGIN');
     const details = await client.query(
-      `SELECT c.*, tc.channel_type
+      `SELECT c.*, tc.channel_type, tc.external_channel_id
          FROM conversations c
          JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
         WHERE c.id = $1 AND c.tenant_id = $2
@@ -361,9 +393,6 @@ export async function appendAgentMessage({ tenantId, conversationId, actor, cont
     if (!conversation) throw new ConversationOperationError(404, 'Conversation not found', 'CONVERSATION_NOT_FOUND');
     if (conversation.status !== 'open') throw new ConversationOperationError(409, 'Conversation is closed', 'CONVERSATION_CLOSED');
     if (conversation.handling_mode !== 'HUMAN') throw new ConversationOperationError(409, 'Human messages require human handling mode', 'CONVERSATION_NOT_HUMAN');
-    if (conversation.channel_type !== 'SAMCHEGUIDE') {
-      throw new ConversationOperationError(409, 'Human delivery is not configured for this channel', 'CHANNEL_DELIVERY_UNSUPPORTED');
-    }
 
     const allowed = canOperateConversation({
       systemRole: actor.systemRole,
@@ -373,6 +402,43 @@ export async function appendAgentMessage({ tenantId, conversationId, actor, cont
       actorUserId: actor.userId,
     });
     if (!allowed) throw new ConversationOperationError(403, 'Conversation operation is not permitted', 'CONVERSATION_OPERATION_DENIED');
+
+    if (idempotencyKey && conversation.channel_type === 'WHATSAPP') {
+      const existing = await client.query(
+        `SELECT * FROM conversation_messages
+          WHERE tenant_id = $1 AND conversation_id = $2 AND idempotency_key = $3
+          LIMIT 1`,
+        [tenantId, conversationId, idempotencyKey]
+      );
+      if (existing.rows[0]) {
+        await client.query('COMMIT');
+        return { duplicate: true, message: existing.rows[0], delivery: 'SENT_TO_WHATSAPP' };
+      }
+    }
+
+    let delivery = 'AVAILABLE_TO_SAMCHEGUIDE';
+    if (conversation.channel_type === 'WHATSAPP') {
+      const integration = await loadWhatsAppAgentDelivery(client, conversation);
+      if (!integration) {
+        throw new ConversationOperationError(409, 'WhatsApp delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
+      }
+      try {
+        await deliverWhatsApp({
+          phoneNumberId: integration.external_channel_id,
+          recipient: conversation.customer_external_id,
+          content,
+        });
+      } catch (error) {
+        if (error instanceof WhatsAppDeliveryError) {
+          const status = error.code === 'WHATSAPP_DELIVERY_NOT_CONFIGURED' || error.code === 'WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH' ? 409 : 502;
+          throw new ConversationOperationError(status, 'WhatsApp delivery could not be completed', error.code);
+        }
+        throw new ConversationOperationError(502, 'WhatsApp delivery could not be completed', 'WHATSAPP_DELIVERY_FAILED');
+      }
+      delivery = 'SENT_TO_WHATSAPP';
+    } else if (conversation.channel_type !== 'SAMCHEGUIDE') {
+      throw new ConversationOperationError(409, 'Human delivery is not configured for this channel', 'CHANNEL_DELIVERY_UNSUPPORTED');
+    }
 
     const message = await insertMessage(client, {
       tenantId,
@@ -384,7 +450,7 @@ export async function appendAgentMessage({ tenantId, conversationId, actor, cont
     });
     if (!message && idempotencyKey) {
       await client.query('COMMIT');
-      return { duplicate: true };
+      return { duplicate: true, delivery };
     }
 
     await client.query(
@@ -394,7 +460,7 @@ export async function appendAgentMessage({ tenantId, conversationId, actor, cont
     await writeAuditEvent(client, { tenantId, conversationId, actorUserId: actor.userId, eventType: 'HUMAN_MESSAGE' });
     await notify(client, tenantId, conversationId, 'AGENT_MESSAGE');
     await client.query('COMMIT');
-    return { duplicate: false, message, delivery: 'AVAILABLE_TO_SAMCHEGUIDE' };
+    return { duplicate: false, message, delivery };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;

@@ -1,0 +1,40 @@
+name: Staging WhatsApp Handoff Verification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  handoff:
+    name: Verify WhatsApp operator delivery and handoff guards
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout selected staging commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install repository dependencies
+        run: npm install --ignore-scripts
+
+      - name: Validate handoff implementation syntax
+        run: |
+          node --check services/whatsapp-delivery-service.js
+          node --check services/live-inbox-service.js
+          node --check test/liveInboxWhatsAppOperatorDelivery.test.js
+
+      - name: Run WhatsApp operator delivery and handoff regressions
+        run: >-
+          node --test
+          test/liveInboxWhatsAppOperatorDelivery.test.js
+          test/whatsappSequentialResourceContext.test.js
+          test/whatsappResourceFollowUpRouting.test.js
+          test/whatsappResourceRetry.test.js
+          test/whatsappStandaloneMediaAcknowledgement.test.js

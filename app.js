@@ -10,7 +10,7 @@ import axios from "axios";
 import dotenv from "dotenv";
 import OpenAI from "openai";
 import cron from "node-cron";
-import https from "https";
+import { deliverWhatsAppText, whatsappHttpsAgent } from "./services/whatsapp-delivery-service.js";
 import { verifyWhatsAppSignature } from "./middleware/whatsappSignature.js";
 import authRoutes from "./routes/authRoutes.js";
 import tenantRoutes from "./routes/tenantRoutes.js";
@@ -122,7 +122,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // ============================================================================
 // 🔥 BAĞLANTI HAVUZU (SİSTEM YAVAŞLAMASINI VE SOKET TÜKENMESİNİ ÖNLER)
 // ============================================================================
-const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 100 });
+const httpsAgent = whatsappHttpsAgent;
 
 // ============================================================================
 // 🔥 TEKRARLANAN MESAJLARI ENGELLEME (RETRY KORUMASI) HAFIZALARI
@@ -441,36 +441,19 @@ function safeWhatsAppStorageFailureLog(error) {
 }
 
 async function sendMessage(to, body) {
+  if (!body || typeof body !== 'string') return;
   try {
-    if (!body || typeof body !== "string") return;
-    const chunks = [];
-    for (let i = 0; i < body.length; i += 4000) {
-      chunks.push(body.substring(i, i + 4000));
+    const outcome = await deliverWhatsAppText({
+      phoneNumberId: process.env.WHATSAPP_PHONE_ID,
+      recipient: to,
+      content: body,
+      continueOnChunkFailure: true,
+    });
+    if (outcome.failedChunks) {
+      console.error('[WHATSAPP SEND ERROR]: partial delivery failure');
     }
-    for (const chunk of chunks) {
-      try {
-        await axios.post(
-          `https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
-          {
-            messaging_product: "whatsapp",
-            to,
-            text: { body: chunk },
-          },
-          {
-            httpsAgent,
-            headers: {
-              Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-              "Content-Type": "application/json",
-            },
-            timeout: 20000 // 🔥 Zaman aşımı 20 saniyeye çıkarıldı (WhatsApp iletişimi güvenliği)
-          }
-        );
-      } catch (err) {
-        console.error("[WHATSAPP SEND ERROR - CHUNK]:", err.response?.data || err.message);
-      }
-    }
-  } catch (err) {
-    console.error("[WHATSAPP SEND ERROR - MAIN]:", err.response?.data || err.message);
+  } catch (error) {
+    console.error('[WHATSAPP SEND ERROR]:', error?.code ?? error?.name ?? 'unknown');
   }
 }
 
