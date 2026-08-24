@@ -27,6 +27,27 @@ function sanitizePdfParserMessage(value) {
   return firstLine.length <= 180 && !firstLine.includes('=') ? firstLine : 'PDF parser failure';
 }
 
+function resolvedPdfParseVersion() {
+  try { return require('pdf-parse/package.json').version ?? null; } catch { return null; }
+}
+
+function classifyPdfParserError(error) {
+  const name = String(error?.name ?? '');
+  const message = String(error?.message ?? '').toLowerCase();
+  if (/password/.test(message)) return 'PASSWORD_PROTECTED';
+  if (/xref/.test(message)) return 'INVALID_XREF';
+  if (/invalid.*pdf|invalidpdf/.test(message)) return 'INVALID_PDF';
+  if (/format/.test(message)) return 'FORMAT_ERROR';
+  if (/missing.*data/.test(message)) return 'MISSING_DATA';
+  if (name === 'UnknownErrorException') return 'PDFJS_UNKNOWN_ERROR';
+  return 'OTHER_PARSER_ERROR';
+}
+
+function safePdfParserMessage(error) {
+  const message = String(error?.message ?? '');
+  return { message_length: message.length, message_fingerprint: crypto.createHash('sha256').update(message).digest('hex').slice(0, 16), sanitized_exception_message: classifyPdfParserError(error) };
+}
+
 export function buildSafePdfExtractionDiagnostic({ mimeType, byteLength, error, extractedCharacterCount = null }) {
   return {
     parser_name: 'pdf-parse',

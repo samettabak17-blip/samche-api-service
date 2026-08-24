@@ -18,11 +18,12 @@ function textPdf(lines) {
 }
 
 const bytes = textPdf(['Reference: SC-WP-92817', 'Amount: 37,450 AED']);
+let runtime = { parser_version: null, parser_callable: null, node_version: process.version };
 try {
-  const runtime = await getPdfParserRuntimeInfo();
+  runtime = await getPdfParserRuntimeInfo();
   const result = await extractDocumentText({ mimeType: 'application/pdf', bytes, contentHash: crypto.createHash('sha256').update(bytes).digest('hex') });
   console.info('STAGING_PDF_EXTRACTION_PROBE', JSON.stringify({ ...runtime, input_is_buffer: Buffer.isBuffer(bytes), input_byte_length: bytes.length, result: 'PASS', extracted_character_count: result.extractedText.length }));
 } catch (error) {
-  console.info('STAGING_PDF_EXTRACTION_PROBE', JSON.stringify({ node_version: process.version, input_is_buffer: Buffer.isBuffer(bytes), input_byte_length: bytes.length, result: 'FAIL', exception_name: error?.name ?? 'Error', exception_category: error?.code ?? 'PDFJS_UNKNOWN_ERROR', message_fingerprint: crypto.createHash('sha256').update(String(error?.message ?? '')).digest('hex').slice(0, 16) }));
+  console.info('STAGING_PDF_EXTRACTION_PROBE', JSON.stringify({ ...runtime, node_version: process.version, input_is_buffer: Buffer.isBuffer(bytes), input_byte_length: bytes.length, result: 'FAIL', exception_name: error?.name ?? 'Error', exception_category: error?.code ?? 'PDFJS_UNKNOWN_ERROR', message_fingerprint: crypto.createHash('sha256').update(String(error?.message ?? '')).digest('hex').slice(0, 16) }));
   process.exitCode = 1;
 }
