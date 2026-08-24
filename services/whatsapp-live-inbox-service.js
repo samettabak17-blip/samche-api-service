@@ -108,7 +108,8 @@ export async function selectRecentWhatsAppResourceContext({
   if (!text) return { parts: [], resourceIds: [] };
 
   const explicitReference = EXPLICIT_RESOURCE_REFERENCE.test(text);
-  const maxResources = explicitReference ? MAX_EXPLICIT_RESOURCES : MAX_FOLLOW_UP_RESOURCES;
+  const maxResources = explicitReference ? 1 : MAX_FOLLOW_UP_RESOURCES;
+  const statusClause = explicitReference ? '' : "AND processing_status IN ('READY', 'PROCESSING')";
   const recentMinutes = explicitReference ? EXPLICIT_RESOURCE_WINDOW_MINUTES : FOLLOW_UP_RESOURCE_WINDOW_MINUTES;
   const category = explicitReference ? resourceCategoryForReference(text) : null;
   const result = await client.query(
@@ -116,7 +117,7 @@ export async function selectRecentWhatsAppResourceContext({
        FROM conversation_resources
       WHERE tenant_id = $1
         AND conversation_id = $2
-        AND processing_status IN ('READY', 'PROCESSING')
+        ${statusClause}
         AND created_at >= CURRENT_TIMESTAMP - ($5::integer * INTERVAL '1 minute')
         AND ($3::text IS NULL OR media_category = $3)
       ORDER BY created_at DESC, id DESC
@@ -127,6 +128,7 @@ export async function selectRecentWhatsAppResourceContext({
   const parts = [];
   const resourceIds = [];
   let processingResourceCount = 0;
+  let latestResource = explicitReference ? (result.rows[0] ?? null) : null;
   let remainingDocumentChars = MAX_DOCUMENT_CONTEXT_CHARS;
   let resourceStorage = storage;
   for (let resource of result.rows.slice(0, maxResources)) {
@@ -147,6 +149,7 @@ export async function selectRecentWhatsAppResourceContext({
         continue;
       }
       resource = waited.resource;
+      if (explicitReference) latestResource = resource;
     }
     if (resource.media_category === 'DOCUMENT') {
       const excerpt = String(resource.extracted_text ?? '').trim().slice(0, remainingDocumentChars);
@@ -169,7 +172,7 @@ export async function selectRecentWhatsAppResourceContext({
       }
     }
   }
-  return { parts, resourceIds, processingResourceCount };
+  return { parts, resourceIds, processingResourceCount, latestResource };
 }
 
 async function insertCustomerMessage(client, { tenantId, conversationId, externalMessageId, content }) {
@@ -329,7 +332,7 @@ export async function persistWhatsAppInbound({
         customerText: content,
       });
       aiContextParts = selected.parts;
-      resourceContext = { processingResourceCount: selected.processingResourceCount };
+      resourceContext = { processingResourceCount: selected.processingResourceCount, latestResource: selected.latestResource };
     }
     await client.query(
       'UPDATE conversations SET last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2',

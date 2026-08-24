@@ -7,11 +7,34 @@ export function planWhatsAppResourceFollowUp({ customerText, readyResourceCount 
   return { action: 'CONTINUE' };
 }
 
+export function planLatestExplicitResource({ explicit, latestResource }) {
+  if (!explicit || !latestResource) return { action: 'CONTINUE' };
+  if (latestResource.processing_status === 'READY') return { action: 'RESOURCE_GROUNDED', invokesModel: true };
+  if (latestResource.processing_status === 'PROCESSING') return { action: 'RESOURCE_PROCESSING', invokesModel: false };
+  if (latestResource.processing_status === 'FAILED') return { action: 'RESOURCE_FAILED', invokesModel: false };
+  return { action: 'CONTINUE' };
+}
+
 export function resourceProcessingAcknowledgement(language) {
   const messages = {
     tr: 'Belgenizi işlemeye devam ediyorum. Birkaç saniye sonra sorunuzu belgeye göre yanıtlayabilirim.',
     en: 'I am still processing your document. Please try your question again in a few seconds and I can answer it from the document.',
     ar: 'ما زلت أعالج المستند. يمكنك إعادة إرسال سؤالك بعد بضع ثوانٍ وسأجيب عليه استنادًا إلى المستند.',
+  };
+  return messages[language] ?? messages.tr;
+}
+
+export function resourceFailureAcknowledgement(language, category = 'DOCUMENT') {
+  const messages = {
+    tr: category === 'IMAGE'
+      ? 'Gönderdiğiniz son görsel şu anda işlenemedi. Lütfen görseli yeniden gönderin veya farklı bir dosya formatıyla tekrar deneyin.'
+      : 'Gönderdiğiniz son belge şu anda işlenemedi. Lütfen belgeyi yeniden gönderin veya farklı bir dosya formatıyla tekrar deneyin.',
+    en: category === 'IMAGE'
+      ? 'Your most recent image could not be processed. Please send it again or try a different file format.'
+      : 'Your most recent document could not be processed. Please send it again or try a different file format.',
+    ar: category === 'IMAGE'
+      ? 'تعذرت معالجة آخر صورة أرسلتها. يرجى إرسالها مرة أخرى أو تجربة صيغة ملف مختلفة.'
+      : 'تعذرت معالجة آخر مستند أرسلته. يرجى إرساله مرة أخرى أو تجربة صيغة ملف مختلفة.',
   };
   return messages[language] ?? messages.tr;
 }

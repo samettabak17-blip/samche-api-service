@@ -26,7 +26,7 @@ import {
 } from "./services/conversation-resource-storage.js";
 import { createWhatsAppMediaRetriever, extractWhatsAppMediaDescriptor } from "./services/whatsapp-multimodal-service.js";
 import { planStandaloneWhatsAppMediaResponse } from "./services/whatsapp-standalone-media-ack.js";
-import { planWhatsAppResourceFollowUp, resourceProcessingAcknowledgement } from "./services/whatsapp-resource-follow-up-routing.js";
+import { planLatestExplicitResource, planWhatsAppResourceFollowUp, resourceFailureAcknowledgement, resourceProcessingAcknowledgement } from "./services/whatsapp-resource-follow-up-routing.js";
 import { ensureConversationCrmIdentity } from "./services/crm-lead-service.js";
 import { queueLeadQualification } from "./services/lead-qualification-runner.js";
 import { startLiveEventListener, subscribeTenantEvents } from "./services/live-event-bus.js";
@@ -1378,7 +1378,10 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           queueLeadQualification,
         });
         logWhatsAppTiming('resource_persistence_complete');
-        if (whatsappInbox?.resource) console.info(`WHATSAPP_MEDIA_TIMING phase=resource_status_${whatsappInbox.resource.processing_status} elapsed_ms=${Date.now() - whatsappRequestStartedAt}`);
+        if (whatsappInbox?.resource) {
+          console.info(`WHATSAPP_MEDIA_TIMING phase=resource_status_${whatsappInbox.resource.processing_status} elapsed_ms=${Date.now() - whatsappRequestStartedAt}`);
+          if (whatsappInbox.resource.processing_status === 'FAILED') console.info(`WHATSAPP_RESOURCE_FAILURE stage=processing failure_code=${whatsappInbox.resource.failure_code ?? 'RESOURCE_PROCESSING_FAILED'}`);
+        }
         if (!whatsappInbox || whatsappInbox.unmapped) {
           console.error(
             'WHATSAPP_INBOUND_UNMAPPED_PHONE runtime_db_identity=' +
@@ -1402,6 +1405,16 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
             handlingVersion: whatsappInbox.handlingVersion,
           });
           if (persisted.delivered) await sendMessage(cleanFrom, processingMessage);
+          return;
+        }
+        const latestResourcePlan = planLatestExplicitResource({
+          explicit: resourceFollowUp.action !== 'CONTINUE',
+          latestResource: whatsappInbox.resourceContext?.latestResource,
+        });
+        if (latestResourcePlan.action === 'RESOURCE_FAILED') {
+          const failureMessage = resourceFailureAcknowledgement(wpSessions[cleanFrom]?.lang ?? 'tr', whatsappInbox.resourceContext.latestResource.media_category);
+          const persisted = await persistAssistantResponseIfCurrent({ tenantId: whatsappInbox.integration.tenant_id, conversationId: whatsappInbox.conversation.id, content: failureMessage, handlingVersion: whatsappInbox.handlingVersion });
+          if (persisted.delivered) await sendMessage(cleanFrom, failureMessage);
           return;
         }
         const standaloneMediaPlan = planStandaloneWhatsAppMediaResponse({
