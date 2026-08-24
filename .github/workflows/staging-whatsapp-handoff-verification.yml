@@ -31,6 +31,9 @@ jobs:
           node --check test/liveInboxWhatsAppOperatorDelivery.test.js
 
       - name: Run WhatsApp operator delivery and handoff regressions
+        env:
+          DATABASE_URL: postgresql://workflow-test:workflow-test@127.0.0.1:5432/workflow_test
+          JWT_SECRET: workflow-test-only-not-for-runtime
         run: >-
           node --test
           test/liveInboxWhatsAppOperatorDelivery.test.js
