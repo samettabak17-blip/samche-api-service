@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -6,7 +7,11 @@ const connectionString = process.env.STAGING_DATABASE_URL;
 const tenantId = process.env.STAGING_WHATSAPP_TENANT_ID;
 const phoneNumberId = process.env.STAGING_WHATSAPP_PHONE_ID;
 const integrationKey = phoneNumberId ? 'WHATSAPP:' + phoneNumberId : null;
-const runtimeAssistant = { name: 'SamChe WhatsApp Runtime', model: 'gemini-2.5-pro' };
+const runtimeAssistant = { name: 'SamChe AI', model: 'gemini-2.5-pro' };
+const legacyRuntimeAssistantName = 'SamChe WhatsApp Runtime';
+const masterPolicy = readFileSync(new URL('../policies/samche-whatsapp-master-business-policy.tr.txt', import.meta.url), 'utf8');
+const masterPolicySha256 = createHash('sha256').update(masterPolicy, 'utf8').digest('hex');
+const expectedMasterPolicySha256 = 'c72bc5787e31ee788431fcb7b73a6f1f72fb3471c3910a00e87005d389edaf58';
 
 if (!connectionString || !tenantId || !phoneNumberId) {
   console.error('WHATSAPP_MAPPING: CONFIGURATION_REQUIRED');
@@ -16,24 +21,57 @@ if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
   console.error('WHATSAPP_MAPPING: INVALID_CONFIGURATION');
   process.exit(1);
 }
+if (masterPolicySha256 !== expectedMasterPolicySha256) {
+  console.error('WHATSAPP_MAPPING: MASTER_POLICY_INTEGRITY_FAILED');
+  process.exit(1);
+}
 function fail(code) { const error = new Error(code); error.code = code; throw error; }
 const pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false } });
 
 async function resolveAssistant(client) {
-  const assistants = await client.query(
-    `SELECT id, status FROM ai_assistants
-      WHERE tenant_id = $1 AND name = $2 AND model = $3 FOR UPDATE`,
-    [tenantId, runtimeAssistant.name, runtimeAssistant.model]
+  const integrationAssistant = await client.query(
+    `SELECT ci.assistant_id, a.status
+       FROM channel_integrations ci
+       JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
+      WHERE ci.integration_key = $1 AND ci.tenant_id = $2
+      FOR UPDATE`,
+    [integrationKey, tenantId]
   );
-  if (assistants.rowCount > 1) fail('WHATSAPP_ASSISTANT_AMBIGUOUS');
-  if (assistants.rowCount === 1) {
-    if (assistants.rows[0].status !== 'active') fail('WHATSAPP_ASSISTANT_INACTIVE');
-    return { assistant: assistants.rows[0], outcome: 'resolved' };
+  if (integrationAssistant.rowCount > 1) fail('WHATSAPP_ASSISTANT_AMBIGUOUS');
+
+  const candidates = integrationAssistant.rowCount
+    ? integrationAssistant
+    : await client.query(
+      `SELECT id, status
+         FROM ai_assistants
+        WHERE tenant_id = $1
+          AND model = $2
+          AND name IN ($3, $4)
+        ORDER BY CASE WHEN name = $3 THEN 0 ELSE 1 END
+        FOR UPDATE`,
+      [tenantId, runtimeAssistant.model, runtimeAssistant.name, legacyRuntimeAssistantName]
+    );
+  if (candidates.rowCount > 1) fail('WHATSAPP_ASSISTANT_AMBIGUOUS');
+
+  if (candidates.rowCount === 1) {
+    if (candidates.rows[0].status !== 'active') fail('WHATSAPP_ASSISTANT_INACTIVE');
+    const updated = await client.query(
+      `UPDATE ai_assistants
+          SET name = $1,
+              system_prompt = $2,
+              model = $3,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $4 AND tenant_id = $5
+        RETURNING id, status`,
+      [runtimeAssistant.name, masterPolicy, runtimeAssistant.model, candidates.rows[0].assistant_id ?? candidates.rows[0].id, tenantId]
+    );
+    return { assistant: updated.rows[0], outcome: 'configured' };
   }
+
   const created = await client.query(
-    `INSERT INTO ai_assistants (tenant_id, name, model, status)
-     VALUES ($1, $2, $3, 'active') RETURNING id, status`,
-    [tenantId, runtimeAssistant.name, runtimeAssistant.model]
+    `INSERT INTO ai_assistants (tenant_id, name, system_prompt, model, status)
+     VALUES ($1, $2, $3, $4, 'active') RETURNING id, status`,
+    [tenantId, runtimeAssistant.name, masterPolicy, runtimeAssistant.model]
   );
   return { assistant: created.rows[0], outcome: 'created' };
 }

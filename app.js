@@ -20,7 +20,7 @@ import conversationRoutes from "./routes/conversationRoutes.js";
 import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
 import { persistAndDeliverWhatsAppAssistant } from "./services/whatsapp-assistant-response-service.js";
-import { buildWhatsAppTenantPrompt } from "./services/whatsapp-tenant-context-service.js";
+import { buildWhatsAppTenantModelContext, WhatsAppTenantContextError } from "./services/whatsapp-tenant-context-service.js";
 import {
   describeStorageCompatibilityProfile,
   describeStorageConfigurationIdentity,
@@ -494,16 +494,20 @@ function corporateFallback(lang) {
   return "لأتمكن من تقديم الإرشاد الأنسب لكم، هل يمكن توضيح طلبكم بشكل أدق؟ سيساعدني ذلك في تقديم الدعم الأمثل.";
 }
 
-async function callWpGemini(prompt, multimodalParts = null) {
+async function callWpGemini(prompt, multimodalParts = null, systemInstruction = null) {
   try {
     const parts = [{ text: prompt }];
     const contextualParts = Array.isArray(multimodalParts)
       ? multimodalParts
       : (multimodalParts ? [multimodalParts] : []);
     parts.push(...contextualParts);
+    const payload = { contents: [{ parts }] };
+    if (typeof systemInstruction === 'string' && systemInstruction.trim()) {
+      payload.systemInstruction = { parts: [{ text: systemInstruction }] };
+    }
     const response = await axios.post(
       WP_GEMINI_URL,
-      { contents: [{ parts }] },
+      payload,
       { 
         httpsAgent,
         headers: { "Content-Type": "application/json" },
@@ -1587,20 +1591,30 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       // --------------------------------------
       // BÜYÜK DİL PROMPTLARI 
       // --------------------------------------
-      const prompt = buildWhatsAppTenantPrompt({
-        tenant: tenantContext,
-        history: whatsappInbox.conversationHistory,
-        customerText: text,
-        communicationLanguage: tenantContext.communicationLanguage,
-      });
+      let modelContext;
+      try {
+        modelContext = buildWhatsAppTenantModelContext({
+          tenant: tenantContext,
+          history: whatsappInbox.conversationHistory,
+          customerText: text,
+          communicationLanguage: tenantContext.communicationLanguage,
+        });
+      } catch (error) {
+        const reason = error instanceof WhatsAppTenantContextError
+          ? error.code
+          : 'WHATSAPP_TENANT_CONTEXT_UNAVAILABLE';
+        console.error('WHATSAPP_TENANT_CONTEXT_UNAVAILABLE', reason);
+        return;
+      }
 
       // --------------------------------------
       // YAPAY ZEKA API ÇAĞRISI
       // --------------------------------------
       logWhatsAppTiming('model_request_started');
       const aiResponse = await callWpGemini(
-        prompt,
-        whatsappInbox?.aiContextParts ?? (whatsappInbox?.aiContextPart ? [whatsappInbox.aiContextPart] : [])
+        modelContext.userPrompt,
+        whatsappInbox?.aiContextParts ?? (whatsappInbox?.aiContextPart ? [whatsappInbox.aiContextPart] : []),
+        modelContext.systemInstruction,
       );
 
       logWhatsAppTiming('model_response_complete');
