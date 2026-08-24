@@ -23,3 +23,10 @@ test('context carries only the mapped tenant identity', () => {
   assert.match(prompt, /Example Company LLC/);
   assert.doesNotMatch(prompt, /SamChe Company LLC/);
 });
+
+
+test('empty optional knowledge still produces a mapped tenant context prompt', () => {
+  const prompt = buildWhatsAppTenantPrompt({ tenant: { ...tenant, knowledge: [] }, history: [], customerText: 'Merhaba', communicationLanguage: 'tr' });
+  assert.match(prompt, /Example Company LLC/);
+  assert.match(prompt, /FIRST_RESPONSE_GREETING/);
+});

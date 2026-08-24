@@ -390,7 +390,7 @@ export async function persistWhatsAppInbound({
     await client.query('COMMIT');
     queueLeadQualification({ tenantId: integration.tenant_id, conversationId });
     return {
-      integration, conversation, customerMessage, resource, aiContextPart, aiContextParts, resourceContext, duplicate: false,
+      integration, conversation, customerMessage, resource, aiContextPart, aiContextParts, resourceContext, tenantContext, conversationHistory, isFirstAssistantResponse, duplicate: false,
       shouldInvokeAi: conversation.status === 'open' && conversation.handling_mode === 'AI',
       handlingVersion: conversation.handling_version,
     };

@@ -475,8 +475,14 @@ async function persistAndSendWhatsAppAssistant(whatsappInbox, recipient, content
 async function sendMessageToTelegram(text) {
   try {
     if (!text) return;
-    const url = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`;
-    axios.post(url, { chat_id: process.env.TELEGRAM_CHAT_ID.trim(), text: text }, { httpsAgent, timeout: 20000 }).catch(() => {});
+    const chatId = process.env.TELEGRAM_CHAT_ID?.trim();
+    const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+    if (!chatId || !token) {
+      console.error('[TELEGRAM ERROR]: notification configuration is unavailable');
+      return;
+    }
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    axios.post(url, { chat_id: chatId, text: text }, { httpsAgent, timeout: 20000 }).catch(() => {});
   } catch (err) {
     console.error("[TELEGRAM ERROR]:", err.message);
   }
