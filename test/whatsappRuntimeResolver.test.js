@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getWhatsAppRuntimeDatabaseFingerprint, resolveWhatsAppIntegration } from '../services/whatsapp-live-inbox-service.js';
+import { getWhatsAppRuntimeDatabaseFingerprint, resolveWhatsAppIntegration, whatsappPhoneNumberFingerprint } from '../services/whatsapp-live-inbox-service.js';
 
 function resolverClient(row) {
   return {
@@ -52,4 +52,12 @@ test('derives a safe stable runtime database identity without exposing connectio
 
   assert.match(first, /^[a-f0-9]{16}$/);
   assert.equal(first, second);
+});
+
+test('uses a stable opaque fingerprint for the inbound WhatsApp phone identifier', () => {
+  const known = whatsappPhoneNumberFingerprint('948536645017374');
+
+  assert.match(known, /^[a-f0-9]{16}$/);
+  assert.equal(known, whatsappPhoneNumberFingerprint('948536645017374'));
+  assert.notEqual(known, whatsappPhoneNumberFingerprint('948536645017375'));
 });

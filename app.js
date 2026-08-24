@@ -1348,7 +1348,8 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         if (!whatsappInbox || whatsappInbox.unmapped) {
           console.error(
             'WHATSAPP_INBOUND_UNMAPPED_PHONE runtime_db_identity=' +
-            (whatsappInbox?.runtimeDbIdentity ?? 'unavailable')
+            (whatsappInbox?.runtimeDbIdentity ?? 'unavailable') +
+            ' phone_id_hash=' + (whatsappInbox?.phoneNumberFingerprint ?? 'unavailable')
           );
           return;
         }

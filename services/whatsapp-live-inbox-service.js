@@ -21,6 +21,10 @@ function externalConversationId(customerPhone) {
   return `whatsapp:${crypto.createHash('sha256').update(customerReference(customerPhone)).digest('hex')}`;
 }
 
+export function whatsappPhoneNumberFingerprint(phoneNumberId) {
+  return crypto.createHash('sha256').update(String(phoneNumberId ?? '')).digest('hex').slice(0, 16);
+}
+
 export async function getWhatsAppRuntimeDatabaseFingerprint(client) {
   try {
     const result = await client.query(
@@ -161,7 +165,11 @@ export async function persistWhatsAppInbound({
     if (!integration) {
       const runtimeDbIdentity = await getWhatsAppRuntimeDatabaseFingerprint(client);
       await client.query('COMMIT');
-      return { unmapped: true, runtimeDbIdentity };
+      return {
+        unmapped: true,
+        runtimeDbIdentity,
+        phoneNumberFingerprint: whatsappPhoneNumberFingerprint(phoneNumberId),
+      };
     }
     const conversationResult = await client.query(
       `INSERT INTO conversations

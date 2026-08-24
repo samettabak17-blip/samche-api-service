@@ -2,6 +2,7 @@ import pg from 'pg';
 import {
   getWhatsAppRuntimeDatabaseFingerprint,
   resolveWhatsAppIntegration,
+  whatsappPhoneNumberFingerprint,
 } from '../services/whatsapp-live-inbox-service.js';
 import { whatsappIntegrationKey } from '../services/whatsapp-multimodal-service.js';
 
@@ -72,6 +73,7 @@ try {
       '; tenant=' + shortId(row.tenant_id) +
       '; channel=' + shortId(row.channel_id) +
       '; assistant=' + shortId(row.assistant_id) +
+      '; phone_id_hash=' + whatsappPhoneNumberFingerprint(phoneNumberId) +
       '; key_exact=1; resolver=READY)'
     );
   } catch (error) {
