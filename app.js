@@ -1441,7 +1441,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         if (error?.code === 'RESOURCE_STORAGE_WRITE_FAILED') {
           console.error('WHATSAPP_MEDIA_INGESTION_FAILED', safeWhatsAppStorageFailureLog(error));
         } else {
-          console.error('WHATSAPP_MEDIA_INGESTION_FAILED', error?.code ?? 'UNKNOWN');
+          console.error('WHATSAPP_MEDIA_INGESTION_FAILED', error?.code ?? 'UNKNOWN', error?.safeDiagnostic ? JSON.stringify(error.safeDiagnostic) : '');
         }
         return;
       }

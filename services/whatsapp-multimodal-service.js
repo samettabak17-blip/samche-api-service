@@ -70,6 +70,19 @@ export function buildGeminiImagePart({ mimeType, bytes }) {
   return { inline_data: { mime_type: mimeType, data: bytes.toString('base64') } };
 }
 
+function safeMetaRetrievalDiagnostic({ phase, error }) {
+  const response = error?.response;
+  const meta = response?.data?.error;
+  return {
+    operation: 'GraphApiGet',
+    phase,
+    http_status: response?.status ?? null,
+    meta_error_type: typeof meta?.type === 'string' ? meta.type : null,
+    meta_error_code: Number.isInteger(meta?.code) ? meta.code : null,
+    meta_error_subcode: Number.isInteger(meta?.error_subcode) ? meta.error_subcode : null,
+  };
+}
+
 export function createWhatsAppMediaRetriever({ http, accessToken, graphApiBase = 'https://graph.facebook.com/v20.0', timeoutMs = 20_000, maxBytes = 10 * 1024 * 1024 }) {
   if (!http?.get || !accessToken) throw new WhatsAppMultimodalError('WHATSAPP_MEDIA_CLIENT_CONFIG_REQUIRED', 'WhatsApp media client is not configured');
   return async function retrieve(externalMediaId) {
@@ -81,16 +94,28 @@ export function createWhatsAppMediaRetriever({ http, accessToken, graphApiBase =
         headers: { Authorization: `Bearer ${accessToken}` }, timeout: timeoutMs,
       });
       const location = metadata?.data?.url;
-      if (!location || typeof location !== 'string') throw new Error('missing media url');
-      const response = await http.get(location, {
+      if (!location || typeof location !== 'string') {
+        const error = new Error('missing media url');
+        error.safeDiagnostic = { operation: 'GraphApiGet', phase: 'media_metadata', http_status: null, meta_error_type: 'MISSING_MEDIA_URL', meta_error_code: null, meta_error_subcode: null };
+        throw error;
+      }
+      let response;
+      try {
+        response = await http.get(location, {
         headers: { Authorization: `Bearer ${accessToken}` }, timeout: timeoutMs,
         responseType: 'arraybuffer', maxContentLength: maxBytes, maxBodyLength: maxBytes,
-      });
+        });
+      } catch (error) {
+        error.safeDiagnostic = safeMetaRetrievalDiagnostic({ phase: 'media_binary_download', error });
+        throw error;
+      }
       const bytes = Buffer.from(response.data);
       if (!bytes.length || bytes.length > maxBytes) throw new Error('invalid media size');
       return { bytes, declaredMimeType: metadata.data.mime_type ?? null, filename: metadata.data.filename ?? null };
     } catch (error) {
-      throw new WhatsAppMultimodalError('WHATSAPP_MEDIA_RETRIEVAL_FAILED', 'WhatsApp media could not be retrieved');
+      const wrapped = new WhatsAppMultimodalError('WHATSAPP_MEDIA_RETRIEVAL_FAILED', 'WhatsApp media could not be retrieved');
+      wrapped.safeDiagnostic = error?.safeDiagnostic ?? safeMetaRetrievalDiagnostic({ phase: 'media_metadata', error });
+      throw wrapped;
     }
   };
 }
