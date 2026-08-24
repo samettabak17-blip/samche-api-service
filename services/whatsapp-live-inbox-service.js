@@ -66,6 +66,92 @@ export async function resolveWhatsAppIntegration(client, phoneNumberId) {
   return integration;
 }
 
+const EXPLICIT_RESOURCE_REFERENCE = /(az önce gönderdiğim|yukarıdaki|bu\s+(?:pdf|dosya|belge|görsel)|(?:pdf|dosya|belge|görsel)(?:deki|daki|yi|yı|nin|ın|in|un)|this\s+(?:pdf|file|document|image)|the\s+(?:previous|above)\s+(?:pdf|file|document|image))/i;
+const IMAGE_RESOURCE_REFERENCE = /\b(görsel|resim|ekran görüntüsü|image|screenshot|photo)\b/i;
+const DOCUMENT_RESOURCE_REFERENCE = /\b(pdf|dosya|belge|document|file)\b/i;
+const FOLLOW_UP_RESOURCE_WINDOW_MINUTES = 10;
+const EXPLICIT_RESOURCE_WINDOW_MINUTES = 60;
+const MAX_FOLLOW_UP_RESOURCES = 1;
+const MAX_EXPLICIT_RESOURCES = 2;
+const MAX_DOCUMENT_CONTEXT_CHARS = 12_000;
+
+function resourceCategoryForReference(content) {
+  if (IMAGE_RESOURCE_REFERENCE.test(content)) return 'IMAGE';
+  if (DOCUMENT_RESOURCE_REFERENCE.test(content)) return 'DOCUMENT';
+  return null;
+}
+
+async function readResourceBytes(storage, key) {
+  const body = await storage.get({ key });
+  if (Buffer.isBuffer(body)) return body;
+  const chunks = [];
+  for await (const chunk of body) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
+
+export function shouldSelectRecentWhatsAppResourceContext({ conversation, descriptor, customerText }) {
+  return !descriptor &&
+    Boolean(String(customerText ?? '').trim()) &&
+    conversation?.status === 'open' &&
+    conversation?.handling_mode === 'AI';
+}
+
+export async function selectRecentWhatsAppResourceContext({
+  client,
+  tenantId,
+  conversationId,
+  customerText,
+  storage = null,
+}) {
+  const text = String(customerText ?? '').trim();
+  if (!text) return { parts: [], resourceIds: [] };
+
+  const explicitReference = EXPLICIT_RESOURCE_REFERENCE.test(text);
+  const maxResources = explicitReference ? MAX_EXPLICIT_RESOURCES : MAX_FOLLOW_UP_RESOURCES;
+  const recentMinutes = explicitReference ? EXPLICIT_RESOURCE_WINDOW_MINUTES : FOLLOW_UP_RESOURCE_WINDOW_MINUTES;
+  const category = explicitReference ? resourceCategoryForReference(text) : null;
+  const result = await client.query(
+    `SELECT id, storage_key, media_category, mime_type, extracted_text
+       FROM conversation_resources
+      WHERE tenant_id = $1
+        AND conversation_id = $2
+        AND processing_status = 'READY'
+        AND created_at >= CURRENT_TIMESTAMP - ($5::integer * INTERVAL '1 minute')
+        AND ($3::text IS NULL OR media_category = $3)
+      ORDER BY created_at DESC, id DESC
+      LIMIT $4`,
+    [tenantId, conversationId, category, maxResources, recentMinutes]
+  );
+
+  const parts = [];
+  const resourceIds = [];
+  let remainingDocumentChars = MAX_DOCUMENT_CONTEXT_CHARS;
+  let resourceStorage = storage;
+  for (const resource of result.rows.slice(0, maxResources)) {
+    if (resource.media_category === 'DOCUMENT') {
+      const excerpt = String(resource.extracted_text ?? '').trim().slice(0, remainingDocumentChars);
+      const context = buildUntrustedDocumentContext(excerpt);
+      if (!context) continue;
+      remainingDocumentChars -= excerpt.length;
+      parts.push({ text: context });
+      resourceIds.push(resource.id);
+      if (remainingDocumentChars <= 0) break;
+      continue;
+    }
+    if (resource.media_category === 'IMAGE') {
+      try {
+        resourceStorage ??= createConversationResourceStorage();
+        const bytes = await readResourceBytes(resourceStorage, resource.storage_key);
+        parts.push(buildGeminiImagePart({ mimeType: resource.mime_type, bytes }));
+        resourceIds.push(resource.id);
+      } catch {
+        // A failed historic resource read is omitted rather than represented as understood.
+      }
+    }
+  }
+  return { parts, resourceIds };
+}
+
 async function insertCustomerMessage(client, { tenantId, conversationId, externalMessageId, content }) {
   const result = await client.query(
     `INSERT INTO conversation_messages
@@ -198,6 +284,7 @@ export async function persistWhatsAppInbound({
     }
     let resource = null;
     let aiContextPart = null;
+    let aiContextParts = [];
     if (descriptor && bytes) {
       const resourceStorage = storage ?? createConversationResourceStorage();
       activeStorage = resourceStorage;
@@ -207,7 +294,20 @@ export async function persistWhatsAppInbound({
       });
       resource = result.resource;
       aiContextPart = result.aiContextPart;
+      aiContextParts = aiContextPart ? [aiContextPart] : [];
       uploadedStorageKey = resource.storage_key;
+    } else if (shouldSelectRecentWhatsAppResourceContext({
+      conversation,
+      descriptor,
+      customerText: content,
+    })) {
+      const selected = await selectRecentWhatsAppResourceContext({
+        client,
+        tenantId: integration.tenant_id,
+        conversationId,
+        customerText: content,
+      });
+      aiContextParts = selected.parts;
     }
     await client.query(
       'UPDATE conversations SET last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2',
@@ -217,7 +317,7 @@ export async function persistWhatsAppInbound({
     await client.query('COMMIT');
     queueLeadQualification({ tenantId: integration.tenant_id, conversationId });
     return {
-      integration, conversation, customerMessage, resource, aiContextPart, duplicate: false,
+      integration, conversation, customerMessage, resource, aiContextPart, aiContextParts, duplicate: false,
       shouldInvokeAi: conversation.status === 'open' && conversation.handling_mode === 'AI',
       handlingVersion: conversation.handling_version,
     };

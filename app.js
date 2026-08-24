@@ -488,10 +488,13 @@ function corporateFallback(lang) {
   return "لأتمكن من تقديم الإرشاد الأنسب لكم، هل يمكن توضيح طلبكم بشكل أدق؟ سيساعدني ذلك في تقديم الدعم الأمثل.";
 }
 
-async function callWpGemini(prompt, multimodalPart = null) {
+async function callWpGemini(prompt, multimodalParts = null) {
   try {
     const parts = [{ text: prompt }];
-    if (multimodalPart) parts.push(multimodalPart);
+    const contextualParts = Array.isArray(multimodalParts)
+      ? multimodalParts
+      : (multimodalParts ? [multimodalParts] : []);
+    parts.push(...contextualParts);
     const response = await axios.post(
       WP_GEMINI_URL,
       { contents: [{ parts }] },
@@ -3061,7 +3064,10 @@ ${text}
       // --------------------------------------
       // YAPAY ZEKA API ÇAĞRISI
       // --------------------------------------
-      const aiResponse = await callWpGemini(prompt, whatsappInbox?.aiContextPart ?? null);
+      const aiResponse = await callWpGemini(
+        prompt,
+        whatsappInbox?.aiContextParts ?? (whatsappInbox?.aiContextPart ? [whatsappInbox.aiContextPart] : [])
+      );
 
       if (!aiResponse) {
         await sendMessage(cleanFrom, corporateFallback(session.lang || "en"));
