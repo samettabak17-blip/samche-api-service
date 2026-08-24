@@ -1,0 +1,32 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { planWhatsAppResourceFollowUp } from '../services/whatsapp-resource-follow-up-routing.js';
+
+test('a Turkish CV question takes precedence over the legacy contact shortcut when a document is ready', () => {
+  const plan = planWhatsAppResourceFollowUp({
+    customerText: 'Bu belgedeki kişinin adı soyadı iletişim bilgileri ve ünvanı nedir?',
+    readyResourceCount: 1,
+    processingResourceCount: 0,
+  });
+  assert.equal(plan.action, 'DOCUMENT_GROUNDED');
+});
+
+test('an immediate explicit document question waits instead of reaching generic routing while the document processes', () => {
+  const plan = planWhatsAppResourceFollowUp({
+    customerText: 'Bu CVdeki kişinin ünvanı nedir?',
+    readyResourceCount: 0,
+    processingResourceCount: 1,
+  });
+  assert.equal(plan.action, 'RESOURCE_PROCESSING');
+  assert.equal(plan.invokesModel, false);
+});
+
+test('an ordinary contact request keeps the existing legacy routing behavior', () => {
+  const plan = planWhatsAppResourceFollowUp({
+    customerText: 'İletişim bilgilerinizi paylaşır mısınız?',
+    readyResourceCount: 0,
+    processingResourceCount: 0,
+  });
+  assert.equal(plan.action, 'CONTINUE');
+});
+

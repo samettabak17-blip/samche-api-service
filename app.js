@@ -26,6 +26,7 @@ import {
 } from "./services/conversation-resource-storage.js";
 import { createWhatsAppMediaRetriever, extractWhatsAppMediaDescriptor } from "./services/whatsapp-multimodal-service.js";
 import { planStandaloneWhatsAppMediaResponse } from "./services/whatsapp-standalone-media-ack.js";
+import { planWhatsAppResourceFollowUp } from "./services/whatsapp-resource-follow-up-routing.js";
 import { ensureConversationCrmIdentity } from "./services/crm-lead-service.js";
 import { queueLeadQualification } from "./services/lead-qualification-runner.js";
 import { startLiveEventListener, subscribeTenantEvents } from "./services/live-event-bus.js";
@@ -1344,6 +1345,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       text = (text || "").trim();
       const mediaDescriptor = extractWhatsAppMediaDescriptor(message);
       let whatsappInbox = null;
+      let resourceFollowUp = { action: 'CONTINUE' };
       try {
         if (!phoneNumberId) {
           console.error('WHATSAPP_INBOUND_UNMAPPED_PHONE');
@@ -1380,6 +1382,11 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           return;
         }
         if (whatsappInbox.duplicate || !whatsappInbox.shouldInvokeAi) return;
+        resourceFollowUp = planWhatsAppResourceFollowUp({
+          customerText: text,
+          readyResourceCount: whatsappInbox.aiContextParts?.length ?? 0,
+          processingResourceCount: 0,
+        });
         const standaloneMediaPlan = planStandaloneWhatsAppMediaResponse({
           customerText: text,
           descriptor: mediaDescriptor,
@@ -1531,7 +1538,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         await sendMessage(cleanFrom, wpCorporateShortReplyMap[lower][lang]);
         return;
       }
-      if (lower.includes("contact") || lower.includes("iletişim") || lower.includes("whatsapp") || lower.includes("call") || lower.includes("telefon")) {
+      if (resourceFollowUp.action !== 'DOCUMENT_GROUNDED' && (lower.includes("contact") || lower.includes("iletişim") || lower.includes("whatsapp") || lower.includes("call") || lower.includes("telefon"))) {
         if(contactText && contactText[lang]) await sendMessage(cleanFrom, contactText[lang]);
         return;
       }
