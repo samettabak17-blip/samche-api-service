@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -89,6 +90,35 @@ function configuredForcePathStyle(env) {
 
 export function describeStorageConfiguration(env = process.env) {
   return CONFIGURATION_FIELDS.map((name) => ({ name, ...stringShape(env[name]) }));
+}
+
+function opaqueFingerprint(values) {
+  return crypto.createHash('sha256').update(values.join('\u0000')).digest('hex').slice(0, 16);
+}
+
+export function describeStorageConfigurationIdentity(env = process.env) {
+  const configuredDriver = String(env.CONVERSATION_STORAGE_DRIVER ?? '').toLowerCase();
+  return {
+    driver: configuredDriver === 's3' ? 's3' : (configuredDriver ? 'unsupported' : 'missing'),
+    configurationFingerprint: opaqueFingerprint([
+      configuredDriver,
+      String(env.CONVERSATION_S3_BUCKET ?? ''),
+      String(env.CONVERSATION_S3_REGION ?? ''),
+      String(env.CONVERSATION_S3_ENDPOINT ?? ''),
+      String(env.CONVERSATION_S3_FORCE_PATH_STYLE ?? ''),
+    ]),
+    accessKeyIdFingerprint: env.CONVERSATION_S3_ACCESS_KEY_ID
+      ? opaqueFingerprint([String(env.CONVERSATION_S3_ACCESS_KEY_ID)])
+      : null,
+  };
+}
+
+export function describeStorageCompatibilityProfile() {
+  return {
+    serverSideEncryption: 0,
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
+  };
 }
 
 export function describeStorageAddressing(env = process.env, forcePathStyleOverride = undefined) {

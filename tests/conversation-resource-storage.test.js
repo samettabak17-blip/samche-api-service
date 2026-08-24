@@ -5,7 +5,9 @@ import {
   buildS3ClientConfig,
   describeSafeHttpRequest,
   describeStorageAddressing,
+  describeStorageCompatibilityProfile,
   describeStorageConfiguration,
+  describeStorageConfigurationIdentity,
   getSafeStorageFailureDiagnostic,
   getSafeStorageProviderDiagnostic,
 } from '../services/conversation-resource-storage.js';
@@ -101,4 +103,25 @@ test('provider diagnostics preserve safe XML-style error fields and exclude unsa
   const fallback = { configuration: [], addressing: null, request: { operation: 'ListObjectsV2Command', headers: [] }, putObjectOptionNames: [] };
   assert.deepEqual(getSafeStorageFailureDiagnostic(error, fallback).provider, expected);
   assert.equal(JSON.stringify(getSafeStorageProviderDiagnostic(error)).includes('not-reported'), false);
+});
+test('storage identity and R2 profile reveal only opaque configuration state', () => {
+  const identity = describeStorageConfigurationIdentity({
+    CONVERSATION_STORAGE_DRIVER: 's3',
+    CONVERSATION_S3_BUCKET: 'staging-private-bucket',
+    CONVERSATION_S3_REGION: 'auto',
+    CONVERSATION_S3_ENDPOINT: 'https://account.r2.cloudflarestorage.com',
+    CONVERSATION_S3_FORCE_PATH_STYLE: 'false',
+    CONVERSATION_S3_ACCESS_KEY_ID: 'access-key-material',
+  });
+
+  assert.deepEqual(describeStorageCompatibilityProfile(), {
+    serverSideEncryption: 0,
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
+  });
+  assert.equal(identity.driver, 's3');
+  assert.match(identity.configurationFingerprint, /^[a-f0-9]{16}$/);
+  assert.match(identity.accessKeyIdFingerprint, /^[a-f0-9]{16}$/);
+  assert.equal(JSON.stringify(identity).includes('staging-private-bucket'), false);
+  assert.equal(JSON.stringify(identity).includes('access-key-material'), false);
 });

@@ -19,6 +19,11 @@ import crmRoutes from "./routes/crmRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
 import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
+import {
+  describeStorageCompatibilityProfile,
+  describeStorageConfigurationIdentity,
+  getSafeStorageFailureDiagnostic,
+} from "./services/conversation-resource-storage.js";
 import { createWhatsAppMediaRetriever, extractWhatsAppMediaDescriptor } from "./services/whatsapp-multimodal-service.js";
 import { ensureConversationCrmIdentity } from "./services/crm-lead-service.js";
 import { queueLeadQualification } from "./services/lead-qualification-runner.js";
@@ -416,6 +421,23 @@ const contactText = {
 // ============================================================================
 // YARDIMCI FONKSİYONLAR (WHATSAPP & TELEGRAM)
 // ============================================================================
+function safeWhatsAppStorageFailureLog(error) {
+  const diagnostic = getSafeStorageFailureDiagnostic(error);
+  const provider = diagnostic.provider ?? {};
+  return JSON.stringify({
+    code: error?.code ?? 'UNKNOWN',
+    provider_name: provider.providerErrorName ?? null,
+    provider_code: provider.providerErrorCode ?? null,
+    http_status: provider.httpStatus ?? null,
+    operation: diagnostic.request?.operation ?? null,
+    configuration_shape: diagnostic.configuration ?? [],
+    addressing: diagnostic.addressing ?? null,
+    put_object_options: diagnostic.putObjectOptionNames ?? [],
+    runtime_storage: describeStorageConfigurationIdentity(process.env),
+    r2_compatibility: describeStorageCompatibilityProfile(),
+  });
+}
+
 async function sendMessage(to, body) {
   try {
     if (!body || typeof body !== "string") return;
@@ -1356,7 +1378,11 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         if (whatsappInbox.duplicate || !whatsappInbox.shouldInvokeAi) return;
         if (!text && mediaDescriptor) text = 'Customer shared an attachment.';
       } catch (error) {
-        console.error('WHATSAPP_MEDIA_INGESTION_FAILED', error?.code ?? 'UNKNOWN');
+        if (error?.code === 'RESOURCE_STORAGE_WRITE_FAILED') {
+          console.error('WHATSAPP_MEDIA_INGESTION_FAILED', safeWhatsAppStorageFailureLog(error));
+        } else {
+          console.error('WHATSAPP_MEDIA_INGESTION_FAILED', error?.code ?? 'UNKNOWN');
+        }
         return;
       }
 

@@ -12,6 +12,8 @@ import {
   createConversationResourceStorage,
   createConversationStorageClient,
   getSafeStorageFailureDiagnostic,
+  describeStorageCompatibilityProfile,
+  describeStorageConfigurationIdentity,
 } from '../services/conversation-resource-storage.js';
 
 const prefix = `conversation-resources-preflight/${crypto.randomUUID()}`;
@@ -96,6 +98,9 @@ let applicationStored = false;
 let failed = false;
 
 try {
+  const storageIdentity = describeStorageConfigurationIdentity(process.env);
+  console.log(`CONVERSATION_STORAGE_PREFLIGHT: RUNTIME_STORAGE driver=${storageIdentity.driver}; config_fingerprint=${storageIdentity.configurationFingerprint}; access_key_id_fingerprint=${storageIdentity.accessKeyIdFingerprint ?? 'missing'}`);
+  console.log(`CONVERSATION_STORAGE_PREFLIGHT: R2_COMPATIBILITY server_side_encryption=${describeStorageCompatibilityProfile().serverSideEncryption}; request_checksum=${describeStorageCompatibilityProfile().requestChecksumCalculation}; response_checksum=${describeStorageCompatibilityProfile().responseChecksumValidation}`);
   console.log(`CONVERSATION_STORAGE_PREFLIGHT: AUTH_CONFIGURED_MODE: force_path_style=${configuredConnection.addressing.forcePathStyle}`);
 
   const virtualHost = await runAuthenticationProbes('VIRTUAL_HOST', virtualHostConnection);
