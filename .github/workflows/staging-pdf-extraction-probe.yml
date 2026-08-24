@@ -8,18 +8,22 @@ permissions:
 
 jobs:
   probe:
-    name: Probe pdf-parse on Node 24
+    name: Probe pdf-parse on Node ${{ matrix.node }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
     steps:
       - name: Checkout selected staging commit
         uses: actions/checkout@v4
         with:
-          ref: staging
+          ref: ${{ github.sha }}
 
       - name: Setup Node 24
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: ${{ matrix.node }}
 
       - name: Install repository dependencies
         run: npm install --ignore-scripts
