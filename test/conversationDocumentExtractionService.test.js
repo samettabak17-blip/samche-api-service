@@ -5,9 +5,16 @@ import test from 'node:test';
 import {
   ConversationResourceExtractionError,
   extractDocumentText,
+  getPdfParserRuntimeInfo,
 } from '../services/conversation-document-extraction-service.js';
 
 const knownGoodPdf = fs.readFileSync(new URL('./fixtures/pdf-extraction-known-good.pdf', import.meta.url));
+
+test('reports the exact supported PDF parser runtime contract', async () => {
+  const runtime = await getPdfParserRuntimeInfo();
+  assert.equal(runtime.parser_version, '2.4.5');
+  assert.equal(runtime.parser_callable, true);
+});
 
 test('extracts the known-good PDF Buffer through the production adapter', async () => {
   assert.equal(Buffer.isBuffer(knownGoodPdf), true);

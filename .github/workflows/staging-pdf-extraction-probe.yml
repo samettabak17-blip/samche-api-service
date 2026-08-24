@@ -33,5 +33,15 @@ jobs:
           node --check services/conversation-document-extraction-service.js
           node --check scripts/staging_pdf_extraction_probe.js
 
+      - name: Run focused extraction and WhatsApp resource regressions
+        run: >
+          node --test
+          test/conversationDocumentExtractionService.test.js
+          test/conversationDocumentExtractionDiagnostic.test.js
+          test/whatsappSequentialResourceContext.test.js
+          test/whatsappResourceFollowUpRouting.test.js
+          test/whatsappResourceRetry.test.js
+          test/whatsappStandaloneMediaAcknowledgement.test.js
+
       - name: Run PDF extraction probe
         run: node scripts/staging_pdf_extraction_probe.js

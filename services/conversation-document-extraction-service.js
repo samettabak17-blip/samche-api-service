@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -28,7 +30,13 @@ function sanitizePdfParserMessage(value) {
 }
 
 function resolvedPdfParseVersion() {
-  try { return require('pdf-parse/package.json').version ?? null; } catch { return null; }
+  try {
+    const entryPath = require.resolve('pdf-parse');
+    const packagePath = path.resolve(path.dirname(entryPath), '../../../package.json');
+    return JSON.parse(fs.readFileSync(packagePath, 'utf8')).version ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function classifyPdfParserError(error) {
