@@ -37,6 +37,7 @@ jobs:
         run: >-
           node --test
           test/liveInboxWhatsAppOperatorDelivery.test.js
+          test/whatsappAssistantTimelinePersistence.test.js
           test/whatsappSequentialResourceContext.test.js
           test/whatsappResourceFollowUpRouting.test.js
           test/whatsappResourceRetry.test.js

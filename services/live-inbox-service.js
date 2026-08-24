@@ -179,8 +179,8 @@ export async function persistSamcheguideInbound({ externalSessionId, content, id
   }
 }
 
-export async function persistAssistantResponseIfCurrent({ tenantId, conversationId, content, handlingVersion }) {
-  const client = await pool.connect();
+export async function persistAssistantResponseIfCurrent({ tenantId, conversationId, content, handlingVersion, database = pool }) {
+  const client = await database.connect();
   try {
     await client.query('BEGIN');
     const locked = await client.query(

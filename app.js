@@ -19,6 +19,7 @@ import crmRoutes from "./routes/crmRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
 import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
+import { persistAndDeliverWhatsAppAssistant } from "./services/whatsapp-assistant-response-service.js";
 import {
   describeStorageCompatibilityProfile,
   describeStorageConfigurationIdentity,
@@ -455,6 +456,19 @@ async function sendMessage(to, body) {
   } catch (error) {
     console.error('[WHATSAPP SEND ERROR]:', error?.code ?? error?.name ?? 'unknown');
   }
+}
+
+async function persistAndSendWhatsAppAssistant(whatsappInbox, recipient, content) {
+  if (!whatsappInbox) return { delivered: false, message: null };
+  return persistAndDeliverWhatsAppAssistant({
+    tenantId: whatsappInbox.integration.tenant_id,
+    conversationId: whatsappInbox.conversation.id,
+    handlingVersion: whatsappInbox.handlingVersion,
+    recipient,
+    content,
+    persistAssistantResponse: persistAssistantResponseIfCurrent,
+    deliver: sendMessage,
+  });
 }
 
 async function sendMessageToTelegram(text) {
@@ -1491,7 +1505,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       const isInvalid = ((!text || text === "") && !mediaDescriptor) || message.type === "audio" || message.type === "voice" || message.type === "video" || message.type === "sticker";
       if (isInvalid) {
         if (!session.humanOverride) {
-          await sendMessage(cleanFrom, "Gönderdiğiniz içeriği işleyemiyorum. Lütfen mesajınızı yazılı olarak iletin.");
+          await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, "Gönderdiğiniz içeriği işleyemiyorum. Lütfen mesajınızı yazılı olarak iletin.");
         }
         return;
       }
@@ -1506,10 +1520,11 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
 
         if (detectedLang) {
           session.lang = detectedLang;
-          await sendMessage(cleanFrom, introAfterLang[session.lang]);
+          await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, introAfterLang[session.lang]);
           return;
         } else {
-          await sendMessage(
+          await persistAndSendWhatsAppAssistant(
+            whatsappInbox,
             cleanFrom,
             "Welcome to SamChe Company LLC.\nSamChe Company LLC'ye hoş geldiniz.\nمرحبًا بكم.\n\nPlease select your language:\n1️⃣ English\n2️⃣ Türkçe\n3️⃣ العربية\n\nLütfen dil seçiminizi yapınız:\n1️⃣ İngilizce\n2️⃣ Türkçe\n3️⃣ Arapça"
           );
@@ -1539,7 +1554,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         if (lang === "en") aktarimMesaji = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
         if (lang === "ar") aktarimMesaji = `لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص موضوع *${topicSummary}*، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.`;
 
-        await sendMessage(cleanFrom, aktarimMesaji);
+        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, aktarimMesaji);
         sendMessageToTelegram(`🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``).catch(()=>{});
         return;
       }
@@ -1548,11 +1563,11 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       // KISA CEVAPLAR
       // --------------------------------------
       if (wpCorporateShortReplyMap && wpCorporateShortReplyMap[lower]) {
-        await sendMessage(cleanFrom, wpCorporateShortReplyMap[lower][lang]);
+        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, wpCorporateShortReplyMap[lower][lang]);
         return;
       }
       if (resourceFollowUp.action !== 'DOCUMENT_GROUNDED' && (lower.includes("contact") || lower.includes("iletişim") || lower.includes("whatsapp") || lower.includes("call") || lower.includes("telefon"))) {
-        if(contactText && contactText[lang]) await sendMessage(cleanFrom, contactText[lang]);
+        if(contactText && contactText[lang]) await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, contactText[lang]);
         return;
       }
 
@@ -3112,7 +3127,7 @@ ${text}
 
       logWhatsAppTiming('model_response_complete');
       if (!aiResponse) {
-        await sendMessage(cleanFrom, corporateFallback(session.lang || "en"));
+        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, corporateFallback(session.lang || "en"));
         return; 
       }
 
@@ -3155,7 +3170,7 @@ ${text}
         if (lang === "en") aiAktarimMesaji = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
         if (lang === "ar") aiAktarimMesaji = `لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص موضوع *${topicSummary}*، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.`;
 
-        await sendMessage(cleanFrom, aiAktarimMesaji);
+        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, aiAktarimMesaji);
 
         session.humanOverride = true;
         session.manualTakeover = false; 
