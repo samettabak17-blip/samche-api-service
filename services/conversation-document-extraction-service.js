@@ -18,8 +18,10 @@ function normalizeText(value) {
 }
 
 function sanitizePdfParserMessage(value) {
-  const text = String(value ?? '').replace(/https?:\\/\\/\\S+/gi, '[redacted-url]').replace(/['"][^'"]{1,160}['"]/g, '[redacted]').replace(/[\\r\\n\\t]/g, ' ').trim();
-  return text && !/[A-Za-z]{3,}[:=][^ ]{4,}/.test(text) ? text.slice(0, 180) : 'PDF parser failure';
+  const raw = String(value ?? '');
+  if (!raw || raw.includes('://') || raw.includes('\\n') || raw.includes('\\r')) return 'PDF parser failure';
+  const firstLine = raw.split(/[\\r\\n]/, 1)[0].trim();
+  return firstLine.length <= 180 && !firstLine.includes('=') ? firstLine : 'PDF parser failure';
 }
 
 export function buildSafePdfExtractionDiagnostic({ mimeType, byteLength, error, extractedCharacterCount = null }) {
