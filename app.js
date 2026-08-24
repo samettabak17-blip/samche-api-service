@@ -1345,8 +1345,11 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           ensureConversationCrmIdentity,
           queueLeadQualification,
         });
-        if (!whatsappInbox) {
-          console.error('WHATSAPP_INBOUND_UNMAPPED_PHONE');
+        if (!whatsappInbox || whatsappInbox.unmapped) {
+          console.error(
+            'WHATSAPP_INBOUND_UNMAPPED_PHONE runtime_db_identity=' +
+            (whatsappInbox?.runtimeDbIdentity ?? 'unavailable')
+          );
           return;
         }
         if (whatsappInbox.duplicate || !whatsappInbox.shouldInvokeAi) return;

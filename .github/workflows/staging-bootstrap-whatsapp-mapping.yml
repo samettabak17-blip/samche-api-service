@@ -17,9 +17,17 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Validate mapping bootstrap syntax
         run: node --check scripts/bootstrap_whatsapp_mapping.js
+      - name: Validate runtime resolver verification syntax
+        run: node --check scripts/verify_whatsapp_runtime_mapping.js
       - name: Bootstrap and verify tenant-safe WhatsApp mapping
         env:
           STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
           STAGING_WHATSAPP_TENANT_ID: ${{ secrets.STAGING_WHATSAPP_TENANT_ID }}
           STAGING_WHATSAPP_PHONE_ID: ${{ secrets.STAGING_WHATSAPP_PHONE_ID }}
         run: node scripts/bootstrap_whatsapp_mapping.js
+      - name: Verify exact webhook runtime resolver mapping
+        env:
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          STAGING_WHATSAPP_TENANT_ID: ${{ secrets.STAGING_WHATSAPP_TENANT_ID }}
+          STAGING_WHATSAPP_PHONE_ID: ${{ secrets.STAGING_WHATSAPP_PHONE_ID }}
+        run: node scripts/verify_whatsapp_runtime_mapping.js

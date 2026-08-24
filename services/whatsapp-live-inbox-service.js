@@ -21,13 +21,30 @@ function externalConversationId(customerPhone) {
   return `whatsapp:${crypto.createHash('sha256').update(customerReference(customerPhone)).digest('hex')}`;
 }
 
+export async function getWhatsAppRuntimeDatabaseFingerprint(client) {
+  try {
+    const result = await client.query(
+      `SELECT current_database() AS database_name, current_schema() AS schema_name,
+              COALESCE(inet_server_addr()::text, 'local') AS server_address,
+              COALESCE(inet_server_port()::text, '0') AS server_port`
+    );
+    const identity = result.rows[0];
+    return crypto.createHash('sha256')
+      .update([identity.database_name, identity.schema_name, identity.server_address, identity.server_port].join('|'))
+      .digest('hex')
+      .slice(0, 16);
+  } catch {
+    return 'unavailable';
+  }
+}
+
 async function notify(client, tenantId, conversationId, type) {
   await client.query('SELECT pg_notify($1, $2)', [
     'samche_live_events', JSON.stringify({ tenant_id: tenantId, conversation_id: conversationId, type }),
   ]);
 }
 
-async function resolveIntegration(client, phoneNumberId) {
+export async function resolveWhatsAppIntegration(client, phoneNumberId) {
   const result = await client.query(
     `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id, tc.channel_type, tc.status AS channel_status, a.status AS assistant_status
        FROM channel_integrations ci
@@ -140,10 +157,11 @@ export async function persistWhatsAppInbound({
   let activeStorage = storage;
   try {
     await client.query('BEGIN');
-    const integration = await resolveIntegration(client, phoneNumberId);
+    const integration = await resolveWhatsAppIntegration(client, phoneNumberId);
     if (!integration) {
+      const runtimeDbIdentity = await getWhatsAppRuntimeDatabaseFingerprint(client);
       await client.query('COMMIT');
-      return null;
+      return { unmapped: true, runtimeDbIdentity };
     }
     const conversationResult = await client.query(
       `INSERT INTO conversations
