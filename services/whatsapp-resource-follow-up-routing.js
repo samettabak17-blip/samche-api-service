@@ -7,3 +7,12 @@ export function planWhatsAppResourceFollowUp({ customerText, readyResourceCount 
   return { action: 'CONTINUE' };
 }
 
+export function resourceProcessingAcknowledgement(language) {
+  const messages = {
+    tr: 'Belgenizi işlemeye devam ediyorum. Birkaç saniye sonra sorunuzu belgeye göre yanıtlayabilirim.',
+    en: 'I am still processing your document. Please try your question again in a few seconds and I can answer it from the document.',
+    ar: 'ما زلت أعالج المستند. يمكنك إعادة إرسال سؤالك بعد بضع ثوانٍ وسأجيب عليه استنادًا إلى المستند.',
+  };
+  return messages[language] ?? messages.tr;
+}
+

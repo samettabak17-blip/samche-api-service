@@ -5,6 +5,7 @@ import { createConversationResourceStorage } from './conversation-resource-stora
 import { extractDocumentText } from './conversation-document-extraction-service.js';
 import { buildConversationStorageKey, validateConversationUpload } from './conversation-resource-validation.js';
 import { buildGeminiImagePart, buildUntrustedDocumentContext, whatsappIntegrationKey } from './whatsapp-multimodal-service.js';
+import { waitForReadyResource } from './whatsapp-resource-retry.js';
 
 export class WhatsAppInboxError extends Error {
   constructor(code, message) {
@@ -111,11 +112,11 @@ export async function selectRecentWhatsAppResourceContext({
   const recentMinutes = explicitReference ? EXPLICIT_RESOURCE_WINDOW_MINUTES : FOLLOW_UP_RESOURCE_WINDOW_MINUTES;
   const category = explicitReference ? resourceCategoryForReference(text) : null;
   const result = await client.query(
-    `SELECT id, storage_key, media_category, mime_type, extracted_text
+    `SELECT id, storage_key, media_category, mime_type, extracted_text, processing_status
        FROM conversation_resources
       WHERE tenant_id = $1
         AND conversation_id = $2
-        AND processing_status = 'READY'
+        AND processing_status IN ('READY', 'PROCESSING')
         AND created_at >= CURRENT_TIMESTAMP - ($5::integer * INTERVAL '1 minute')
         AND ($3::text IS NULL OR media_category = $3)
       ORDER BY created_at DESC, id DESC
@@ -125,9 +126,28 @@ export async function selectRecentWhatsAppResourceContext({
 
   const parts = [];
   const resourceIds = [];
+  let processingResourceCount = 0;
   let remainingDocumentChars = MAX_DOCUMENT_CONTEXT_CHARS;
   let resourceStorage = storage;
-  for (const resource of result.rows.slice(0, maxResources)) {
+  for (let resource of result.rows.slice(0, maxResources)) {
+    if (resource.processing_status === 'PROCESSING') {
+      const waited = await waitForReadyResource({
+        read: async () => {
+          const refreshed = await client.query(
+            `SELECT id, storage_key, media_category, mime_type, extracted_text, processing_status
+               FROM conversation_resources
+              WHERE id = $1 AND tenant_id = $2 AND conversation_id = $3`,
+            [resource.id, tenantId, conversationId]
+          );
+          return refreshed.rows[0] ?? null;
+        },
+      });
+      if (waited.status !== 'READY') {
+        processingResourceCount += 1;
+        continue;
+      }
+      resource = waited.resource;
+    }
     if (resource.media_category === 'DOCUMENT') {
       const excerpt = String(resource.extracted_text ?? '').trim().slice(0, remainingDocumentChars);
       const context = buildUntrustedDocumentContext(excerpt);
@@ -149,7 +169,7 @@ export async function selectRecentWhatsAppResourceContext({
       }
     }
   }
-  return { parts, resourceIds };
+  return { parts, resourceIds, processingResourceCount };
 }
 
 async function insertCustomerMessage(client, { tenantId, conversationId, externalMessageId, content }) {
@@ -285,6 +305,7 @@ export async function persistWhatsAppInbound({
     let resource = null;
     let aiContextPart = null;
     let aiContextParts = [];
+    let resourceContext = null;
     if (descriptor && bytes) {
       const resourceStorage = storage ?? createConversationResourceStorage();
       activeStorage = resourceStorage;
@@ -308,6 +329,7 @@ export async function persistWhatsAppInbound({
         customerText: content,
       });
       aiContextParts = selected.parts;
+      resourceContext = { processingResourceCount: selected.processingResourceCount };
     }
     await client.query(
       'UPDATE conversations SET last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2',
@@ -317,7 +339,7 @@ export async function persistWhatsAppInbound({
     await client.query('COMMIT');
     queueLeadQualification({ tenantId: integration.tenant_id, conversationId });
     return {
-      integration, conversation, customerMessage, resource, aiContextPart, aiContextParts, duplicate: false,
+      integration, conversation, customerMessage, resource, aiContextPart, aiContextParts, resourceContext, duplicate: false,
       shouldInvokeAi: conversation.status === 'open' && conversation.handling_mode === 'AI',
       handlingVersion: conversation.handling_version,
     };

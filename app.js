@@ -26,7 +26,7 @@ import {
 } from "./services/conversation-resource-storage.js";
 import { createWhatsAppMediaRetriever, extractWhatsAppMediaDescriptor } from "./services/whatsapp-multimodal-service.js";
 import { planStandaloneWhatsAppMediaResponse } from "./services/whatsapp-standalone-media-ack.js";
-import { planWhatsAppResourceFollowUp } from "./services/whatsapp-resource-follow-up-routing.js";
+import { planWhatsAppResourceFollowUp, resourceProcessingAcknowledgement } from "./services/whatsapp-resource-follow-up-routing.js";
 import { ensureConversationCrmIdentity } from "./services/crm-lead-service.js";
 import { queueLeadQualification } from "./services/lead-qualification-runner.js";
 import { startLiveEventListener, subscribeTenantEvents } from "./services/live-event-bus.js";
@@ -1385,8 +1385,19 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         resourceFollowUp = planWhatsAppResourceFollowUp({
           customerText: text,
           readyResourceCount: whatsappInbox.aiContextParts?.length ?? 0,
-          processingResourceCount: 0,
+          processingResourceCount: whatsappInbox.resourceContext?.processingResourceCount ?? 0,
         });
+        if (resourceFollowUp.action === 'RESOURCE_PROCESSING') {
+          const processingMessage = resourceProcessingAcknowledgement(wpSessions[cleanFrom]?.lang ?? 'tr');
+          const persisted = await persistAssistantResponseIfCurrent({
+            tenantId: whatsappInbox.integration.tenant_id,
+            conversationId: whatsappInbox.conversation.id,
+            content: processingMessage,
+            handlingVersion: whatsappInbox.handlingVersion,
+          });
+          if (persisted.delivered) await sendMessage(cleanFrom, processingMessage);
+          return;
+        }
         const standaloneMediaPlan = planStandaloneWhatsAppMediaResponse({
           customerText: text,
           descriptor: mediaDescriptor,
