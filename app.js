@@ -1314,6 +1314,9 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
   res.status(200).send("OK");
 
   (async () => {
+    const whatsappRequestStartedAt = Date.now();
+    const logWhatsAppTiming = (phase) => console.info(`WHATSAPP_MEDIA_TIMING phase=${phase} elapsed_ms=${Date.now() - whatsappRequestStartedAt}`);
+    logWhatsAppTiming('webhook_received');
     try {
       const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
       if (!message) return; 
@@ -1358,6 +1361,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
             accessToken: process.env.WHATSAPP_TOKEN,
           });
           const media = await retrieveMedia(mediaDescriptor.externalMediaId);
+          logWhatsAppTiming('media_download_complete');
           mediaDescriptor.declaredMimeType = media.declaredMimeType || mediaDescriptor.declaredMimeType;
           mediaDescriptor.originalFilename = media.filename || mediaDescriptor.originalFilename;
           mediaBytes = media.bytes;
@@ -1373,6 +1377,8 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           ensureConversationCrmIdentity,
           queueLeadQualification,
         });
+        logWhatsAppTiming('resource_persistence_complete');
+        if (whatsappInbox?.resource) console.info(`WHATSAPP_MEDIA_TIMING phase=resource_status_${whatsappInbox.resource.processing_status} elapsed_ms=${Date.now() - whatsappRequestStartedAt}`);
         if (!whatsappInbox || whatsappInbox.unmapped) {
           console.error(
             'WHATSAPP_INBOUND_UNMAPPED_PHONE runtime_db_identity=' +
@@ -3102,11 +3108,13 @@ ${text}
       // --------------------------------------
       // YAPAY ZEKA API ÇAĞRISI
       // --------------------------------------
+      logWhatsAppTiming('model_request_started');
       const aiResponse = await callWpGemini(
         prompt,
         whatsappInbox?.aiContextParts ?? (whatsappInbox?.aiContextPart ? [whatsappInbox.aiContextPart] : [])
       );
 
+      logWhatsAppTiming('model_response_complete');
       if (!aiResponse) {
         await sendMessage(cleanFrom, corporateFallback(session.lang || "en"));
         return; 
@@ -3140,7 +3148,9 @@ ${text}
           if (!persisted.delivered) return;
         }
         session.history.push({ role: "assistant", text: aiResponse });
+        logWhatsAppTiming('whatsapp_outbound_started');
         await sendMessage(cleanFrom, aiResponse);
+        logWhatsAppTiming('whatsapp_outbound_complete');
         return;
       } else {
         const topicSummary = await getTopicSummary(session, text);
