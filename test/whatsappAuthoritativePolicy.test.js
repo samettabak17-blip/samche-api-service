@@ -31,7 +31,7 @@ test('preserves the recovered SamChe master policy byte-for-byte and beyond 6000
   assert.match(context.systemInstruction, /DANIŞMANLIK ÜCRETİ/);
   assert.match(context.systemInstruction, /8\.000 AED/);
   assert.match(context.systemInstruction, /MANDATORY RESPONSE LANGUAGE: Turkish/);
-  assert.ok(context.systemInstruction.indexOf(masterPolicy) < context.systemInstruction.indexOf('RESPONSE LANGUAGE POLICY:'));
+  assert.ok(context.systemInstruction.indexOf(masterPolicy) < context.systemInstruction.indexOf('MANDATORY RESPONSE LANGUAGE:'));
 });
 
 test('uses the same complete authoritative policy for Turkish English and Arabic response languages', () => {
@@ -108,4 +108,6 @@ test('staging WhatsApp bootstrap configures the mapped assistant with the verifi
   assert.match(bootstrap, /system_prompt = \$2/);
   assert.match(bootstrap, /expectedMasterPolicySha256/);
   assert.match(bootstrap, /MASTER_POLICY_INTEGRITY_FAILED/);
+  assert.match(bootstrap, /verifiedPolicySha256 !== expectedMasterPolicySha256/);
+  assert.match(bootstrap, /row\.assistant_name !== runtimeAssistant\.name/);
 });
