@@ -150,10 +150,17 @@ export function ConversationsPage() {
         if (context.state !== 'running') throw new Error('AUDIO_NOT_RUNNING');
         const oscillator = context.createOscillator();
         const gain = context.createGain();
-        gain.gain.setValueAtTime(0.035, context.currentTime);
-        oscillator.frequency.setValueAtTime(880, context.currentTime);
+        // A clear two-strike bell, kept short enough to remain a professional operational alert.
+        oscillator.type = 'sine';
+        oscillator.frequency.setValueAtTime(1046.5, context.currentTime);
+        oscillator.frequency.setValueAtTime(1318.5, context.currentTime + 0.12);
+        gain.gain.setValueAtTime(0, context.currentTime);
+        gain.gain.linearRampToValueAtTime(0.07, context.currentTime + 0.012);
+        gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.10);
+        gain.gain.linearRampToValueAtTime(0.07, context.currentTime + 0.132);
+        gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.24);
         oscillator.connect(gain).connect(context.destination);
-        oscillator.start(); oscillator.stop(context.currentTime + 0.16);
+        oscillator.start(); oscillator.stop(context.currentTime + 0.25);
         if (!disposed) {
           setAudioState('PLAYING');
           console.info('DASHBOARD_ATTENTION_AUDIO state=PLAYED');
