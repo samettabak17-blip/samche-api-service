@@ -37,6 +37,7 @@ jobs:
           node --check test/whatsappDeterministicSocialResponse.test.js
           node --check test/conversationCommunicationLanguage.test.js
           node --check services/human-support-intent.js
+          node --check services/telegram-live-support-status.js
           node --check test/humanSupportIntent.test.js
 
       - name: Run WhatsApp operator delivery and handoff regressions

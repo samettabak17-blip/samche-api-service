@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { appendAgentMessage, ConversationOperationError, getHumanDeliveryCapability, resolveHumanSupportTemplate } from '../services/live-inbox-service.js';
 import { WhatsAppDeliveryError, deliverWhatsAppText } from '../services/whatsapp-delivery-service.js';
+import { legacyTelegramSupportClosedStatus } from '../services/telegram-live-support-status.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
 const otherTenantId = '99999999-9999-4999-8999-999999999999';
@@ -143,4 +144,9 @@ test('manual takeover template does not create customer-request attention state'
   const templates = { human_support: { manual_takeover: { tr: 'legacy takeover' } } };
   assert.equal(resolveHumanSupportTemplate(templates, 'manual_takeover', 'tr'), 'legacy takeover');
   assert.equal(resolveHumanSupportTemplate(templates, 'return_to_ai', 'tr'), null);
+});
+
+
+test('Return to AI uses the exact legacy Telegram closing status format', () => {
+  assert.equal(legacyTelegramSupportClosedStatus('whatsapp:15551234567'), 'Canlı destek kapatıldı → +15551234567');
 });

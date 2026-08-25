@@ -5,6 +5,7 @@ import { deliverWhatsAppText, WhatsAppDeliveryError } from './whatsapp-delivery-
 import { whatsappIntegrationKey } from './whatsapp-multimodal-service.js';
 import { ensureConversationCrmIdentity } from './crm-lead-service.js';
 import { queueLeadQualification } from './lead-qualification-runner.js';
+import { notifyLegacyTelegramSupportClosed } from './telegram-live-support-status.js';
 
 export class ConversationOperationError extends Error {
   constructor(status, message, code = 'CONVERSATION_OPERATION_FAILED') {
@@ -344,6 +345,9 @@ export async function operateConversation({ tenantId, conversationId, actor, act
       await writeAuditEvent(client, { tenantId, conversationId, actorUserId, eventType: 'RETURN_TO_AI' });
       await notify(client, tenantId, conversationId, 'RETURN_TO_AI');
       await client.query('COMMIT');
+      if (conversation.handling_mode === 'HUMAN' && returned.channel_type === 'WHATSAPP') {
+        void notifyLegacyTelegramSupportClosed({ customerExternalId: returned.customer_external_id });
+      }
       return returned;
     }
 
