@@ -10,6 +10,7 @@ const { Pool } = pg;
 const connectionString = process.env.STAGING_DATABASE_URL;
 const tenantId = process.env.STAGING_WHATSAPP_TENANT_ID;
 const phoneNumberId = process.env.STAGING_WHATSAPP_PHONE_ID;
+const tenantDisplayName = process.env.STAGING_WHATSAPP_TENANT_NAME;
 
 function fail(code) {
   const error = new Error(code);
@@ -21,7 +22,7 @@ function shortId(value) {
   return typeof value === 'string' && value.length >= 8 ? value.slice(0, 8) : 'unknown';
 }
 
-if (!connectionString || !tenantId || !phoneNumberId) fail('CONFIGURATION_REQUIRED');
+if (!connectionString || !tenantId || !phoneNumberId || !tenantDisplayName) fail('CONFIGURATION_REQUIRED');
 if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(tenantId)) fail('INVALID_TENANT_ID');
 if (!/^\d{6,32}$/.test(phoneNumberId)) fail('INVALID_PHONE_NUMBER_ID');
 
@@ -37,10 +38,11 @@ try {
 
     const mapping = await client.query(
       `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id, ci.enabled, ci.integration_type,
-              tc.channel_type, tc.external_channel_id, tc.status AS channel_status,
+              t.name AS tenant_name, tc.channel_type, tc.external_channel_id, tc.status AS channel_status,
               a.status AS assistant_status
          FROM channel_integrations ci
          JOIN tenant_channels tc ON tc.id = ci.channel_id AND tc.tenant_id = ci.tenant_id
+         JOIN tenants t ON t.id = ci.tenant_id AND t.status = 'active'
          JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
         WHERE ci.integration_key = $1
         LIMIT 2`,
@@ -50,6 +52,7 @@ try {
     const row = mapping.rows[0];
     if (
       row.tenant_id !== tenantId ||
+      row.tenant_name !== tenantDisplayName ||
       row.integration_type !== 'WHATSAPP' ||
       row.enabled !== true ||
       row.channel_type !== 'WHATSAPP' ||
@@ -63,7 +66,8 @@ try {
       !resolved ||
       resolved.tenant_id !== row.tenant_id ||
       resolved.channel_id !== row.channel_id ||
-      resolved.assistant_id !== row.assistant_id
+      resolved.assistant_id !== row.assistant_id ||
+      resolved.tenant_name !== tenantDisplayName
     ) fail('RUNTIME_RESOLVER_MISMATCH');
 
     await client.query('COMMIT');

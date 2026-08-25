@@ -31,4 +31,5 @@ jobs:
           STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
           STAGING_WHATSAPP_TENANT_ID: ${{ secrets.STAGING_WHATSAPP_TENANT_ID }}
           STAGING_WHATSAPP_PHONE_ID: ${{ secrets.STAGING_WHATSAPP_PHONE_ID }}
+          STAGING_WHATSAPP_TENANT_NAME: SamChe Company LLC
         run: node scripts/verify_whatsapp_runtime_mapping.js
