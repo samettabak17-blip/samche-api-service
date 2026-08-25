@@ -33,3 +33,9 @@ test('support request parsing is independent of the current response language', 
     assert.equal(parseCustomerHumanSupportRequest(text).requested, true, text);
   }
 });
+
+
+test('recognizes semantic Turkish and English requests for a human operator', () => {
+  assert.equal(parseCustomerHumanSupportRequest('bir insanla görüşmek istiyorum').requested, true);
+  assert.equal(parseCustomerHumanSupportRequest('connect me to an agent').requested, true);
+});

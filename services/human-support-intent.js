@@ -3,6 +3,8 @@ const HUMAN_SUPPORT_PATTERNS = [
   /(?:^|\s)(?:müşteri|musteri)\s+temsilcisi(?:\s|$)/iu,
   /(?:^|\s)(?:live\s+support|live\s+agent|human\s+support)(?:\s|$)/iu,
   /(?:^|\s)(?:speak|talk)\s+to\s+(?:a\s+)?(?:human|agent|someone)(?:\s|$)/iu,
+  /(?:^|\s)connect\s+me\s+to\s+(?:an?\s+)?(?:human|agent|someone)(?:\s|$)/iu,
+  /(?:^|\s)(?:bir\s+)?insanla\s+(?:görüşmek|gorusmek|konuşmak|konusmak)(?:\s|$)/iu,
   /(?:^|\s)(?:دعم\s+مباشر|موظف|ممثل\s+بشري)(?:\s|$)/iu,
   /^\/(?:w|n)$/iu,
 ];
