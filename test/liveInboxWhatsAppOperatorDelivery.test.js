@@ -9,7 +9,7 @@ const otherTenantId = '99999999-9999-4999-8999-999999999999';
 const conversationId = '22222222-2222-4222-8222-222222222222';
 const actor = { userId: '33333333-3333-4333-8333-333333333333', systemRole: 'OWNER', tenantRole: 'ADMIN' };
 
-function humanWhatsAppConversation() {
+function humanWhatsAppConversation({ attentionState = 'NONE' } = {}) {
   return {
     id: conversationId,
     tenant_id: tenantId,
@@ -20,11 +20,13 @@ function humanWhatsAppConversation() {
     assigned_agent_user_id: actor.userId,
     channel_type: 'WHATSAPP',
     external_channel_id: '948536645017374',
+    human_attention_state: attentionState,
   };
 }
 
 function createDatabase({ conversation = humanWhatsAppConversation(), mapping = true } = {}) {
   const calls = [];
+  let humanAttentionState = conversation?.human_attention_state ?? 'NONE';
   const client = {
     async query(sql, parameters = []) {
       calls.push({ sql, parameters });
@@ -34,6 +36,11 @@ function createDatabase({ conversation = humanWhatsAppConversation(), mapping = 
       }
       if (sql.includes('SELECT * FROM conversation_messages') && sql.includes('idempotency_key')) return { rows: [] };
       if (sql.includes('INSERT INTO conversation_messages')) return { rows: [{ id: '55555555-5555-4555-8555-555555555555', sender_type: 'AGENT' }] };
+      if (sql.includes("SET human_attention_state = 'ACKNOWLEDGED'")) {
+        if (humanAttentionState !== 'REQUESTED') return { rowCount: 0, rows: [] };
+        humanAttentionState = 'ACKNOWLEDGED';
+        return { rowCount: 1, rows: [{ id: conversationId }] };
+      }
       return { rows: [] };
     },
     release() {},
@@ -149,4 +156,45 @@ test('manual takeover template does not create customer-request attention state'
 
 test('Return to AI uses the exact legacy Telegram closing status format', () => {
   assert.equal(legacyTelegramSupportClosedStatus('whatsapp:15551234567'), 'Canlı destek kapatıldı → +15551234567');
+});
+
+
+test('first successful operator delivery acknowledges a waiting customer without ending HUMAN handling', async () => {
+  const { database, calls } = createDatabase({ conversation: humanWhatsAppConversation({ attentionState: 'REQUESTED' }) });
+  const result = await appendAgentMessage({
+    tenantId, conversationId, actor, content: 'A representative is here.', idempotencyKey: 'agent-ack-1', database,
+    deliverWhatsApp: async () => ({ deliveredChunks: 1, failedChunks: 0 }),
+  });
+
+  assert.equal(result.delivery, 'SENT_TO_WHATSAPP');
+  const persistedMessage = calls.findIndex(({ sql }) => sql.includes('INSERT INTO conversation_messages'));
+  const acknowledgement = calls.findIndex(({ sql }) => sql.includes("SET human_attention_state = 'ACKNOWLEDGED'"));
+  assert.ok(persistedMessage >= 0 && acknowledgement > persistedMessage, 'attention is acknowledged only after AGENT persistence');
+  assert.ok(calls.some(({ sql, parameters }) => sql.includes('SELECT pg_notify') && String(parameters[1]).includes('HUMAN_SUPPORT_ACKNOWLEDGED')));
+  assert.ok(!calls.some(({ sql }) => sql.includes("handling_mode = 'AI'")));
+});
+
+test('additional operator messages do not write a duplicate human-support acknowledgement', async () => {
+  const { database, calls } = createDatabase({ conversation: humanWhatsAppConversation({ attentionState: 'REQUESTED' }) });
+  const send = (idempotencyKey) => appendAgentMessage({
+    tenantId, conversationId, actor, content: 'Operator response', idempotencyKey, database,
+    deliverWhatsApp: async () => ({ deliveredChunks: 1, failedChunks: 0 }),
+  });
+  await send('agent-ack-1');
+  await send('agent-ack-2');
+  assert.equal(calls.filter(({ sql, parameters }) => sql.includes('INSERT INTO conversation_audit_events') && String(parameters[3]).includes('HUMAN_SUPPORT_ACKNOWLEDGED')).length, 1);
+});
+
+test('a failed operator delivery leaves requested human attention unchanged', async () => {
+  const { database, calls } = createDatabase({ conversation: humanWhatsAppConversation({ attentionState: 'REQUESTED' }) });
+  await assert.rejects(
+    appendAgentMessage({ tenantId, conversationId, actor, content: 'Operator response', database, deliverWhatsApp: async () => { throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_FAILED'); } }),
+  );
+  assert.equal(calls.filter(({ sql }) => sql.includes("SET human_attention_state = 'ACKNOWLEDGED'")).length, 0);
+});
+
+test('manual HUMAN handling with attention NONE is not acknowledged by an operator message', async () => {
+  const { database, calls } = createDatabase({ conversation: humanWhatsAppConversation({ attentionState: 'NONE' }) });
+  await appendAgentMessage({ tenantId, conversationId, actor, content: 'Operator response', database, deliverWhatsApp: async () => ({ deliveredChunks: 1, failedChunks: 0 }) });
+  assert.equal(calls.filter(({ sql, parameters }) => sql.includes('SELECT pg_notify') && String(parameters[1]).includes('HUMAN_SUPPORT_ACKNOWLEDGED')).length, 0);
 });

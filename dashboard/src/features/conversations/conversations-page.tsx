@@ -7,12 +7,41 @@ import { formatDateTime } from '../../lib/format';
 import { useAuth } from '../auth/auth-context';
 import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
 import { useTenant } from '../tenants/tenant-context';
-import { canUseHumanReplyComposer, liveSupportAlertTitle, liveSupportFavicon, liveSupportWaitingLabel, senderLabel, senderTone } from './conversation-utils';
+import { canUseHumanReplyComposer, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone } from './conversation-utils';
 import { SafeRichMessage } from './safe-rich-message';
 import { useTenantConversationLiveEvents } from './use-live-conversation-events';
 
 const pageSize = 25;
 const messagePageSize = 50;
+
+async function buildLiveSupportFavicon(requestedCount: number): Promise<string | null> {
+  return await new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 128; canvas.height = 128;
+      const context = canvas.getContext('2d');
+      if (!context) return resolve(null);
+      context.fillStyle = '#151817';
+      context.fillRect(0, 0, 128, 128);
+      context.drawImage(image, 4, 40, 120, 32);
+      context.fillStyle = '#b91c1c';
+      context.fillRect(3, 4, 122, 28);
+      context.fillStyle = '#ffffff';
+      context.font = '800 14px Arial, sans-serif';
+      context.textAlign = 'center';
+      context.fillText('LIVE SUPPORT', 64, 23);
+      context.beginPath(); context.arc(106, 106, 20, 0, Math.PI * 2);
+      context.fillStyle = '#dc2626'; context.fill();
+      context.lineWidth = 4; context.strokeStyle = '#ffffff'; context.stroke();
+      context.fillStyle = '#ffffff'; context.font = '800 23px Arial, sans-serif';
+      context.fillText(String(requestedCount), 106, 114);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    image.onerror = () => resolve(null);
+    image.src = '/samche-logo.png';
+  });
+}
 
 function handlingLabel(mode?: string) {
   return mode === 'HUMAN' ? 'Human handling' : mode === 'PAUSED' ? 'AI paused' : 'AI handling';
@@ -34,8 +63,19 @@ export function ConversationsPage() {
   const [content, setContent] = useState('');
   const [audioArmed, setAudioArmed] = useState(false);
   const [audioState, setAudioState] = useState<'OFF' | 'ARMED' | 'PLAYING' | 'BLOCKED'>('OFF');
+  const [soundMuted, setSoundMuted] = useState(false);
+  const [soundPreferenceReady, setSoundPreferenceReady] = useState(false);
   const audioContext = useRef<AudioContext | null>(null);
   const liveState = useTenantConversationLiveEvents(tenantId, conversationId);
+  useEffect(() => {
+    const key = dashboardSoundMutePreferenceKey(user?.id);
+    setSoundMuted(window.localStorage.getItem(key) === 'true');
+    setSoundPreferenceReady(true);
+  }, [user?.id]);
+  const setSoundPreference = (muted: boolean) => {
+    window.localStorage.setItem(dashboardSoundMutePreferenceKey(user?.id), String(muted));
+    setSoundMuted(muted);
+  };
   useEffect(() => {
     setMessageOffset(0);
   }, [conversationId]);
@@ -104,20 +144,26 @@ export function ConversationsPage() {
       favicon.href = normalHref;
       return;
     }
-    const alertHref = liveSupportFavicon(unresolvedAttention);
-    let alertVisible = true;
-    favicon.href = alertHref;
-    // A conservative visual cadence keeps the browser-tab notification noticeable without aggressive flashing.
-    const timer = window.setInterval(() => {
-      alertVisible = !alertVisible;
-      favicon.href = alertVisible ? alertHref : normalHref;
-    }, 1500);
+    let disposed = false;
+    let timer: number | undefined;
+    void buildLiveSupportFavicon(unresolvedAttention).then((alertHref) => {
+      if (disposed || !alertHref) return;
+      let alertVisible = true;
+      favicon.href = alertHref;
+      // A conservative visual cadence keeps the browser-tab notification noticeable without aggressive flashing.
+      timer = window.setInterval(() => {
+        alertVisible = !alertVisible;
+        favicon.href = alertVisible ? alertHref : normalHref;
+      }, 1500);
+    });
     return () => {
-      window.clearInterval(timer);
+      disposed = true;
+      if (timer) window.clearInterval(timer);
       favicon.href = normalHref;
     };
   }, [unresolvedAttention]);
   const armSoundNotifications = async () => {
+    if (soundMuted) return;
     try {
       const Context = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!Context) throw new Error('AUDIO_UNSUPPORTED');
@@ -134,7 +180,17 @@ export function ConversationsPage() {
     }
   };
   useEffect(() => {
-    if (!audioArmed || unresolvedAttention < 1) {
+    if (!soundPreferenceReady || soundMuted || audioArmed) return;
+    const armAfterInteraction = () => { void armSoundNotifications(); };
+    window.addEventListener('pointerdown', armAfterInteraction);
+    window.addEventListener('keydown', armAfterInteraction);
+    return () => {
+      window.removeEventListener('pointerdown', armAfterInteraction);
+      window.removeEventListener('keydown', armAfterInteraction);
+    };
+  }, [audioArmed, soundMuted, soundPreferenceReady]);
+  useEffect(() => {
+    if (!soundPreferenceReady || soundMuted || !audioArmed || unresolvedAttention < 1) {
       if (audioState === 'PLAYING') {
         setAudioState('ARMED');
         console.info('DASHBOARD_ATTENTION_AUDIO state=STOPPED');
@@ -181,7 +237,7 @@ export function ConversationsPage() {
       window.clearInterval(timer);
       console.info('DASHBOARD_ATTENTION_AUDIO state=STOPPED');
     };
-  }, [audioArmed, audioState, unresolvedAttention]);
+  }, [audioArmed, audioState, soundMuted, soundPreferenceReady, unresolvedAttention]);
 
   const conversations = conversationsQuery.data ?? [];
   const conversation = conversationQuery.data;
@@ -198,7 +254,7 @@ export function ConversationsPage() {
   if (conversationsQuery.isError) return <QueryErrorState error={conversationsQuery.error} onRetry={() => void conversationsQuery.refetch()} resource="conversations" />;
 
   return <div className="space-y-5">
-    <header className="flex items-end justify-between gap-4"><div><p className="eyebrow">SamChe live customer inbox</p><h1 className="page-title mt-2">Conversations</h1><p className="mt-2 text-sm text-stone-400">Real tenant channel activity and human handoff controls.</p>{unresolvedAttention > 0 && <div role="status" className="mt-3 inline-flex items-center gap-3 rounded-lg border border-red-400/50 bg-red-500/10 px-4 py-3 shadow-[0_0_24px_rgba(239,68,68,0.12)]"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-400 motion-safe:animate-pulse" aria-hidden="true" /><span><span className="block text-xs font-bold tracking-[0.16em] text-red-200">LIVE SUPPORT</span><span className="mt-0.5 block text-sm font-semibold text-red-100">{liveSupportWaitingLabel(unresolvedAttention)}</span></span></div>}{attentionQuery.isError && <p role="alert" className="mt-2 text-xs text-red-300">Human-support attention status is unavailable. Reconnect to restore live alerts.</p>}{unresolvedAttention > 0 && !audioArmed && <button type="button" onClick={() => void armSoundNotifications()} className="mt-2 text-xs text-gold underline underline-offset-4">Enable sound notifications</button>}{unresolvedAttention > 0 && audioArmed && <p className="mt-2 text-xs text-gold">Sound notifications: ON</p>}{unresolvedAttention > 0 && audioState === 'BLOCKED' && <p role="alert" className="mt-2 text-xs text-red-300">Sound notifications are blocked. Enable them in your browser and try again.</p>}</div><LiveState state={liveState} /></header>
+    <header className="flex items-end justify-between gap-4"><div><p className="eyebrow">SamChe live customer inbox</p><h1 className="page-title mt-2">Conversations</h1><p className="mt-2 text-sm text-stone-400">Real tenant channel activity and human handoff controls.</p>{unresolvedAttention > 0 && <div role="status" className="mt-3 inline-flex items-center gap-3 rounded-lg border border-red-400/50 bg-red-500/10 px-4 py-3 shadow-[0_0_24px_rgba(239,68,68,0.12)]"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-400 motion-safe:animate-pulse" aria-hidden="true" /><span><span className="block text-xs font-bold tracking-[0.16em] text-red-200">LIVE SUPPORT</span><span className="mt-0.5 block text-sm font-semibold text-red-100">{liveSupportWaitingLabel(unresolvedAttention)}</span></span></div>}{attentionQuery.isError && <p role="alert" className="mt-2 text-xs text-red-300">Human-support attention status is unavailable. Reconnect to restore live alerts.</p>}<div className="mt-2 flex items-center gap-2 text-xs"><span className={soundMuted ? 'text-stone-400' : 'text-gold'}>Sound notifications: {soundMuted ? 'MUTED' : 'ON'}</span><button type="button" onClick={() => setSoundPreference(!soundMuted)} className="text-stone-300 underline underline-offset-4">{soundMuted ? 'Unmute' : 'Mute'}</button></div>{unresolvedAttention > 0 && !soundMuted && !audioArmed && <p className="mt-1 text-xs text-stone-400">Sound will activate after your first interaction.</p>}{unresolvedAttention > 0 && !soundMuted && audioState === 'BLOCKED' && <p role="alert" className="mt-1 text-xs text-red-300">Sound is blocked by this browser. It will retry after your next interaction.</p>}</div><LiveState state={liveState} /></header>
     <div className="grid min-h-[42rem] gap-4 xl:grid-cols-[19rem_minmax(0,1fr)_18rem]">
       <section className={'panel overflow-hidden ' + (conversationId ? 'hidden xl:block' : '')}>
         <header className="border-b border-line px-4 py-4"><p className="font-semibold text-ink">Conversation inbox</p><p className="mt-1 text-xs text-stone-400">Latest tenant activity</p></header>

@@ -579,9 +579,26 @@ export async function appendAgentMessage({
       [conversationId, tenantId]
     );
     await writeAuditEvent(client, { tenantId, conversationId, actorUserId: actor.userId, eventType: 'HUMAN_MESSAGE' });
+    // Provider delivery and AGENT persistence succeeded. This is a second, durable acknowledgement
+    // boundary for a waiting customer request; manual HUMAN handling remains attention NONE.
+    const acknowledgement = await client.query(
+      `UPDATE conversations
+          SET human_attention_state = 'ACKNOWLEDGED',
+              human_attention_acknowledged_at = COALESCE(human_attention_acknowledged_at, CURRENT_TIMESTAMP),
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1
+          AND tenant_id = $2
+          AND human_attention_state = 'REQUESTED'
+        RETURNING id`,
+      [conversationId, tenantId]
+    );
+    if (acknowledgement.rowCount === 1) {
+      await writeAuditEvent(client, { tenantId, conversationId, actorUserId: actor.userId, eventType: 'HUMAN_SUPPORT_ACKNOWLEDGED', metadata: { source: 'AGENT_MESSAGE' } });
+      await notify(client, tenantId, conversationId, 'HUMAN_SUPPORT_ACKNOWLEDGED');
+    }
     await notify(client, tenantId, conversationId, 'AGENT_MESSAGE');
     await client.query('COMMIT');
-    return { duplicate: false, message, delivery };
+    return { duplicate: false, message, delivery, attentionAcknowledged: acknowledgement.rowCount === 1 };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
