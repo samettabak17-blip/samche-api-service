@@ -11,6 +11,14 @@ on:
         description: Type RESET-STAGING-TEST-CONVERSATION exactly
         required: true
         type: string
+      operation:
+        description: Inspect is read-only. Reset deletes only an eligible disposable conversation.
+        required: true
+        default: inspect
+        type: choice
+        options:
+          - inspect
+          - reset
 
 jobs:
   reset:
@@ -42,5 +50,6 @@ jobs:
         env:
           RESET_CONVERSATION_ID: ${{ inputs.conversation_id }}
           RESET_CONFIRMATION: ${{ inputs.confirmation }}
-        run: node scripts/reset_staging_whatsapp_test_conversation.js --conversation-id "$RESET_CONVERSATION_ID" --confirm-staging "$RESET_CONFIRMATION"
+          RESET_OPERATION: ${{ inputs.operation }}
+        run: node scripts/reset_staging_whatsapp_test_conversation.js --conversation-id "$RESET_CONVERSATION_ID" --confirm-staging "$RESET_CONFIRMATION" --mode "$RESET_OPERATION"
 

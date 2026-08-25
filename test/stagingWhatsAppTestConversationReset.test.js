@@ -5,6 +5,7 @@ import {
   STAGING_RESET_CONFIRMATION,
   StagingWhatsAppTestResetError,
   formatSafeResetSummary,
+  inspectStagingWhatsAppTestConversation,
   parseResetArguments,
   requireStagingEnvironment,
   resetStagingWhatsAppTestConversation,
@@ -56,7 +57,7 @@ test('reset refuses missing or incorrect explicit staging confirmation', () => {
   assert.throws(() => parseResetArguments(['--conversation-id', selectedConversationId, '--confirm-staging', 'wrong']), /STAGING_RESET_CONFIRMATION_REQUIRED/);
   assert.deepEqual(
     parseResetArguments(['--conversation-id', selectedConversationId, '--confirm-staging', STAGING_RESET_CONFIRMATION]),
-    { conversationId: selectedConversationId },
+    { conversationId: selectedConversationId, mode: 'reset' },
   );
 });
 
@@ -85,6 +86,21 @@ test('unknown conversation dependencies fail closed before mutation', async () =
   const client = fakeClient({ dependencies: [...expectedDependencyRows(), { table_name: 'unreviewed_conversation_state' }] });
   await assert.rejects(() => resetStagingWhatsAppTestConversation({ client, conversationId: selectedConversationId }), /STAGING_RESET_CONVERSATION_DEPENDENCY_MISMATCH/);
   assert.equal(client.calls.some((call) => call.sql.startsWith('DELETE')), false);
+});
+
+test('unknown foreign-key dependents fail closed before mutation', async () => {
+  const client = fakeClient();
+  const originalQuery = client.query.bind(client);
+  client.query = async (sql, params) => {
+    if (sql.includes('FROM pg_constraint')) {
+      client.calls.push({ sql, params });
+      return { rowCount: 1, rows: [{ dependent_table: 'unreviewed_resource_link', referenced_table: 'conversation_resources' }] };
+    }
+    return originalQuery(sql, params);
+  };
+  await assert.rejects(() => resetStagingWhatsAppTestConversation({ client, conversationId: selectedConversationId }), /STAGING_RESET_FOREIGN_KEY_MISMATCH/);
+  assert.equal(client.calls.some((call) => call.sql.startsWith('DELETE')), false);
+  assert.equal(client.calls.at(-1).sql, 'ROLLBACK');
 });
 
 test('only the explicit selected WhatsApp conversation and its dependencies are deleted transactionally', async () => {
@@ -142,12 +158,28 @@ test('safe failure taxonomy exposes no native exception detail', () => {
     { result: 'FAIL', reason: 'CONVERSATION_NOT_FOUND' }
   );
   assert.deepEqual(
+    safeResetFailureResult(new StagingWhatsAppTestResetError('STAGING_RESET_TRANSACTION_FAILED', { mutation_stage: 'DELETE_CONVERSATION_RESOURCES' })),
+    { result: 'FAIL', reason: 'TRANSACTION_FAILED', mutation_stage: 'DELETE_CONVERSATION_RESOURCES' }
+  );
+  assert.deepEqual(
     safeResetFailureResult({ code: '42P01', message: 'sensitive internal database detail' }),
     { result: 'FAIL', reason: 'DEPENDENCY_CHECK_FAILED' }
   );
   assert.deepEqual(
     safeResetFailureResult(new Error('unknown failure')), { result: 'FAIL', reason: 'TRANSACTION_FAILED' }
   );
+});
+
+test('read-only inspection reports only safe schema names and dependency counts', async () => {
+  const client = fakeClient({ crmDependencies: { crm_activities: 2 } });
+  const summary = await inspectStagingWhatsAppTestConversation({ client, conversationId: selectedConversationId });
+  assert.equal(summary.result, 'INSPECTED');
+  assert.equal(summary.resettable, false);
+  assert.equal(summary.reason, 'CRM_DEPENDENCIES_PRESENT');
+  assert.equal(summary.crm_activities, 2);
+  assert.equal(client.calls[0].sql, 'BEGIN READ ONLY');
+  assert.equal(client.calls.at(-1).sql, 'ROLLBACK');
+  assert.equal(client.calls.some((call) => call.sql.startsWith('DELETE')), false);
 });
 
 test('a failed final deletion rolls back the whole reset transaction', async () => {
