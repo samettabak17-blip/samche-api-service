@@ -33,6 +33,7 @@ export function ConversationsPage() {
   const [messageOffset, setMessageOffset] = useState(0);
   const [content, setContent] = useState('');
   const [audioArmed, setAudioArmed] = useState(false);
+  const [audioState, setAudioState] = useState<'OFF' | 'ARMED' | 'PLAYING' | 'BLOCKED'>('OFF');
   const audioContext = useRef<AudioContext | null>(null);
   const liveState = useTenantConversationLiveEvents(tenantId, conversationId);
   useEffect(() => {
@@ -71,7 +72,13 @@ export function ConversationsPage() {
     onSuccess: () => { setContent(''); refresh(); },
   });
 
-  const attentionQuery = useQuery({ queryKey: tenantKeys.humanAttention(tenantId), queryFn: () => tenantApi.getHumanAttentionSummary(tenantId), enabled: Boolean(tenantId) });
+  const attentionQuery = useQuery({
+    queryKey: tenantKeys.humanAttention(tenantId),
+    queryFn: () => tenantApi.getHumanAttentionSummary(tenantId),
+    enabled: Boolean(tenantId),
+    // SSE is primary. This low-frequency tenant-scoped fallback only heals a missed event/reconnect.
+    refetchInterval: liveState === 'connected' ? false : 15000,
+  });
   const unresolvedAttention = attentionQuery.data?.unresolvedCount ?? 0;
   useEffect(() => {
     if (attentionQuery.isSuccess) console.info('DASHBOARD_ATTENTION_FETCH status=OK requested_count=' + unresolvedAttention);
@@ -82,31 +89,64 @@ export function ConversationsPage() {
     document.title = unresolvedAttention > 0 ? '(' + unresolvedAttention + ') ' + normalTitle : normalTitle;
     return () => { document.title = normalTitle; };
   }, [unresolvedAttention]);
+  const armSoundNotifications = async () => {
+    try {
+      const Context = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!Context) throw new Error('AUDIO_UNSUPPORTED');
+      audioContext.current ??= new Context();
+      await audioContext.current.resume();
+      if (audioContext.current.state !== 'running') throw new Error('AUDIO_NOT_RUNNING');
+      setAudioArmed(true);
+      setAudioState('ARMED');
+      console.info('DASHBOARD_ATTENTION_AUDIO state=ARMED');
+    } catch {
+      setAudioArmed(false);
+      setAudioState('BLOCKED');
+      console.info('DASHBOARD_ATTENTION_AUDIO state=BLOCKED reason=PLAYBACK_POLICY');
+    }
+  };
   useEffect(() => {
-    const arm = () => setAudioArmed(true);
-    window.addEventListener('pointerdown', arm, { once: true });
-    return () => window.removeEventListener('pointerdown', arm);
-  }, []);
-  useEffect(() => {
-    if (!audioArmed || unresolvedAttention < 1) return;
-    const alert = () => {
+    if (!audioArmed || unresolvedAttention < 1) {
+      if (audioState === 'PLAYING') {
+        setAudioState('ARMED');
+        console.info('DASHBOARD_ATTENTION_AUDIO state=STOPPED');
+      }
+      return;
+    }
+    let disposed = false;
+    const alert = async () => {
       try {
-        const Context = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-        if (!Context) return;
-        audioContext.current ??= new Context();
-        if (audioContext.current.state === 'suspended') { void audioContext.current.resume().catch(() => {}); }
-        const oscillator = audioContext.current.createOscillator();
-        const gain = audioContext.current.createGain();
-        gain.gain.setValueAtTime(0.035, audioContext.current.currentTime);
-        oscillator.frequency.setValueAtTime(880, audioContext.current.currentTime);
-        oscillator.connect(gain).connect(audioContext.current.destination);
-        oscillator.start(); oscillator.stop(audioContext.current.currentTime + 0.16);
-      } catch { /* visual attention remains available if browser audio is blocked */ }
+        const context = audioContext.current;
+        if (!context) throw new Error('AUDIO_UNARMED');
+        if (context.state !== 'running') await context.resume();
+        if (context.state !== 'running') throw new Error('AUDIO_NOT_RUNNING');
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        gain.gain.setValueAtTime(0.035, context.currentTime);
+        oscillator.frequency.setValueAtTime(880, context.currentTime);
+        oscillator.connect(gain).connect(context.destination);
+        oscillator.start(); oscillator.stop(context.currentTime + 0.16);
+        if (!disposed) {
+          setAudioState('PLAYING');
+          console.info('DASHBOARD_ATTENTION_AUDIO state=PLAYED');
+        }
+      } catch {
+        if (!disposed) {
+          setAudioArmed(false);
+          setAudioState('BLOCKED');
+          console.info('DASHBOARD_ATTENTION_AUDIO state=BLOCKED reason=PLAYBACK_POLICY');
+        }
+      }
     };
-    alert();
-    const timer = window.setInterval(alert, 3000);
-    return () => window.clearInterval(timer);
-  }, [audioArmed, unresolvedAttention]);
+    console.info('DASHBOARD_ATTENTION_AUDIO state=STARTED requested_count=' + unresolvedAttention);
+    void alert();
+    const timer = window.setInterval(() => { void alert(); }, 3000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      console.info('DASHBOARD_ATTENTION_AUDIO state=STOPPED');
+    };
+  }, [audioArmed, audioState, unresolvedAttention]);
 
   const conversations = conversationsQuery.data ?? [];
   const conversation = conversationQuery.data;
@@ -123,7 +163,7 @@ export function ConversationsPage() {
   if (conversationsQuery.isError) return <QueryErrorState error={conversationsQuery.error} onRetry={() => void conversationsQuery.refetch()} resource="conversations" />;
 
   return <div className="space-y-5">
-    <header className="flex items-end justify-between gap-4"><div><p className="eyebrow">SamChe live customer inbox</p><h1 className="page-title mt-2">Conversations</h1><p className="mt-2 text-sm text-stone-400">Real tenant channel activity and human handoff controls.</p>{unresolvedAttention > 0 && <p className="mt-2 inline-flex rounded-full bg-red-500/15 px-3 py-1 text-xs font-semibold text-red-200">{unresolvedAttention} needs attention</p>}{attentionQuery.isError && <p role="alert" className="mt-2 text-xs text-red-300">Human-support attention status is unavailable. Reconnect to restore live alerts.</p>}{unresolvedAttention > 0 && !audioArmed && <button type="button" onClick={() => setAudioArmed(true)} className="mt-2 text-xs text-gold underline underline-offset-4">Enable sound notifications</button>}{unresolvedAttention > 0 && audioArmed && <p className="mt-2 text-xs text-gold">Sound notifications: ON</p>}</div><LiveState state={liveState} /></header>
+    <header className="flex items-end justify-between gap-4"><div><p className="eyebrow">SamChe live customer inbox</p><h1 className="page-title mt-2">Conversations</h1><p className="mt-2 text-sm text-stone-400">Real tenant channel activity and human handoff controls.</p>{unresolvedAttention > 0 && <p className="mt-2 inline-flex rounded-full bg-red-500/15 px-3 py-1 text-xs font-semibold text-red-200">{unresolvedAttention} needs attention</p>}{attentionQuery.isError && <p role="alert" className="mt-2 text-xs text-red-300">Human-support attention status is unavailable. Reconnect to restore live alerts.</p>}{unresolvedAttention > 0 && !audioArmed && <button type="button" onClick={() => void armSoundNotifications()} className="mt-2 text-xs text-gold underline underline-offset-4">Enable sound notifications</button>}{unresolvedAttention > 0 && audioArmed && <p className="mt-2 text-xs text-gold">Sound notifications: ON</p>}{unresolvedAttention > 0 && audioState === 'BLOCKED' && <p role="alert" className="mt-2 text-xs text-red-300">Sound notifications are blocked. Enable them in your browser and try again.</p>}</div><LiveState state={liveState} /></header>
     <div className="grid min-h-[42rem] gap-4 xl:grid-cols-[19rem_minmax(0,1fr)_18rem]">
       <section className={'panel overflow-hidden ' + (conversationId ? 'hidden xl:block' : '')}>
         <header className="border-b border-line px-4 py-4"><p className="font-semibold text-ink">Conversation inbox</p><p className="mt-1 text-xs text-stone-400">Latest tenant activity</p></header>
