@@ -125,4 +125,11 @@ test('the live WhatsApp path persists deterministic responses before it can call
   assert.match(app.slice(deterministicBranch, geminiCall), /model_invoked=0/);
 });
 
+test('the persisted first-contact decision checks all assistant history, not only the recent context window', () => {
+  const inbox = readFileSync(new URL('../services/whatsapp-live-inbox-service.js', import.meta.url), 'utf8');
+
+  assert.match(inbox, /SELECT EXISTS\(\s*SELECT 1\s*FROM conversation_messages/s);
+  assert.match(inbox, /sender_type = 'ASSISTANT'/);
+  assert.match(inbox, /isFirstAssistantResponse\s*=\s*!.*has_assistant_response/);
+});
 

@@ -334,6 +334,16 @@ export async function persistWhatsAppInbound({
       [integration.tenant_id, conversationId]
     );
     const conversationHistory = historyResult.rows.reverse();
+    const assistantHistoryResult = await client.query(
+      `SELECT EXISTS(
+         SELECT 1
+           FROM conversation_messages
+          WHERE tenant_id = $1
+            AND conversation_id = $2
+            AND sender_type = 'ASSISTANT'
+       ) AS has_assistant_response`,
+      [integration.tenant_id, conversationId]
+    );
     const knowledgeResult = await client.query(
       `SELECT content
          FROM knowledge_base_documents
@@ -352,7 +362,7 @@ export async function persistWhatsAppInbound({
       knowledge: knowledgeResult.rows.map((row) => row.content),
       communicationLanguage: candidateLanguage ?? conversation.communication_language ?? 'und',
     };
-    const isFirstAssistantResponse = !conversationHistory.some((message) => message.sender_type === 'ASSISTANT');
+    const isFirstAssistantResponse = !assistantHistoryResult.rows[0]?.has_assistant_response;
 
     let resource = null;
     let aiContextPart = null;
@@ -403,4 +413,5 @@ export async function persistWhatsAppInbound({
     client.release();
   }
 }
+
 
