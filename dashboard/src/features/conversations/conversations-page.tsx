@@ -75,6 +75,7 @@ export function ConversationsPage() {
   const setSoundPreference = (muted: boolean) => {
     window.localStorage.setItem(dashboardSoundMutePreferenceKey(user?.id), String(muted));
     setSoundMuted(muted);
+    if (!muted) void armSoundNotifications(true);
   };
   useEffect(() => {
     setMessageOffset(0);
@@ -162,8 +163,8 @@ export function ConversationsPage() {
       favicon.href = normalHref;
     };
   }, [unresolvedAttention]);
-  const armSoundNotifications = async () => {
-    if (soundMuted) return;
+  const armSoundNotifications = async (force = false) => {
+    if (soundMuted && !force) return;
     try {
       const Context = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!Context) throw new Error('AUDIO_UNSUPPORTED');
