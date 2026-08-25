@@ -23,7 +23,12 @@ export async function startLiveEventListener() {
       if (notification.channel !== 'samche_live_events') return;
       try {
         const event = JSON.parse(notification.payload);
-        if (event?.tenant_id && event?.conversation_id && event?.type) events.emit(event.tenant_id, event);
+        if (event?.tenant_id && event?.conversation_id && event?.type) {
+          if (String(event.type).startsWith('HUMAN_SUPPORT_')) {
+            console.info('DASHBOARD_SSE event_type=' + event.type + ' tenant=' + String(event.tenant_id).slice(0, 8));
+          }
+          events.emit(event.tenant_id, event);
+        }
       } catch {
         // Notification payloads are internal hints. Ignore malformed payloads.
       }

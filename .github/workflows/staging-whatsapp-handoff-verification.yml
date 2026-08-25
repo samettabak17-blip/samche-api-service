@@ -30,6 +30,7 @@ jobs:
           node --check services/live-inbox-service.js
           node --check services/whatsapp-live-inbox-service.js
           node --check services/human-support-service.js
+          node --check services/live-event-bus.js
           node --check app.js
           node --check services/whatsapp-tenant-context-service.js
           node --check services/conversation-communication-language.js
