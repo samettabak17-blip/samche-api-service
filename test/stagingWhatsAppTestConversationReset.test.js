@@ -8,6 +8,7 @@ import {
   parseResetArguments,
   requireStagingEnvironment,
   resetStagingWhatsAppTestConversation,
+  safeResetFailureResult,
   verifyStagingDatabaseIdentity,
 } from '../scripts/reset_staging_whatsapp_test_conversation.js';
 
@@ -21,7 +22,7 @@ function expectedDependencyRows() {
   ].map((table_name) => ({ table_name }));
 }
 
-function fakeClient({ target = true, channel = 'WHATSAPP', dependencies = expectedDependencyRows(), crmDependencyCount = 0, contactId = null } = {}) {
+function fakeClient({ target = true, channel = 'WHATSAPP', dependencies = expectedDependencyRows(), crmDependencies = {}, contactId = null } = {}) {
   const calls = [];
   const client = {
     calls,
@@ -35,7 +36,13 @@ function fakeClient({ target = true, channel = 'WHATSAPP', dependencies = expect
       if (sql.includes('FROM conversations c')) {
         return target ? { rowCount: 1, rows: [{ id: selectedConversationId, tenant_id: 'tenant-a', contact_id: contactId, channel_type: channel }] } : { rowCount: 0, rows: [] };
       }
-      if (sql.includes('WITH selected_leads AS')) return { rowCount: 1, rows: [{ crm_dependency_count: crmDependencyCount || (params[2] ? 1 : 0) }] };
+      if (sql.includes('WITH selected_leads AS')) return { rowCount: 1, rows: [{
+        crm_leads: crmDependencies.crm_leads ?? 0,
+        crm_deals: crmDependencies.crm_deals ?? 0,
+        crm_activities: crmDependencies.crm_activities ?? 0,
+        crm_analysis: crmDependencies.crm_analysis ?? 0,
+        crm_contact_associations: params[2] ? 1 : 0,
+      }] };
       if (sql.startsWith('DELETE FROM conversations')) return { rowCount: 1, rows: [] };
       if (sql.startsWith('DELETE')) return { rowCount: 1, rows: [] };
       return { rowCount: 0, rows: [] };
@@ -101,19 +108,22 @@ test('only the explicit selected WhatsApp conversation and its dependencies are 
 });
 
 test('a CRM lead dependency refuses the reset before any mutation', async () => {
-  const client = fakeClient({ crmDependencyCount: 1 });
+  const client = fakeClient({ crmDependencies: { crm_leads: 1 } });
   const result = await resetStagingWhatsAppTestConversation({ client, conversationId: selectedConversationId });
-  assert.deepEqual(result, { result: 'REFUSED', reason: 'CRM_DEPENDENCIES_PRESENT', crm_dependency_count: 1 });
+  assert.deepEqual(result, {
+    result: 'REFUSED', reason: 'CRM_DEPENDENCIES_PRESENT', crm_leads: 1, crm_deals: 0,
+    crm_activities: 0, crm_analysis: 0, crm_contact_associations: 0, crm_dependency_count: 1,
+  });
   assert.equal(client.calls.some((call) => call.sql.startsWith('DELETE')), false);
   assert.equal(client.calls.at(-1).sql, 'ROLLBACK');
 });
 
 test('a CRM deal dependency refuses the reset before any mutation', async () => {
-  const client = fakeClient({ crmDependencyCount: 2 });
+  const client = fakeClient({ crmDependencies: { crm_deals: 1 } });
   const result = await resetStagingWhatsAppTestConversation({ client, conversationId: selectedConversationId });
   assert.equal(result.result, 'REFUSED');
   assert.equal(result.reason, 'CRM_DEPENDENCIES_PRESENT');
-  assert.equal(result.crm_dependency_count, 2);
+  assert.equal(result.crm_dependency_count, 1);
   assert.equal(client.calls.some((call) => call.sql.startsWith('DELETE')), false);
 });
 
@@ -124,6 +134,20 @@ test('a CRM contact association also refuses the reset before any mutation', asy
   assert.equal(result.reason, 'CRM_DEPENDENCIES_PRESENT');
   assert.equal(result.crm_dependency_count, 1);
   assert.equal(client.calls.some((call) => call.sql.startsWith('DELETE')), false);
+});
+
+test('safe failure taxonomy exposes no native exception detail', () => {
+  assert.deepEqual(
+    safeResetFailureResult(new StagingWhatsAppTestResetError('STAGING_RESET_CONVERSATION_NOT_FOUND')),
+    { result: 'FAIL', reason: 'CONVERSATION_NOT_FOUND' }
+  );
+  assert.deepEqual(
+    safeResetFailureResult({ code: '42P01', message: 'sensitive internal database detail' }),
+    { result: 'FAIL', reason: 'DEPENDENCY_CHECK_FAILED' }
+  );
+  assert.deepEqual(
+    safeResetFailureResult(new Error('unknown failure')), { result: 'FAIL', reason: 'TRANSACTION_FAILED' }
+  );
 });
 
 test('a failed final deletion rolls back the whole reset transaction', async () => {

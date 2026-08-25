@@ -106,30 +106,38 @@ async function resolveTargetConversation(client, conversationId) {
 }
 
 async function countCrmDependencies(client, tenantId, conversationId, contactId) {
-  const result = await client.query(
-    `WITH selected_leads AS (
-       SELECT id
-         FROM crm_leads
-        WHERE tenant_id = $1 AND conversation_id = $2
-     ), dependencies AS (
-       SELECT COUNT(*)::integer AS count FROM crm_leads WHERE tenant_id = $1 AND conversation_id = $2
-       UNION ALL
-       SELECT COUNT(*)::integer AS count FROM crm_activities
-        WHERE tenant_id = $1 AND (conversation_id = $2 OR lead_id IN (SELECT id FROM selected_leads))
-       UNION ALL
-       SELECT COUNT(*)::integer AS count FROM crm_lead_analyses
-        WHERE tenant_id = $1 AND (conversation_id = $2 OR lead_id IN (SELECT id FROM selected_leads))
-       UNION ALL
-       SELECT COUNT(*)::integer AS count FROM crm_deals
-        WHERE tenant_id = $1 AND lead_id IN (SELECT id FROM selected_leads)
-       UNION ALL
-       SELECT CASE WHEN $3::uuid IS NULL THEN 0 ELSE 1 END
-     )
-     SELECT COALESCE(SUM(count), 0)::integer AS crm_dependency_count FROM dependencies`,
-    [tenantId, conversationId, contactId]
-  );
-  if (result.rowCount !== 1) fail('STAGING_RESET_CRM_DEPENDENCY_CHECK_FAILED');
-  return Number(result.rows[0].crm_dependency_count ?? 0);
+  try {
+    const result = await client.query(
+      `WITH selected_leads AS (
+         SELECT id
+           FROM crm_leads
+          WHERE tenant_id = $1 AND conversation_id = $2
+       )
+       SELECT
+         (SELECT COUNT(*)::integer FROM selected_leads) AS crm_leads,
+         (SELECT COUNT(*)::integer FROM crm_activities
+           WHERE tenant_id = $1 AND (conversation_id = $2 OR lead_id IN (SELECT id FROM selected_leads))) AS crm_activities,
+         (SELECT COUNT(*)::integer FROM crm_lead_analyses
+           WHERE tenant_id = $1 AND (conversation_id = $2 OR lead_id IN (SELECT id FROM selected_leads))) AS crm_analysis,
+         (SELECT COUNT(*)::integer FROM crm_deals
+           WHERE tenant_id = $1 AND lead_id IN (SELECT id FROM selected_leads)) AS crm_deals,
+         (CASE WHEN $3::uuid IS NULL THEN 0 ELSE 1 END)::integer AS crm_contact_associations`,
+      [tenantId, conversationId, contactId]
+    );
+    if (result.rowCount !== 1) fail('STAGING_RESET_CRM_DEPENDENCY_CHECK_FAILED');
+    const row = result.rows[0];
+    const counts = {
+      crm_leads: Number(row.crm_leads ?? 0),
+      crm_deals: Number(row.crm_deals ?? 0),
+      crm_activities: Number(row.crm_activities ?? 0),
+      crm_analysis: Number(row.crm_analysis ?? 0),
+      crm_contact_associations: Number(row.crm_contact_associations ?? 0),
+    };
+    return { ...counts, crm_dependency_count: Object.values(counts).reduce((total, value) => total + value, 0) };
+  } catch (error) {
+    if (error instanceof StagingWhatsAppTestResetError) throw error;
+    fail('STAGING_RESET_CRM_DEPENDENCY_CHECK_FAILED');
+  }
 }
 
 function count(result) {
@@ -146,13 +154,13 @@ export async function resetStagingWhatsAppTestConversation({ client, conversatio
     await assertKnownConversationDependencies(client);
     const target = await resolveTargetConversation(client, conversationId);
     const tenantId = target.tenant_id;
-    const crmDependencyCount = await countCrmDependencies(client, tenantId, conversationId, target.contact_id);
-    if (crmDependencyCount > 0) {
+    const crmDependencies = await countCrmDependencies(client, tenantId, conversationId, target.contact_id);
+    if (crmDependencies.crm_dependency_count > 0) {
       await client.query('ROLLBACK');
       return {
         result: 'REFUSED',
         reason: 'CRM_DEPENDENCIES_PRESENT',
-        crm_dependency_count: crmDependencyCount,
+        ...crmDependencies,
       };
     }
     const audits = await client.query(
@@ -193,6 +201,26 @@ export function formatSafeResetSummary(summary) {
   return 'STAGING_WHATSAPP_TEST_RESET ' + JSON.stringify(summary);
 }
 
+export function safeResetFailureResult(error) {
+  const code = error instanceof StagingWhatsAppTestResetError ? error.code : error?.code;
+  const reasonByCode = {
+    STAGING_RESET_CRM_DEPENDENCY_CHECK_FAILED: 'DEPENDENCY_CHECK_FAILED',
+    STAGING_RESET_CONVERSATION_NOT_FOUND: 'CONVERSATION_NOT_FOUND',
+    STAGING_RESET_CHANNEL_REQUIRED: 'NON_WHATSAPP_CONVERSATION',
+    STAGING_RESET_DATABASE_IDENTITY_MISMATCH: 'DATABASE_IDENTITY_MISMATCH',
+    STAGING_RESET_ENVIRONMENT_REQUIRED: 'INVALID_STAGING_ENVIRONMENT',
+    STAGING_RESET_DATABASE_REQUIRED: 'INVALID_STAGING_ENVIRONMENT',
+    STAGING_RESET_DATABASE_INVALID: 'INVALID_STAGING_ENVIRONMENT',
+    STAGING_RESET_CONVERSATION_DEPENDENCY_MISMATCH: 'UNEXPECTED_SCHEMA_DEPENDENCY',
+    STAGING_RESET_FOREIGN_KEY_MISMATCH: 'UNEXPECTED_SCHEMA_DEPENDENCY',
+  };
+  const databaseDependencyCodes = new Set(['42P01', '42703', '42883']);
+  return {
+    result: 'FAIL',
+    reason: reasonByCode[code] ?? (databaseDependencyCodes.has(code) ? 'DEPENDENCY_CHECK_FAILED' : 'TRANSACTION_FAILED'),
+  };
+}
+
 export async function main({ env = process.env, argv = process.argv.slice(2), Pool = null } = {}) {
   const { conversationId } = parseResetArguments(argv);
   const { connectionString, databaseName } = requireStagingEnvironment(env);
@@ -212,8 +240,7 @@ export async function main({ env = process.env, argv = process.argv.slice(2), Po
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : null;
 if (invokedPath === fileURLToPath(import.meta.url)) {
   main().catch((error) => {
-    const code = error instanceof StagingWhatsAppTestResetError ? error.code : 'STAGING_RESET_FAILED';
-    console.error('STAGING_WHATSAPP_TEST_RESET result=FAIL code=' + code);
+    console.error(formatSafeResetSummary(safeResetFailureResult(error)));
     process.exitCode = 1;
   });
 }
