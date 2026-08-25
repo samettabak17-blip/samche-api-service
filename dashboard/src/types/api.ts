@@ -25,6 +25,7 @@ export interface ConversationRecord {
   handling_version: number;
   last_activity_at: string;
 }
+export interface HumanAttentionSummary { unresolvedCount: number; }
 export interface Conversation extends ConversationRecord {
   channel_type: ConversationChannelType;
   channel_display_name: string;
@@ -33,6 +34,7 @@ export interface Conversation extends ConversationRecord {
   last_message_preview: string | null;
   last_message_at: string | null;
   human_delivery_configured: boolean;
+  human_attention_state?: 'NONE' | 'REQUESTED' | 'ACKNOWLEDGED' | 'RESOLVED';
 }
 export type SenderType = 'CUSTOMER' | 'ASSISTANT' | 'AGENT' | 'SYSTEM';
 export type ConversationResourceStatus = 'UPLOADING' | 'PROCESSING' | 'READY' | 'FAILED';

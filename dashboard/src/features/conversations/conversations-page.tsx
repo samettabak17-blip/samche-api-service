@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, ChevronLeft, ChevronRight, Headphones, MessageSquareText, Send, UserRound } from 'lucide-react';
-import { type FormEvent, useEffect, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { EmptyState, QueryErrorState, SkeletonBlock } from '../../components/ui/async-state';
 import { formatDateTime } from '../../lib/format';
@@ -32,6 +32,8 @@ export function ConversationsPage() {
   const [offset, setOffset] = useState(0);
   const [messageOffset, setMessageOffset] = useState(0);
   const [content, setContent] = useState('');
+  const [audioArmed, setAudioArmed] = useState(false);
+  const audioContext = useRef<AudioContext | null>(null);
   const liveState = useTenantConversationLiveEvents(tenantId, conversationId);
   useEffect(() => {
     setMessageOffset(0);
@@ -66,6 +68,39 @@ export function ConversationsPage() {
     onSuccess: () => { setContent(''); refresh(); },
   });
 
+  const attentionQuery = useQuery({ queryKey: tenantKeys.humanAttention(tenantId), queryFn: () => tenantApi.getHumanAttentionSummary(tenantId), enabled: Boolean(tenantId) });
+  const unresolvedAttention = attentionQuery.data?.unresolvedCount ?? 0;
+  useEffect(() => {
+    const normalTitle = 'SamChe Dashboard';
+    document.title = unresolvedAttention > 0 ? '(' + unresolvedAttention + ') ' + normalTitle : normalTitle;
+    return () => { document.title = normalTitle; };
+  }, [unresolvedAttention]);
+  useEffect(() => {
+    const arm = () => setAudioArmed(true);
+    window.addEventListener('pointerdown', arm, { once: true });
+    return () => window.removeEventListener('pointerdown', arm);
+  }, []);
+  useEffect(() => {
+    if (!audioArmed || unresolvedAttention < 1) return;
+    const alert = () => {
+      try {
+        const Context = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!Context) return;
+        audioContext.current ??= new Context();
+        if (audioContext.current.state === 'suspended') { void audioContext.current.resume().catch(() => {}); }
+        const oscillator = audioContext.current.createOscillator();
+        const gain = audioContext.current.createGain();
+        gain.gain.setValueAtTime(0.035, audioContext.current.currentTime);
+        oscillator.frequency.setValueAtTime(880, audioContext.current.currentTime);
+        oscillator.connect(gain).connect(audioContext.current.destination);
+        oscillator.start(); oscillator.stop(audioContext.current.currentTime + 0.16);
+      } catch { /* visual attention remains available if browser audio is blocked */ }
+    };
+    alert();
+    const timer = window.setInterval(alert, 3000);
+    return () => window.clearInterval(timer);
+  }, [audioArmed, unresolvedAttention]);
+
   const conversations = conversationsQuery.data ?? [];
   const conversation = conversationQuery.data;
   const messages = messagesQuery.data ?? [];
@@ -81,11 +116,11 @@ export function ConversationsPage() {
   if (conversationsQuery.isError) return <QueryErrorState error={conversationsQuery.error} onRetry={() => void conversationsQuery.refetch()} resource="conversations" />;
 
   return <div className="space-y-5">
-    <header className="flex items-end justify-between gap-4"><div><p className="eyebrow">SamChe live customer inbox</p><h1 className="page-title mt-2">Conversations</h1><p className="mt-2 text-sm text-stone-400">Real tenant channel activity and human handoff controls.</p></div><LiveState state={liveState} /></header>
+    <header className="flex items-end justify-between gap-4"><div><p className="eyebrow">SamChe live customer inbox</p><h1 className="page-title mt-2">Conversations</h1><p className="mt-2 text-sm text-stone-400">Real tenant channel activity and human handoff controls.</p>{unresolvedAttention > 0 && <p className="mt-2 inline-flex rounded-full bg-red-500/15 px-3 py-1 text-xs font-semibold text-red-200">{unresolvedAttention} needs attention</p>}{unresolvedAttention > 0 && !audioArmed && <p className="mt-2 text-xs text-gold">Click anywhere in Dashboard to activate sound alerts.</p>}</div><LiveState state={liveState} /></header>
     <div className="grid min-h-[42rem] gap-4 xl:grid-cols-[19rem_minmax(0,1fr)_18rem]">
       <section className={'panel overflow-hidden ' + (conversationId ? 'hidden xl:block' : '')}>
         <header className="border-b border-line px-4 py-4"><p className="font-semibold text-ink">Conversation inbox</p><p className="mt-1 text-xs text-stone-400">Latest tenant activity</p></header>
-        {conversations.length === 0 ? <div className="p-5"><EmptyState title="No conversations yet" description="Connected channel traffic will appear here." icon={<MessageSquareText size={20} />} /></div> : <ul className="divide-y divide-line">{conversations.map((item) => <li key={item.id}><Link to={'/app/' + tenantId + '/conversations/' + item.id} className={'block px-4 py-4 transition hover:bg-white/[0.035] ' + (item.id === conversationId ? 'bg-signal/10' : '')}><div className="flex justify-between gap-2"><div className="min-w-0"><p className="truncate text-sm font-medium text-ink">{item.customer_external_id || item.external_conversation_id || 'Customer conversation'}</p><p className="mt-1 truncate text-xs text-stone-400">{item.last_message_preview || item.channel_display_name || 'No message preview'}</p></div><time className="shrink-0 text-[11px] text-stone-500">{formatDateTime(item.last_activity_at || item.created_at)}</time></div><div className="mt-3 flex gap-1.5"><span className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-stone-300">{item.channel_type || 'CHANNEL'}</span><span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-stone-300">{handlingLabel(item.handling_mode)}</span></div></Link></li>)}</ul>}
+        {conversations.length === 0 ? <div className="p-5"><EmptyState title="No conversations yet" description="Connected channel traffic will appear here." icon={<MessageSquareText size={20} />} /></div> : <ul className="divide-y divide-line">{conversations.map((item) => <li key={item.id}><Link to={'/app/' + tenantId + '/conversations/' + item.id} className={'block px-4 py-4 transition hover:bg-white/[0.035] ' + (item.id === conversationId ? 'bg-signal/10 ' : '') + (item.human_attention_state === 'REQUESTED' ? 'bg-red-500/10 ring-1 ring-inset ring-red-400/30' : '')}><div className="flex justify-between gap-2"><div className="min-w-0"><p className="truncate text-sm font-medium text-ink">{item.customer_external_id || item.external_conversation_id || 'Customer conversation'}</p><p className="mt-1 truncate text-xs text-stone-400">{item.last_message_preview || item.channel_display_name || 'No message preview'}</p></div><time className="shrink-0 text-[11px] text-stone-500">{formatDateTime(item.last_activity_at || item.created_at)}</time></div><div className="mt-3 flex gap-1.5"><span className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-stone-300">{item.channel_type || 'CHANNEL'}</span><span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-stone-300">{handlingLabel(item.handling_mode)}</span>{item.human_attention_state === 'REQUESTED' && <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-200">Needs attention</span>}</div></Link></li>)}</ul>}
         <footer className="flex justify-between border-t border-line px-3 py-3"><button type="button" onClick={() => setOffset((value) => Math.max(0, value - pageSize))} disabled={offset === 0} className="text-xs text-stone-400 disabled:opacity-40"><ChevronLeft className="inline" size={14} /> Previous</button><button type="button" onClick={() => setOffset((value) => value + pageSize)} disabled={conversations.length < pageSize} className="text-xs text-stone-400 disabled:opacity-40">Next <ChevronRight className="inline" size={14} /></button></footer>
       </section>
 

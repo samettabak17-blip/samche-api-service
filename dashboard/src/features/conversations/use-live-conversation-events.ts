@@ -32,6 +32,7 @@ export function useTenantConversationLiveEvents(tenantId: string, activeConversa
     const refresh = (event?: ConversationEvent) => {
       if (event?.tenant_id && event.tenant_id !== tenantId) return;
       void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversations'] });
+      void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'human-attention'] });
       if (activeConversationId && (!event?.conversation_id || event.conversation_id === activeConversationId)) {
         void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', activeConversationId] });
       }
