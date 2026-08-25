@@ -114,15 +114,18 @@ SamChe Company LLC'nin yapay zeka destekli danışmanıyım ve size yardımcı o
 Dubai’de şirket kuruluşu, iş planları, iş geliştirme, dijital büyüme, yapay zeka çözümleri, oturum seçenekleri, yaşam maliyetleri ve şirket kuruluşu sonrasında sunduğumuz hizmetler ile ilgili tüm sorularınızı yanıtlayabilirim. Size nasıl yardımcı olabilirim?`);
 });
 
-test('the live WhatsApp path persists deterministic responses before it can call Gemini', () => {
+test('the live WhatsApp path returns after guarded deterministic delivery before entering the substantive model path', () => {
   const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   const deterministicBranch = app.indexOf('const deterministicSocialResponse = planWhatsAppDeterministicSocialResponse');
-  const geminiCall = app.indexOf('const aiResponse = await callWpGemini');
+  const substantiveModelBranch = app.indexOf("logWhatsAppTiming('model_request_started')");
 
   assert.ok(deterministicBranch >= 0);
-  assert.ok(geminiCall > deterministicBranch);
-  assert.match(app.slice(deterministicBranch, geminiCall), /await persistAndSendWhatsAppAssistant\(whatsappInbox, cleanFrom, deterministicSocialResponse\.content\)/);
-  assert.match(app.slice(deterministicBranch, geminiCall), /model_invoked=0/);
+  assert.ok(substantiveModelBranch > deterministicBranch);
+  const deterministicSource = app.slice(deterministicBranch, substantiveModelBranch);
+  assert.match(deterministicSource, /await persistAndSendWhatsAppAssistant\(whatsappInbox, cleanFrom, deterministicSocialResponse\.content\)/);
+  assert.match(deterministicSource, /model_invoked=0/);
+  assert.match(deterministicSource, /return;/);
+  assert.doesNotMatch(deterministicSource, /LANGUAGE_COMPLIANCE_RETRY/);
 });
 
 test('the persisted first-contact decision checks all assistant history, not only the recent context window', () => {
