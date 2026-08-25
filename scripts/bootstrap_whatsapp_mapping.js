@@ -10,8 +10,17 @@ const integrationKey = phoneNumberId ? 'WHATSAPP:' + phoneNumberId : null;
 const runtimeAssistant = { name: 'SamChe AI', model: 'gemini-2.5-pro' };
 const legacyRuntimeAssistantName = 'SamChe WhatsApp Runtime';
 const masterPolicy = readFileSync(new URL('../policies/samche-whatsapp-master-business-policy.tr.txt', import.meta.url), 'utf8');
-const masterPolicySha256 = createHash('sha256').update(masterPolicy, 'utf8').digest('hex');
-const expectedMasterPolicySha256 = 'c72bc5787e31ee788431fcb7b73a6f1f72fb3471c3910a00e87005d389edaf58';
+// Only CRLF-to-LF and one terminal LF are canonicalized for policy integrity.
+function canonicalizePolicyNewlines(value) {
+  return String(value ?? '').replace(/\r\n/g, '\n').replace(/\n$/, '');
+}
+function policyLineCount(value) {
+  return value.length === 0 ? 0 : value.split('\n').length;
+}
+const masterPolicyCanonical = canonicalizePolicyNewlines(masterPolicy);
+const masterPolicyRawSha256 = createHash('sha256').update(masterPolicy, 'utf8').digest('hex');
+const masterPolicyCanonicalSha256 = createHash('sha256').update(masterPolicyCanonical, 'utf8').digest('hex');
+const expectedMasterPolicyCanonicalSha256 = 'c72bc5787e31ee788431fcb7b73a6f1f72fb3471c3910a00e87005d389edaf58';
 
 if (!connectionString || !tenantId || !phoneNumberId) {
   console.error('WHATSAPP_MAPPING: CONFIGURATION_REQUIRED');
@@ -21,7 +30,7 @@ if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
   console.error('WHATSAPP_MAPPING: INVALID_CONFIGURATION');
   process.exit(1);
 }
-if (masterPolicySha256 !== expectedMasterPolicySha256) {
+if (masterPolicyCanonicalSha256 !== expectedMasterPolicyCanonicalSha256) {
   console.error('WHATSAPP_MAPPING: MASTER_POLICY_INTEGRITY_FAILED');
   process.exit(1);
 }
@@ -151,17 +160,22 @@ try {
       [mapping.rows[0].id]
     );
     const row = verified.rows[0];
-    const verifiedPolicySha256 = row
-      ? createHash('sha256').update(String(row.system_prompt ?? ''), 'utf8').digest('hex')
+    const verifiedPolicy = String(row?.system_prompt ?? '');
+    const verifiedPolicyCanonical = canonicalizePolicyNewlines(verifiedPolicy);
+    const verifiedPolicyRawSha256 = row
+      ? createHash('sha256').update(verifiedPolicy, 'utf8').digest('hex')
+      : null;
+    const verifiedPolicyCanonicalSha256 = row
+      ? createHash('sha256').update(verifiedPolicyCanonical, 'utf8').digest('hex')
       : null;
     if (!row || row.tenant_id !== tenantId || row.channel_id !== channel.channel.id ||
         row.assistant_id !== assistant.assistant.id || row.enabled !== true ||
         row.channel_type !== 'WHATSAPP' || row.channel_status !== 'active' ||
         row.assistant_status !== 'active' || row.model !== runtimeAssistant.model ||
         row.assistant_name !== runtimeAssistant.name ||
-        verifiedPolicySha256 !== expectedMasterPolicySha256) fail('MAPPING_VERIFICATION_FAILED');
+        verifiedPolicyCanonicalSha256 !== expectedMasterPolicyCanonicalSha256) fail('MAPPING_VERIFICATION_FAILED');
     await client.query('COMMIT');
-    console.log('WHATSAPP_MAPPING: READY (assistant=' + assistant.outcome + '; channel=' + channel.outcome + ')');
+    console.log('WHATSAPP_MAPPING: READY (assistant=' + assistant.outcome + '; channel=' + channel.outcome + '; policy_characters=' + verifiedPolicyCanonical.length + '; policy_lines=' + policyLineCount(verifiedPolicyCanonical) + '; policy_raw_sha256=' + verifiedPolicyRawSha256 + '; policy_canonical_sha256=' + verifiedPolicyCanonicalSha256 + ')');
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('WHATSAPP_MAPPING: ' + (error?.code || 'BOOTSTRAP_FAILED'));

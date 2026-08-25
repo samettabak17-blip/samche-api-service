@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { buildWhatsAppTenantModelContext, WhatsAppTenantContextError } from '../services/whatsapp-tenant-context-service.js';
+import { buildWhatsAppTenantModelContext, canonicalizeSamcheWhatsAppPolicyNewlines, WhatsAppTenantContextError } from '../services/whatsapp-tenant-context-service.js';
 
 const masterPolicy = readFileSync(new URL('../policies/samche-whatsapp-master-business-policy.tr.txt', import.meta.url), 'utf8');
 const expectedPolicySha256 = 'c72bc5787e31ee788431fcb7b73a6f1f72fb3471c3910a00e87005d389edaf58';
@@ -28,10 +28,21 @@ test('preserves the recovered SamChe master policy byte-for-byte and beyond 6000
   });
 
   assert.ok(context.systemInstruction.includes(masterPolicy));
+  assert.ok(context.systemInstruction.includes(masterPolicy.slice(-200)));
   assert.match(context.systemInstruction, /DANIŞMANLIK ÜCRETİ/);
   assert.match(context.systemInstruction, /8\.000 AED/);
   assert.match(context.systemInstruction, /MANDATORY RESPONSE LANGUAGE: Turkish/);
   assert.ok(context.systemInstruction.indexOf(masterPolicy) < context.systemInstruction.indexOf('MANDATORY RESPONSE LANGUAGE:'));
+});
+
+test('canonicalizes only CRLF and one terminal newline for master-policy integrity', () => {
+  const attachedCrLfRepresentation = masterPolicy.replace(/\n/g, '\r\n') + '\r\n';
+  assert.notEqual(
+    createHash('sha256').update(attachedCrLfRepresentation, 'utf8').digest('hex'),
+    expectedPolicySha256
+  );
+  assert.equal(canonicalizeSamcheWhatsAppPolicyNewlines(attachedCrLfRepresentation), masterPolicy);
+  assert.equal(canonicalizeSamcheWhatsAppPolicyNewlines('A  \nB'), 'A  \nB');
 });
 
 test('uses the same complete authoritative policy for Turkish English and Arabic response languages', () => {
@@ -106,8 +117,10 @@ test('staging WhatsApp bootstrap configures the mapped assistant with the verifi
   const bootstrap = readFileSync(new URL('../scripts/bootstrap_whatsapp_mapping.js', import.meta.url), 'utf8');
   assert.match(bootstrap, /name: 'SamChe AI'/);
   assert.match(bootstrap, /system_prompt = \$2/);
-  assert.match(bootstrap, /expectedMasterPolicySha256/);
+  assert.match(bootstrap, /expectedMasterPolicyCanonicalSha256/);
   assert.match(bootstrap, /MASTER_POLICY_INTEGRITY_FAILED/);
-  assert.match(bootstrap, /verifiedPolicySha256 !== expectedMasterPolicySha256/);
+  assert.match(bootstrap, /masterPolicyCanonicalSha256/);
+  assert.match(bootstrap, /verifiedPolicyCanonicalSha256/);
+  assert.match(bootstrap, /verifiedPolicyCanonicalSha256 !== expectedMasterPolicyCanonicalSha256/);
   assert.match(bootstrap, /row\.assistant_name !== runtimeAssistant\.name/);
 });

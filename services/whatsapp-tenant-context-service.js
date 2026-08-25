@@ -5,6 +5,13 @@ export class WhatsAppTenantContextError extends Error {
   }
 }
 
+// This is intentionally the only policy-text transformation: CRLF becomes LF
+// and one terminal LF is removed. Do not trim or otherwise normalize policy text.
+export function canonicalizeSamcheWhatsAppPolicyNewlines(value) {
+  const lfText = String(value ?? '').replace(/\r\n/g, '\n');
+  return lfText.replace(/\n$/, '');
+}
+
 function bounded(value, limit) {
   return String(value ?? '').trim().slice(0, limit);
 }
@@ -31,7 +38,7 @@ function firstResponseInstruction(firstResponse) {
 export function buildWhatsAppTenantModelContext({ tenant, history = [], customerText, communicationLanguage = 'und' }) {
   const companyName = bounded(tenant?.companyName, 255);
   const assistantName = bounded(tenant?.assistantName, 255);
-  const businessPolicy = String(tenant?.systemPrompt ?? '').trim();
+  const businessPolicy = canonicalizeSamcheWhatsAppPolicyNewlines(tenant?.systemPrompt);
   if (!companyName || !assistantName) throw new WhatsAppTenantContextError('WHATSAPP_TENANT_IDENTITY_MISSING');
   if (!businessPolicy) throw new WhatsAppTenantContextError('WHATSAPP_ASSISTANT_POLICY_MISSING');
 
