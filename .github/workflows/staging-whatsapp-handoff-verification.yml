@@ -34,6 +34,7 @@ jobs:
           node --check test/whatsappTenantContext.test.js
           node --check test/whatsappAuthoritativePolicy.test.js
           node --check test/whatsappGreetingOnlyPolicy.test.js
+          node --check test/whatsappDeterministicSocialResponse.test.js
           node --check test/conversationCommunicationLanguage.test.js
 
       - name: Run WhatsApp operator delivery and handoff regressions
@@ -47,6 +48,7 @@ jobs:
           test/whatsappTenantContext.test.js
           test/whatsappAuthoritativePolicy.test.js
           test/whatsappGreetingOnlyPolicy.test.js
+          test/whatsappDeterministicSocialResponse.test.js
           test/conversationCommunicationLanguage.test.js
           test/whatsappSequentialResourceContext.test.js
           test/whatsappResourceFollowUpRouting.test.js

@@ -52,7 +52,7 @@ async function notify(client, tenantId, conversationId, type) {
 
 export async function resolveWhatsAppIntegration(client, phoneNumberId) {
   const result = await client.query(
-    `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id, tc.channel_type, tc.status AS channel_status, a.status AS assistant_status, t.name AS tenant_name, a.name AS assistant_name, a.system_prompt AS assistant_system_prompt
+    `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id, tc.channel_type, tc.status AS channel_status, a.status AS assistant_status, t.name AS tenant_name, a.name AS assistant_name, a.system_prompt AS assistant_system_prompt, a.whatsapp_response_templates AS assistant_whatsapp_response_templates
        FROM channel_integrations ci
        JOIN tenant_channels tc ON tc.id = ci.channel_id AND tc.tenant_id = ci.tenant_id
        JOIN tenants t ON t.id = ci.tenant_id AND t.status = 'active'
@@ -348,6 +348,7 @@ export async function persistWhatsAppInbound({
       companyName: integration.tenant_name,
       assistantName: integration.assistant_name,
       systemPrompt: integration.assistant_system_prompt,
+      deterministicTemplates: integration.assistant_whatsapp_response_templates,
       knowledge: knowledgeResult.rows.map((row) => row.content),
       communicationLanguage: candidateLanguage ?? conversation.communication_language ?? 'und',
     };

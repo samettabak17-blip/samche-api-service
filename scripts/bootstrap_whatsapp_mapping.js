@@ -10,6 +10,9 @@ const integrationKey = phoneNumberId ? 'WHATSAPP:' + phoneNumberId : null;
 const runtimeAssistant = { name: 'SamChe AI', model: 'gemini-2.5-pro' };
 const legacyRuntimeAssistantName = 'SamChe WhatsApp Runtime';
 const masterPolicy = readFileSync(new URL('../policies/samche-whatsapp-master-business-policy.tr.txt', import.meta.url), 'utf8');
+const deterministicResponseTemplates = JSON.parse(
+  readFileSync(new URL('../policies/samche-whatsapp-deterministic-responses.json', import.meta.url), 'utf8')
+);
 // Only CRLF-to-LF and one terminal LF are canonicalized for policy integrity.
 function canonicalizePolicyNewlines(value) {
   return String(value ?? '').replace(/\r\n/g, '\n').replace(/\n$/, '');
@@ -34,6 +37,14 @@ if (masterPolicyCanonicalSha256 !== expectedMasterPolicyCanonicalSha256) {
   console.error('WHATSAPP_MAPPING: MASTER_POLICY_INTEGRITY_FAILED');
   process.exit(1);
 }
+function hasRequiredDeterministicTemplates(value) {
+  return ['tr', 'en', 'ar'].every((language) =>
+    typeof value?.first_contact?.[language] === 'string' &&
+    typeof value?.social?.greeting?.[language] === 'string' &&
+    typeof value?.social?.thanks?.[language] === 'string'
+  );
+}
+
 function fail(code) { const error = new Error(code); error.code = code; throw error; }
 const pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false } });
 
@@ -69,18 +80,19 @@ async function resolveAssistant(client) {
           SET name = $1,
               system_prompt = $2,
               model = $3,
+              whatsapp_response_templates = $4::jsonb,
               updated_at = CURRENT_TIMESTAMP
-        WHERE id = $4 AND tenant_id = $5
+        WHERE id = $5 AND tenant_id = $6
         RETURNING id, status`,
-      [runtimeAssistant.name, masterPolicy, runtimeAssistant.model, candidates.rows[0].assistant_id ?? candidates.rows[0].id, tenantId]
+      [runtimeAssistant.name, masterPolicy, runtimeAssistant.model, JSON.stringify(deterministicResponseTemplates), candidates.rows[0].assistant_id ?? candidates.rows[0].id, tenantId]
     );
     return { assistant: updated.rows[0], outcome: 'configured' };
   }
 
   const created = await client.query(
-    `INSERT INTO ai_assistants (tenant_id, name, system_prompt, model, status)
-     VALUES ($1, $2, $3, $4, 'active') RETURNING id, status`,
-    [tenantId, runtimeAssistant.name, masterPolicy, runtimeAssistant.model]
+    `INSERT INTO ai_assistants (tenant_id, name, system_prompt, model, status, whatsapp_response_templates)
+     VALUES ($1, $2, $3, $4, 'active', $5::jsonb) RETURNING id, status`,
+    [tenantId, runtimeAssistant.name, masterPolicy, runtimeAssistant.model, JSON.stringify(deterministicResponseTemplates)]
   );
   return { assistant: created.rows[0], outcome: 'created' };
 }
@@ -152,7 +164,7 @@ try {
     const verified = await client.query(
       `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id, ci.enabled,
               tc.channel_type, tc.status channel_status, a.status assistant_status, a.model,
-              a.name assistant_name, a.system_prompt
+              a.name assistant_name, a.system_prompt, a.whatsapp_response_templates
          FROM channel_integrations ci
          JOIN tenant_channels tc ON tc.id = ci.channel_id AND tc.tenant_id = ci.tenant_id
          JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
@@ -173,6 +185,7 @@ try {
         row.channel_type !== 'WHATSAPP' || row.channel_status !== 'active' ||
         row.assistant_status !== 'active' || row.model !== runtimeAssistant.model ||
         row.assistant_name !== runtimeAssistant.name ||
+        !hasRequiredDeterministicTemplates(row.whatsapp_response_templates) ||
         verifiedPolicyCanonicalSha256 !== expectedMasterPolicyCanonicalSha256) fail('MAPPING_VERIFICATION_FAILED');
     await client.query('COMMIT');
     console.log('WHATSAPP_MAPPING: READY (assistant=' + assistant.outcome + '; channel=' + channel.outcome + '; policy_characters=' + verifiedPolicyCanonical.length + '; policy_lines=' + policyLineCount(verifiedPolicyCanonical) + '; policy_raw_sha256=' + verifiedPolicyRawSha256 + '; policy_canonical_sha256=' + verifiedPolicyCanonicalSha256 + ')');

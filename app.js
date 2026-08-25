@@ -20,7 +20,8 @@ import conversationRoutes from "./routes/conversationRoutes.js";
 import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
 import { persistAndDeliverWhatsAppAssistant } from "./services/whatsapp-assistant-response-service.js";
-import { buildWhatsAppTenantModelContext, WhatsAppTenantContextError } from "./services/whatsapp-tenant-context-service.js";
+import { buildWhatsAppTenantModelContext, classifyWhatsAppCurrentCustomerIntent, WhatsAppTenantContextError } from "./services/whatsapp-tenant-context-service.js";
+import { planWhatsAppDeterministicSocialResponse } from "./services/whatsapp-deterministic-social-response-service.js";
 import {
   describeStorageCompatibilityProfile,
   describeStorageConfigurationIdentity,
@@ -1534,6 +1535,23 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         : 'en';
       session.lang = lang;
 
+      const currentIntent = classifyWhatsAppCurrentCustomerIntent(text);
+      const deterministicSocialResponse = planWhatsAppDeterministicSocialResponse({
+        tenant: tenantContext,
+        communicationLanguage: tenantContext.communicationLanguage,
+        currentIntent,
+        firstAssistantResponse: whatsappInbox.isFirstAssistantResponse,
+      });
+      if (deterministicSocialResponse) {
+        console.info(
+          'WHATSAPP_RESPONSE_POLICY current_intent=' + currentIntent +
+          ' first_assistant_response=' + (whatsappInbox.isFirstAssistantResponse ? '1' : '0') +
+          ' model_invoked=0 deterministic_kind=' + deterministicSocialResponse.kind
+        );
+        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, deterministicSocialResponse.content);
+        return;
+      }
+
       // --------------------------------------
       // FOLLOW-UP RESETLERİ
       // --------------------------------------
@@ -1608,7 +1626,8 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       }
       console.info(
         'WHATSAPP_RESPONSE_POLICY current_intent=' + modelContext.currentIntent +
-        ' first_assistant_response=' + (modelContext.firstResponse ? '1' : '0')
+        ' first_assistant_response=' + (modelContext.firstResponse ? '1' : '0') +
+        ' model_invoked=1'
       );
 
       // --------------------------------------

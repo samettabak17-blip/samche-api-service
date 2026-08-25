@@ -1,0 +1,19 @@
+{
+  "first_contact": {
+    "tr": "Merhaba, ben {{assistantName}}.\n\n{{companyName}}'nin yapay zeka destekli danışmanıyım ve size yardımcı olmak için buradayım.\n\nDubai’de şirket kuruluşu, iş planları, iş geliştirme, dijital büyüme, yapay zeka çözümleri, oturum seçenekleri, yaşam maliyetleri ve şirket kuruluşu sonrasında sunduğumuz hizmetler ile ilgili tüm sorularınızı yanıtlayabilirim. Size nasıl yardımcı olabilirim?",
+    "en": "Hello, I'm {{assistantName}}.\n\nI'm the AI-powered consultant for {{companyName}}, and I'm here to assist you.\n\nI can answer your questions about company formation in Dubai, business planning, business development, digital growth, AI solutions, residency options, cost of living, and the services we provide after company formation. How can I assist you?",
+    "ar": "مرحبًا، أنا {{assistantName}}.\n\nأنا المستشار المدعوم بالذكاء الاصطناعي لشركة {{companyName}}، وأنا هنا لمساعدتك.\n\nيمكنني الإجابة عن أسئلتك حول تأسيس الشركات في دبي، وتخطيط الأعمال، وتطوير الأعمال، والنمو الرقمي، وحلول الذكاء الاصطناعي، وخيارات الإقامة، وتكاليف المعيشة، والخدمات التي نقدمها بعد تأسيس الشركة. كيف يمكنني مساعدتك؟"
+  },
+  "social": {
+    "greeting": {
+      "tr": "Merhaba, size nasıl yardımcı olabilirim?",
+      "en": "Hello, how may I assist you?",
+      "ar": "مرحبًا، كيف يمكنني مساعدتك؟"
+    },
+    "thanks": {
+      "tr": "Rica ederim. Başka bir konuda yardımcı olmamı isterseniz buradayım.",
+      "en": "You are welcome. I am here if you need anything else.",
+      "ar": "على الرحب والسعة. أنا هنا إذا احتجت إلى أي مساعدة أخرى."
+    }
+  }
+}

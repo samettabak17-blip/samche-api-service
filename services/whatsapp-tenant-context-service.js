@@ -32,15 +32,19 @@ function responseLanguageInstruction(language) {
 
 const GREETING_ONLY = /^(?:merhaba|mrb|selam|slm|selamlar|selamun\s+aleykum|selamün\s+aleyküm|selamunaleykum|selamünaleyküm|s\.?\s*a\.?|sa|hello|hi|hey|مرحبا|السلام\s+عليكم)(?:[\s!,.?:;()\[\]{}…~*_😀-🙏]*)$/iu;
 
-function classifyCurrentCustomerIntent(customerText) {
-  return GREETING_ONLY.test(String(customerText ?? '').trim())
+const THANKS_ONLY = /^(?:teşekkürler|tesekkurler|teşekkür ederim|tesekkür ederim|çok teşekkürler|cok tesekkurler|sağ olun|sag olun|thanks|thank you|شكراً|شكرًا)(?:[\s!,.?:;()\[\]{}…~*_😀-🙏]*)$/iu;
+
+export function classifyWhatsAppCurrentCustomerIntent(customerText) {
+  const normalized = String(customerText ?? '').trim();
+  if (THANKS_ONLY.test(normalized)) return 'THANKS_ONLY';
+  return GREETING_ONLY.test(normalized)
     ? 'GREETING_ONLY'
     : 'TOPIC_PRESENT';
 }
 
 function currentIntentBoundaryInstruction(currentIntent) {
-  if (currentIntent === 'GREETING_ONLY') {
-    return 'CURRENT_MESSAGE_INTENT: GREETING_ONLY. This classification is based only on the current customer message. Do not infer company formation or any other business topic from the authoritative policy, supplementary knowledge, history, examples, capabilities, or prior unrelated messages. Do not begin business qualification or a topic-specific explanation.';
+  if (currentIntent === 'GREETING_ONLY' || currentIntent === 'THANKS_ONLY') {
+    return `CURRENT_MESSAGE_INTENT: ${currentIntent}. This classification is based only on the current customer message. Do not infer company formation or any other business topic from the authoritative policy, supplementary knowledge, history, examples, capabilities, or prior unrelated messages. Do not begin business qualification or a topic-specific explanation.`;
   }
   return 'CURRENT_MESSAGE_INTENT: TOPIC_PRESENT. Determine the topic only from the current customer message and respond according to the authoritative business policy. Do not let policy, knowledge, or history invent a different topic.';
 }
@@ -60,7 +64,7 @@ export function buildWhatsAppTenantModelContext({ tenant, history = [], customer
   if (!businessPolicy) throw new WhatsAppTenantContextError('WHATSAPP_ASSISTANT_POLICY_MISSING');
 
   const firstResponse = !history.some((message) => message.sender_type === 'ASSISTANT');
-  const currentIntent = classifyCurrentCustomerIntent(customerText);
+  const currentIntent = classifyWhatsAppCurrentCustomerIntent(customerText);
   const knowledge = (tenant?.knowledge ?? [])
     .map((item) => bounded(item, 3000))
     .filter(Boolean)
