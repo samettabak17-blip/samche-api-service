@@ -137,3 +137,10 @@ test('return-to-ai uses the configured legacy customer closure template', () => 
   const templates = { human_support: { return_to_ai: { tr: 'legacy closure' } } };
   assert.equal(resolveHumanSupportTemplate(templates, 'return_to_ai', 'tr'), 'legacy closure');
 });
+
+
+test('manual takeover template does not create customer-request attention state', () => {
+  const templates = { human_support: { manual_takeover: { tr: 'legacy takeover' } } };
+  assert.equal(resolveHumanSupportTemplate(templates, 'manual_takeover', 'tr'), 'legacy takeover');
+  assert.equal(resolveHumanSupportTemplate(templates, 'return_to_ai', 'tr'), null);
+});

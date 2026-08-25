@@ -252,6 +252,14 @@ export async function operateConversation({ tenantId, conversationId, actor, act
                 assigned_agent_user_id = $1,
                 handoff_requested = FALSE,
                 handoff_reason = NULL,
+                human_attention_state = CASE
+                  WHEN human_attention_state = 'REQUESTED' THEN 'ACKNOWLEDGED'
+                  ELSE human_attention_state
+                END,
+                human_attention_acknowledged_at = CASE
+                  WHEN human_attention_state = 'REQUESTED' THEN CURRENT_TIMESTAMP
+                  ELSE human_attention_acknowledged_at
+                END,
                 handling_version = handling_version + 1,
                 last_activity_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
@@ -291,6 +299,14 @@ export async function operateConversation({ tenantId, conversationId, actor, act
                 assigned_agent_user_id = NULL,
                 handoff_requested = FALSE,
                 handoff_reason = NULL,
+                human_attention_state = CASE
+                  WHEN human_attention_state IN ('REQUESTED', 'ACKNOWLEDGED') THEN 'RESOLVED'
+                  ELSE human_attention_state
+                END,
+                human_support_closed_at = CASE
+                  WHEN human_attention_state IN ('REQUESTED', 'ACKNOWLEDGED') THEN CURRENT_TIMESTAMP
+                  ELSE human_support_closed_at
+                END,
                 handling_version = handling_version + 1,
                 last_activity_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
