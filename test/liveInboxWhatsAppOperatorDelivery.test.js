@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { appendAgentMessage, ConversationOperationError, getHumanDeliveryCapability } from '../services/live-inbox-service.js';
+import { appendAgentMessage, ConversationOperationError, getHumanDeliveryCapability, resolveHumanSupportTemplate } from '../services/live-inbox-service.js';
 import { WhatsAppDeliveryError, deliverWhatsAppText } from '../services/whatsapp-delivery-service.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
@@ -123,4 +123,11 @@ test('human reply capability requires the exact tenant-scoped WhatsApp mapping',
   const unconfigured = createDatabase({ mapping: false });
   const missing = await getHumanDeliveryCapability({ tenantId, conversationId, database: unconfigured.database });
   assert.deepEqual(missing, { channelType: 'WHATSAPP', configured: false });
+});
+
+
+test('manual takeover uses only the configured tenant-scoped deterministic template', () => {
+  const templates = { human_support: { manual_takeover: { tr: 'legacy takeover' } } };
+  assert.equal(resolveHumanSupportTemplate(templates, 'manual_takeover', 'tr'), 'legacy takeover');
+  assert.equal(resolveHumanSupportTemplate(templates, 'manual_takeover', 'en'), null);
 });

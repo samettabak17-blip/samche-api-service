@@ -219,7 +219,7 @@ export async function operateConversation({ tenantId, conversationId, actor, act
   try {
     await client.query('BEGIN');
     const result = await client.query(
-      'SELECT * FROM conversations WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
+      `SELECT c.*, tc.channel_type, tc.external_channel_id\n         FROM conversations c\n         JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id\n        WHERE c.id = $1 AND c.tenant_id = $2\n        FOR UPDATE`,
       [conversationId, tenantId]
     );
     const conversation = result.rows[0];
@@ -259,10 +259,29 @@ export async function operateConversation({ tenantId, conversationId, actor, act
           RETURNING *`,
         [actorUserId, conversationId, tenantId]
       );
+      const takenOver = updated.rows[0];
+      if (takenOver.channel_type === 'WHATSAPP') {
+        const content = await loadWhatsAppManualTakeoverNotice(client, takenOver);
+        const integration = await loadWhatsAppAgentDelivery(client, takenOver);
+        if (!content || !integration) {
+          throw new ConversationOperationError(409, 'WhatsApp human delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
+        }
+        try {
+          await deliverWhatsAppText({
+            phoneNumberId: integration.external_channel_id,
+            recipient: takenOver.customer_external_id,
+            content,
+          });
+        } catch (error) {
+          const code = error instanceof WhatsAppDeliveryError ? error.code : 'WHATSAPP_DELIVERY_FAILED';
+          throw new ConversationOperationError(code === 'WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH' ? 409 : 502, 'WhatsApp delivery could not be completed', code);
+        }
+        await insertMessage(client, { tenantId, conversationId, senderType: 'ASSISTANT', content });
+      }
       await writeAuditEvent(client, { tenantId, conversationId, actorUserId, eventType: 'TAKEOVER' });
       await notify(client, tenantId, conversationId, 'TAKEOVER');
       await client.query('COMMIT');
-      return updated.rows[0];
+      return takenOver;
     }
 
     if (action === 'return_to_ai') {
@@ -345,6 +364,34 @@ export async function operateConversation({ tenantId, conversationId, actor, act
   } finally {
     client.release();
   }
+}
+
+export function resolveHumanSupportTemplate(templates, key, language) {
+  const candidate = templates?.human_support?.[key]?.[language]
+    ?? templates?.human_support?.[key]?.en
+    ?? null;
+  return typeof candidate === 'string' && candidate.trim() ? candidate : null;
+}
+
+async function loadWhatsAppManualTakeoverNotice(client, conversation) {
+  const result = await client.query(
+    `SELECT a.whatsapp_response_templates
+       FROM channel_integrations ci
+       JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
+      WHERE ci.channel_id = $1
+        AND ci.tenant_id = $2
+        AND ci.integration_type = 'WHATSAPP'
+        AND ci.enabled = TRUE
+        AND a.status = 'active'
+      LIMIT 2`,
+    [conversation.channel_id, conversation.tenant_id]
+  );
+  if (result.rowCount !== 1) return null;
+  return resolveHumanSupportTemplate(
+    result.rows[0].whatsapp_response_templates,
+    'manual_takeover',
+    conversation.communication_language
+  );
 }
 
 async function loadWhatsAppAgentDelivery(client, conversation) {

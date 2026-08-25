@@ -15,5 +15,18 @@
       "en": "You are welcome. I am here if you need anything else.",
       "ar": "على الرحب والسعة. أنا هنا إذا احتجت إلى أي مساعدة أخرى."
     }
+  },
+  "human_support": {
+    "manual_takeover": {
+      "tr": "DİKKAT⚠️ Canlı temsilcimiz bu konuşmayı devralmıştır. Lütfen sohbete bağlanana kadar beklemede kalın ⌛️ \n\n ⚠️Canlı temsilci bu konuşmayı sonlandırmadığı sürece yapay zeka danışmanı devre dışıdır.🔒",
+      "en": "Our live representative has taken over the conversation. Please stay on hold...\n\nAs SamChe AI, the AI is deactivated until the live representative ends your conversation.",
+      "ar": "تولى ممثلنا المباشر المحادثة. يرجى البقاء على الخط...\n\nبصفتي SamChe AI، تم إلغاء تنشيط الذكاء الاصطناعي حتى ينهي الممثل المباشر محادثتك."
+    },
+    "warning_5m": {
+      "tr": "⚠️Lütfen dikkat, bu sohbet oturumu 5 dakika sonra sona erecektir.\nEkibimizden yanıt beklerken oturumu aktif tutmak için bu sohbette mesaj gönderebilirsiniz.\n\nOturumunuz sona ererse, istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin; daha fazla sorunuzda size yardımcı olmaktan memnuniyet duyarız."
+    },
+    "timeout_close": {
+      "tr": "🔒 Bu sohbet oturumu sona ermiştir.\n\nBaşka sorularınız varsa veya ek yardıma ihtiyacınız olursa, lütfen istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin. Canlı Destek Ekibimiz size yardımcı olmaktan mutluluk duyacaktır."
+    }
   }
 }
