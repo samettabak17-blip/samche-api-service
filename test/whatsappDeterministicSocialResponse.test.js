@@ -114,5 +114,15 @@ SamChe Company LLC'nin yapay zeka destekli danışmanıyım ve size yardımcı o
 Dubai’de şirket kuruluşu, iş planları, iş geliştirme, dijital büyüme, yapay zeka çözümleri, oturum seçenekleri, yaşam maliyetleri ve şirket kuruluşu sonrasında sunduğumuz hizmetler ile ilgili tüm sorularınızı yanıtlayabilirim. Size nasıl yardımcı olabilirim?`);
 });
 
+test('the live WhatsApp path persists deterministic responses before it can call Gemini', () => {
+  const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  const deterministicBranch = app.indexOf('const deterministicSocialResponse = planWhatsAppDeterministicSocialResponse');
+  const geminiCall = app.indexOf('const aiResponse = await callWpGemini');
+
+  assert.ok(deterministicBranch >= 0);
+  assert.ok(geminiCall > deterministicBranch);
+  assert.match(app.slice(deterministicBranch, geminiCall), /await persistAndSendWhatsAppAssistant\(whatsappInbox, cleanFrom, deterministicSocialResponse\.content\)/);
+  assert.match(app.slice(deterministicBranch, geminiCall), /model_invoked=0/);
+});
 
 
