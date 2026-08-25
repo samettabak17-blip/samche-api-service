@@ -89,3 +89,66 @@ export async function listHumanAttentionSummary({ tenantId, database = pool }) {
   );
   return { unresolvedCount: result.rows[0]?.unresolved_count ?? 0 };
 }
+
+
+export async function claimDueCustomerSupportLifecycle({ database = pool, now = new Date() }) {
+  const client = await database.connect();
+  try {
+    await client.query('BEGIN');
+    const due = await client.query(
+      `SELECT c.*, tc.external_channel_id, a.whatsapp_response_templates
+         FROM conversations c
+         JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
+         JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id
+         JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
+        WHERE c.status = 'open'
+          AND c.handling_mode = 'HUMAN'
+          AND c.human_attention_state = 'ACKNOWLEDGED'
+          AND c.human_support_started_at IS NOT NULL
+          AND c.human_support_closed_at IS NULL
+          AND ci.integration_type = 'WHATSAPP' AND ci.enabled = TRUE
+        ORDER BY c.human_support_last_activity_at ASC
+        FOR UPDATE OF c SKIP LOCKED`
+    );
+    const actions = [];
+    for (const conversation of due.rows) {
+      const last = new Date(conversation.human_support_last_activity_at ?? conversation.human_support_started_at);
+      const elapsed = now.getTime() - last.getTime();
+      const templates = conversation.whatsapp_response_templates?.human_support ?? {};
+      if (elapsed >= 10 * 60 * 1000) {
+        const content = templates.timeout_close?.[conversation.communication_language] ?? templates.timeout_close?.tr;
+        if (typeof content !== 'string' || !content.trim()) continue;
+        await client.query(
+          `UPDATE conversations SET handling_mode = 'AI', assigned_agent_user_id = NULL,
+              human_attention_state = 'RESOLVED', handoff_requested = FALSE, handoff_reason = NULL,
+              human_support_closed_at = $1, handling_version = handling_version + 1,
+              last_activity_at = $1, updated_at = $1
+            WHERE id = $2 AND tenant_id = $3 AND human_support_closed_at IS NULL`,
+          [now, conversation.id, conversation.tenant_id]
+        );
+        await client.query(`INSERT INTO conversation_messages (tenant_id, conversation_id, sender_type, content)
+          VALUES ($1, $2, 'ASSISTANT', $3)`, [conversation.tenant_id, conversation.id, content]);
+        await audit(client, { tenantId: conversation.tenant_id, conversationId: conversation.id, eventType: 'RETURN_TO_AI', metadata: { source: 'LEGACY_TIMEOUT' } });
+        await notify(client, conversation.tenant_id, conversation.id, 'HUMAN_SUPPORT_TIMEOUT');
+        actions.push({ type: 'TIMEOUT_CLOSE', tenantId: conversation.tenant_id, conversationId: conversation.id, recipient: conversation.customer_external_id, content });
+      } else if (elapsed >= 5 * 60 * 1000 && !conversation.human_support_warning_sent_at) {
+        const content = templates.warning_5m?.[conversation.communication_language] ?? templates.warning_5m?.tr;
+        if (typeof content !== 'string' || !content.trim()) continue;
+        await client.query(
+          `UPDATE conversations SET human_support_warning_sent_at = $1, updated_at = $1
+            WHERE id = $2 AND tenant_id = $3 AND human_support_warning_sent_at IS NULL`,
+          [now, conversation.id, conversation.tenant_id]
+        );
+        await client.query(`INSERT INTO conversation_messages (tenant_id, conversation_id, sender_type, content)
+          VALUES ($1, $2, 'ASSISTANT', $3)`, [conversation.tenant_id, conversation.id, content]);
+        await notify(client, conversation.tenant_id, conversation.id, 'HUMAN_SUPPORT_WARNING');
+        actions.push({ type: 'WARNING_5M', tenantId: conversation.tenant_id, conversationId: conversation.id, recipient: conversation.customer_external_id, content });
+      }
+    }
+    await client.query('COMMIT');
+    return actions;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally { client.release(); }
+}

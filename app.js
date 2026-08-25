@@ -19,7 +19,7 @@ import crmRoutes from "./routes/crmRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
 import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
-import { requestCustomerHumanSupport } from "./services/human-support-service.js";
+import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from "./services/human-support-service.js";
 import { persistAndDeliverWhatsAppAssistant } from "./services/whatsapp-assistant-response-service.js";
 import { buildWhatsAppTenantModelContext, classifyWhatsAppCurrentCustomerIntent, WhatsAppTenantContextError } from "./services/whatsapp-tenant-context-service.js";
 import { planWhatsAppDeterministicSocialResponse } from "./services/whatsapp-deterministic-social-response-service.js";
@@ -1836,6 +1836,13 @@ app.post("/telegram-webhook", (req, res) => {
 // ============================================================================
 cron.schedule("* * * * *", async () => {
   try {
+    const lifecycleActions = await claimDueCustomerSupportLifecycle();
+    for (const action of lifecycleActions) {
+      await sendMessage(action.recipient, action.content).catch(() => {});
+      if (action.type === 'TIMEOUT_CLOSE') {
+        sendMessageToTelegram(`Zaman Aşımı: Canlı destek kapatıldı → +${action.recipient}`).catch(() => {});
+      }
+    }
     const now = Date.now();
     if (!wpSessions || typeof wpSessions !== "object") return;
     const users = Object.keys(wpSessions);

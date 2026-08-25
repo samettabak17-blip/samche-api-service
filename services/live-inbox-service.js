@@ -156,7 +156,15 @@ export async function persistSamcheguideInbound({ externalSessionId, content, id
     }
 
     await client.query(
-      'UPDATE conversations SET last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2',
+      `UPDATE conversations
+          SET last_activity_at = CURRENT_TIMESTAMP,
+              human_support_last_activity_at = CASE
+                WHEN handling_mode = 'HUMAN' AND human_attention_state = 'ACKNOWLEDGED'
+                  THEN CURRENT_TIMESTAMP
+                ELSE human_support_last_activity_at
+              END,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1 AND tenant_id = $2`,
       [conversationId, integration.tenant_id]
     );
     await notify(client, integration.tenant_id, conversationId, 'CUSTOMER_MESSAGE');
