@@ -32,6 +32,7 @@ export interface Conversation extends ConversationRecord {
   assigned_agent_email: string | null;
   last_message_preview: string | null;
   last_message_at: string | null;
+  human_delivery_configured: boolean;
 }
 export type SenderType = 'CUSTOMER' | 'ASSISTANT' | 'AGENT' | 'SYSTEM';
 export type ConversationResourceStatus = 'UPLOADING' | 'PROCESSING' | 'READY' | 'FAILED';
@@ -75,7 +76,7 @@ export interface ConversationAuditEvent {
 export interface ConversationOperationResponse { conversation: ConversationRecord; }
 export type AgentMessageResponse =
   | { duplicate: true }
-  | { duplicate: false; message: ConversationMessage; delivery: 'AVAILABLE_TO_SAMCHEGUIDE' };
+  | { duplicate: false; message: ConversationMessage; delivery: 'AVAILABLE_TO_SAMCHEGUIDE' | 'SENT_TO_WHATSAPP' };
 export interface KnowledgeDocument { id: string; tenant_id: string; assistant_id?: string | null; title: string; content: string; status: 'active' | 'inactive'; created_at?: string; updated_at?: string; }
 export interface TeamMember { id: string; email: string; system_role: SystemRole; tenant_role: TenantRole; created_at?: string; }
 

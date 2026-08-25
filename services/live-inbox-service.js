@@ -369,6 +369,33 @@ async function loadWhatsAppAgentDelivery(client, conversation) {
   return result.rowCount === 1 ? result.rows[0] : null;
 }
 
+export async function getHumanDeliveryCapability({ tenantId, conversationId, database = pool }) {
+  const client = await database.connect();
+  try {
+    const result = await client.query(
+      `SELECT c.*, tc.channel_type, tc.external_channel_id
+         FROM conversations c
+         JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
+        WHERE c.id = $1 AND c.tenant_id = $2`,
+      [conversationId, tenantId]
+    );
+    const conversation = result.rows[0];
+    if (!conversation) return null;
+    if (conversation.channel_type === 'SAMCHEGUIDE') {
+      return { channelType: 'SAMCHEGUIDE', configured: true };
+    }
+    if (conversation.channel_type !== 'WHATSAPP') {
+      return { channelType: conversation.channel_type, configured: false };
+    }
+    return {
+      channelType: 'WHATSAPP',
+      configured: Boolean(await loadWhatsAppAgentDelivery(client, conversation)),
+    };
+  } finally {
+    client.release();
+  }
+}
+
 export async function appendAgentMessage({
   tenantId,
   conversationId,

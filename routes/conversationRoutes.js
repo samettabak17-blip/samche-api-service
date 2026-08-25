@@ -4,6 +4,7 @@ import { isValidUUID } from '../middleware/validators.js';
 import {
   appendAgentMessage,
   ConversationOperationError,
+  getHumanDeliveryCapability,
   listConversationEvents,
   operateConversation,
 } from '../services/live-inbox-service.js';
@@ -73,7 +74,13 @@ async function conversationContext(tenantId, conversationId) {
      WHERE c.id = $1 AND c.tenant_id = $2`,
     [conversationId, tenantId]
   );
-  return result.rows[0] ?? null;
+  const conversation = result.rows[0] ?? null;
+  if (!conversation) return null;
+  const humanDelivery = await getHumanDeliveryCapability({ tenantId, conversationId });
+  return {
+    ...conversation,
+    human_delivery_configured: humanDelivery?.configured === true,
+  };
 }
 
 router.get('/:tenantId/conversations/live', requireTenantAccess, async (req, res) => {

@@ -7,7 +7,7 @@ import { formatDateTime } from '../../lib/format';
 import { useAuth } from '../auth/auth-context';
 import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
 import { useTenant } from '../tenants/tenant-context';
-import { senderLabel, senderTone, supportsHumanReplyChannel } from './conversation-utils';
+import { canUseHumanReplyComposer, senderLabel, senderTone } from './conversation-utils';
 import { SafeRichMessage } from './safe-rich-message';
 import { useTenantConversationLiveEvents } from './use-live-conversation-events';
 
@@ -74,7 +74,7 @@ export function ConversationsPage() {
   const isOwn = conversation?.assigned_agent_user_id === user?.id;
   const canTakeOver = Boolean(conversation && conversation.status === 'open' && conversation.handling_mode === 'AI' && !conversation.assigned_agent_user_id && (isAdmin || isAgent));
   const canReturn = Boolean(conversation && conversation.status === 'open' && conversation.handling_mode === 'HUMAN' && (isAdmin || (isAgent && isOwn)));
-  const canSend = Boolean(conversation && conversation.status === 'open' && supportsHumanReplyChannel(conversation.channel_type) && conversation.handling_mode === 'HUMAN' && (isAdmin || (isAgent && isOwn)));
+  const canSend = Boolean(conversation && conversation.status === 'open' && canUseHumanReplyComposer(conversation.channel_type, conversation.human_delivery_configured) && conversation.handling_mode === 'HUMAN' && (isAdmin || (isAgent && isOwn)));
 
   if (!tenantId) return <EmptyState title="No tenant selected" description="Choose a tenant to view its conversations." />;
   if (conversationsQuery.isLoading) return <div className="space-y-5"><SkeletonBlock className="h-16 w-72" /><SkeletonBlock className="h-[38rem]" /></div>;
