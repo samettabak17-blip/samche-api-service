@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { requestCustomerHumanSupport } from '../services/human-support-service.js';
+import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from '../services/human-support-service.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
 const conversationId = '22222222-2222-4222-8222-222222222222';
@@ -50,4 +50,60 @@ test('repeated customer support request does not duplicate attention or lifecycl
   assert.equal(result.duplicate, true);
   assert.equal(fixture.calls.some(({ sql }) => sql.startsWith('UPDATE conversations')), false);
   assert.equal(fixture.calls.some(({ sql }) => sql.includes('INSERT INTO conversation_messages')), false);
+});
+
+function lifecycleDatabase({ attention = 'REQUESTED', lastActivityAt, warningSentAt = null } = {}) {
+  const calls = [];
+  const client = {
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+      if (sql.startsWith('SELECT c.*, tc.external_channel_id')) {
+        return {
+          rows: [{
+            id: conversationId,
+            tenant_id: tenantId,
+            customer_external_id: 'whatsapp:15551234567',
+            human_attention_state: attention,
+            human_support_started_at: lastActivityAt,
+            human_support_last_activity_at: lastActivityAt,
+            human_support_warning_sent_at: warningSentAt,
+            human_support_closed_at: null,
+            communication_language: 'tr',
+            whatsapp_response_templates: {
+              human_support: {
+                warning_5m: { tr: 'legacy five minute warning' },
+                timeout_close: { tr: 'legacy timeout close' },
+              },
+            },
+          }],
+        };
+      }
+      return { rows: [] };
+    },
+    release() {},
+  };
+  return { database: { async connect() { return client; } }, calls };
+}
+
+test('unacknowledged customer support requests receive the persisted five-minute warning', async () => {
+  const now = new Date('2026-08-25T12:00:00.000Z');
+  const fixture = lifecycleDatabase({ lastActivityAt: new Date(now.getTime() - (5 * 60 * 1000 + 1)) });
+  const actions = await claimDueCustomerSupportLifecycle({ database: fixture.database, now });
+
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].type, 'WARNING_5M');
+  const dueQuery = fixture.calls.find(({ sql }) => sql.startsWith('SELECT c.*, tc.external_channel_id'));
+  assert.match(dueQuery?.sql ?? '', /c\.human_attention_state IN \('REQUESTED', 'ACKNOWLEDGED'\)/);
+  assert.ok(fixture.calls.some(({ sql }) => sql.includes('human_support_warning_sent_at')));
+});
+
+test('unacknowledged customer support requests close at ten minutes and return handling to AI', async () => {
+  const now = new Date('2026-08-25T12:00:00.000Z');
+  const fixture = lifecycleDatabase({ lastActivityAt: new Date(now.getTime() - (10 * 60 * 1000 + 1)) });
+  const actions = await claimDueCustomerSupportLifecycle({ database: fixture.database, now });
+
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].type, 'TIMEOUT_CLOSE');
+  assert.ok(fixture.calls.some(({ sql }) => sql.includes("SET handling_mode = 'AI'")));
+  assert.ok(fixture.calls.some(({ sql }) => sql.includes("human_attention_state = 'RESOLVED'")));
 });

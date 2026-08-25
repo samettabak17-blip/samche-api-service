@@ -103,7 +103,7 @@ export async function claimDueCustomerSupportLifecycle({ database = pool, now = 
          JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
         WHERE c.status = 'open'
           AND c.handling_mode = 'HUMAN'
-          AND c.human_attention_state = 'ACKNOWLEDGED'
+          AND c.human_attention_state IN ('REQUESTED', 'ACKNOWLEDGED')
           AND c.human_support_started_at IS NOT NULL
           AND c.human_support_closed_at IS NULL
           AND ci.integration_type = 'WHATSAPP' AND ci.enabled = TRUE
