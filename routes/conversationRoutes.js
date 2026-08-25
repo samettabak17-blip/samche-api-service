@@ -8,6 +8,7 @@ import {
   listConversationEvents,
   operateConversation,
 } from '../services/live-inbox-service.js';
+import { listHumanAttentionSummary } from '../services/human-support-service.js';
 import { startLiveEventListener, subscribeTenantEvents } from '../services/live-event-bus.js';
 
 const router = express.Router();
@@ -151,6 +152,17 @@ router.get('/:tenantId/conversations', requireTenantAccess, async (req, res) => 
     return res.json(result.rows);
   } catch (error) {
     console.error('List tenant conversations error:', error?.code ?? error?.name ?? 'unknown');
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.get('/:tenantId/conversations/human-attention-summary', requireTenantAccess, async (req, res) => {
+  const currentTenantId = tenantId(req, res);
+  if (!currentTenantId) return;
+  try {
+    return res.json(await listHumanAttentionSummary({ tenantId: currentTenantId }));
+  } catch (error) {
+    console.error('Human attention summary error:', error?.code ?? error?.name ?? 'unknown');
     return res.status(500).json({ error: 'Server error' });
   }
 });

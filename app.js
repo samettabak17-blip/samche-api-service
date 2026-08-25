@@ -19,6 +19,7 @@ import crmRoutes from "./routes/crmRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
 import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
+import { requestCustomerHumanSupport } from "./services/human-support-service.js";
 import { persistAndDeliverWhatsAppAssistant } from "./services/whatsapp-assistant-response-service.js";
 import { buildWhatsAppTenantModelContext, classifyWhatsAppCurrentCustomerIntent, WhatsAppTenantContextError } from "./services/whatsapp-tenant-context-service.js";
 import { planWhatsAppDeterministicSocialResponse } from "./services/whatsapp-deterministic-social-response-service.js";
@@ -1559,21 +1560,31 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       session.pingSentOnce = false;
 
       // --------------------------------------
-      // WHATSAPP MANUEL CANLI DESTEK AÇMA /w
       // --------------------------------------
-      if (lower === "/w" || lower === "/n" || lower === "canlı destek" || lower === "canli destek" || lower === "live") {
-        session.humanOverride = true;
-        session.manualTakeover = false; 
-        session.lastUserText = ""; // KİLİTLENMEYİ ÖNLER
-
-        const topicSummary = await getTopicSummary(session, text);
-
-        let aktarimMesaji = `Canlı temsilci ile görüşme ilgili talebinizi aldım. *${topicSummary}* konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.`;
-        if (lang === "en") aktarimMesaji = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
-        if (lang === "ar") aktarimMesaji = `لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص موضوع *${topicSummary}*، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.`;
-
-        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, aktarimMesaji);
-        sendMessageToTelegram(`🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``).catch(()=>{});
+      // CUSTOMER-REQUESTED HUMAN SUPPORT
+      // --------------------------------------
+      const humanRequestOnly = /^(?:\/w|\/n|canlı destek|canli destek|live support|live agent|human support|müşteri temsilcisi|musteri temsilcisi|دعم مباشر|موظف)$/iu.test(text.trim());
+      if (humanRequestOnly) {
+        // Legacy topic summary fallback was "Genel Destek". A bare support
+        // request intentionally makes no model call.
+        const topicSummary = 'Genel Destek';
+        const transferTemplates = tenantContext?.deterministicTemplates?.human_support?.transfer;
+        const transfer = transferTemplates?.[lang] ?? transferTemplates?.tr;
+        if (!transfer) {
+          console.error('WHATSAPP_HUMAN_SUPPORT_TEMPLATE_UNAVAILABLE');
+          return;
+        }
+        const acknowledgement = transfer.replace(/{{topicSummary}}/g, topicSummary);
+        const handoff = await requestCustomerHumanSupport({
+          tenantId: whatsappInbox.integration.tenant_id,
+          conversationId: whatsappInbox.conversation.id,
+          acknowledgement,
+          topicSummary,
+        });
+        if (!handoff.duplicate) {
+          await sendMessage(cleanFrom, acknowledgement);
+          sendMessageToTelegram(`🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``).catch(() => {});
+        }
         return;
       }
 
