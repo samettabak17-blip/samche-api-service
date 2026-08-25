@@ -20,6 +20,7 @@ import conversationRoutes from "./routes/conversationRoutes.js";
 import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
 import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from "./services/human-support-service.js";
+import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
 import { persistAndDeliverWhatsAppAssistant } from "./services/whatsapp-assistant-response-service.js";
 import { buildWhatsAppTenantModelContext, classifyWhatsAppCurrentCustomerIntent, WhatsAppTenantContextError } from "./services/whatsapp-tenant-context-service.js";
 import { planWhatsAppDeterministicSocialResponse } from "./services/whatsapp-deterministic-social-response-service.js";
@@ -1560,14 +1561,16 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       session.pingSentOnce = false;
 
       // --------------------------------------
-      // --------------------------------------
       // CUSTOMER-REQUESTED HUMAN SUPPORT
+      // The explicit customer request is handled before normal model routing.
+      // A bare request stays zero-token; meaningful context permits exactly
+      // one legacy topic-summary call.
       // --------------------------------------
-      const humanRequestOnly = /^(?:\/w|\/n|canlı destek|canli destek|live support|live agent|human support|müşteri temsilcisi|musteri temsilcisi|دعم مباشر|موظف)$/iu.test(text.trim());
-      if (humanRequestOnly) {
-        // Legacy topic summary fallback was "Genel Destek". A bare support
-        // request intentionally makes no model call.
-        const topicSummary = 'Genel Destek';
+      const humanSupportRequest = parseCustomerHumanSupportRequest(text);
+      if (humanSupportRequest.requested) {
+        const topicSummary = humanSupportRequest.hasMeaningfulContext
+          ? await getTopicSummary(session, text)
+          : 'Genel Destek';
         const transferTemplates = tenantContext?.deterministicTemplates?.human_support?.transfer;
         const transfer = transferTemplates?.[lang] ?? transferTemplates?.tr;
         if (!transfer) {
@@ -1659,55 +1662,11 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
 
       const lowerAi = aiResponse.toLowerCase();
 
-      // --------------------------------------
-      // AI → CANLI DESTEK ÖNERİYOR MU?
-      // --------------------------------------
-      const needsHuman =
-        lowerAi.includes("canlı destek") ||
-        lowerAi.includes("canli destek") ||
-        lowerAi.includes("müşteri temsilci") ||
-        lowerAi.includes("musteri temsilci") ||
-        lowerAi.includes("live support") ||
-        lowerAi.includes("human_agent") ||
-        lowerAi.includes("transfer_to_human");
-
-      // --------------------------------------
-      // NORMAL CEVAP VEYA AKTARIM İŞLEMİ
-      // --------------------------------------
-      if (!needsHuman) {
-        if (whatsappInbox) {
-          const persisted = await persistAssistantResponseIfCurrent({
-            tenantId: whatsappInbox.integration.tenant_id,
-            conversationId: whatsappInbox.conversation.id,
-            content: aiResponse,
-            handlingVersion: whatsappInbox.handlingVersion,
-          });
-          if (!persisted.delivered) return;
-        }
-        session.history.push({ role: "assistant", text: aiResponse });
-        logWhatsAppTiming('whatsapp_outbound_started');
-        await sendMessage(cleanFrom, aiResponse);
-        logWhatsAppTiming('whatsapp_outbound_complete');
-        return;
-      } else {
-        const topicSummary = await getTopicSummary(session, text);
-
-        let aiAktarimMesaji = `Canlı temsilci ile görüşme ilgili talebinizi aldım. *${topicSummary}* konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.`;
-        if (lang === "en") aiAktarimMesaji = `I have received your request to speak with a live representative. Regarding the topic of *${topicSummary}*, I am transferring you to our live customer representative to provide you with the most accurate support.\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\nPlease stay on hold while we connect you ⌛️.`;
-        if (lang === "ar") aiAktarimMesaji = `لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص موضوع *${topicSummary}*، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.`;
-
-        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, aiAktarimMesaji);
-
-        session.humanOverride = true;
-        session.manualTakeover = false; 
-        session.lastMessageTime = Date.now();
-        session.lastUserText = ""; // Kilitlenmeyi önler
-
-        const alertMsgAi = `🚨 CANLI TEMSİLCİ TALEBİ (Yapay Zeka Yönlendirdi)!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``;
-        sendMessageToTelegram(alertMsgAi).catch(()=>{});
-
-        return;
-      }
+      // Model text is conversational only. A human-support transition may
+      // originate from the customer request above, never from model wording.
+      await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, aiResponse);
+      session.history.push({ role: "assistant", text: aiResponse });
+      return;
 
     } catch (error) {
       console.error("WhatsApp webhook error:", error);
