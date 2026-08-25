@@ -5,6 +5,7 @@ import { useAuth } from '../../features/auth/auth-context';
 import { useTenant } from '../../features/tenants/tenant-context';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
+import { GlobalLiveSupportIndicator, LiveSupportAttentionProvider } from '../../features/live-support/live-support-attention-provider';
 
 export function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
@@ -21,7 +22,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="min-h-screen bg-canvas lg:grid lg:grid-cols-[18rem_1fr]">
+    <LiveSupportAttentionProvider tenantId={selectedTenant.id} userId={user.id}><div className="min-h-screen bg-canvas lg:grid lg:grid-cols-[18rem_1fr]">
       <div className="hidden lg:block"><Sidebar tenantId={selectedTenant.id} tenantName={selectedTenant.name} tenantRole={role} email={user.email} onLogout={() => { logout(); navigate('/login'); }} onNavigate={() => undefined} /></div>
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation menu">
@@ -36,9 +37,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       )}
       <div className="min-w-0">
         <Topbar tenants={tenants} selectedTenantId={selectedTenant.id} email={user.email} onSelectTenant={switchTenant} onOpenNavigation={() => setMobileOpen(true)} onLogout={() => { logout(); navigate('/login'); }} />
+        <GlobalLiveSupportIndicator tenantId={selectedTenant.id} />
         <main className="mx-auto w-full max-w-7xl px-4 py-7 sm:px-7 lg:px-10">{children}</main>
       </div>
-    </div>
+    </div></LiveSupportAttentionProvider>
   );
 }
 

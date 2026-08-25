@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel } from './conversation-utils';
+import { clearSentAgentDraft, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel } from './conversation-utils';
 
 describe('conversation sender presentation', () => {
   it('maps every backend sender type to a distinct safe label', () => {
@@ -30,5 +30,13 @@ describe('live-support attention presentation', () => {
     expect(liveSupportAlertTitle(0)).toBe('SamChe Dashboard');
     expect(dashboardSoundMutePreferenceKey('operator-a')).not.toBe(dashboardSoundMutePreferenceKey('operator-b'));
     expect(dashboardSoundMutePreferenceKey('operator-a')).toBe('samche.dashboard.live-support.muted:operator-a');
+  });
+});
+
+
+describe('agent composer draft handling', () => {
+  it('clears only the draft confirmed by successful delivery', () => {
+    expect(clearSentAgentDraft('Hello', 'Hello')).toBe('');
+    expect(clearSentAgentDraft('New draft', 'Hello')).toBe('New draft');
   });
 });

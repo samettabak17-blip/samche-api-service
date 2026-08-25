@@ -25,3 +25,7 @@ export function liveSupportAlertTitle(requestedCount: number): string {
 export function dashboardSoundMutePreferenceKey(userId?: string): string {
   return 'samche.dashboard.live-support.muted:' + (userId || 'anonymous');
 }
+
+export function clearSentAgentDraft(currentDraft: string, deliveredDraft: string): string {
+  return currentDraft === deliveredDraft ? '' : currentDraft;
+}

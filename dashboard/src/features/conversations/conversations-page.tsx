@@ -1,47 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, ChevronLeft, ChevronRight, Headphones, MessageSquareText, Send, UserRound } from 'lucide-react';
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { EmptyState, QueryErrorState, SkeletonBlock } from '../../components/ui/async-state';
 import { formatDateTime } from '../../lib/format';
 import { useAuth } from '../auth/auth-context';
 import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
 import { useTenant } from '../tenants/tenant-context';
-import { canUseHumanReplyComposer, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone } from './conversation-utils';
+import { canUseHumanReplyComposer, clearSentAgentDraft, senderLabel, senderTone } from './conversation-utils';
+import { useLiveSupportAttention } from '../live-support/live-support-attention-provider';
 import { SafeRichMessage } from './safe-rich-message';
 import { useTenantConversationLiveEvents } from './use-live-conversation-events';
 
 const pageSize = 25;
 const messagePageSize = 50;
-
-async function buildLiveSupportFavicon(requestedCount: number): Promise<string | null> {
-  return await new Promise((resolve) => {
-    const image = new Image();
-    image.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = 128; canvas.height = 128;
-      const context = canvas.getContext('2d');
-      if (!context) return resolve(null);
-      context.fillStyle = '#151817';
-      context.fillRect(0, 0, 128, 128);
-      context.drawImage(image, 4, 40, 120, 32);
-      context.fillStyle = '#b91c1c';
-      context.fillRect(3, 4, 122, 28);
-      context.fillStyle = '#ffffff';
-      context.font = '800 14px Arial, sans-serif';
-      context.textAlign = 'center';
-      context.fillText('LIVE SUPPORT', 64, 23);
-      context.beginPath(); context.arc(106, 106, 20, 0, Math.PI * 2);
-      context.fillStyle = '#dc2626'; context.fill();
-      context.lineWidth = 4; context.strokeStyle = '#ffffff'; context.stroke();
-      context.fillStyle = '#ffffff'; context.font = '800 23px Arial, sans-serif';
-      context.fillText(String(requestedCount), 106, 114);
-      resolve(canvas.toDataURL('image/png'));
-    };
-    image.onerror = () => resolve(null);
-    image.src = '/samche-logo.png';
-  });
-}
 
 function handlingLabel(mode?: string) {
   return mode === 'HUMAN' ? 'Human handling' : mode === 'PAUSED' ? 'AI paused' : 'AI handling';
@@ -61,22 +33,8 @@ export function ConversationsPage() {
   const [offset, setOffset] = useState(0);
   const [messageOffset, setMessageOffset] = useState(0);
   const [content, setContent] = useState('');
-  const [audioArmed, setAudioArmed] = useState(false);
-  const [audioState, setAudioState] = useState<'OFF' | 'ARMED' | 'PLAYING' | 'BLOCKED'>('OFF');
-  const [soundMuted, setSoundMuted] = useState(false);
-  const [soundPreferenceReady, setSoundPreferenceReady] = useState(false);
-  const audioContext = useRef<AudioContext | null>(null);
   const liveState = useTenantConversationLiveEvents(tenantId, conversationId);
-  useEffect(() => {
-    const key = dashboardSoundMutePreferenceKey(user?.id);
-    setSoundMuted(window.localStorage.getItem(key) === 'true');
-    setSoundPreferenceReady(true);
-  }, [user?.id]);
-  const setSoundPreference = (muted: boolean) => {
-    window.localStorage.setItem(dashboardSoundMutePreferenceKey(user?.id), String(muted));
-    setSoundMuted(muted);
-    if (!muted) void armSoundNotifications(true);
-  };
+  const { requestedCount: unresolvedAttention, refreshAttention } = useLiveSupportAttention();
   useEffect(() => {
     setMessageOffset(0);
   }, [conversationId]);
@@ -87,21 +45,13 @@ export function ConversationsPage() {
   const eventsQuery = useQuery({ queryKey: tenantKeys.conversationEvents(tenantId, conversationId ?? ''), queryFn: () => tenantApi.listConversationEvents(tenantId, conversationId ?? ''), enabled: Boolean(tenantId && conversationId) });
 
   const refresh = async (reason?: string) => {
-    const requestedCountBefore = queryClient.getQueryData<{ unresolvedCount?: number }>(tenantKeys.humanAttention(tenantId))?.unresolvedCount ?? 0;
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversations'] }),
-      queryClient.invalidateQueries({ queryKey: tenantKeys.humanAttention(tenantId) }),
       conversationId ? queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', conversationId] }) : Promise.resolve(),
       conversationId ? queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', conversationId, 'messages'] }) : Promise.resolve(),
       conversationId ? queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', conversationId, 'events'] }) : Promise.resolve(),
     ]);
-    // A successful Take Over must not wait for an SSE/fallback interval before stopping the waiting alert.
-    await queryClient.refetchQueries({ queryKey: tenantKeys.humanAttention(tenantId), type: 'active' });
-    if (reason === 'takeover' || reason === 'agent-message') {
-      const requestedCountAfter = queryClient.getQueryData<{ unresolvedCount?: number }>(tenantKeys.humanAttention(tenantId))?.unresolvedCount ?? 0;
-      const diagnostic = reason === 'agent-message' ? 'DASHBOARD_LIVE_SUPPORT_AGENT_ACK' : 'DASHBOARD_LIVE_SUPPORT_ACK';
-      console.info(diagnostic + ' requested_count_before=' + requestedCountBefore + ' requested_count_after=' + requestedCountAfter);
-    }
+    if (reason) await refreshAttention(reason === 'agent-message' ? 'AGENT_ACK' : reason.toUpperCase());
   };
 
   const operation = useMutation({
@@ -117,129 +67,13 @@ export function ConversationsPage() {
   });
 
   const send = useMutation({
-    mutationFn: () => tenantApi.sendAgentMessage(tenantId, conversationId ?? '', content.trim(), crypto.randomUUID()),
-    onSuccess: async () => { setContent(''); await refresh('agent-message'); },
+    mutationFn: (draft: string) => tenantApi.sendAgentMessage(tenantId, conversationId ?? '', draft, crypto.randomUUID()),
+    onSuccess: async (_result, sentDraft) => {
+      setContent((current) => clearSentAgentDraft(current, sentDraft));
+      await refresh('agent-message');
+    },
   });
 
-  const attentionQuery = useQuery({
-    queryKey: tenantKeys.humanAttention(tenantId),
-    queryFn: () => tenantApi.getHumanAttentionSummary(tenantId),
-    enabled: Boolean(tenantId),
-    // SSE is primary. This low-frequency tenant-scoped fallback only heals a missed event/reconnect.
-    refetchInterval: liveState === 'connected' ? false : 15000,
-  });
-  const unresolvedAttention = attentionQuery.data?.unresolvedCount ?? 0;
-  useEffect(() => {
-    if (attentionQuery.isSuccess) console.info('DASHBOARD_ATTENTION_FETCH status=OK requested_count=' + unresolvedAttention);
-    if (attentionQuery.isError) console.info('DASHBOARD_ATTENTION_FETCH status=FAIL code=REQUEST_FAILED');
-  }, [attentionQuery.isError, attentionQuery.isSuccess, unresolvedAttention]);
-  useEffect(() => {
-    document.title = liveSupportAlertTitle(unresolvedAttention);
-    return () => { document.title = liveSupportAlertTitle(0); };
-  }, [unresolvedAttention]);
-  useEffect(() => {
-    const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-    if (!favicon) return;
-    const normalHref = favicon.dataset.normalHref ?? favicon.href;
-    favicon.dataset.normalHref = normalHref;
-    if (unresolvedAttention < 1) {
-      favicon.href = normalHref;
-      return;
-    }
-    let disposed = false;
-    let timer: number | undefined;
-    void buildLiveSupportFavicon(unresolvedAttention).then((alertHref) => {
-      if (disposed || !alertHref) return;
-      let alertVisible = true;
-      favicon.href = alertHref;
-      // A conservative visual cadence keeps the browser-tab notification noticeable without aggressive flashing.
-      timer = window.setInterval(() => {
-        alertVisible = !alertVisible;
-        favicon.href = alertVisible ? alertHref : normalHref;
-      }, 1500);
-    });
-    return () => {
-      disposed = true;
-      if (timer) window.clearInterval(timer);
-      favicon.href = normalHref;
-    };
-  }, [unresolvedAttention]);
-  const armSoundNotifications = async (force = false) => {
-    if (soundMuted && !force) return;
-    try {
-      const Context = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!Context) throw new Error('AUDIO_UNSUPPORTED');
-      audioContext.current ??= new Context();
-      await audioContext.current.resume();
-      if (audioContext.current.state !== 'running') throw new Error('AUDIO_NOT_RUNNING');
-      setAudioArmed(true);
-      setAudioState('ARMED');
-      console.info('DASHBOARD_ATTENTION_AUDIO state=ARMED');
-    } catch {
-      setAudioArmed(false);
-      setAudioState('BLOCKED');
-      console.info('DASHBOARD_ATTENTION_AUDIO state=BLOCKED reason=PLAYBACK_POLICY');
-    }
-  };
-  useEffect(() => {
-    if (!soundPreferenceReady || soundMuted || audioArmed) return;
-    const armAfterInteraction = () => { void armSoundNotifications(); };
-    window.addEventListener('pointerdown', armAfterInteraction);
-    window.addEventListener('keydown', armAfterInteraction);
-    return () => {
-      window.removeEventListener('pointerdown', armAfterInteraction);
-      window.removeEventListener('keydown', armAfterInteraction);
-    };
-  }, [audioArmed, soundMuted, soundPreferenceReady]);
-  useEffect(() => {
-    if (!soundPreferenceReady || soundMuted || !audioArmed || unresolvedAttention < 1) {
-      if (audioState === 'PLAYING') {
-        setAudioState('ARMED');
-        console.info('DASHBOARD_ATTENTION_AUDIO state=STOPPED');
-      }
-      return;
-    }
-    let disposed = false;
-    const alert = async () => {
-      try {
-        const context = audioContext.current;
-        if (!context) throw new Error('AUDIO_UNARMED');
-        if (context.state !== 'running') await context.resume();
-        if (context.state !== 'running') throw new Error('AUDIO_NOT_RUNNING');
-        const oscillator = context.createOscillator();
-        const gain = context.createGain();
-        // A clear two-strike bell, kept short enough to remain a professional operational alert.
-        oscillator.type = 'sine';
-        oscillator.frequency.setValueAtTime(1046.5, context.currentTime);
-        oscillator.frequency.setValueAtTime(1318.5, context.currentTime + 0.12);
-        gain.gain.setValueAtTime(0, context.currentTime);
-        gain.gain.linearRampToValueAtTime(0.07, context.currentTime + 0.012);
-        gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.10);
-        gain.gain.linearRampToValueAtTime(0.07, context.currentTime + 0.132);
-        gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.24);
-        oscillator.connect(gain).connect(context.destination);
-        oscillator.start(); oscillator.stop(context.currentTime + 0.25);
-        if (!disposed) {
-          setAudioState('PLAYING');
-          console.info('DASHBOARD_ATTENTION_AUDIO state=PLAYED');
-        }
-      } catch {
-        if (!disposed) {
-          setAudioArmed(false);
-          setAudioState('BLOCKED');
-          console.info('DASHBOARD_ATTENTION_AUDIO state=BLOCKED reason=PLAYBACK_POLICY');
-        }
-      }
-    };
-    console.info('DASHBOARD_ATTENTION_AUDIO state=STARTED requested_count=' + unresolvedAttention);
-    void alert();
-    const timer = window.setInterval(() => { void alert(); }, 3000);
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
-      console.info('DASHBOARD_ATTENTION_AUDIO state=STOPPED');
-    };
-  }, [audioArmed, audioState, soundMuted, soundPreferenceReady, unresolvedAttention]);
 
   const conversations = conversationsQuery.data ?? [];
   const conversation = conversationQuery.data;
@@ -256,7 +90,7 @@ export function ConversationsPage() {
   if (conversationsQuery.isError) return <QueryErrorState error={conversationsQuery.error} onRetry={() => void conversationsQuery.refetch()} resource="conversations" />;
 
   return <div className="space-y-5">
-    <header className="flex items-end justify-between gap-4"><div><p className="eyebrow">SamChe live customer inbox</p><h1 className="page-title mt-2">Conversations</h1><p className="mt-2 text-sm text-stone-400">Real tenant channel activity and human handoff controls.</p>{unresolvedAttention > 0 && <div role="status" className="mt-3 inline-flex items-center gap-3 rounded-lg border border-red-400/50 bg-red-500/10 px-4 py-3 shadow-[0_0_24px_rgba(239,68,68,0.12)]"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-400 motion-safe:animate-pulse" aria-hidden="true" /><span><span className="block text-xs font-bold tracking-[0.16em] text-red-200">LIVE SUPPORT</span><span className="mt-0.5 block text-sm font-semibold text-red-100">{liveSupportWaitingLabel(unresolvedAttention)}</span></span></div>}{attentionQuery.isError && <p role="alert" className="mt-2 text-xs text-red-300">Human-support attention status is unavailable. Reconnect to restore live alerts.</p>}<div className="mt-2 flex items-center gap-2 text-xs"><span className={soundMuted ? 'text-stone-400' : 'text-gold'}>Sound notifications: {soundMuted ? 'MUTED' : 'ON'}</span><button type="button" onClick={() => setSoundPreference(!soundMuted)} className="text-stone-300 underline underline-offset-4">{soundMuted ? 'Unmute' : 'Mute'}</button></div>{unresolvedAttention > 0 && !soundMuted && !audioArmed && <p className="mt-1 text-xs text-stone-400">Sound will activate after your first interaction.</p>}{unresolvedAttention > 0 && !soundMuted && audioState === 'BLOCKED' && <p role="alert" className="mt-1 text-xs text-red-300">Sound is blocked by this browser. It will retry after your next interaction.</p>}</div><LiveState state={liveState} /></header>
+    <header className="flex items-end justify-between gap-4"><div><p className="eyebrow">SamChe live customer inbox</p><h1 className="page-title mt-2">Conversations</h1><p className="mt-2 text-sm text-stone-400">Real tenant channel activity and human handoff controls.</p></div><LiveState state={liveState} /></header>
     <div className="grid min-h-[42rem] gap-4 xl:grid-cols-[19rem_minmax(0,1fr)_18rem]">
       <section className={'panel overflow-hidden ' + (conversationId ? 'hidden xl:block' : '')}>
         <header className="border-b border-line px-4 py-4"><p className="font-semibold text-ink">Conversation inbox</p><p className="mt-1 text-xs text-stone-400">Latest tenant activity</p></header>
@@ -268,7 +102,7 @@ export function ConversationsPage() {
         {!conversationId ? <EmptyState title="Select a conversation" description="Choose an inbox item to inspect its real message history." icon={<MessageSquareText size={22} />} /> : conversationQuery.isLoading || messagesQuery.isLoading ? <div className="space-y-4 p-5"><SkeletonBlock className="h-20" /><SkeletonBlock className="h-80" /></div> : conversationQuery.isError || messagesQuery.isError ? <QueryErrorState error={conversationQuery.error ?? messagesQuery.error!} onRetry={() => { void conversationQuery.refetch(); void messagesQuery.refetch(); }} resource="conversation" /> : conversation ? <>
           <header className="border-b border-line px-5 py-4"><div className="flex flex-wrap justify-between gap-3"><div><Link to={'/app/' + tenantId + '/conversations'} className="text-xs text-stone-400 xl:hidden">← Inbox</Link><p className="mt-1 text-base font-semibold text-ink">{conversation.customer_external_id || 'Customer conversation'}</p><p className="mt-1 text-xs text-stone-400">{conversation.channel_display_name || conversation.channel_type} · {handlingLabel(conversation.handling_mode)}</p></div><div className="flex flex-wrap gap-2">{canTakeOver && <button type="button" onClick={() => operation.mutate('takeover')} className="button-primary"><Headphones size={15} />Take over</button>}{canReturn && <button type="button" onClick={() => operation.mutate('return')} className="button-secondary"><Bot size={15} />Return to AI</button>}{isAdmin && conversation.handling_mode === 'AI' && <button type="button" onClick={() => operation.mutate('pause')} className="button-secondary">Pause AI</button>}{isAdmin && conversation.handling_mode === 'PAUSED' && <button type="button" onClick={() => operation.mutate('resume')} className="button-secondary">Resume AI</button>}{isAdmin && conversation.status === 'open' && <button type="button" onClick={() => operation.mutate('close')} className="button-danger">Close</button>}</div></div>{operation.error instanceof Error && <p role="alert" className="mt-3 text-xs text-red-300">{operation.error.message}</p>}</header>
           <div className="flex-1 space-y-4 overflow-y-auto bg-black/10 p-5">{messages.map((message) => <article key={message.id} className={'max-w-[88%] rounded-xl border px-4 py-3 ' + senderTone(message.sender_type)}><div className="flex justify-between gap-3"><p className="text-[10px] font-semibold uppercase tracking-[0.12em] opacity-70">{senderLabel(message.sender_type)}{message.actor_email ? ' · ' + message.actor_email : ''}</p><time className="text-[10px] opacity-60">{formatDateTime(message.created_at)}</time></div><div className="mt-2 min-w-0 break-words text-sm leading-6"><SafeRichMessage content={message.content} /></div>{message.resources.length > 0 && <ul className="mt-3 space-y-2" aria-label="Message attachments">{message.resources.map((resource) => <li key={resource.id} className="rounded-lg border border-white/10 bg-black/15 px-3 py-2 text-xs"><p className="font-medium text-stone-100">{resource.media_category === 'IMAGE' ? 'Image' : 'Document'} · {resource.original_filename || 'Attachment'}</p><p className="mt-1 text-stone-400">{resource.mime_type || 'Unknown type'} · {resource.processing_status}{resource.processing_status === 'FAILED' ? ' · Processing failed' : ''}</p></li>)}</ul>}</article>)}{messages.length === 0 && <EmptyState title="No messages yet" description="Messages will appear as the channel receives them." />}{messages.length > 0 && <div className="flex justify-between pt-2 text-xs text-stone-400"><button type="button" onClick={() => setMessageOffset((value) => Math.max(0, value - messagePageSize))} disabled={messageOffset === 0} className="disabled:opacity-40"><ChevronLeft className="inline" size={14} /> Previous messages</button><button type="button" onClick={() => setMessageOffset((value) => value + messagePageSize)} disabled={messages.length < messagePageSize} className="disabled:opacity-40">Next messages <ChevronRight className="inline" size={14} /></button></div>}</div>
-          <footer className="border-t border-line bg-black/10 px-5 py-4">{canSend ? <form onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (content.trim()) send.mutate(); }}><label className="sr-only" htmlFor="agent-message">Reply as human agent</label><textarea id="agent-message" value={content} onChange={(event) => setContent(event.target.value)} className="field min-h-24 w-full resize-y" placeholder="Write a response to the customer…" maxLength={8000} /><div className="mt-3 flex justify-between gap-3"><p className="text-xs text-stone-500">{conversation.channel_type === 'WHATSAPP' ? 'Sent through the configured WhatsApp channel.' : 'Sent to the Samcheguide conversation feed.'}</p><button type="submit" disabled={!content.trim() || send.isPending} className="button-primary"><Send size={15} />Send</button></div>{send.error instanceof Error && <p role="alert" className="mt-2 text-xs text-red-300">{send.error.message}</p>}</form> : <p className="text-xs text-stone-400">{conversation.handling_mode === 'HUMAN' ? 'Only the assigned operator can reply.' : 'Take over to enable a supported human reply.'}</p>}</footer>
+          <footer className="border-t border-line bg-black/10 px-5 py-4">{canSend ? <form onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (content.trim()) send.mutate(content.trim()); }}><label className="sr-only" htmlFor="agent-message">Reply as human agent</label><textarea id="agent-message" value={content} onChange={(event) => setContent(event.target.value)} className="field min-h-24 w-full resize-y" placeholder="Write a response to the customer…" maxLength={8000} /><div className="mt-3 flex justify-between gap-3"><p className="text-xs text-stone-500">{conversation.channel_type === 'WHATSAPP' ? 'Sent through the configured WhatsApp channel.' : 'Sent to the Samcheguide conversation feed.'}</p><button type="submit" disabled={!content.trim() || send.isPending} className="button-primary"><Send size={15} />Send</button></div>{send.error instanceof Error && <p role="alert" className="mt-2 text-xs text-red-300">{send.error.message}</p>}</form> : <p className="text-xs text-stone-400">{conversation.handling_mode === 'HUMAN' ? 'Only the assigned operator can reply.' : 'Take over to enable a supported human reply.'}</p>}</footer>
         </> : <EmptyState title="Conversation not found" description="This conversation is unavailable in the selected tenant." />}
       </section>
 
