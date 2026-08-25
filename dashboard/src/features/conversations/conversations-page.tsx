@@ -97,9 +97,10 @@ export function ConversationsPage() {
     ]);
     // A successful Take Over must not wait for an SSE/fallback interval before stopping the waiting alert.
     await queryClient.refetchQueries({ queryKey: tenantKeys.humanAttention(tenantId), type: 'active' });
-    if (reason === 'takeover') {
+    if (reason === 'takeover' || reason === 'agent-message') {
       const requestedCountAfter = queryClient.getQueryData<{ unresolvedCount?: number }>(tenantKeys.humanAttention(tenantId))?.unresolvedCount ?? 0;
-      console.info('DASHBOARD_LIVE_SUPPORT_ACK requested_count_before=' + requestedCountBefore + ' requested_count_after=' + requestedCountAfter);
+      const diagnostic = reason === 'agent-message' ? 'DASHBOARD_LIVE_SUPPORT_AGENT_ACK' : 'DASHBOARD_LIVE_SUPPORT_ACK';
+      console.info(diagnostic + ' requested_count_before=' + requestedCountBefore + ' requested_count_after=' + requestedCountAfter);
     }
   };
 
