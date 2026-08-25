@@ -42,7 +42,13 @@ function hasRequiredDeterministicTemplates(value) {
   return ['tr', 'en', 'ar'].every((language) =>
     typeof value?.first_contact?.[language] === 'string' &&
     typeof value?.social?.greeting?.[language] === 'string' &&
-    typeof value?.social?.thanks?.[language] === 'string'
+    typeof value?.social?.thanks?.[language] === 'string' &&
+    typeof value?.human_support?.general_topic?.[language] === 'string' &&
+    typeof value?.human_support?.transfer?.[language] === 'string' &&
+    typeof value?.human_support?.manual_takeover?.[language] === 'string' &&
+    typeof value?.human_support?.warning_5m?.[language] === 'string' &&
+    typeof value?.human_support?.timeout_close?.[language] === 'string' &&
+    typeof value?.human_support?.return_to_ai?.[language] === 'string'
   );
 }
 

@@ -1568,12 +1568,17 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       // --------------------------------------
       const humanSupportRequest = parseCustomerHumanSupportRequest(text);
       if (humanSupportRequest.requested) {
+        const supportTemplates = tenantContext?.deterministicTemplates?.human_support;
         const topicSummary = humanSupportRequest.hasMeaningfulContext
           ? await getTopicSummary(session, text)
-          : 'Genel Destek';
-        const transferTemplates = tenantContext?.deterministicTemplates?.human_support?.transfer;
+          : supportTemplates?.general_topic?.[lang];
+        const transferTemplates = supportTemplates?.transfer;
         const transfer = transferTemplates?.[lang] ?? transferTemplates?.tr;
         if (!transfer) {
+          console.error('WHATSAPP_HUMAN_SUPPORT_TEMPLATE_UNAVAILABLE');
+          return;
+        }
+        if (typeof topicSummary !== 'string' || !topicSummary.trim()) {
           console.error('WHATSAPP_HUMAN_SUPPORT_TEMPLATE_UNAVAILABLE');
           return;
         }
@@ -1661,13 +1666,19 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         ' context=' + expectedLanguage + ' response_lock=' + expectedLanguage + ' session=' + (session.lang ?? 'und') +
         ' model_response_detected=' + responseLanguage);
       if (aiResponse && isWhatsAppResponseLanguageMismatch({ expectedLanguage, responseContent: aiResponse })) {
+        const firstResponseLanguage = responseLanguage;
         aiResponse = await callWpGemini(
           modelContext.userPrompt + '\n\nLANGUAGE_COMPLIANCE_RETRY: The prior response violated the required output language. Respond only in ' + expectedLanguage + ' while preserving the same tenant business policy and answer.',
           whatsappInbox?.aiContextParts ?? (whatsappInbox?.aiContextPart ? [whatsappInbox.aiContextPart] : []),
           modelContext.systemInstruction,
         );
         responseLanguage = detectWhatsAppModelResponseLanguage(aiResponse);
-        console.info('WHATSAPP_LANGUAGE_TRACE retry=1 expected=' + expectedLanguage + ' model_response_detected=' + responseLanguage);
+        console.info('LANGUAGE_COMPLIANCE_RETRY triggered=1 required=' + expectedLanguage + ' first_response=' + firstResponseLanguage + ' retry_response=' + responseLanguage);
+        if (aiResponse && isWhatsAppResponseLanguageMismatch({ expectedLanguage, responseContent: aiResponse })) {
+          console.error('LANGUAGE_COMPLIANCE_RETRY status=FAILED required=' + expectedLanguage);
+          aiResponse = corporateFallback(expectedLanguage);
+          responseLanguage = expectedLanguage;
+        }
       }
 
       logWhatsAppTiming('model_response_complete');

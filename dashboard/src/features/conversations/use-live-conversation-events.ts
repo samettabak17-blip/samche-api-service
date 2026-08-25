@@ -31,8 +31,10 @@ export function useTenantConversationLiveEvents(tenantId: string, activeConversa
 
     const refresh = (event?: ConversationEvent) => {
       if (event?.tenant_id && event.tenant_id !== tenantId) return;
+      if (event?.type?.startsWith('HUMAN_SUPPORT_')) console.info('DASHBOARD_ATTENTION_SSE received=' + event.type);
       void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversations'] });
       void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'human-attention'] });
+      if (event?.type?.startsWith('HUMAN_SUPPORT_')) console.info('DASHBOARD_ATTENTION_REFETCH reason=SSE');
       if (activeConversationId && (!event?.conversation_id || event.conversation_id === activeConversationId)) {
         void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', activeConversationId] });
         void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', activeConversationId, 'messages'] });

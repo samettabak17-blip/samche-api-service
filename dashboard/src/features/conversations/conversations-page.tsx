@@ -74,6 +74,10 @@ export function ConversationsPage() {
   const attentionQuery = useQuery({ queryKey: tenantKeys.humanAttention(tenantId), queryFn: () => tenantApi.getHumanAttentionSummary(tenantId), enabled: Boolean(tenantId) });
   const unresolvedAttention = attentionQuery.data?.unresolvedCount ?? 0;
   useEffect(() => {
+    if (attentionQuery.isSuccess) console.info('DASHBOARD_ATTENTION_FETCH status=OK requested_count=' + unresolvedAttention);
+    if (attentionQuery.isError) console.info('DASHBOARD_ATTENTION_FETCH status=FAIL code=REQUEST_FAILED');
+  }, [attentionQuery.isError, attentionQuery.isSuccess, unresolvedAttention]);
+  useEffect(() => {
     const normalTitle = 'SamChe Dashboard';
     document.title = unresolvedAttention > 0 ? '(' + unresolvedAttention + ') ' + normalTitle : normalTitle;
     return () => { document.title = normalTitle; };
