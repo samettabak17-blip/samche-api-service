@@ -46,10 +46,11 @@ export function ConversationsPage() {
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversations'] });
+    void queryClient.invalidateQueries({ queryKey: tenantKeys.humanAttention(tenantId) });
     if (conversationId) {
       void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', conversationId] });
-      void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'messages', conversationId] });
-      void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation-events', conversationId] });
+      void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', conversationId, 'messages'] });
+      void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', conversationId, 'events'] });
     }
   };
 
@@ -118,7 +119,7 @@ export function ConversationsPage() {
   if (conversationsQuery.isError) return <QueryErrorState error={conversationsQuery.error} onRetry={() => void conversationsQuery.refetch()} resource="conversations" />;
 
   return <div className="space-y-5">
-    <header className="flex items-end justify-between gap-4"><div><p className="eyebrow">SamChe live customer inbox</p><h1 className="page-title mt-2">Conversations</h1><p className="mt-2 text-sm text-stone-400">Real tenant channel activity and human handoff controls.</p>{unresolvedAttention > 0 && <p className="mt-2 inline-flex rounded-full bg-red-500/15 px-3 py-1 text-xs font-semibold text-red-200">{unresolvedAttention} needs attention</p>}{unresolvedAttention > 0 && !audioArmed && <p className="mt-2 text-xs text-gold">Click anywhere in Dashboard to activate sound alerts.</p>}</div><LiveState state={liveState} /></header>
+    <header className="flex items-end justify-between gap-4"><div><p className="eyebrow">SamChe live customer inbox</p><h1 className="page-title mt-2">Conversations</h1><p className="mt-2 text-sm text-stone-400">Real tenant channel activity and human handoff controls.</p>{unresolvedAttention > 0 && <p className="mt-2 inline-flex rounded-full bg-red-500/15 px-3 py-1 text-xs font-semibold text-red-200">{unresolvedAttention} needs attention</p>}{attentionQuery.isError && <p role="alert" className="mt-2 text-xs text-red-300">Human-support attention status is unavailable. Reconnect to restore live alerts.</p>}{unresolvedAttention > 0 && !audioArmed && <p className="mt-2 text-xs text-gold">Click anywhere in Dashboard to activate sound alerts.</p>}</div><LiveState state={liveState} /></header>
     <div className="grid min-h-[42rem] gap-4 xl:grid-cols-[19rem_minmax(0,1fr)_18rem]">
       <section className={'panel overflow-hidden ' + (conversationId ? 'hidden xl:block' : '')}>
         <header className="border-b border-line px-4 py-4"><p className="font-semibold text-ink">Conversation inbox</p><p className="mt-1 text-xs text-stone-400">Latest tenant activity</p></header>

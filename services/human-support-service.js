@@ -87,7 +87,10 @@ export async function listHumanAttentionSummary({ tenantId, database = pool }) {
         AND human_attention_state = 'REQUESTED'`,
     [tenantId]
   );
-  return { unresolvedCount: result.rows[0]?.unresolved_count ?? 0 };
+  const unresolvedCount = Number(result.rows[0]?.unresolved_count ?? 0);
+  // Safe staging/runtime evidence: no customer, message, document, or credential data.
+  console.info('HUMAN_ATTENTION_SUMMARY tenant=' + String(tenantId).slice(0, 8) + ' requested_count=' + unresolvedCount);
+  return { unresolvedCount };
 }
 
 

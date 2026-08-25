@@ -35,8 +35,8 @@ export function useTenantConversationLiveEvents(tenantId: string, activeConversa
       void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'human-attention'] });
       if (activeConversationId && (!event?.conversation_id || event.conversation_id === activeConversationId)) {
         void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', activeConversationId] });
-        void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'messages', activeConversationId] });
-        void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation-events', activeConversationId] });
+        void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', activeConversationId, 'messages'] });
+        void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', activeConversationId, 'events'] });
       }
     };
 

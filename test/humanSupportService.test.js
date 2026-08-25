@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from '../services/human-support-service.js';
+import { claimDueCustomerSupportLifecycle, listHumanAttentionSummary, requestCustomerHumanSupport } from '../services/human-support-service.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
 const conversationId = '22222222-2222-4222-8222-222222222222';
@@ -106,4 +106,21 @@ test('unacknowledged customer support requests close at ten minutes and return h
   assert.equal(actions[0].type, 'TIMEOUT_CLOSE');
   assert.ok(fixture.calls.some(({ sql }) => sql.includes("SET handling_mode = 'AI'")));
   assert.ok(fixture.calls.some(({ sql }) => sql.includes("human_attention_state = 'RESOLVED'")));
+});
+
+
+test('human attention summary counts only the tenant requested state without emitting customer data', async () => {
+  const calls = [];
+  const summary = await listHumanAttentionSummary({
+    tenantId,
+    database: {
+      async query(sql, params) {
+        calls.push({ sql, params });
+        return { rows: [{ unresolved_count: 2 }] };
+      },
+    },
+  });
+  assert.deepEqual(summary, { unresolvedCount: 2 });
+  assert.match(calls[0].sql, /human_attention_state = 'REQUESTED'/);
+  assert.deepEqual(calls[0].params, [tenantId]);
 });
