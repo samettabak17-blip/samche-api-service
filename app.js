@@ -1606,6 +1606,10 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         console.error('WHATSAPP_TENANT_CONTEXT_UNAVAILABLE', reason);
         return;
       }
+      console.info(
+        'WHATSAPP_RESPONSE_POLICY current_intent=' + modelContext.currentIntent +
+        ' first_assistant_response=' + (modelContext.firstResponse ? '1' : '0')
+      );
 
       // --------------------------------------
       // YAPAY ZEKA API ÇAĞRISI
