@@ -6,7 +6,7 @@ import { extractDocumentText } from './conversation-document-extraction-service.
 import { buildConversationStorageKey, validateConversationUpload } from './conversation-resource-validation.js';
 import { buildGeminiImagePart, buildUntrustedDocumentContext, whatsappIntegrationKey } from './whatsapp-multimodal-service.js';
 import { waitForReadyResource } from './whatsapp-resource-retry.js';
-import { inferConservativeWhatsAppLanguage, shouldUpdateCommunicationLanguage } from './conversation-communication-language.js';
+import { resolveWhatsAppCommunicationLanguage } from './conversation-communication-language.js';
 
 export class WhatsAppInboxError extends Error {
   constructor(code, message) {
@@ -308,20 +308,18 @@ export async function persistWhatsAppInbound({
       return { integration, conversation, duplicate: true, shouldInvokeAi: false, resource: null, aiContextPart: null };
     }
 
-    const candidateLanguage = inferConservativeWhatsAppLanguage(content);
-    if (shouldUpdateCommunicationLanguage({
+    const resolvedCommunicationLanguage = resolveWhatsAppCommunicationLanguage({
       currentLanguage: conversation.communication_language,
-      candidateLanguage,
-      confidence: candidateLanguage ? 'high' : 'low',
-      substantive: Boolean(String(content ?? '').trim()),
-    })) {
+      content,
+    });
+    if (resolvedCommunicationLanguage !== (conversation.communication_language ?? 'und')) {
       await client.query(
         `UPDATE conversations
             SET communication_language = $1,
                 communication_language_updated_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
           WHERE id = $2 AND tenant_id = $3`,
-        [candidateLanguage, conversationId, integration.tenant_id]
+        [resolvedCommunicationLanguage, conversationId, integration.tenant_id]
       );
     }
 
@@ -360,7 +358,7 @@ export async function persistWhatsAppInbound({
       systemPrompt: integration.assistant_system_prompt,
       deterministicTemplates: integration.assistant_whatsapp_response_templates,
       knowledge: knowledgeResult.rows.map((row) => row.content),
-      communicationLanguage: candidateLanguage ?? conversation.communication_language ?? 'und',
+      communicationLanguage: resolvedCommunicationLanguage,
     };
     const isFirstAssistantResponse = !assistantHistoryResult.rows[0]?.has_assistant_response;
 
