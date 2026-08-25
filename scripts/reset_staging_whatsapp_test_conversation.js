@@ -92,7 +92,7 @@ async function assertKnownConversationDependencies(client) {
 
 async function resolveTargetConversation(client, conversationId) {
   const result = await client.query(
-    `SELECT c.id, c.tenant_id, channel.channel_type
+    `SELECT c.id, c.tenant_id, c.contact_id, channel.channel_type
        FROM conversations c
        JOIN tenant_channels channel ON channel.id = c.channel_id AND channel.tenant_id = c.tenant_id
       WHERE c.id = $1
@@ -103,6 +103,33 @@ async function resolveTargetConversation(client, conversationId) {
   if (result.rowCount !== 1) fail('STAGING_RESET_CONVERSATION_AMBIGUOUS');
   if (result.rows[0].channel_type !== 'WHATSAPP') fail('STAGING_RESET_CHANNEL_REQUIRED');
   return result.rows[0];
+}
+
+async function countCrmDependencies(client, tenantId, conversationId, contactId) {
+  const result = await client.query(
+    `WITH selected_leads AS (
+       SELECT id
+         FROM crm_leads
+        WHERE tenant_id = $1 AND conversation_id = $2
+     ), dependencies AS (
+       SELECT COUNT(*)::integer AS count FROM crm_leads WHERE tenant_id = $1 AND conversation_id = $2
+       UNION ALL
+       SELECT COUNT(*)::integer AS count FROM crm_activities
+        WHERE tenant_id = $1 AND (conversation_id = $2 OR lead_id IN (SELECT id FROM selected_leads))
+       UNION ALL
+       SELECT COUNT(*)::integer AS count FROM crm_lead_analyses
+        WHERE tenant_id = $1 AND (conversation_id = $2 OR lead_id IN (SELECT id FROM selected_leads))
+       UNION ALL
+       SELECT COUNT(*)::integer AS count FROM crm_deals
+        WHERE tenant_id = $1 AND lead_id IN (SELECT id FROM selected_leads)
+       UNION ALL
+       SELECT CASE WHEN $3::uuid IS NULL THEN 0 ELSE 1 END
+     )
+     SELECT COALESCE(SUM(count), 0)::integer AS crm_dependency_count FROM dependencies`,
+    [tenantId, conversationId, contactId]
+  );
+  if (result.rowCount !== 1) fail('STAGING_RESET_CRM_DEPENDENCY_CHECK_FAILED');
+  return Number(result.rows[0].crm_dependency_count ?? 0);
 }
 
 function count(result) {
@@ -119,30 +146,15 @@ export async function resetStagingWhatsAppTestConversation({ client, conversatio
     await assertKnownConversationDependencies(client);
     const target = await resolveTargetConversation(client, conversationId);
     const tenantId = target.tenant_id;
-    const leadRows = await client.query(
-      'SELECT id FROM crm_leads WHERE tenant_id = $1 AND conversation_id = $2 FOR UPDATE',
-      [tenantId, conversationId]
-    );
-    const leadIds = leadRows.rows.map((row) => row.id);
-
-    const activities = await client.query(
-      `DELETE FROM crm_activities
-        WHERE tenant_id = $1 AND (conversation_id = $2 OR lead_id = ANY($3::uuid[]))`,
-      [tenantId, conversationId, leadIds]
-    );
-    const analyses = await client.query(
-      `DELETE FROM crm_lead_analyses
-        WHERE tenant_id = $1 AND (conversation_id = $2 OR lead_id = ANY($3::uuid[]))`,
-      [tenantId, conversationId, leadIds]
-    );
-    const deals = await client.query(
-      'DELETE FROM crm_deals WHERE tenant_id = $1 AND lead_id = ANY($2::uuid[])',
-      [tenantId, leadIds]
-    );
-    const leads = await client.query(
-      'DELETE FROM crm_leads WHERE tenant_id = $1 AND conversation_id = $2',
-      [tenantId, conversationId]
-    );
+    const crmDependencyCount = await countCrmDependencies(client, tenantId, conversationId, target.contact_id);
+    if (crmDependencyCount > 0) {
+      await client.query('ROLLBACK');
+      return {
+        result: 'REFUSED',
+        reason: 'CRM_DEPENDENCIES_PRESENT',
+        crm_dependency_count: crmDependencyCount,
+      };
+    }
     const audits = await client.query(
       'DELETE FROM conversation_audit_events WHERE tenant_id = $1 AND conversation_id = $2',
       [tenantId, conversationId]
@@ -169,10 +181,6 @@ export async function resetStagingWhatsAppTestConversation({ client, conversatio
       messages_removed: count(messages),
       resources_removed: count(resources),
       audit_events_removed: count(audits),
-      crm_activities_removed: count(activities),
-      crm_analyses_removed: count(analyses),
-      crm_deals_removed: count(deals),
-      crm_leads_removed: count(leads),
       runtime_restart_required: true,
     };
   } catch (error) {

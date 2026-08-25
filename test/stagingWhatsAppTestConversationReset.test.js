@@ -21,7 +21,7 @@ function expectedDependencyRows() {
   ].map((table_name) => ({ table_name }));
 }
 
-function fakeClient({ target = true, channel = 'WHATSAPP', dependencies = expectedDependencyRows() } = {}) {
+function fakeClient({ target = true, channel = 'WHATSAPP', dependencies = expectedDependencyRows(), crmDependencyCount = 0, contactId = null } = {}) {
   const calls = [];
   const client = {
     calls,
@@ -33,9 +33,9 @@ function fakeClient({ target = true, channel = 'WHATSAPP', dependencies = expect
       if (sql.includes('information_schema.columns')) return { rowCount: dependencies.length, rows: dependencies };
       if (sql.includes('FROM pg_constraint')) return { rowCount: 0, rows: [] };
       if (sql.includes('FROM conversations c')) {
-        return target ? { rowCount: 1, rows: [{ id: selectedConversationId, tenant_id: 'tenant-a', channel_type: channel }] } : { rowCount: 0, rows: [] };
+        return target ? { rowCount: 1, rows: [{ id: selectedConversationId, tenant_id: 'tenant-a', contact_id: contactId, channel_type: channel }] } : { rowCount: 0, rows: [] };
       }
-      if (sql.includes('SELECT id FROM crm_leads')) return { rowCount: 1, rows: [{ id: 'lead-a' }] };
+      if (sql.includes('WITH selected_leads AS')) return { rowCount: 1, rows: [{ crm_dependency_count: crmDependencyCount || (params[2] ? 1 : 0) }] };
       if (sql.startsWith('DELETE FROM conversations')) return { rowCount: 1, rows: [] };
       if (sql.startsWith('DELETE')) return { rowCount: 1, rows: [] };
       return { rowCount: 0, rows: [] };
@@ -89,7 +89,7 @@ test('only the explicit selected WhatsApp conversation and its dependencies are 
   assert.equal(client.calls[0].sql, 'BEGIN');
   assert.equal(client.calls.at(-1).sql, 'COMMIT');
   const deletes = client.calls.filter((call) => call.sql.startsWith('DELETE'));
-  assert.ok(deletes.length >= 8);
+  assert.equal(deletes.length, 4);
   for (const call of deletes) assert.equal(call.params.includes(otherConversationId), false);
   assert.ok(deletes.findIndex((call) => call.sql.includes('conversation_resources')) < deletes.findIndex((call) => call.sql.includes('conversation_messages')));
   assert.ok(deletes.findIndex((call) => call.sql.includes('conversation_messages')) < deletes.findIndex((call) => call.sql.includes('DELETE FROM conversations')));
@@ -97,6 +97,33 @@ test('only the explicit selected WhatsApp conversation and its dependencies are 
     assert.match(call.sql, /tenant_id = \$1/);
     assert.equal(call.params[0], 'tenant-a');
   }
+  assert.equal(deletes.some((call) => /crm_(lead|activity|deal)/.test(call.sql)), false);
+});
+
+test('a CRM lead dependency refuses the reset before any mutation', async () => {
+  const client = fakeClient({ crmDependencyCount: 1 });
+  const result = await resetStagingWhatsAppTestConversation({ client, conversationId: selectedConversationId });
+  assert.deepEqual(result, { result: 'REFUSED', reason: 'CRM_DEPENDENCIES_PRESENT', crm_dependency_count: 1 });
+  assert.equal(client.calls.some((call) => call.sql.startsWith('DELETE')), false);
+  assert.equal(client.calls.at(-1).sql, 'ROLLBACK');
+});
+
+test('a CRM deal dependency refuses the reset before any mutation', async () => {
+  const client = fakeClient({ crmDependencyCount: 2 });
+  const result = await resetStagingWhatsAppTestConversation({ client, conversationId: selectedConversationId });
+  assert.equal(result.result, 'REFUSED');
+  assert.equal(result.reason, 'CRM_DEPENDENCIES_PRESENT');
+  assert.equal(result.crm_dependency_count, 2);
+  assert.equal(client.calls.some((call) => call.sql.startsWith('DELETE')), false);
+});
+
+test('a CRM contact association also refuses the reset before any mutation', async () => {
+  const client = fakeClient({ contactId: '33333333-3333-4333-8333-333333333333' });
+  const result = await resetStagingWhatsAppTestConversation({ client, conversationId: selectedConversationId });
+  assert.equal(result.result, 'REFUSED');
+  assert.equal(result.reason, 'CRM_DEPENDENCIES_PRESENT');
+  assert.equal(result.crm_dependency_count, 1);
+  assert.equal(client.calls.some((call) => call.sql.startsWith('DELETE')), false);
 });
 
 test('a failed final deletion rolls back the whole reset transaction', async () => {
