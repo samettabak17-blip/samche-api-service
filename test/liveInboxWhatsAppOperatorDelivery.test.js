@@ -131,3 +131,9 @@ test('manual takeover uses only the configured tenant-scoped deterministic templ
   assert.equal(resolveHumanSupportTemplate(templates, 'manual_takeover', 'tr'), 'legacy takeover');
   assert.equal(resolveHumanSupportTemplate(templates, 'manual_takeover', 'en'), null);
 });
+
+
+test('return-to-ai uses the configured legacy customer closure template', () => {
+  const templates = { human_support: { return_to_ai: { tr: 'legacy closure' } } };
+  assert.equal(resolveHumanSupportTemplate(templates, 'return_to_ai', 'tr'), 'legacy closure');
+});
