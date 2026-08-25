@@ -69,6 +69,8 @@ export async function requestCustomerHumanSupport({
     await audit(client, { tenantId, conversationId, eventType: 'HANDOFF_REQUESTED' });
     await notify(client, tenantId, conversationId, 'HUMAN_SUPPORT_REQUESTED');
     await client.query('COMMIT');
+    console.info('HUMAN_SUPPORT_REQUEST persisted=1 attention=REQUESTED tenant=' + String(tenantId).slice(0, 8));
+    console.info('DASHBOARD_SSE_PUBLISH event_type=HUMAN_SUPPORT_REQUESTED tenant=' + String(tenantId).slice(0, 8));
     return { duplicate: false, conversation: updated.rows[0] };
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
@@ -94,7 +96,7 @@ export async function listHumanAttentionSummary({ tenantId, database = pool }) {
 }
 
 
-export async function claimDueCustomerSupportLifecycle({ database = pool, now = new Date() }) {
+export async function claimDueCustomerSupportLifecycle({ database = pool, now = new Date() } = {}) {
   const client = await database.connect();
   try {
     await client.query('BEGIN');
@@ -107,16 +109,19 @@ export async function claimDueCustomerSupportLifecycle({ database = pool, now = 
         WHERE c.status = 'open'
           AND c.handling_mode = 'HUMAN'
           AND c.human_attention_state IN ('REQUESTED', 'ACKNOWLEDGED')
-          AND c.human_support_started_at IS NOT NULL
+          AND c.human_attention_requested_at IS NOT NULL
           AND c.human_support_closed_at IS NULL
           AND ci.integration_type = 'WHATSAPP' AND ci.enabled = TRUE
-        ORDER BY c.human_support_last_activity_at ASC
+        ORDER BY c.human_attention_requested_at ASC
         FOR UPDATE OF c SKIP LOCKED`
     );
     const actions = [];
+    let warnings = 0;
+    let timeouts = 0;
+    console.info('HUMAN_SUPPORT_LIFECYCLE_SCAN requested=' + due.rows.filter((row) => row.human_attention_state === 'REQUESTED').length + ' acknowledged=' + due.rows.filter((row) => row.human_attention_state === 'ACKNOWLEDGED').length);
     for (const conversation of due.rows) {
-      const last = new Date(conversation.human_support_last_activity_at ?? conversation.human_support_started_at);
-      const elapsed = now.getTime() - last.getTime();
+      const requestedAt = new Date(conversation.human_attention_requested_at);
+      const elapsed = now.getTime() - requestedAt.getTime();
       const templates = conversation.whatsapp_response_templates?.human_support ?? {};
       if (elapsed >= 10 * 60 * 1000) {
         const content = templates.timeout_close?.[conversation.communication_language] ?? templates.timeout_close?.tr;
@@ -133,6 +138,8 @@ export async function claimDueCustomerSupportLifecycle({ database = pool, now = 
           VALUES ($1, $2, 'ASSISTANT', $3)`, [conversation.tenant_id, conversation.id, content]);
         await audit(client, { tenantId: conversation.tenant_id, conversationId: conversation.id, eventType: 'RETURN_TO_AI', metadata: { source: 'LEGACY_TIMEOUT' } });
         await notify(client, conversation.tenant_id, conversation.id, 'HUMAN_SUPPORT_TIMEOUT');
+        timeouts += 1;
+        console.info('HUMAN_SUPPORT_TIMEOUT status=CLAIMED tenant=' + String(conversation.tenant_id).slice(0, 8));
         actions.push({ type: 'TIMEOUT_CLOSE', tenantId: conversation.tenant_id, conversationId: conversation.id, recipient: conversation.customer_external_id, content });
       } else if (elapsed >= 5 * 60 * 1000 && !conversation.human_support_warning_sent_at) {
         const content = templates.warning_5m?.[conversation.communication_language] ?? templates.warning_5m?.tr;
@@ -145,10 +152,13 @@ export async function claimDueCustomerSupportLifecycle({ database = pool, now = 
         await client.query(`INSERT INTO conversation_messages (tenant_id, conversation_id, sender_type, content)
           VALUES ($1, $2, 'ASSISTANT', $3)`, [conversation.tenant_id, conversation.id, content]);
         await notify(client, conversation.tenant_id, conversation.id, 'HUMAN_SUPPORT_WARNING');
+        warnings += 1;
+        console.info('HUMAN_SUPPORT_WARNING status=CLAIMED tenant=' + String(conversation.tenant_id).slice(0, 8));
         actions.push({ type: 'WARNING_5M', tenantId: conversation.tenant_id, conversationId: conversation.id, recipient: conversation.customer_external_id, content });
       }
     }
     await client.query('COMMIT');
+    console.info('HUMAN_SUPPORT_LIFECYCLE_CRON status=OK claimed=' + actions.length + ' warnings=' + warnings + ' timeouts=' + timeouts);
     return actions;
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});

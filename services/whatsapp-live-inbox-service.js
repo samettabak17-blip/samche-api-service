@@ -6,7 +6,7 @@ import { extractDocumentText } from './conversation-document-extraction-service.
 import { buildConversationStorageKey, validateConversationUpload } from './conversation-resource-validation.js';
 import { buildGeminiImagePart, buildUntrustedDocumentContext, whatsappIntegrationKey } from './whatsapp-multimodal-service.js';
 import { waitForReadyResource } from './whatsapp-resource-retry.js';
-import { resolveWhatsAppCommunicationLanguage } from './conversation-communication-language.js';
+import { inferConservativeWhatsAppLanguage, resolveWhatsAppCommunicationLanguage } from './conversation-communication-language.js';
 
 export class WhatsAppInboxError extends Error {
   constructor(code, message) {
@@ -308,11 +308,12 @@ export async function persistWhatsAppInbound({
       return { integration, conversation, duplicate: true, shouldInvokeAi: false, resource: null, aiContextPart: null };
     }
 
+    const previousCommunicationLanguage = conversation.communication_language ?? 'und';
+    const detectedCommunicationLanguage = inferConservativeWhatsAppLanguage(content) ?? 'und';
     const resolvedCommunicationLanguage = resolveWhatsAppCommunicationLanguage({
       currentLanguage: conversation.communication_language,
       content,
     });
-    const previousCommunicationLanguage = conversation.communication_language ?? 'und';
     const communicationLanguageChanged = resolvedCommunicationLanguage !== previousCommunicationLanguage;
     console.info(
       'WHATSAPP_COMMUNICATION_LANGUAGE previous=' + previousCommunicationLanguage +
@@ -414,7 +415,9 @@ export async function persistWhatsAppInbound({
     await client.query('COMMIT');
     queueLeadQualification({ tenantId: integration.tenant_id, conversationId });
     return {
-      integration, conversation, customerMessage, resource, aiContextPart, aiContextParts, resourceContext, tenantContext, conversationHistory, isFirstAssistantResponse, duplicate: false,
+      integration, conversation, customerMessage, resource, aiContextPart, aiContextParts, resourceContext, tenantContext, conversationHistory, isFirstAssistantResponse,
+      languageTrace: { previous: previousCommunicationLanguage, detected: detectedCommunicationLanguage, resolved: resolvedCommunicationLanguage, persisted: resolvedCommunicationLanguage },
+      duplicate: false,
       shouldInvokeAi: conversation.status === 'open' && conversation.handling_mode === 'AI',
       handlingVersion: conversation.handling_version,
     };

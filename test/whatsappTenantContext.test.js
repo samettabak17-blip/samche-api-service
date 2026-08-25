@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildWhatsAppTenantPrompt } from '../services/whatsapp-tenant-context-service.js';
+import { buildWhatsAppTenantPrompt, detectWhatsAppModelResponseLanguage, isWhatsAppResponseLanguageMismatch } from '../services/whatsapp-tenant-context-service.js';
 
 const tenant = { companyName: 'Example Company LLC', assistantName: 'Example AI', systemPrompt: 'Offer accounting services.', knowledge: ['Accounting and payroll support.'] };
 
@@ -58,4 +58,11 @@ test('a clear English turn after Arabic history uses a current-turn English lock
   assert.match(prompt, /CURRENT_TURN_RESPONSE_LANGUAGE_LOCK: English/);
   assert.match(prompt, /SUBSEQUENT_RESPONSE:/);
   assert.doesNotMatch(prompt, /FIRST_RESPONSE:/);
+});
+
+
+test('detects a clear Arabic model output mismatch for a resolved English turn', () => {
+  assert.equal(detectWhatsAppModelResponseLanguage('يمكنني مساعدتك في تأسيس الشركة'), 'ar');
+  assert.equal(isWhatsAppResponseLanguageMismatch({ expectedLanguage: 'en', responseContent: 'يمكنني مساعدتك في تأسيس الشركة' }), true);
+  assert.equal(isWhatsAppResponseLanguageMismatch({ expectedLanguage: 'en', responseContent: 'I can explain the company setup costs and visa options.' }), false);
 });

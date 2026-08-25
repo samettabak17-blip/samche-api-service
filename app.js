@@ -22,7 +22,7 @@ import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.j
 import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from "./services/human-support-service.js";
 import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
 import { persistAndDeliverWhatsAppAssistant } from "./services/whatsapp-assistant-response-service.js";
-import { buildWhatsAppTenantModelContext, classifyWhatsAppCurrentCustomerIntent, WhatsAppTenantContextError } from "./services/whatsapp-tenant-context-service.js";
+import { buildWhatsAppTenantModelContext, classifyWhatsAppCurrentCustomerIntent, detectWhatsAppModelResponseLanguage, isWhatsAppResponseLanguageMismatch, WhatsAppTenantContextError } from "./services/whatsapp-tenant-context-service.js";
 import { planWhatsAppDeterministicSocialResponse } from "./services/whatsapp-deterministic-social-response-service.js";
 import {
   describeStorageCompatibilityProfile,
@@ -1648,11 +1648,27 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       // YAPAY ZEKA API ÇAĞRISI
       // --------------------------------------
       logWhatsAppTiming('model_request_started');
-      const aiResponse = await callWpGemini(
+      let aiResponse = await callWpGemini(
         modelContext.userPrompt,
         whatsappInbox?.aiContextParts ?? (whatsappInbox?.aiContextPart ? [whatsappInbox.aiContextPart] : []),
         modelContext.systemInstruction,
       );
+      let responseLanguage = detectWhatsAppModelResponseLanguage(aiResponse);
+      const expectedLanguage = tenantContext.communicationLanguage;
+      console.info('WHATSAPP_LANGUAGE_TRACE previous=' + (whatsappInbox.languageTrace?.previous ?? 'und') +
+        ' detected=' + (whatsappInbox.languageTrace?.detected ?? 'und') +
+        ' resolved=' + expectedLanguage + ' persisted=' + (whatsappInbox.languageTrace?.persisted ?? expectedLanguage) +
+        ' context=' + expectedLanguage + ' response_lock=' + expectedLanguage + ' session=' + (session.lang ?? 'und') +
+        ' model_response_detected=' + responseLanguage);
+      if (aiResponse && isWhatsAppResponseLanguageMismatch({ expectedLanguage, responseContent: aiResponse })) {
+        aiResponse = await callWpGemini(
+          modelContext.userPrompt + '\n\nLANGUAGE_COMPLIANCE_RETRY: The prior response violated the required output language. Respond only in ' + expectedLanguage + ' while preserving the same tenant business policy and answer.',
+          whatsappInbox?.aiContextParts ?? (whatsappInbox?.aiContextPart ? [whatsappInbox.aiContextPart] : []),
+          modelContext.systemInstruction,
+        );
+        responseLanguage = detectWhatsAppModelResponseLanguage(aiResponse);
+        console.info('WHATSAPP_LANGUAGE_TRACE retry=1 expected=' + expectedLanguage + ' model_response_detected=' + responseLanguage);
+      }
 
       logWhatsAppTiming('model_response_complete');
       if (!aiResponse) {
@@ -1795,12 +1811,23 @@ app.post("/telegram-webhook", (req, res) => {
 // ============================================================================
 cron.schedule("* * * * *", async () => {
   try {
-    const lifecycleActions = await claimDueCustomerSupportLifecycle();
-    for (const action of lifecycleActions) {
-      await sendMessage(action.recipient, action.content).catch(() => {});
-      if (action.type === 'TIMEOUT_CLOSE') {
-        sendMessageToTelegram(`Zaman Aşımı: Canlı destek kapatıldı → +${action.recipient}`).catch(() => {});
+    let lifecycleActions;
+    try {
+      lifecycleActions = await claimDueCustomerSupportLifecycle({ database: pool });
+      for (const action of lifecycleActions) {
+        try {
+          await sendMessage(action.recipient, action.content);
+          console.info('HUMAN_SUPPORT_' + action.type + ' status=DELIVERED tenant=' + String(action.tenantId).slice(0, 8));
+        } catch {
+          console.error('HUMAN_SUPPORT_' + action.type + ' status=FAILED tenant=' + String(action.tenantId).slice(0, 8));
+        }
+        if (action.type === 'TIMEOUT_CLOSE') {
+          sendMessageToTelegram(`Zaman Aşımı: Canlı destek kapatıldı → +${action.recipient}`).catch(() => {});
+        }
       }
+    } catch (error) {
+      console.error('HUMAN_SUPPORT_LIFECYCLE_CRON status=FAIL reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+      lifecycleActions = [];
     }
     const now = Date.now();
     if (!wpSessions || typeof wpSessions !== "object") return;

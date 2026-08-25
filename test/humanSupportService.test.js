@@ -64,6 +64,7 @@ function lifecycleDatabase({ attention = 'REQUESTED', lastActivityAt, warningSen
             tenant_id: tenantId,
             customer_external_id: 'whatsapp:15551234567',
             human_attention_state: attention,
+            human_attention_requested_at: lastActivityAt,
             human_support_started_at: lastActivityAt,
             human_support_last_activity_at: lastActivityAt,
             human_support_warning_sent_at: warningSentAt,
@@ -123,4 +124,12 @@ test('human attention summary counts only the tenant requested state without emi
   assert.deepEqual(summary, { unresolvedCount: 2 });
   assert.match(calls[0].sql, /human_attention_state = 'REQUESTED'/);
   assert.deepEqual(calls[0].params, [tenantId]);
+});
+
+
+test('app-shaped scheduler call accepts its production dependency object and scans requested support', async () => {
+  const now = new Date('2026-08-25T12:00:00.000Z');
+  const fixture = lifecycleDatabase({ attention: 'REQUESTED', lastActivityAt: new Date(now.getTime() - (5 * 60 * 1000 + 1)) });
+  const actions = await claimDueCustomerSupportLifecycle({ database: fixture.database, now });
+  assert.equal(actions[0]?.type, 'WARNING_5M');
 });

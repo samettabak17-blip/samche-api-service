@@ -56,6 +56,22 @@ function firstResponseInstruction(firstResponse, currentIntent) {
   return 'FIRST_RESPONSE: Briefly identify yourself as the named AI assistant for the named tenant, acknowledge the current customer topic, then immediately continue according to the authoritative business policy. Never answer with only a generic greeting.';
 }
 
+export function detectWhatsAppModelResponseLanguage(content) {
+  const text = String(content ?? '').trim();
+  if (!text) return 'other';
+  const arabic = (text.match(/[\u0600-\u06FF]/gu) ?? []).length;
+  if (arabic >= 4) return 'ar';
+  if (/[ığüşöçİĞÜŞÖÇ]/u.test(text) || /\b(ve|için|ile|şirket|yardımcı|merhaba)\b/iu.test(text)) return 'tr';
+  const latinWords = text.match(/[A-Za-z]+/g) ?? [];
+  return latinWords.length >= 3 ? 'en' : 'other';
+}
+
+export function isWhatsAppResponseLanguageMismatch({ expectedLanguage, responseContent }) {
+  const expected = ['tr', 'en', 'ar'].includes(expectedLanguage) ? expectedLanguage : 'other';
+  const detected = detectWhatsAppModelResponseLanguage(responseContent);
+  return expected !== 'other' && detected !== 'other' && detected !== expected;
+}
+
 export function buildWhatsAppTenantModelContext({ tenant, history = [], customerText, communicationLanguage = 'und' }) {
   const companyName = bounded(tenant?.companyName, 255);
   const assistantName = bounded(tenant?.assistantName, 255);
