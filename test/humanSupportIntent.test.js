@@ -22,3 +22,14 @@ test('business topic without an explicit support request stays on the normal AI 
     hasMeaningfulContext: false,
   });
 });
+
+
+test('support request parsing is independent of the current response language', () => {
+  for (const text of [
+    'canlı destek istiyorum şirket kurulumu için',
+    'I need live support for company setup',
+    'أريد دعم مباشر بخصوص تأسيس شركة',
+  ]) {
+    assert.equal(parseCustomerHumanSupportRequest(text).requested, true, text);
+  }
+});

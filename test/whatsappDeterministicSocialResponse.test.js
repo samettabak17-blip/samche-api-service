@@ -133,3 +133,30 @@ test('the persisted first-contact decision checks all assistant history, not onl
   assert.match(inbox, /isFirstAssistantResponse\s*=\s*!.*has_assistant_response/);
 });
 
+
+
+test('a later Arabic greeting is zero-token social handling and never repeats the full first-contact identity', () => {
+  const plan = planWhatsAppDeterministicSocialResponse({
+    tenant,
+    communicationLanguage: 'ar',
+    currentIntent: 'GREETING_ONLY',
+    firstAssistantResponse: false,
+  });
+
+  assert.equal(plan.kind, 'SOCIAL_GREETING');
+  assert.equal(plan.shouldInvokeGemini, false);
+  assert.doesNotMatch(plan.content, /Example AI|Example Company LLC/);
+});
+
+test('clear language changes do not alter persisted first-response semantics', () => {
+  for (const language of ['tr', 'en', 'ar']) {
+    const plan = planWhatsAppDeterministicSocialResponse({
+      tenant,
+      communicationLanguage: language,
+      currentIntent: 'GREETING_ONLY',
+      firstAssistantResponse: false,
+    });
+    assert.equal(plan.kind, 'SOCIAL_GREETING');
+    assert.equal(plan.shouldInvokeGemini, false);
+  }
+});
