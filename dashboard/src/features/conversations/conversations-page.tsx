@@ -7,7 +7,7 @@ import { formatDateTime } from '../../lib/format';
 import { useAuth } from '../auth/auth-context';
 import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
 import { useTenant } from '../tenants/tenant-context';
-import { canUseHumanReplyComposer, senderLabel, senderTone } from './conversation-utils';
+import { canUseHumanReplyComposer, liveSupportAlertTitle, liveSupportFavicon, liveSupportWaitingLabel, senderLabel, senderTone } from './conversation-utils';
 import { SafeRichMessage } from './safe-rich-message';
 import { useTenantConversationLiveEvents } from './use-live-conversation-events';
 
@@ -45,13 +45,20 @@ export function ConversationsPage() {
   const messagesQuery = useQuery({ queryKey: tenantKeys.messages(tenantId, conversationId ?? '', messagePageSize, messageOffset), queryFn: () => tenantApi.listMessages(tenantId, conversationId ?? '', { limit: messagePageSize, offset: messageOffset }), enabled: Boolean(tenantId && conversationId) });
   const eventsQuery = useQuery({ queryKey: tenantKeys.conversationEvents(tenantId, conversationId ?? ''), queryFn: () => tenantApi.listConversationEvents(tenantId, conversationId ?? ''), enabled: Boolean(tenantId && conversationId) });
 
-  const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversations'] });
-    void queryClient.invalidateQueries({ queryKey: tenantKeys.humanAttention(tenantId) });
-    if (conversationId) {
-      void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', conversationId] });
-      void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', conversationId, 'messages'] });
-      void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', conversationId, 'events'] });
+  const refresh = async (reason?: string) => {
+    const requestedCountBefore = queryClient.getQueryData<{ unresolvedCount?: number }>(tenantKeys.humanAttention(tenantId))?.unresolvedCount ?? 0;
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversations'] }),
+      queryClient.invalidateQueries({ queryKey: tenantKeys.humanAttention(tenantId) }),
+      conversationId ? queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', conversationId] }) : Promise.resolve(),
+      conversationId ? queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', conversationId, 'messages'] }) : Promise.resolve(),
+      conversationId ? queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', conversationId, 'events'] }) : Promise.resolve(),
+    ]);
+    // A successful Take Over must not wait for an SSE/fallback interval before stopping the waiting alert.
+    await queryClient.refetchQueries({ queryKey: tenantKeys.humanAttention(tenantId), type: 'active' });
+    if (reason === 'takeover') {
+      const requestedCountAfter = queryClient.getQueryData<{ unresolvedCount?: number }>(tenantKeys.humanAttention(tenantId))?.unresolvedCount ?? 0;
+      console.info('DASHBOARD_LIVE_SUPPORT_ACK requested_count_before=' + requestedCountBefore + ' requested_count_after=' + requestedCountAfter);
     }
   };
 
@@ -64,12 +71,12 @@ export function ConversationsPage() {
       if (action === 'resume') return tenantApi.resumeConversationAi(tenantId, conversationId);
       return tenantApi.closeConversation(tenantId, conversationId);
     },
-    onSuccess: refresh,
+    onSuccess: async (_data, action) => { await refresh(action); },
   });
 
   const send = useMutation({
     mutationFn: () => tenantApi.sendAgentMessage(tenantId, conversationId ?? '', content.trim(), crypto.randomUUID()),
-    onSuccess: () => { setContent(''); refresh(); },
+    onSuccess: async () => { setContent(''); await refresh('agent-message'); },
   });
 
   const attentionQuery = useQuery({
@@ -85,9 +92,30 @@ export function ConversationsPage() {
     if (attentionQuery.isError) console.info('DASHBOARD_ATTENTION_FETCH status=FAIL code=REQUEST_FAILED');
   }, [attentionQuery.isError, attentionQuery.isSuccess, unresolvedAttention]);
   useEffect(() => {
-    const normalTitle = 'SamChe Dashboard';
-    document.title = unresolvedAttention > 0 ? '(' + unresolvedAttention + ') ' + normalTitle : normalTitle;
-    return () => { document.title = normalTitle; };
+    document.title = liveSupportAlertTitle(unresolvedAttention);
+    return () => { document.title = liveSupportAlertTitle(0); };
+  }, [unresolvedAttention]);
+  useEffect(() => {
+    const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!favicon) return;
+    const normalHref = favicon.dataset.normalHref ?? favicon.href;
+    favicon.dataset.normalHref = normalHref;
+    if (unresolvedAttention < 1) {
+      favicon.href = normalHref;
+      return;
+    }
+    const alertHref = liveSupportFavicon(unresolvedAttention);
+    let alertVisible = true;
+    favicon.href = alertHref;
+    // A conservative visual cadence keeps the browser-tab notification noticeable without aggressive flashing.
+    const timer = window.setInterval(() => {
+      alertVisible = !alertVisible;
+      favicon.href = alertVisible ? alertHref : normalHref;
+    }, 1500);
+    return () => {
+      window.clearInterval(timer);
+      favicon.href = normalHref;
+    };
   }, [unresolvedAttention]);
   const armSoundNotifications = async () => {
     try {
@@ -163,11 +191,11 @@ export function ConversationsPage() {
   if (conversationsQuery.isError) return <QueryErrorState error={conversationsQuery.error} onRetry={() => void conversationsQuery.refetch()} resource="conversations" />;
 
   return <div className="space-y-5">
-    <header className="flex items-end justify-between gap-4"><div><p className="eyebrow">SamChe live customer inbox</p><h1 className="page-title mt-2">Conversations</h1><p className="mt-2 text-sm text-stone-400">Real tenant channel activity and human handoff controls.</p>{unresolvedAttention > 0 && <p className="mt-2 inline-flex rounded-full bg-red-500/15 px-3 py-1 text-xs font-semibold text-red-200">{unresolvedAttention} needs attention</p>}{attentionQuery.isError && <p role="alert" className="mt-2 text-xs text-red-300">Human-support attention status is unavailable. Reconnect to restore live alerts.</p>}{unresolvedAttention > 0 && !audioArmed && <button type="button" onClick={() => void armSoundNotifications()} className="mt-2 text-xs text-gold underline underline-offset-4">Enable sound notifications</button>}{unresolvedAttention > 0 && audioArmed && <p className="mt-2 text-xs text-gold">Sound notifications: ON</p>}{unresolvedAttention > 0 && audioState === 'BLOCKED' && <p role="alert" className="mt-2 text-xs text-red-300">Sound notifications are blocked. Enable them in your browser and try again.</p>}</div><LiveState state={liveState} /></header>
+    <header className="flex items-end justify-between gap-4"><div><p className="eyebrow">SamChe live customer inbox</p><h1 className="page-title mt-2">Conversations</h1><p className="mt-2 text-sm text-stone-400">Real tenant channel activity and human handoff controls.</p>{unresolvedAttention > 0 && <div role="status" className="mt-3 inline-flex items-center gap-3 rounded-lg border border-red-400/50 bg-red-500/10 px-4 py-3 shadow-[0_0_24px_rgba(239,68,68,0.12)]"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-400 motion-safe:animate-pulse" aria-hidden="true" /><span><span className="block text-xs font-bold tracking-[0.16em] text-red-200">LIVE SUPPORT</span><span className="mt-0.5 block text-sm font-semibold text-red-100">{liveSupportWaitingLabel(unresolvedAttention)}</span></span></div>}{attentionQuery.isError && <p role="alert" className="mt-2 text-xs text-red-300">Human-support attention status is unavailable. Reconnect to restore live alerts.</p>}{unresolvedAttention > 0 && !audioArmed && <button type="button" onClick={() => void armSoundNotifications()} className="mt-2 text-xs text-gold underline underline-offset-4">Enable sound notifications</button>}{unresolvedAttention > 0 && audioArmed && <p className="mt-2 text-xs text-gold">Sound notifications: ON</p>}{unresolvedAttention > 0 && audioState === 'BLOCKED' && <p role="alert" className="mt-2 text-xs text-red-300">Sound notifications are blocked. Enable them in your browser and try again.</p>}</div><LiveState state={liveState} /></header>
     <div className="grid min-h-[42rem] gap-4 xl:grid-cols-[19rem_minmax(0,1fr)_18rem]">
       <section className={'panel overflow-hidden ' + (conversationId ? 'hidden xl:block' : '')}>
         <header className="border-b border-line px-4 py-4"><p className="font-semibold text-ink">Conversation inbox</p><p className="mt-1 text-xs text-stone-400">Latest tenant activity</p></header>
-        {conversations.length === 0 ? <div className="p-5"><EmptyState title="No conversations yet" description="Connected channel traffic will appear here." icon={<MessageSquareText size={20} />} /></div> : <ul className="divide-y divide-line">{conversations.map((item) => <li key={item.id}><Link to={'/app/' + tenantId + '/conversations/' + item.id} className={'block px-4 py-4 transition hover:bg-white/[0.035] ' + (item.id === conversationId ? 'bg-signal/10 ' : '') + (item.human_attention_state === 'REQUESTED' ? 'bg-red-500/10 ring-1 ring-inset ring-red-400/30' : '')}><div className="flex justify-between gap-2"><div className="min-w-0"><p className="truncate text-sm font-medium text-ink">{item.customer_external_id || item.external_conversation_id || 'Customer conversation'}</p><p className="mt-1 truncate text-xs text-stone-400">{item.last_message_preview || item.channel_display_name || 'No message preview'}</p></div><time className="shrink-0 text-[11px] text-stone-500">{formatDateTime(item.last_activity_at || item.created_at)}</time></div><div className="mt-3 flex gap-1.5"><span className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-stone-300">{item.channel_type || 'CHANNEL'}</span><span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-stone-300">{handlingLabel(item.handling_mode)}</span>{item.human_attention_state === 'REQUESTED' && <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-200">Needs attention</span>}</div></Link></li>)}</ul>}
+        {conversations.length === 0 ? <div className="p-5"><EmptyState title="No conversations yet" description="Connected channel traffic will appear here." icon={<MessageSquareText size={20} />} /></div> : <ul className="divide-y divide-line">{conversations.map((item) => <li key={item.id}><Link to={'/app/' + tenantId + '/conversations/' + item.id} className={'block px-4 py-4 transition hover:bg-white/[0.035] ' + (item.id === conversationId ? 'bg-signal/10 ' : '') + (item.human_attention_state === 'REQUESTED' ? 'bg-red-500/10 ring-1 ring-inset ring-red-400/30' : '')}><div className="flex justify-between gap-2"><div className="min-w-0"><p className="truncate text-sm font-medium text-ink">{item.customer_external_id || item.external_conversation_id || 'Customer conversation'}</p><p className="mt-1 truncate text-xs text-stone-400">{item.last_message_preview || item.channel_display_name || 'No message preview'}</p></div><time className="shrink-0 text-[11px] text-stone-500">{formatDateTime(item.last_activity_at || item.created_at)}</time></div><div className="mt-3 flex gap-1.5"><span className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-stone-300">{item.channel_type || 'CHANNEL'}</span><span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-stone-300">{handlingLabel(item.handling_mode)}</span>{item.human_attention_state === 'REQUESTED' && <span className="rounded border border-red-400/40 bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold tracking-[0.1em] text-red-200">LIVE SUPPORT</span>}</div></Link></li>)}</ul>}
         <footer className="flex justify-between border-t border-line px-3 py-3"><button type="button" onClick={() => setOffset((value) => Math.max(0, value - pageSize))} disabled={offset === 0} className="text-xs text-stone-400 disabled:opacity-40"><ChevronLeft className="inline" size={14} /> Previous</button><button type="button" onClick={() => setOffset((value) => value + pageSize)} disabled={conversations.length < pageSize} className="text-xs text-stone-400 disabled:opacity-40">Next <ChevronRight className="inline" size={14} /></button></footer>
       </section>
 
