@@ -21,8 +21,8 @@ export class StagingWhatsAppTestResetError extends Error {
   }
 }
 
-function fail(code) {
-  throw new StagingWhatsAppTestResetError(code);
+function fail(code, details = {}) {
+  throw new StagingWhatsAppTestResetError(code, details);
 }
 
 export function parseResetArguments(argv = process.argv.slice(2)) {
@@ -80,7 +80,19 @@ function safeTableName(value) {
   return /^[a-z_]+$/.test(String(value ?? '')) ? value : 'unknown';
 }
 
-async function inspectConversationDependencies(client) {
+function databaseErrorCategory(error, fallback = 'UNKNOWN_DATABASE_ERROR') {
+  const code = error?.code;
+  if (code === '42P01') return 'UNDEFINED_TABLE';
+  if (code === '42703') return 'UNDEFINED_COLUMN';
+  if (code === '42501') return 'PERMISSION_DENIED';
+  if (code === '25001' || code === '25006') return 'READ_ONLY_TRANSACTION_ERROR';
+  if (code === '42601' || code === '42P18' || code === '42804') return 'INVALID_QUERY_SHAPE';
+  if (typeof code === 'string' && code.startsWith('08')) return 'CONNECTION_ERROR';
+  return fallback;
+}
+
+async function inspectConversationDependencies(client, { onStage = () => {} } = {}) {
+  onStage('CLASSIFY_DEPENDENCIES');
   const columns = await client.query(
     `SELECT table_name
        FROM information_schema.columns
@@ -95,23 +107,31 @@ async function inspectConversationDependencies(client) {
     fail('STAGING_RESET_CONVERSATION_DEPENDENCY_MISMATCH', { dependency: safeTableName(unknown[0] ?? missing[0]) });
   }
 
-  const foreignKeys = await client.query(
-    `SELECT child.relname AS dependent_table, parent.relname AS referenced_table
+  const foreignKeys = [];
+  const rootTables = [
+    ['conversations', 'LOAD_REVERSE_FK_METADATA_CONVERSATIONS'],
+    ['conversation_messages', 'LOAD_REVERSE_FK_METADATA_MESSAGES'],
+    ['conversation_resources', 'LOAD_REVERSE_FK_METADATA_RESOURCES'],
+    ['conversation_audit_events', 'LOAD_REVERSE_FK_METADATA_AUDIT_EVENTS'],
+  ];
+  for (const [rootTable, stage] of rootTables) {
+    onStage(stage);
+    const result = await client.query(
+      `SELECT child.relname AS dependent_table, parent.relname AS referenced_table
        FROM pg_constraint constraint
        JOIN pg_class child ON child.oid = constraint.conrelid
        JOIN pg_class parent ON parent.oid = constraint.confrelid
        JOIN pg_namespace namespace ON namespace.oid = child.relnamespace
       WHERE constraint.contype = 'f'
         AND namespace.nspname = current_schema()
-        AND constraint.confrelid IN (
-          'conversations'::regclass,
-          'conversation_messages'::regclass,
-          'conversation_resources'::regclass,
-          'conversation_audit_events'::regclass
-        )
+        AND constraint.confrelid = to_regclass($1)
       ORDER BY parent.relname, child.relname`
-  );
-  const dependencies = foreignKeys.rows.map((row) => {
+      , [rootTable]
+    );
+    foreignKeys.push(...result.rows);
+  }
+  onStage('CLASSIFY_DEPENDENCIES');
+  const dependencies = foreignKeys.map((row) => {
     const dependentTable = safeTableName(row.dependent_table);
     const referencedTable = safeTableName(row.referenced_table);
     const edge = `${dependentTable}->${referencedTable}`;
@@ -172,7 +192,7 @@ async function countCrmDependencies(client, tenantId, conversationId, contactId)
     return { ...counts, crm_dependency_count: Object.values(counts).reduce((total, value) => total + value, 0) };
   } catch (error) {
     if (error instanceof StagingWhatsAppTestResetError) throw error;
-    fail('STAGING_RESET_CRM_DEPENDENCY_CHECK_FAILED');
+    fail('STAGING_RESET_CRM_DEPENDENCY_CHECK_FAILED', { error_category: databaseErrorCategory(error) });
   }
 }
 
@@ -241,14 +261,33 @@ export async function resetStagingWhatsAppTestConversation({ client, conversatio
   }
 }
 
-export async function inspectStagingWhatsAppTestConversation({ client, conversationId }) {
+export async function inspectStagingWhatsAppTestConversation({ client, conversationId, databaseName = null }) {
   if (!client?.query) fail('STAGING_RESET_CLIENT_REQUIRED');
   if (!UUID_PATTERN.test(conversationId ?? '')) fail('STAGING_RESET_TARGET_INVALID');
-  await client.query('BEGIN READ ONLY');
+  let inspectStage = 'BEGIN_TRANSACTION';
   try {
-    const dependencies = await inspectConversationDependencies(client);
+    await client.query('BEGIN');
+    inspectStage = 'SET_READ_ONLY';
+    await client.query('SET TRANSACTION READ ONLY');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw new StagingWhatsAppTestResetError('STAGING_RESET_INSPECT_FAILED', {
+      inspect_stage: inspectStage,
+      error_category: databaseErrorCategory(error, inspectStage === 'SET_READ_ONLY' ? 'READ_ONLY_TRANSACTION_ERROR' : 'UNKNOWN_DATABASE_ERROR'),
+    });
+  }
+  try {
+    inspectStage = 'VERIFY_DATABASE_IDENTITY';
+    if (databaseName) await verifyStagingDatabaseIdentity(client, databaseName);
+    inspectStage = 'LOAD_REVERSE_FK_METADATA_CONVERSATIONS';
+    const dependencies = await inspectConversationDependencies(client, { onStage: (stage) => { inspectStage = stage; } });
+    inspectStage = 'LOAD_TARGET_CONVERSATION';
     const target = await resolveTargetConversation(client, conversationId, { lock: false });
+    inspectStage = 'VERIFY_WHATSAPP_CHANNEL';
+    if (target.channel_type !== 'WHATSAPP') fail('STAGING_RESET_CHANNEL_REQUIRED');
+    inspectStage = 'LOAD_CRM_DEPENDENCY_COUNTS';
     const crmDependencies = await countCrmDependencies(client, target.tenant_id, conversationId, target.contact_id);
+    inspectStage = 'COMMIT_OR_ROLLBACK_READ_ONLY_INSPECTION';
     await client.query('ROLLBACK');
     return {
       result: 'INSPECTED',
@@ -260,6 +299,32 @@ export async function inspectStagingWhatsAppTestConversation({ client, conversat
     };
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
+    if (error instanceof StagingWhatsAppTestResetError && [
+      'STAGING_RESET_CONVERSATION_DEPENDENCY_MISMATCH',
+      'STAGING_RESET_FOREIGN_KEY_MISMATCH',
+    ].includes(error.code)) {
+      return {
+        result: 'INSPECTED',
+        channel: 'WHATSAPP',
+        resettable: false,
+        reason: 'UNKNOWN_SCHEMA_DEPENDENCY',
+        schema_dependencies: error.details?.dependency
+          ? [{ dependent_table: error.details.dependency, classification: 'UNKNOWN' }]
+          : [],
+      };
+    }
+    if (error instanceof StagingWhatsAppTestResetError && error.code === 'STAGING_RESET_CRM_DEPENDENCY_CHECK_FAILED') {
+      throw new StagingWhatsAppTestResetError('STAGING_RESET_INSPECT_FAILED', {
+        inspect_stage: inspectStage,
+        error_category: error.details?.error_category ?? 'UNKNOWN_DATABASE_ERROR',
+      });
+    }
+    if (!(error instanceof StagingWhatsAppTestResetError)) {
+      throw new StagingWhatsAppTestResetError('STAGING_RESET_INSPECT_FAILED', {
+        inspect_stage: inspectStage,
+        error_category: databaseErrorCategory(error, inspectStage.startsWith('LOAD_REVERSE_FK') ? 'FK_METADATA_QUERY_FAILED' : 'UNKNOWN_DATABASE_ERROR'),
+      });
+    }
     throw error;
   }
 }
@@ -281,6 +346,7 @@ export function safeResetFailureResult(error) {
     STAGING_RESET_CONVERSATION_DEPENDENCY_MISMATCH: 'UNEXPECTED_SCHEMA_DEPENDENCY',
     STAGING_RESET_FOREIGN_KEY_MISMATCH: 'UNEXPECTED_SCHEMA_DEPENDENCY',
     STAGING_RESET_TRANSACTION_FAILED: 'TRANSACTION_FAILED',
+    STAGING_RESET_INSPECT_FAILED: 'INSPECT_FAILED',
   };
   const databaseDependencyCodes = new Set(['42P01', '42703', '42883']);
   const result = {
@@ -289,6 +355,8 @@ export function safeResetFailureResult(error) {
   };
   if (error instanceof StagingWhatsAppTestResetError && error.details?.dependency) result.dependency = error.details.dependency;
   if (error instanceof StagingWhatsAppTestResetError && error.details?.mutation_stage) result.mutation_stage = error.details.mutation_stage;
+  if (error instanceof StagingWhatsAppTestResetError && error.details?.inspect_stage) result.inspect_stage = error.details.inspect_stage;
+  if (error instanceof StagingWhatsAppTestResetError && error.details?.error_category) result.error_category = error.details.error_category;
   return result;
 }
 
@@ -299,10 +367,9 @@ export async function main({ env = process.env, argv = process.argv.slice(2), Po
   const pool = new PoolConstructor({ connectionString, ssl: { rejectUnauthorized: false } });
   const client = await pool.connect();
   try {
-    await verifyStagingDatabaseIdentity(client, databaseName);
     const summary = mode === 'inspect'
-      ? await inspectStagingWhatsAppTestConversation({ client, conversationId })
-      : await resetStagingWhatsAppTestConversation({ client, conversationId });
+      ? await inspectStagingWhatsAppTestConversation({ client, conversationId, databaseName })
+      : (await verifyStagingDatabaseIdentity(client, databaseName), await resetStagingWhatsAppTestConversation({ client, conversationId }));
     console.log(formatSafeResetSummary(summary));
   } finally {
     client.release();

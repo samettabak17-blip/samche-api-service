@@ -177,8 +177,70 @@ test('read-only inspection reports only safe schema names and dependency counts'
   assert.equal(summary.resettable, false);
   assert.equal(summary.reason, 'CRM_DEPENDENCIES_PRESENT');
   assert.equal(summary.crm_activities, 2);
-  assert.equal(client.calls[0].sql, 'BEGIN READ ONLY');
+  assert.equal(client.calls[0].sql, 'BEGIN');
+  assert.equal(client.calls[1].sql, 'SET TRANSACTION READ ONLY');
   assert.equal(client.calls.at(-1).sql, 'ROLLBACK');
+  assert.equal(client.calls.some((call) => call.sql.startsWith('DELETE')), false);
+});
+
+test('inspect reports a safe database-identity failure stage', async () => {
+  const client = fakeClient();
+  const originalQuery = client.query.bind(client);
+  client.query = async (sql, params) => {
+    if (sql === 'SELECT current_database() AS database_name, current_schema() AS schema_name') {
+      client.calls.push({ sql, params });
+      throw { code: '42501' };
+    }
+    return originalQuery(sql, params);
+  };
+  await assert.rejects(
+    () => inspectStagingWhatsAppTestConversation({ client, conversationId: selectedConversationId, databaseName: 'staging_db' }),
+    (error) => error.code === 'STAGING_RESET_INSPECT_FAILED' && error.details.inspect_stage === 'VERIFY_DATABASE_IDENTITY' && error.details.error_category === 'PERMISSION_DENIED'
+  );
+  assert.equal(client.calls.some((call) => call.sql.startsWith('DELETE')), false);
+});
+
+test('inspect reports a safe CRM dependency-query failure stage', async () => {
+  const client = fakeClient();
+  const originalQuery = client.query.bind(client);
+  client.query = async (sql, params) => {
+    if (sql.includes('WITH selected_leads AS')) {
+      client.calls.push({ sql, params });
+      throw { code: '42P01' };
+    }
+    return originalQuery(sql, params);
+  };
+  await assert.rejects(
+    () => inspectStagingWhatsAppTestConversation({ client, conversationId: selectedConversationId }),
+    (error) => error.code === 'STAGING_RESET_INSPECT_FAILED' && error.details.inspect_stage === 'LOAD_CRM_DEPENDENCY_COUNTS' && error.details.error_category === 'UNDEFINED_TABLE'
+  );
+  assert.equal(client.calls.some((call) => call.sql.startsWith('DELETE')), false);
+});
+
+test('inspect reports a safe reverse-FK metadata failure stage', async () => {
+  const client = fakeClient();
+  const originalQuery = client.query.bind(client);
+  client.query = async (sql, params) => {
+    if (sql.includes('FROM pg_constraint') && params?.[0] === 'conversation_resources') {
+      client.calls.push({ sql, params });
+      throw { code: '42703' };
+    }
+    return originalQuery(sql, params);
+  };
+  await assert.rejects(
+    () => inspectStagingWhatsAppTestConversation({ client, conversationId: selectedConversationId }),
+    (error) => error.code === 'STAGING_RESET_INSPECT_FAILED' && error.details.inspect_stage === 'LOAD_REVERSE_FK_METADATA_RESOURCES' && error.details.error_category === 'UNDEFINED_COLUMN'
+  );
+  assert.equal(client.calls.some((call) => call.sql.startsWith('DELETE')), false);
+});
+
+test('an absent optional schema table becomes a non-resettable inspection result', async () => {
+  const client = fakeClient({ dependencies: expectedDependencyRows().filter((row) => row.table_name !== 'crm_lead_analyses') });
+  const summary = await inspectStagingWhatsAppTestConversation({ client, conversationId: selectedConversationId });
+  assert.deepEqual(summary, {
+    result: 'INSPECTED', channel: 'WHATSAPP', resettable: false, reason: 'UNKNOWN_SCHEMA_DEPENDENCY',
+    schema_dependencies: [{ dependent_table: 'crm_lead_analyses', classification: 'UNKNOWN' }],
+  });
   assert.equal(client.calls.some((call) => call.sql.startsWith('DELETE')), false);
 });
 
