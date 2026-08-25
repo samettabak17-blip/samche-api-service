@@ -92,6 +92,7 @@ export function buildWhatsAppTenantModelContext({ tenant, history = [], customer
     historyText || '(none)',
     'Current customer message:',
     bounded(customerText, 6000),
+    `CURRENT_TURN_RESPONSE_LANGUAGE_LOCK: ${responseLanguageName(communicationLanguage)}. Answer this turn naturally in ${responseLanguageName(communicationLanguage)}. The current customer message and this runtime lock control output language; historical messages must not override it.`,
   ].join('\n');
 
   return { systemInstruction, userPrompt, firstResponse, currentIntent };

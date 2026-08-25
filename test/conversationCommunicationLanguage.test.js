@@ -85,3 +85,14 @@ test('a language switch never makes a conversation first-contact state again', (
   assert.equal(resolveWhatsAppCommunicationLanguage({ currentLanguage: 'ar', content: 'Hello, I need company setup information.' }), 'en');
   assert.equal(resolveWhatsAppCommunicationLanguage({ currentLanguage: 'en', content: 'selam, şirket kurmak istiyorum' }), 'tr');
 });
+
+
+test('a realistic substantive English turn overrides Arabic conversation language before prompt construction', () => {
+  assert.equal(
+    resolveWhatsAppCommunicationLanguage({
+      currentLanguage: 'ar',
+      content: 'Can you explain the company setup costs and visa options in English?',
+    }),
+    'en'
+  );
+});

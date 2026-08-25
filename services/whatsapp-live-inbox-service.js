@@ -312,7 +312,14 @@ export async function persistWhatsAppInbound({
       currentLanguage: conversation.communication_language,
       content,
     });
-    if (resolvedCommunicationLanguage !== (conversation.communication_language ?? 'und')) {
+    const previousCommunicationLanguage = conversation.communication_language ?? 'und';
+    const communicationLanguageChanged = resolvedCommunicationLanguage !== previousCommunicationLanguage;
+    console.info(
+      'WHATSAPP_COMMUNICATION_LANGUAGE previous=' + previousCommunicationLanguage +
+      ' resolved=' + resolvedCommunicationLanguage +
+      ' changed=' + (communicationLanguageChanged ? '1' : '0')
+    );
+    if (communicationLanguageChanged) {
       await client.query(
         `UPDATE conversations
             SET communication_language = $1,

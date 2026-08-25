@@ -45,3 +45,17 @@ test('resolved Turkish language is mandatory even when tenant knowledge is Engli
   assert.match(prompt, /MANDATORY RESPONSE LANGUAGE: Turkish/);
   assert.match(prompt, /Never answer with only a generic greeting/);
 });
+
+
+test('a clear English turn after Arabic history uses a current-turn English lock without another introduction', () => {
+  const prompt = buildWhatsAppTenantPrompt({
+    tenant,
+    history: [{ sender_type: 'CUSTOMER', content: 'أريد معلومات' }, { sender_type: 'ASSISTANT', content: 'مرحبًا' }],
+    customerText: 'Can you explain the company setup costs and visa options in English?',
+    communicationLanguage: 'en',
+  });
+  assert.match(prompt, /MANDATORY RESPONSE LANGUAGE: English/);
+  assert.match(prompt, /CURRENT_TURN_RESPONSE_LANGUAGE_LOCK: English/);
+  assert.match(prompt, /SUBSEQUENT_RESPONSE:/);
+  assert.doesNotMatch(prompt, /FIRST_RESPONSE:/);
+});
