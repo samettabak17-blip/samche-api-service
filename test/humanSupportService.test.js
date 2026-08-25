@@ -26,10 +26,20 @@ test('customer-requested support persists one unresolved attention state and sup
   });
   assert.equal(result.duplicate, false);
   assert.equal(result.conversation.handling_mode, 'HUMAN');
-  assert.ok(fixture.calls.some(({ sql }) => sql.includes("human_attention_state = 'REQUESTED'")));
+  assert.ok(fixture.calls.some(({ sql }) =>
+    sql.includes("human_attention_state = 'REQUESTED'")
+    && sql.includes('human_attention_requested_at = CURRENT_TIMESTAMP')
+    && sql.includes('human_support_started_at = CURRENT_TIMESTAMP')
+    && sql.includes('human_support_last_activity_at = CURRENT_TIMESTAMP')
+  ));
   assert.ok(fixture.calls.some(({ sql }) => sql.includes("INSERT INTO conversation_messages")));
-  assert.ok(fixture.calls.some(({ sql }) => sql.includes('HANDOFF_REQUESTED')));
-  assert.ok(fixture.calls.some(({ sql }) => sql.includes('HUMAN_SUPPORT_REQUESTED')));
+
+  const auditCall = fixture.calls.find(({ sql }) => sql.includes('INSERT INTO conversation_audit_events'));
+  assert.equal(auditCall?.params?.[2], 'HANDOFF_REQUESTED');
+
+  const attentionEvent = fixture.calls.find(({ sql }) => sql.includes('SELECT pg_notify'));
+  assert.equal(attentionEvent?.params?.[0], 'samche_live_events');
+  assert.equal(JSON.parse(attentionEvent?.params?.[1] ?? '{}').type, 'HUMAN_SUPPORT_REQUESTED');
 });
 
 test('repeated customer support request does not duplicate attention or lifecycle messages', async () => {
