@@ -6,6 +6,7 @@ const { Pool } = pg;
 const connectionString = process.env.STAGING_DATABASE_URL;
 const tenantId = process.env.STAGING_WHATSAPP_TENANT_ID;
 const phoneNumberId = process.env.STAGING_WHATSAPP_PHONE_ID;
+const tenantDisplayName = process.env.STAGING_WHATSAPP_TENANT_NAME;
 const integrationKey = phoneNumberId ? 'WHATSAPP:' + phoneNumberId : null;
 const runtimeAssistant = { name: 'SamChe AI', model: 'gemini-2.5-pro' };
 const legacyRuntimeAssistantName = 'SamChe WhatsApp Runtime';
@@ -25,7 +26,7 @@ const masterPolicyRawSha256 = createHash('sha256').update(masterPolicy, 'utf8').
 const masterPolicyCanonicalSha256 = createHash('sha256').update(masterPolicyCanonical, 'utf8').digest('hex');
 const expectedMasterPolicyCanonicalSha256 = 'c72bc5787e31ee788431fcb7b73a6f1f72fb3471c3910a00e87005d389edaf58';
 
-if (!connectionString || !tenantId || !phoneNumberId) {
+if (!connectionString || !tenantId || !phoneNumberId || !tenantDisplayName) {
   console.error('WHATSAPP_MAPPING: CONFIGURATION_REQUIRED');
   process.exit(1);
 }
@@ -143,8 +144,14 @@ try {
   try {
     await client.query('BEGIN');
     await client.query("SELECT pg_advisory_xact_lock(hashtext('whatsapp-bootstrap:' || $1::text))", [tenantId]);
-    const tenant = await client.query('SELECT id FROM tenants WHERE id = $1 AND status = $2 FOR UPDATE', [tenantId, 'active']);
+    const tenant = await client.query('SELECT id, name FROM tenants WHERE id = $1 AND status = $2 FOR UPDATE', [tenantId, 'active']);
     if (tenant.rowCount !== 1) fail('TENANT_NOT_FOUND');
+    if (tenant.rows[0].name !== tenantDisplayName) {
+      await client.query(
+        'UPDATE tenants SET name = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND status = $3',
+        [tenantDisplayName, tenantId, 'active']
+      );
+    }
 
     const assistant = await resolveAssistant(client);
     const channel = await resolveChannel(client, assistant.assistant.id);
@@ -180,7 +187,7 @@ try {
     const verifiedPolicyCanonicalSha256 = row
       ? createHash('sha256').update(verifiedPolicyCanonical, 'utf8').digest('hex')
       : null;
-    if (!row || row.tenant_id !== tenantId || row.channel_id !== channel.channel.id ||
+    if (!row || tenantDisplayName !== (await client.query('SELECT name FROM tenants WHERE id = $1', [tenantId])).rows[0]?.name || row.tenant_id !== tenantId || row.channel_id !== channel.channel.id ||
         row.assistant_id !== assistant.assistant.id || row.enabled !== true ||
         row.channel_type !== 'WHATSAPP' || row.channel_status !== 'active' ||
         row.assistant_status !== 'active' || row.model !== runtimeAssistant.model ||

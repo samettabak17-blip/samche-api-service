@@ -48,6 +48,8 @@ export function ConversationsPage() {
     void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversations'] });
     if (conversationId) {
       void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation', conversationId] });
+      void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'messages', conversationId] });
+      void queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'conversation-events', conversationId] });
     }
   };
 
