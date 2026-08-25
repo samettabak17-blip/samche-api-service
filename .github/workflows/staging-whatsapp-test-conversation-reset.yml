@@ -1,0 +1,46 @@
+name: Staging WhatsApp Test Conversation Reset
+
+on:
+  workflow_dispatch:
+    inputs:
+      conversation_id:
+        description: Explicit staging WhatsApp conversation UUID to delete and recreate on next inbound message
+        required: true
+        type: string
+      confirmation:
+        description: Type RESET-STAGING-TEST-CONVERSATION exactly
+        required: true
+        type: string
+
+jobs:
+  reset:
+    if: github.ref == 'refs/heads/staging'
+    environment: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      STAGING_RESET_ENVIRONMENT: staging
+    steps:
+      - name: Checkout selected staging commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install repository dependencies
+        run: npm install --omit=dev --no-audit --no-fund
+
+      - name: Validate reset utility syntax
+        run: node --check scripts/reset_staging_whatsapp_test_conversation.js
+
+      - name: Reset one explicitly selected staging WhatsApp test conversation
+        env:
+          RESET_CONVERSATION_ID: ${{ inputs.conversation_id }}
+          RESET_CONFIRMATION: ${{ inputs.confirmation }}
+        run: node scripts/reset_staging_whatsapp_test_conversation.js --conversation-id "$RESET_CONVERSATION_ID" --confirm-staging "$RESET_CONFIRMATION"
+
