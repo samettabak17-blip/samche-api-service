@@ -93,6 +93,27 @@ test('only the explicit selected WhatsApp conversation and its dependencies are 
   for (const call of deletes) assert.equal(call.params.includes(otherConversationId), false);
   assert.ok(deletes.findIndex((call) => call.sql.includes('conversation_resources')) < deletes.findIndex((call) => call.sql.includes('conversation_messages')));
   assert.ok(deletes.findIndex((call) => call.sql.includes('conversation_messages')) < deletes.findIndex((call) => call.sql.includes('DELETE FROM conversations')));
+  for (const call of deletes) {
+    assert.match(call.sql, /tenant_id = \$1/);
+    assert.equal(call.params[0], 'tenant-a');
+  }
+});
+
+test('a failed final deletion rolls back the whole reset transaction', async () => {
+  const client = fakeClient();
+  const originalQuery = client.query.bind(client);
+  client.query = async (sql, params) => {
+    if (sql.startsWith('DELETE FROM conversations')) {
+      client.calls.push({ sql, params });
+      return { rowCount: 0, rows: [] };
+    }
+    return originalQuery(sql, params);
+  };
+  await assert.rejects(
+    () => resetStagingWhatsAppTestConversation({ client, conversationId: selectedConversationId }),
+    /STAGING_RESET_CONVERSATION_DELETE_FAILED/
+  );
+  assert.equal(client.calls.at(-1).sql, 'ROLLBACK');
 });
 
 test('safe reset output contains counts only and never serializes a target identifier', () => {
