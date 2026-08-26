@@ -12,6 +12,7 @@ test('uploads a validated WhatsApp image then sends it using the mapped phone nu
   }});
   assert.equal(result.delivery, 'SENT_TO_WHATSAPP');
   assert.equal(result.mediaId, 'meta-upload-1');
+  assert.equal(result.providerMessageId, 'wamid.agent-media-1');
   assert.equal(calls.length, 2);
   assert.match(calls[0].url, /\/948536645017374\/media$/);
   assert.deepEqual(calls[1].body, { messaging_product: 'whatsapp', to: '15551234567', type: 'image', image: { id: 'meta-upload-1', caption: 'Please review this.' } });
@@ -29,4 +30,11 @@ test('rejects a phone-number mismatch before attempting provider upload', async 
   let calls = 0;
   await assert.rejects(deliverWhatsAppMedia({ phoneNumberId: 'other-number', recipient: 'whatsapp:15551234567', file, env, httpClient: { async post() { calls += 1; } } }), (error) => error instanceof WhatsAppDeliveryError && error.code === 'WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH');
   assert.equal(calls, 0);
+});
+
+
+test('does not report media sent when Graph accepts the request without a WhatsApp message identifier', async () => {
+  await assert.rejects(deliverWhatsAppMedia({ phoneNumberId: '948536645017374', recipient: 'whatsapp:15551234567', file, env, httpClient: {
+    async post(url) { return url.endsWith('/media') ? { data: { id: 'meta-upload-1' } } : { data: { messages: [] } }; },
+  }}), (error) => error instanceof WhatsAppDeliveryError && error.code === 'WHATSAPP_MEDIA_SEND_UNCORRELATED');
 });
