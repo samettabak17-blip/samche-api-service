@@ -44,7 +44,7 @@ test('dashboard analytics sends each SQL aggregate only the parameters it refere
     [{ total_conversations: 0, previous_conversations: 0, new_leads: 0 }], [], [], [], [], [], [], [],
   ];
   const query = async (sql, params) => {
-    const placeholders = [...sql.matchAll(/\\$(\\d+)/g)].map((match) => Number(match[1]));
+    const placeholders = [...sql.matchAll(/\$(\d+)/g)].map((match) => Number(match[1]));
     assert.equal(params.length, Math.max(...placeholders), 'each SQL statement receives its exact parameter arity');
     return { rows: rows.shift() ?? [] };
   };
