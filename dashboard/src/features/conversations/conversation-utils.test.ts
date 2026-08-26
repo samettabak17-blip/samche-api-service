@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canTakeOverConversation, clearSentAgentDraft, displayConversationCustomerIdentifier, isInlinePreviewableAttachment, isVoiceResource, voiceResourceDisplayLabel, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel } from './conversation-utils';
+import { canTakeOverConversation, clearSentAgentDraft, displayConversationCustomerIdentifier, isInlinePreviewableAttachment, isVoiceResource, voiceResourceDisplayLabel, resourceDisplayName, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel } from './conversation-utils';
 
 describe('conversation sender presentation', () => {
   it('maps every backend sender type to a distinct safe label', () => {
@@ -75,5 +75,18 @@ describe('WhatsApp voice-resource presentation', () => {
     expect(isVoiceResource({ media_category: 'AUDIO', mime_type: 'audio/ogg' })).toBe(true);
     expect(isVoiceResource({ media_category: 'DOCUMENT', mime_type: 'application/pdf' })).toBe(false);
     expect(voiceResourceDisplayLabel({ original_filename: 'whatsapp-voice-wamid.HBgMOT...ogg', mime_type: 'audio/ogg' })).toBe('Voice message');
+  });
+});
+
+
+describe('canonical resource display names', () => {
+  it('never exposes generated provider identifiers as attachment names', () => {
+    expect(resourceDisplayName({ original_filename: 'whatsapp-image-wamid.HBgMOTcxNTAxNzkzODgwFQIAEhgUM0FBM0...jpg', mime_type: 'image/jpeg' })).toBe('Image.jpg');
+    expect(resourceDisplayName({ original_filename: 'resource-8d765634-0b91-41d8-b4e9-0914c5e973ea', mime_type: 'application/pdf' })).toBe('Document.pdf');
+  });
+  it('retains a genuine uploaded filename and uses clean type fallbacks only when necessary', () => {
+    expect(resourceDisplayName({ original_filename: 'Business setup.pdf', mime_type: 'application/pdf' })).toBe('Business setup.pdf');
+    expect(resourceDisplayName({ original_filename: null, mime_type: 'image/png' })).toBe('Image.png');
+    expect(resourceDisplayName({ original_filename: null, mime_type: 'audio/ogg' })).toBe('Voice message');
   });
 });
