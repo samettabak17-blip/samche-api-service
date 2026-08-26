@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bot, BookOpenText, ChevronLeft, ChevronRight, CircleX, Download, ExternalLink, FileText, Headphones, Image as ImageIcon, MessageSquareText, MoreHorizontal, Pause, Search, Send, X } from 'lucide-react';
+import { Bot, BookOpenText, CircleX, Download, ExternalLink, FileText, Headphones, Image as ImageIcon, MessageSquareText, MoreHorizontal, Pause, Search, Send, X } from 'lucide-react';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { EmptyState, QueryErrorState, SkeletonBlock } from '../../components/ui/async-state';
@@ -12,7 +12,7 @@ import { canTakeOverConversation, canUseHumanReplyComposer, clearSentAgentDraft,
 import { useLiveSupportAttention } from '../live-support/live-support-attention-provider';
 import { SafeRichMessage } from './safe-rich-message';
 import { useTenantConversationLiveEvents } from './use-live-conversation-events';
-import { conversationCapabilities, type ConversationCapabilityKey, workspaceVisualIdentity } from './conversation-workspace-config';
+import { conversationCapabilities, conversationListLoadMoreLabel, type ConversationCapabilityKey, workspaceVisualIdentity } from './conversation-workspace-config';
 
 const pageSize = 25;
 const messagePageSize = 50;
@@ -33,7 +33,7 @@ export function ConversationsPage() {
   const queryClient = useQueryClient();
   const tenantId = selectedTenant?.id ?? '';
   const channelContext: { type: 'WEB_CHAT' | 'SAMCHEGUIDE' | 'WHATSAPP'; label: string } = channel === 'web-chat' ? { type: 'WEB_CHAT', label: 'Web Chatbot' } : channel === 'guide' ? { type: 'SAMCHEGUIDE', label: 'AI Guide' } : { type: 'WHATSAPP', label: 'WhatsApp' };
-  const [offset, setOffset] = useState(0);
+  const [conversationLimit, setConversationLimit] = useState(pageSize);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [content, setContent] = useState('');
@@ -55,8 +55,8 @@ export function ConversationsPage() {
   }, [conversationId]);
 
   const conversationsQuery = useQuery({
-    queryKey: [...tenantKeys.conversations(tenantId, pageSize, offset), channelContext.type, search, statusFilter],
-    queryFn: () => tenantApi.listConversations(tenantId, { limit: pageSize, offset }, { channelType: channelContext.type, search, status: statusFilter === 'all' ? undefined : statusFilter }),
+    queryKey: [...tenantKeys.conversations(tenantId, conversationLimit, 0), channelContext.type, search, statusFilter],
+    queryFn: () => tenantApi.listConversations(tenantId, { limit: conversationLimit, offset: 0 }, { channelType: channelContext.type, search, status: statusFilter === 'all' ? undefined : statusFilter }),
     enabled: Boolean(tenantId),
   });
   const conversationQuery = useQuery({ queryKey: tenantKeys.conversation(tenantId, conversationId ?? ''), queryFn: () => tenantApi.getConversation(tenantId, conversationId ?? ''), enabled: Boolean(tenantId && conversationId) });
@@ -198,9 +198,9 @@ export function ConversationsPage() {
     </section>
     <div className="grid h-[calc(100vh-14rem)] min-h-[38rem] gap-2 xl:grid-cols-[minmax(17rem,21rem)_minmax(0,1fr)_minmax(18rem,22rem)]">
       <section className={'dashboard-card flex min-h-0 flex-col overflow-hidden rounded-lg ' + (conversationId ? 'hidden xl:flex' : '')}>
-        <header className="border-b border-line bg-elevated/35 px-4 py-3.5"><div className="flex items-center justify-between gap-3"><div><p className="font-semibold text-ink">{channelContext.label}</p><p className="mt-1 text-xs text-stone-400">Most recent activity first</p></div><span className="rounded border border-white/10 px-2 py-1 text-[10px] text-stone-400">{conversations.length}</span></div><label className="relative mt-4 block"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" size={15} /><input value={search} onChange={(event) => { setSearch(event.target.value); setOffset(0); }} className="field w-full !py-2 !pl-9 text-xs" placeholder="Search conversations" aria-label="Search conversations" /></label><div className="mt-3 flex gap-1.5" role="group" aria-label="Conversation status filters">{(['all', 'open', 'closed'] as const).map((value) => <button type="button" key={value} onClick={() => { setStatusFilter(value); setOffset(0); }} className={'rounded-md px-2.5 py-1 text-[10px] font-medium capitalize ' + (statusFilter === value ? 'bg-[#159b61] text-white' : 'border border-white/10 text-stone-400 hover:bg-white/[.04]')}>{value}</button>)}</div></header>
+        <header className="border-b border-line bg-elevated/35 px-4 py-3.5"><div className="flex items-center justify-between gap-3"><div><p className="font-semibold text-ink">{channelContext.label}</p><p className="mt-1 text-xs text-stone-400">Most recent activity first</p></div><span className="rounded border border-white/10 px-2 py-1 text-[10px] text-stone-400">{conversations.length}</span></div><label className="relative mt-4 block"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" size={15} /><input value={search} onChange={(event) => { setSearch(event.target.value); setConversationLimit(pageSize); }} className="field w-full !py-2 !pl-9 text-xs" placeholder="Search conversations" aria-label="Search conversations" /></label><div className="mt-3 flex gap-1.5" role="group" aria-label="Conversation status filters">{(['all', 'open', 'closed'] as const).map((value) => <button type="button" key={value} onClick={() => { setStatusFilter(value); setConversationLimit(pageSize); }} className={'rounded-md px-2.5 py-1 text-[10px] font-medium capitalize ' + (statusFilter === value ? 'bg-[#159b61] text-white' : 'border border-white/10 text-stone-400 hover:bg-white/[.04]')}>{value}</button>)}</div></header>
         <div className="min-h-0 flex-1 overflow-y-auto bg-[#09111B]">{conversations.length === 0 ? <div className="p-5"><EmptyState title="No conversations yet" description="Connected channel traffic will appear here." icon={<MessageSquareText size={20} />} /></div> : <ul className="divide-y divide-line">{conversations.map((item) => <li key={item.id}><Link to={'/app/' + tenantId + '/conversations/' + channel + '/' + item.id} className={'block border-l-2 border-transparent px-4 py-3 transition hover:bg-white/[0.035] ' + (item.id === conversationId ? 'border-signal bg-elevated/80 ' : '') + (item.human_attention_state === 'REQUESTED' ? 'border-red-400 bg-red-500/10 ring-1 ring-inset ring-red-400/30' : '')}><div className="flex justify-between gap-2"><div className="min-w-0"><p className="truncate text-sm font-medium text-ink">{displayConversationCustomerIdentifier(item.customer_external_id || item.external_conversation_id)}</p><p className="mt-1 truncate text-xs text-stone-400">{item.last_message_preview || item.channel_display_name || 'No message preview'}</p></div><time className="shrink-0 text-[11px] text-stone-500">{formatDateTime(item.last_activity_at || item.created_at)}</time></div><div className="mt-3 flex gap-1.5"><span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-stone-300">{handlingLabel(item.handling_mode)}</span>{item.human_attention_state === 'REQUESTED' && <span className="rounded border border-red-400/40 bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold tracking-[0.1em] text-red-200">LIVE SUPPORT</span>}</div></Link></li>)}</ul>}</div>
-        <footer className="flex justify-between border-t border-line bg-elevated/35 px-3 py-2.5"><button type="button" onClick={() => setOffset((value) => Math.max(0, value - pageSize))} disabled={offset === 0} className="text-xs text-stone-400 disabled:opacity-40"><ChevronLeft className="inline" size={14} /> Previous</button><button type="button" onClick={() => setOffset((value) => value + pageSize)} disabled={conversations.length < pageSize} className="text-xs text-stone-400 disabled:opacity-40">Next <ChevronRight className="inline" size={14} /></button></footer>
+        <footer className="flex justify-center border-t border-line bg-elevated/35 px-3 py-2.5">{conversations.length >= conversationLimit && <button type="button" onClick={() => setConversationLimit((limit) => limit + pageSize)} className="rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-stone-300 transition hover:border-white/20 hover:bg-white/[.04]">{conversationListLoadMoreLabel}</button>}</footer>
       </section>
 
       <section className={'dashboard-card flex min-h-[42rem] flex-col overflow-hidden rounded-lg ' + (!conversationId ? 'hidden xl:flex' : '')}>
