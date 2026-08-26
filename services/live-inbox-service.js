@@ -611,7 +611,9 @@ export async function appendAgentMessage({
     );
     traceStage('ATTENTION_ACK_SUCCEEDED');
     if (acknowledgement.rowCount === 1) {
+      traceStage('ATTENTION_ACK_AUDIT_STARTED');
       await writeAuditEvent(client, { tenantId, conversationId, actorUserId: actor.userId, eventType: 'HUMAN_SUPPORT_ACKNOWLEDGED', metadata: { source: 'AGENT_MESSAGE' } });
+      traceStage('ATTENTION_ACK_AUDIT_SUCCEEDED');
       await notify(client, tenantId, conversationId, 'HUMAN_SUPPORT_ACKNOWLEDGED');
     }
     await notify(client, tenantId, conversationId, 'AGENT_MESSAGE');
