@@ -24,7 +24,7 @@ export const tenantKeys = {
   deals: (tenantId: string, filters: string) => ['tenant', tenantId, 'deals', filters] as const,
   deal: (tenantId: string, dealId: string) => ['tenant', tenantId, 'deal', dealId] as const,
   crmOverview: (tenantId: string) => ['tenant', tenantId, 'crm-overview'] as const,
-  dashboardOverview: (tenantId: string, days: number) => ['tenant', tenantId, 'dashboard-overview', days] as const,
+  dashboardOverview: (tenantId: string, startDate: string, endDate: string) => ['tenant', tenantId, 'dashboard-overview', startDate, endDate] as const,
 };
 export interface LeadFilters { limit: number; offset: number; temperature?: string; stage?: string; source?: string; assigned_user_id?: string; conversation_id?: string; }
 export interface DealFilters { limit: number; offset: number; stage?: string; contact_id?: string; owner_user_id?: string; status?: string; source?: string; include_archived?: boolean; }
@@ -76,7 +76,7 @@ export const tenantApi = {
   listPipelines: (tenantId: string) => apiClient.get<CrmPipelineStage[]>(`${tenantRoot(tenantId)}/pipelines`),
   listPipelineSummary: (tenantId: string) => apiClient.get<CrmPipelineSummary[]>(`${tenantRoot(tenantId)}/pipelines/summary`),
   getCrmOverview: (tenantId: string) => apiClient.get<CrmOverviewMetrics>(`${tenantRoot(tenantId)}/crm/overview`),
-  getDashboardOverview: (tenantId: string, days: number) => apiClient.get<DashboardOverview>(`${tenantRoot(tenantId)}/dashboard/overview?days=${days}`),
+  getDashboardOverview: (tenantId: string, range: { startDate: string; endDate: string }) => apiClient.get<DashboardOverview>(`${tenantRoot(tenantId)}/dashboard/overview?${new URLSearchParams({ start_date: range.startDate, end_date: range.endDate }).toString()}`),
   listContacts: (tenantId: string, page: { limit: number; offset: number }) => apiClient.get<CrmContactList>(`${tenantRoot(tenantId)}/contacts?limit=${page.limit}&offset=${page.offset}`),
   getContact: (tenantId: string, contactId: string) => apiClient.get<CrmContact>(`${tenantRoot(tenantId)}/contacts/${contactId}`),
   listDeals: (tenantId: string, filters: DealFilters) => apiClient.get<CrmDealList>(`${tenantRoot(tenantId)}/deals?${dealQuery(filters)}`),
