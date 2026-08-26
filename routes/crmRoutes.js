@@ -5,6 +5,7 @@ import { isValidUUID } from '../middleware/validators.js';
 import { canOperateCrmLead, canWriteCrm } from '../services/crm-permissions.js';
 import { queueLeadQualification } from '../services/lead-qualification-runner.js';
 import { getCrmLeadDetail } from '../services/crm-lead-detail-service.js';
+import { getDashboardOverview, normalizeDashboardRange } from '../services/dashboard-analytics-service.js';
 import {
   getContact, getCrmOverviewMetrics, getDeal, getPipelineSummary, listCompanies, listContacts,
   listDeals, listLeads, listPipelineStages,
@@ -202,6 +203,10 @@ router.get('/:tenantId/pipelines/summary', requireTenantAccess, async (req, res)
 });
 router.get('/:tenantId/crm/overview', requireTenantAccess, async (req, res) => {
   try { return res.json(await getCrmOverviewMetrics(query, { tenantId: tenant(req) })); } catch (err) { return responseError(res, err); }
+});
+
+router.get('/:tenantId/dashboard/overview', requireTenantAccess, async (req, res) => {
+  try { return res.json(await getDashboardOverview(query, { tenantId: tenant(req), days: normalizeDashboardRange(req.query.days) })); } catch (err) { return responseError(res, err); }
 });
 
 router.get('/:tenantId/deals', requireTenantAccess, async (req, res) => {
