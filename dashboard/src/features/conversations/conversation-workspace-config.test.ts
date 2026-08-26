@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { conversationCapabilities, conversationOverflowActions } from './conversation-workspace-config';
+import { conversationCapabilities, conversationListLoadMoreLabel, conversationOverflowActions } from './conversation-workspace-config';
 
 describe('conversation workspace control hierarchy', () => {
   it('keeps the capability strip restricted to the three approved conversation resources', () => {
     expect(conversationCapabilities.map((item) => item.label)).toEqual(['Document Reading', 'Voice Messages', 'Images & Media']);
+  });
+
+  it('keeps the conversation list free of previous/next pagination labels', () => {
+    expect(conversationListLoadMoreLabel).toBe('Load more conversations');
   });
 
   it('keeps Pause AI and Close out of the primary capability strip', () => {
