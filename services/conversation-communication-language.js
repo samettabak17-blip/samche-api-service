@@ -112,6 +112,33 @@ export function isClearlySubstantiveWhatsAppMessage(content) {
  * transition. Greeting-only and ambiguous fragments retain the persisted
  * language; a clear substantive message may replace it.
  */
+/**
+ * A reliable customer language signal is distinct from substantive continuity:
+ * greetings such as "Merhaba" and "Hola" are valid future-media signals,
+ * while ambiguous fragments intentionally return null.
+ */
+export function inferReliableWhatsAppCustomerLanguage(content) {
+  const text = String(content ?? '').trim();
+  const inferred = inferConservativeWhatsAppLanguage(text);
+  if (inferred) return inferred;
+  if (/^(?:hola|gracias)\b/iu.test(text)) return 'es';
+  if (/^(?:bonjour|merci)\b/iu.test(text)) return 'fr';
+  if (/^(?:hallo|danke)\b/iu.test(text)) return 'de';
+  if (/^(?:ciao|grazie)\b/iu.test(text)) return 'it';
+  if (/^(?:olá|oi|obrigad[oa])\b/iu.test(text)) return 'pt';
+  return null;
+}
+
+export function resolveWhatsAppMediaResponseLanguage({ currentLanguage, lastReliableCustomerLanguage, caption }) {
+  const reliableCaption = inferReliableWhatsAppCustomerLanguage(caption);
+  if (String(caption ?? '').trim() && reliableCaption) {
+    return { language: resolveWhatsAppCommunicationLanguage({ currentLanguage, content: caption }), source: 'media_caption', detected: reliableCaption };
+  }
+  const reliable = normalizeCommunicationLanguage(lastReliableCustomerLanguage);
+  if (reliable) return { language: reliable, source: 'last_reliable_customer_language', detected: null };
+  return { language: normalizeCommunicationLanguage(currentLanguage) ?? 'en', source: 'persisted_language', detected: null };
+}
+
 export function resolveWhatsAppCommunicationLanguage({ currentLanguage, content }) {
   const current = normalizeCommunicationLanguage(currentLanguage) ?? 'und';
   const candidate = inferConservativeWhatsAppLanguage(content);

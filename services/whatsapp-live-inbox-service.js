@@ -6,7 +6,7 @@ import { extractDocumentText } from './conversation-document-extraction-service.
 import { buildConversationStorageKey, validateConversationUpload } from './conversation-resource-validation.js';
 import { buildGeminiImagePart, buildUntrustedDocumentContext, whatsappIntegrationKey } from './whatsapp-multimodal-service.js';
 import { waitForReadyResource } from './whatsapp-resource-retry.js';
-import { inferConservativeWhatsAppLanguage, resolveWhatsAppCommunicationLanguage } from './conversation-communication-language.js';
+import { inferConservativeWhatsAppLanguage, inferReliableWhatsAppCustomerLanguage, resolveWhatsAppCommunicationLanguage, resolveWhatsAppMediaResponseLanguage } from './conversation-communication-language.js';
 
 export class WhatsAppInboxError extends Error {
   constructor(code, message) {
@@ -309,25 +309,46 @@ export async function persistWhatsAppInbound({
     }
 
     const previousCommunicationLanguage = conversation.communication_language ?? 'und';
+    const previousReliableCustomerLanguage = conversation.last_reliable_customer_language ?? null;
     const detectedCommunicationLanguage = inferConservativeWhatsAppLanguage(content) ?? 'und';
     const resolvedCommunicationLanguage = resolveWhatsAppCommunicationLanguage({
       currentLanguage: conversation.communication_language,
       content,
     });
+    const reliableCustomerLanguage = inferReliableWhatsAppCustomerLanguage(content);
     const communicationLanguageChanged = resolvedCommunicationLanguage !== previousCommunicationLanguage;
     console.info(
       'WHATSAPP_COMMUNICATION_LANGUAGE previous=' + previousCommunicationLanguage +
       ' resolved=' + resolvedCommunicationLanguage +
       ' changed=' + (communicationLanguageChanged ? '1' : '0')
     );
-    if (communicationLanguageChanged) {
+    if (communicationLanguageChanged || reliableCustomerLanguage) {
       await client.query(
         `UPDATE conversations
-            SET communication_language = $1,
-                communication_language_updated_at = CURRENT_TIMESTAMP,
+            SET communication_language = CASE WHEN $1::boolean THEN $2 ELSE communication_language END,
+                communication_language_updated_at = CASE WHEN $1::boolean THEN CURRENT_TIMESTAMP ELSE communication_language_updated_at END,
+                last_reliable_customer_language = COALESCE($3, last_reliable_customer_language),
+                last_reliable_customer_language_at = CASE WHEN $3::text IS NULL THEN last_reliable_customer_language_at ELSE CURRENT_TIMESTAMP END,
                 updated_at = CURRENT_TIMESTAMP
-          WHERE id = $2 AND tenant_id = $3`,
-        [resolvedCommunicationLanguage, conversationId, integration.tenant_id]
+          WHERE id = $4 AND tenant_id = $5`,
+        [communicationLanguageChanged, resolvedCommunicationLanguage, reliableCustomerLanguage, conversationId, integration.tenant_id]
+      );
+    }
+    const mediaResponse = descriptor
+      ? resolveWhatsAppMediaResponseLanguage({
+        currentLanguage: resolvedCommunicationLanguage,
+        lastReliableCustomerLanguage: reliableCustomerLanguage ?? previousReliableCustomerLanguage,
+        caption: content,
+      })
+      : null;
+    if (mediaResponse) {
+      console.info(
+        'WHATSAPP_LANGUAGE_TRACE source=' + mediaResponse.source +
+        ' previous=' + previousCommunicationLanguage +
+        ' detected=' + (mediaResponse.detected ?? 'none') +
+        ' resolved=' + mediaResponse.language +
+        ' response_lock=' + mediaResponse.language +
+        ' media=1'
       );
     }
 
@@ -367,6 +388,7 @@ export async function persistWhatsAppInbound({
       deterministicTemplates: integration.assistant_whatsapp_response_templates,
       knowledge: knowledgeResult.rows.map((row) => row.content),
       communicationLanguage: resolvedCommunicationLanguage,
+      mediaResponseLanguage: mediaResponse?.language ?? resolvedCommunicationLanguage,
     };
     const isFirstAssistantResponse = !assistantHistoryResult.rows[0]?.has_assistant_response;
 
@@ -416,7 +438,7 @@ export async function persistWhatsAppInbound({
     queueLeadQualification({ tenantId: integration.tenant_id, conversationId });
     return {
       integration, conversation, customerMessage, resource, aiContextPart, aiContextParts, resourceContext, tenantContext, conversationHistory, isFirstAssistantResponse,
-      languageTrace: { previous: previousCommunicationLanguage, detected: detectedCommunicationLanguage, resolved: resolvedCommunicationLanguage, persisted: resolvedCommunicationLanguage },
+      languageTrace: { previous: previousCommunicationLanguage, detected: detectedCommunicationLanguage, resolved: resolvedCommunicationLanguage, persisted: resolvedCommunicationLanguage, mediaSource: mediaResponse?.source ?? null, mediaResponseLanguage: mediaResponse?.language ?? null },
       duplicate: false,
       shouldInvokeAi: conversation.status === 'open' && conversation.handling_mode === 'AI',
       handlingVersion: conversation.handling_version,

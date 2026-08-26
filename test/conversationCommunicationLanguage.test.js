@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   inferConservativeWhatsAppLanguage,
+  inferReliableWhatsAppCustomerLanguage,
   resolveWhatsAppCommunicationLanguage,
+  resolveWhatsAppMediaResponseLanguage,
 } from '../services/conversation-communication-language.js';
 
 test('current substantive multilingual language overrides stale persisted language without per-tenant rules', () => {
@@ -38,4 +40,13 @@ test('explicit current language instruction overrides stale history and ambiguou
 
 test('general language inference recognizes substantive Spanish rather than leaving it stale Turkish', () => {
   assert.equal(inferConservativeWhatsAppLanguage('Quiero obtener una visa de trabajador independiente'), 'es');
+});
+
+
+test('media-only turns use the last reliable customer signal rather than stale substantive history', () => {
+  assert.equal(inferReliableWhatsAppCustomerLanguage('Merhaba'), 'tr');
+  assert.equal(inferReliableWhatsAppCustomerLanguage('Hola'), 'es');
+  assert.equal(inferReliableWhatsAppCustomerLanguage('ok'), null);
+  assert.deepEqual(resolveWhatsAppMediaResponseLanguage({ currentLanguage: 'ar', lastReliableCustomerLanguage: 'tr', caption: '' }), { language: 'tr', source: 'last_reliable_customer_language', detected: null });
+  assert.deepEqual(resolveWhatsAppMediaResponseLanguage({ currentLanguage: 'tr', lastReliableCustomerLanguage: 'tr', caption: 'What does this document say?' }), { language: 'en', source: 'media_caption', detected: 'en' });
 });

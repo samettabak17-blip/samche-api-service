@@ -1433,7 +1433,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           descriptor: mediaDescriptor,
           shouldInvokeAi: whatsappInbox.shouldInvokeAi,
           duplicate: whatsappInbox.duplicate,
-          language: wpSessions[cleanFrom]?.lang ?? 'tr',
+          language: whatsappInbox.tenantContext?.mediaResponseLanguage ?? whatsappInbox.tenantContext?.communicationLanguage ?? 'en',
         });
         if (standaloneMediaPlan.action === 'ACKNOWLEDGE') {
           const acknowledgement = await persistAssistantResponseIfCurrent({

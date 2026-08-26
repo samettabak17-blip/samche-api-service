@@ -87,3 +87,9 @@ test('a standalone media message cannot invoke qualification when it has no cust
   assert.equal(providerCalls, 0);
 });
 
+
+
+test('standalone media acknowledgement uses the resolved media language rather than a session language', () => {
+  const plan = planStandaloneWhatsAppMediaResponse({ customerText: '', descriptor: { declaredMimeType: 'application/pdf' }, shouldInvokeAi: true, duplicate: false, language: 'tr' });
+  assert.match(plan.message, /Belgeniz alındı/);
+});
