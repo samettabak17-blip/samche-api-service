@@ -1,3 +1,5 @@
+import { inferConservativeWhatsAppLanguage, normalizeCommunicationLanguage } from './conversation-communication-language.js';
+
 export class WhatsAppTenantContextError extends Error {
   constructor(code) {
     super(code);
@@ -16,18 +18,21 @@ function bounded(value, limit) {
   return String(value ?? '').trim().slice(0, limit);
 }
 
+const RESPONSE_LANGUAGE_NAMES = {
+  tr: 'Turkish', en: 'English', ar: 'Arabic', es: 'Spanish', fr: 'French',
+  de: 'German', it: 'Italian', pt: 'Portuguese', ru: 'Russian',
+};
+
 function responseLanguageName(language) {
-  if (language === 'tr') return 'Turkish';
-  if (language === 'en') return 'English';
-  if (language === 'ar') return 'Arabic';
-  return 'the customer’s dominant established conversation language';
+  const normalized = normalizeCommunicationLanguage(language);
+  return RESPONSE_LANGUAGE_NAMES[normalized] ?? (normalized ? 'the language with BCP-47 code ' + normalized : 'the customer’s established conversation language');
 }
 
 function responseLanguageInstruction(language) {
-  if (language === 'tr') return 'Respond naturally in Turkish.';
-  if (language === 'en') return 'Respond naturally in English.';
-  if (language === 'ar') return 'Respond naturally in Arabic.';
-  return 'Respond in the customer’s dominant established conversation language.';
+  const normalized = normalizeCommunicationLanguage(language);
+  return normalized
+    ? 'Respond naturally and exclusively in ' + responseLanguageName(normalized) + ' (language code ' + normalized + ').'
+    : 'Respond in the customer’s established conversation language.';
 }
 
 const GREETING_ONLY = /^(?:merhaba|mrb|selam|slm|selamlar|selamun\s+aleykum|selamün\s+aleyküm|selamunaleykum|selamünaleyküm|s\.?\s*a\.?|sa|hello|hi|hey|مرحبا|السلام\s+عليكم)(?:[\s!,.?:;()\[\]{}…~*_😀-🙏]*)$/iu;
@@ -57,17 +62,11 @@ function firstResponseInstruction(firstResponse, currentIntent) {
 }
 
 export function detectWhatsAppModelResponseLanguage(content) {
-  const text = String(content ?? '').trim();
-  if (!text) return 'other';
-  const arabic = (text.match(/[\u0600-\u06FF]/gu) ?? []).length;
-  if (arabic >= 4) return 'ar';
-  if (/[ığüşöçİĞÜŞÖÇ]/u.test(text) || /\b(ve|için|ile|şirket|yardımcı|merhaba)\b/iu.test(text)) return 'tr';
-  const latinWords = text.match(/[A-Za-z]+/g) ?? [];
-  return latinWords.length >= 3 ? 'en' : 'other';
+  return inferConservativeWhatsAppLanguage(content) ?? 'other';
 }
 
 export function isWhatsAppResponseLanguageMismatch({ expectedLanguage, responseContent }) {
-  const expected = ['tr', 'en', 'ar'].includes(expectedLanguage) ? expectedLanguage : 'other';
+  const expected = normalizeCommunicationLanguage(expectedLanguage) ?? 'other';
   const detected = detectWhatsAppModelResponseLanguage(responseContent);
   return expected !== 'other' && detected !== 'other' && detected !== expected;
 }

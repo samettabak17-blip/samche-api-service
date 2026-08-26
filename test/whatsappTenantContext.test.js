@@ -66,3 +66,18 @@ test('detects a clear Arabic model output mismatch for a resolved English turn',
   assert.equal(isWhatsAppResponseLanguageMismatch({ expectedLanguage: 'en', responseContent: 'يمكنني مساعدتك في تأسيس الشركة' }), true);
   assert.equal(isWhatsAppResponseLanguageMismatch({ expectedLanguage: 'en', responseContent: 'I can explain the company setup costs and visa options.' }), false);
 });
+
+
+test('a resolved Spanish current turn builds a Spanish lock and detects stale Turkish output as non-compliant', () => {
+  const prompt = buildWhatsAppTenantPrompt({
+    tenant,
+    history: [{ sender_type: 'ASSISTANT', content: 'Merhaba' }],
+    customerText: 'Quiero obtener una visa de trabajador independiente',
+    communicationLanguage: 'es',
+  });
+  assert.match(prompt, /MANDATORY RESPONSE LANGUAGE: Spanish/);
+  assert.match(prompt, /CURRENT_TURN_RESPONSE_LANGUAGE_LOCK: Spanish/);
+  assert.match(prompt, /SUBSEQUENT_RESPONSE:/);
+  assert.equal(detectWhatsAppModelResponseLanguage('Şirket kurulumu için size yardımcı olabilirim.'), 'tr');
+  assert.equal(isWhatsAppResponseLanguageMismatch({ expectedLanguage: 'es', responseContent: 'Şirket kurulumu için size yardımcı olabilirim.' }), true);
+});
