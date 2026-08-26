@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
     steps:
       - uses: actions/checkout@v4
       - name: Install backend dependencies
