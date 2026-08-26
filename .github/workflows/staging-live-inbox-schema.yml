@@ -28,13 +28,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify operator permission rules
-        run: node --test tests/conversation-permissions.test.js tests/samcheguide-runtime.test.js
+        run: node --test tests/conversation-permissions.test.js tests/samcheguide-runtime.test.js test/dashboardAnalyticsService.test.js
       - name: Verify live inbox syntax
         run: |
           node --check app.js
           node --check routes/conversationRoutes.js
           node --check services/live-inbox-service.js
           node --check services/live-event-bus.js
+          node --check services/dashboard-analytics-service.js
           node --check scripts/acceptance_live_inbox.js
           node --check scripts/cleanup_live_inbox_fixture.js
           node --check scripts/bootstrap_samcheguide_mapping.js
