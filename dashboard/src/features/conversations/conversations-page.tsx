@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bot, BookOpenText, CircleX, Download, ExternalLink, FileText, Headphones, Image as ImageIcon, MessageSquareText, MoreHorizontal, Pause, Search, Send, X } from 'lucide-react';
+import { Bot, BookOpenText, ChevronLeft, ChevronRight, CircleX, Download, ExternalLink, FileText, Headphones, Image as ImageIcon, MessageSquareText, MoreHorizontal, Pause, Search, Send, X } from 'lucide-react';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { EmptyState, QueryErrorState, SkeletonBlock } from '../../components/ui/async-state';
@@ -32,7 +32,7 @@ export function ConversationsPage() {
   const { conversationId, channel } = useParams();
   const queryClient = useQueryClient();
   const tenantId = selectedTenant?.id ?? '';
-  const channelContext = channel === 'web-chat' ? { type: 'WEB_CHAT', label: 'Web Chatbot' } : channel === 'guide' ? { type: 'SAMCHEGUIDE', label: 'AI Guide' } : { type: 'WHATSAPP', label: 'WhatsApp' };
+  const channelContext: { type: 'WEB_CHAT' | 'SAMCHEGUIDE' | 'WHATSAPP'; label: string } = channel === 'web-chat' ? { type: 'WEB_CHAT', label: 'Web Chatbot' } : channel === 'guide' ? { type: 'SAMCHEGUIDE', label: 'AI Guide' } : { type: 'WHATSAPP', label: 'WhatsApp' };
   const [offset, setOffset] = useState(0);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
