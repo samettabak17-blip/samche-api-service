@@ -53,6 +53,7 @@ export const tenantApi = {
   getConversation: (tenantId: string, conversationId: string) => apiClient.get<Conversation>(`${tenantRoot(tenantId)}/conversations/${conversationId}`),
   listMessages: (tenantId: string, conversationId: string, page: { limit: number; offset: number }) => apiClient.get<ConversationMessage[]>(`${tenantRoot(tenantId)}/conversations/${conversationId}/messages?limit=${page.limit}&offset=${page.offset}`),
   listConversationEvents: (tenantId: string, conversationId: string) => apiClient.get<ConversationAuditEvent[]>(`${tenantRoot(tenantId)}/conversations/${conversationId}/events`),
+  getConversationAttachment: (tenantId: string, conversationId: string, resourceId: string, download = false) => apiClient.getBlob(`${tenantRoot(tenantId)}/conversations/${conversationId}/resources/${resourceId}${download ? '?download=1' : ''}`),
   takeoverConversation: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/takeover`, {}),
   returnConversationToAi: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/return-to-ai`, {}),
   pauseConversationAi: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/pause`, {}),

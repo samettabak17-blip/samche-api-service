@@ -42,3 +42,13 @@ export async function listConversationResources(queryFn, { tenantId, conversatio
   );
   return result.rows;
 }
+
+
+export function conversationResourceContentDisposition(resource, { download = false } = {}) {
+  const fallback = resource?.media_category === 'IMAGE' ? 'image-attachment' : 'document-attachment';
+  const filename = String(resource?.original_filename ?? fallback)
+    .replace(/[\\/\r\n"]/g, '_')
+    .trim()
+    .slice(0, 180) || fallback;
+  return `${download ? 'attachment' : 'inline'}; filename="${filename}"`;
+}

@@ -77,7 +77,19 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   return body as T;
 }
 
+async function requestBlob(path: string): Promise<Blob> {
+  const token = session.getToken();
+  const response = await fetch(`${apiBaseUrl()}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!response.ok) {
+    const body = await readBody(response);
+    throw new ApiError(response.status, messageFromBody(body, `Request failed (${response.status})`), body);
+  }
+  return response.blob();
+}
+
 export const apiClient = {
+  getBlob(path: string): Promise<Blob> { return requestBlob(path); },
+
   get<T>(path: string, options?: RequestOptions): Promise<T> {
     return request<T>(path, { ...options, method: 'GET' });
   },

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createConversationResource, listConversationResources } from '../services/conversation-resource-service.js';
+import { conversationResourceContentDisposition, createConversationResource, listConversationResources } from '../services/conversation-resource-service.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
 const conversationId = '22222222-2222-4222-8222-222222222222';
@@ -42,4 +42,16 @@ test('resource reads remain tenant and conversation scoped', async () => {
   assert.deepEqual(calls[0].params, [tenantId, conversationId, null]);
   assert.match(calls[0].sql, /tenant_id = \$1/);
   assert.match(calls[0].sql, /conversation_id = \$2/);
+});
+
+
+test('builds a safe inline or download disposition without exposing storage paths', () => {
+  assert.equal(
+    conversationResourceContentDisposition({ media_category: 'DOCUMENT', original_filename: 'passport.pdf' }),
+    'inline; filename="passport.pdf"',
+  );
+  assert.equal(
+    conversationResourceContentDisposition({ media_category: 'IMAGE', original_filename: '../private.jpg' }, { download: true }),
+    'attachment; filename=".._private.jpg"',
+  );
 });

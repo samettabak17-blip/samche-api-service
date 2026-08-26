@@ -10,6 +10,8 @@ import {
 } from '../services/live-inbox-service.js';
 import { listHumanAttentionSummary } from '../services/human-support-service.js';
 import { startLiveEventListener, subscribeTenantEvents } from '../services/live-event-bus.js';
+import { createConversationResourceStorage } from '../services/conversation-resource-storage.js';
+import { conversationResourceContentDisposition } from '../services/conversation-resource-service.js';
 
 const router = express.Router();
 
@@ -208,6 +210,40 @@ router.get('/:tenantId/conversations/:conversationId/messages', requireTenantAcc
   } catch (error) {
     console.error('List conversation messages error:', error?.code ?? error?.name ?? 'unknown');
     return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.get('/:tenantId/conversations/:conversationId/resources/:resourceId', requireTenantAccess, async (req, res) => {
+  const currentTenantId = tenantId(req, res);
+  if (!currentTenantId) return;
+  if (!isValidUUID(req.params.conversationId) || !isValidUUID(req.params.resourceId)) {
+    return res.status(400).json({ error: 'Invalid resource request' });
+  }
+  try {
+    const { query } = await import('../config/db.js');
+    const found = await query(
+      `SELECT r.id, r.conversation_id, r.media_category, r.original_filename, r.mime_type, r.storage_key
+         FROM conversation_resources r
+         JOIN conversations c ON c.id = r.conversation_id AND c.tenant_id = r.tenant_id
+        WHERE r.id = $1 AND r.conversation_id = $2 AND r.tenant_id = $3`,
+      [req.params.resourceId, req.params.conversationId, currentTenantId]
+    );
+    const resource = found.rows[0];
+    if (!resource?.storage_key) return res.status(404).json({ error: 'Attachment unavailable' });
+    const storage = createConversationResourceStorage();
+    const stream = await storage.get({ key: resource.storage_key });
+    res.status(200);
+    res.set({
+      'Content-Type': resource.mime_type || 'application/octet-stream',
+      'Content-Disposition': conversationResourceContentDisposition(resource, { download: req.query.download === '1' }),
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    for await (const chunk of stream) res.write(chunk);
+    return res.end();
+  } catch (error) {
+    console.error('Read conversation attachment error:', error?.code ?? error?.name ?? 'unknown');
+    return res.status(404).json({ error: 'Attachment unavailable' });
   }
 });
 
