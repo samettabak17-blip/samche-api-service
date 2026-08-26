@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { AgentMessageResponse, HumanAttentionSummary, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmContact, CrmContactList, CrmDeal, CrmDealList, CrmLead, CrmLeadList, CrmOverviewMetrics, CrmPipelineStage, CrmPipelineSummary, KnowledgeDocument, TeamMember, TenantChannel } from '../../types/api';
+import type { AgentMessageResponse, HumanAttentionSummary, DashboardOverview, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmContact, CrmContactList, CrmDeal, CrmDealList, CrmLead, CrmLeadList, CrmOverviewMetrics, CrmPipelineStage, CrmPipelineSummary, KnowledgeDocument, TeamMember, TenantChannel } from '../../types/api';
 
 const tenantRoot = (tenantId: string) => `/api/v1/tenants/${tenantId}`;
 export const tenantKeys = {
@@ -24,6 +24,7 @@ export const tenantKeys = {
   deals: (tenantId: string, filters: string) => ['tenant', tenantId, 'deals', filters] as const,
   deal: (tenantId: string, dealId: string) => ['tenant', tenantId, 'deal', dealId] as const,
   crmOverview: (tenantId: string) => ['tenant', tenantId, 'crm-overview'] as const,
+  dashboardOverview: (tenantId: string, days: number) => ['tenant', tenantId, 'dashboard-overview', days] as const,
 };
 export interface LeadFilters { limit: number; offset: number; temperature?: string; stage?: string; source?: string; assigned_user_id?: string; conversation_id?: string; }
 export interface DealFilters { limit: number; offset: number; stage?: string; contact_id?: string; owner_user_id?: string; status?: string; source?: string; include_archived?: boolean; }
@@ -48,10 +49,11 @@ export const tenantApi = {
   updateKnowledgeDocument: (tenantId: string, documentId: string, body: Partial<Omit<KnowledgeDocument, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>>) => apiClient.put<KnowledgeDocument>(`${tenantRoot(tenantId)}/knowledge-base/${documentId}`, body),
   deleteKnowledgeDocument: (tenantId: string, documentId: string) => apiClient.delete<{ message: string }>(`${tenantRoot(tenantId)}/knowledge-base/${documentId}`),
   listTeam: (tenantId: string) => apiClient.get<TeamMember[]>(`${tenantRoot(tenantId)}/team`),
-  listConversations: (tenantId: string, page: { limit: number; offset: number }, filters: { channelType?: string; search?: string } = {}) => {
+  listConversations: (tenantId: string, page: { limit: number; offset: number }, filters: { channelType?: string; search?: string; status?: string } = {}) => {
     const params = new URLSearchParams({ limit: String(page.limit), offset: String(page.offset) });
     if (filters.channelType) params.set('channel_type', filters.channelType);
     if (filters.search?.trim()) params.set('search', filters.search.trim());
+    if (filters.status) params.set('status', filters.status);
     return apiClient.get<Conversation[]>(`${tenantRoot(tenantId)}/conversations?${params.toString()}`);
   },
   getHumanAttentionSummary: (tenantId: string) => apiClient.get<HumanAttentionSummary>(`${tenantRoot(tenantId)}/conversations/human-attention-summary`),
@@ -74,6 +76,7 @@ export const tenantApi = {
   listPipelines: (tenantId: string) => apiClient.get<CrmPipelineStage[]>(`${tenantRoot(tenantId)}/pipelines`),
   listPipelineSummary: (tenantId: string) => apiClient.get<CrmPipelineSummary[]>(`${tenantRoot(tenantId)}/pipelines/summary`),
   getCrmOverview: (tenantId: string) => apiClient.get<CrmOverviewMetrics>(`${tenantRoot(tenantId)}/crm/overview`),
+  getDashboardOverview: (tenantId: string, days: number) => apiClient.get<DashboardOverview>(`${tenantRoot(tenantId)}/dashboard/overview?days=${days}`),
   listContacts: (tenantId: string, page: { limit: number; offset: number }) => apiClient.get<CrmContactList>(`${tenantRoot(tenantId)}/contacts?limit=${page.limit}&offset=${page.offset}`),
   getContact: (tenantId: string, contactId: string) => apiClient.get<CrmContact>(`${tenantRoot(tenantId)}/contacts/${contactId}`),
   listDeals: (tenantId: string, filters: DealFilters) => apiClient.get<CrmDealList>(`${tenantRoot(tenantId)}/deals?${dealQuery(filters)}`),
