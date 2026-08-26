@@ -1,8 +1,10 @@
 import express from 'express';
+import multer from 'multer';
 import { authenticateToken, requireTenantAccess } from '../middleware/auth.js';
 import { isValidUUID } from '../middleware/validators.js';
 import {
   appendAgentMessage,
+  appendAgentMediaMessage,
   ConversationOperationError,
   getHumanDeliveryCapability,
   listConversationEvents,
@@ -14,6 +16,7 @@ import { createConversationResourceStorage } from '../services/conversation-reso
 import { classifyConversationResourceAccessFailure, conversationResourceContentDisposition } from '../services/conversation-resource-service.js';
 
 const router = express.Router();
+const agentMediaUpload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 10 * 1024 * 1024 } });
 
 router.use(authenticateToken);
 
@@ -358,5 +361,33 @@ router.post('/:tenantId/conversations/:conversationId/messages', requireTenantAc
     return operationError(res, error, 'Create human conversation message error:');
   }
 });
+
+
+router.post('/:tenantId/conversations/:conversationId/media', requireTenantAccess, agentMediaUpload.single('file'), async (req, res) => {
+  const currentTenantId = tenantId(req, res);
+  if (!currentTenantId) return;
+  if (!isValidUUID(req.params.conversationId)) return res.status(400).json({ error: 'Invalid conversation ID' });
+  if (!req.file) return res.status(400).json({ error: 'A single attachment file is required' });
+  const caption = typeof req.body?.caption === 'string' ? req.body.caption.trim().slice(0, 1024) : '';
+  const idempotencyKey = req.get('Idempotency-Key') ?? null;
+  if (idempotencyKey && (idempotencyKey.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(idempotencyKey))) {
+    return res.status(400).json({ error: 'Invalid idempotency key' });
+  }
+
+  try {
+    const result = await appendAgentMediaMessage({
+      tenantId: currentTenantId,
+      conversationId: req.params.conversationId,
+      actor: actor(req),
+      file: req.file,
+      caption,
+      idempotencyKey,
+    });
+    return res.status(result.duplicate ? 200 : 201).json(result);
+  } catch (error) {
+    return operationError(res, error, 'Create human conversation media error:');
+  }
+});
+
 
 export default router;
