@@ -215,7 +215,10 @@ router.get('/:tenantId/dashboard/overview', requireTenantAccess, async (req, res
       startDate,
       endDate,
     }));
-  } catch (err) { return responseError(res, err); }
+  } catch (err) {
+    console.error('DASHBOARD_OVERVIEW_FAILED code=' + (err?.code ?? 'UNKNOWN') + ' message=' + String(err?.message ?? 'Unknown error').replace(/\\s+/g, ' ').slice(0, 240));
+    return responseError(res, err);
+  }
 });
 
 router.get('/:tenantId/deals', requireTenantAccess, async (req, res) => {
