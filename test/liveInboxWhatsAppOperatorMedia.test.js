@@ -30,7 +30,7 @@ test('persists an AGENT media resource only after mapped WhatsApp media delivery
   const delivered = [];
   const result = await appendAgentMediaMessage({
     tenantId, conversationId, actor, file, caption: 'See attachment', idempotencyKey: 'agent-media-1', database,
-    deliverWhatsAppMedia: async (input) => { delivered.push(input); return { delivery: 'SENT_TO_WHATSAPP', mediaId: 'meta-media-1' }; },
+    deliverWhatsAppMedia: async (input) => { delivered.push(input); return { delivery: 'SENT_TO_WHATSAPP', mediaId: 'meta-media-1', providerMessageId: 'wamid.agent-media-1' }; },
     storage: { async put(input) { stored.push(input); }, async remove() {} },
   });
   assert.equal(result.delivery, 'SENT_TO_WHATSAPP');
@@ -53,4 +53,15 @@ test('does not persist an AGENT message/resource or acknowledge attention when p
   assert.equal(calls.filter(({ sql }) => sql.includes('INSERT INTO conversation_messages')).length, 0);
   assert.equal(calls.filter(({ sql }) => sql.includes('INSERT INTO conversation_resources')).length, 0);
   assert.equal(calls.filter(({ sql }) => sql.includes("SET human_attention_state = 'ACKNOWLEDGED'")).length, 0);
+});
+
+
+test('does not persist a locally uploaded media message as sent without a correlated WhatsApp message ID', async () => {
+  const { database, calls } = databaseFixture();
+  await assert.rejects(appendAgentMediaMessage({
+    tenantId, conversationId, actor, file, database,
+    deliverWhatsAppMedia: async () => ({ delivery: 'SENT_TO_WHATSAPP', mediaId: 'meta-media-1' }),
+    storage: { async put() { throw new Error('must not store'); }, async remove() {} },
+  }), (error) => error instanceof ConversationOperationError && error.code === 'WHATSAPP_MEDIA_SEND_UNCORRELATED');
+  assert.equal(calls.filter(({ sql }) => sql.includes('INSERT INTO conversation_messages')).length, 0);
 });
