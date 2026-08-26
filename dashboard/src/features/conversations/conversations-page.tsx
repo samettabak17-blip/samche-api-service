@@ -57,6 +57,7 @@ export function ConversationsPage() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [content, setContent] = useState('');
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingVoicePreviewUrl, setPendingVoicePreviewUrl] = useState<string | null>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -81,6 +82,12 @@ export function ConversationsPage() {
     knownMessageCountRef.current = 0;
     setNewMessagesWaiting(false);
   }, [conversationId]);
+  useEffect(() => {
+    if (!pendingFile?.type.startsWith('audio/')) { setPendingVoicePreviewUrl(null); return; }
+    const url = URL.createObjectURL(pendingFile);
+    setPendingVoicePreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [pendingFile]);
   useEffect(() => {
     if (!conversationId && conversationsQuery.data?.[0]?.id && tenantId) {
       navigate('/app/' + tenantId + '/conversations/' + channel + '/' + conversationsQuery.data[0].id, { replace: true });
@@ -324,7 +331,7 @@ export function ConversationsPage() {
                 <button type="button" onClick={() => documentInputRef.current?.click()} className="grid h-9 w-9 place-items-center rounded-full text-stone-300 hover:bg-white/[.07] hover:text-white" aria-label="Send document"><Paperclip size={19} /></button>
                 <button type="button" onClick={() => imageInputRef.current?.click()} className="grid h-9 w-9 place-items-center rounded-full text-stone-300 hover:bg-white/[.07] hover:text-white" aria-label="Send image"><ImageIcon size={19} /></button>
                 {content.trim() || pendingFile ? <button type="submit" disabled={send.isPending || sendMedia.isPending} className={'grid h-10 min-w-10 place-items-center rounded-full text-white disabled:opacity-50 ' + (channelContext.type === 'WHATSAPP' ? 'bg-[#159b61] hover:bg-[#118452]' : 'bg-signal hover:bg-signal/85')} aria-label={pendingFile ? 'Send attachment' : 'Send message'}><Send size={17} /></button> : (channelContext.type === 'WHATSAPP' && typeof window !== 'undefined' && Boolean(window.MediaRecorder?.isTypeSupported('audio/ogg;codecs=opus')) ? <button type="button" onClick={() => void startVoiceRecording()} className="grid h-10 w-10 place-items-center rounded-full bg-[#159b61] text-white hover:bg-[#118452]" aria-label="Record WhatsApp voice note"><Mic size={18} /></button> : <span className="grid h-10 w-10 place-items-center rounded-full bg-white/[.04] text-stone-600" title="Voice notes are unavailable in this browser"><Mic size={18} /></span>)}</>}</div>
-              {pendingFile && <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-line bg-black/15 px-3 py-2 text-xs"><div className="min-w-0 flex-1">{pendingFile.type.startsWith('audio/') ? <><p className="font-medium text-stone-200">Voice note ready to send</p><audio controls src={URL.createObjectURL(pendingFile)} className="mt-1 h-8 w-full max-w-sm" /></> : <span className="truncate text-stone-300">{pendingFile.name} · {Math.ceil(pendingFile.size / 1024)} KB</span>}</div><button type="button" onClick={() => setPendingFile(null)} className="text-stone-400 hover:text-white">Remove</button></div>}
+              {pendingFile && <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-line bg-black/15 px-3 py-2 text-xs"><div className="min-w-0 flex-1">{pendingFile.type.startsWith('audio/') ? <><p className="font-medium text-stone-200">Voice note ready to send</p><audio controls src={pendingVoicePreviewUrl ?? undefined} className="mt-1 h-8 w-full max-w-sm" /></> : <span className="truncate text-stone-300">{pendingFile.name} · {Math.ceil(pendingFile.size / 1024)} KB</span>}</div><button type="button" onClick={() => setPendingFile(null)} className="text-stone-400 hover:text-white">Remove</button></div>}
               {(send.error instanceof Error || sendMedia.error instanceof Error) && <p role="alert" className="mt-2 text-xs text-red-300">{(send.error ?? sendMedia.error as Error).message}</p>}
             </form> : <p className="text-xs text-stone-400">{conversation.handling_mode === 'HUMAN' ? 'Only the assigned operator can reply.' : 'Take over to enable a supported human reply.'}</p>}
           </footer>
