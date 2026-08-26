@@ -71,6 +71,16 @@ export const tenantApi = {
     { content },
     { headers: { 'Idempotency-Key': idempotencyKey } },
   ),
+  sendAgentMedia: (tenantId: string, conversationId: string, file: File, caption: string, idempotencyKey: string) => {
+    const form = new FormData();
+    form.set('file', file);
+    if (caption.trim()) form.set('caption', caption.trim());
+    return apiClient.postForm<AgentMessageResponse>(
+      `${tenantRoot(tenantId)}/conversations/${conversationId}/media`,
+      form,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
+  },
   listLeads: (tenantId: string, filters: LeadFilters) => apiClient.get<CrmLeadList>(`${tenantRoot(tenantId)}/leads?${leadQuery(filters)}`),
   getLead: (tenantId: string, leadId: string) => apiClient.get<CrmLead>(`${tenantRoot(tenantId)}/leads/${leadId}`),
   listPipelines: (tenantId: string) => apiClient.get<CrmPipelineStage[]>(`${tenantRoot(tenantId)}/pipelines`),
