@@ -23,7 +23,7 @@ import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from ".
 import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
 import { persistAndDeliverWhatsAppAssistant } from "./services/whatsapp-assistant-response-service.js";
 import { buildWhatsAppTenantModelContext, classifyWhatsAppCurrentCustomerIntent, detectWhatsAppModelResponseLanguage, isWhatsAppResponseLanguageMismatch, WhatsAppTenantContextError } from "./services/whatsapp-tenant-context-service.js";
-import { planWhatsAppDeterministicSocialResponse } from "./services/whatsapp-deterministic-social-response-service.js";
+import { planWhatsAppDeterministicSocialResponse, resolveWhatsAppDeterministicTemplateLanguage } from "./services/whatsapp-deterministic-social-response-service.js";
 import {
   describeStorageCompatibilityProfile,
   describeStorageConfigurationIdentity,
@@ -1538,9 +1538,12 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       session.lang = lang;
 
       const currentIntent = classifyWhatsAppCurrentCustomerIntent(text);
+      const deterministicTemplateLanguage = resolveWhatsAppDeterministicTemplateLanguage({ currentInboundMessage: text });
       const deterministicSocialResponse = planWhatsAppDeterministicSocialResponse({
         tenant: tenantContext,
         communicationLanguage: tenantContext.communicationLanguage,
+        currentInboundMessage: text,
+        detectedLanguage: deterministicTemplateLanguage,
         currentIntent,
         firstAssistantResponse: whatsappInbox.isFirstAssistantResponse,
       });

@@ -163,3 +163,28 @@ test('clear language changes do not alter persisted first-response semantics', (
     assert.equal(plan.shouldInvokeGemini, false);
   }
 });
+
+
+test('deterministic templates use the recognized current inbound language, never stale substantive history', () => {
+  const cases = [
+    ['tr', 'Hi', 'GREETING_ONLY', 'en'], ['tr', 'Hello', 'GREETING_ONLY', 'en'], ['tr', 'Hola', 'GREETING_ONLY', 'en'],
+    ['ar', 'Bonjour', 'GREETING_ONLY', 'en'], ['en', 'Merhaba', 'GREETING_ONLY', 'tr'], ['es', 'mrb', 'GREETING_ONLY', 'tr'],
+    ['en', 'مرحبا', 'GREETING_ONLY', 'ar'], ['tr', 'Thanks', 'THANKS_ONLY', 'en'], ['tr', 'Gracias', 'THANKS_ONLY', 'en'],
+    ['ar', 'Merci', 'THANKS_ONLY', 'en'], ['en', 'Teşekkür ederim', 'THANKS_ONLY', 'tr'], ['en', 'شكرا', 'THANKS_ONLY', 'ar'],
+  ];
+  for (const [history, inbound, currentIntent, expected] of cases) {
+    const plan = planWhatsAppDeterministicSocialResponse({
+      tenant,
+      communicationLanguage: history,
+      currentInboundMessage: inbound,
+      currentIntent,
+      firstAssistantResponse: false,
+    });
+    assert.equal(plan.shouldInvokeGemini, false, inbound);
+    assert.equal(
+      plan.content,
+      templates.social[currentIntent === 'THANKS_ONLY' ? 'thanks' : 'greeting'][expected],
+      inbound,
+    );
+  }
+});
