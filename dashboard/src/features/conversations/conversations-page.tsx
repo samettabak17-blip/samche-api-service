@@ -167,7 +167,7 @@ export function ConversationsPage() {
       return result;
     },
     onSuccess: async (_result, payload) => {
-      if (payload.file.type.startsWith('audio/')) console.info('VOICE_PERSISTED');
+      if (payload.file.type.startsWith('audio/')) { console.info('VOICE_PERSISTED'); setVoicePreviewPlaying(false); setPendingVoiceDuration(0); }
       setPendingFile((current) => current === payload.file ? null : current);
       setContent((current) => clearSentAgentDraft(current, payload.caption));
       await refresh('agent-message');
@@ -176,6 +176,8 @@ export function ConversationsPage() {
 
   const chooseComposerFile = (file: File | undefined) => {
     if (!file) return;
+    setVoicePreviewPlaying(false);
+    setPendingVoiceDuration(0);
     setPendingFile(file);
   };
   const insertEmoji = (emoji: string) => {
