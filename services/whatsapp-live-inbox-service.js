@@ -218,14 +218,17 @@ async function persistResource(client, {
     processingStatus: 'PROCESSING',
   });
 
-  if (validated.mediaCategory === 'IMAGE') {
+  if (validated.mediaCategory === 'IMAGE' || validated.mediaCategory === 'AUDIO') {
     const updated = await client.query(
       `UPDATE conversation_resources
-          SET processing_status = 'READY', processing_method = 'IMAGE_ORIGINAL', processed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-        WHERE id = $1 AND tenant_id = $2 RETURNING *`,
-      [resource.id, tenantId]
+          SET processing_status = 'READY', processing_method = $1, processed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2 AND tenant_id = $3 RETURNING *`,
+      [validated.mediaCategory === 'IMAGE' ? 'IMAGE_ORIGINAL' : 'AUDIO_ORIGINAL', resource.id, tenantId]
     );
-    return { resource: updated.rows[0], aiContextPart: buildGeminiImagePart({ mimeType: validated.mimeType, bytes }) };
+    return {
+      resource: updated.rows[0],
+      aiContextPart: validated.mediaCategory === 'IMAGE' ? buildGeminiImagePart({ mimeType: validated.mimeType, bytes }) : null,
+    };
   }
 
   try {
