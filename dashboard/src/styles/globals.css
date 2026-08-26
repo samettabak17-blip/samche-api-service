@@ -5,26 +5,48 @@
 :root {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #f4f7fb;
-  background: #070b12;
+  background: #050a10;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
 
 * { box-sizing: border-box; }
-body { min-width: 320px; min-height: 100vh; margin: 0; background: #070b12; }
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 82% -12%, rgba(212, 33, 41, 0.11), transparent 30rem),
+    radial-gradient(circle at 15% 85%, rgba(15, 88, 132, 0.10), transparent 32rem),
+    #050a10;
+}
 button, input, select, textarea { font: inherit; }
-input:not([type='checkbox']), select, textarea { background: #0d1521; border-color: #1d2939; color: #f4f7fb; }
+input:not([type='checkbox']), select, textarea { background: rgba(12, 22, 35, 0.82); border-color: rgba(75, 100, 132, 0.38); color: #f4f7fb; }
 option { background: #0d1521; color: #f4f7fb; }
-button.bg-ink { background: #D42129; color: #fff; }
-button.bg-ink:hover { background: #B81920; }
-:focus-visible { outline: 3px solid rgba(212, 33, 41, 0.42); outline-offset: 2px; }
+button.bg-ink { background: #d42129; color: #fff; }
+button.bg-ink:hover { background: #b81920; }
+:focus-visible { outline: 3px solid rgba(236, 51, 60, 0.42); outline-offset: 2px; }
 
 @layer components {
-  .panel { @apply rounded-xl border border-line/80 bg-panel shadow-panel; }
-  .dashboard-card { @apply rounded-xl border border-line/80 bg-panel shadow-panel; }
+  .panel {
+    @apply rounded-2xl border border-line/80 bg-panel/90 shadow-panel;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.025), 0 18px 44px rgba(0,0,0,.24);
+  }
+  .dashboard-card {
+    @apply rounded-2xl border border-line/80 bg-panel/90 shadow-panel;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.025), 0 18px 44px rgba(0,0,0,.24);
+  }
+  .glass-surface {
+    @apply border border-white/[0.08] bg-[#0b1420]/80 backdrop-blur-xl;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 18px 44px rgba(0,0,0,.24);
+  }
   .page-title { @apply text-2xl font-semibold tracking-tight text-ink sm:text-3xl; }
-  .eyebrow { @apply text-xs font-semibold uppercase tracking-[0.16em] text-signal; }
+  .eyebrow { @apply text-[10px] font-semibold uppercase tracking-[0.22em] text-signal; }
   .dashboard-section-label { @apply text-[10px] font-semibold uppercase tracking-[0.16em] text-stone-500; }
-  .nav-link { @apply flex items-center gap-3 rounded-md px-3 py-2 text-[13px] font-medium text-stone-400 transition hover:bg-white/[0.045] hover:text-white; }
-  .nav-link-active { @apply border border-signal/30 bg-gradient-to-r from-signal to-[#b31620] text-white shadow-[0_10px_24px_rgba(212,33,41,0.18)]; }
+  .nav-link { @apply flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium text-stone-400 transition hover:bg-white/[0.045] hover:text-white; }
+  .nav-link-active { @apply border border-signal/35 bg-gradient-to-r from-signal to-[#b31620] text-white shadow-[0_10px_24px_rgba(212,33,41,0.20)]; }
+  .icon-orb { @apply grid h-10 w-10 place-items-center rounded-xl border border-white/[0.06] bg-white/[0.035]; }
+  .subtle-scrollbar { scrollbar-color: #26364a transparent; scrollbar-width: thin; }
+  .subtle-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+  .subtle-scrollbar::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: #26364a; background-clip: padding-box; }
 }
