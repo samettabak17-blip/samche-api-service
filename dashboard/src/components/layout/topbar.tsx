@@ -1,5 +1,6 @@
 import { Bell, Building2, CalendarDays, ChevronLeft, ChevronRight, LogOut, Menu, Search } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { Tenant } from '../../types/api';
@@ -20,7 +21,21 @@ const compactRange = (start: string, end: string) => new Intl.DateTimeFormat('en
 function DateRangeControl() {
   const { preset, setPreset, customStart, setCustomStart, customEnd, setCustomEnd, applyCustomRange, clearCustomRange, activeRange } = useOverviewDateRange();
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [overlayPosition, setOverlayPosition] = useState({ top: 0, left: 0 });
   const [cursor, setCursor] = useState(() => new Date(parseDate(customStart).getUTCFullYear(), parseDate(customStart).getUTCMonth(), 1));
+  useEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const position = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setOverlayPosition({ top: rect.bottom + 10, left: Math.max(16, Math.min(rect.right - 368, window.innerWidth - 384)) });
+    };
+    position();
+    window.addEventListener('resize', position);
+    window.addEventListener('scroll', position, true);
+    return () => { window.removeEventListener('resize', position); window.removeEventListener('scroll', position, true); };
+  }, [open]);
   const [choosingStart, setChoosingStart] = useState(true);
   const first = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), 1));
   const offset = (first.getUTCDay() + 6) % 7;
@@ -32,10 +47,10 @@ function DateRangeControl() {
   };
   const selectPreset = (value: typeof presets[number][0]) => { setPreset(value); setOpen(false); };
   return <div className="relative hidden xl:block">
-    <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} className="group glass-surface inline-flex h-10 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-stone-200 transition hover:border-signal/35 hover:bg-white/[.055]">
+    <button ref={triggerRef} type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} className="group glass-surface inline-flex h-10 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-stone-200 transition hover:border-signal/35 hover:bg-white/[.055]">
       <CalendarDays size={15} className="text-stone-100 transition-colors group-hover:text-signal" /><span>{activeRange.label}</span><ChevronRight size={14} className={open ? 'rotate-90 text-stone-300 transition-transform' : 'text-stone-500 transition-transform'} />
     </button>
-    {open && <section className="absolute right-0 top-12 z-[90] w-[23rem] rounded-2xl border border-white/[.14] bg-[#09121f]/95 p-3 text-left shadow-[0_22px_60px_rgba(0,0,0,.55),0_0_28px_rgba(212,33,41,.13)] backdrop-blur-2xl">
+    {open && typeof document !== 'undefined' && createPortal(<section role="dialog" aria-label="Date range" style={{ position: 'fixed', top: overlayPosition.top, left: overlayPosition.left, zIndex: 60 }} className="w-[23rem] rounded-2xl border border-white/[.14] bg-[#09121f]/95 p-3 text-left shadow-[0_22px_60px_rgba(0,0,0,.55),0_0_28px_rgba(212,33,41,.13)] backdrop-blur-2xl">
       <div className="grid grid-cols-2 gap-1.5 border-b border-white/[.08] pb-3">{presets.map(([value, label]) => <button key={value} type="button" onClick={() => selectPreset(value)} className={'rounded-lg px-2.5 py-2 text-left text-xs transition ' + (preset === value ? 'bg-signal/20 text-white ring-1 ring-inset ring-signal/45' : 'text-stone-300 hover:bg-white/[.06]')}>{label}</button>)}<button type="button" onClick={() => { setPreset('custom'); setChoosingStart(true); }} className={'rounded-lg px-2.5 py-2 text-left text-xs transition ' + (preset === 'custom' ? 'bg-signal/20 text-white ring-1 ring-inset ring-signal/45' : 'text-stone-300 hover:bg-white/[.06]')}>Custom range</button></div>
       {preset === 'custom' && <div className="pt-3">
         <div className="mb-3 flex items-center justify-between"><button type="button" aria-label="Previous month" onClick={() => setCursor(new Date(cursor.getUTCFullYear(), cursor.getUTCMonth() - 1, 1))} className="grid h-8 w-8 place-items-center rounded-lg text-stone-300 hover:bg-white/[.07]"><ChevronLeft size={16} /></button><p className="text-sm font-semibold text-white">{new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(first)}</p><button type="button" aria-label="Next month" onClick={() => setCursor(new Date(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1))} className="grid h-8 w-8 place-items-center rounded-lg text-stone-300 hover:bg-white/[.07]"><ChevronRight size={16} /></button></div>
@@ -43,7 +58,7 @@ function DateRangeControl() {
         <div className="grid grid-cols-7 gap-1">{days.map((date) => { const value = asDate(date); const inMonth = date.getUTCMonth() === cursor.getUTCMonth(); const selected = value === customStart || value === customEnd; const between = value > customStart && value < customEnd; const today = value === asDate(new Date()); return <button key={value} type="button" onClick={() => chooseDay(date)} className={'grid h-9 place-items-center rounded-lg text-xs transition ' + (!inMonth ? 'text-stone-700' : selected ? 'bg-signal text-white shadow-[0_0_14px_rgba(239,52,61,.45)]' : between ? 'bg-signal/18 text-red-100' : today ? 'border border-signal/45 text-white' : 'text-stone-300 hover:bg-white/[.08]')}>{date.getUTCDate()}</button>; })}</div>
         <div className="mt-3 flex items-center justify-between border-t border-white/[.08] pt-3"><button type="button" onClick={clearCustomRange} className="rounded-lg px-2.5 py-1.5 text-xs text-stone-400 hover:bg-white/[.06] hover:text-white">Clear</button><span className="text-[10px] text-stone-500">{compactRange(customStart, customEnd)}</span><button type="button" onClick={() => { applyCustomRange(); setOpen(false); }} className="rounded-lg bg-signal px-3 py-1.5 text-xs font-semibold text-white hover:bg-signal/90">Apply</button></div>
       </div>}
-    </section>}
+    </section>, document.body)}
   </div>;
 }
 
