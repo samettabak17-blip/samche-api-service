@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canTakeOverConversation, clearSentAgentDraft, isInlinePreviewableAttachment, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel } from './conversation-utils';
+import { canTakeOverConversation, clearSentAgentDraft, displayConversationCustomerIdentifier, isInlinePreviewableAttachment, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel } from './conversation-utils';
 
 describe('conversation sender presentation', () => {
   it('maps every backend sender type to a distinct safe label', () => {
@@ -58,5 +58,13 @@ describe('customer-requested live-support ownership', () => {
     expect(canTakeOverConversation({ ...allowed, handlingMode: 'HUMAN', humanAttentionState: 'ACKNOWLEDGED' })).toBe(false);
     expect(canTakeOverConversation({ ...allowed, handlingMode: 'HUMAN', humanAttentionState: 'NONE' })).toBe(false);
     expect(canTakeOverConversation({ ...allowed, handlingMode: 'AI', humanAttentionState: 'NONE' })).toBe(true);
+  });
+});
+
+
+describe('customer identifier presentation', () => {
+  it('does not expose internal WhatsApp or Guide prefixes as the primary identity', () => {
+    expect(displayConversationCustomerIdentifier('whatsapp:971501234567')).toBe('+971501234567');
+    expect(displayConversationCustomerIdentifier('samcheguide:opaque-session')).toBe('Guide conversation');
   });
 });

@@ -53,3 +53,10 @@ export function canTakeOverConversation({
   // deliberately unassigned until an operator takes ownership.
   return handlingMode === 'AI' || (handlingMode === 'HUMAN' && humanAttentionState === 'REQUESTED');
 }
+
+export function displayConversationCustomerIdentifier(value?: string | null): string {
+  if (!value) return 'Customer conversation';
+  if (value.startsWith('whatsapp:')) return '+' + value.slice('whatsapp:'.length);
+  if (value.startsWith('samcheguide:')) return 'Guide conversation';
+  return value;
+}
