@@ -13,6 +13,17 @@ const imageExtensions = Object.freeze({
   'image/webp': 'webp',
 });
 
+const audioExtensions = Object.freeze({
+  'audio/ogg': 'ogg',
+  'audio/mpeg': 'mp3',
+  'audio/mp4': 'm4a',
+  'audio/aac': 'aac',
+});
+
+function normalizedMimeType(value) {
+  return typeof value === 'string' ? value.split(';', 1)[0].trim().toLowerCase() : '';
+}
+
 export function whatsappIntegrationKey(phoneNumberId) {
   const value = String(phoneNumberId ?? '').trim();
   if (!value) throw new WhatsAppMultimodalError('WHATSAPP_PHONE_NUMBER_ID_REQUIRED', 'WhatsApp phone number ID is required');
@@ -33,12 +44,17 @@ export function extractWhatsAppMediaDescriptor(message = {}) {
   if (!externalMessageId) return null;
   const image = message.image;
   const document = message.document;
-  const media = image ?? document;
+  const audio = message.audio;
+  const media = image ?? document ?? audio;
   const externalMediaId = String(media?.id ?? '').trim();
   if (!externalMediaId) return null;
 
-  const declaredMimeType = typeof media.mime_type === 'string' ? media.mime_type.trim().toLowerCase() : '';
-  const fallback = image ? `whatsapp-image-${externalMessageId}.${imageExtensions[declaredMimeType] ?? 'bin'}` : `whatsapp-document-${externalMessageId}`;
+  const declaredMimeType = normalizedMimeType(media.mime_type);
+  const fallback = image
+    ? `whatsapp-image-${externalMessageId}.${imageExtensions[declaredMimeType] ?? 'bin'}`
+    : audio
+      ? `whatsapp-voice-${externalMessageId}.${audioExtensions[declaredMimeType] ?? 'ogg'}`
+      : `whatsapp-document-${externalMessageId}`;
   return {
     externalMediaId,
     sourceReference: `${externalMessageId}:${externalMediaId}`,
