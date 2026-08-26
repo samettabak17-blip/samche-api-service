@@ -31,7 +31,7 @@ export function resolveDashboardDateRange({ days = 7, startDate, endDate } = {},
     const rangeDays = Math.floor((end.getTime() - start.getTime()) / DAY_MS) + 1;
     if (rangeDays >= 1 && rangeDays <= 366) {
       const previousEnd = new Date(start.getTime() - 1);
-      const previousStart = new Date(previousEnd.getTime() - ((rangeDays - 1) * DAY_MS));
+      const previousStart = new Date(start.getTime() - (rangeDays * DAY_MS));
       return { startDate: iso(start), endDate: iso(end), previousStartDate: iso(previousStart), previousEndDate: iso(previousEnd), rangeDays };
     }
   }
@@ -40,7 +40,7 @@ export function resolveDashboardDateRange({ days = 7, startDate, endDate } = {},
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
   const start = new Date(end.getTime() - ((rangeDays - 1) * DAY_MS));
   const previousEnd = new Date(start.getTime() - 1);
-  const previousStart = new Date(previousEnd.getTime() - ((rangeDays - 1) * DAY_MS));
+  const previousStart = new Date(start.getTime() - (rangeDays * DAY_MS));
   return { startDate: iso(start), endDate: iso(end), previousStartDate: iso(previousStart), previousEndDate: iso(previousEnd), rangeDays };
 }
 
