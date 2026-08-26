@@ -30,6 +30,8 @@ jobs:
       STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install backend dependencies
+        run: npm install
       - name: Verify operator permission rules
         run: node --test tests/conversation-permissions.test.js tests/samcheguide-runtime.test.js test/dashboardAnalyticsService.test.js test/conversationRoutesProjection.test.js test/whatsappAgentMediaDelivery.test.js test/liveInboxWhatsAppOperatorMedia.test.js test/conversationResourceAudioValidation.test.js test/whatsappMultimodalService.test.js
       - name: Verify live inbox syntax
