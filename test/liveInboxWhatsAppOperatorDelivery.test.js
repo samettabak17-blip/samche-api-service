@@ -198,3 +198,38 @@ test('manual HUMAN handling with attention NONE is not acknowledged by an operat
   await appendAgentMessage({ tenantId, conversationId, actor, content: 'Operator response', database, deliverWhatsApp: async () => ({ deliveredChunks: 1, failedChunks: 0 }) });
   assert.equal(calls.filter(({ sql, parameters }) => sql.includes('SELECT pg_notify') && String(parameters[1]).includes('HUMAN_SUPPORT_ACKNOWLEDGED')).length, 0);
 });
+
+
+test('a post-delivery acknowledgement persistence failure never triggers an automatic second WhatsApp delivery', async () => {
+  const calls = [];
+  const conversation = humanWhatsAppConversation({ attentionState: 'REQUESTED' });
+  const client = {
+    async query(sql, parameters = []) {
+      calls.push({ sql, parameters });
+      if (sql.includes('FROM conversations c')) return { rows: [conversation] };
+      if (sql.includes('FROM tenant_channels tc') && sql.includes('channel_integrations')) {
+        return { rowCount: 1, rows: [{ external_channel_id: conversation.external_channel_id, integration_key: `WHATSAPP:${conversation.external_channel_id}` }] };
+      }
+      if (sql.includes('SELECT * FROM conversation_messages') && sql.includes('idempotency_key')) return { rows: [] };
+      if (sql.includes('INSERT INTO conversation_messages')) return { rows: [{ id: '55555555-5555-4555-8555-555555555555', sender_type: 'AGENT' }] };
+      if (sql.includes("SET human_attention_state = 'ACKNOWLEDGED'")) return { rowCount: 1, rows: [{ id: conversationId }] };
+      if (sql.includes('INSERT INTO conversation_audit_events') && parameters[3] === 'HUMAN_SUPPORT_ACKNOWLEDGED') {
+        const error = new Error('constraint');
+        error.code = '23514';
+        throw error;
+      }
+      return { rows: [] };
+    },
+    release() {},
+  };
+  let providerCalls = 0;
+  await assert.rejects(
+    appendAgentMessage({
+      tenantId, conversationId, actor, content: 'Operator response', idempotencyKey: 'post-delivery-failure',
+      database: { async connect() { return client; } },
+      deliverWhatsApp: async () => { providerCalls += 1; return { deliveredChunks: 1, failedChunks: 0 }; },
+    }),
+  );
+  assert.equal(providerCalls, 1);
+  assert.ok(calls.some(({ sql }) => sql === 'ROLLBACK'));
+});
