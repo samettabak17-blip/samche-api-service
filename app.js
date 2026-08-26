@@ -17,7 +17,7 @@ import tenantRoutes from "./routes/tenantRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
 import crmRoutes from "./routes/crmRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
-import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound } from "./services/live-inbox-service.js";
+import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, recordWhatsAppDeliveryStatus } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
 import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from "./services/human-support-service.js";
 import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
@@ -1329,7 +1329,17 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
     const logWhatsAppTiming = (phase) => console.info(`WHATSAPP_MEDIA_TIMING phase=${phase} elapsed_ms=${Date.now() - whatsappRequestStartedAt}`);
     logWhatsAppTiming('webhook_received');
     try {
-      const message = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+      const change = req.body.entry?.[0]?.changes?.[0]?.value ?? {};
+      const phoneNumberId = change.metadata?.phone_number_id;
+      const deliveryStatuses = Array.isArray(change.statuses) ? change.statuses : [];
+      if (deliveryStatuses.length) {
+        for (const status of deliveryStatuses) {
+          await recordWhatsAppDeliveryStatus({ phoneNumberId, status, database: pool });
+        }
+        return;
+      }
+
+      const message = change.messages?.[0];
       if (!message) return; 
 
       // --------------------------------------
@@ -1346,7 +1356,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       if (!from) return; 
 
       const cleanFrom = from.replace("+", "");
-      const phoneNumberId = req.body.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
+      // phoneNumberId was resolved from the same webhook change above.
       let text = "";
 
       if (message.text?.body) text = message.text.body;
