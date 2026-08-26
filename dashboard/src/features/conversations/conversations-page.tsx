@@ -1,5 +1,5 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bot, ChevronLeft, ChevronRight, Download, ExternalLink, FileText, Headphones, Image as ImageIcon, MessageSquareText, Send, UserRound, X } from 'lucide-react';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Bot, ChevronLeft, ChevronRight, Download, ExternalLink, FileText, Headphones, Image as ImageIcon, MessageSquareText, Search, Send, UserRound, X } from 'lucide-react';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { EmptyState, QueryErrorState, SkeletonBlock } from '../../components/ui/async-state';
@@ -32,20 +32,37 @@ export function ConversationsPage() {
   const queryClient = useQueryClient();
   const tenantId = selectedTenant?.id ?? '';
   const [offset, setOffset] = useState(0);
-  const [messageOffset, setMessageOffset] = useState(0);
+  const [channelFilter, setChannelFilter] = useState<'ALL' | 'WHATSAPP' | 'WEB_CHAT' | 'SAMCHEGUIDE'>('ALL');
+  const [search, setSearch] = useState('');
   const [content, setContent] = useState('');
+  const [newMessagesWaiting, setNewMessagesWaiting] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [attachmentPreview, setAttachmentPreview] = useState<{ url: string; mimeType: string; filename: string } | null>(null);
   const previewUrlRef = useRef<string | null>(null);
+  const messageListRef = useRef<HTMLDivElement | null>(null);
+  const atMessageBottomRef = useRef(true);
+  const loadingOlderRef = useRef(false);
+  const knownMessageCountRef = useRef(0);
   const liveState = useTenantConversationLiveEvents(tenantId, conversationId);
   const { requestedCount: unresolvedAttention, refreshAttention } = useLiveSupportAttention();
   useEffect(() => {
-    setMessageOffset(0);
+    knownMessageCountRef.current = 0;
+    setNewMessagesWaiting(false);
   }, [conversationId]);
 
-  const conversationsQuery = useQuery({ queryKey: tenantKeys.conversations(tenantId, pageSize, offset), queryFn: () => tenantApi.listConversations(tenantId, { limit: pageSize, offset }), enabled: Boolean(tenantId) });
+  const conversationsQuery = useQuery({
+    queryKey: [...tenantKeys.conversations(tenantId, pageSize, offset), channelFilter, search],
+    queryFn: () => tenantApi.listConversations(tenantId, { limit: pageSize, offset }, { channelType: channelFilter === 'ALL' ? undefined : channelFilter, search }),
+    enabled: Boolean(tenantId),
+  });
   const conversationQuery = useQuery({ queryKey: tenantKeys.conversation(tenantId, conversationId ?? ''), queryFn: () => tenantApi.getConversation(tenantId, conversationId ?? ''), enabled: Boolean(tenantId && conversationId) });
-  const messagesQuery = useQuery({ queryKey: tenantKeys.messages(tenantId, conversationId ?? '', messagePageSize, messageOffset), queryFn: () => tenantApi.listMessages(tenantId, conversationId ?? '', { limit: messagePageSize, offset: messageOffset }), enabled: Boolean(tenantId && conversationId) });
+  const messagesQuery = useInfiniteQuery({
+    queryKey: ['tenant', tenantId, 'conversation', conversationId ?? '', 'messages', 'latest-window', messagePageSize],
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => tenantApi.listMessages(tenantId, conversationId ?? '', { limit: messagePageSize, offset: pageParam }),
+    getNextPageParam: (lastPage, _pages, lastPageParam) => lastPage.length === messagePageSize ? lastPageParam + messagePageSize : undefined,
+    enabled: Boolean(tenantId && conversationId),
+  });
   const eventsQuery = useQuery({ queryKey: tenantKeys.conversationEvents(tenantId, conversationId ?? ''), queryFn: () => tenantApi.listConversationEvents(tenantId, conversationId ?? ''), enabled: Boolean(tenantId && conversationId) });
 
   const refresh = async (reason?: string) => {
@@ -116,7 +133,41 @@ export function ConversationsPage() {
 
   const conversations = conversationsQuery.data ?? [];
   const conversation = conversationQuery.data;
-  const messages = messagesQuery.data ?? [];
+  // API returns each window newest-first for efficient latest-first loading.
+  // Render accumulated windows chronologically so the messaging timeline reads naturally.
+  const messages = messagesQuery.data?.pages.slice().reverse().flatMap((page) => page.slice().reverse()) ?? [];
+  const loadOlderMessages = async () => {
+    if (!messagesQuery.hasNextPage || messagesQuery.isFetchingNextPage) return;
+    loadingOlderRef.current = true;
+    const list = messageListRef.current;
+    const previousHeight = list?.scrollHeight ?? 0;
+    const previousTop = list?.scrollTop ?? 0;
+    try {
+      await messagesQuery.fetchNextPage();
+      requestAnimationFrame(() => {
+        if (list) list.scrollTop = list.scrollHeight - previousHeight + previousTop;
+      });
+    } finally {
+      loadingOlderRef.current = false;
+    }
+  };
+  const scrollToLatest = () => {
+    const list = messageListRef.current;
+    if (!list) return;
+    list.scrollTop = list.scrollHeight;
+    atMessageBottomRef.current = true;
+    setNewMessagesWaiting(false);
+  };
+  useEffect(() => {
+    if (!conversationId || messages.length === 0) return;
+    const previous = knownMessageCountRef.current;
+    knownMessageCountRef.current = messages.length;
+    if (previous === 0 || atMessageBottomRef.current) {
+      requestAnimationFrame(scrollToLatest);
+    } else if (!loadingOlderRef.current && messages.length > previous) {
+      setNewMessagesWaiting(true);
+    }
+  }, [conversationId, messages.length]);
   const isAdmin = user?.system_role === 'OWNER' || tenantRole === 'ADMIN';
   const isAgent = tenantRole === 'AGENT';
   const isOwn = conversation?.assigned_agent_user_id === user?.id;
@@ -132,7 +183,7 @@ export function ConversationsPage() {
     <header className="flex items-end justify-between gap-4"><div><p className="eyebrow">SamChe live customer inbox</p><h1 className="page-title mt-2">Conversations</h1><p className="mt-2 text-sm text-stone-400">Real tenant channel activity and human handoff controls.</p></div><LiveState state={liveState} /></header>
     <div className="grid min-h-[42rem] gap-4 xl:grid-cols-[19rem_minmax(0,1fr)_18rem]">
       <section className={'panel overflow-hidden ' + (conversationId ? 'hidden xl:block' : '')}>
-        <header className="border-b border-line px-4 py-4"><p className="font-semibold text-ink">Conversation inbox</p><p className="mt-1 text-xs text-stone-400">Latest tenant activity</p></header>
+        <header className="border-b border-line px-4 py-4"><div className="flex items-center justify-between gap-3"><div><p className="font-semibold text-ink">Conversation inbox</p><p className="mt-1 text-xs text-stone-400">Most recent activity first</p></div><span className="rounded border border-white/10 px-2 py-1 text-[10px] text-stone-400">{conversations.length}</span></div><label className="relative mt-4 block"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-500" size={15} /><input value={search} onChange={(event) => { setSearch(event.target.value); setOffset(0); }} className="field w-full !py-2 !pl-9 text-xs" placeholder="Search conversations" aria-label="Search conversations" /></label><div className="mt-3 flex flex-wrap gap-1" aria-label="Conversation channel filters">{(['ALL', 'WHATSAPP', 'WEB_CHAT', 'SAMCHEGUIDE'] as const).map((channel) => <button key={channel} type="button" onClick={() => { setChannelFilter(channel); setOffset(0); }} className={(channelFilter === channel ? 'bg-signal text-white border-signal ' : 'border-white/10 text-stone-400 hover:bg-white/[0.04] ') + 'rounded border px-2 py-1 text-[10px] font-semibold tracking-wide'}>{channel === 'WEB_CHAT' ? 'WEB CHAT' : channel === 'SAMCHEGUIDE' ? 'GUIDE' : channel}</button>)}</div></header>
         {conversations.length === 0 ? <div className="p-5"><EmptyState title="No conversations yet" description="Connected channel traffic will appear here." icon={<MessageSquareText size={20} />} /></div> : <ul className="divide-y divide-line">{conversations.map((item) => <li key={item.id}><Link to={'/app/' + tenantId + '/conversations/' + item.id} className={'block px-4 py-4 transition hover:bg-white/[0.035] ' + (item.id === conversationId ? 'bg-signal/10 ' : '') + (item.human_attention_state === 'REQUESTED' ? 'bg-red-500/10 ring-1 ring-inset ring-red-400/30' : '')}><div className="flex justify-between gap-2"><div className="min-w-0"><p className="truncate text-sm font-medium text-ink">{item.customer_external_id || item.external_conversation_id || 'Customer conversation'}</p><p className="mt-1 truncate text-xs text-stone-400">{item.last_message_preview || item.channel_display_name || 'No message preview'}</p></div><time className="shrink-0 text-[11px] text-stone-500">{formatDateTime(item.last_activity_at || item.created_at)}</time></div><div className="mt-3 flex gap-1.5"><span className="rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-stone-300">{item.channel_type || 'CHANNEL'}</span><span className="rounded bg-white/[0.05] px-1.5 py-0.5 text-[10px] text-stone-300">{handlingLabel(item.handling_mode)}</span>{item.human_attention_state === 'REQUESTED' && <span className="rounded border border-red-400/40 bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold tracking-[0.1em] text-red-200">LIVE SUPPORT</span>}</div></Link></li>)}</ul>}
         <footer className="flex justify-between border-t border-line px-3 py-3"><button type="button" onClick={() => setOffset((value) => Math.max(0, value - pageSize))} disabled={offset === 0} className="text-xs text-stone-400 disabled:opacity-40"><ChevronLeft className="inline" size={14} /> Previous</button><button type="button" onClick={() => setOffset((value) => value + pageSize)} disabled={conversations.length < pageSize} className="text-xs text-stone-400 disabled:opacity-40">Next <ChevronRight className="inline" size={14} /></button></footer>
       </section>
@@ -147,7 +198,7 @@ export function ConversationsPage() {
               <footer className="flex justify-end border-t border-line px-5 py-3"><a href={attachmentPreview.url} download={attachmentPreview.filename} className="button-primary"><Download size={15} />Download</a></footer>
             </section>
           </div>}
-          <div className="flex-1 space-y-4 overflow-y-auto bg-black/10 p-5">{messages.map((message) => <article key={message.id} className={'max-w-[88%] rounded-xl border px-4 py-3 ' + senderTone(message.sender_type)}><div className="flex justify-between gap-3"><p className="text-[10px] font-semibold uppercase tracking-[0.12em] opacity-70">{senderLabel(message.sender_type)}{message.actor_email ? ' · ' + message.actor_email : ''}</p><time className="text-[10px] opacity-60">{formatDateTime(message.created_at)}</time></div><div className="mt-2 min-w-0 break-words text-sm leading-6"><SafeRichMessage content={message.content} /></div>{message.resources.length > 0 && <ul className="mt-3 grid gap-2 sm:grid-cols-2" aria-label="Message attachments">{message.resources.map((resource) => <li key={resource.id} className="rounded-lg border border-white/10 bg-black/15 p-3 text-xs"><div className="flex items-start gap-3">{resource.media_category === 'IMAGE' ? <ImageIcon className="mt-0.5 shrink-0 text-gold" size={20} /> : <FileText className="mt-0.5 shrink-0 text-gold" size={20} />}<div className="min-w-0 flex-1"><p className="truncate font-medium text-stone-100">{resource.original_filename || (resource.media_category === 'IMAGE' ? 'Image attachment' : 'Document attachment')}</p><p className="mt-1 text-stone-400">{resource.mime_type || 'Unknown type'}{resource.size_bytes ? ' · ' + Math.ceil(resource.size_bytes / 1024) + ' KB' : ''}{resource.processing_status === 'FAILED' ? ' · Unavailable' : ''}</p><div className="mt-2 flex gap-3">{resource.processing_status !== 'FAILED' && isInlinePreviewableAttachment(resource.mime_type) && <button type="button" onClick={() => void openAttachment(resource, false)} className="inline-flex items-center gap-1 text-gold hover:text-gold/80"><ExternalLink size={13} />View</button>}<button type="button" onClick={() => void openAttachment(resource, true)} className="inline-flex items-center gap-1 text-gold hover:text-gold/80"><Download size={13} />Download</button></div></div></div></li>)}</ul>}</article>)}{messages.length === 0 && <EmptyState title="No messages yet" description="Messages will appear as the channel receives them." />}{messages.length > 0 && <div className="flex justify-between pt-2 text-xs text-stone-400"><button type="button" onClick={() => setMessageOffset((value) => Math.max(0, value - messagePageSize))} disabled={messageOffset === 0} className="disabled:opacity-40"><ChevronLeft className="inline" size={14} /> Previous messages</button><button type="button" onClick={() => setMessageOffset((value) => value + messagePageSize)} disabled={messages.length < messagePageSize} className="disabled:opacity-40">Next messages <ChevronRight className="inline" size={14} /></button></div>}</div>
+          <div ref={messageListRef} onScroll={(event) => { const element = event.currentTarget; atMessageBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 72; if (element.scrollTop < 64) void loadOlderMessages(); }} className="flex-1 space-y-4 overflow-y-auto bg-black/10 p-5">{messagesQuery.hasNextPage && <div className="flex justify-center"><button type="button" onClick={() => void loadOlderMessages()} disabled={messagesQuery.isFetchingNextPage} className="rounded border border-white/10 px-3 py-1.5 text-xs text-stone-300 hover:bg-white/[0.04] disabled:opacity-50">{messagesQuery.isFetchingNextPage ? 'Loading earlier messages…' : 'Load earlier messages'}</button></div>}{messages.map((message) => <article key={message.id} className={'max-w-[88%] rounded-xl border px-4 py-3 ' + senderTone(message.sender_type)}><div className="flex justify-between gap-3"><p className="text-[10px] font-semibold uppercase tracking-[0.12em] opacity-70">{senderLabel(message.sender_type)}{message.actor_email ? ' · ' + message.actor_email : ''}</p><time className="text-[10px] opacity-60">{formatDateTime(message.created_at)}</time></div><div className="mt-2 min-w-0 break-words text-sm leading-6"><SafeRichMessage content={message.content} /></div>{message.resources.length > 0 && <ul className="mt-3 grid gap-2 sm:grid-cols-2" aria-label="Message attachments">{message.resources.map((resource) => <li key={resource.id} className="rounded-lg border border-white/10 bg-black/15 p-3 text-xs"><div className="flex items-start gap-3">{resource.media_category === 'IMAGE' ? <ImageIcon className="mt-0.5 shrink-0 text-gold" size={20} /> : <FileText className="mt-0.5 shrink-0 text-gold" size={20} />}<div className="min-w-0 flex-1"><p className="truncate font-medium text-stone-100">{resource.original_filename || (resource.media_category === 'IMAGE' ? 'Image attachment' : 'Document attachment')}</p><p className="mt-1 text-stone-400">{resource.mime_type || 'Unknown type'}{resource.size_bytes ? ' · ' + Math.ceil(resource.size_bytes / 1024) + ' KB' : ''}{resource.processing_status === 'FAILED' ? ' · Unavailable' : ''}</p><div className="mt-2 flex gap-3">{resource.processing_status !== 'FAILED' && isInlinePreviewableAttachment(resource.mime_type) && <button type="button" onClick={() => void openAttachment(resource, false)} className="inline-flex items-center gap-1 text-gold hover:text-gold/80"><ExternalLink size={13} />View</button>}<button type="button" onClick={() => void openAttachment(resource, true)} className="inline-flex items-center gap-1 text-gold hover:text-gold/80"><Download size={13} />Download</button></div></div></div></li>)}</ul>}</article>)}{messages.length === 0 && <EmptyState title="No messages yet" description="Messages will appear as the channel receives them." />}{newMessagesWaiting && <div className="sticky bottom-3 flex justify-center"><button type="button" onClick={scrollToLatest} className="button-primary shadow-lg">New messages ↓</button></div>}</div>
           {attachmentError && <p role="alert" className="mx-5 mt-3 text-xs text-red-300">{attachmentError}</p>}<footer className="border-t border-line bg-black/10 px-5 py-4">{canSend ? <form onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (content.trim()) send.mutate(content.trim()); }}><label className="sr-only" htmlFor="agent-message">Reply as human agent</label><textarea id="agent-message" value={content} onChange={(event) => setContent(event.target.value)} className="field min-h-24 w-full resize-y" placeholder="Write a response to the customer…" maxLength={8000} /><div className="mt-3 flex justify-between gap-3"><p className="text-xs text-stone-500">{conversation.channel_type === 'WHATSAPP' ? 'Sent through the configured WhatsApp channel.' : 'Sent to the Samcheguide conversation feed.'}</p><button type="submit" disabled={!content.trim() || send.isPending} className="button-primary"><Send size={15} />Send</button></div>{send.error instanceof Error && <p role="alert" className="mt-2 text-xs text-red-300">{send.error.message}</p>}</form> : <p className="text-xs text-stone-400">{conversation.handling_mode === 'HUMAN' ? 'Only the assigned operator can reply.' : 'Take over to enable a supported human reply.'}</p>}</footer>
         </> : <EmptyState title="Conversation not found" description="This conversation is unavailable in the selected tenant." />}
       </section>
