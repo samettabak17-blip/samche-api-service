@@ -5,6 +5,7 @@ export const conversationCapabilities = [
 ] as const;
 
 export const conversationOverflowActions = ['Pause AI', 'Close conversation'] as const;
+export const conversationListLoadMoreLabel = 'Load more conversations';
 
 export type ConversationCapabilityKey = (typeof conversationCapabilities)[number]['key'];
 
