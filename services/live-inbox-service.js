@@ -59,16 +59,16 @@ async function loadSamcheguideIntegration(client) {
   return result.rows[0] ?? null;
 }
 
-async function insertMessage(client, { tenantId, conversationId, senderType, content, actorUserId = null, idempotencyKey = null }) {
+async function insertMessage(client, { tenantId, conversationId, senderType, content, actorUserId = null, idempotencyKey = null, externalMessageId = null, deliveryStatus = null }) {
   const result = await client.query(
     `INSERT INTO conversation_messages
-      (tenant_id, conversation_id, sender_type, content, actor_user_id, idempotency_key)
-     VALUES ($1, $2, $3, $4, $5, $6)
+      (tenant_id, conversation_id, sender_type, content, actor_user_id, idempotency_key, external_message_id, delivery_status, delivery_status_updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CASE WHEN $8 IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END)
      ON CONFLICT (conversation_id, idempotency_key)
        WHERE idempotency_key IS NOT NULL
        DO NOTHING
      RETURNING *`,
-    [tenantId, conversationId, senderType, content, actorUserId, idempotencyKey]
+    [tenantId, conversationId, senderType, content, actorUserId, idempotencyKey, externalMessageId, deliveryStatus]
   );
   return result.rows[0] ?? null;
 }
@@ -721,9 +721,11 @@ export async function appendAgentMediaMessage({
       tenantId,
       conversationId,
       senderType: 'AGENT',
-      content: String(caption).trim() || `[${validated.mediaCategory}: ${validated.originalFilename}]`,
+      content: String(caption).trim() || (validated.mediaCategory === 'AUDIO' ? '' : `[${validated.mediaCategory}: ${validated.originalFilename}]`),
       actorUserId: actor.userId,
       idempotencyKey,
+      externalMessageId: deliveryResult.providerMessageId,
+      deliveryStatus: 'SENT',
     });
     if (!message && idempotencyKey) {
       await client.query('COMMIT');
@@ -783,6 +785,44 @@ export async function appendAgentMediaMessage({
       try { await activeStorage.remove({ key: uploadedStorageKey }); } catch {}
     }
     if (providerDelivered) console.error('OPERATOR_MEDIA_SEND_FAILED stage=POST_DELIVERY_PERSISTENCE reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function recordWhatsAppDeliveryStatus({ phoneNumberId, status, database = pool }) {
+  const providerMessageId = String(status?.id ?? '').trim();
+  const providerStatus = String(status?.status ?? '').trim().toUpperCase();
+  const deliveryStatus = { SENT: 'SENT', DELIVERED: 'DELIVERED', READ: 'READ', FAILED: 'FAILED' }[providerStatus];
+  if (!providerMessageId || !deliveryStatus || !phoneNumberId) return { updated: false, reason: 'IGNORED' };
+
+  const client = await database.connect();
+  try {
+    await client.query('BEGIN');
+    const updated = await client.query(
+      `UPDATE conversation_messages m
+          SET delivery_status = $1,
+              delivery_status_updated_at = CURRENT_TIMESTAMP,
+              delivery_failure_code = CASE WHEN $1 = 'FAILED' THEN COALESCE($2, 'WHATSAPP_DELIVERY_FAILED') ELSE NULL END
+         FROM conversations c
+         JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
+        WHERE m.conversation_id = c.id
+          AND m.tenant_id = c.tenant_id
+          AND m.external_message_id = $3
+          AND m.sender_type IN ('AGENT', 'ASSISTANT')
+          AND tc.channel_type = 'WHATSAPP'
+          AND tc.external_channel_id = $4
+        RETURNING m.tenant_id, m.conversation_id, m.id, m.delivery_status`,
+      [deliveryStatus, status?.errors?.[0]?.code ? String(status.errors[0].code) : null, providerMessageId, phoneNumberId]
+    );
+    for (const row of updated.rows) await notify(client, row.tenant_id, row.conversation_id, 'WHATSAPP_DELIVERY_STATUS');
+    await client.query('COMMIT');
+    console.info('WHATSAPP_DELIVERY_STATUS status=' + deliveryStatus + ' correlated=' + updated.rowCount);
+    return { updated: updated.rowCount === 1, count: updated.rowCount, deliveryStatus };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('WHATSAPP_DELIVERY_STATUS status=FAIL reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     throw error;
   } finally {
     client.release();
