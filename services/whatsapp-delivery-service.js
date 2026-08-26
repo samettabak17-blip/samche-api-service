@@ -93,3 +93,73 @@ export async function deliverWhatsAppText({
 
   return { deliveredChunks, failedChunks: failures.length, failures };
 }
+
+
+function mediaPayload({ mediaCategory, mediaId, caption = '', filename = '' }) {
+  const type = mediaCategory === 'IMAGE' ? 'image' : mediaCategory === 'AUDIO' ? 'audio' : 'document';
+  if (type === 'audio') return { type, audio: { id: mediaId } };
+  if (type === 'image') return { type, image: { id: mediaId, ...(caption ? { caption } : {}) } };
+  return { type, document: { id: mediaId, ...(filename ? { filename } : {}), ...(caption ? { caption } : {}) } };
+}
+
+/**
+ * Uploads and sends one validated WhatsApp media resource through the exact
+ * configured phone number. The caller persists the canonical conversation
+ * resource only after this provider boundary succeeds.
+ */
+export async function deliverWhatsAppMedia({
+  phoneNumberId,
+  recipient,
+  file,
+  mediaCategory,
+  caption = '',
+  env = process.env,
+  httpClient = axios,
+  httpsAgent = whatsappHttpsAgent,
+}) {
+  const configuredPhoneNumberId = configuredValue(env.WHATSAPP_PHONE_ID);
+  const accessToken = configuredValue(env.WHATSAPP_TOKEN);
+  const destination = trustedRecipient(recipient);
+  const expectedPhoneNumberId = configuredValue(phoneNumberId);
+  const buffer = file?.buffer;
+  const mimeType = configuredValue(file?.mimetype);
+  const filename = configuredValue(file?.originalname) || 'attachment';
+
+  if (!configuredPhoneNumberId || !accessToken) throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_NOT_CONFIGURED');
+  if (!expectedPhoneNumberId || expectedPhoneNumberId !== configuredPhoneNumberId) throw new WhatsAppDeliveryError('WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH');
+  if (!destination || !Buffer.isBuffer(buffer) || !buffer.length || !mimeType || !mediaCategory) throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_INVALID_INPUT');
+
+  let upload;
+  try {
+    const form = new FormData();
+    form.append('messaging_product', 'whatsapp');
+    form.append('file', new Blob([buffer], { type: mimeType }), filename);
+    upload = await httpClient.post(
+      `https://graph.facebook.com/v20.0/${configuredPhoneNumberId}/media`,
+      form,
+      { httpsAgent, headers: { Authorization: `Bearer ${accessToken}` }, timeout: 20000 }
+    );
+  } catch (error) {
+    throw new WhatsAppDeliveryError(error?.response?.status === 401 || error?.response?.status === 403 ? 'WHATSAPP_DELIVERY_AUTH_FAILED' : 'WHATSAPP_MEDIA_UPLOAD_FAILED');
+  }
+
+  const mediaId = configuredValue(upload?.data?.id);
+  if (!mediaId) throw new WhatsAppDeliveryError('WHATSAPP_MEDIA_UPLOAD_FAILED');
+
+  try {
+    const payload = {
+      messaging_product: 'whatsapp',
+      to: destination,
+      ...mediaPayload({ mediaCategory, mediaId, caption: String(caption ?? '').trim().slice(0, 1024), filename }),
+    };
+    await httpClient.post(
+      `https://graph.facebook.com/v20.0/${configuredPhoneNumberId}/messages`,
+      payload,
+      { httpsAgent, headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 20000 }
+    );
+  } catch (error) {
+    throw new WhatsAppDeliveryError(error?.response?.status === 401 || error?.response?.status === 403 ? 'WHATSAPP_DELIVERY_AUTH_FAILED' : 'WHATSAPP_MEDIA_SEND_FAILED');
+  }
+
+  return { delivery: 'SENT_TO_WHATSAPP', mediaId };
+}
