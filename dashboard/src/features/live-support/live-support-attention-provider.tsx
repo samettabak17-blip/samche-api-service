@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
 import { session } from '../../lib/session';
+import samcheBrandLogo from '../../assets/branding/samche-company-llc-logo.png';
 
 type AttentionContextValue = {
   requestedCount: number;
@@ -37,6 +38,10 @@ function apiBaseUrl() {
   return import.meta.env.VITE_API_BASE_URL?.trim().replace(/\/$/, '') ?? '';
 }
 
+export function liveSupportFaviconDrawPlan(count: number) {
+  return { logo: { x: 14, y: 42, width: 100, height: 42 }, badge: { x: 108, y: 105, radius: count < 10 ? 13 : 11 } };
+}
+
 function buildAlertFavicon(count: number): Promise<string | null> {
   return new Promise((resolve) => {
     const image = new Image();
@@ -45,21 +50,22 @@ function buildAlertFavicon(count: number): Promise<string | null> {
       canvas.width = 128; canvas.height = 128;
       const context = canvas.getContext('2d');
       if (!context) return resolve(null);
-      context.drawImage(image, 4, 34, 120, 48);
+      const plan = liveSupportFaviconDrawPlan(count);
+      context.drawImage(image, plan.logo.x, plan.logo.y, plan.logo.width, plan.logo.height);
       context.beginPath();
-      context.arc(104, 101, 20, 0, Math.PI * 2);
+      context.arc(plan.badge.x, plan.badge.y, plan.badge.radius, 0, Math.PI * 2);
       context.fillStyle = '#dc2626'; context.fill();
-      context.lineWidth = 4; context.strokeStyle = '#ffffff'; context.stroke();
+      context.lineWidth = 3; context.strokeStyle = '#ffffff'; context.stroke();
       if (count < 10) {
         context.fillStyle = '#ffffff';
-        context.font = '800 22px Arial, sans-serif';
+        context.font = '800 18px Arial, sans-serif';
         context.textAlign = 'center';
-        context.fillText(String(count), 104, 109);
+        context.fillText(String(count), plan.badge.x, plan.badge.y + 6);
       }
       resolve(canvas.toDataURL('image/png'));
     };
     image.onerror = () => resolve(null);
-    image.src = '/samche-logo.png';
+    image.src = samcheBrandLogo;
   });
 }
 
@@ -220,8 +226,9 @@ export function LiveSupportAttentionProvider({ tenantId, userId, children }: { t
   useEffect(() => {
     const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
     if (!favicon) return;
-    const normal = favicon.dataset.normalHref ?? favicon.href;
+    const normal = favicon.dataset.normalHref ?? samcheBrandLogo;
     favicon.dataset.normalHref = normal;
+    favicon.href = normal;
     if (requestedCount < 1) { favicon.href = normal; return; }
     let disposed = false;
     let timer: number | undefined;

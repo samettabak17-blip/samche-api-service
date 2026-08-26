@@ -6,6 +6,7 @@ import { useTenant } from '../../features/tenants/tenant-context';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
 import { GlobalLiveSupportIndicator, LiveSupportAttentionProvider } from '../../features/live-support/live-support-attention-provider';
+import samcheBrandLogo from '../../assets/branding/samche-company-llc-logo.png';
 
 export function AppShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
@@ -39,6 +40,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         <Topbar tenants={tenants} selectedTenantId={selectedTenant.id} email={user.email} onSelectTenant={switchTenant} onOpenNavigation={() => setMobileOpen(true)} onLogout={() => { logout(); navigate('/login'); }} />
         <GlobalLiveSupportIndicator tenantId={selectedTenant.id} />
         <main className="mx-auto w-full max-w-7xl px-4 py-7 sm:px-7 lg:px-10">{children}</main>
+        <footer className="mx-auto flex w-full max-w-7xl items-center gap-3 border-t border-line px-4 py-4 text-xs text-stone-500 sm:px-7 lg:px-10">
+          <img src={samcheBrandLogo} alt="SamChe" className="h-5 w-auto object-contain" />
+          <span>{selectedTenant.name}</span><span aria-hidden="true">·</span><span>Dashboard</span>
+        </footer>
       </div>
     </div></LiveSupportAttentionProvider>
   );
