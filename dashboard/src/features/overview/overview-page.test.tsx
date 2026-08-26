@@ -1,7 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { OverviewSummary } from './overview-page';
+
+afterEach(cleanup);
 
 describe('OverviewSummary', () => {
   it('presents recent conversations without claiming a paginated list is a total', () => {
