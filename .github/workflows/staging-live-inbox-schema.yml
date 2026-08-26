@@ -36,6 +36,7 @@ jobs:
           node --check services/live-inbox-service.js
           node --check services/live-event-bus.js
           node --check services/dashboard-analytics-service.js
+          node --check scripts/verify_dashboard_analytics.js
           node --check scripts/acceptance_live_inbox.js
           node --check scripts/cleanup_live_inbox_fixture.js
           node --check scripts/bootstrap_samcheguide_mapping.js
@@ -79,6 +80,7 @@ jobs:
                 throw new Error('Live inbox migration is not applied');
               }
               console.log('PASS | STAGING | live inbox schema migration and agent acknowledgement audit event');
+              await import('./scripts/verify_dashboard_analytics.js');
             } finally {
               await pool.end();
             }
