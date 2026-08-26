@@ -35,6 +35,11 @@ export interface Conversation extends ConversationRecord {
   last_message_at: string | null;
   human_delivery_configured: boolean;
   human_attention_state?: 'NONE' | 'REQUESTED' | 'ACKNOWLEDGED' | 'RESOLVED';
+  contact_display_name?: string | null;
+  contact_phone?: string | null;
+  contact_language?: string | null;
+  contact_country?: string | null;
+  communication_language?: string | null;
 }
 export type SenderType = 'CUSTOMER' | 'ASSISTANT' | 'AGENT' | 'SYSTEM';
 export type ConversationResourceStatus = 'UPLOADING' | 'PROCESSING' | 'READY' | 'FAILED';
@@ -142,3 +147,15 @@ export interface CrmLead {
 }
 export interface CrmLeadList { items: CrmLead[]; total: number; limit: number; offset: number; }
 export interface CrmPipelineStage { id: string; tenant_id: string; stage_key: string; name: string; position: number; is_terminal?: boolean; }
+
+export interface DashboardOverview {
+  range_days: number;
+  kpis: { total_conversations: number; new_leads: number; appointments: number | null; automations: number | null; satisfaction_rate: number | null; conversation_growth: number | null; };
+  conversation_timeseries: Array<{ day: string; count: number }>;
+  channel_distribution: Array<{ channel: ConversationChannelType; count: number }>;
+  recent_conversations: Array<{ id: string; contact_name: string; customer_external_id?: string | null; channel_type: ConversationChannelType; last_message_preview?: string | null; last_activity_at?: string | null }>;
+  ai_performance: { response_rate: number | null; average_response_time_ms: number | null; containment_rate: number | null; satisfaction_rate: number | null; };
+  top_intents: Array<{ label: string; count: number }>;
+  insights: { peak_hour: string | null; best_channel: string | null; top_assistant: string | null; growth: number | null; };
+  conversation_status_distribution: Array<{ status: ConversationStatus; count: number }>;
+}
