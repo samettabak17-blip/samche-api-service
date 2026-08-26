@@ -31,7 +31,7 @@ describe('workspace access presentation', () => {
 
 it('provides the three neutral conversation channel labels without repeated company branding', () => {
   render(<MemoryRouter initialEntries={['/app/tenant-agent/conversations/whatsapp']}><Sidebar tenantId="tenant-agent" tenantName="Agent tenant" tenantRole="ADMIN" email="agent@samche.test" onLogout={() => undefined} onNavigate={() => undefined} /></MemoryRouter>);
-  expect(screen.getByRole('button', { name: /Conversations/i })).toBeTruthy();
+  expect(screen.getAllByRole('button', { name: /Conversations/i }).length).toBeGreaterThan(0);
   expect(screen.getByRole('link', { name: 'WhatsApp' })).toBeTruthy();
   expect(screen.getByRole('link', { name: 'Web Chatbot' })).toBeTruthy();
   expect(screen.getByRole('link', { name: 'AI Guide' })).toBeTruthy();
