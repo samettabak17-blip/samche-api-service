@@ -52,3 +52,12 @@ export function conversationResourceContentDisposition(resource, { download = fa
     .slice(0, 180) || fallback;
   return `${download ? 'attachment' : 'inline'}; filename="${filename}"`;
 }
+
+
+export function classifyConversationResourceAccessFailure(stage, error) {
+  const code = String(error?.code ?? '');
+  if (stage === 'RESOURCE_LOOKUP') return { status: 404, code: 'ATTACHMENT_NOT_FOUND' };
+  if (stage === 'TENANT_AUTHORIZATION') return { status: 404, code: 'ATTACHMENT_NOT_FOUND' };
+  if (stage === 'STORAGE_RESOLUTION' && code === 'RESOURCE_STORAGE_UNAVAILABLE') return { status: 503, code: 'ATTACHMENT_STORAGE_UNAVAILABLE' };
+  return { status: 502, code: 'ATTACHMENT_RETRIEVAL_FAILED' };
+}

@@ -6,6 +6,7 @@ import { EmptyState, QueryErrorState, SkeletonBlock } from '../../components/ui/
 import { formatDateTime } from '../../lib/format';
 import { useAuth } from '../auth/auth-context';
 import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
+import { ApiError } from '../../lib/api-client';
 import { useTenant } from '../tenants/tenant-context';
 import { canUseHumanReplyComposer, clearSentAgentDraft, senderLabel, senderTone } from './conversation-utils';
 import { useLiveSupportAttention } from '../live-support/live-support-attention-provider';
@@ -87,8 +88,9 @@ export function ConversationsPage() {
       if (download) { link.download = 'attachment'; link.click(); }
       else { link.target = '_blank'; link.rel = 'noopener'; link.click(); }
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch {
-      setAttachmentError('This attachment is currently unavailable.');
+    } catch (error) {
+      const status = error instanceof ApiError ? error.status : 0;
+      setAttachmentError(status === 403 ? 'You are not permitted to access this attachment.' : status === 404 ? 'This attachment is no longer available.' : 'This attachment is currently unavailable.');
     }
   };
 

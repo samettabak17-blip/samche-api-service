@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { conversationResourceContentDisposition, createConversationResource, listConversationResources } from '../services/conversation-resource-service.js';
+import { classifyConversationResourceAccessFailure, conversationResourceContentDisposition, createConversationResource, listConversationResources } from '../services/conversation-resource-service.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
 const conversationId = '22222222-2222-4222-8222-222222222222';
@@ -54,4 +54,11 @@ test('builds a safe inline or download disposition without exposing storage path
     conversationResourceContentDisposition({ media_category: 'IMAGE', original_filename: '../private.jpg' }, { download: true }),
     'attachment; filename=".._private.jpg"',
   );
+});
+
+
+test('classifies attachment access failures without leaking provider diagnostics', () => {
+  assert.deepEqual(classifyConversationResourceAccessFailure('RESOURCE_LOOKUP'), { status: 404, code: 'ATTACHMENT_NOT_FOUND' });
+  assert.deepEqual(classifyConversationResourceAccessFailure('STORAGE_RESOLUTION', { code: 'RESOURCE_STORAGE_UNAVAILABLE' }), { status: 503, code: 'ATTACHMENT_STORAGE_UNAVAILABLE' });
+  assert.deepEqual(classifyConversationResourceAccessFailure('BINARY_FETCH', { code: 'RESOURCE_STORAGE_READ_FAILED' }), { status: 502, code: 'ATTACHMENT_RETRIEVAL_FAILED' });
 });

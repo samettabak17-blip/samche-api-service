@@ -11,7 +11,7 @@ import {
 import { listHumanAttentionSummary } from '../services/human-support-service.js';
 import { startLiveEventListener, subscribeTenantEvents } from '../services/live-event-bus.js';
 import { createConversationResourceStorage } from '../services/conversation-resource-storage.js';
-import { conversationResourceContentDisposition } from '../services/conversation-resource-service.js';
+import { classifyConversationResourceAccessFailure, conversationResourceContentDisposition } from '../services/conversation-resource-service.js';
 
 const router = express.Router();
 
@@ -219,6 +219,7 @@ router.get('/:tenantId/conversations/:conversationId/resources/:resourceId', req
   if (!isValidUUID(req.params.conversationId) || !isValidUUID(req.params.resourceId)) {
     return res.status(400).json({ error: 'Invalid resource request' });
   }
+  let stage = 'RESOURCE_LOOKUP';
   try {
     const { query } = await import('../config/db.js');
     const found = await query(
@@ -229,9 +230,20 @@ router.get('/:tenantId/conversations/:conversationId/resources/:resourceId', req
       [req.params.resourceId, req.params.conversationId, currentTenantId]
     );
     const resource = found.rows[0];
-    if (!resource?.storage_key) return res.status(404).json({ error: 'Attachment unavailable' });
+    if (!resource?.storage_key) {
+      console.info('CONVERSATION_RESOURCE_ACCESS stage=RESOURCE_LOOKUP status=FAIL');
+      return res.status(404).json({ error: 'Attachment unavailable', code: 'ATTACHMENT_NOT_FOUND' });
+    }
+    console.info('CONVERSATION_RESOURCE_ACCESS stage=RESOURCE_LOOKUP status=OK');
+    stage = 'TENANT_AUTHORIZATION';
+    console.info('CONVERSATION_RESOURCE_ACCESS stage=TENANT_AUTHORIZATION status=OK');
+    stage = 'STORAGE_RESOLUTION';
     const storage = createConversationResourceStorage();
+    console.info('CONVERSATION_RESOURCE_ACCESS stage=STORAGE_RESOLUTION status=OK');
+    stage = 'BINARY_FETCH';
     const stream = await storage.get({ key: resource.storage_key });
+    console.info('CONVERSATION_RESOURCE_ACCESS stage=BINARY_FETCH status=OK');
+    stage = 'STREAM_RESPONSE';
     res.status(200);
     res.set({
       'Content-Type': resource.mime_type || 'application/octet-stream',
@@ -240,13 +252,15 @@ router.get('/:tenantId/conversations/:conversationId/resources/:resourceId', req
       'X-Content-Type-Options': 'nosniff',
     });
     for await (const chunk of stream) res.write(chunk);
+    console.info('CONVERSATION_RESOURCE_ACCESS stage=STREAM_RESPONSE status=OK');
     return res.end();
   } catch (error) {
-    console.error('Read conversation attachment error:', error?.code ?? error?.name ?? 'unknown');
-    return res.status(404).json({ error: 'Attachment unavailable' });
+    const failure = classifyConversationResourceAccessFailure(stage, error);
+    console.info('CONVERSATION_RESOURCE_ACCESS stage=' + stage + ' status=FAIL code=' + failure.code);
+    if (res.headersSent) return res.end();
+    return res.status(failure.status).json({ error: 'Attachment unavailable', code: failure.code });
   }
 });
-
 router.get('/:tenantId/conversations/:conversationId/events', requireTenantAccess, async (req, res) => {
   const currentTenantId = tenantId(req, res);
   if (!currentTenantId) return;
