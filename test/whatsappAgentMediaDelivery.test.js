@@ -14,7 +14,7 @@ test('uploads a validated WhatsApp image then sends it using the mapped phone nu
   assert.equal(result.mediaId, 'meta-upload-1');
   assert.equal(calls.length, 2);
   assert.match(calls[0].url, /\/948536645017374\/media$/);
-  assert.deepEqual(calls[1].body, { messaging_product: 'whatsapp', to: '15551234567', type: 'image', image: { id: 'meta-upload-1', caption: 'Please review this' } });
+  assert.deepEqual(calls[1].body, { messaging_product: 'whatsapp', to: '15551234567', type: 'image', image: { id: 'meta-upload-1', caption: 'Please review this.' } });
 });
 
 test('never submits a WhatsApp message when the media upload fails', async () => {
