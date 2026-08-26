@@ -1,11 +1,15 @@
 import crypto from 'crypto';
+import { randomUUID } from 'node:crypto';
 import pool, { query } from '../config/db.js';
 import { canOperateConversation } from './conversation-permissions.js';
-import { deliverWhatsAppText, WhatsAppDeliveryError } from './whatsapp-delivery-service.js';
+import { deliverWhatsAppText, deliverWhatsAppMedia, WhatsAppDeliveryError } from './whatsapp-delivery-service.js';
 import { whatsappIntegrationKey } from './whatsapp-multimodal-service.js';
 import { ensureConversationCrmIdentity } from './crm-lead-service.js';
 import { queueLeadQualification } from './lead-qualification-runner.js';
 import { notifyLegacyTelegramSupportClosed } from './telegram-live-support-status.js';
+import { createConversationResource } from './conversation-resource-service.js';
+import { createConversationResourceStorage } from './conversation-resource-storage.js';
+import { buildConversationStorageKey, validateConversationUpload } from './conversation-resource-validation.js';
 
 export class ConversationOperationError extends Error {
   constructor(status, message, code = 'CONVERSATION_OPERATION_FAILED') {
@@ -631,6 +635,154 @@ export async function appendAgentMessage({
   } catch (error) {
     console.error('OPERATOR_SEND_FAILED stage=' + operatorSendStage + ' reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+
+export async function appendAgentMediaMessage({
+  tenantId,
+  conversationId,
+  actor,
+  file,
+  caption = '',
+  idempotencyKey = null,
+  database = pool,
+  storage = null,
+  deliverWhatsAppMedia: deliverMedia = deliverWhatsAppMedia,
+}) {
+  const validated = validateConversationUpload(file);
+  const client = await database.connect();
+  let uploadedStorageKey = null;
+  let activeStorage = storage;
+  let providerDelivered = false;
+  try {
+    await client.query('BEGIN');
+    const details = await client.query(
+      `SELECT c.*, tc.channel_type, tc.external_channel_id
+         FROM conversations c
+         JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
+        WHERE c.id = $1 AND c.tenant_id = $2
+        FOR UPDATE`,
+      [conversationId, tenantId]
+    );
+    const conversation = details.rows[0];
+    if (!conversation) throw new ConversationOperationError(404, 'Conversation not found', 'CONVERSATION_NOT_FOUND');
+    if (conversation.status !== 'open') throw new ConversationOperationError(409, 'Conversation is closed', 'CONVERSATION_CLOSED');
+    if (conversation.handling_mode !== 'HUMAN') throw new ConversationOperationError(409, 'Human messages require human handling mode', 'CONVERSATION_NOT_HUMAN');
+    if (conversation.channel_type !== 'WHATSAPP') throw new ConversationOperationError(409, 'Media delivery is not configured for this channel', 'CHANNEL_DELIVERY_UNSUPPORTED');
+
+    const allowed = canOperateConversation({
+      systemRole: actor.systemRole,
+      tenantRole: actor.tenantRole,
+      action: 'send_message',
+      assignedAgentUserId: conversation.assigned_agent_user_id,
+      actorUserId: actor.userId,
+    });
+    if (!allowed) throw new ConversationOperationError(403, 'Conversation operation is not permitted', 'CONVERSATION_OPERATION_DENIED');
+
+    if (idempotencyKey) {
+      const existing = await client.query(
+        `SELECT * FROM conversation_messages
+          WHERE tenant_id = $1 AND conversation_id = $2 AND idempotency_key = $3
+          LIMIT 1`,
+        [tenantId, conversationId, idempotencyKey]
+      );
+      if (existing.rows[0]) {
+        await client.query('COMMIT');
+        return { duplicate: true, message: existing.rows[0], delivery: 'SENT_TO_WHATSAPP' };
+      }
+    }
+
+    const integration = await loadWhatsAppAgentDelivery(client, conversation);
+    if (!integration) throw new ConversationOperationError(409, 'WhatsApp delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
+
+    let deliveryResult;
+    try {
+      deliveryResult = await deliverMedia({
+        phoneNumberId: integration.external_channel_id,
+        recipient: conversation.customer_external_id,
+        file,
+        mediaCategory: validated.mediaCategory,
+        caption,
+      });
+      providerDelivered = true;
+    } catch (error) {
+      if (error instanceof WhatsAppDeliveryError) {
+        const status = error.code === 'WHATSAPP_DELIVERY_NOT_CONFIGURED' || error.code === 'WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH' ? 409 : 502;
+        throw new ConversationOperationError(status, 'WhatsApp media delivery could not be completed', error.code);
+      }
+      throw new ConversationOperationError(502, 'WhatsApp media delivery could not be completed', 'WHATSAPP_MEDIA_SEND_FAILED');
+    }
+
+    const message = await insertMessage(client, {
+      tenantId,
+      conversationId,
+      senderType: 'AGENT',
+      content: String(caption).trim() || `[${validated.mediaCategory}: ${validated.originalFilename}]`,
+      actorUserId: actor.userId,
+      idempotencyKey,
+    });
+    if (!message && idempotencyKey) {
+      await client.query('COMMIT');
+      return { duplicate: true, delivery: 'SENT_TO_WHATSAPP' };
+    }
+
+    const resourceId = randomUUID();
+    const storageKey = buildConversationStorageKey({ tenantId, conversationId, resourceId });
+    activeStorage ??= createConversationResourceStorage();
+    await activeStorage.put({ key: storageKey, body: file.buffer, mimeType: validated.mimeType, checksum: validated.contentHash });
+    uploadedStorageKey = storageKey;
+    const resource = await createConversationResource(client, {
+      tenantId,
+      conversationId,
+      messageId: message.id,
+      sourceType: 'AGENT_UPLOAD',
+      mediaCategory: validated.mediaCategory,
+      originalFilename: validated.originalFilename,
+      mimeType: validated.mimeType,
+      sizeBytes: validated.sizeBytes,
+      storageKey,
+      sourceReference: `agent:${message.id}:${resourceId}`,
+      contentHash: validated.contentHash,
+      metadata: { provider_media_id: deliveryResult?.mediaId ?? null },
+      processingStatus: 'READY',
+    });
+    await client.query(
+      'UPDATE conversations SET last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2',
+      [conversationId, tenantId]
+    );
+    await writeAuditEvent(client, {
+      tenantId,
+      conversationId,
+      actorUserId: actor.userId,
+      eventType: 'HUMAN_MESSAGE',
+      metadata: { media_category: validated.mediaCategory },
+    });
+    const acknowledgement = await client.query(
+      `UPDATE conversations
+          SET human_attention_state = 'ACKNOWLEDGED',
+              human_attention_acknowledged_at = COALESCE(human_attention_acknowledged_at, CURRENT_TIMESTAMP),
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1 AND tenant_id = $2 AND human_attention_state = 'REQUESTED'
+        RETURNING id`,
+      [conversationId, tenantId]
+    );
+    if (acknowledgement.rowCount === 1) {
+      await writeAuditEvent(client, { tenantId, conversationId, actorUserId: actor.userId, eventType: 'HUMAN_SUPPORT_ACKNOWLEDGED', metadata: { source: 'AGENT_MEDIA' } });
+      await notify(client, tenantId, conversationId, 'HUMAN_SUPPORT_ACKNOWLEDGED');
+    }
+    await notify(client, tenantId, conversationId, 'AGENT_MESSAGE');
+    await client.query('COMMIT');
+    return { duplicate: false, message, resource, delivery: 'SENT_TO_WHATSAPP', attentionAcknowledged: acknowledgement.rowCount === 1 };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    if (uploadedStorageKey && activeStorage?.remove) {
+      try { await activeStorage.remove({ key: uploadedStorageKey }); } catch {}
+    }
+    if (providerDelivered) console.error('OPERATOR_MEDIA_SEND_FAILED stage=POST_DELIVERY_PERSISTENCE reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     throw error;
   } finally {
     client.release();
