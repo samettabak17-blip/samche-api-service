@@ -48,8 +48,8 @@ export interface ConversationResource {
   tenant_id: string;
   conversation_id: string;
   message_id: string;
-  source_type: 'UPLOAD' | 'WHATSAPP_MEDIA' | 'URL';
-  media_category: 'DOCUMENT' | 'IMAGE' | 'LINK';
+  source_type: 'UPLOAD' | 'WHATSAPP_MEDIA' | 'AGENT_UPLOAD' | 'URL';
+  media_category: 'DOCUMENT' | 'IMAGE' | 'AUDIO' | 'LINK';
   original_filename: string | null;
   mime_type: string | null;
   size_bytes: number | null;
