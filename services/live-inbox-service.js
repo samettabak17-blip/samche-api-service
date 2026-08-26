@@ -708,6 +708,9 @@ export async function appendAgentMediaMessage({
         mediaCategory: validated.mediaCategory,
         caption,
       });
+      if (!String(deliveryResult?.providerMessageId ?? '').trim()) {
+        throw new WhatsAppDeliveryError('WHATSAPP_MEDIA_SEND_UNCORRELATED');
+      }
       providerDelivered = true;
     } catch (error) {
       if (error instanceof WhatsAppDeliveryError) {
