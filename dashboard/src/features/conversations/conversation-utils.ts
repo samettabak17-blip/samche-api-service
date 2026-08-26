@@ -60,3 +60,12 @@ export function displayConversationCustomerIdentifier(value?: string | null): st
   if (value.startsWith('samcheguide:')) return 'Guide conversation';
   return value;
 }
+
+
+export function isVoiceResource(resource: { media_category?: string | null; mime_type?: string | null }): boolean {
+  return resource.media_category === 'AUDIO' || String(resource.mime_type ?? '').startsWith('audio/');
+}
+
+export function voiceResourceDisplayLabel(resource: { original_filename?: string | null; mime_type?: string | null }): string {
+  return isVoiceResource(resource) ? 'Voice message' : (resource.original_filename || 'Attachment');
+}
