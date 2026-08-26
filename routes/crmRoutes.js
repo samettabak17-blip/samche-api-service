@@ -206,7 +206,16 @@ router.get('/:tenantId/crm/overview', requireTenantAccess, async (req, res) => {
 });
 
 router.get('/:tenantId/dashboard/overview', requireTenantAccess, async (req, res) => {
-  try { return res.json(await getDashboardOverview(query, { tenantId: tenant(req), days: normalizeDashboardRange(req.query.days) })); } catch (err) { return responseError(res, err); }
+  const startDate = typeof req.query.start_date === 'string' ? req.query.start_date : undefined;
+  const endDate = typeof req.query.end_date === 'string' ? req.query.end_date : undefined;
+  try {
+    return res.json(await getDashboardOverview(query, {
+      tenantId: tenant(req),
+      days: normalizeDashboardRange(req.query.days),
+      startDate,
+      endDate,
+    }));
+  } catch (err) { return responseError(res, err); }
 });
 
 router.get('/:tenantId/deals', requireTenantAccess, async (req, res) => {
