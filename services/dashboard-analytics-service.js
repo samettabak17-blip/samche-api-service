@@ -46,25 +46,26 @@ export function resolveDashboardDateRange({ days = 7, startDate, endDate } = {},
 
 export async function getDashboardOverview(query, { tenantId, days = 7, startDate, endDate } = {}) {
   const range = resolveDashboardDateRange({ days, startDate, endDate });
-  const params = [tenantId, range.startDate, range.endDate, range.previousStartDate, range.previousEndDate];
+  const rangeParams = [tenantId, range.startDate, range.endDate];
+  const comparisonParams = [...rangeParams, range.previousStartDate, range.previousEndDate];
   const [totals, series, channels, recent, intents, peak, assistant, statuses] = await Promise.all([
     query(`SELECT
       COUNT(*) FILTER (WHERE c.created_at >= $2::timestamptz AND c.created_at <= $3::timestamptz)::int AS total_conversations,
       COUNT(*) FILTER (WHERE c.created_at >= $4::timestamptz AND c.created_at <= $5::timestamptz)::int AS previous_conversations,
       (SELECT COUNT(*)::int FROM crm_leads l WHERE l.tenant_id = $1 AND l.created_at >= $2::timestamptz AND l.created_at <= $3::timestamptz) AS new_leads
-      FROM conversations c WHERE c.tenant_id = $1`, params),
+      FROM conversations c WHERE c.tenant_id = $1`, comparisonParams),
     query(`WITH dates AS (
         SELECT generate_series($2::timestamptz::date, $3::timestamptz::date, INTERVAL '1 day')::date AS day
       )
       SELECT d.day::text AS day, COUNT(c.id)::int AS count
       FROM dates d
       LEFT JOIN conversations c ON c.tenant_id = $1 AND c.created_at >= d.day AND c.created_at < d.day + INTERVAL '1 day'
-      GROUP BY d.day ORDER BY d.day`, params),
+      GROUP BY d.day ORDER BY d.day`, rangeParams),
     query(`SELECT tc.channel_type AS channel, COUNT(c.id)::int AS count
       FROM conversations c
       JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
       WHERE c.tenant_id = $1 AND c.created_at >= $2::timestamptz AND c.created_at <= $3::timestamptz
-      GROUP BY tc.channel_type ORDER BY count DESC, tc.channel_type`, params),
+      GROUP BY tc.channel_type ORDER BY count DESC, tc.channel_type`, rangeParams),
     query(`SELECT c.id, c.customer_external_id, c.last_activity_at, tc.channel_type,
         COALESCE(NULLIF(contact.display_name, ''), c.customer_external_id, c.external_conversation_id, 'Customer') AS contact_name,
         latest.content AS last_message_preview
@@ -79,26 +80,26 @@ export async function getDashboardOverview(query, { tenantId, days = 7, startDat
       WHERE c.tenant_id = $1
         AND COALESCE(c.last_activity_at, c.created_at) >= $2::timestamptz
         AND COALESCE(c.last_activity_at, c.created_at) <= $3::timestamptz
-      ORDER BY c.last_activity_at DESC NULLS LAST, c.created_at DESC LIMIT 5`, params),
+      ORDER BY c.last_activity_at DESC NULLS LAST, c.created_at DESC LIMIT 5`, rangeParams),
     query(`SELECT COALESCE(NULLIF(TRIM(l.intent), ''), NULLIF(TRIM(l.service_interest), '')) AS label, COUNT(*)::int AS count
       FROM crm_leads l
       WHERE l.tenant_id = $1 AND l.created_at >= $2::timestamptz AND l.created_at <= $3::timestamptz
         AND COALESCE(NULLIF(TRIM(l.intent), ''), NULLIF(TRIM(l.service_interest), '')) IS NOT NULL
-      GROUP BY label ORDER BY count DESC, label ASC LIMIT 6`, params),
+      GROUP BY label ORDER BY count DESC, label ASC LIMIT 6`, rangeParams),
     query(`SELECT to_char(date_trunc('hour', m.created_at), 'HH24:00') AS hour, COUNT(*)::int AS count
       FROM conversation_messages m
       WHERE m.tenant_id = $1 AND m.created_at >= $2::timestamptz AND m.created_at <= $3::timestamptz
-      GROUP BY date_trunc('hour', m.created_at) ORDER BY count DESC, hour ASC LIMIT 1`, params),
+      GROUP BY date_trunc('hour', m.created_at) ORDER BY count DESC, hour ASC LIMIT 1`, rangeParams),
     query(`SELECT a.name, COUNT(c.id)::int AS count
       FROM conversations c
       JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
       JOIN ai_assistants a ON a.id = tc.assistant_id AND a.tenant_id = tc.tenant_id
       WHERE c.tenant_id = $1 AND c.created_at >= $2::timestamptz AND c.created_at <= $3::timestamptz
-      GROUP BY a.name ORDER BY count DESC, a.name ASC LIMIT 1`, params),
+      GROUP BY a.name ORDER BY count DESC, a.name ASC LIMIT 1`, rangeParams),
     query(`SELECT c.status, COUNT(*)::int AS count
       FROM conversations c
       WHERE c.tenant_id = $1 AND c.created_at >= $2::timestamptz AND c.created_at <= $3::timestamptz
-      GROUP BY c.status ORDER BY c.status`, params),
+      GROUP BY c.status ORDER BY c.status`, rangeParams),
   ]);
   const total = totals.rows[0] ?? {};
   const current = number(total.total_conversations);
