@@ -190,6 +190,11 @@ export async function persistSamcheguideInbound({ externalSessionId, content, id
 
 export async function persistAssistantResponseIfCurrent({ tenantId, conversationId, content, handlingVersion, database = pool }) {
   const client = await database.connect();
+  let operatorSendStage = 'BEGIN_TRANSACTION';
+  const traceStage = (stage) => {
+    operatorSendStage = stage;
+    console.info('OPERATOR_SEND_STAGE stage=' + stage);
+  };
   try {
     await client.query('BEGIN');
     const locked = await client.query(
@@ -202,12 +207,14 @@ export async function persistAssistantResponseIfCurrent({ tenantId, conversation
       return { delivered: false };
     }
 
+    traceStage('AGENT_PERSIST_STARTED');
     const message = await insertMessage(client, {
       tenantId,
       conversationId,
       senderType: 'ASSISTANT',
       content,
     });
+    traceStage('AGENT_PERSIST_SUCCEEDED');
     await client.query(
       'UPDATE conversations SET last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2',
       [conversationId, tenantId]
@@ -500,6 +507,11 @@ export async function appendAgentMessage({
   deliverWhatsApp = deliverWhatsAppText,
 }) {
   const client = await database.connect();
+  let operatorSendStage = 'BEGIN_TRANSACTION';
+  const traceStage = (stage) => {
+    operatorSendStage = stage;
+    console.info('OPERATOR_SEND_STAGE stage=' + stage);
+  };
   try {
     await client.query('BEGIN');
     const details = await client.query(
@@ -543,6 +555,7 @@ export async function appendAgentMessage({
       if (!integration) {
         throw new ConversationOperationError(409, 'WhatsApp delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
       }
+      traceStage('DELIVERY_STARTED');
       try {
         await deliverWhatsApp({
           phoneNumberId: integration.external_channel_id,
@@ -556,11 +569,13 @@ export async function appendAgentMessage({
         }
         throw new ConversationOperationError(502, 'WhatsApp delivery could not be completed', 'WHATSAPP_DELIVERY_FAILED');
       }
+      traceStage('DELIVERY_SUCCEEDED');
       delivery = 'SENT_TO_WHATSAPP';
     } else if (conversation.channel_type !== 'SAMCHEGUIDE') {
       throw new ConversationOperationError(409, 'Human delivery is not configured for this channel', 'CHANNEL_DELIVERY_UNSUPPORTED');
     }
 
+    traceStage('AGENT_PERSIST_STARTED');
     const message = await insertMessage(client, {
       tenantId,
       conversationId,
@@ -574,6 +589,7 @@ export async function appendAgentMessage({
       return { duplicate: true, delivery };
     }
 
+    traceStage('AGENT_PERSIST_SUCCEEDED');
     await client.query(
       'UPDATE conversations SET last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2',
       [conversationId, tenantId]
@@ -581,6 +597,7 @@ export async function appendAgentMessage({
     await writeAuditEvent(client, { tenantId, conversationId, actorUserId: actor.userId, eventType: 'HUMAN_MESSAGE' });
     // Provider delivery and AGENT persistence succeeded. This is a second, durable acknowledgement
     // boundary for a waiting customer request; manual HUMAN handling remains attention NONE.
+    traceStage('ATTENTION_ACK_STARTED');
     const acknowledgement = await client.query(
       `UPDATE conversations
           SET human_attention_state = 'ACKNOWLEDGED',
@@ -592,14 +609,18 @@ export async function appendAgentMessage({
         RETURNING id`,
       [conversationId, tenantId]
     );
+    traceStage('ATTENTION_ACK_SUCCEEDED');
     if (acknowledgement.rowCount === 1) {
       await writeAuditEvent(client, { tenantId, conversationId, actorUserId: actor.userId, eventType: 'HUMAN_SUPPORT_ACKNOWLEDGED', metadata: { source: 'AGENT_MESSAGE' } });
       await notify(client, tenantId, conversationId, 'HUMAN_SUPPORT_ACKNOWLEDGED');
     }
     await notify(client, tenantId, conversationId, 'AGENT_MESSAGE');
+    traceStage('SSE_PUBLISHED');
     await client.query('COMMIT');
+    traceStage('HTTP_SUCCESS');
     return { duplicate: false, message, delivery, attentionAcknowledged: acknowledgement.rowCount === 1 };
   } catch (error) {
+    console.error('OPERATOR_SEND_FAILED stage=' + operatorSendStage + ' reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     await client.query('ROLLBACK');
     throw error;
   } finally {
