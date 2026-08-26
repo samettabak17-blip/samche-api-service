@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getDashboardOverview, normalizeDashboardRange } from '../services/dashboard-analytics-service.js';
+import { getDashboardOverview, normalizeDashboardRange, resolveDashboardDateRange } from '../services/dashboard-analytics-service.js';
 
 test('dashboard overview uses fixed tenant-scoped aggregates', async () => {
   const calls = [];
@@ -25,4 +25,15 @@ test('dashboard overview keeps required sections honest when data is empty', asy
 });
 test('dashboard range is constrained to supported periods', () => {
   assert.equal(normalizeDashboardRange(30), 30); assert.equal(normalizeDashboardRange(365), 7);
+});
+
+test('dashboard date ranges derive an immediately preceding comparison period', () => {
+  const range = resolveDashboardDateRange({ startDate: '2026-08-20', endDate: '2026-08-26' });
+  assert.deepEqual(range, {
+    startDate: '2026-08-20T00:00:00.000Z',
+    endDate: '2026-08-26T23:59:59.999Z',
+    previousStartDate: '2026-08-13T00:00:00.000Z',
+    previousEndDate: '2026-08-19T23:59:59.999Z',
+    rangeDays: 7,
+  });
 });
