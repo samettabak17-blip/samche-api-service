@@ -37,3 +37,16 @@ test('dashboard date ranges derive an immediately preceding comparison period', 
     rangeDays: 7,
   });
 });
+
+
+test('dashboard analytics sends each SQL aggregate only the parameters it references', async () => {
+  const rows = [
+    [{ total_conversations: 0, previous_conversations: 0, new_leads: 0 }], [], [], [], [], [], [], [],
+  ];
+  const query = async (sql, params) => {
+    const placeholders = [...sql.matchAll(/\\$(\\d+)/g)].map((match) => Number(match[1]));
+    assert.equal(params.length, Math.max(...placeholders), 'each SQL statement receives its exact parameter arity');
+    return { rows: rows.shift() ?? [] };
+  };
+  await getDashboardOverview(query, { tenantId: 'tenant-a', startDate: '2026-08-20', endDate: '2026-08-26' });
+});
