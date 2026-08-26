@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
-import { Sidebar } from './sidebar';
+import { Sidebar, workspaceAccessCopy } from './sidebar';
 
 describe('Sidebar', () => {
   it('keeps read pages available while marking an AGENT workspace as read-only', () => {
@@ -19,3 +19,11 @@ describe('Sidebar', () => {
   });
 });
 
+
+
+describe('workspace access presentation', () => {
+  it('shows real administrator access without fabricating a tenant plan', () => {
+    expect(workspaceAccessCopy('OWNER')).toEqual({ label: 'ADMIN', detail: 'FULL ACCESS' });
+    expect(workspaceAccessCopy('ADMIN')).toEqual({ label: 'WORKSPACE ACCESS', detail: 'PLAN NOT AVAILABLE' });
+  });
+});
