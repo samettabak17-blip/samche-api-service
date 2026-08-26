@@ -36,7 +36,17 @@ test('describes a document without fabricating customer intent when it has no ca
   });
 });
 
+test('describes a WhatsApp voice note as a canonical audio resource', () => {
+  assert.deepEqual(extractWhatsAppMediaDescriptor({ id: 'wamid.audio', audio: { id: 'meta-audio', mime_type: 'audio/ogg; codecs=opus' } }), {
+    externalMediaId: 'meta-audio',
+    sourceReference: 'wamid.audio:meta-audio',
+    declaredMimeType: 'audio/ogg',
+    originalFilename: 'whatsapp-voice-wamid.audio.ogg',
+    caption: '',
+  });
+});
+
 test('does not treat unsupported WhatsApp payloads as resources', () => {
-  assert.equal(extractWhatsAppMediaDescriptor({ id: 'wamid.audio', audio: { id: 'meta-audio' } }), null);
+  assert.equal(extractWhatsAppMediaDescriptor({ id: 'wamid.sticker', sticker: { id: 'meta-sticker' } }), null);
 });
 
