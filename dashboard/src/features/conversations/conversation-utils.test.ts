@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canTakeOverConversation, clearSentAgentDraft, displayConversationCustomerIdentifier, isInlinePreviewableAttachment, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel } from './conversation-utils';
+import { canTakeOverConversation, clearSentAgentDraft, displayConversationCustomerIdentifier, isInlinePreviewableAttachment, isVoiceResource, voiceResourceDisplayLabel, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel } from './conversation-utils';
 
 describe('conversation sender presentation', () => {
   it('maps every backend sender type to a distinct safe label', () => {
@@ -66,5 +66,14 @@ describe('customer identifier presentation', () => {
   it('does not expose internal WhatsApp or Guide prefixes as the primary identity', () => {
     expect(displayConversationCustomerIdentifier('whatsapp:971501234567')).toBe('+971501234567');
     expect(displayConversationCustomerIdentifier('samcheguide:opaque-session')).toBe('Guide conversation');
+  });
+});
+
+
+describe('WhatsApp voice-resource presentation', () => {
+  it('routes audio resources to a compact player and never exposes a provider filename', () => {
+    expect(isVoiceResource({ media_category: 'AUDIO', mime_type: 'audio/ogg' })).toBe(true);
+    expect(isVoiceResource({ media_category: 'DOCUMENT', mime_type: 'application/pdf' })).toBe(false);
+    expect(voiceResourceDisplayLabel({ original_filename: 'whatsapp-voice-wamid.HBgMOT...ogg', mime_type: 'audio/ogg' })).toBe('Voice message');
   });
 });
