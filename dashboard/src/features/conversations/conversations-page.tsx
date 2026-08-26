@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bot, BookOpenText, CircleX, Download, ExternalLink, FileText, Headphones, Image as ImageIcon, MessageSquareText, MoreHorizontal, Pause, Search, Send, X } from 'lucide-react';
+import { Bot, BookOpenText, CircleX, Download, ExternalLink, FileText, Headphones, Image as ImageIcon, MessageSquareText, Mic, MoreHorizontal, Paperclip, Pause, Plus, Search, Send, Smile, X } from 'lucide-react';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { EmptyState, QueryErrorState, SkeletonBlock } from '../../components/ui/async-state';
@@ -38,12 +38,21 @@ export function ConversationsPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'open' | 'closed'>('all');
   const [content, setContent] = useState('');
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [newMessagesWaiting, setNewMessagesWaiting] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [attachmentPreview, setAttachmentPreview] = useState<{ url: string; mimeType: string; filename: string } | null>(null);
   const [resourcePanel, setResourcePanel] = useState<ConversationCapabilityKey | null>(null);
   const [actionsOpen, setActionsOpen] = useState(false);
   const previewUrlRef = useRef<string | null>(null);
+  const documentInputRef = useRef<HTMLInputElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordingTimerRef = useRef<number | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const atMessageBottomRef = useRef(true);
   const loadingOlderRef = useRef(false);
@@ -98,6 +107,57 @@ export function ConversationsPage() {
       await refresh('agent-message');
     },
   });
+  const sendMedia = useMutation({
+    mutationFn: ({ file, caption }: { file: File; caption: string }) => tenantApi.sendAgentMedia(tenantId, conversationId ?? '', file, caption, crypto.randomUUID()),
+    onSuccess: async (_result, payload) => {
+      setPendingFile((current) => current === payload.file ? null : current);
+      setContent((current) => clearSentAgentDraft(current, payload.caption));
+      await refresh('agent-message');
+    },
+  });
+
+  const chooseComposerFile = (file: File | undefined) => {
+    if (!file) return;
+    setPendingFile(file);
+  };
+  const insertEmoji = (emoji: string) => {
+    const input = composerInputRef.current;
+    const start = input?.selectionStart ?? content.length;
+    const end = input?.selectionEnd ?? content.length;
+    setContent(content.slice(0, start) + emoji + content.slice(end));
+    setEmojiOpen(false);
+    requestAnimationFrame(() => {
+      input?.focus();
+      input?.setSelectionRange(start + emoji.length, start + emoji.length);
+    });
+  };
+  const stopVoiceRecording = () => {
+    recorderRef.current?.stop();
+  };
+  const startVoiceRecording = async () => {
+    if (!window.MediaRecorder || !MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const chunks: BlobPart[] = [];
+      const recorder = new MediaRecorder(stream, { mimeType: 'audio/ogg;codecs=opus' });
+      recorderRef.current = recorder;
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        if (recordingTimerRef.current !== null) window.clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+        setRecording(false);
+        setRecordingSeconds(0);
+        if (chunks.length) chooseComposerFile(new File(chunks, 'voice-note.ogg', { type: 'audio/ogg' }));
+      };
+      recorder.start();
+      setRecording(true);
+      setRecordingSeconds(0);
+      recordingTimerRef.current = window.setInterval(() => setRecordingSeconds((value) => value + 1), 1000);
+    } catch {
+      setAttachmentError('Microphone access is unavailable in this browser.');
+    }
+  };
 
 
   const closeAttachmentPreview = () => {
@@ -108,6 +168,8 @@ export function ConversationsPage() {
 
   useEffect(() => () => {
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    if (recordingTimerRef.current !== null) window.clearInterval(recordingTimerRef.current);
+    recorderRef.current?.stream.getTracks().forEach((track) => track.stop());
   }, []);
 
   const openAttachment = async (resource: { id: string; mime_type: string | null; original_filename: string | null }, download: boolean) => {
