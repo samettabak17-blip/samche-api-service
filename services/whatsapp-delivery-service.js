@@ -95,6 +95,12 @@ export async function deliverWhatsAppText({
 }
 
 
+function resolveMediaCategory(file, explicitCategory = null) {
+  if (explicitCategory === 'IMAGE' || explicitCategory === 'AUDIO' || explicitCategory === 'DOCUMENT') return explicitCategory;
+  const mimeType = String(file?.mimetype ?? '').toLowerCase();
+  return mimeType.startsWith('image/') ? 'IMAGE' : mimeType.startsWith('audio/') ? 'AUDIO' : mimeType ? 'DOCUMENT' : null;
+}
+
 function mediaPayload({ mediaCategory, mediaId, caption = '', filename = '' }) {
   const type = mediaCategory === 'IMAGE' ? 'image' : mediaCategory === 'AUDIO' ? 'audio' : 'document';
   if (type === 'audio') return { type, audio: { id: mediaId } };
@@ -124,10 +130,11 @@ export async function deliverWhatsAppMedia({
   const buffer = file?.buffer;
   const mimeType = configuredValue(file?.mimetype);
   const filename = configuredValue(file?.originalname) || 'attachment';
+  const resolvedMediaCategory = resolveMediaCategory(file, mediaCategory);
 
   if (!configuredPhoneNumberId || !accessToken) throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_NOT_CONFIGURED');
   if (!expectedPhoneNumberId || expectedPhoneNumberId !== configuredPhoneNumberId) throw new WhatsAppDeliveryError('WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH');
-  if (!destination || !Buffer.isBuffer(buffer) || !buffer.length || !mimeType || !mediaCategory) throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_INVALID_INPUT');
+  if (!destination || !Buffer.isBuffer(buffer) || !buffer.length || !mimeType || !resolvedMediaCategory) throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_INVALID_INPUT');
 
   let upload;
   try {
@@ -150,7 +157,7 @@ export async function deliverWhatsAppMedia({
     const payload = {
       messaging_product: 'whatsapp',
       to: destination,
-      ...mediaPayload({ mediaCategory, mediaId, caption: String(caption ?? '').trim().slice(0, 1024), filename }),
+      ...mediaPayload({ mediaCategory: resolvedMediaCategory, mediaId, caption: String(caption ?? '').trim().slice(0, 1024), filename }),
     };
     await httpClient.post(
       `https://graph.facebook.com/v20.0/${configuredPhoneNumberId}/messages`,
