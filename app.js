@@ -1516,7 +1516,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       }
 
       // Gelen içerik desteklenmiyorsa
-      const isInvalid = ((!text || text === "") && !mediaDescriptor) || message.type === "audio" || message.type === "voice" || message.type === "video" || message.type === "sticker";
+      const isInvalid = ((!text || text === "") && !mediaDescriptor) || message.type === "video" || message.type === "sticker";
       if (isInvalid) {
         if (!session.humanOverride) {
           await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, "Gönderdiğiniz içeriği işleyemiyorum. Lütfen mesajınızı yazılı olarak iletin.");
