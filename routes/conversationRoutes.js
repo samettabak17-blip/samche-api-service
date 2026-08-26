@@ -149,6 +149,7 @@ router.get('/:tenantId/conversations', requireTenantAccess, async (req, res) => 
        JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
        LEFT JOIN ai_assistants a ON a.id = tc.assistant_id AND a.tenant_id = tc.tenant_id
        LEFT JOIN users assigned ON assigned.id = c.assigned_agent_user_id
+       LEFT JOIN crm_contacts contact ON contact.id = c.contact_id AND contact.tenant_id = c.tenant_id
        LEFT JOIN LATERAL (
          SELECT content, created_at
          FROM conversation_messages
