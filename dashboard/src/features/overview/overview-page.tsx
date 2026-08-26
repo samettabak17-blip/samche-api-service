@@ -5,7 +5,8 @@ import { EmptyState, QueryErrorState, SkeletonBlock } from '../../components/ui/
 import type { DashboardOverview } from '../../types/api';
 import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
 import { useTenant } from '../tenants/tenant-context';
-import { useOverviewDateRange } from './overview-date-range-context';
+import { overviewRangeRequest, useOverviewDateRange } from './overview-date-range-context';
+export { overviewRangeRequest } from './overview-date-range-context';
 
 const channelColors: Record<string, string> = { WHATSAPP: '#20c77a', WEB_CHAT: '#e3343d', SAMCHEGUIDE: '#7767f6' };
 const channelName = (channel?: string | null) => channel === 'WEB_CHAT' ? 'Web Chatbot' : channel === 'SAMCHEGUIDE' ? 'AI Guide' : channel === 'WHATSAPP' ? 'WhatsApp' : '—';
