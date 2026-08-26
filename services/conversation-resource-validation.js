@@ -17,6 +17,10 @@ const supportedMimeTypes = new Map([
   ['image/jpeg', 'IMAGE'],
   ['image/png', 'IMAGE'],
   ['image/webp', 'IMAGE'],
+  ['audio/ogg', 'AUDIO'],
+  ['audio/mpeg', 'AUDIO'],
+  ['audio/mp4', 'AUDIO'],
+  ['audio/aac', 'AUDIO'],
 ]);
 
 function isPdf(buffer) {
@@ -35,6 +39,22 @@ function isWebp(buffer) {
   return buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
 }
 
+function isOgg(buffer) {
+  return buffer.length >= 4 && buffer.subarray(0, 4).toString('ascii') === 'OggS';
+}
+
+function isMpeg(buffer) {
+  return buffer.length >= 3 && (buffer.subarray(0, 3).toString('ascii') === 'ID3' || (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0));
+}
+
+function isMp4(buffer) {
+  return buffer.length >= 12 && buffer.subarray(4, 8).toString('ascii') === 'ftyp';
+}
+
+function isAac(buffer) {
+  return buffer.length >= 2 && buffer[0] === 0xff && (buffer[1] & 0xf6) === 0xf0;
+}
+
 function isZip(buffer) {
   return buffer.length >= 4 && buffer.subarray(0, 4).toString('ascii') === 'PK\\x03\\x04';
 }
@@ -50,6 +70,10 @@ function hasExpectedSignature(mimeType, buffer) {
   if (mimeType === 'image/jpeg') return isJpeg(buffer);
   if (mimeType === 'image/webp') return isWebp(buffer);
   if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return isZip(buffer);
+  if (mimeType === 'audio/ogg') return isOgg(buffer);
+  if (mimeType === 'audio/mpeg') return isMpeg(buffer);
+  if (mimeType === 'audio/mp4') return isMp4(buffer);
+  if (mimeType === 'audio/aac') return isAac(buffer);
   if (mimeType === 'text/plain') return isText(buffer);
   return false;
 }
