@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useParams } from 'react-router-dom';
+import { Navigate, Outlet, Route, Routes, useParams } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { AppShell } from '../components/layout/app-shell';
 import { LoginPage } from '../features/auth/login-page';
@@ -23,33 +23,42 @@ function DashboardEntry() {
   if (!selectedTenant) return <div className="panel max-w-xl p-7"><p className="eyebrow">No workspace access</p><h1 className="mt-2 text-xl font-semibold">No tenant is assigned to this account.</h1><p className="mt-2 text-sm text-stone-600">Contact your SamChe workspace owner to request access.</p></div>;
   return <Navigate to={`/app/${selectedTenant.id}/overview`} replace />;
 }
-function TenantRoute({ children }: { children: ReactNode }) {
+
+/**
+ * One authenticated tenant layout stays mounted while nested dashboard pages
+ * change. The global Live Support coordinator therefore owns exactly one
+ * attention stream, title, favicon and alarm per active dashboard tab.
+ */
+function TenantDashboardLayout() {
   const { tenantId } = useParams();
   const { tenants, selectedTenant, isLoading, selectTenant } = useTenant();
   if (isLoading) return <LoadingScreen />;
   if (!tenantId || !tenants.some((item) => item.id === tenantId)) return <Navigate to="/app" replace />;
   if (selectedTenant?.id !== tenantId) { selectTenant(tenantId); return <LoadingScreen />; }
-  return <AppShell>{children}</AppShell>;
+  return <AppShell><Outlet /></AppShell>;
 }
+
 export function AppRouter() {
   return <Routes>
     <Route path="/login" element={<LoginPage />} />
     <Route path="/app" element={<RequireAuth><DashboardEntry /></RequireAuth>} />
-    <Route path="/app/:tenantId/overview" element={<RequireAuth><TenantRoute><OverviewPage /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/conversations" element={<RequireAuth><TenantRoute><ConversationsPage /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/conversations/:conversationId" element={<RequireAuth><TenantRoute><ConversationsPage /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/leads" element={<RequireAuth><TenantRoute><LeadsPage /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/leads/:leadId" element={<RequireAuth><TenantRoute><LeadsPage /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/pipeline" element={<RequireAuth><TenantRoute><PipelinePage /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/pipeline/:dealId" element={<RequireAuth><TenantRoute><PipelinePage /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/team" element={<RequireAuth><TenantRoute><TeamPage /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/settings" element={<RequireAuth><TenantRoute><SettingsPage /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/assistants" element={<RequireAuth><TenantRoute><AssistantsPage /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/assistants/:assistantId" element={<RequireAuth><TenantRoute><AssistantsPage /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/channels" element={<RequireAuth><TenantRoute><ChannelsPage /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/channels/:channelId" element={<RequireAuth><TenantRoute><ChannelsPage /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/knowledge-base" element={<RequireAuth><TenantRoute><KnowledgeBasePage /></TenantRoute></RequireAuth>} />
-    <Route path="/app/:tenantId/knowledge-base/:documentId" element={<RequireAuth><TenantRoute><KnowledgeBasePage /></TenantRoute></RequireAuth>} />
+    <Route path="/app/:tenantId" element={<RequireAuth><TenantDashboardLayout /></RequireAuth>}>
+      <Route path="overview" element={<OverviewPage />} />
+      <Route path="conversations" element={<ConversationsPage />} />
+      <Route path="conversations/:conversationId" element={<ConversationsPage />} />
+      <Route path="leads" element={<LeadsPage />} />
+      <Route path="leads/:leadId" element={<LeadsPage />} />
+      <Route path="pipeline" element={<PipelinePage />} />
+      <Route path="pipeline/:dealId" element={<PipelinePage />} />
+      <Route path="team" element={<TeamPage />} />
+      <Route path="settings" element={<SettingsPage />} />
+      <Route path="assistants" element={<AssistantsPage />} />
+      <Route path="assistants/:assistantId" element={<AssistantsPage />} />
+      <Route path="channels" element={<ChannelsPage />} />
+      <Route path="channels/:channelId" element={<ChannelsPage />} />
+      <Route path="knowledge-base" element={<KnowledgeBasePage />} />
+      <Route path="knowledge-base/:documentId" element={<KnowledgeBasePage />} />
+    </Route>
     <Route path="*" element={<Navigate to="/app" replace />} />
   </Routes>;
 }

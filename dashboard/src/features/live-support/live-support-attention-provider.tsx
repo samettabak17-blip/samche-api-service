@@ -75,6 +75,11 @@ export function LiveSupportAttentionProvider({ tenantId, userId, children }: { t
     setMutedState(window.localStorage.getItem(preferenceKey(userId)) === 'true');
   }, [userId]);
 
+  useEffect(() => {
+    console.info('DASHBOARD_LIVE_SUPPORT_PROVIDER mounted=1 tenant=' + tenantId.slice(0, 8));
+    return () => console.info('DASHBOARD_LIVE_SUPPORT_PROVIDER mounted=0 tenant=' + tenantId.slice(0, 8));
+  }, [tenantId]);
+
   const setMuted = useCallback((nextMuted: boolean) => {
     window.localStorage.setItem(preferenceKey(userId), String(nextMuted));
     setMutedState(nextMuted);
@@ -87,6 +92,10 @@ export function LiveSupportAttentionProvider({ tenantId, userId, children }: { t
     refetchInterval: streamConnected ? false : 15000,
   });
   const requestedCount = attentionQuery.data?.unresolvedCount ?? 0;
+  useEffect(() => {
+    if (attentionQuery.isSuccess) console.info('DASHBOARD_ATTENTION_FETCH status=OK requested_count=' + requestedCount);
+    if (attentionQuery.isError) console.info('DASHBOARD_ATTENTION_FETCH status=FAIL code=REQUEST_FAILED');
+  }, [attentionQuery.isError, attentionQuery.isSuccess, requestedCount]);
 
   const refreshAttention = useCallback(async (reason?: string) => {
     const before = queryClient.getQueryData<{ unresolvedCount?: number }>(tenantKeys.humanAttention(tenantId))?.unresolvedCount ?? 0;
@@ -132,8 +141,14 @@ export function LiveSupportAttentionProvider({ tenantId, userId, children }: { t
         }
       } catch {
         setStreamConnected(false);
+        console.info('DASHBOARD_ATTENTION_SSE state=RECONNECTING');
       } finally {
-        if (active) retry = window.setTimeout(() => void connect(), 3000);
+        // A stream that ends after a prior successful connection must re-enable
+        // the conservative summary fallback until it is healthy again.
+        if (active) {
+          setStreamConnected(false);
+          retry = window.setTimeout(() => void connect(), 3000);
+        }
       }
     };
     void connect();
@@ -217,6 +232,10 @@ export function LiveSupportAttentionProvider({ tenantId, userId, children }: { t
       timer = window.setInterval(() => { alertVisible = !alertVisible; favicon.href = alertVisible ? alert : normal; }, 1500);
     });
     return () => { disposed = true; if (timer) window.clearInterval(timer); favicon.href = normal; };
+  }, [requestedCount]);
+
+  useEffect(() => {
+    console.info('DASHBOARD_LIVE_SUPPORT_RENDER requested_count=' + requestedCount);
   }, [requestedCount]);
 
   const value: AttentionContextValue = { requestedCount, muted, audioState, refreshAttention, setMuted };
