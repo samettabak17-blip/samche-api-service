@@ -150,6 +150,7 @@ export interface CrmPipelineStage { id: string; tenant_id: string; stage_key: st
 
 export interface DashboardOverview {
   range_days: number;
+  range: { start_date: string; end_date: string; previous_start_date: string; previous_end_date: string; };
   kpis: { total_conversations: number; new_leads: number; appointments: number | null; automations: number | null; satisfaction_rate: number | null; conversation_growth: number | null; };
   conversation_timeseries: Array<{ day: string; count: number }>;
   channel_distribution: Array<{ channel: ConversationChannelType; count: number }>;
