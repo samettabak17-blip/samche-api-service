@@ -136,8 +136,11 @@ export async function deliverWhatsAppMedia({
   if (!expectedPhoneNumberId || expectedPhoneNumberId !== configuredPhoneNumberId) throw new WhatsAppDeliveryError('WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH');
   if (!destination || !Buffer.isBuffer(buffer) || !buffer.length || !mimeType || !resolvedMediaCategory) throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_INVALID_INPUT');
 
+  const startedAt = Date.now();
+  const timing = (stage) => console.info(`AGENT_MEDIA_SEND_TIMING stage=${stage} elapsed_ms=${Date.now() - startedAt}`);
   let upload;
   try {
+    timing('UPLOAD_STARTED');
     const form = new FormData();
     form.append('messaging_product', 'whatsapp');
     form.append('file', new Blob([buffer], { type: mimeType }), filename);
@@ -146,27 +149,38 @@ export async function deliverWhatsAppMedia({
       form,
       { httpsAgent, headers: { Authorization: `Bearer ${accessToken}` }, timeout: 20000 }
     );
+    timing('UPLOAD_COMPLETED');
   } catch (error) {
+    timing('UPLOAD_FAILED');
     throw new WhatsAppDeliveryError(error?.response?.status === 401 || error?.response?.status === 403 ? 'WHATSAPP_DELIVERY_AUTH_FAILED' : 'WHATSAPP_MEDIA_UPLOAD_FAILED');
   }
 
   const mediaId = configuredValue(upload?.data?.id);
   if (!mediaId) throw new WhatsAppDeliveryError('WHATSAPP_MEDIA_UPLOAD_FAILED');
 
+  let submission;
   try {
     const payload = {
       messaging_product: 'whatsapp',
       to: destination,
       ...mediaPayload({ mediaCategory: resolvedMediaCategory, mediaId, caption: String(caption ?? '').trim().slice(0, 1024), filename }),
     };
-    await httpClient.post(
+    timing('WHATSAPP_SEND_STARTED');
+    submission = await httpClient.post(
       `https://graph.facebook.com/v20.0/${configuredPhoneNumberId}/messages`,
       payload,
       { httpsAgent, headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 20000 }
     );
+    timing('WHATSAPP_SEND_COMPLETED');
   } catch (error) {
+    timing('WHATSAPP_SEND_FAILED');
     throw new WhatsAppDeliveryError(error?.response?.status === 401 || error?.response?.status === 403 ? 'WHATSAPP_DELIVERY_AUTH_FAILED' : 'WHATSAPP_MEDIA_SEND_FAILED');
   }
 
-  return { delivery: 'SENT_TO_WHATSAPP', mediaId };
+  const providerMessageId = configuredValue(submission?.data?.messages?.[0]?.id);
+  if (!providerMessageId) {
+    timing('WHATSAPP_SEND_UNCORRELATED');
+    throw new WhatsAppDeliveryError('WHATSAPP_MEDIA_SEND_UNCORRELATED');
+  }
+  return { delivery: 'SENT_TO_WHATSAPP', mediaId, providerMessageId };
 }
