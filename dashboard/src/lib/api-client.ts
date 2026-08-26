@@ -77,6 +77,20 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   return body as T;
 }
 
+
+async function requestForm<T>(path: string, form: FormData, options: Omit<RequestOptions, 'body'> = {}): Promise<T> {
+  const token = session.getToken();
+  const headers: Record<string, string> = { ...options.headers };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(`${apiBaseUrl()}${path}`, { ...options, method: 'POST', headers, body: form });
+  const body = await readBody(response);
+  if (!response.ok) {
+    if (response.status === 401) onUnauthorized?.();
+    throw new ApiError(response.status, messageFromBody(body, `Request failed (${response.status})`), body);
+  }
+  return body as T;
+}
+
 async function requestBlob(path: string): Promise<Blob> {
   const token = session.getToken();
   const response = await fetch(`${apiBaseUrl()}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
@@ -89,6 +103,8 @@ async function requestBlob(path: string): Promise<Blob> {
 
 export const apiClient = {
   getBlob(path: string): Promise<Blob> { return requestBlob(path); },
+
+  postForm<T>(path: string, form: FormData, options?: Omit<RequestOptions, 'body'>): Promise<T> { return requestForm<T>(path, form, options); },
 
   get<T>(path: string, options?: RequestOptions): Promise<T> {
     return request<T>(path, { ...options, method: 'GET' });
