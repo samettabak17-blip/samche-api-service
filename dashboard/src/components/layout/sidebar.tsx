@@ -1,5 +1,5 @@
 import { BadgeDollarSign, BookOpenText, Bot, Cable, ChevronDown, KanbanSquare, LayoutDashboard, MessageCircle, MessagesSquare, Settings, UsersRound } from 'lucide-react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import samcheLogo from '../../assets/branding/samche-company-llc-logo.png';
 import { useEffect, useState } from 'react';
 import type { TenantRole } from '../../types/api';
@@ -56,9 +56,9 @@ export function Sidebar({ tenantId, tenantName, tenantRole, email, onLogout, onN
   const isAgent = tenantRole === 'AGENT';
   const access = workspaceAccessCopy(tenantRole);
 
-  return <aside className="flex h-full w-72 flex-col border-r border-line/80 bg-shell px-3 py-5 text-white">
-    <div className="mb-7 px-3"><img src={samcheLogo} alt="SamChe Company LLC" className="h-14 w-36 object-contain object-left" /><p className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-400">AI Platform</p></div>
-    <div className="mb-6 rounded-lg border border-line bg-elevated/60 px-3 py-2.5"><p className="truncate text-sm font-medium" title={tenantName}>{tenantName}</p><p className="mt-1 text-xs text-stone-400">{isAgent ? 'Read-only access' : tenantRole ?? 'Workspace access'}</p></div>
+  return <aside className="flex h-full w-full flex-col border-r border-line/80 bg-shell/95 px-2.5 py-5 text-white">
+    <div className="mb-6 px-2.5"><img src={samcheLogo} alt="SamChe Company LLC" className="h-12 w-32 object-contain object-left" /><p className="mt-1 text-[9px] font-semibold uppercase tracking-[0.24em] text-stone-400">AI Platform</p></div>
+    <div className="glass-surface mb-6 rounded-xl px-3 py-3"><p className="truncate text-sm font-medium" title={tenantName}>{tenantName}</p><p className="mt-1 text-xs text-stone-400">{isAgent ? 'Read-only access' : tenantRole ?? 'Workspace access'}</p></div>
     <nav aria-label="Dashboard navigation" className="space-y-4">
       {groups.map((group) => <section key={group.title}>
         <p className="mb-2 px-3 text-[10px] font-semibold tracking-[0.16em] text-stone-500">{group.title}</p>
@@ -66,6 +66,14 @@ export function Sidebar({ tenantId, tenantName, tenantRole, email, onLogout, onN
         {navigation.filter((item) => group.labels.includes(item.label)).map(({ label, suffix, icon: Icon }) => <NavLink key={suffix} to={'/app/' + tenantId + suffix} onClick={onNavigate} className={({ isActive }) => 'nav-link ' + (isActive ? 'nav-link-active' : '')}><Icon aria-hidden="true" size={18} strokeWidth={1.8} />{label}</NavLink>)}
       </section>)}
     </nav>
-    <div className="mt-auto border-t border-line pt-4"><div className="rounded-lg border border-signal/20 bg-signal/10 px-3 py-3"><p className="text-[10px] font-semibold tracking-[0.16em] text-signal">{access.label}</p><p className="mt-1 text-sm font-semibold text-white">{access.detail}</p></div><p className="mt-3 truncate text-xs text-stone-400" title={email}>{email}</p><button type="button" onClick={onLogout} className="mt-3 w-full rounded-lg border border-line bg-elevated/50 px-3 py-2 text-left text-sm text-stone-400 transition hover:border-signal/30 hover:bg-signal/10 hover:text-white">Sign out</button></div>
+    <div className="mt-auto border-t border-line/80 pt-4">
+      <div className="rounded-xl border border-signal/30 bg-[radial-gradient(circle_at_16%_18%,rgba(212,33,41,.2),transparent_8rem),rgba(48,16,24,.58)] px-3 py-3 shadow-[0_12px_28px_rgba(0,0,0,.18)]">
+        <p className="text-[10px] font-semibold tracking-[0.18em] text-signal">{access.label}</p>
+        <p className="mt-1 text-sm font-semibold text-white">{access.detail}</p>
+        <Link to={'/app/' + tenantId + '/settings'} onClick={onNavigate} className="mt-3 flex w-full items-center justify-center rounded-lg border border-signal/35 bg-black/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-signal hover:shadow-signal">Manage Plan</Link>
+      </div>
+      <p className="mt-3 truncate text-xs text-stone-400" title={email}>{email}</p>
+      <button type="button" onClick={onLogout} className="mt-3 w-full rounded-lg border border-line bg-elevated/50 px-3 py-2 text-left text-sm text-stone-400 transition hover:border-signal/30 hover:bg-signal/10 hover:text-white">Sign out</button>
+    </div>
   </aside>;
 }
