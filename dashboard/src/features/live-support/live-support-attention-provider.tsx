@@ -15,6 +15,9 @@ type AttentionContextValue = {
 
 const AttentionContext = createContext<AttentionContextValue | null>(null);
 
+// SSE is the immediate path; this tenant-scoped interval only heals a missed event or reconnect gap.
+export const LIVE_SUPPORT_ATTENTION_FALLBACK_MS = 15000;
+
 export function liveSupportBrowserTitle(requestedCount: number): string {
   return requestedCount > 0 ? '(' + requestedCount + ') LIVE SUPPORT — SamChe Dashboard' : 'SamChe Dashboard';
 }
@@ -95,7 +98,7 @@ export function LiveSupportAttentionProvider({ tenantId, userId, children }: { t
     queryKey: tenantKeys.humanAttention(tenantId),
     queryFn: () => tenantApi.getHumanAttentionSummary(tenantId),
     enabled: Boolean(tenantId),
-    refetchInterval: streamConnected ? false : 15000,
+    refetchInterval: LIVE_SUPPORT_ATTENTION_FALLBACK_MS,
   });
   const requestedCount = attentionQuery.data?.unresolvedCount ?? 0;
   useEffect(() => {

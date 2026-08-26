@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { liveSupportBrowserTitle, liveSupportFaviconDrawPlan, shouldRunLiveSupportAlarm } from './live-support-attention-provider';
+import { LIVE_SUPPORT_ATTENTION_FALLBACK_MS, liveSupportBrowserTitle, liveSupportFaviconDrawPlan, shouldRunLiveSupportAlarm } from './live-support-attention-provider';
 
 describe('global Live Support coordinator decisions', () => {
   it('runs one alarm only for unmuted, armed waiting attention', () => {
@@ -14,6 +14,10 @@ describe('global Live Support coordinator decisions', () => {
   });
 });
 
+
+it('keeps a conservative summary recovery path even when SSE is connected', () => {
+  expect(LIVE_SUPPORT_ATTENTION_FALLBACK_MS).toBe(15000);
+});
 
 describe('SamChe favicon drawing', () => {
   it('uses an inset logo and restrained notification badge at favicon scale', () => {
