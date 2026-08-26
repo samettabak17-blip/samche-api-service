@@ -64,6 +64,9 @@ export interface ConversationMessage {
   tenant_id: string;
   conversation_id: string;
   external_message_id: string | null;
+  delivery_status: 'SENDING' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED' | null;
+  delivery_status_updated_at: string | null;
+  delivery_failure_code: string | null;
   sender_type: SenderType;
   content: string;
   actor_user_id: string | null;
