@@ -34,3 +34,22 @@ export function clearSentAgentDraft(currentDraft: string, deliveredDraft: string
 export function isInlinePreviewableAttachment(mimeType?: string | null): boolean {
   return String(mimeType ?? '').startsWith('image/') || String(mimeType ?? '') === 'application/pdf';
 }
+
+export function canTakeOverConversation({
+  status,
+  handlingMode,
+  assignedAgentUserId,
+  humanAttentionState,
+  operatorAllowed,
+}: {
+  status?: string;
+  handlingMode?: string;
+  assignedAgentUserId?: string | null;
+  humanAttentionState?: string | null;
+  operatorAllowed: boolean;
+}): boolean {
+  if (!operatorAllowed || status !== 'open' || assignedAgentUserId) return false;
+  // A customer-requested handoff is already HUMAN to suppress AI, but remains
+  // deliberately unassigned until an operator takes ownership.
+  return handlingMode === 'AI' || (handlingMode === 'HUMAN' && humanAttentionState === 'REQUESTED');
+}

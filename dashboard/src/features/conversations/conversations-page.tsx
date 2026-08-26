@@ -8,7 +8,7 @@ import { useAuth } from '../auth/auth-context';
 import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
 import { ApiError } from '../../lib/api-client';
 import { useTenant } from '../tenants/tenant-context';
-import { canUseHumanReplyComposer, clearSentAgentDraft, isInlinePreviewableAttachment, senderLabel, senderTone } from './conversation-utils';
+import { canTakeOverConversation, canUseHumanReplyComposer, clearSentAgentDraft, isInlinePreviewableAttachment, senderLabel, senderTone } from './conversation-utils';
 import { useLiveSupportAttention } from '../live-support/live-support-attention-provider';
 import { SafeRichMessage } from './safe-rich-message';
 import { useTenantConversationLiveEvents } from './use-live-conversation-events';
@@ -120,7 +120,7 @@ export function ConversationsPage() {
   const isAdmin = user?.system_role === 'OWNER' || tenantRole === 'ADMIN';
   const isAgent = tenantRole === 'AGENT';
   const isOwn = conversation?.assigned_agent_user_id === user?.id;
-  const canTakeOver = Boolean(conversation && conversation.status === 'open' && conversation.handling_mode === 'AI' && !conversation.assigned_agent_user_id && (isAdmin || isAgent));
+  const canTakeOver = canTakeOverConversation({ status: conversation?.status, handlingMode: conversation?.handling_mode, assignedAgentUserId: conversation?.assigned_agent_user_id, humanAttentionState: conversation?.human_attention_state, operatorAllowed: isAdmin || isAgent });
   const canReturn = Boolean(conversation && conversation.status === 'open' && conversation.handling_mode === 'HUMAN' && (isAdmin || (isAgent && isOwn)));
   const canSend = Boolean(conversation && conversation.status === 'open' && canUseHumanReplyComposer(conversation.channel_type, conversation.human_delivery_configured) && conversation.handling_mode === 'HUMAN' && (isAdmin || (isAgent && isOwn)));
 

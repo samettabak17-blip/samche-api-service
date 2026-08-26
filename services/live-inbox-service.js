@@ -255,6 +255,7 @@ export async function operateConversation({ tenantId, conversationId, actor, act
     if (!permission) throw new ConversationOperationError(403, 'Conversation operation is not permitted', 'CONVERSATION_OPERATION_DENIED');
 
     if (action === 'takeover') {
+      console.info('TAKEOVER_STAGE stage=STARTED tenant=' + String(tenantId).slice(0, 8));
       if (conversation.assigned_agent_user_id && conversation.assigned_agent_user_id !== actorUserId) {
         throw new ConversationOperationError(409, 'Conversation is already handled by another agent', 'CONVERSATION_ALREADY_ASSIGNED');
       }
@@ -284,7 +285,10 @@ export async function operateConversation({ tenantId, conversationId, actor, act
         [actorUserId, conversationId, tenantId]
       );
       const takenOver = { ...updated.rows[0], channel_type: conversation.channel_type, external_channel_id: conversation.external_channel_id };
-      if (takenOver.channel_type === 'WHATSAPP') {
+      console.info('TAKEOVER_STAGE stage=ASSIGNED tenant=' + String(tenantId).slice(0, 8));
+      // The customer-request transfer has already been delivered. Only a voluntary
+      // manual takeover receives the separate deterministic manual-takeover notice.
+      if (takenOver.channel_type === 'WHATSAPP' && conversation.human_attention_state !== 'REQUESTED') {
         const content = await loadWhatsAppHumanSupportNotice(client, takenOver, 'manual_takeover');
         const integration = await loadWhatsAppAgentDelivery(client, takenOver);
         if (!content || !integration) {
@@ -303,8 +307,11 @@ export async function operateConversation({ tenantId, conversationId, actor, act
         await insertMessage(client, { tenantId, conversationId, senderType: 'ASSISTANT', content });
       }
       await writeAuditEvent(client, { tenantId, conversationId, actorUserId, eventType: 'TAKEOVER' });
+      console.info('TAKEOVER_STAGE stage=ACKNOWLEDGED tenant=' + String(tenantId).slice(0, 8));
       await notify(client, tenantId, conversationId, 'TAKEOVER');
+      console.info('TAKEOVER_STAGE stage=SSE_PUBLISHED tenant=' + String(tenantId).slice(0, 8));
       await client.query('COMMIT');
+      console.info('TAKEOVER_STAGE stage=SUCCESS tenant=' + String(tenantId).slice(0, 8));
       return takenOver;
     }
 

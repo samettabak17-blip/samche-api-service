@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clearSentAgentDraft, isInlinePreviewableAttachment, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel } from './conversation-utils';
+import { canTakeOverConversation, clearSentAgentDraft, isInlinePreviewableAttachment, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel } from './conversation-utils';
 
 describe('conversation sender presentation', () => {
   it('maps every backend sender type to a distinct safe label', () => {
@@ -47,5 +47,16 @@ describe('inline attachment preview helpers', () => {
     expect(isInlinePreviewableAttachment('image/jpeg')).toBe(true);
     expect(isInlinePreviewableAttachment('application/pdf')).toBe(true);
     expect(isInlinePreviewableAttachment('application/msword')).toBe(false);
+  });
+});
+
+
+describe('customer-requested live-support ownership', () => {
+  it('exposes Take Over for an unassigned HUMAN conversation that is still REQUESTED', () => {
+    const allowed = { status: 'open', assignedAgentUserId: null, operatorAllowed: true };
+    expect(canTakeOverConversation({ ...allowed, handlingMode: 'HUMAN', humanAttentionState: 'REQUESTED' })).toBe(true);
+    expect(canTakeOverConversation({ ...allowed, handlingMode: 'HUMAN', humanAttentionState: 'ACKNOWLEDGED' })).toBe(false);
+    expect(canTakeOverConversation({ ...allowed, handlingMode: 'HUMAN', humanAttentionState: 'NONE' })).toBe(false);
+    expect(canTakeOverConversation({ ...allowed, handlingMode: 'AI', humanAttentionState: 'NONE' })).toBe(true);
   });
 });
