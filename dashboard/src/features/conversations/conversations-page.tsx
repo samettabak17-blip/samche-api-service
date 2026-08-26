@@ -22,6 +22,11 @@ function handlingLabel(mode?: string) {
   return mode === 'HUMAN' ? 'Human handling' : mode === 'PAUSED' ? 'AI paused' : 'AI handling';
 }
 
+function supportedWhatsAppVoiceMime(): string | null {
+  if (!window.MediaRecorder) return null;
+  return ['audio/ogg;codecs=opus', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4'].find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? null;
+}
+
 function LiveState({ state }: { state: string }) {
   const label = state === 'connected' ? 'Live' : state === 'reconnecting' ? 'Reconnecting' : state === 'connecting' ? 'Connecting' : 'Offline';
   return <span className="inline-flex items-center gap-2 rounded-full border border-gold/20 bg-gold/10 px-3 py-1.5 text-xs font-medium text-gold"><span className="h-1.5 w-1.5 rounded-full bg-current" />{label}</span>;
@@ -143,8 +148,14 @@ export function ConversationsPage() {
     },
   });
   const sendMedia = useMutation({
-    mutationFn: ({ file, caption }: { file: File; caption: string }) => tenantApi.sendAgentMedia(tenantId, conversationId ?? '', file, caption, crypto.randomUUID()),
+    mutationFn: async ({ file, caption }: { file: File; caption: string }) => {
+      if (file.type.startsWith('audio/')) console.info('VOICE_UPLOAD_STARTED');
+      const result = await tenantApi.sendAgentMedia(tenantId, conversationId ?? '', file, caption, crypto.randomUUID());
+      if (file.type.startsWith('audio/')) console.info('VOICE_UPLOAD_COMPLETED');
+      return result;
+    },
     onSuccess: async (_result, payload) => {
+      if (payload.file.type.startsWith('audio/')) console.info('VOICE_PERSISTED');
       setPendingFile((current) => current === payload.file ? null : current);
       setContent((current) => clearSentAgentDraft(current, payload.caption));
       await refresh('agent-message');
@@ -170,11 +181,15 @@ export function ConversationsPage() {
     recorderRef.current?.stop();
   };
   const startVoiceRecording = async () => {
-    if (!window.MediaRecorder || !MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) return;
+    const mimeType = supportedWhatsAppVoiceMime();
+    console.info('VOICE_RECORDER_SUPPORT=' + Boolean(mimeType));
+    console.info('VOICE_RECORDER_MIME=' + (mimeType ?? 'none'));
+    if (!navigator.mediaDevices?.getUserMedia || !mimeType) { setAttachmentError('Voice notes are not supported by this browser. Use a browser that supports WhatsApp-compatible audio recording.'); return; }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const chunks: BlobPart[] = [];
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/ogg;codecs=opus' });
+      const recorder = new MediaRecorder(stream, { mimeType });
+      console.info('VOICE_RECORDING_STARTED');
       recorderRef.current = recorder;
       recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
       recorder.onstop = () => {
@@ -183,7 +198,8 @@ export function ConversationsPage() {
         recordingTimerRef.current = null;
         setRecording(false);
         setRecordingSeconds(0);
-        if (chunks.length) chooseComposerFile(new File(chunks, 'voice-note.ogg', { type: 'audio/ogg' }));
+        console.info('VOICE_RECORDING_STOPPED');
+        if (chunks.length) chooseComposerFile(new File(chunks, mimeType === 'audio/ogg;codecs=opus' ? 'voice-note.ogg' : 'voice-note.m4a', { type: mimeType.split(';')[0] }));
       };
       recorder.start();
       setRecording(true);
@@ -335,7 +351,7 @@ export function ConversationsPage() {
                 <div className="relative"><button type="button" onClick={() => setEmojiOpen((open) => !open)} className="grid h-9 w-9 place-items-center rounded-full text-stone-300 hover:bg-white/[.07] hover:text-white" aria-label="Insert emoji"><Smile size={19} /></button>{emojiOpen && <div className="absolute bottom-11 right-0 z-30 flex gap-1 rounded-xl border border-line bg-[#101a27] p-2 shadow-xl">{['😀','😁','😂','😊','😍','🤝','👍','👏','🙏','❤️','🎉','✅','💼','📌','📎','🌟','🔥','👋','🤔','😢','😮','📞','🏢','✈️'].map((emoji) => <button key={emoji} type="button" onClick={() => insertEmoji(emoji)} className="grid h-7 w-7 place-items-center rounded hover:bg-white/[.08]" aria-label={'Insert ' + emoji}>{emoji}</button>)}</div>}</div>
                 <button type="button" onClick={() => documentInputRef.current?.click()} className="grid h-9 w-9 place-items-center rounded-full text-stone-300 hover:bg-white/[.07] hover:text-white" aria-label="Send document"><Paperclip size={19} /></button>
                 <button type="button" onClick={() => imageInputRef.current?.click()} className="grid h-9 w-9 place-items-center rounded-full text-stone-300 hover:bg-white/[.07] hover:text-white" aria-label="Send image"><ImageIcon size={19} /></button>
-                {content.trim() || pendingFile ? <button type="submit" disabled={send.isPending || sendMedia.isPending} className={'grid h-10 min-w-10 place-items-center rounded-full text-white disabled:opacity-50 ' + (channelContext.type === 'WHATSAPP' ? 'bg-[#159b61] hover:bg-[#118452]' : 'bg-signal hover:bg-signal/85')} aria-label={pendingFile ? 'Send attachment' : 'Send message'}><Send size={17} /></button> : (channelContext.type === 'WHATSAPP' && typeof window !== 'undefined' && Boolean(window.MediaRecorder?.isTypeSupported('audio/ogg;codecs=opus')) ? <button type="button" onClick={() => void startVoiceRecording()} className="grid h-10 w-10 place-items-center rounded-full bg-[#159b61] text-white hover:bg-[#118452]" aria-label="Record WhatsApp voice note"><Mic size={18} /></button> : <span className="grid h-10 w-10 place-items-center rounded-full bg-white/[.04] text-stone-600" title="Voice notes are unavailable in this browser"><Mic size={18} /></span>)}</>}</div>
+                {content.trim() || pendingFile ? <button type="submit" disabled={send.isPending || sendMedia.isPending} className={'grid h-10 min-w-10 place-items-center rounded-full text-white disabled:opacity-50 ' + (channelContext.type === 'WHATSAPP' ? 'bg-[#159b61] hover:bg-[#118452]' : 'bg-signal hover:bg-signal/85')} aria-label={pendingFile ? 'Send attachment' : 'Send message'}><Send size={17} /></button> : (channelContext.type === 'WHATSAPP' && typeof window !== 'undefined' && Boolean(supportedWhatsAppVoiceMime()) ? <button type="button" onClick={() => void startVoiceRecording()} className="grid h-10 w-10 place-items-center rounded-full bg-[#159b61] text-white hover:bg-[#118452]" aria-label="Record WhatsApp voice note"><Mic size={18} /></button> : <span className="grid h-10 w-10 place-items-center rounded-full bg-white/[.04] text-stone-600" title="Voice notes are unavailable in this browser"><Mic size={18} /></span>)}</>}</div>
               {pendingFile && <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-line bg-black/15 px-3 py-2 text-xs"><div className="min-w-0 flex-1">{pendingFile.type.startsWith('audio/') ? <><p className="font-medium text-stone-200">Voice note ready to send</p><audio controls src={pendingVoicePreviewUrl ?? undefined} className="mt-1 h-8 w-full max-w-sm" /></> : <span className="truncate text-stone-300">{pendingFile.name} · {Math.ceil(pendingFile.size / 1024)} KB</span>}</div><button type="button" onClick={() => setPendingFile(null)} className="text-stone-400 hover:text-white">Remove</button></div>}
               {(send.error instanceof Error || sendMedia.error instanceof Error) && <p role="alert" className="mt-2 text-xs text-red-300">{(send.error ?? sendMedia.error as Error).message}</p>}
             </form> : <p className="text-xs text-stone-400">{conversation.handling_mode === 'HUMAN' ? 'Only the assigned operator can reply.' : 'Take over to enable a supported human reply.'}</p>}
