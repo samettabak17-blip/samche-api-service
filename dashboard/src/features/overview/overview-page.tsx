@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import { Bot, CalendarDays, CheckSquare, Clock3, MessagesSquare, Sparkles, UsersRound, Zap } from 'lucide-react';
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { EmptyState, QueryErrorState, SkeletonBlock } from '../../components/ui/async-state';
 import type { DashboardOverview } from '../../types/api';
 import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
 import { useTenant } from '../tenants/tenant-context';
+import { overviewRangeRequest, useOverviewDateRange } from './overview-date-range-context';
 
 const channelColors: Record<string, string> = { WHATSAPP: '#20c77a', WEB_CHAT: '#e3343d', SAMCHEGUIDE: '#7767f6' };
 const channelName = (channel?: string | null) => channel === 'WEB_CHAT' ? 'Web Chatbot' : channel === 'SAMCHEGUIDE' ? 'AI Guide' : channel === 'WHATSAPP' ? 'WhatsApp' : '—';
@@ -16,19 +16,6 @@ const relativeTime = (value?: string | null) => {
   const minutes = Math.floor(diff / 60000);
   return minutes < 1 ? 'Now' : minutes < 60 ? minutes + 'm ago' : minutes < 1440 ? Math.floor(minutes / 60) + 'h ago' : Math.floor(minutes / 1440) + 'd ago';
 };
-const toDateInput = (date: Date) => date.toISOString().slice(0, 10);
-const dateAtUtcStart = (value: string) => new Date(value + 'T00:00:00.000Z');
-
-export type OverviewRangePreset = 'today' | 'last-7-days' | 'last-30-days' | 'this-month' | 'custom';
-export function overviewRangeRequest(preset: Exclude<OverviewRangePreset, 'custom'>, now = new Date()) {
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  let start = new Date(end);
-  let label = 'Today';
-  if (preset === 'last-7-days') { start.setUTCDate(start.getUTCDate() - 6); label = 'Last 7 days'; }
-  if (preset === 'last-30-days') { start.setUTCDate(start.getUTCDate() - 29); label = 'Last 30 days'; }
-  if (preset === 'this-month') { start = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1)); label = 'This month'; }
-  return { startDate: toDateInput(start), endDate: toDateInput(end), label };
-}
 export const formatOverviewValue = (value: number | null, suffix = '') => value === null ? '—' : value + suffix;
 export const overviewWorkspaceName = (name?: string) => name || 'your workspace';
 export const overviewConversationLabel = (value?: string | null) => {
@@ -82,11 +69,7 @@ function NeuralBrain() {
 export function OverviewPage() {
   const { selectedTenant } = useTenant();
   const tenantId = selectedTenant?.id ?? '';
-  const [preset, setPreset] = useState<OverviewRangePreset>('last-7-days');
-  const initial = overviewRangeRequest('last-7-days');
-  const [customStart, setCustomStart] = useState(initial.startDate);
-  const [customEnd, setCustomEnd] = useState(initial.endDate);
-  const activeRange = preset === 'custom' ? { startDate: customStart, endDate: customEnd, label: 'Custom range' } : overviewRangeRequest(preset);
+  const { activeRange } = useOverviewDateRange();
   const query = useQuery({
     queryKey: tenantKeys.dashboardOverview(tenantId, activeRange.startDate, activeRange.endDate),
     queryFn: () => tenantApi.getDashboardOverview(tenantId, activeRange),
@@ -111,7 +94,7 @@ export function OverviewPage() {
   return <div className="mx-auto max-w-[1540px] space-y-4 pb-6">
     <header className="flex flex-wrap items-end justify-between gap-4 px-1">
       <div><p className="eyebrow">SamChe AI Platform</p><h1 className="mt-1 text-2xl font-semibold tracking-tight text-ink">Dashboard Overview</h1><p className="mt-1 text-sm text-stone-400">Live workspace activity and customer engagement for {overviewWorkspaceName(selectedTenant?.name)}.</p></div>
-      <div className="glass-surface flex flex-wrap items-center gap-2 rounded-xl p-2"><CalendarDays size={16} className="ml-1 text-signal" /><select value={preset} onChange={(event) => setPreset(event.target.value as OverviewRangePreset)} className="border-0 !bg-transparent px-2 py-1.5 text-xs font-semibold outline-none" aria-label="Overview date range"><option value="today">Today</option><option value="last-7-days">Last 7 days</option><option value="last-30-days">Last 30 days</option><option value="this-month">This month</option><option value="custom">Custom range</option></select>{preset === 'custom' && <><input aria-label="Overview start date" type="date" value={customStart} max={customEnd} onChange={(event) => setCustomStart(event.target.value)} className="max-w-36 rounded-lg px-2 py-1 text-xs" /><span className="text-xs text-stone-500">to</span><input aria-label="Overview end date" type="date" value={customEnd} min={customStart} onChange={(event) => setCustomEnd(event.target.value)} className="max-w-36 rounded-lg px-2 py-1 text-xs" /></>}<span className="hidden rounded-lg bg-white/[.04] px-2 py-1 text-[10px] text-stone-400 sm:inline">{activeRange.label}</span></div>
+      <span className="rounded-lg border border-line bg-black/10 px-2.5 py-1.5 text-[10px] font-semibold text-stone-400 xl:hidden">{activeRange.label}</span>
     </header>
 
     <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{kpis.map(([label, value, Icon], index) => <article key={label} className="dashboard-card relative overflow-hidden p-4"><div className="absolute right-0 top-0 h-16 w-16 rounded-bl-[2.4rem] bg-signal/[.035]" /><div className={'icon-orb ' + (index === 0 ? 'text-signal' : index === 1 ? 'text-[#7884ff]' : index === 2 ? 'text-emerald-400' : index === 3 ? 'text-gold' : 'text-sky-400')}><Icon size={18} /></div><p className="mt-4 text-xs text-stone-400">{label}</p><div className="mt-1 flex items-end justify-between gap-2"><p className="text-2xl font-semibold tracking-tight text-ink">{formatOverviewValue(value, label === 'Satisfaction Rate' ? '%' : '')}</p>{index === 0 && <MiniTrend trend={data.kpis.conversation_growth} />}</div></article>)}</section>
