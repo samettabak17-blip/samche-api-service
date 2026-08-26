@@ -31,12 +31,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify operator permission rules
-        run: node --test tests/conversation-permissions.test.js tests/samcheguide-runtime.test.js test/dashboardAnalyticsService.test.js test/conversationRoutesProjection.test.js
+        run: node --test tests/conversation-permissions.test.js tests/samcheguide-runtime.test.js test/dashboardAnalyticsService.test.js test/conversationRoutesProjection.test.js test/whatsappAgentMediaDelivery.test.js test/liveInboxWhatsAppOperatorMedia.test.js test/conversationResourceAudioValidation.test.js test/whatsappMultimodalService.test.js
       - name: Verify live inbox syntax
         run: |
           node --check app.js
           node --check routes/conversationRoutes.js
           node --check services/live-inbox-service.js
+          node --check services/whatsapp-delivery-service.js
+          node --check services/whatsapp-live-inbox-service.js
+          node --check services/conversation-resource-validation.js
           node --check services/live-event-bus.js
           node --check services/dashboard-analytics-service.js
           node --check scripts/verify_dashboard_analytics.js
