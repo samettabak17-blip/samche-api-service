@@ -61,12 +61,17 @@ async function conversationContext(tenantId, conversationId) {
        tc.assistant_id,
        a.name AS assistant_name,
        assigned.email AS assigned_agent_email,
+       contact.display_name AS contact_display_name,
+       contact.phone AS contact_phone,
+       contact.language AS contact_language,
+       contact.country AS contact_country,
        latest.content AS last_message_preview,
        latest.created_at AS last_message_at
      FROM conversations c
      JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
      LEFT JOIN ai_assistants a ON a.id = tc.assistant_id AND a.tenant_id = tc.tenant_id
      LEFT JOIN users assigned ON assigned.id = c.assigned_agent_user_id
+     LEFT JOIN crm_contacts contact ON contact.id = c.contact_id AND contact.tenant_id = c.tenant_id
      LEFT JOIN LATERAL (
        SELECT content, created_at
        FROM conversation_messages
@@ -134,6 +139,10 @@ router.get('/:tenantId/conversations', requireTenantAccess, async (req, res) => 
          tc.display_name AS channel_display_name,
          a.name AS assistant_name,
          assigned.email AS assigned_agent_email,
+         contact.display_name AS contact_display_name,
+         contact.phone AS contact_phone,
+         contact.language AS contact_language,
+         contact.country AS contact_country,
          latest.content AS last_message_preview,
          latest.created_at AS last_message_at
        FROM conversations c
