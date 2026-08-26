@@ -11,9 +11,9 @@ describe('tenant dashboard API', () => {
   it('passes pagination parameters to the real conversations endpoint', async () => {
     const get = vi.spyOn(apiClient, 'get').mockResolvedValue([]);
 
-    await tenantApi.listConversations('tenant-a', { limit: 25, offset: 50 });
+    await tenantApi.listConversations('tenant-a', { limit: 25, offset: 50 }, { channelType: 'WHATSAPP', search: 'customer' });
 
-    expect(get).toHaveBeenCalledWith('/api/v1/tenants/tenant-a/conversations?limit=25&offset=50');
+    expect(get).toHaveBeenCalledWith('/api/v1/tenants/tenant-a/conversations?limit=25&offset=50&channel_type=WHATSAPP&search=customer');
     get.mockRestore();
   });
 

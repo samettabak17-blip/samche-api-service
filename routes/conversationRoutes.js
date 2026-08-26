@@ -119,8 +119,11 @@ router.get('/:tenantId/conversations', requireTenantAccess, async (req, res) => 
 
   const status = req.query.status;
   const handlingMode = req.query.handling_mode;
+  const channelType = req.query.channel_type;
+  const search = typeof req.query.search === 'string' ? req.query.search.trim().slice(0, 160) : '';
   if (status && !['open', 'closed', 'archived'].includes(status)) return res.status(400).json({ error: 'Invalid conversation status' });
   if (handlingMode && !['AI', 'HUMAN', 'PAUSED'].includes(handlingMode)) return res.status(400).json({ error: 'Invalid handling mode' });
+  if (channelType && !['WHATSAPP', 'WEB_CHAT', 'SAMCHEGUIDE'].includes(channelType)) return res.status(400).json({ error: 'Invalid conversation channel type' });
 
   try {
     const { query } = await import('../config/db.js');
@@ -147,9 +150,13 @@ router.get('/:tenantId/conversations', requireTenantAccess, async (req, res) => 
        WHERE c.tenant_id = $1
          AND ($2::text IS NULL OR c.status = $2)
          AND ($3::text IS NULL OR c.handling_mode = $3)
+         AND ($4::text IS NULL OR tc.channel_type = $4)
+         AND ($5::text IS NULL OR c.customer_external_id ILIKE '%' || $5 || '%'
+              OR c.external_conversation_id ILIKE '%' || $5 || '%'
+              OR latest.content ILIKE '%' || $5 || '%')
        ORDER BY c.last_activity_at DESC, c.created_at DESC
-       LIMIT $4 OFFSET $5`,
-      [currentTenantId, status ?? null, handlingMode ?? null, page.limit, page.offset]
+       LIMIT $6 OFFSET $7`,
+      [currentTenantId, status ?? null, handlingMode ?? null, channelType ?? null, search || null, page.limit, page.offset]
     );
     return res.json(result.rows);
   } catch (error) {
@@ -186,7 +193,7 @@ router.get('/:tenantId/conversations/:conversationId/messages', requireTenantAcc
        JOIN conversations c ON c.id = m.conversation_id AND c.tenant_id = m.tenant_id
        LEFT JOIN users u ON u.id = m.actor_user_id
        WHERE m.tenant_id = $1 AND m.conversation_id = $2
-       ORDER BY m.created_at ASC
+       ORDER BY m.created_at DESC, m.id DESC
        LIMIT $3 OFFSET $4`,
       [currentTenantId, req.params.conversationId, page.limit, page.offset]
     );

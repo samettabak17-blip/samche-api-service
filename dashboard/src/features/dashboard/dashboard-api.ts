@@ -48,7 +48,12 @@ export const tenantApi = {
   updateKnowledgeDocument: (tenantId: string, documentId: string, body: Partial<Omit<KnowledgeDocument, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>>) => apiClient.put<KnowledgeDocument>(`${tenantRoot(tenantId)}/knowledge-base/${documentId}`, body),
   deleteKnowledgeDocument: (tenantId: string, documentId: string) => apiClient.delete<{ message: string }>(`${tenantRoot(tenantId)}/knowledge-base/${documentId}`),
   listTeam: (tenantId: string) => apiClient.get<TeamMember[]>(`${tenantRoot(tenantId)}/team`),
-  listConversations: (tenantId: string, page: { limit: number; offset: number }) => apiClient.get<Conversation[]>(`${tenantRoot(tenantId)}/conversations?limit=${page.limit}&offset=${page.offset}`),
+  listConversations: (tenantId: string, page: { limit: number; offset: number }, filters: { channelType?: string; search?: string } = {}) => {
+    const params = new URLSearchParams({ limit: String(page.limit), offset: String(page.offset) });
+    if (filters.channelType) params.set('channel_type', filters.channelType);
+    if (filters.search?.trim()) params.set('search', filters.search.trim());
+    return apiClient.get<Conversation[]>(`${tenantRoot(tenantId)}/conversations?${params.toString()}`);
+  },
   getHumanAttentionSummary: (tenantId: string) => apiClient.get<HumanAttentionSummary>(`${tenantRoot(tenantId)}/conversations/human-attention-summary`),
   getConversation: (tenantId: string, conversationId: string) => apiClient.get<Conversation>(`${tenantRoot(tenantId)}/conversations/${conversationId}`),
   listMessages: (tenantId: string, conversationId: string, page: { limit: number; offset: number }) => apiClient.get<ConversationMessage[]>(`${tenantRoot(tenantId)}/conversations/${conversationId}/messages?limit=${page.limit}&offset=${page.offset}`),
