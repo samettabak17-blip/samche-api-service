@@ -64,13 +64,20 @@ jobs:
                       WHERE table_schema = 'public'
                         AND table_name = 'conversations'
                         AND column_name = 'handling_mode'
-                    ) AS has_handling_mode`
+                    ) AS has_handling_mode,
+                    EXISTS (
+                      SELECT 1
+                      FROM pg_constraint
+                      WHERE conrelid = 'public.conversation_audit_events'::regclass
+                        AND contype = 'c'
+                        AND pg_get_constraintdef(oid) LIKE '%HUMAN_SUPPORT_ACKNOWLEDGED%'
+                    ) AS has_agent_ack_audit_event`
               );
               const row = result.rows[0];
-              if (!row.has_mapping_table || !row.has_audit_table || !row.has_handling_mode) {
+              if (!row.has_mapping_table || !row.has_audit_table || !row.has_handling_mode || !row.has_agent_ack_audit_event) {
                 throw new Error('Live inbox migration is not applied');
               }
-              console.log('PASS | STAGING | live inbox schema migration');
+              console.log('PASS | STAGING | live inbox schema migration and agent acknowledgement audit event');
             } finally {
               await pool.end();
             }

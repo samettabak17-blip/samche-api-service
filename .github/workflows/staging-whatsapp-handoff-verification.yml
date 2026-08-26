@@ -59,6 +59,7 @@ jobs:
           test/whatsappDeterministicTemplateParity.test.js
           test/conversationCommunicationLanguage.test.js
           test/humanSupportService.test.js
+          test/humanSupportAcknowledgementAuditSchema.test.js
           test/humanSupportIntent.test.js
           test/whatsappSequentialResourceContext.test.js
           test/whatsappResourceFollowUpRouting.test.js
