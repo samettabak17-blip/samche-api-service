@@ -1,8 +1,11 @@
-import { Building2, CalendarDays, ChevronLeft, ChevronRight, LogOut, Menu } from 'lucide-react';
+import { Bell, Building2, CalendarDays, ChevronLeft, ChevronRight, LogOut, Menu, Search } from 'lucide-react';
 import { useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { useLocation, useNavigate } from 'react-router-dom';
 import type { Tenant } from '../../types/api';
 import { useOverviewDateRange } from '../../features/overview/overview-date-range-context';
+import { useLiveSupportAttention } from '../../features/live-support/live-support-attention-provider';
+import { tenantApi } from '../../features/dashboard/dashboard-api';
 
 interface TopbarProps { tenants: Tenant[]; selectedTenantId: string; email: string; onSelectTenant(tenantId: string): void; onOpenNavigation(): void; onLogout(): void; }
 
@@ -46,11 +49,30 @@ function DateRangeControl() {
 
 export function Topbar({ tenants, selectedTenantId, email, onSelectTenant, onOpenNavigation, onLogout }: TopbarProps) {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { requestedCount } = useLiveSupportAttention();
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [search, setSearch] = useState('');
   const knownSection = location.pathname.split('/').find((segment) => ['overview', 'conversations', 'leads', 'pipeline', 'assistants', 'channels', 'knowledge-base', 'team', 'settings'].includes(segment));
   const title = ({ overview: 'Dashboard Overview', conversations: 'Conversations', leads: 'Leads', pipeline: 'Pipeline', assistants: 'AI Assistants', channels: 'Channels', 'knowledge-base': 'Knowledge Base', team: 'Team', settings: 'Settings' } as Record<string, string>)[knownSection ?? ''] ?? 'Dashboard Overview';
   const isOverview = knownSection === 'overview';
+  const notifications = useQuery({
+    queryKey: ['tenant', selectedTenantId, 'header-live-support'],
+    queryFn: () => tenantApi.listConversations(selectedTenantId, { limit: 20, offset: 0 }),
+    enabled: notificationsOpen && requestedCount > 0,
+  });
+  const waiting = (notifications.data ?? []).filter((item) => item.human_attention_state === 'REQUESTED');
+  const displayRole = 'Administrator';
   return <header className="flex min-h-[4.25rem] items-center justify-between border-b border-line/80 bg-shell/85 px-4 backdrop-blur-xl sm:px-6 lg:px-7">
     <div className="flex min-w-0 items-center gap-3"><button type="button" onClick={onOpenNavigation} className="grid h-10 w-10 place-items-center rounded-lg text-stone-300 hover:bg-white/[0.04] lg:hidden" aria-label="Open navigation"><Menu aria-hidden="true" size={21} /></button><p className="truncate text-lg font-semibold tracking-tight text-ink sm:text-xl">{title}</p></div>
-    <div className="flex items-center gap-3">{isOverview && <DateRangeControl />}<div className="glass-surface min-w-0 rounded-xl px-3 py-2"><label className="sr-only" htmlFor="tenant-select">Selected tenant</label><span className="mr-2 inline-block align-middle text-signal"><Building2 aria-hidden="true" size={15} /></span><select id="tenant-select" value={selectedTenantId} onChange={(event) => onSelectTenant(event.target.value)} className="max-w-40 truncate bg-transparent text-sm font-semibold text-ink outline-none sm:max-w-56">{tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></div><span className="hidden max-w-48 truncate text-xs text-stone-400 xl:block" title={email}>{email}</span><button type="button" onClick={onLogout} className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-elevated/60 text-stone-400 transition hover:border-signal/30 hover:text-ink" aria-label="Sign out"><LogOut aria-hidden="true" size={18} /></button></div>
+    <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+      <form onSubmit={(event) => { event.preventDefault(); const term = search.trim(); if (term) navigate('/app/' + selectedTenantId + '/conversations/whatsapp?q=' + encodeURIComponent(term)); }} className="relative hidden xl:block"><Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} className="h-10 w-48 rounded-xl border border-line bg-black/15 pl-9 pr-3 text-xs text-ink outline-none transition placeholder:text-stone-500 focus:border-signal/50 2xl:w-60" placeholder="Search anything…" aria-label="Search conversations" /></form>
+      {isOverview && <DateRangeControl />}
+      <div className="relative"><button type="button" onClick={() => setNotificationsOpen((value) => !value)} aria-label="Live support notifications" aria-expanded={notificationsOpen} className="relative grid h-10 w-10 place-items-center rounded-xl border border-line bg-elevated/60 text-stone-200 transition hover:border-signal/35 hover:text-white"><Bell size={17} />{requestedCount > 0 && <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-signal px-1 text-[9px] font-bold text-white">{requestedCount}</span>}</button>{notificationsOpen && <section className="absolute right-0 top-12 z-[90] w-80 overflow-hidden rounded-2xl border border-white/[.14] bg-[#09121f]/95 shadow-2xl backdrop-blur-2xl"><header className="border-b border-white/[.08] px-4 py-3"><p className="text-sm font-semibold text-white">Notifications</p><p className="mt-0.5 text-xs text-stone-400">{requestedCount ? requestedCount + ' live support request' + (requestedCount === 1 ? '' : 's') + ' waiting' : 'No active notifications'}</p></header><div className="max-h-72 overflow-y-auto">{waiting.length ? waiting.map((item) => <button key={item.id} type="button" onClick={() => { setNotificationsOpen(false); navigate('/app/' + selectedTenantId + '/conversations/whatsapp/' + item.id); }} className="block w-full border-b border-white/[.06] px-4 py-3 text-left transition hover:bg-white/[.05]"><p className="text-xs font-bold tracking-[.1em] text-red-300">LIVE SUPPORT</p><p className="mt-1 truncate text-sm font-medium text-white">{item.contact_display_name || item.contact_phone || 'Customer waiting'}</p><p className="mt-1 truncate text-xs text-stone-400">{item.last_message_preview || 'Customer requested a representative'}</p></button>) : <p className="px-4 py-7 text-center text-sm text-stone-500">{requestedCount ? 'Loading current requests…' : 'No live support requests.'}</p>}</div></section>}</div>
+      <div className="glass-surface hidden min-w-0 items-center gap-2 rounded-xl px-3 py-2 lg:flex"><span className="inline-grid h-7 w-7 place-items-center rounded-full bg-signal/15 text-xs font-bold text-signal">{displayRole.slice(0, 1)}</span><div className="min-w-0"><p className="max-w-40 truncate text-xs font-semibold text-ink">{tenants.find((tenant) => tenant.id === selectedTenantId)?.name || 'Workspace'}</p><p className="text-[10px] text-stone-400">{displayRole}</p></div></div>
+      <div className="hidden 2xl:block"><label className="sr-only" htmlFor="tenant-select">Selected tenant</label><select id="tenant-select" value={selectedTenantId} onChange={(event) => onSelectTenant(event.target.value)} className="max-w-40 truncate rounded-xl border border-line bg-elevated/60 px-2 py-2 text-xs font-semibold text-ink outline-none">{tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></div>
+      <button type="button" onClick={onLogout} className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-elevated/60 text-stone-400 transition hover:border-signal/30 hover:text-ink" aria-label="Sign out"><LogOut aria-hidden="true" size={18} /></button>
+    </div>
   </header>;
 }
+
