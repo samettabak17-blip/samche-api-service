@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { planWhatsAppDeterministicSocialResponse } from '../services/whatsapp-deterministic-social-response-service.js';
+import { classifyWhatsAppCurrentCustomerIntent } from '../services/whatsapp-tenant-context-service.js';
 
 const templates = {
   first_contact: {
@@ -187,4 +188,23 @@ test('deterministic templates use the recognized current inbound language, never
       inbound,
     );
   }
+});
+
+
+test('recognizes non-Turkish/non-Arabic deterministic social variants before the substantive model path', () => {
+  for (const value of ['hola', 'bonjour', 'hallo', 'ciao', 'thanks', 'gracias', 'merci', 'danke']) {
+    assert.notEqual(classifyWhatsAppCurrentCustomerIntent(value), 'TOPIC_PRESENT', value);
+  }
+});
+
+test('hola uses the English zero-token template even after Arabic history', () => {
+  const plan = planWhatsAppDeterministicSocialResponse({
+    tenant,
+    communicationLanguage: 'ar',
+    currentInboundMessage: 'hola',
+    currentIntent: 'GREETING_ONLY',
+    firstAssistantResponse: false,
+  });
+  assert.equal(plan.content, templates.social.greeting.en);
+  assert.equal(plan.shouldInvokeGemini, false);
 });

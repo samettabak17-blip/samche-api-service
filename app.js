@@ -23,7 +23,7 @@ import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from ".
 import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
 import { persistAndDeliverWhatsAppAssistant } from "./services/whatsapp-assistant-response-service.js";
 import { buildWhatsAppTenantModelContext, classifyWhatsAppCurrentCustomerIntent, detectWhatsAppModelResponseLanguage, isWhatsAppResponseLanguageMismatch, WhatsAppTenantContextError } from "./services/whatsapp-tenant-context-service.js";
-import { planWhatsAppDeterministicSocialResponse, resolveWhatsAppDeterministicTemplateLanguage } from "./services/whatsapp-deterministic-social-response-service.js";
+import { inferWhatsAppDeterministicInboundLanguage, planWhatsAppDeterministicSocialResponse, resolveWhatsAppDeterministicTemplateLanguage } from "./services/whatsapp-deterministic-social-response-service.js";
 import {
   describeStorageCompatibilityProfile,
   describeStorageConfigurationIdentity,
@@ -1538,12 +1538,13 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       session.lang = lang;
 
       const currentIntent = classifyWhatsAppCurrentCustomerIntent(text);
-      const deterministicTemplateLanguage = resolveWhatsAppDeterministicTemplateLanguage({ currentInboundMessage: text });
+      const deterministicDetectedLanguage = inferWhatsAppDeterministicInboundLanguage(text);
+      const deterministicTemplateLanguage = resolveWhatsAppDeterministicTemplateLanguage({ currentInboundMessage: text, detectedLanguage: deterministicDetectedLanguage });
       const deterministicSocialResponse = planWhatsAppDeterministicSocialResponse({
         tenant: tenantContext,
         communicationLanguage: tenantContext.communicationLanguage,
         currentInboundMessage: text,
-        detectedLanguage: deterministicTemplateLanguage,
+        detectedLanguage: deterministicDetectedLanguage,
         currentIntent,
         firstAssistantResponse: whatsappInbox.isFirstAssistantResponse,
       });
@@ -1551,7 +1552,10 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         console.info(
           'WHATSAPP_RESPONSE_POLICY current_intent=' + currentIntent +
           ' first_assistant_response=' + (whatsappInbox.isFirstAssistantResponse ? '1' : '0') +
-          ' model_invoked=0 deterministic_kind=' + deterministicSocialResponse.kind
+          ' model_invoked=0 deterministic_kind=' + deterministicSocialResponse.kind +
+          ' current_detected=' + deterministicDetectedLanguage +
+          ' template_language=' + deterministicTemplateLanguage +
+          ' persisted_language=' + tenantContext.communicationLanguage
         );
         await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, deterministicSocialResponse.content);
         return;

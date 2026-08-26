@@ -5,8 +5,20 @@ import { inferConservativeWhatsAppLanguage } from './conversation-communication-
  * persisted substantive-language continuity. Turkish and Arabic choose their
  * own templates; every other input chooses the configured English template.
  */
+export function inferWhatsAppDeterministicInboundLanguage(currentInboundMessage) {
+  const text = String(currentInboundMessage ?? '').trim();
+  const inferred = inferConservativeWhatsAppLanguage(text);
+  if (inferred) return inferred;
+  if (/^(?:hola|gracias)\b/iu.test(text)) return 'es';
+  if (/^(?:bonjour|merci)\b/iu.test(text)) return 'fr';
+  if (/^(?:hallo|danke)\b/iu.test(text)) return 'de';
+  if (/^(?:ciao|grazie)\b/iu.test(text)) return 'it';
+  if (/^(?:olá|oi|obrigad[oa])\b/iu.test(text)) return 'pt';
+  return 'en';
+}
+
 export function resolveWhatsAppDeterministicTemplateLanguage({ currentInboundMessage, detectedLanguage = null }) {
-  const candidate = String(detectedLanguage ?? inferConservativeWhatsAppLanguage(currentInboundMessage) ?? '').toLowerCase();
+  const candidate = String(detectedLanguage ?? inferWhatsAppDeterministicInboundLanguage(currentInboundMessage) ?? '').toLowerCase();
   if (candidate === 'tr') return 'tr';
   if (candidate === 'ar') return 'ar';
   return 'en';

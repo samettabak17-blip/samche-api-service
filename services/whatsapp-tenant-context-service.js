@@ -35,9 +35,9 @@ function responseLanguageInstruction(language) {
     : 'Respond in the customer’s established conversation language.';
 }
 
-const GREETING_ONLY = /^(?:merhaba|mrb|selam|slm|selamlar|selamun\s+aleykum|selamün\s+aleyküm|selamunaleykum|selamünaleyküm|s\.?\s*a\.?|sa|hello|hi|hey|مرحبا|السلام\s+عليكم)(?:[\s!,.?:;()\[\]{}…~*_😀-🙏]*)$/iu;
+const GREETING_ONLY = /^(?:merhaba|mrb|selam|slm|selamlar|selamun\s+aleykum|selamün\s+aleyküm|selamunaleykum|selamünaleyküm|s\.?\s*a\.?|sa|hello|hi|hey|hola|bonjour|hallo|ciao|olá|oi|привет|مرحبا|السلام\s+عليكم)(?:[\s!,.?:;()\[\]{}…~*_😀-🙏]*)$/iu;
 
-const THANKS_ONLY = /^(?:teşekkürler|tesekkurler|teşekkür ederim|tesekkür ederim|çok teşekkürler|cok tesekkurler|sağ olun|sag olun|thanks|thank you|شكراً|شكرًا)(?:[\s!,.?:;()\[\]{}…~*_😀-🙏]*)$/iu;
+const THANKS_ONLY = /^(?:teşekkürler|tesekkurler|teşekkür ederim|tesekkür ederim|çok teşekkürler|cok tesekkurler|sağ olun|sag olun|thanks|thank you|gracias|merci|danke|grazie|obrigado|obrigada|شكراً|شكرًا)(?:[\s!,.?:;()\[\]{}…~*_😀-🙏]*)$/iu;
 
 export function classifyWhatsAppCurrentCustomerIntent(customerText) {
   const normalized = String(customerText ?? '').trim();
