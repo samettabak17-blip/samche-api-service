@@ -88,11 +88,6 @@ export function ConversationsPage() {
     setPendingVoicePreviewUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [pendingFile]);
-  useEffect(() => {
-    if (!conversationId && conversationsQuery.data?.[0]?.id && tenantId) {
-      navigate('/app/' + tenantId + '/conversations/' + channel + '/' + conversationsQuery.data[0].id, { replace: true });
-    }
-  }, [channel, conversationId, conversationsQuery.data, navigate, tenantId]);
 
   const conversationsQuery = useQuery({
     queryKey: [...tenantKeys.conversations(tenantId, conversationLimit, 0), channelContext.type, search, statusFilter],
@@ -100,6 +95,11 @@ export function ConversationsPage() {
     enabled: Boolean(tenantId),
   });
   const conversationQuery = useQuery({ queryKey: tenantKeys.conversation(tenantId, conversationId ?? ''), queryFn: () => tenantApi.getConversation(tenantId, conversationId ?? ''), enabled: Boolean(tenantId && conversationId) });
+  useEffect(() => {
+    if (!conversationId && conversationsQuery.data?.[0]?.id && tenantId) {
+      navigate('/app/' + tenantId + '/conversations/' + channel + '/' + conversationsQuery.data[0].id, { replace: true });
+    }
+  }, [channel, conversationId, conversationsQuery.data, navigate, tenantId]);
   const messagesQuery = useInfiniteQuery({
     queryKey: ['tenant', tenantId, 'conversation', conversationId ?? '', 'messages', 'latest-window', messagePageSize],
     initialPageParam: 0,
