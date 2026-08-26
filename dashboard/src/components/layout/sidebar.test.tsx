@@ -24,4 +24,14 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: 'AI Guide' })).toBeTruthy();
   });
 });
-describe('workspace access presentation', () => { it('shows real administrator access without fabricating a tenant plan', () => { expect(workspaceAccessCopy('OWNER')).toEqual({ label: 'ADMIN', detail: 'FULL ACCESS' }); expect(workspaceAccessCopy('ADMIN')).toEqual({ label: 'ADMIN', detail: 'FULL ACCESS' }); }); });
+describe('workspace access presentation', () => {
+  it('shows real administrator access without fabricating a tenant plan', () => {
+    expect(workspaceAccessCopy('OWNER')).toEqual({ label: 'ADMIN', detail: 'FULL ACCESS' });
+    expect(workspaceAccessCopy('ADMIN')).toEqual({ label: 'ADMIN', detail: 'FULL ACCESS' });
+  });
+  it('keeps the persistent access card connected to the real workspace settings route', () => {
+    render(<MemoryRouter><Sidebar tenantId="tenant-admin" tenantName="Admin tenant" tenantRole="ADMIN" email="admin@samche.test" onLogout={() => undefined} onNavigate={() => undefined} /></MemoryRouter>);
+    const managePlan = screen.getByRole('link', { name: 'Manage Plan' });
+    expect(managePlan.getAttribute('href')).toBe('/app/tenant-admin/settings');
+  });
+});
