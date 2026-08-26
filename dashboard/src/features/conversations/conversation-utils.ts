@@ -29,3 +29,8 @@ export function dashboardSoundMutePreferenceKey(userId?: string): string {
 export function clearSentAgentDraft(currentDraft: string, deliveredDraft: string): string {
   return currentDraft === deliveredDraft ? '' : currentDraft;
 }
+
+
+export function isInlinePreviewableAttachment(mimeType?: string | null): boolean {
+  return String(mimeType ?? '').startsWith('image/') || String(mimeType ?? '') === 'application/pdf';
+}

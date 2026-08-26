@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clearSentAgentDraft, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel } from './conversation-utils';
+import { clearSentAgentDraft, isInlinePreviewableAttachment, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel } from './conversation-utils';
 
 describe('conversation sender presentation', () => {
   it('maps every backend sender type to a distinct safe label', () => {
@@ -38,5 +38,14 @@ describe('agent composer draft handling', () => {
   it('clears only the draft confirmed by successful delivery', () => {
     expect(clearSentAgentDraft('Hello', 'Hello')).toBe('');
     expect(clearSentAgentDraft('New draft', 'Hello')).toBe('New draft');
+  });
+});
+
+
+describe('inline attachment preview helpers', () => {
+  it('renders only images and PDFs inside the Live Inbox overlay', () => {
+    expect(isInlinePreviewableAttachment('image/jpeg')).toBe(true);
+    expect(isInlinePreviewableAttachment('application/pdf')).toBe(true);
+    expect(isInlinePreviewableAttachment('application/msword')).toBe(false);
   });
 });
