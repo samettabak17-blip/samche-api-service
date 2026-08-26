@@ -29,8 +29,8 @@ function DateRangeControl() {
   };
   const selectPreset = (value: typeof presets[number][0]) => { setPreset(value); setOpen(false); };
   return <div className="relative hidden xl:block">
-    <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} className="glass-surface inline-flex h-10 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-stone-200 transition hover:border-signal/35 hover:bg-white/[.055]">
-      <CalendarDays size={15} className="text-signal" /><span>{activeRange.label}</span><ChevronRight size={14} className={open ? 'rotate-90 text-stone-300 transition-transform' : 'text-stone-500 transition-transform'} />
+    <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} className="group glass-surface inline-flex h-10 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-stone-200 transition hover:border-signal/35 hover:bg-white/[.055]">
+      <CalendarDays size={15} className="text-stone-100 transition-colors group-hover:text-signal" /><span>{activeRange.label}</span><ChevronRight size={14} className={open ? 'rotate-90 text-stone-300 transition-transform' : 'text-stone-500 transition-transform'} />
     </button>
     {open && <section className="absolute right-0 top-12 z-[90] w-[23rem] rounded-2xl border border-white/[.14] bg-[#09121f]/95 p-3 text-left shadow-[0_22px_60px_rgba(0,0,0,.55),0_0_28px_rgba(212,33,41,.13)] backdrop-blur-2xl">
       <div className="grid grid-cols-2 gap-1.5 border-b border-white/[.08] pb-3">{presets.map(([value, label]) => <button key={value} type="button" onClick={() => selectPreset(value)} className={'rounded-lg px-2.5 py-2 text-left text-xs transition ' + (preset === value ? 'bg-signal/20 text-white ring-1 ring-inset ring-signal/45' : 'text-stone-300 hover:bg-white/[.06]')}>{label}</button>)}<button type="button" onClick={() => { setPreset('custom'); setChoosingStart(true); }} className={'rounded-lg px-2.5 py-2 text-left text-xs transition ' + (preset === 'custom' ? 'bg-signal/20 text-white ring-1 ring-inset ring-signal/45' : 'text-stone-300 hover:bg-white/[.06]')}>Custom range</button></div>
