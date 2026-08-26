@@ -5,10 +5,10 @@
   "main": "app.js",
   "type": "module",
   "scripts": {
-  "start": "node scripts/migrate.js && node app.js",
-  "dev": "nodemon app.js",
-  "migrate": "node scripts/migrate.js",
-  "bootstrap-owner": "node scripts/bootstrap_owner.js"
+    "start": "node scripts/migrate.js && node app.js",
+    "dev": "nodemon app.js",
+    "migrate": "node scripts/migrate.js",
+    "bootstrap-owner": "node scripts/bootstrap_owner.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.540.0",
@@ -24,7 +24,8 @@
     "node-cron": "^3.0.3",
     "node-fetch": "^3.3.2",
     "openai": "^4.20.0",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "multer": "^1.4.5-lts.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
