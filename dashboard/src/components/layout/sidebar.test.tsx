@@ -24,6 +24,16 @@ describe('Sidebar', () => {
 describe('workspace access presentation', () => {
   it('shows real administrator access without fabricating a tenant plan', () => {
     expect(workspaceAccessCopy('OWNER')).toEqual({ label: 'ADMIN', detail: 'FULL ACCESS' });
-    expect(workspaceAccessCopy('ADMIN')).toEqual({ label: 'WORKSPACE ACCESS', detail: 'PLAN NOT AVAILABLE' });
+    expect(workspaceAccessCopy('ADMIN')).toEqual({ label: 'ADMIN', detail: 'FULL ACCESS' });
   });
+});
+
+
+it('provides the three neutral conversation channel labels without repeated company branding', () => {
+  render(<MemoryRouter initialEntries={['/app/tenant-agent/conversations/whatsapp']}><Sidebar tenantId="tenant-agent" tenantName="Agent tenant" tenantRole="ADMIN" email="agent@samche.test" onLogout={() => undefined} onNavigate={() => undefined} /></MemoryRouter>);
+  expect(screen.getByRole('button', { name: /Conversations/i })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'WhatsApp' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Web Chatbot' })).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'AI Guide' })).toBeTruthy();
+  expect(screen.queryByText('SamChe WhatsApp')).toBeNull();
 });
