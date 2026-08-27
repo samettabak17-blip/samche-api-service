@@ -173,9 +173,19 @@ router.get('/:tenantId/conversations', requireTenantAccess, async (req, res) => 
          AND ($2::text IS NULL OR c.status = $2)
          AND ($3::text IS NULL OR c.handling_mode = $3)
          AND ($4::text IS NULL OR tc.channel_type = $4)
-         AND ($5::text IS NULL OR c.customer_external_id ILIKE '%' || $5 || '%'
+         AND ($5::text IS NULL
+              OR c.customer_external_id ILIKE '%' || $5 || '%'
               OR c.external_conversation_id ILIKE '%' || $5 || '%'
-              OR latest.content ILIKE '%' || $5 || '%')
+              OR contact.display_name ILIKE '%' || $5 || '%'
+              OR contact.phone ILIKE '%' || $5 || '%'
+              OR latest.content ILIKE '%' || $5 || '%'
+              OR EXISTS (
+                SELECT 1
+                  FROM conversation_messages searchable
+                 WHERE searchable.tenant_id = c.tenant_id
+                   AND searchable.conversation_id = c.id
+                   AND searchable.content ILIKE '%' || $5 || '%'
+              ))
        ORDER BY c.last_activity_at DESC, c.created_at DESC
        LIMIT $6 OFFSET $7`,
       [currentTenantId, status ?? null, handlingMode ?? null, channelType ?? null, search || null, page.limit, page.offset]
