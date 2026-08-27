@@ -17,6 +17,7 @@ import tenantRoutes from "./routes/tenantRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
 import crmRoutes from "./routes/crmRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
+import knowledgeIntelligenceRoutes from "./routes/knowledgeIntelligenceRoutes.js";
 import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
 import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from "./services/human-support-service.js";
@@ -109,6 +110,7 @@ app.get("/api/v1/health/db", async (req, res) => {
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/tenants", tenantRoutes);
 app.use("/api/v1/tenants", conversationRoutes);
+app.use("/api/v1/tenants", knowledgeIntelligenceRoutes);
 app.use("/api/v1/tenants", dashboardRoutes);
 app.use("/api/v1/tenants", crmRoutes);
 void startLiveEventListener();
