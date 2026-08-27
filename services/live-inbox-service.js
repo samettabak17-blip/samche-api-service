@@ -211,15 +211,14 @@ export async function persistAssistantResponseIfCurrent({ tenantId, conversation
       return { delivered: false };
     }
 
-    traceStage('AGENT_PERSIST_STARTED');
-    traceMediaStage('MESSAGE_PERSISTENCE');
+    traceStage('ASSISTANT_PERSIST_STARTED');
     const message = await insertMessage(client, {
       tenantId,
       conversationId,
       senderType: 'ASSISTANT',
       content,
     });
-    traceStage('AGENT_PERSIST_SUCCEEDED');
+    traceStage('ASSISTANT_PERSIST_SUCCEEDED');
     await client.query(
       'UPDATE conversations SET last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2',
       [conversationId, tenantId]
