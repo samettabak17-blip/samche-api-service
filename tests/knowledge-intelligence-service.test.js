@@ -82,6 +82,6 @@ test('re-indexing replaces active chunks without creating duplicate active vecto
     config: { ...Object.freeze({ provider: 'OPENAI', model: 'text-embedding-3-small', version: 'test', dimensions: 1536, chunkCharacters: 18, overlapCharacters: 4, retrievalLimit: 3 }) },
   });
   assert.match(calls[0].sql, /SET is_active = FALSE/);
-  assert.ok(calls.some(({ sql }) => /ON CONFLICT[\\s\\S]*DO UPDATE/i.test(sql)));
+  assert.ok(calls.some(({ sql }) => /ON CONFLICT[\s\S]*DO UPDATE/i.test(sql)));
   assert.match(calls.at(-1).sql, /indexing_status = 'READY'/);
 });
