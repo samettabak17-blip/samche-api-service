@@ -6,13 +6,17 @@ import { INSERT_CONVERSATION_MESSAGE_SQL, recordWhatsAppDeliveryStatus, UPDATE_W
 const tenantId = '11111111-1111-4111-8111-111111111111';
 const conversationId = '22222222-2222-4222-8222-222222222222';
 
-function databaseFixture({ matched = true } = {}) {
+function databaseFixture({ matched = true, matchOnAttempt = 1 } = {}) {
   const calls = [];
+  let updateAttempts = 0;
   const client = {
     async query(sql, parameters = []) {
       calls.push({ sql, parameters });
       if (sql.includes('UPDATE conversation_messages m')) {
-        return matched ? { rowCount: 1, rows: [{ tenant_id: tenantId, conversation_id: conversationId, id: 'message-id', delivery_status: parameters[0] }] } : { rowCount: 0, rows: [] };
+        updateAttempts += 1;
+        return matched && updateAttempts >= matchOnAttempt
+          ? { rowCount: 1, rows: [{ tenant_id: tenantId, conversation_id: conversationId, id: 'message-id', delivery_status: parameters[0] }] }
+          : { rowCount: 0, rows: [] };
       }
       return { rowCount: 0, rows: [] };
     },
@@ -129,4 +133,18 @@ test('regression: every provider delivery status executes against the staging SQ
     client.release();
     await database.end();
   }
+});
+
+
+test('reconciles an early status webhook after the assistant wamid is committed', async () => {
+  const { database, calls } = databaseFixture({ matchOnAttempt: 2 });
+  const result = await recordWhatsAppDeliveryStatus({
+    phoneNumberId: '948536645017374',
+    status: { id: 'TEST_WAMID', status: 'sent' },
+    database,
+    reconciliationDelaysMs: [0, 0],
+  });
+
+  assert.deepEqual(result, { updated: true, count: 1, deliveryStatus: 'SENT' });
+  assert.equal(calls.filter(({ sql }) => sql.includes('UPDATE conversation_messages m')).length, 2);
 });
