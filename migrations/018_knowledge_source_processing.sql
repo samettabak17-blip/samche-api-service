@@ -1,5 +1,10 @@
 -- Task 6: durable, tenant-scoped processing jobs for canonical knowledge sources.
 -- This migration is additive and only runs after the pgvector foundation migrations.
+ALTER TABLE knowledge_base_documents
+  ADD COLUMN IF NOT EXISTS extraction_hash CHAR(64),
+  ADD COLUMN IF NOT EXISTS extraction_method VARCHAR(32),
+  ADD COLUMN IF NOT EXISTS extracted_at TIMESTAMPTZ;
+
 CREATE TABLE IF NOT EXISTS knowledge_processing_jobs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
