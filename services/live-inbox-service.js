@@ -236,6 +236,18 @@ export async function persistAssistantResponseIfCurrent({ tenantId, conversation
   }
 }
 
+export const UPDATE_WHATSAPP_ASSISTANT_PROVIDER_ACCEPTANCE_SQL = `UPDATE conversation_messages
+  SET external_message_id = $1::varchar(255),
+      delivery_status = 'SENT'::varchar(20),
+      delivery_status_updated_at = CURRENT_TIMESTAMP,
+      delivery_failure_code = NULL::varchar(80)
+WHERE id = $2::uuid
+  AND tenant_id = $3::uuid
+  AND conversation_id = $4::uuid
+  AND sender_type = 'ASSISTANT'
+  AND (external_message_id IS NULL OR external_message_id = $1::varchar(255))
+RETURNING *`;
+
 export async function recordWhatsAppAssistantProviderAcceptance({
   tenantId,
   conversationId,
@@ -252,17 +264,7 @@ export async function recordWhatsAppAssistantProviderAcceptance({
   try {
     await client.query('BEGIN');
     const updated = await client.query(
-      `UPDATE conversation_messages
-          SET external_message_id = $1::varchar(255),
-              delivery_status = 'SENT'::varchar(20),
-              delivery_status_updated_at = CURRENT_TIMESTAMP,
-              delivery_failure_code = NULL::varchar(80)
-        WHERE id = $2::uuid
-          AND tenant_id = $3::uuid
-          AND conversation_id = $4::uuid
-          AND sender_type = 'ASSISTANT'
-          AND (external_message_id IS NULL OR external_message_id = $1::varchar(255))
-        RETURNING *`,
+      UPDATE_WHATSAPP_ASSISTANT_PROVIDER_ACCEPTANCE_SQL,
       [resolvedProviderMessageId, messageId, tenantId, conversationId]
     );
     if (updated.rowCount !== 1) {
