@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import pg from 'pg';
-import { INSERT_CONVERSATION_MESSAGE_SQL, persistAssistantResponseIfCurrent } from '../services/live-inbox-service.js';
+import { INSERT_CONVERSATION_MESSAGE_SQL, UPDATE_WHATSAPP_ASSISTANT_PROVIDER_ACCEPTANCE_SQL, persistAssistantResponseIfCurrent } from '../services/live-inbox-service.js';
 import { persistAndDeliverWhatsAppAssistant } from '../services/whatsapp-assistant-response-service.js';
+import { WhatsAppDeliveryError, deliverWhatsAppText } from '../services/whatsapp-delivery-service.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
 const conversationId = '22222222-2222-4222-8222-222222222222';
@@ -56,7 +57,8 @@ test('takeover race blocks persistence and channel delivery for a stale AI resul
   const outcome = await persistAndDeliverWhatsAppAssistant({
     tenantId, conversationId, handlingVersion: 7, recipient: 'whatsapp:15551234567', content: 'Stale response',
     persistAssistantResponse: (input) => persistAssistantResponseIfCurrent({ ...input, database }),
-    deliver: async () => { deliveries += 1; },
+    persistProviderMessageId: async ({ providerMessageId }) => ({ id: 'assistant-provider-message', external_message_id: providerMessageId }),
+    deliver: async () => { deliveries += 1; return { providerMessageId: 'wamid.assistant-test' }; },
   });
 
   assert.equal(outcome.delivered, false);
@@ -122,11 +124,86 @@ test('regression: nullable assistant delivery status has a concrete PostgreSQL t
     ]);
 
     assert.equal(inserted.rowCount, 1);
-    assert.equal(inserted.rows[0].sender_type, 'ASSISTANT');
-    assert.equal(inserted.rows[0].delivery_status, null);
+    const accepted = await client.query(UPDATE_WHATSAPP_ASSISTANT_PROVIDER_ACCEPTANCE_SQL, [
+      'TEST_WAMID',
+      inserted.rows[0].id,
+      target.tenant_id,
+      target.id,
+    ]);
+    assert.equal(accepted.rowCount, 1);
+    assert.equal(accepted.rows[0].external_message_id, 'TEST_WAMID');
+    assert.equal(accepted.rows[0].delivery_status, 'SENT');
   } finally {
     if (transactionOpen) await client.query('ROLLBACK');
     client.release();
     await database.end();
   }
+});
+
+
+test('persists the exact Meta wamid on the assistant message after provider acceptance', async () => {
+  const persistedIds = [];
+  const outcome = await persistAndDeliverWhatsAppAssistant({
+    tenantId,
+    conversationId,
+    handlingVersion: 4,
+    recipient: 'whatsapp:15551234567',
+    content: 'Assistant response',
+    persistAssistantResponse: async () => ({ delivered: true, message: { id: 'assistant-message-id' } }),
+    deliver: async () => ({ providerMessageId: 'TEST_WAMID' }),
+    persistProviderMessageId: async (input) => {
+      persistedIds.push(input);
+      return { id: input.messageId, external_message_id: input.providerMessageId, delivery_status: 'SENT' };
+    },
+  });
+
+  assert.equal(outcome.delivered, true);
+  assert.equal(outcome.providerMessageId, 'TEST_WAMID');
+  assert.deepEqual(persistedIds, [{
+    tenantId,
+    conversationId,
+    messageId: 'assistant-message-id',
+    providerMessageId: 'TEST_WAMID',
+  }]);
+  assert.equal(outcome.message.external_message_id, 'TEST_WAMID');
+});
+
+test('does not mark an assistant response delivered when Meta rejects the request', async () => {
+  let wamidPersisted = false;
+  await assert.rejects(persistAndDeliverWhatsAppAssistant({
+    tenantId,
+    conversationId,
+    handlingVersion: 4,
+    recipient: 'whatsapp:15551234567',
+    content: 'Assistant response',
+    persistAssistantResponse: async () => ({ delivered: true, message: { id: 'assistant-message-id' } }),
+    deliver: async () => { throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_FAILED'); },
+    persistProviderMessageId: async () => { wamidPersisted = true; },
+  }), (error) => error.code === 'WHATSAPP_DELIVERY_FAILED');
+  assert.equal(wamidPersisted, false);
+});
+
+test('extracts Meta messages[0].id for an assistant text delivery', async () => {
+  const result = await deliverWhatsAppText({
+    phoneNumberId: '948536645017374',
+    recipient: 'whatsapp:15551234567',
+    content: 'Merhaba',
+    requireProviderMessageId: true,
+    env: { WHATSAPP_PHONE_ID: '948536645017374', WHATSAPP_TOKEN: 'test-token' },
+    httpClient: { async post() { return { data: { messages: [{ id: 'TEST_WAMID' }] } }; } },
+  });
+
+  assert.equal(result.providerMessageId, 'TEST_WAMID');
+  assert.deepEqual(result.providerMessageIds, ['TEST_WAMID']);
+});
+
+test('rejects an assistant text delivery without a real Meta wamid', async () => {
+  await assert.rejects(deliverWhatsAppText({
+    phoneNumberId: '948536645017374',
+    recipient: 'whatsapp:15551234567',
+    content: 'Merhaba',
+    requireProviderMessageId: true,
+    env: { WHATSAPP_PHONE_ID: '948536645017374', WHATSAPP_TOKEN: 'test-token' },
+    httpClient: { async post() { return { data: { messages: [] } }; } },
+  }), (error) => error instanceof WhatsAppDeliveryError && error.code === 'WHATSAPP_DELIVERY_UNCORRELATED');
 });
