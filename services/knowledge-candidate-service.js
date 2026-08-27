@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { redactConversationCandidate } from './knowledge-intelligence-service.js';
 import { KnowledgeSourceServiceError, createManualKnowledgeSource } from './knowledge-source-service.js';
 
