@@ -7,7 +7,8 @@ test('activating an approved assistant configuration supersedes only the previou
   const database = {
     async query(sql, params = []) {
       calls.push({ sql, params });
-      if (/SELECT id, status/i.test(sql)) return { rows: [{ id: params[0], status: 'APPROVED' }] };\n      if (/status = 'ACTIVE'/i.test(sql)) return { rows: [{ id: 'old-version' }] };
+      if (/SELECT id, status/i.test(sql)) return { rows: [{ id: params[0], status: 'APPROVED' }] };
+      if (/status = 'ACTIVE'/i.test(sql)) return { rows: [{ id: 'old-version' }] };
       return { rows: [] };
     },
   };
