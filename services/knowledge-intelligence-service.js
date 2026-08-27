@@ -32,7 +32,7 @@ export function chunkKnowledgeText(value, {
 } = {}) {
   const text = normalizeText(value);
   if (!text) return [];
-  if (!Number.isInteger(maxCharacters) || maxCharacters < 64 || !Number.isInteger(overlapCharacters) || overlapCharacters < 0 || overlapCharacters >= maxCharacters) {
+  if (!Number.isInteger(maxCharacters) || maxCharacters < 8 || !Number.isInteger(overlapCharacters) || overlapCharacters < 0 || overlapCharacters >= maxCharacters) {
     throw new KnowledgeIntelligenceError('KNOWLEDGE_CHUNK_CONFIG_INVALID', 'Knowledge chunk configuration is invalid');
   }
 
