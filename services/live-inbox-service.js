@@ -859,7 +859,7 @@ export async function appendAgentMediaMessage({
     traceMediaStage('COMMIT');
     await client.query('COMMIT');
     console.info('OPERATOR_MEDIA_SEND_SUCCEEDED media_category=' + validated.mediaCategory);
-    if (isVoiceMessage && conversation.channel_type === 'WHATSAPP') console.info('VOICE_SEND stage=COMPLETED');
+    if (isVoiceMessage && conversation.channel_type === 'WHATSAPP') console.info('VOICE_SEND stage=PROVIDER_SUBMISSION_COMPLETED');
     return { duplicate: false, message, resource, delivery: deliveryResult.delivery, attentionAcknowledged: acknowledgement.rowCount === 1 };
   } catch (error) {
     console.error('OPERATOR_MEDIA_SEND_FAILED stage=' + mediaSendStage + ' reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
@@ -921,7 +921,9 @@ export async function recordWhatsAppDeliveryStatus({
   phoneNumberId,
   status,
   database = pool,
-  reconciliationDelaysMs = [0, 25, 75],
+  // Meta can issue an asynchronous status before the sending transaction commits.
+  // Keep the provider webhook tenant/channel scoped, but reconcile across that brief commit boundary.
+  reconciliationDelaysMs = [0, 75, 250, 750],
 }) {
   const providerMessageId = String(status?.id ?? '').trim();
   const providerStatus = String(status?.status ?? '').trim().toUpperCase();
@@ -939,7 +941,7 @@ export async function recordWhatsAppDeliveryStatus({
     for (let attempt = 0; attempt < reconciliationDelaysMs.length; attempt += 1) {
       if (attempt > 0) {
         const delay = Number(reconciliationDelaysMs[attempt]) || 0;
-        console.info('WHATSAPP_DELIVERY_STATUS stage=RECONCILE_RETRY attempt=' + attempt);
+        console.info('WHATSAPP_DELIVERY_STATUS stage=RECONCILE_RETRY attempt=' + attempt + ' delay_ms=' + delay);
         if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
       }
       updated = await client.query(
