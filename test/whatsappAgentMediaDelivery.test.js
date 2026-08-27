@@ -63,3 +63,18 @@ test('retains a safe provider-boundary diagnostic when Meta rejects an audio mes
     return true;
   });
 });
+
+
+test('uploads verified Ogg/Opus voice bytes to Meta with an audio/ogg file contract', async () => {
+  const calls = [];
+  const audio = { buffer: Buffer.from('OggS....OpusHead....voice'), size: 23, mimetype: 'audio/ogg', originalname: 'voice-note.ogg' };
+  const result = await deliverWhatsAppMedia({
+    phoneNumberId: '948536645017374', recipient: 'whatsapp:15551234567', file: audio, mediaCategory: 'AUDIO', env,
+    httpClient: { async post(url, body) { calls.push({ url, body }); return url.endsWith('/media') ? { data: { id: 'meta-audio-1' } } : { data: { messages: [{ id: 'wamid.voice-1' }] } }; } },
+  });
+  const uploaded = calls[0].body.get('file');
+  assert.equal(uploaded.type, 'audio/ogg');
+  assert.equal(uploaded.name, 'voice-note.ogg');
+  assert.deepEqual(calls[1].body, { messaging_product: 'whatsapp', to: '15551234567', type: 'audio', audio: { id: 'meta-audio-1' } });
+  assert.equal(result.providerMessageId, 'wamid.voice-1');
+});
