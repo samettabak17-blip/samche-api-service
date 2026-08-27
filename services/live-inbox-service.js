@@ -493,8 +493,8 @@ export async function getHumanDeliveryCapability({ tenantId, conversationId, dat
     );
     const conversation = result.rows[0];
     if (!conversation) return null;
-    if (conversation.channel_type === 'SAMCHEGUIDE') {
-      return { channelType: 'SAMCHEGUIDE', configured: true };
+    if (conversation.channel_type === 'SAMCHEGUIDE' || conversation.channel_type === 'WEB_CHAT') {
+      return { channelType: conversation.channel_type, configured: true };
     }
     if (conversation.channel_type !== 'WHATSAPP') {
       return { channelType: conversation.channel_type, configured: false };
@@ -582,7 +582,7 @@ export async function appendAgentMessage({
       }
       traceStage('DELIVERY_SUCCEEDED');
       delivery = 'SENT_TO_WHATSAPP';
-    } else if (conversation.channel_type !== 'SAMCHEGUIDE') {
+    } else if (!['SAMCHEGUIDE', 'WEB_CHAT'].includes(conversation.channel_type)) {
       throw new ConversationOperationError(409, 'Human delivery is not configured for this channel', 'CHANNEL_DELIVERY_UNSUPPORTED');
     }
 
