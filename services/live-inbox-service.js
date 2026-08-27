@@ -236,6 +236,49 @@ export async function persistAssistantResponseIfCurrent({ tenantId, conversation
   }
 }
 
+export async function recordWhatsAppAssistantProviderAcceptance({
+  tenantId,
+  conversationId,
+  messageId,
+  providerMessageId,
+  database = pool,
+}) {
+  const resolvedProviderMessageId = String(providerMessageId ?? '').trim();
+  if (!tenantId || !conversationId || !messageId || !resolvedProviderMessageId) {
+    throw new ConversationOperationError(502, 'WhatsApp assistant delivery could not be correlated', 'WHATSAPP_ASSISTANT_SEND_UNCORRELATED');
+  }
+
+  const client = await database.connect();
+  try {
+    await client.query('BEGIN');
+    const updated = await client.query(
+      `UPDATE conversation_messages
+          SET external_message_id = $1::varchar(255),
+              delivery_status = 'SENT'::varchar(20),
+              delivery_status_updated_at = CURRENT_TIMESTAMP,
+              delivery_failure_code = NULL::varchar(80)
+        WHERE id = $2::uuid
+          AND tenant_id = $3::uuid
+          AND conversation_id = $4::uuid
+          AND sender_type = 'ASSISTANT'
+          AND (external_message_id IS NULL OR external_message_id = $1::varchar(255))
+        RETURNING *`,
+      [resolvedProviderMessageId, messageId, tenantId, conversationId]
+    );
+    if (updated.rowCount !== 1) {
+      throw new ConversationOperationError(409, 'WhatsApp assistant delivery could not be correlated', 'WHATSAPP_ASSISTANT_PERSIST_UNCORRELATED');
+    }
+    await notify(client, tenantId, conversationId, 'WHATSAPP_DELIVERY_STATUS');
+    await client.query('COMMIT');
+    return updated.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function operateConversation({ tenantId, conversationId, actor, action }) {
   const client = await pool.connect();
   try {
