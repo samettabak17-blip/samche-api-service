@@ -12,17 +12,334 @@ import type { Assistant, KnowledgeDocument } from '../../types/api';
 
 type DocumentPayload = Omit<KnowledgeDocument, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>;
 
-export function KnowledgeDocumentForm({ canManage, assistants, initial, onSubmit, isPending = false }: { canManage: boolean; assistants: Assistant[]; initial?: KnowledgeDocument; onSubmit(payload: DocumentPayload): void; isPending?: boolean }) {
-  const [title, setTitle] = useState(initial?.title ?? ''); const [content, setContent] = useState(initial?.content ?? ''); const [assistantId, setAssistantId] = useState(initial?.assistant_id ?? ''); const [status, setStatus] = useState<KnowledgeDocument['status']>(initial?.status ?? 'active'); const [validationError, setValidationError] = useState<string>();
-  if (!canManage) return null;
-  function submit(event: FormEvent) { event.preventDefault(); if (!title.trim() || !content.trim()) return setValidationError('Title and content are required.'); setValidationError(undefined); onSubmit({ title: title.trim(), content: content.trim(), assistant_id: assistantId || null, status }); }
-  return <form onSubmit={submit} className="space-y-4"><label className="block text-sm font-medium">Title<input aria-label="Title" value={title} onChange={(e) => setTitle(e.target.value)} className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm" /></label><label className="block text-sm font-medium">Text content<textarea aria-label="Text content" value={content} onChange={(e) => setContent(e.target.value)} rows={8} className="mt-1.5 w-full resize-y rounded-lg border border-line px-3 py-2 text-sm" /></label><label className="block text-sm font-medium">Associated assistant<select aria-label="Associated assistant" value={assistantId ?? ''} onChange={(e) => setAssistantId(e.target.value)} className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm"><option value="">No assistant assigned</option>{assistants.map((assistant) => <option key={assistant.id} value={assistant.id}>{assistant.name}</option>)}</select></label><label className="block text-sm font-medium">Status<select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as KnowledgeDocument['status'])} className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm"><option value="active">Active</option><option value="inactive">Inactive</option></select></label>{validationError && <p role="alert" className="text-sm text-red-700">{validationError}</p>}<button type="submit" disabled={isPending} className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">{isPending ? 'Saving…' : initial ? 'Save changes' : 'Create document'}</button></form>;
+interface KnowledgeDocumentFormProps {
+  canManage: boolean;
+  assistants: Assistant[];
+  initial?: KnowledgeDocument;
+  onSubmit(payload: DocumentPayload): void;
+  isPending?: boolean;
+}
+
+export function KnowledgeDocumentForm({
+  canManage,
+  assistants,
+  initial,
+  onSubmit,
+  isPending = false,
+}: KnowledgeDocumentFormProps) {
+  const [title, setTitle] = useState(initial?.title ?? '');
+  const [content, setContent] = useState(initial?.content ?? '');
+  const [assistantId, setAssistantId] = useState(initial?.assistant_id ?? '');
+  const [status, setStatus] = useState<KnowledgeDocument['status']>(initial?.status ?? 'active');
+  const [validationError, setValidationError] = useState<string>();
+
+  if (!canManage) {
+    return null;
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+
+    if (!title.trim() || !content.trim()) {
+      return setValidationError('Title and content are required.');
+    }
+
+    setValidationError(undefined);
+    onSubmit({
+      title: title.trim(),
+      content: content.trim(),
+      assistant_id: assistantId || null,
+      status,
+    });
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <label className="block text-sm font-medium">
+        Title
+        <input
+          aria-label="Title"
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm"
+        />
+      </label>
+
+      <label className="block text-sm font-medium">
+        Text content
+        <textarea
+          aria-label="Text content"
+          value={content}
+          onChange={(event) => setContent(event.target.value)}
+          rows={8}
+          className="mt-1.5 w-full resize-y rounded-lg border border-line px-3 py-2 text-sm"
+        />
+      </label>
+
+      <label className="block text-sm font-medium">
+        Associated assistant
+        <select
+          aria-label="Associated assistant"
+          value={assistantId ?? ''}
+          onChange={(event) => setAssistantId(event.target.value)}
+          className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm"
+        >
+          <option value="">No assistant assigned</option>
+          {assistants.map((assistant) => (
+            <option key={assistant.id} value={assistant.id}>
+              {assistant.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="block text-sm font-medium">
+        Status
+        <select
+          aria-label="Status"
+          value={status}
+          onChange={(event) => setStatus(event.target.value as KnowledgeDocument['status'])}
+          className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm"
+        >
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+      </label>
+
+      {validationError && (
+        <p role="alert" className="text-sm text-red-700">
+          {validationError}
+        </p>
+      )}
+
+      <button
+        type="submit"
+        disabled={isPending}
+        className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+      >
+        {isPending ? 'Saving…' : initial ? 'Save changes' : 'Create document'}
+      </button>
+    </form>
+  );
 }
 
 export function KnowledgeBasePage() {
-  const { tenantId, documentId } = useParams(); const { canManage } = useTenant(); const navigate = useNavigate(); const queryClient = useQueryClient(); const [mode, setMode] = useState<'create' | 'edit' | undefined>(); const [deleteTarget, setDeleteTarget] = useState<KnowledgeDocument>(); const [notice, setNotice] = useState<string>();
-  const list = useQuery({ queryKey: tenantKeys.knowledgeBase(tenantId ?? ''), queryFn: () => tenantApi.listKnowledgeBase(tenantId!), enabled: Boolean(tenantId) }); const assistants = useQuery({ queryKey: tenantKeys.assistants(tenantId ?? ''), queryFn: () => tenantApi.listAssistants(tenantId!), enabled: Boolean(tenantId) }); const detail = useQuery({ queryKey: tenantKeys.knowledgeDocument(tenantId ?? '', documentId ?? ''), queryFn: () => tenantApi.getKnowledgeDocument(tenantId!, documentId!), enabled: Boolean(tenantId && documentId) }); const tenantAssistants = selectTenantAssistants(assistants.data ?? [], tenantId ?? ''); const invalidate = () => queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeBase(tenantId!) });
-  const create = useMutation({ mutationFn: (payload: DocumentPayload) => tenantApi.createKnowledgeDocument(tenantId!, payload), onSuccess: async () => { await invalidate(); setMode(undefined); setNotice('Document created.'); } }); const update = useMutation({ mutationFn: (payload: DocumentPayload) => tenantApi.updateKnowledgeDocument(tenantId!, documentId!, payload), onSuccess: async () => { await Promise.all([invalidate(), queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeDocument(tenantId!, documentId!) })]); setMode(undefined); setNotice('Document updated.'); } }); const remove = useMutation({ mutationFn: (id: string) => tenantApi.deleteKnowledgeDocument(tenantId!, id), onSuccess: async () => { await invalidate(); setDeleteTarget(undefined); setNotice('Document deleted.'); navigate(`/app/${tenantId}/knowledge-base`); } }); const selected = detail.data ?? list.data?.find((document) => document.id === documentId);
-  return <section className="space-y-6"><header className="flex flex-wrap items-end justify-between gap-4"><div><p className="eyebrow">Grounding</p><h1 className="page-title mt-2">Knowledge Base</h1><p className="mt-2 text-sm text-stone-600">Manage tenant text documents only. File uploads and vector search are not part of this version.</p></div>{canManage && <button onClick={() => { setMode('create'); navigate(`/app/${tenantId}/knowledge-base`); }} className="inline-flex items-center gap-2 rounded-lg bg-ink px-4 py-2.5 text-sm font-semibold text-white"><Plus size={16} />New document</button>}</header><MutationFeedback error={create.error ?? update.error ?? remove.error} success={notice} /><div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(340px,0.9fr)]"><div className="panel overflow-hidden">{list.isLoading ? <div className="space-y-3 p-5"><SkeletonBlock className="h-14" /><SkeletonBlock className="h-14" /></div> : list.error ? <QueryErrorState error={list.error} onRetry={() => list.refetch()} /> : !list.data?.length ? <EmptyState title="No documents yet" description="Add text knowledge when your assistant needs tenant-specific context." /> : <ul className="divide-y divide-line">{list.data.map((document) => <li key={document.id}><Link to={`/app/${tenantId}/knowledge-base/${document.id}`} className="block px-5 py-4 hover:bg-canvas"><div className="flex justify-between gap-3"><strong className="text-sm">{document.title}</strong><span className="text-xs uppercase tracking-wide text-stone-500">{document.status}</span></div><p className="mt-1 line-clamp-1 text-xs text-stone-500">{document.content}</p></Link></li>)}</ul>}</div><aside className="panel p-5">{mode === 'create' ? <><h2 className="text-lg font-semibold">New document</h2><div className="mt-5"><KnowledgeDocumentForm canManage={canManage} assistants={tenantAssistants} onSubmit={(payload) => create.mutate(payload)} isPending={create.isPending} /></div></> : detail.isLoading && documentId ? <SkeletonBlock className="h-52" /> : selected ? <><div className="flex justify-between gap-3"><div><p className="eyebrow">Document detail</p><h2 className="mt-2 text-lg font-semibold">{selected.title}</h2></div>{canManage && <div className="flex gap-2"><button aria-label="Edit document" onClick={() => setMode('edit')} className="rounded-lg border border-line p-2"><Pencil size={16} /></button><button aria-label="Delete document" onClick={() => setDeleteTarget(selected)} className="rounded-lg border border-red-200 p-2 text-red-700"><Trash2 size={16} /></button></div>}</div>{mode === 'edit' ? <div className="mt-5"><KnowledgeDocumentForm canManage={canManage} assistants={tenantAssistants} initial={selected} onSubmit={(payload) => update.mutate(payload)} isPending={update.isPending} /></div> : <dl className="mt-5 space-y-4 text-sm"><div><dt className="text-stone-500">Status</dt><dd className="mt-1 capitalize">{selected.status}</dd></div><div><dt className="text-stone-500">Text content</dt><dd className="mt-1 whitespace-pre-wrap leading-6 text-ink">{selected.content}</dd></div></dl>}</> : <EmptyState title="Select a document" description="Choose a text document to inspect its content." />}</aside></div><ConfirmationDialog open={Boolean(deleteTarget)} title="Delete document" description={`Delete ${deleteTarget?.title ?? 'this document'}? This action cannot be undone.`} confirmLabel="Delete" onCancel={() => setDeleteTarget(undefined)} onConfirm={() => deleteTarget && remove.mutate(deleteTarget.id)} isPending={remove.isPending} /></section>;
-}
+  const { tenantId, documentId } = useParams();
+  const { canManage } = useTenant();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [mode, setMode] = useState<'create' | 'edit' | undefined>();
+  const [deleteTarget, setDeleteTarget] = useState<KnowledgeDocument>();
+  const [notice, setNotice] = useState<string>();
 
+  const list = useQuery({
+    queryKey: tenantKeys.knowledgeBase(tenantId ?? ''),
+    queryFn: () => tenantApi.listKnowledgeBase(tenantId!),
+    enabled: Boolean(tenantId),
+  });
+  const assistants = useQuery({
+    queryKey: tenantKeys.assistants(tenantId ?? ''),
+    queryFn: () => tenantApi.listAssistants(tenantId!),
+    enabled: Boolean(tenantId),
+  });
+  const detail = useQuery({
+    queryKey: tenantKeys.knowledgeDocument(tenantId ?? '', documentId ?? ''),
+    queryFn: () => tenantApi.getKnowledgeDocument(tenantId!, documentId!),
+    enabled: Boolean(tenantId && documentId),
+  });
+
+  const tenantAssistants = selectTenantAssistants(assistants.data ?? [], tenantId ?? '');
+  const invalidate = () => queryClient.invalidateQueries({
+    queryKey: tenantKeys.knowledgeBase(tenantId!),
+  });
+
+  const create = useMutation({
+    mutationFn: (payload: DocumentPayload) => tenantApi.createKnowledgeDocument(tenantId!, payload),
+    onSuccess: async () => {
+      await invalidate();
+      setMode(undefined);
+      setNotice('Document created.');
+    },
+  });
+  const update = useMutation({
+    mutationFn: (payload: DocumentPayload) => tenantApi.updateKnowledgeDocument(tenantId!, documentId!, payload),
+    onSuccess: async () => {
+      await Promise.all([
+        invalidate(),
+        queryClient.invalidateQueries({
+          queryKey: tenantKeys.knowledgeDocument(tenantId!, documentId!),
+        }),
+      ]);
+      setMode(undefined);
+      setNotice('Document updated.');
+    },
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => tenantApi.deleteKnowledgeDocument(tenantId!, id),
+    onSuccess: async () => {
+      await invalidate();
+      setDeleteTarget(undefined);
+      setNotice('Document deleted.');
+      navigate(`/app/${tenantId}/knowledge-base`);
+    },
+  });
+
+  const selected = detail.data ?? list.data?.find((document) => document.id === documentId);
+
+  return (
+    <section className="space-y-6">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="eyebrow">Grounding</p>
+          <h1 className="page-title mt-2">Knowledge Base</h1>
+          <p className="mt-2 text-sm text-stone-600">
+            Manage tenant text documents only. File uploads and vector search are not part of this version.
+          </p>
+        </div>
+
+        {canManage && (
+          <button
+            onClick={() => {
+              setMode('create');
+              navigate(`/app/${tenantId}/knowledge-base`);
+            }}
+            className="inline-flex items-center gap-2 rounded-lg bg-ink px-4 py-2.5 text-sm font-semibold text-white"
+          >
+            <Plus size={16} />
+            New document
+          </button>
+        )}
+      </header>
+
+      <MutationFeedback
+        error={create.error ?? update.error ?? remove.error}
+        success={notice}
+      />
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(340px,0.9fr)]">
+        <div className="panel overflow-hidden">
+          {list.isLoading ? (
+            <div className="space-y-3 p-5">
+              <SkeletonBlock className="h-14" />
+              <SkeletonBlock className="h-14" />
+            </div>
+          ) : list.error ? (
+            <QueryErrorState error={list.error} onRetry={() => list.refetch()} />
+          ) : !list.data?.length ? (
+            <EmptyState
+              title="No documents yet"
+              description="Add text knowledge when your assistant needs tenant-specific context."
+            />
+          ) : (
+            <ul className="divide-y divide-line">
+              {list.data.map((document) => (
+                <li key={document.id}>
+                  <Link
+                    to={`/app/${tenantId}/knowledge-base/${document.id}`}
+                    className="block px-5 py-4 hover:bg-canvas"
+                  >
+                    <div className="flex justify-between gap-3">
+                      <strong className="text-sm">{document.title}</strong>
+                      <span className="text-xs uppercase tracking-wide text-stone-500">
+                        {document.status}
+                      </span>
+                    </div>
+                    <p className="mt-1 line-clamp-1 text-xs text-stone-500">
+                      {document.content}
+                    </p>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <aside className="panel p-5">
+          {mode === 'create' ? (
+            <>
+              <h2 className="text-lg font-semibold">New document</h2>
+              <div className="mt-5">
+                <KnowledgeDocumentForm
+                  canManage={canManage}
+                  assistants={tenantAssistants}
+                  onSubmit={(payload) => create.mutate(payload)}
+                  isPending={create.isPending}
+                />
+              </div>
+            </>
+          ) : detail.isLoading && documentId ? (
+            <SkeletonBlock className="h-52" />
+          ) : selected ? (
+            <>
+              <div className="flex justify-between gap-3">
+                <div>
+                  <p className="eyebrow">Document detail</p>
+                  <h2 className="mt-2 text-lg font-semibold">{selected.title}</h2>
+                </div>
+
+                {canManage && (
+                  <div className="flex gap-2">
+                    <button
+                      aria-label="Edit document"
+                      onClick={() => setMode('edit')}
+                      className="rounded-lg border border-line p-2"
+                    >
+                      <Pencil size={16} />
+                    </button>
+                    <button
+                      aria-label="Delete document"
+                      onClick={() => setDeleteTarget(selected)}
+                      className="rounded-lg border border-red-200 p-2 text-red-700"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {mode === 'edit' ? (
+                <div className="mt-5">
+                  <KnowledgeDocumentForm
+                    canManage={canManage}
+                    assistants={tenantAssistants}
+                    initial={selected}
+                    onSubmit={(payload) => update.mutate(payload)}
+                    isPending={update.isPending}
+                  />
+                </div>
+              ) : (
+                <dl className="mt-5 space-y-4 text-sm">
+                  <div>
+                    <dt className="text-stone-500">Status</dt>
+                    <dd className="mt-1 capitalize">{selected.status}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-stone-500">Text content</dt>
+                    <dd className="mt-1 whitespace-pre-wrap leading-6 text-ink">
+                      {selected.content}
+                    </dd>
+                  </div>
+                </dl>
+              )}
+            </>
+          ) : (
+            <EmptyState
+              title="Select a document"
+              description="Choose a text document to inspect its content."
+            />
+          )}
+        </aside>
+      </div>
+
+      <ConfirmationDialog
+        open={Boolean(deleteTarget)}
+        title="Delete document"
+        description={`Delete ${deleteTarget?.title ?? 'this document'}? This action cannot be undone.`}
+        confirmLabel="Delete"
+        onCancel={() => setDeleteTarget(undefined)}
+        onConfirm={() => deleteTarget && remove.mutate(deleteTarget.id)}
+        isPending={remove.isPending}
+      />
+    </section>
+  );
+}
