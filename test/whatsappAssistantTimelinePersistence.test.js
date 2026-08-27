@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import pool from '../config/db.js';
+import pg from 'pg';
 import { INSERT_CONVERSATION_MESSAGE_SQL, persistAssistantResponseIfCurrent } from '../services/live-inbox-service.js';
 import { persistAndDeliverWhatsAppAssistant } from '../services/whatsapp-assistant-response-service.js';
 
@@ -88,7 +88,11 @@ test('returning to AI allows only the next new assistant response to persist and
 
 
 test('regression: nullable assistant delivery status has a concrete PostgreSQL type', { skip: !process.env.DATABASE_URL }, async (t) => {
-  const client = await pool.connect();
+  const database = new pg.Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+  });
+  const client = await database.connect();
   let transactionOpen = false;
   try {
     await client.query('BEGIN');
@@ -123,5 +127,6 @@ test('regression: nullable assistant delivery status has a concrete PostgreSQL t
   } finally {
     if (transactionOpen) await client.query('ROLLBACK');
     client.release();
+    await database.end();
   }
 });
