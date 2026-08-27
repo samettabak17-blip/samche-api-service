@@ -38,3 +38,28 @@ test('does not report media sent when Graph accepts the request without a WhatsA
     async post(url) { return url.endsWith('/media') ? { data: { id: 'meta-upload-1' } } : { data: { messages: [] } }; },
   }}), (error) => error instanceof WhatsAppDeliveryError && error.code === 'WHATSAPP_MEDIA_SEND_UNCORRELATED');
 });
+
+
+test('retains a safe provider-boundary diagnostic when Meta rejects an audio message request', async () => {
+  const audio = { buffer: Buffer.from('OggSvoice-note'), size: 13, mimetype: 'audio/ogg', originalname: 'voice-note.ogg' };
+  await assert.rejects(deliverWhatsAppMedia({
+    phoneNumberId: '948536645017374',
+    recipient: 'whatsapp:15551234567',
+    file: audio,
+    mediaCategory: 'AUDIO',
+    env,
+    httpClient: {
+      async post(url) {
+        if (url.endsWith('/media')) return { data: { id: 'meta-upload-1' } };
+        throw Object.assign(new Error('Graph rejected audio'), { response: { status: 400, data: { error: { code: 131052 } } } });
+      },
+    },
+  }), (error) => {
+    assert.ok(error instanceof WhatsAppDeliveryError);
+    assert.equal(error.code, 'WHATSAPP_MEDIA_SEND_FAILED');
+    assert.equal(error.providerStage, 'WHATSAPP_SEND');
+    assert.equal(error.providerStatus, 400);
+    assert.equal(error.providerCode, '131052');
+    return true;
+  });
+});
