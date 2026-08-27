@@ -4,9 +4,30 @@ on:
     branches: [staging]
     paths:
       - .github/workflows/staging-kb-v2-preflight.yml
+      - migrations/016_knowledge_intelligence.sql
+      - migrations/017_knowledge_source_archival.sql
+      - migrations/018_knowledge_source_processing.sql
+      - migrations/019_knowledge_configuration_activation.sql
+      - migrations/020_knowledge_gap_deduplication.sql
+      - migrations/021_knowledge_gap_signals.sql
+      - migrations/022_knowledge_generation_provenance.sql
+      - routes/knowledge-*.js
+      - services/knowledge-*.js
+      - tests/knowledge-*.test.js
+      - dashboard/src/features/knowledge-intelligence/**
   workflow_dispatch:
 
 jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install API dependencies
+        run: npm install --ignore-scripts
+      - name: Run Task 6 focused contract tests
+        run: node --test tests/knowledge-*.test.js
+
   postgres:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -16,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install database client
         run: npm install --no-save pg@8.16.3
-      - name: Inspect pgvector availability without exposing credentials
+      - name: Inspect Task 6 staging schema without exposing credentials
         shell: bash
         run: |
           node <<'NODE'
@@ -40,12 +61,85 @@ jobs:
               console.log('PGVECTOR_INSTALLED: ' + (row.vector_installed ? 'yes' : 'no'));
               console.log('PGVECTOR_AVAILABLE: ' + (row.vector_available ? 'yes' : 'no'));
               console.log('DATABASE_CREATE_PRIVILEGE: ' + (row.can_create_in_database ? 'yes' : 'no'));
-              if (!row.vector_available) {
+              if (!row.vector_installed || !row.vector_available) {
                 console.log('KBV2_PREFLIGHT: BLOCKED_PGVECTOR_UNAVAILABLE');
                 process.exitCode = 2;
-              } else {
-                console.log('KBV2_PREFLIGHT: PGVECTOR_COMPATIBLE');
+                return;
               }
+
+              const expectedTables = [
+                'knowledge_source_assistants', 'knowledge_chunks', 'knowledge_candidates',
+                'knowledge_candidate_evidence', 'knowledge_gaps', 'knowledge_processing_jobs',
+                'knowledge_gap_signals', 'business_profiles', 'business_profile_versions',
+                'assistant_knowledge_recommendations', 'assistant_configuration_versions',
+                'knowledge_generation_runs'
+              ];
+              const expectedColumns = {
+                knowledge_base_documents: ['source_type', 'storage_key', 'processing_status', 'indexing_status', 'extraction_hash', 'extraction_method', 'extracted_at'],
+                knowledge_gaps: ['dedupe_key', 'signal_type', 'last_detected_at'],
+                business_profiles: ['approved_version_id', 'active_version_id', 'activated_by', 'activated_at'],
+                business_profile_versions: ['generation_run_id', 'activated_by', 'activated_at', 'superseded_by_version_id'],
+                assistant_knowledge_recommendations: ['generation_run_id'],
+                assistant_configuration_versions: ['generation_run_id', 'status', 'approved_at', 'activated_at', 'supersedes_version_id'],
+                ai_assistants: ['active_configuration_version_id']
+              };
+              const expectedIndexes = [
+                'knowledge_chunks_embedding_hnsw', 'idx_knowledge_processing_jobs_claim',
+                'uq_knowledge_gaps_tenant_dedupe', 'idx_knowledge_gaps_tenant_assistant_review',
+                'idx_knowledge_gap_signals_tenant_assistant',
+                'idx_assistant_configuration_versions_one_active',
+                'idx_knowledge_generation_runs_tenant_created'
+              ];
+              const expectedConstraints = [
+                'fk_business_profiles_active_version', 'fk_business_profile_versions_superseded_by',
+                'fk_assistant_configuration_versions_supersedes',
+                'fk_ai_assistants_active_configuration_version',
+                'fk_business_profile_versions_generation_run',
+                'fk_assistant_recommendations_generation_run',
+                'fk_assistant_configurations_generation_run'
+              ];
+
+              const tables = await pool.query(
+                `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1::text[])`,
+                [expectedTables]
+              );
+              const presentTables = new Set(tables.rows.map(({ table_name }) => table_name));
+              const missingTables = expectedTables.filter((name) => !presentTables.has(name));
+
+              const missingColumns = [];
+              for (const [table, columns] of Object.entries(expectedColumns)) {
+                const found = await pool.query(
+                  `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = ANY($2::text[])`,
+                  [table, columns]
+                );
+                const present = new Set(found.rows.map(({ column_name }) => column_name));
+                for (const column of columns) if (!present.has(column)) missingColumns.push(table + '.' + column);
+              }
+
+              const indexes = await pool.query(
+                `SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1::text[])`,
+                [expectedIndexes]
+              );
+              const presentIndexes = new Set(indexes.rows.map(({ indexname }) => indexname));
+              const missingIndexes = expectedIndexes.filter((name) => !presentIndexes.has(name));
+
+              const constraints = await pool.query(
+                `SELECT conname FROM pg_constraint WHERE conname = ANY($1::text[])`,
+                [expectedConstraints]
+              );
+              const presentConstraints = new Set(constraints.rows.map(({ conname }) => conname));
+              const missingConstraints = expectedConstraints.filter((name) => !presentConstraints.has(name));
+
+              console.log('TASK6_TABLES: ' + (missingTables.length ? 'missing ' + missingTables.join(',') : 'ok'));
+              console.log('TASK6_COLUMNS: ' + (missingColumns.length ? 'missing ' + missingColumns.join(',') : 'ok'));
+              console.log('TASK6_INDEXES: ' + (missingIndexes.length ? 'missing ' + missingIndexes.join(',') : 'ok'));
+              console.log('TASK6_CONSTRAINTS: ' + (missingConstraints.length ? 'missing ' + missingConstraints.join(',') : 'ok'));
+              if (missingTables.length || missingColumns.length || missingIndexes.length || missingConstraints.length) {
+                console.log('KBV2_PREFLIGHT: BLOCKED_SCHEMA_INCOMPLETE');
+                process.exitCode = 3;
+                return;
+              }
+              console.log('KBV2_PREFLIGHT: TASK6_SCHEMA_COMPATIBLE');
             } finally {
               await pool.end();
             }
