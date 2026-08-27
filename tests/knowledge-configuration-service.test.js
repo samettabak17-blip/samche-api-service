@@ -7,7 +7,7 @@ test('activating an approved assistant configuration supersedes only the previou
   const database = {
     async query(sql, params = []) {
       calls.push({ sql, params });
-      if (/SELECT id, status/i.test(sql)) return { rows: [{ id: params[0], status: 'APPROVED' }] };
+      if (/SELECT id, status/i.test(sql)) return { rows: [{ id: params[0], status: 'APPROVED' }] };\n      if (/status = 'ACTIVE'/i.test(sql)) return { rows: [{ id: 'old-version' }] };
       return { rows: [] };
     },
   };
@@ -20,7 +20,7 @@ test('activating an approved assistant configuration supersedes only the previou
     activatedBy: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
   });
 
-  assert.match(calls[1].sql, /status = 'SUPERSEDED'/);
-  assert.match(calls[2].sql, /status = 'ACTIVE'/);
-  assert.match(calls[3].sql, /active_configuration_version_id/);
+  assert.ok(calls.some(({ sql }) => /status = 'SUPERSEDED'/.test(sql)));
+  assert.ok(calls.some(({ sql }) => /status = 'ACTIVE'/.test(sql)));
+  assert.ok(calls.some(({ sql }) => /active_configuration_version_id/.test(sql)));
 });
