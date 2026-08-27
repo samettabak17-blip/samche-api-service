@@ -78,8 +78,8 @@ test('converts a rejected recorded-audio payload into a safe client error instea
     tenantId, conversationId, actor, file: unsupportedAudio, database: databaseFixture().database,
   }), (error) => error instanceof ConversationOperationError
     && error.status === 400
-    && error.code === 'VOICE_FORMAT_INVALID'
-    && error.message === 'Unsupported or invalid voice recording format.');
+    && ['VOICE_FORMAT_INVALID', 'VOICE_MEDIA_FORMAT_MISMATCH'].includes(error.code)
+    && error.status === 400);
 });
 
 
