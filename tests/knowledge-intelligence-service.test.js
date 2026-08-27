@@ -6,6 +6,7 @@ import {
   redactConversationCandidate,
   retrieveApprovedKnowledge,
   createOpenAIEmbedder,
+  indexKnowledgeSource,
 } from '../services/knowledge-intelligence-service.js';
 
 test('chunks normalized knowledge with deterministic overlap', () => {
@@ -67,4 +68,20 @@ test('centralizes OpenAI embedding model and dimensional contract', async () => 
   assert.equal(vector.length, 1536);
   assert.equal(calls[0].model, 'text-embedding-3-small');
   assert.equal(calls[0].dimensions, 1536);
+});
+
+test('re-indexing replaces active chunks without creating duplicate active vectors', async () => {
+  const calls = [];
+  const database = { query: async (sql, params) => { calls.push({ sql, params }); return { rows: [] }; } };
+  await indexKnowledgeSource({
+    database,
+    embed: async () => Array.from({ length: 1536 }, () => 0.03),
+    tenantId: 'tenant-a',
+    sourceId: 'source-a',
+    text: 'One reliable fact. Another reliable fact.',
+    config: { ...Object.freeze({ provider: 'OPENAI', model: 'text-embedding-3-small', version: 'test', dimensions: 1536, chunkCharacters: 18, overlapCharacters: 4, retrievalLimit: 3 }) },
+  });
+  assert.match(calls[0].sql, /SET is_active = FALSE/);
+  assert.ok(calls.some(({ sql }) => /ON CONFLICT .*DO UPDATE/i.test(sql)));
+  assert.match(calls.at(-1).sql, /indexing_status = 'READY'/);
 });
