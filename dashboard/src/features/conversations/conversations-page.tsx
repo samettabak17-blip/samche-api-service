@@ -246,7 +246,7 @@ export function ConversationsPage() {
       if (download) {
         const link = document.createElement('a');
         link.href = url;
-        link.download = resource.original_filename || 'attachment';
+        link.download = resourceDisplayName(resource);
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -255,7 +255,7 @@ export function ConversationsPage() {
       }
       if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
       previewUrlRef.current = url;
-      setAttachmentPreview({ url, mimeType: resource.mime_type || blob.type || 'application/octet-stream', filename: resource.original_filename || 'Attachment' });
+      setAttachmentPreview({ url, mimeType: resource.mime_type || blob.type || 'application/octet-stream', filename: resourceDisplayName(resource) });
     } catch (error) {
       const status = error instanceof ApiError ? error.status : 0;
       setAttachmentError(status === 403 ? 'You are not permitted to access this attachment.' : status === 404 ? 'This attachment is no longer available.' : 'This attachment is currently unavailable.');
