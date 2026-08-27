@@ -12,7 +12,7 @@ vi.mock('../../features/dashboard/dashboard-api', () => ({ tenantApi: { listConv
 
 function renderTopbar() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/app/tenant-1/overview']}><Topbar tenants={[{ id: 'tenant-1', name: 'SamChe', created_at: '', updated_at: '' }]} selectedTenantId="tenant-1" email="operator@samche.test" onSelectTenant={() => undefined} onOpenNavigation={() => undefined} onLogout={() => undefined} /></MemoryRouter></QueryClientProvider>);
+  return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/app/tenant-1/overview']}><Topbar tenants={[{ id: 'tenant-1', name: 'SamChe', status: 'active', created_at: '' }]} selectedTenantId="tenant-1" email="operator@samche.test" onSelectTenant={() => undefined} onOpenNavigation={() => undefined} onLogout={() => undefined} /></MemoryRouter></QueryClientProvider>);
 }
 
 describe('Topbar global navigation search', () => {
