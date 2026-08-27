@@ -711,6 +711,8 @@ export async function appendAgentMediaMessage({
     }
     throw error;
   }
+  const isVoiceMessage = validated.mediaCategory === 'AUDIO';
+  if (isVoiceMessage) console.info('VOICE_SEND stage=MEDIA_VALIDATED mime=' + validated.mimeType + ' size=' + validated.sizeBytes);
   const client = await database.connect();
   let uploadedStorageKey = null;
   let activeStorage = storage;
@@ -802,6 +804,7 @@ export async function appendAgentMediaMessage({
       await client.query('COMMIT');
       return { duplicate: true, delivery: 'SENT_TO_WHATSAPP' };
     }
+    if (isVoiceMessage && conversation.channel_type === 'WHATSAPP') console.info('VOICE_SEND stage=WAMID_PERSISTED');
 
     traceMediaStage('RESOURCE_STORAGE');
     const resourceId = randomUUID();
@@ -852,9 +855,11 @@ export async function appendAgentMediaMessage({
     traceMediaStage('COMMIT');
     await client.query('COMMIT');
     console.info('OPERATOR_MEDIA_SEND_SUCCEEDED media_category=' + validated.mediaCategory);
+    if (isVoiceMessage && conversation.channel_type === 'WHATSAPP') console.info('VOICE_SEND stage=COMPLETED');
     return { duplicate: false, message, resource, delivery: deliveryResult.delivery, attentionAcknowledged: acknowledgement.rowCount === 1 };
   } catch (error) {
     console.error('OPERATOR_MEDIA_SEND_FAILED stage=' + mediaSendStage + ' reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    if (isVoiceMessage) console.error('VOICE_SEND stage=FAILED failure_stage=' + (error?.providerStage ?? mediaSendStage) + ' code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     await client.query('ROLLBACK');
     if (uploadedStorageKey && activeStorage?.remove) {
       try { await activeStorage.remove({ key: uploadedStorageKey }); } catch {}
