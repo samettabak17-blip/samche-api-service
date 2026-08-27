@@ -89,11 +89,13 @@ export async function deliverWhatsAppText({
       deliveredChunks += 1;
     } catch (error) {
       const providerStatus = error?.response?.status;
-      const failure = new WhatsAppDeliveryError(
-        providerStatus === 401 || providerStatus === 403
-          ? 'WHATSAPP_DELIVERY_AUTH_FAILED'
-          : 'WHATSAPP_DELIVERY_FAILED'
-      );
+      const failure = error instanceof WhatsAppDeliveryError
+        ? error
+        : new WhatsAppDeliveryError(
+          providerStatus === 401 || providerStatus === 403
+            ? 'WHATSAPP_DELIVERY_AUTH_FAILED'
+            : 'WHATSAPP_DELIVERY_FAILED'
+        );
       if (!continueOnChunkFailure) throw failure;
       failures.push(failure.code);
     }
