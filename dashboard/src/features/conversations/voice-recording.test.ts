@@ -26,6 +26,6 @@ describe('WhatsApp operator voice recording contract', () => {
   it('never relabels non-MP4 bytes as an MP4/M4A voice note', async () => {
     const format = selectWhatsAppVoiceRecordingFormat((mime) => mime === 'audio/mp4')!;
     await expect(buildVerifiedWhatsAppVoiceFile([new Blob([new Uint8Array([0x1a, 0x45, 0xdf, 0xa3])], { type: 'audio/webm' })], format, format.recorderMime)).rejects.toThrow('VOICE_FORMAT_INVALID');
-    expect(detectedVoiceContainer(new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]))).toBe('UNKNOWN');
+    expect(detectedVoiceContainer(new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]))).toBe('WEBM');
   });
 });
