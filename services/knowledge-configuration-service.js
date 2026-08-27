@@ -54,6 +54,62 @@ export async function resolveActiveAssistantKnowledgeConfiguration({ database, t
   return result.rows[0] ?? null;
 }
 
+export async function approveAssistantConfigurationVersion({
+  database,
+  tenantId,
+  assistantId,
+  versionId,
+  approvedBy,
+}) {
+  uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
+  uuid(assistantId, 'KNOWLEDGE_ASSISTANT_INVALID');
+  uuid(versionId, 'KNOWLEDGE_CONFIGURATION_INVALID');
+  uuid(approvedBy, 'KNOWLEDGE_APPROVER_INVALID');
+
+  return transaction(database, async (client) => {
+    const result = await client.query(
+      `UPDATE assistant_configuration_versions
+          SET status = 'APPROVED', approved_by = $4, approved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1 AND tenant_id = $2 AND assistant_id = $3
+          AND status IN ('DRAFT', 'NEEDS_REVIEW', 'APPROVED')
+        RETURNING id, status`,
+      [versionId, tenantId, assistantId, approvedBy]
+    );
+    if (!result.rows[0]) {
+      throw new KnowledgeConfigurationError('KNOWLEDGE_CONFIGURATION_NOT_REVIEWABLE', 'Assistant configuration is not available for approval');
+    }
+    return result.rows[0];
+  });
+}
+
+export async function approveBusinessProfileVersion({ database, tenantId, versionId, approvedBy }) {
+  uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
+  uuid(versionId, 'KNOWLEDGE_PROFILE_VERSION_INVALID');
+  uuid(approvedBy, 'KNOWLEDGE_APPROVER_INVALID');
+
+  return transaction(database, async (client) => {
+    const result = await client.query(
+      `UPDATE business_profile_versions
+          SET status = 'APPROVED', reviewed_by = $3, reviewed_at = CURRENT_TIMESTAMP
+        WHERE id = $1 AND tenant_id = $2
+          AND status IN ('DRAFT', 'NEEDS_REVIEW', 'APPROVED')
+        RETURNING profile_id, id, status`,
+      [versionId, tenantId, approvedBy]
+    );
+    const version = result.rows[0];
+    if (!version) {
+      throw new KnowledgeConfigurationError('KNOWLEDGE_PROFILE_NOT_REVIEWABLE', 'Business Profile is not available for approval');
+    }
+    await client.query(
+      `UPDATE business_profiles
+          SET approved_version_id = $3, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1 AND tenant_id = $2`,
+      [version.profile_id, tenantId, versionId]
+    );
+    return version;
+  });
+}
+
 export async function activateAssistantConfigurationVersion({
   database,
   tenantId,
