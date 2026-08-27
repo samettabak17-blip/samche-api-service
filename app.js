@@ -42,6 +42,7 @@ import pool from "./config/db.js";
 import { runMigrations } from "./migrations/runMigrations.js";
 import { createOpenAIEmbedder } from "./services/knowledge-intelligence-service.js";
 import { startKnowledgeProcessingWorker } from "./services/knowledge-source-processing-service.js";
+import { applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from "./services/knowledge-runtime-context-service.js";
 
 dotenv.config();
 
@@ -150,11 +151,12 @@ const WP_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/g
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
+const knowledgeEmbedder = process.env.OPENAI_API_KEY ? createOpenAIEmbedder(openaiClient) : null;
 
-if (process.env.OPENAI_API_KEY && process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
+if (knowledgeEmbedder && process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
   startKnowledgeProcessingWorker({
     database: pool,
-    embed: createOpenAIEmbedder(openaiClient),
+    embed: knowledgeEmbedder,
     createStorage: () => createConversationResourceStorage(),
   });
 } else {
@@ -1671,9 +1673,27 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       // BÜYÜK DİL PROMPTLARI 
       // --------------------------------------
       let modelContext;
+      let runtimeTenantContext = tenantContext;
+      try {
+        const runtimeKnowledge = await resolveAssistantRuntimeKnowledgeContext({
+          database: pool,
+          embed: knowledgeEmbedder,
+          tenantId: whatsappInbox.integration.tenant_id,
+          assistantId: whatsappInbox.integration.assistant_id,
+          query: text,
+        });
+        runtimeTenantContext = applyRuntimeKnowledgeContext(tenantContext, runtimeKnowledge);
+        console.info(
+          'KNOWLEDGE_RUNTIME_CONTEXT active_configuration=' + (runtimeKnowledge.activeConfiguration ? '1' : '0') +
+          ' retrieved_chunks=' + runtimeKnowledge.knowledge.length +
+          ' retrieval_available=' + (runtimeKnowledge.retrievalAvailable ? '1' : '0')
+        );
+      } catch (error) {
+        console.error('KNOWLEDGE_RUNTIME_CONTEXT_UNAVAILABLE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+      }
       try {
         modelContext = buildWhatsAppTenantModelContext({
-          tenant: tenantContext,
+          tenant: runtimeTenantContext,
           history: whatsappInbox.conversationHistory,
           customerText: text,
           communicationLanguage: tenantContext.communicationLanguage,
@@ -2002,3 +2022,4 @@ async function startServer() {
 }
 
 startServer();
+
