@@ -16,6 +16,9 @@ test('knowledge intelligence migration enables pgvector and keeps every knowledg
   assert.match(sql, /embedding vector\(1536\)/i);
   assert.match(sql, /knowledge_chunks_embedding_hnsw/i);
   assert.match(sql, /CREATE TABLE IF NOT EXISTS knowledge_candidates/i);
+  assert.match(sql, /ADD CONSTRAINT uq_knowledge_candidates_id_tenant UNIQUE \(id, tenant_id\)/i);
+  assert.match(sql, /ADD CONSTRAINT uq_conversation_messages_id_tenant UNIQUE \(id, tenant_id\)/i);
   assert.match(sql, /CREATE TABLE IF NOT EXISTS business_profile_versions/i);
   assert.match(sql, /CREATE TABLE IF NOT EXISTS assistant_knowledge_recommendations/i);
+  assert.match(sql, /ADD CONSTRAINT uq_assistant_knowledge_recommendations_id_tenant UNIQUE \(id, tenant_id\)/i);
 });
