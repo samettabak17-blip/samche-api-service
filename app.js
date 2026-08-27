@@ -42,7 +42,7 @@ import pool from "./config/db.js";
 import { runMigrations } from "./migrations/runMigrations.js";
 import { createOpenAIEmbedder } from "./services/knowledge-intelligence-service.js";
 import { startKnowledgeProcessingWorker } from "./services/knowledge-source-processing-service.js";
-import { applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from "./services/knowledge-runtime-context-service.js";
+import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from "./services/knowledge-runtime-context-service.js";
 
 dotenv.config();
 
@@ -876,10 +876,30 @@ app.post("/chat", async (req, res) => {
         }
         return msg;
       });
+      let runtimeSystemInstruction = SAMCHEGUIDE_SYSTEM_PROMPT;
+      if (inboxState) {
+        try {
+          const runtimeKnowledge = await resolveAssistantRuntimeKnowledgeContext({
+            database: pool,
+            embed: knowledgeEmbedder,
+            tenantId: inboxState.integration.tenant_id,
+            assistantId: inboxState.integration.assistant_id,
+            query: cleanText,
+          });
+          runtimeSystemInstruction = appendRuntimeKnowledgeToSystemInstruction(SAMCHEGUIDE_SYSTEM_PROMPT, runtimeKnowledge);
+          console.info(
+            'KNOWLEDGE_RUNTIME_CONTEXT channel=SAMCHEGUIDE active_configuration=' + (runtimeKnowledge.activeConfiguration ? '1' : '0') +
+            ' retrieved_chunks=' + runtimeKnowledge.knowledge.length +
+            ' retrieval_available=' + (runtimeKnowledge.retrievalAvailable ? '1' : '0')
+          );
+        } catch (error) {
+          console.error('KNOWLEDGE_RUNTIME_CONTEXT_UNAVAILABLE channel=SAMCHEGUIDE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+        }
+      }
 
       const data = await requestGemini({
         contents,
-        systemInstruction: { parts: [{ text: SAMCHEGUIDE_SYSTEM_PROMPT }] }
+        systemInstruction: { parts: [{ text: runtimeSystemInstruction }] }
       });
       originalText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
       if (typeof originalText !== "string" || !originalText.trim()) {
