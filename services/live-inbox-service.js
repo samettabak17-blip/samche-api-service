@@ -9,7 +9,7 @@ import { queueLeadQualification } from './lead-qualification-runner.js';
 import { notifyLegacyTelegramSupportClosed } from './telegram-live-support-status.js';
 import { createConversationResource } from './conversation-resource-service.js';
 import { createConversationResourceStorage } from './conversation-resource-storage.js';
-import { buildConversationStorageKey, validateConversationUpload } from './conversation-resource-validation.js';
+import { buildConversationStorageKey, ConversationResourceValidationError, validateConversationUpload } from './conversation-resource-validation.js';
 
 export class ConversationOperationError extends Error {
   constructor(status, message, code = 'CONVERSATION_OPERATION_FAILED') {
@@ -212,6 +212,7 @@ export async function persistAssistantResponseIfCurrent({ tenantId, conversation
     }
 
     traceStage('AGENT_PERSIST_STARTED');
+    traceMediaStage('MESSAGE_PERSISTENCE');
     const message = await insertMessage(client, {
       tenantId,
       conversationId,
@@ -525,6 +526,7 @@ export async function appendAgentMessage({
   };
   try {
     await client.query('BEGIN');
+    traceMediaStage('CONVERSATION_LOOKUP');
     const details = await client.query(
       `SELECT c.*, tc.channel_type, tc.external_channel_id
          FROM conversations c
@@ -653,12 +655,27 @@ export async function appendAgentMediaMessage({
   storage = null,
   deliverWhatsAppMedia: deliverMedia = deliverWhatsAppMedia,
 }) {
-  const validated = validateConversationUpload(file);
+  let validated;
+  try {
+    validated = validateConversationUpload(file);
+  } catch (error) {
+    if (error instanceof ConversationResourceValidationError) {
+      console.info('OPERATOR_MEDIA_SEND_FAILED stage=MEDIA_VALIDATION code=' + error.code);
+      throw new ConversationOperationError(400, 'Voice message could not be prepared. Please record it again.', error.code);
+    }
+    throw error;
+  }
   const client = await database.connect();
   let uploadedStorageKey = null;
   let activeStorage = storage;
   let providerDelivered = false;
+  let mediaSendStage = 'TRANSACTION_BEGIN';
+  const traceMediaStage = (stage) => {
+    mediaSendStage = stage;
+    console.info('OPERATOR_MEDIA_SEND_STAGE stage=' + stage + ' media_category=' + validated.mediaCategory);
+  };
   try {
+    traceMediaStage('TRANSACTION_BEGIN');
     await client.query('BEGIN');
     const details = await client.query(
       `SELECT c.*, tc.channel_type, tc.external_channel_id
@@ -701,6 +718,7 @@ export async function appendAgentMediaMessage({
       const integration = await loadWhatsAppAgentDelivery(client, conversation);
       if (!integration) throw new ConversationOperationError(409, 'WhatsApp delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
       try {
+        traceMediaStage('WHATSAPP_MEDIA_UPLOAD_AND_SEND');
         deliveryResult = await deliverMedia({
           phoneNumberId: integration.external_channel_id,
           recipient: conversation.customer_external_id,
@@ -712,6 +730,7 @@ export async function appendAgentMediaMessage({
           throw new WhatsAppDeliveryError('WHATSAPP_MEDIA_SEND_UNCORRELATED');
         }
         providerDelivered = true;
+        traceMediaStage('WHATSAPP_PROVIDER_ACCEPTED');
       } catch (error) {
         if (error instanceof WhatsAppDeliveryError) {
           const status = error.code === 'WHATSAPP_DELIVERY_NOT_CONFIGURED' || error.code === 'WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH' ? 409 : 502;
@@ -736,6 +755,7 @@ export async function appendAgentMediaMessage({
       return { duplicate: true, delivery: 'SENT_TO_WHATSAPP' };
     }
 
+    traceMediaStage('RESOURCE_STORAGE');
     const resourceId = randomUUID();
     const storageKey = buildConversationStorageKey({ tenantId, conversationId, resourceId });
     activeStorage ??= createConversationResourceStorage();
@@ -781,9 +801,12 @@ export async function appendAgentMediaMessage({
       await notify(client, tenantId, conversationId, 'HUMAN_SUPPORT_ACKNOWLEDGED');
     }
     await notify(client, tenantId, conversationId, 'AGENT_MESSAGE');
+    traceMediaStage('COMMIT');
     await client.query('COMMIT');
+    console.info('OPERATOR_MEDIA_SEND_SUCCEEDED media_category=' + validated.mediaCategory);
     return { duplicate: false, message, resource, delivery: deliveryResult.delivery, attentionAcknowledged: acknowledgement.rowCount === 1 };
   } catch (error) {
+    console.error('OPERATOR_MEDIA_SEND_FAILED stage=' + mediaSendStage + ' reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     await client.query('ROLLBACK');
     if (uploadedStorageKey && activeStorage?.remove) {
       try { await activeStorage.remove({ key: uploadedStorageKey }); } catch {}
