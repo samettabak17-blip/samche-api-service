@@ -108,6 +108,18 @@ export function ConversationsPage() {
     knownMessageCountRef.current = 0;
     setNewMessagesWaiting(false);
     setFirstNewMessageId(null);
+    const recorder = recorderRef.current;
+    if (!recorder) return;
+    recorderSessionRef.current += 1;
+    discardVoiceRecordingRef.current = true;
+    if (recorder.state !== 'inactive') recorder.stop();
+    recorder.stream.getTracks().forEach((track) => track.stop());
+    recorderRef.current = null;
+    if (recordingTimerRef.current !== null) window.clearInterval(recordingTimerRef.current);
+    recordingTimerRef.current = null;
+    setRecording(false);
+    setRecordingSeconds(0);
+    setPendingFile((current) => current?.type.startsWith('audio/') ? null : current);
   }, [conversationId]);
   useEffect(() => {
     const requestedSearch = searchParams.get('q')?.trim();
