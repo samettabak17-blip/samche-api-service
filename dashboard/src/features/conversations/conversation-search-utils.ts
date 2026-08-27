@@ -2,7 +2,7 @@ export type SearchableMessage = { content?: string | null; resourceNames?: strin
 export type SearchRange = { start: number; end: number };
 
 function canonical(value: string): string {
-  return value.toLocaleLowerCase('tr-TR').replaceAll('ı', 'i');
+  return value.toLocaleLowerCase('tr-TR').replace(/ı/g, 'i');
 }
 
 export function normalizeSearchTokens(query: string): string[] {
@@ -28,7 +28,7 @@ export function findSearchTokenRanges(value: string, tokens: string[]): SearchRa
     }
   }
   return ranges.sort((left, right) => left.start - right.start || right.end - left.end).reduce<SearchRange[]>((merged, range) => {
-    const previous = merged.at(-1);
+    const previous = merged[merged.length - 1];
     if (!previous || range.start >= previous.end) merged.push(range);
     else if (range.end > previous.end) previous.end = range.end;
     return merged;
