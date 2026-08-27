@@ -118,6 +118,42 @@ jobs:
                       FROM information_schema.columns
                       WHERE table_schema = 'public'
                         AND table_name = 'conversation_messages'
+                        AND column_name = 'tenant_id'
+                        AND data_type = 'uuid'
+                        AND is_nullable = 'NO'
+                    )
+                    AND EXISTS (
+                      SELECT 1
+                      FROM information_schema.columns
+                      WHERE table_schema = 'public'
+                        AND table_name = 'conversation_messages'
+                        AND column_name = 'conversation_id'
+                        AND data_type = 'uuid'
+                        AND is_nullable = 'NO'
+                    )
+                    AND EXISTS (
+                      SELECT 1
+                      FROM information_schema.columns
+                      WHERE table_schema = 'public'
+                        AND table_name = 'conversations'
+                        AND column_name = 'id'
+                        AND data_type = 'uuid'
+                        AND is_nullable = 'NO'
+                    )
+                    AND EXISTS (
+                      SELECT 1
+                      FROM information_schema.columns
+                      WHERE table_schema = 'public'
+                        AND table_name = 'conversations'
+                        AND column_name = 'tenant_id'
+                        AND data_type = 'uuid'
+                        AND is_nullable = 'NO'
+                    ) AS has_typed_delivery_scope_ids,
+                    EXISTS (
+                      SELECT 1
+                      FROM information_schema.columns
+                      WHERE table_schema = 'public'
+                        AND table_name = 'conversation_messages'
                         AND column_name = 'external_message_id'
                         AND data_type = 'character varying'
                         AND character_maximum_length = 255
@@ -142,7 +178,7 @@ jobs:
               const row = result.rows[0];
               if (!row.has_mapping_table || !row.has_audit_table || !row.has_handling_mode || !row.has_agent_ack_audit_event
                 || !row.has_typed_delivery_status || !row.has_typed_delivery_status_timestamp || !row.has_typed_delivery_failure_code
-                || !row.has_typed_provider_message_id || !row.has_typed_provider_channel_id || !row.has_delivery_status_constraint) {
+                || !row.has_typed_delivery_scope_ids || !row.has_typed_provider_message_id || !row.has_typed_provider_channel_id || !row.has_delivery_status_constraint) {
                 throw new Error('Live inbox migration or WhatsApp delivery-status schema contract is not applied');
               }
               console.log('PASS | STAGING | live inbox schema and WhatsApp delivery-status type contract');
