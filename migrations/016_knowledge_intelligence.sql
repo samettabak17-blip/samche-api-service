@@ -102,7 +102,6 @@ CREATE TABLE IF NOT EXISTS knowledge_candidates (
   approved_source_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (id, tenant_id),
   CONSTRAINT fk_knowledge_candidates_assistant
     FOREIGN KEY (assistant_id, tenant_id)
     REFERENCES ai_assistants(id, tenant_id)
@@ -231,7 +230,6 @@ CREATE TABLE IF NOT EXISTS assistant_knowledge_recommendations (
   reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
   reviewed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (id, tenant_id),
   CONSTRAINT fk_assistant_knowledge_recommendations_assistant
     FOREIGN KEY (assistant_id, tenant_id)
     REFERENCES ai_assistants(id, tenant_id)
