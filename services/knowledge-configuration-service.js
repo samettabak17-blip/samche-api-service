@@ -35,7 +35,8 @@ export async function resolveActiveAssistantKnowledgeConfiguration({ database, t
   const result = await database.query(
     `SELECT configuration.id, configuration.configuration_data, configuration.source_profile_version_id,
             configuration.source_recommendation_id, configuration.activated_at,
-            profile.active_version_id AS active_business_profile_version_id
+            profile.active_version_id AS active_business_profile_version_id,
+            profile_version.profile_data AS active_business_profile
        FROM ai_assistants assistant
        LEFT JOIN assistant_configuration_versions configuration
          ON configuration.id = assistant.active_configuration_version_id
@@ -43,6 +44,10 @@ export async function resolveActiveAssistantKnowledgeConfiguration({ database, t
         AND configuration.status = 'ACTIVE'
        LEFT JOIN business_profiles profile
          ON profile.tenant_id = assistant.tenant_id
+       LEFT JOIN business_profile_versions profile_version
+         ON profile_version.id = profile.active_version_id
+        AND profile_version.tenant_id = profile.tenant_id
+        AND profile_version.status = 'APPROVED'
       WHERE assistant.id = $1 AND assistant.tenant_id = $2`,
     [assistantId, tenantId]
   );
@@ -164,3 +169,4 @@ export async function activateBusinessProfileVersion({ database, tenantId, versi
     return { id: versionId, supersedesVersionId: previousId, status: 'ACTIVE' };
   });
 }
+
