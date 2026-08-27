@@ -192,11 +192,18 @@ CREATE TABLE IF NOT EXISTS business_profile_versions (
     ON DELETE CASCADE
 );
 
-ALTER TABLE business_profiles
-  ADD CONSTRAINT fk_business_profiles_approved_version
-  FOREIGN KEY (approved_version_id)
-  REFERENCES business_profile_versions(id)
-  ON DELETE SET NULL;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'fk_business_profiles_approved_version'
+  ) THEN
+    ALTER TABLE business_profiles
+      ADD CONSTRAINT fk_business_profiles_approved_version
+      FOREIGN KEY (approved_version_id, tenant_id)
+      REFERENCES business_profile_versions(id, tenant_id)
+      ON DELETE SET NULL;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS assistant_knowledge_recommendations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
