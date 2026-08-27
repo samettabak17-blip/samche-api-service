@@ -8,7 +8,7 @@ test('stores a validated document privately and queues canonical indexing withou
   const database = {
     async query(sql, params = []) {
       calls.push({ sql, params });
-      if (/INSERT INTO knowledge_base_documents/i.test(sql)) return { rows: [{ id: params[0], tenant_id: params[1] }] };
+      if (/INSERT INTO knowledge_base_documents/i.test(sql)) return { rows: [{ id: params[0], tenant_id: params[1], processing_status: 'UPLOADED', indexing_status: 'PENDING' }] };
       if (/INSERT INTO knowledge_processing_jobs/i.test(sql)) return { rows: [{ id: 'job-1' }] };
       return { rows: [] };
     },
