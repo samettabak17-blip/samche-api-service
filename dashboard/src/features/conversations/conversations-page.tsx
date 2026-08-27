@@ -23,9 +23,9 @@ function handlingLabel(mode?: string) {
   return mode === 'HUMAN' ? 'Human handling' : mode === 'PAUSED' ? 'AI paused' : 'AI handling';
 }
 
-function supportedWhatsAppVoiceMime(): string | null {
+function supportedWhatsAppVoiceFormat() {
   if (!window.MediaRecorder) return null;
-  return selectWhatsAppVoiceRecordingFormat((mimeType) => MediaRecorder.isTypeSupported(mimeType))?.recorderMime ?? null;
+  return selectWhatsAppVoiceRecordingFormat((mimeType) => MediaRecorder.isTypeSupported(mimeType));
 }
 
 function LiveState({ state }: { state: string }) {
@@ -97,6 +97,7 @@ export function ConversationsPage() {
   const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
   const recordingTimerRef = useRef<number | null>(null);
   const discardVoiceRecordingRef = useRef(false);
+  const recorderSessionRef = useRef(0);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const atMessageBottomRef = useRef(true);
   const loadingOlderRef = useRef(false);
@@ -212,48 +213,63 @@ export function ConversationsPage() {
       input?.setSelectionRange(start + emoji.length, start + emoji.length);
     });
   };
+  const releaseVoiceRecorder = () => {
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
+    if (recordingTimerRef.current !== null) window.clearInterval(recordingTimerRef.current);
+    recordingTimerRef.current = null;
+    recorder?.stream.getTracks().forEach((track) => track.stop());
+    setRecording(false);
+    setRecordingSeconds(0);
+  };
   const stopVoiceRecording = () => {
     discardVoiceRecordingRef.current = false;
-    recorderRef.current?.stop();
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state === 'inactive') { releaseVoiceRecorder(); return; }
+    recorder.stop();
   };
   const cancelVoiceRecording = () => {
     discardVoiceRecordingRef.current = true;
-    recorderRef.current?.stop();
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state === 'inactive') { releaseVoiceRecorder(); return; }
+    recorder.stop();
   };
   const startVoiceRecording = async () => {
-    const mimeType = supportedWhatsAppVoiceMime();
-    console.info('VOICE_RECORDER_SUPPORT=' + Boolean(mimeType));
-    console.info('VOICE_RECORDER_MIME=' + (mimeType ?? 'none'));
-    if (!navigator.mediaDevices?.getUserMedia || !mimeType) { setAttachmentError('Voice notes are not supported by this browser. Use a browser that supports WhatsApp-compatible audio recording.'); return; }
+    const format = supportedWhatsAppVoiceFormat();
+    console.info('VOICE_RECORDER_SUPPORT=' + Boolean(format));
+    console.info('VOICE_RECORDER_MIME=' + (format?.recorderMime ?? 'none'));
+    if (recording || recorderRef.current?.state === 'recording') return;
+    if (!navigator.mediaDevices?.getUserMedia || !format) { setAttachmentError('Voice notes are unavailable because this browser cannot produce a verified WhatsApp-compatible recording.'); return; }
+    setAttachmentError(null);
+    const session = recorderSessionRef.current + 1;
+    recorderSessionRef.current = session;
+    let stream: MediaStream | null = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const chunks: BlobPart[] = [];
-      const recorder = new MediaRecorder(stream, { mimeType });
-      console.info('VOICE_AUDIO_DIAGNOSTIC browser_requested_mime=' + mimeType + ' browser_selected_mime=' + recorder.mimeType);
+      const recorder = new MediaRecorder(stream, { mimeType: format.recorderMime });
+      console.info('VOICE_SEND stage=BROWSER_FORMAT_SELECTED mime=' + recorder.mimeType);
       console.info('VOICE_RECORDING_STARTED');
       recorderRef.current = recorder;
       recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
       recorder.onstop = () => {
-        stream.getTracks().forEach((track) => track.stop());
-        if (recordingTimerRef.current !== null) window.clearInterval(recordingTimerRef.current);
-        recordingTimerRef.current = null;
-        setRecording(false);
-        setRecordingSeconds(0);
+        releaseVoiceRecorder();
         console.info('VOICE_RECORDING_STOPPED');
-        if (discardVoiceRecordingRef.current) {
+        if (discardVoiceRecordingRef.current || recorderSessionRef.current !== session) {
           discardVoiceRecordingRef.current = false;
           return;
         }
         if (chunks.length) {
-          void buildVerifiedWhatsAppVoiceFile(chunks, recorder.mimeType || mimeType).then((file) => {
-            console.info('VOICE_AUDIO_DIAGNOSTIC browser_requested_mime=' + mimeType
+          void buildVerifiedWhatsAppVoiceFile(chunks, format, recorder.mimeType || format.recorderMime).then(({ file, detectedContainer }) => {
+            if (recorderSessionRef.current !== session) return;
+            console.info('VOICE_AUDIO_DIAGNOSTIC browser_requested_mime=' + format.recorderMime
               + ' browser_selected_mime=' + (recorder.mimeType || 'unknown')
               + ' blob_mime=' + file.type
               + ' blob_size=' + file.size
-              + ' detected_container=OGG_OPUS');
+              + ' detected_container=' + detectedContainer);
             chooseComposerFile(file);
           }).catch(() => {
-            setAttachmentError('Unsupported or invalid voice recording format. Please use a browser that records Ogg/Opus voice notes.');
+            if (recorderSessionRef.current === session) setAttachmentError('Unsupported or invalid voice recording format. No voice note was uploaded.');
           });
         }
       };
@@ -263,6 +279,8 @@ export function ConversationsPage() {
       setRecordingSeconds(0);
       recordingTimerRef.current = window.setInterval(() => setRecordingSeconds((value) => value + 1), 1000);
     } catch {
+      stream?.getTracks().forEach((track) => track.stop());
+      releaseVoiceRecorder();
       setAttachmentError('Microphone access is unavailable in this browser.');
     }
   };
@@ -275,9 +293,12 @@ export function ConversationsPage() {
   };
 
   useEffect(() => () => {
+    recorderSessionRef.current += 1;
+    discardVoiceRecordingRef.current = true;
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state !== 'inactive') recorder.stop();
+    releaseVoiceRecorder();
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-    if (recordingTimerRef.current !== null) window.clearInterval(recordingTimerRef.current);
-    recorderRef.current?.stream.getTracks().forEach((track) => track.stop());
   }, []);
 
   const openAttachment = async (resource: { id: string; mime_type: string | null; original_filename: string | null }, download: boolean) => {
@@ -433,7 +454,7 @@ export function ConversationsPage() {
                 <div className="relative"><button type="button" onClick={() => setEmojiOpen((open) => !open)} className="grid h-9 w-9 place-items-center rounded-full text-stone-300 hover:bg-white/[.07] hover:text-white" aria-label="Insert emoji"><Smile size={19} /></button>{emojiOpen && <div className="absolute bottom-11 right-0 z-30 flex gap-1 rounded-xl border border-line bg-[#101a27] p-2 shadow-xl">{['😀','😁','😂','😊','😍','🤝','👍','👏','🙏','❤️','🎉','✅','💼','📌','📎','🌟','🔥','👋','🤔','😢','😮','📞','🏢','✈️'].map((emoji) => <button key={emoji} type="button" onClick={() => insertEmoji(emoji)} className="grid h-7 w-7 place-items-center rounded hover:bg-white/[.08]" aria-label={'Insert ' + emoji}>{emoji}</button>)}</div>}</div>
                 <button type="button" onClick={() => documentInputRef.current?.click()} className="grid h-9 w-9 place-items-center rounded-full text-stone-300 hover:bg-white/[.07] hover:text-white" aria-label="Send document"><Paperclip size={19} /></button>
                 <button type="button" onClick={() => imageInputRef.current?.click()} className="grid h-9 w-9 place-items-center rounded-full text-stone-300 hover:bg-white/[.07] hover:text-white" aria-label="Send image"><ImageIcon size={19} /></button>
-                {content.trim() || pendingFile ? <button type="submit" disabled={send.isPending || sendMedia.isPending} className={'grid h-10 min-w-10 place-items-center rounded-full text-white disabled:opacity-50 ' + (channelContext.type === 'WHATSAPP' ? 'bg-[#159b61] hover:bg-[#118452]' : 'bg-signal hover:bg-signal/85')} aria-label={pendingFile ? 'Send attachment' : 'Send message'}><Send size={17} /></button> : (typeof window !== 'undefined' && Boolean(supportedWhatsAppVoiceMime()) ? <button type="button" onClick={() => void startVoiceRecording()} className={'grid h-10 w-10 place-items-center rounded-full text-white ' + (channelContext.type === 'WHATSAPP' ? 'bg-[#159b61] hover:bg-[#118452]' : 'bg-signal hover:bg-signal/85')} aria-label="Record voice note"><Mic size={18} /></button> : <span className="grid h-10 w-10 place-items-center rounded-full bg-white/[.04] text-stone-600" title="Voice notes are unavailable in this browser"><Mic size={18} /></span>)}</>}</div>
+                {content.trim() || pendingFile ? <button type="submit" disabled={send.isPending || sendMedia.isPending} className={'grid h-10 min-w-10 place-items-center rounded-full text-white disabled:opacity-50 ' + (channelContext.type === 'WHATSAPP' ? 'bg-[#159b61] hover:bg-[#118452]' : 'bg-signal hover:bg-signal/85')} aria-label={pendingFile ? 'Send attachment' : 'Send message'}><Send size={17} /></button> : (typeof window !== 'undefined' && Boolean(supportedWhatsAppVoiceFormat()) ? <button type="button" onClick={() => void startVoiceRecording()} className={'grid h-10 w-10 place-items-center rounded-full text-white ' + (channelContext.type === 'WHATSAPP' ? 'bg-[#159b61] hover:bg-[#118452]' : 'bg-signal hover:bg-signal/85')} aria-label="Record voice note"><Mic size={18} /></button> : <span className="grid h-10 w-10 place-items-center rounded-full bg-white/[.04] text-stone-600" title="Voice notes are unavailable in this browser"><Mic size={18} /></span>)}</>}</div>
               {pendingFile && !pendingFile.type.startsWith('audio/') && <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-line bg-black/15 px-3 py-2 text-xs"><span className="min-w-0 flex-1 truncate text-stone-300">{pendingFile.name} · {Math.ceil(pendingFile.size / 1024)} KB</span><button type="button" onClick={() => setPendingFile(null)} className="text-stone-400 hover:text-white">Remove</button></div>}
               {(send.error instanceof Error || sendMedia.error instanceof Error) && <p role="alert" className="mt-2 text-xs text-red-300">{(send.error ?? sendMedia.error as Error).message}</p>}
             </form> : <p className="text-xs text-stone-400">{conversation.handling_mode === 'HUMAN' ? 'Only the assigned operator can reply.' : 'Take over to enable a supported human reply.'}</p>}
