@@ -186,6 +186,7 @@ CREATE TABLE IF NOT EXISTS business_profile_versions (
   reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
   reviewed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (id, tenant_id),
   CONSTRAINT fk_business_profile_versions_profile
     FOREIGN KEY (profile_id, tenant_id)
     REFERENCES business_profiles(id, tenant_id)
