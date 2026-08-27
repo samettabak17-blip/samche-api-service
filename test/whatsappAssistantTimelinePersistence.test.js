@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { persistAssistantResponseIfCurrent } from '../services/live-inbox-service.js';
+import pool from '../config/db.js';
+import { INSERT_CONVERSATION_MESSAGE_SQL, persistAssistantResponseIfCurrent } from '../services/live-inbox-service.js';
 import { persistAndDeliverWhatsAppAssistant } from '../services/whatsapp-assistant-response-service.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
@@ -83,4 +84,44 @@ test('returning to AI allows only the next new assistant response to persist and
   assert.equal(resumed.delivered, true);
   assert.equal(deliveries, 1);
   assert.deepEqual(messages.map((message) => message.content), ['New response']);
+});
+
+
+test('regression: nullable assistant delivery status has a concrete PostgreSQL type', { skip: !process.env.DATABASE_URL }, async (t) => {
+  const client = await pool.connect();
+  let transactionOpen = false;
+  try {
+    await client.query('BEGIN');
+    transactionOpen = true;
+    const conversation = await client.query(
+      `SELECT id, tenant_id
+         FROM conversations
+        WHERE status = 'open'
+        ORDER BY last_activity_at DESC NULLS LAST
+        LIMIT 1`
+    );
+    if (!conversation.rows[0]) {
+      t.skip('No staging conversation is available for the SQL-contract regression check');
+      return;
+    }
+
+    const target = conversation.rows[0];
+    const inserted = await client.query(INSERT_CONVERSATION_MESSAGE_SQL, [
+      target.tenant_id,
+      target.id,
+      'ASSISTANT',
+      'SQL contract regression check',
+      null,
+      null,
+      null,
+      null,
+    ]);
+
+    assert.equal(inserted.rowCount, 1);
+    assert.equal(inserted.rows[0].sender_type, 'ASSISTANT');
+    assert.equal(inserted.rows[0].delivery_status, null);
+  } finally {
+    if (transactionOpen) await client.query('ROLLBACK');
+    client.release();
+  }
 });
