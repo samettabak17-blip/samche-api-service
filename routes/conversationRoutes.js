@@ -148,6 +148,7 @@ router.get('/:tenantId/conversations', requireTenantAccess, async (req, res) => 
   const handlingMode = req.query.handling_mode;
   const channelType = req.query.channel_type;
   const search = typeof req.query.search === 'string' ? req.query.search.trim().slice(0, 160) : '';
+  const searchTokens = search ? search.split(/\s+/u).filter(Boolean).slice(0, 12) : null;
   if (status && !['open', 'closed', 'archived'].includes(status)) return res.status(400).json({ error: 'Invalid conversation status' });
   if (handlingMode && !['AI', 'HUMAN', 'PAUSED'].includes(handlingMode)) return res.status(400).json({ error: 'Invalid handling mode' });
   if (channelType && !['WHATSAPP', 'WEB_CHAT', 'SAMCHEGUIDE'].includes(channelType)) return res.status(400).json({ error: 'Invalid conversation channel type' });
@@ -183,22 +184,28 @@ router.get('/:tenantId/conversations', requireTenantAccess, async (req, res) => 
          AND ($2::text IS NULL OR c.status = $2)
          AND ($3::text IS NULL OR c.handling_mode = $3)
          AND ($4::text IS NULL OR tc.channel_type = $4)
-         AND ($5::text IS NULL
-              OR c.customer_external_id ILIKE '%' || $5 || '%'
-              OR c.external_conversation_id ILIKE '%' || $5 || '%'
-              OR contact.display_name ILIKE '%' || $5 || '%'
-              OR contact.phone ILIKE '%' || $5 || '%'
-              OR latest.content ILIKE '%' || $5 || '%'
-              OR EXISTS (
+         AND ($5::text[] IS NULL
+              OR NOT EXISTS (
                 SELECT 1
-                  FROM conversation_messages searchable
-                 WHERE searchable.tenant_id = c.tenant_id
-                   AND searchable.conversation_id = c.id
-                   AND searchable.content ILIKE '%' || $5 || '%'
+                  FROM unnest($5::text[]) AS term
+                 WHERE NOT (
+                   c.customer_external_id ILIKE '%' || term || '%'
+                   OR c.external_conversation_id ILIKE '%' || term || '%'
+                   OR contact.display_name ILIKE '%' || term || '%'
+                   OR contact.phone ILIKE '%' || term || '%'
+                   OR latest.content ILIKE '%' || term || '%'
+                   OR EXISTS (
+                     SELECT 1
+                       FROM conversation_messages searchable
+                      WHERE searchable.tenant_id = c.tenant_id
+                        AND searchable.conversation_id = c.id
+                        AND searchable.content ILIKE '%' || term || '%'
+                   )
+                 )
               ))
        ORDER BY c.last_activity_at DESC, c.created_at DESC
        LIMIT $6 OFFSET $7`,
-      [currentTenantId, status ?? null, handlingMode ?? null, channelType ?? null, search || null, page.limit, page.offset]
+      [currentTenantId, status ?? null, handlingMode ?? null, channelType ?? null, searchTokens, page.limit, page.offset]
     );
     return res.json(result.rows);
   } catch (error) {
