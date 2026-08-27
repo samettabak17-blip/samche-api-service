@@ -53,3 +53,22 @@ test('does not retrieve or apply configuration unless an active configuration ex
   assert.equal(resolved.knowledgeContext, '');
 });
 
+test('keeps active configuration available when semantic retrieval is temporarily unavailable', async () => {
+  const resolved = await resolveAssistantRuntimeKnowledgeContext({
+    database: { query: async () => ({ rows: [] }) },
+    tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    assistantId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    query: 'question',
+    resolveConfiguration: async () => ({
+      id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      configuration_data: { tone: 'Professional' },
+    }),
+    retrieve: async () => { throw new Error('embedding unavailable'); },
+  });
+
+  assert.match(resolved.activeConfigurationContext, /Professional/);
+  assert.deepEqual(resolved.knowledge, []);
+  assert.equal(resolved.knowledgeContext, '');
+  assert.equal(resolved.retrievalAvailable, false);
+});
+
