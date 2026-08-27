@@ -35,7 +35,7 @@ jobs:
       - name: Install backend dependencies
         run: npm install
       - name: Verify operator permission rules
-        run: node --test tests/conversation-permissions.test.js tests/samcheguide-runtime.test.js test/dashboardAnalyticsService.test.js test/conversationRoutesProjection.test.js test/whatsappAgentMediaDelivery.test.js test/liveInboxWhatsAppOperatorMedia.test.js test/conversationResourceAudioValidation.test.js test/whatsappMultimodalService.test.js
+        run: node --test tests/conversation-permissions.test.js tests/samcheguide-runtime.test.js test/dashboardAnalyticsService.test.js test/conversationRoutesProjection.test.js test/whatsappAgentMediaDelivery.test.js test/liveInboxWhatsAppOperatorMedia.test.js test/whatsappDeliveryStatus.test.js test/conversationResourceAudioValidation.test.js test/whatsappMultimodalService.test.js
       - name: Verify live inbox syntax
         run: |
           node --check app.js
@@ -83,10 +83,17 @@ jobs:
                       WHERE conrelid = 'public.conversation_audit_events'::regclass
                         AND contype = 'c'
                         AND pg_get_constraintdef(oid) LIKE '%HUMAN_SUPPORT_ACKNOWLEDGED%'
-                    ) AS has_agent_ack_audit_event`
+                    ) AS has_agent_ack_audit_event,
+                    EXISTS (
+                      SELECT 1
+                      FROM information_schema.columns
+                      WHERE table_schema = 'public'
+                        AND table_name = 'conversation_messages'
+                        AND column_name = 'delivery_status'
+                    ) AS has_delivery_status`
               );
               const row = result.rows[0];
-              if (!row.has_mapping_table || !row.has_audit_table || !row.has_handling_mode || !row.has_agent_ack_audit_event) {
+              if (!row.has_mapping_table || !row.has_audit_table || !row.has_handling_mode || !row.has_agent_ack_audit_event || !row.has_delivery_status) {
                 throw new Error('Live inbox migration is not applied');
               }
               console.log('PASS | STAGING | live inbox schema migration and agent acknowledgement audit event');
