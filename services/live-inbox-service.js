@@ -59,15 +59,17 @@ async function loadSamcheguideIntegration(client) {
   return result.rows[0] ?? null;
 }
 
+export const INSERT_CONVERSATION_MESSAGE_SQL = `INSERT INTO conversation_messages
+  (tenant_id, conversation_id, sender_type, content, actor_user_id, idempotency_key, external_message_id, delivery_status, delivery_status_updated_at)
+ VALUES ($1, $2, $3, $4, $5, $6, $7, $8::varchar(20), CASE WHEN $8::varchar(20) IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END)
+ ON CONFLICT (conversation_id, idempotency_key)
+   WHERE idempotency_key IS NOT NULL
+   DO NOTHING
+ RETURNING *`;
+
 async function insertMessage(client, { tenantId, conversationId, senderType, content, actorUserId = null, idempotencyKey = null, externalMessageId = null, deliveryStatus = null }) {
   const result = await client.query(
-    `INSERT INTO conversation_messages
-      (tenant_id, conversation_id, sender_type, content, actor_user_id, idempotency_key, external_message_id, delivery_status, delivery_status_updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CASE WHEN $8 IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END)
-     ON CONFLICT (conversation_id, idempotency_key)
-       WHERE idempotency_key IS NOT NULL
-       DO NOTHING
-     RETURNING *`,
+    INSERT_CONVERSATION_MESSAGE_SQL,
     [tenantId, conversationId, senderType, content, actorUserId, idempotencyKey, externalMessageId, deliveryStatus]
   );
   return result.rows[0] ?? null;
