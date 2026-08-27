@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canTakeOverConversation, clearSentAgentDraft, displayConversationCustomerIdentifier, isInlinePreviewableAttachment, isVoiceResource, voiceResourceDisplayLabel, resourceDisplayName, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel } from './conversation-utils';
+import { canTakeOverConversation, clearSentAgentDraft, displayConversationCustomerIdentifier, isInlinePreviewableAttachment, isVoiceResource, voiceResourceDisplayLabel, resourceDisplayName, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel, deliveryTickPresentation } from './conversation-utils';
 
 describe('conversation sender presentation', () => {
   it('maps every backend sender type to a distinct safe label', () => {
@@ -88,5 +88,16 @@ describe('canonical resource display names', () => {
     expect(resourceDisplayName({ original_filename: 'Business setup.pdf', mime_type: 'application/pdf' })).toBe('Business setup.pdf');
     expect(resourceDisplayName({ original_filename: null, mime_type: 'image/png' })).toBe('Image.png');
     expect(resourceDisplayName({ original_filename: null, mime_type: 'audio/ogg' })).toBe('Voice message');
+  });
+});
+
+
+describe('WhatsApp delivery ticks', () => {
+  it('shows a single tick only after provider acceptance and double ticks only after persisted delivery state', () => {
+    expect(deliveryTickPresentation('SENT')).toMatchObject({ glyph: '✓', label: 'Sent' });
+    expect(deliveryTickPresentation('DELIVERED')).toMatchObject({ glyph: '✓✓', label: 'Delivered' });
+    expect(deliveryTickPresentation('READ')).toMatchObject({ glyph: '✓✓', label: 'Read' });
+    expect(deliveryTickPresentation('SENDING')).toMatchObject({ glyph: '◌', label: 'Sending' });
+    expect(deliveryTickPresentation(undefined)).toBeNull();
   });
 });
