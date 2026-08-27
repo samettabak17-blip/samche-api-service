@@ -90,6 +90,7 @@ export function ConversationsPage() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
   const recordingTimerRef = useRef<number | null>(null);
+  const discardVoiceRecordingRef = useRef(false);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const atMessageBottomRef = useRef(true);
   const loadingOlderRef = useRef(false);
@@ -170,7 +171,13 @@ export function ConversationsPage() {
       if (payload.file.type.startsWith('audio/')) { console.info('VOICE_PERSISTED'); setVoicePreviewPlaying(false); setPendingVoiceDuration(0); }
       setPendingFile((current) => current === payload.file ? null : current);
       setContent((current) => clearSentAgentDraft(current, payload.caption));
+      setAttachmentError(null);
       await refresh('agent-message');
+    },
+    onError: (error, payload) => {
+      if (payload.file.type.startsWith('audio/')) {
+        setAttachmentError('Voice message could not be sent. Please try again.');
+      }
     },
   });
 
@@ -192,6 +199,11 @@ export function ConversationsPage() {
     });
   };
   const stopVoiceRecording = () => {
+    discardVoiceRecordingRef.current = false;
+    recorderRef.current?.stop();
+  };
+  const cancelVoiceRecording = () => {
+    discardVoiceRecordingRef.current = true;
     recorderRef.current?.stop();
   };
   const startVoiceRecording = async () => {
@@ -213,8 +225,13 @@ export function ConversationsPage() {
         setRecording(false);
         setRecordingSeconds(0);
         console.info('VOICE_RECORDING_STOPPED');
+        if (discardVoiceRecordingRef.current) {
+          discardVoiceRecordingRef.current = false;
+          return;
+        }
         if (chunks.length) chooseComposerFile(new File(chunks, mimeType === 'audio/ogg;codecs=opus' ? 'voice-note.ogg' : 'voice-note.m4a', { type: mimeType.split(';')[0] }));
       };
+      discardVoiceRecordingRef.current = false;
       recorder.start();
       setRecording(true);
       setRecordingSeconds(0);
@@ -363,7 +380,7 @@ export function ConversationsPage() {
               <input ref={imageInputRef} className="hidden" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { chooseComposerFile(event.target.files?.[0]); event.currentTarget.value = ''; }} />
               <div className={'relative flex items-center gap-1.5 rounded-2xl border bg-[#08131e]/90 px-2 py-2 shadow-inner ' + (channelContext.type === 'WHATSAPP' ? 'border-emerald-400/30 shadow-emerald-950/30' : 'border-signal/30 shadow-red-950/25')}>
                 <button type="button" onClick={() => documentInputRef.current?.click()} className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-stone-300 transition hover:bg-white/[.07] hover:text-white" aria-label="Add document"><Plus size={20} /></button>
-                {recording ? <div className="flex min-w-0 flex-1 items-center gap-3 px-2 text-sm text-red-200"><button type="button" onClick={stopVoiceRecording} className="grid h-8 w-8 place-items-center rounded-full bg-red-500/15 text-red-300 hover:bg-red-500/25" aria-label="Stop voice recording"><CircleX size={17} /></button><span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-400" /><span>Recording {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:{String(recordingSeconds % 60).padStart(2, '0')}</span><span className="min-w-0 flex-1 border-t border-dashed border-red-300/30" /></div> : pendingFile?.type.startsWith('audio/') ? <div className="flex min-w-0 flex-1 items-center gap-2 px-1 text-sm"><audio ref={voicePreviewAudioRef} src={pendingVoicePreviewUrl ?? undefined} className="hidden" onLoadedMetadata={(event) => setPendingVoiceDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)} onEnded={() => setVoicePreviewPlaying(false)} /><button type="button" onClick={() => { const audio = voicePreviewAudioRef.current; if (!audio) return; if (audio.paused) { void audio.play().then(() => setVoicePreviewPlaying(true)).catch(() => setAttachmentError('Voice preview could not start.')); } else { audio.pause(); setVoicePreviewPlaying(false); } }} className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-emerald-400/15 text-emerald-100 hover:bg-emerald-400/25" aria-label={voicePreviewPlaying ? 'Pause voice note' : 'Play voice note'}>{voicePreviewPlaying ? 'Ⅱ' : '▶'}</button><span className="font-medium text-stone-100">Voice note</span><span className="min-w-0 flex-1 border-t border-dashed border-emerald-300/35" /><span className="tabular-nums text-xs text-stone-300">{String(Math.floor(pendingVoiceDuration / 60)).padStart(2, '0')}:{String(Math.floor(pendingVoiceDuration % 60)).padStart(2, '0')}</span><button type="button" onClick={() => { voicePreviewAudioRef.current?.pause(); setVoicePreviewPlaying(false); setPendingVoiceDuration(0); setPendingFile(null); }} className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-stone-300 hover:bg-white/[.07] hover:text-red-200" aria-label="Delete voice note">⌫</button><button type="submit" disabled={sendMedia.isPending} className={'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold text-white disabled:opacity-50 ' + (channelContext.type === 'WHATSAPP' ? 'bg-[#159b61] hover:bg-[#118452]' : 'bg-signal hover:bg-signal/85')} aria-label="Send voice note"><Send size={15} />Send</button></div> : <><label className="sr-only" htmlFor="agent-message">Reply as human agent</label><textarea ref={composerInputRef} id="agent-message" value={content} onChange={(event) => setContent(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} className="min-h-9 max-h-28 flex-1 resize-none border-0 !bg-transparent px-1 py-2 text-sm outline-none placeholder:text-stone-500" placeholder={pendingFile ? 'Add an optional caption…' : 'Type a message…'} maxLength={8000} rows={1} />
+                {recording ? <div className="flex min-w-0 flex-1 items-center gap-2 px-1 text-sm text-red-100"><button type="button" onClick={cancelVoiceRecording} className="shrink-0 rounded-full px-2 py-1.5 text-xs font-medium text-red-200 hover:bg-red-500/15" aria-label="Cancel voice recording">Cancel</button><Mic size={16} className="shrink-0 text-red-300" /><span className="h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-red-400" /><span className="shrink-0 font-medium">Recording {String(Math.floor(recordingSeconds / 60)).padStart(2, '0')}:{String(recordingSeconds % 60).padStart(2, '0')}</span><span className="min-w-0 flex-1 border-t border-dashed border-red-300/35" /><span className="hidden text-xs text-red-200/75 sm:inline">Tap to cancel</span><button type="button" onClick={stopVoiceRecording} className="shrink-0 rounded-full bg-red-500/18 px-3 py-1.5 text-xs font-semibold text-red-100 hover:bg-red-500/28" aria-label="Stop and prepare voice recording">Stop</button></div> : pendingFile?.type.startsWith('audio/') ? <div className="flex min-w-0 flex-1 items-center gap-2 px-1 text-sm"><audio ref={voicePreviewAudioRef} src={pendingVoicePreviewUrl ?? undefined} className="hidden" onLoadedMetadata={(event) => setPendingVoiceDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)} onEnded={() => setVoicePreviewPlaying(false)} /><button type="button" onClick={() => { const audio = voicePreviewAudioRef.current; if (!audio) return; if (audio.paused) { void audio.play().then(() => setVoicePreviewPlaying(true)).catch(() => setAttachmentError('Voice preview could not start.')); } else { audio.pause(); setVoicePreviewPlaying(false); } }} className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-emerald-400/15 text-emerald-100 hover:bg-emerald-400/25" aria-label={voicePreviewPlaying ? 'Pause voice note' : 'Play voice note'}>{voicePreviewPlaying ? 'Ⅱ' : '▶'}</button><span className="font-medium text-stone-100">{sendMedia.isPending ? 'Sending voice message…' : 'Voice note'}</span><span className="min-w-0 flex-1 border-t border-dashed border-emerald-300/35" /><span className="tabular-nums text-xs text-stone-300">{String(Math.floor(pendingVoiceDuration / 60)).padStart(2, '0')}:{String(Math.floor(pendingVoiceDuration % 60)).padStart(2, '0')}</span><button type="button" onClick={() => { voicePreviewAudioRef.current?.pause(); setVoicePreviewPlaying(false); setPendingVoiceDuration(0); setPendingFile(null); setAttachmentError(null); }} disabled={sendMedia.isPending} className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-stone-300 hover:bg-white/[.07] hover:text-red-200 disabled:opacity-50" aria-label="Delete voice note">⌫</button><button type="submit" disabled={sendMedia.isPending} className={'inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-xs font-semibold text-white disabled:opacity-50 ' + (channelContext.type === 'WHATSAPP' ? 'bg-[#159b61] hover:bg-[#118452]' : 'bg-signal hover:bg-signal/85')} aria-label="Send voice note"><Send size={15} />{sendMedia.isPending ? 'Sending…' : sendMedia.isError ? 'Retry' : 'Send'}</button></div> : <><label className="sr-only" htmlFor="agent-message">Reply as human agent</label><textarea ref={composerInputRef} id="agent-message" value={content} onChange={(event) => setContent(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} className="min-h-9 max-h-28 flex-1 resize-none border-0 !bg-transparent px-1 py-2 text-sm outline-none placeholder:text-stone-500" placeholder={pendingFile ? 'Add an optional caption…' : 'Type a message…'} maxLength={8000} rows={1} />
                 <div className="relative"><button type="button" onClick={() => setEmojiOpen((open) => !open)} className="grid h-9 w-9 place-items-center rounded-full text-stone-300 hover:bg-white/[.07] hover:text-white" aria-label="Insert emoji"><Smile size={19} /></button>{emojiOpen && <div className="absolute bottom-11 right-0 z-30 flex gap-1 rounded-xl border border-line bg-[#101a27] p-2 shadow-xl">{['😀','😁','😂','😊','😍','🤝','👍','👏','🙏','❤️','🎉','✅','💼','📌','📎','🌟','🔥','👋','🤔','😢','😮','📞','🏢','✈️'].map((emoji) => <button key={emoji} type="button" onClick={() => insertEmoji(emoji)} className="grid h-7 w-7 place-items-center rounded hover:bg-white/[.08]" aria-label={'Insert ' + emoji}>{emoji}</button>)}</div>}</div>
                 <button type="button" onClick={() => documentInputRef.current?.click()} className="grid h-9 w-9 place-items-center rounded-full text-stone-300 hover:bg-white/[.07] hover:text-white" aria-label="Send document"><Paperclip size={19} /></button>
                 <button type="button" onClick={() => imageInputRef.current?.click()} className="grid h-9 w-9 place-items-center rounded-full text-stone-300 hover:bg-white/[.07] hover:text-white" aria-label="Send image"><ImageIcon size={19} /></button>
