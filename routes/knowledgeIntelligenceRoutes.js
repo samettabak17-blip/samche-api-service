@@ -1,5 +1,6 @@
 import express from 'express';
 import multer from 'multer';
+import OpenAI from 'openai';
 import pool from '../config/db.js';
 import { authenticateToken, requireTenantAccess, requireTenantAdmin } from '../middleware/auth.js';
 import { isValidUUID } from '../middleware/validators.js';
@@ -40,6 +41,8 @@ import {
   reviewAssistantRecommendation,
 } from '../services/knowledge-assistant-lifecycle.js';
 import { getKnowledgeOverview, KnowledgeOverviewError } from '../services/knowledge-overview-service.js';
+import { createOpenAIEmbedder } from '../services/knowledge-intelligence-service.js';
+import { KnowledgeRetrievalPreviewError, previewKnowledgeRetrieval } from '../services/knowledge-retrieval-preview.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -64,7 +67,7 @@ function sourceId(req, res) {
 
 function safeError(res, error) {
   const code = error?.code;
-  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError || error instanceof KnowledgeGenerationError || error instanceof KnowledgeProfileLifecycleError || error instanceof KnowledgeAssistantLifecycleError || error instanceof KnowledgeOverviewError) {
+  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError || error instanceof KnowledgeGenerationError || error instanceof KnowledgeProfileLifecycleError || error instanceof KnowledgeAssistantLifecycleError || error instanceof KnowledgeOverviewError || error instanceof KnowledgeRetrievalPreviewError) {
     const status = /NOT_FOUND|INVALID|EMPTY|UNSUPPORTED|MISMATCH|REQUIRED/.test(code) ? 400 : 503;
     return res.status(status).json({ error: error.message, code });
   }
@@ -86,6 +89,19 @@ router.get('/:tenantId/knowledge-intelligence/overview', requireTenantAccess, as
   if (!tenantId) return;
   try {
     return res.json({ overview: await getKnowledgeOverview({ database: pool, tenantId }) });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/retrieval-preview', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res); const assistantId = req.params.assistantId;
+  if (!tenantId || !isValidUUID(assistantId)) return res.status(400).json({ error: 'Invalid Assistant ID' });
+  try {
+    if (!process.env.OPENAI_API_KEY) throw new KnowledgeRetrievalPreviewError('KNOWLEDGE_PREVIEW_EMBEDDING_UNAVAILABLE', 'Retrieval preview embedding is unavailable');
+    const embed = createOpenAIEmbedder(new OpenAI({ apiKey: process.env.OPENAI_API_KEY }));
+    const preview = await previewKnowledgeRetrieval({ database: pool, embed, tenantId, assistantId, query: req.body?.query, limit: req.body?.limit });
+    return res.json({ preview });
   } catch (error) {
     return safeError(res, error);
   }
