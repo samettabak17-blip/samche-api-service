@@ -882,7 +882,12 @@ WHERE m.conversation_id = c.id
   AND tc.external_channel_id = $4::varchar(255)
 RETURNING m.tenant_id, m.conversation_id, m.id, m.delivery_status, m.delivery_failure_code`;
 
-export async function recordWhatsAppDeliveryStatus({ phoneNumberId, status, database = pool }) {
+export async function recordWhatsAppDeliveryStatus({
+  phoneNumberId,
+  status,
+  database = pool,
+  reconciliationDelaysMs = [0, 25, 75],
+}) {
   const providerMessageId = String(status?.id ?? '').trim();
   const providerStatus = String(status?.status ?? '').trim().toUpperCase();
   const deliveryStatus = { SENT: 'SENT', DELIVERED: 'DELIVERED', READ: 'READ', FAILED: 'FAILED' }[providerStatus];
@@ -893,10 +898,19 @@ export async function recordWhatsAppDeliveryStatus({ phoneNumberId, status, data
     console.info('WHATSAPP_DELIVERY_STATUS stage=LOOKUP');
     await client.query('BEGIN');
     console.info('WHATSAPP_DELIVERY_STATUS stage=UPDATE_STARTED status=' + deliveryStatus);
-    const updated = await client.query(
-      UPDATE_WHATSAPP_DELIVERY_STATUS_SQL,
-      [deliveryStatus, status?.errors?.[0]?.code ? String(status.errors[0].code) : null, providerMessageId, phoneNumberId]
-    );
+    let updated = { rowCount: 0, rows: [] };
+    for (let attempt = 0; attempt < reconciliationDelaysMs.length; attempt += 1) {
+      if (attempt > 0) {
+        const delay = Number(reconciliationDelaysMs[attempt]) || 0;
+        console.info('WHATSAPP_DELIVERY_STATUS stage=RECONCILE_RETRY attempt=' + attempt);
+        if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      updated = await client.query(
+        UPDATE_WHATSAPP_DELIVERY_STATUS_SQL,
+        [deliveryStatus, status?.errors?.[0]?.code ? String(status.errors[0].code) : null, providerMessageId, phoneNumberId]
+      );
+      if (updated.rowCount > 0) break;
+    }
     for (const row of updated.rows) await notify(client, row.tenant_id, row.conversation_id, 'WHATSAPP_DELIVERY_STATUS');
     await client.query('COMMIT');
     console.info('WHATSAPP_DELIVERY_STATUS stage=UPDATE_SUCCEEDED status=' + deliveryStatus + ' correlated=' + updated.rowCount);
