@@ -48,10 +48,19 @@ function actor(req) {
 
 function operationError(res, error, label) {
   if (error instanceof ConversationOperationError) {
-    return res.status(error.status).json({ error: error.message, code: error.code });
+    return res.status(error.status).json({
+      error: error.message,
+      code: error.code,
+      retryable: error.status >= 500,
+    });
   }
-  console.error(label, error?.code ?? error?.name ?? 'unknown');
-  return res.status(500).json({ error: 'Server error' });
+  const code = error?.code ?? error?.name ?? 'CONVERSATION_OPERATION_FAILED';
+  console.error(label, code);
+  return res.status(500).json({
+    error: 'The conversation operation could not be completed. Please try again.',
+    code: 'CONVERSATION_OPERATION_FAILED',
+    retryable: true,
+  });
 }
 
 async function conversationContext(tenantId, conversationId) {
