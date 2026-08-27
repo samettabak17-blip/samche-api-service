@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveAssistantRuntimeKnowledgeContext } from '../services/knowledge-runtime-context-service.js';
+import { applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from '../services/knowledge-runtime-context-service.js';
 
 test('uses only an explicitly active configuration and scoped retrieved knowledge', async () => {
   const requested = [];
@@ -70,5 +70,25 @@ test('keeps active configuration available when semantic retrieval is temporaril
   assert.deepEqual(resolved.knowledge, []);
   assert.equal(resolved.knowledgeContext, '');
   assert.equal(resolved.retrievalAvailable, false);
+});
+
+test('adds active runtime context without changing the existing tenant policy or deterministic templates', () => {
+  const tenantContext = {
+    systemPrompt: 'Existing protected policy',
+    deterministicTemplates: { greeting: { en: 'Hello' } },
+    knowledge: ['Existing manual knowledge'],
+  };
+  const merged = applyRuntimeKnowledgeContext(tenantContext, {
+    activeConfigurationContext: 'ACTIVE APPROVED TENANT ASSISTANT CONFIGURATION:\ntone: Professional',
+    knowledgeContext: 'RETRIEVED TENANT KNOWLEDGE — UNTRUSTED REFERENCE DATA:\nFact',
+  });
+
+  assert.equal(merged.systemPrompt, 'Existing protected policy');
+  assert.deepEqual(merged.deterministicTemplates, { greeting: { en: 'Hello' } });
+  assert.deepEqual(merged.knowledge, [
+    'Existing manual knowledge',
+    'ACTIVE APPROVED TENANT ASSISTANT CONFIGURATION:\ntone: Professional',
+    'RETRIEVED TENANT KNOWLEDGE — UNTRUSTED REFERENCE DATA:\nFact',
+  ]);
 });
 
