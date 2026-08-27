@@ -41,6 +41,7 @@ export async function deliverWhatsAppText({
   httpClient = axios,
   httpsAgent = whatsappHttpsAgent,
   continueOnChunkFailure = false,
+  requireProviderMessageId = false,
 }) {
   const configuredPhoneNumberId = configuredValue(env.WHATSAPP_PHONE_ID);
   const accessToken = configuredValue(env.WHATSAPP_TOKEN);
@@ -59,10 +60,11 @@ export async function deliverWhatsAppText({
   }
 
   const failures = [];
+  const providerMessageIds = [];
   let deliveredChunks = 0;
   for (const chunk of chunksFor(body)) {
     try {
-      await httpClient.post(
+      const providerResponse = await httpClient.post(
         `https://graph.facebook.com/v20.0/${configuredPhoneNumberId}/messages`,
         {
           messaging_product: 'whatsapp',
@@ -78,6 +80,12 @@ export async function deliverWhatsAppText({
           timeout: 20000,
         }
       );
+      const providerMessageId = configuredValue(providerResponse?.data?.messages?.[0]?.id);
+      if (providerMessageId) {
+        providerMessageIds.push(providerMessageId);
+      } else if (requireProviderMessageId) {
+        throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_UNCORRELATED');
+      }
       deliveredChunks += 1;
     } catch (error) {
       const providerStatus = error?.response?.status;
@@ -91,7 +99,13 @@ export async function deliverWhatsAppText({
     }
   }
 
-  return { deliveredChunks, failedChunks: failures.length, failures };
+  return {
+    deliveredChunks,
+    failedChunks: failures.length,
+    failures,
+    providerMessageIds,
+    providerMessageId: providerMessageIds[0] ?? null,
+  };
 }
 
 
