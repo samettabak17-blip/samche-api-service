@@ -10,6 +10,7 @@ import { notifyLegacyTelegramSupportClosed } from './telegram-live-support-statu
 import { createConversationResource } from './conversation-resource-service.js';
 import { createConversationResourceStorage } from './conversation-resource-storage.js';
 import { buildConversationStorageKey, ConversationResourceValidationError, validateConversationUpload } from './conversation-resource-validation.js';
+import { normalizeOperatorVoiceNote, OperatorVoiceNormalizationError } from './operator-voice-normalization-service.js';
 
 export class ConversationOperationError extends Error {
   constructor(status, message, code = 'CONVERSATION_OPERATION_FAILED') {
@@ -703,8 +704,12 @@ export async function appendAgentMediaMessage({
 }) {
   let validated;
   try {
+    file = await normalizeOperatorVoiceNote(file);
     validated = validateConversationUpload(file);
   } catch (error) {
+    if (error instanceof OperatorVoiceNormalizationError) {
+      throw new ConversationOperationError(400, 'Voice message format could not be prepared. Record a new note and try again.', 'VOICE_MEDIA_FORMAT_MISMATCH');
+    }
     if (error instanceof ConversationResourceValidationError) {
       const isVoiceUpload = String(file?.mimetype ?? '').toLowerCase().startsWith('audio/');
       console.info('OPERATOR_MEDIA_SEND_FAILED stage=MEDIA_VALIDATION code=' + error.code);
