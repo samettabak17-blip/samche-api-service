@@ -556,7 +556,7 @@ export async function appendAgentMessage({
       );
       if (existing.rows[0]) {
         await client.query('COMMIT');
-        return { duplicate: true, message: existing.rows[0], delivery: 'SENT_TO_WHATSAPP' };
+        return { duplicate: true, message: existing.rows[0], delivery: conversation.channel_type === 'WHATSAPP' ? 'SENT_TO_WHATSAPP' : 'AVAILABLE_TO_SAMCHEGUIDE' };
       }
     }
 
@@ -672,7 +672,7 @@ export async function appendAgentMediaMessage({
     if (!conversation) throw new ConversationOperationError(404, 'Conversation not found', 'CONVERSATION_NOT_FOUND');
     if (conversation.status !== 'open') throw new ConversationOperationError(409, 'Conversation is closed', 'CONVERSATION_CLOSED');
     if (conversation.handling_mode !== 'HUMAN') throw new ConversationOperationError(409, 'Human messages require human handling mode', 'CONVERSATION_NOT_HUMAN');
-    if (conversation.channel_type !== 'WHATSAPP') throw new ConversationOperationError(409, 'Media delivery is not configured for this channel', 'CHANNEL_DELIVERY_UNSUPPORTED');
+    if (!['WHATSAPP', 'SAMCHEGUIDE', 'WEB_CHAT'].includes(conversation.channel_type)) throw new ConversationOperationError(409, 'Media delivery is not configured for this channel', 'CHANNEL_DELIVERY_UNSUPPORTED');
 
     const allowed = canOperateConversation({
       systemRole: actor.systemRole,
@@ -696,28 +696,29 @@ export async function appendAgentMediaMessage({
       }
     }
 
-    const integration = await loadWhatsAppAgentDelivery(client, conversation);
-    if (!integration) throw new ConversationOperationError(409, 'WhatsApp delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
-
-    let deliveryResult;
-    try {
-      deliveryResult = await deliverMedia({
-        phoneNumberId: integration.external_channel_id,
-        recipient: conversation.customer_external_id,
-        file,
-        mediaCategory: validated.mediaCategory,
-        caption,
-      });
-      if (!String(deliveryResult?.providerMessageId ?? '').trim()) {
-        throw new WhatsAppDeliveryError('WHATSAPP_MEDIA_SEND_UNCORRELATED');
+    let deliveryResult = { delivery: 'AVAILABLE_TO_SAMCHEGUIDE', mediaId: null, providerMessageId: null };
+    if (conversation.channel_type === 'WHATSAPP') {
+      const integration = await loadWhatsAppAgentDelivery(client, conversation);
+      if (!integration) throw new ConversationOperationError(409, 'WhatsApp delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
+      try {
+        deliveryResult = await deliverMedia({
+          phoneNumberId: integration.external_channel_id,
+          recipient: conversation.customer_external_id,
+          file,
+          mediaCategory: validated.mediaCategory,
+          caption,
+        });
+        if (!String(deliveryResult?.providerMessageId ?? '').trim()) {
+          throw new WhatsAppDeliveryError('WHATSAPP_MEDIA_SEND_UNCORRELATED');
+        }
+        providerDelivered = true;
+      } catch (error) {
+        if (error instanceof WhatsAppDeliveryError) {
+          const status = error.code === 'WHATSAPP_DELIVERY_NOT_CONFIGURED' || error.code === 'WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH' ? 409 : 502;
+          throw new ConversationOperationError(status, 'WhatsApp media delivery could not be completed', error.code);
+        }
+        throw new ConversationOperationError(502, 'WhatsApp media delivery could not be completed', 'WHATSAPP_MEDIA_SEND_FAILED');
       }
-      providerDelivered = true;
-    } catch (error) {
-      if (error instanceof WhatsAppDeliveryError) {
-        const status = error.code === 'WHATSAPP_DELIVERY_NOT_CONFIGURED' || error.code === 'WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH' ? 409 : 502;
-        throw new ConversationOperationError(status, 'WhatsApp media delivery could not be completed', error.code);
-      }
-      throw new ConversationOperationError(502, 'WhatsApp media delivery could not be completed', 'WHATSAPP_MEDIA_SEND_FAILED');
     }
 
     const message = await insertMessage(client, {
@@ -728,7 +729,7 @@ export async function appendAgentMediaMessage({
       actorUserId: actor.userId,
       idempotencyKey,
       externalMessageId: deliveryResult.providerMessageId,
-      deliveryStatus: 'SENT',
+      deliveryStatus: conversation.channel_type === 'WHATSAPP' ? 'SENT' : null,
     });
     if (!message && idempotencyKey) {
       await client.query('COMMIT');
@@ -781,7 +782,7 @@ export async function appendAgentMediaMessage({
     }
     await notify(client, tenantId, conversationId, 'AGENT_MESSAGE');
     await client.query('COMMIT');
-    return { duplicate: false, message, resource, delivery: 'SENT_TO_WHATSAPP', attentionAcknowledged: acknowledgement.rowCount === 1 };
+    return { duplicate: false, message, resource, delivery: deliveryResult.delivery, attentionAcknowledged: acknowledgement.rowCount === 1 };
   } catch (error) {
     await client.query('ROLLBACK');
     if (uploadedStorageKey && activeStorage?.remove) {
