@@ -88,6 +88,14 @@ export type AgentMessageResponse =
   | { duplicate: true }
   | { duplicate: false; message: ConversationMessage; delivery: 'AVAILABLE_TO_SAMCHEGUIDE' | 'SENT_TO_WHATSAPP' };
 export interface KnowledgeDocument { id: string; tenant_id: string; assistant_id?: string | null; title: string; content: string; status: 'active' | 'inactive'; created_at?: string; updated_at?: string; }
+export interface KnowledgeOverview { sources: { ready: number; processing: number; failed: number }; reviewQueue: { candidates: number; profiles: number; recommendations: number; configurations: number }; gaps: { open: number }; runtime: { activeProfile: boolean; activeConfigurations: number; assistants: number }; }
+export interface KnowledgeSource { id: string; title: string; source_type: string; processing_status: string; indexing_status: string; processing_error_code?: string | null; enabled: boolean; updated_at?: string; }
+export interface KnowledgeCandidate { id: string; candidate_type: string; proposed_title: string; proposed_content: string; status: string; confidence?: number | null; }
+export interface KnowledgeGap { id: string; assistant_id?: string | null; normalized_question: string; occurrence_count: number; status: string; }
+export interface BusinessProfileVersion { id: string; profile_data: Record<string, unknown>; status: string; active_version_id?: string | null; created_at?: string; }
+export interface KnowledgeRecommendation { id: string; recommendation_data: Record<string, unknown>; status: string; created_at?: string; }
+export interface AssistantConfigurationVersion { id: string; configuration_data: Record<string, unknown>; status: string; created_at?: string; }
+export interface KnowledgeRetrievalPreview { query: string; matches: Array<{ chunkId: string; sourceId: string; sourceTitle: string; excerpt: string; similarity: number }>; }
 export interface TeamMember { id: string; email: string; system_role: SystemRole; tenant_role: TenantRole; created_at?: string; }
 
 export type LeadTemperature = 'HOT' | 'WARM' | 'COLD' | 'UNQUALIFIED';

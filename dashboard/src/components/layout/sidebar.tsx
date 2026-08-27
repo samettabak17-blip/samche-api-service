@@ -11,6 +11,7 @@ const navigation = [
   { label: 'AI Assistants', suffix: '/assistants', icon: Bot },
   { label: 'Channels', suffix: '/channels', icon: Cable },
   { label: 'Knowledge Base', suffix: '/knowledge-base', icon: BookOpenText },
+  { label: 'Knowledge Intelligence', suffix: '/knowledge', icon: BookOpenText },
   { label: 'Leads', suffix: '/leads', icon: BadgeDollarSign },
   { label: 'Pipeline', suffix: '/pipeline', icon: KanbanSquare },
   { label: 'Team', suffix: '/team', icon: UsersRound },
@@ -19,7 +20,7 @@ const navigation = [
 
 const groups = [
   { title: 'MAIN', labels: ['Overview'] },
-  { title: 'AI SOLUTIONS', labels: ['AI Assistants', 'Channels', 'Knowledge Base'] },
+  { title: 'AI SOLUTIONS', labels: ['AI Assistants', 'Channels', 'Knowledge Intelligence', 'Knowledge Base'] },
   { title: 'CUSTOMER ENGAGEMENT', labels: ['Leads', 'Pipeline'] },
   { title: 'OPERATIONS', labels: ['Team'] },
   { title: 'SETTINGS', labels: ['Settings'] },

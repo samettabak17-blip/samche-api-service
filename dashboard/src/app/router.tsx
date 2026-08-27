@@ -13,6 +13,7 @@ import { ChannelsPage } from '../features/channels/channels-page';
 import { KnowledgeBasePage } from '../features/knowledge-base/knowledge-base-page';
 import { LeadsPage } from '../features/leads/leads-page';
 import { PipelinePage } from '../features/pipeline/pipeline-page';
+import { KnowledgeIntelligencePage } from '../features/knowledge-intelligence/knowledge-intelligence-page';
 
 function LoadingScreen() { return <div className="grid min-h-screen place-items-center bg-canvas text-sm text-stone-500">Loading workspace…</div>; }
 function RequireAuth({ children }: { children: ReactNode }) { const { status } = useAuth(); if (status === 'checking') return <LoadingScreen />; return status === 'authenticated' ? <>{children}</> : <Navigate to="/login" replace />; }
@@ -59,6 +60,7 @@ export function AppRouter() {
       <Route path="channels/:channelId" element={<ChannelsPage />} />
       <Route path="knowledge-base" element={<KnowledgeBasePage />} />
       <Route path="knowledge-base/:documentId" element={<KnowledgeBasePage />} />
+      <Route path="knowledge" element={<KnowledgeIntelligencePage />} />
     </Route>
     <Route path="*" element={<Navigate to="/app" replace />} />
   </Routes>;

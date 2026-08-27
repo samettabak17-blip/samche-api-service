@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { AgentMessageResponse, HumanAttentionSummary, DashboardOverview, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmContact, CrmContactList, CrmDeal, CrmDealList, CrmLead, CrmLeadList, CrmOverviewMetrics, CrmPipelineStage, CrmPipelineSummary, KnowledgeDocument, TeamMember, TenantChannel } from '../../types/api';
+import type { AgentMessageResponse, HumanAttentionSummary, DashboardOverview, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmContact, CrmContactList, CrmDeal, CrmDealList, CrmLead, CrmLeadList, CrmOverviewMetrics, CrmPipelineStage, CrmPipelineSummary, KnowledgeDocument, KnowledgeOverview, KnowledgeSource, KnowledgeCandidate, KnowledgeGap, BusinessProfileVersion, KnowledgeRecommendation, AssistantConfigurationVersion, KnowledgeRetrievalPreview, TeamMember, TenantChannel } from '../../types/api';
 
 const tenantRoot = (tenantId: string) => `/api/v1/tenants/${tenantId}`;
 export const tenantKeys = {
@@ -25,6 +25,13 @@ export const tenantKeys = {
   deal: (tenantId: string, dealId: string) => ['tenant', tenantId, 'deal', dealId] as const,
   crmOverview: (tenantId: string) => ['tenant', tenantId, 'crm-overview'] as const,
   dashboardOverview: (tenantId: string, startDate: string, endDate: string) => ['tenant', tenantId, 'dashboard-overview', startDate, endDate] as const,
+  knowledgeOverview: (tenantId: string) => ['tenant', tenantId, 'knowledge-intelligence', 'overview'] as const,
+  knowledgeSources: (tenantId: string) => ['tenant', tenantId, 'knowledge-intelligence', 'sources'] as const,
+  knowledgeCandidates: (tenantId: string) => ['tenant', tenantId, 'knowledge-intelligence', 'candidates'] as const,
+  knowledgeGaps: (tenantId: string) => ['tenant', tenantId, 'knowledge-intelligence', 'gaps'] as const,
+  businessProfiles: (tenantId: string) => ['tenant', tenantId, 'knowledge-intelligence', 'profiles'] as const,
+  knowledgeRecommendations: (tenantId: string, assistantId: string) => ['tenant', tenantId, 'knowledge-intelligence', 'recommendations', assistantId] as const,
+  assistantConfigurations: (tenantId: string, assistantId: string) => ['tenant', tenantId, 'knowledge-intelligence', 'configurations', assistantId] as const,
 };
 export interface LeadFilters { limit: number; offset: number; temperature?: string; stage?: string; source?: string; assigned_user_id?: string; conversation_id?: string; }
 export interface DealFilters { limit: number; offset: number; stage?: string; contact_id?: string; owner_user_id?: string; status?: string; source?: string; include_archived?: boolean; }
@@ -48,6 +55,15 @@ export const tenantApi = {
   createKnowledgeDocument: (tenantId: string, body: Omit<KnowledgeDocument, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>) => apiClient.post<KnowledgeDocument>(`${tenantRoot(tenantId)}/knowledge-base`, body),
   updateKnowledgeDocument: (tenantId: string, documentId: string, body: Partial<Omit<KnowledgeDocument, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>>) => apiClient.put<KnowledgeDocument>(`${tenantRoot(tenantId)}/knowledge-base/${documentId}`, body),
   deleteKnowledgeDocument: (tenantId: string, documentId: string) => apiClient.delete<{ message: string }>(`${tenantRoot(tenantId)}/knowledge-base/${documentId}`),
+  getKnowledgeOverview: (tenantId: string) => apiClient.get<{ overview: KnowledgeOverview }>(`${tenantRoot(tenantId)}/knowledge-intelligence/overview`).then((value) => value.overview),
+  listKnowledgeSources: (tenantId: string) => apiClient.get<{ sources: KnowledgeSource[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/sources`).then((value) => value.sources),
+  listKnowledgeCandidates: (tenantId: string) => apiClient.get<{ candidates: KnowledgeCandidate[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/candidates`).then((value) => value.candidates),
+  listKnowledgeGaps: (tenantId: string) => apiClient.get<{ gaps: KnowledgeGap[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/gaps`).then((value) => value.gaps),
+  listBusinessProfiles: (tenantId: string) => apiClient.get<{ profiles: BusinessProfileVersion[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/profiles`).then((value) => value.profiles),
+  generateBusinessProfile: (tenantId: string) => apiClient.post<{ profile: BusinessProfileVersion }>(`${tenantRoot(tenantId)}/knowledge-intelligence/profiles/generate`, {}).then((value) => value.profile),
+  listKnowledgeRecommendations: (tenantId: string, assistantId: string) => apiClient.get<{ recommendations: KnowledgeRecommendation[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/assistants/${assistantId}/recommendations`).then((value) => value.recommendations),
+  listAssistantConfigurations: (tenantId: string, assistantId: string) => apiClient.get<{ configurations: AssistantConfigurationVersion[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/assistants/${assistantId}/configurations`).then((value) => value.configurations),
+  previewKnowledgeRetrieval: (tenantId: string, assistantId: string, query: string) => apiClient.post<{ preview: KnowledgeRetrievalPreview }>(`${tenantRoot(tenantId)}/knowledge-intelligence/assistants/${assistantId}/retrieval-preview`, { query }).then((value) => value.preview),
   listTeam: (tenantId: string) => apiClient.get<TeamMember[]>(`${tenantRoot(tenantId)}/team`),
   listConversations: (tenantId: string, page: { limit: number; offset: number }, filters: { channelType?: string; search?: string; status?: string } = {}) => {
     const params = new URLSearchParams({ limit: String(page.limit), offset: String(page.offset) });
