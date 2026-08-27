@@ -181,6 +181,7 @@ export async function deliverWhatsAppMedia({
   try {
     timing('UPLOAD_STARTED');
     voiceStage('META_MEDIA_UPLOAD_STARTED');
+    if (isVoiceMessage) console.info('VOICE_AUDIO_DIAGNOSTIC meta_upload_mime=' + mimeType + ' filename_extension=' + (filename.includes('.') ? filename.slice(filename.lastIndexOf('.') + 1).toLowerCase() : 'none'));
     const form = new FormData();
     form.append('messaging_product', 'whatsapp');
     form.append('file', new Blob([buffer], { type: mimeType }), filename);
