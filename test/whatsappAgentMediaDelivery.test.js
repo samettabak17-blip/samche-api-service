@@ -70,10 +70,11 @@ test('uploads verified Ogg/Opus voice bytes to Meta with an audio/ogg file contr
   const audio = { buffer: Buffer.from('OggS....OpusHead....voice'), size: 23, mimetype: 'audio/ogg', originalname: 'voice-note.ogg' };
   const result = await deliverWhatsAppMedia({
     phoneNumberId: '948536645017374', recipient: 'whatsapp:15551234567', file: audio, mediaCategory: 'AUDIO', env,
-    httpClient: { async post(url, body) { calls.push({ url, body }); return url.endsWith('/media') ? { data: { id: 'meta-audio-1' } } : { data: { messages: [{ id: 'wamid.voice-1' }] } }; } },
+    httpClient: { async post(url, body, config) { calls.push({ url, body, config }); return url.endsWith('/media') ? { data: { id: 'meta-audio-1' } } : { data: { messages: [{ id: 'wamid.voice-1' }] } }; } },
   });
   const uploadHeaders = calls[0].body.getHeaders();
   assert.match(uploadHeaders['content-type'], /^multipart\/form-data; boundary=/);
+  assert.equal(calls[0].config.headers['content-type'], uploadHeaders['content-type']);
   assert.ok(calls[0].body._streams.some((entry) => Buffer.isBuffer(entry) && entry.equals(audio.buffer)));
   assert.ok(calls[0].body._streams.some((entry) => typeof entry === 'string' && entry.includes('Content-Type: audio/ogg')));
   assert.deepEqual(calls[1].body, { messaging_product: 'whatsapp', to: '15551234567', type: 'audio', audio: { id: 'meta-audio-1' } });
