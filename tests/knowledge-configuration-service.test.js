@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activateAssistantConfigurationVersion } from '../services/knowledge-configuration-service.js';
+import { activateAssistantConfigurationVersion, resolveActiveAssistantKnowledgeConfiguration } from '../services/knowledge-configuration-service.js';
 
 test('activating an approved assistant configuration supersedes only the previously active version', async () => {
   const calls = [];
@@ -25,3 +25,24 @@ test('activating an approved assistant configuration supersedes only the previou
   assert.ok(calls.some(({ sql }) => /status = 'ACTIVE'/.test(sql)));
   assert.ok(calls.some(({ sql }) => /active_configuration_version_id/.test(sql)));
 });
+
+test('active runtime resolution includes only the tenant active approved Business Profile version', async () => {
+  const calls = [];
+  const database = {
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+      return { rows: [{ id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' }] };
+    },
+  };
+
+  await resolveActiveAssistantKnowledgeConfiguration({
+    database,
+    tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    assistantId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  });
+
+  assert.match(calls[0].sql, /business_profile_versions profile_version/i);
+  assert.match(calls[0].sql, /profile_version\.status = 'APPROVED'/i);
+  assert.match(calls[0].sql, /profile_version\.profile_data AS active_business_profile/i);
+});
+
