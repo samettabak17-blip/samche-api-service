@@ -17,7 +17,7 @@ import tenantRoutes from "./routes/tenantRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
 import crmRoutes from "./routes/crmRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
-import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, recordWhatsAppDeliveryStatus } from "./services/live-inbox-service.js";
+import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
 import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from "./services/human-support-service.js";
 import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
@@ -462,6 +462,15 @@ async function sendMessage(to, body) {
   }
 }
 
+async function deliverWhatsAppAssistantText(to, body) {
+  return deliverWhatsAppText({
+    phoneNumberId: process.env.WHATSAPP_PHONE_ID,
+    recipient: to,
+    content: body,
+    requireProviderMessageId: true,
+  });
+}
+
 async function persistAndSendWhatsAppAssistant(whatsappInbox, recipient, content) {
   if (!whatsappInbox) return { delivered: false, message: null };
   return persistAndDeliverWhatsAppAssistant({
@@ -471,7 +480,8 @@ async function persistAndSendWhatsAppAssistant(whatsappInbox, recipient, content
     recipient,
     content,
     persistAssistantResponse: persistAssistantResponseIfCurrent,
-    deliver: sendMessage,
+    persistProviderMessageId: recordWhatsAppAssistantProviderAcceptance,
+    deliver: deliverWhatsAppAssistantText,
   });
 }
 
