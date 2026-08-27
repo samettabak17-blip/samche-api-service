@@ -70,16 +70,19 @@ test('returning to AI allows only the next new assistant response to persist and
   const currentConversation = { value: { status: 'open', handling_mode: 'HUMAN', handling_version: 9 } };
   const { database, messages } = fakeDatabase(currentConversation);
   let deliveries = 0;
+  const persistProviderMessageId = async ({ messageId, providerMessageId }) => ({ id: messageId, external_message_id: providerMessageId });
   const blocked = await persistAndDeliverWhatsAppAssistant({
     tenantId, conversationId, handlingVersion: 9, recipient: 'whatsapp:15551234567', content: 'Paused response',
     persistAssistantResponse: (input) => persistAssistantResponseIfCurrent({ ...input, database }),
-    deliver: async () => { deliveries += 1; },
+    persistProviderMessageId,
+    deliver: async () => { deliveries += 1; return { providerMessageId: 'wamid.assistant-test' }; },
   });
   currentConversation.value = { status: 'open', handling_mode: 'AI', handling_version: 10 };
   const resumed = await persistAndDeliverWhatsAppAssistant({
     tenantId, conversationId, handlingVersion: 10, recipient: 'whatsapp:15551234567', content: 'New response',
     persistAssistantResponse: (input) => persistAssistantResponseIfCurrent({ ...input, database }),
-    deliver: async () => { deliveries += 1; },
+    persistProviderMessageId,
+    deliver: async () => { deliveries += 1; return { providerMessageId: 'wamid.assistant-test' }; },
   });
 
   assert.equal(blocked.delivered, false);
