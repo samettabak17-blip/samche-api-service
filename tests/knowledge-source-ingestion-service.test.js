@@ -12,7 +12,6 @@ test('rejects a file whose declared PDF MIME type does not match its binary sign
       originalname: 'policy.pdf',
       mimetype: 'application/pdf',
       buffer: Buffer.from('PK\x03\x04not-a-pdf'),
-      size: 16,
     }),
     (error) => error instanceof KnowledgeSourceIngestionError && error.code === 'KNOWLEDGE_SOURCE_TYPE_MISMATCH'
   );
