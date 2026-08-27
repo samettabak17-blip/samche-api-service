@@ -526,7 +526,7 @@ export async function appendAgentMessage({
   };
   try {
     await client.query('BEGIN');
-    traceMediaStage('CONVERSATION_LOOKUP');
+    traceStage('CONVERSATION_LOOKUP');
     const details = await client.query(
       `SELECT c.*, tc.channel_type, tc.external_channel_id
          FROM conversations c
@@ -677,6 +677,7 @@ export async function appendAgentMediaMessage({
   try {
     traceMediaStage('TRANSACTION_BEGIN');
     await client.query('BEGIN');
+    traceMediaStage('CONVERSATION_LOOKUP');
     const details = await client.query(
       `SELECT c.*, tc.channel_type, tc.external_channel_id
          FROM conversations c
@@ -740,6 +741,7 @@ export async function appendAgentMediaMessage({
       }
     }
 
+    traceMediaStage('MESSAGE_PERSISTENCE');
     const message = await insertMessage(client, {
       tenantId,
       conversationId,
