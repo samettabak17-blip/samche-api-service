@@ -29,6 +29,7 @@ import {
   describeStorageCompatibilityProfile,
   describeStorageConfigurationIdentity,
   getSafeStorageFailureDiagnostic,
+  createConversationResourceStorage,
 } from "./services/conversation-resource-storage.js";
 import { createWhatsAppMediaRetriever, extractWhatsAppMediaDescriptor } from "./services/whatsapp-multimodal-service.js";
 import { planStandaloneWhatsAppMediaResponse } from "./services/whatsapp-standalone-media-ack.js";
@@ -39,6 +40,8 @@ import { startLiveEventListener, subscribeTenantEvents } from "./services/live-e
 import { configuredPublicConversationSessionSecret, issuePublicConversationSession, PublicConversationSessionError, verifyPublicConversationSession } from "./services/public-conversation-session.js";
 import pool from "./config/db.js";
 import { runMigrations } from "./migrations/runMigrations.js";
+import { createOpenAIEmbedder } from "./services/knowledge-intelligence-service.js";
+import { startKnowledgeProcessingWorker } from "./services/knowledge-source-processing-service.js";
 
 dotenv.config();
 
@@ -147,6 +150,16 @@ const WP_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/g
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
+
+if (process.env.OPENAI_API_KEY && process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
+  startKnowledgeProcessingWorker({
+    database: pool,
+    embed: createOpenAIEmbedder(openaiClient),
+    createStorage: () => createConversationResourceStorage(),
+  });
+} else {
+  console.info('KNOWLEDGE_PROCESSING_WORKER_DISABLED');
+}
 
 // Ortak Link Dönüştürücü
 const parseLinksToHTML = (text) => {
