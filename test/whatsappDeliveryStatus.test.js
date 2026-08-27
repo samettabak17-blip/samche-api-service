@@ -148,3 +148,18 @@ test('reconciles an early status webhook after the assistant wamid is committed'
   assert.deepEqual(result, { updated: true, count: 1, deliveryStatus: 'SENT' });
   assert.equal(calls.filter(({ sql }) => sql.includes('UPDATE conversation_messages m')).length, 2);
 });
+
+
+test('reconciles an early FAILED voice status after the outbound transaction commit boundary', async () => {
+  const { database, calls } = databaseFixture({ matchOnAttempt: 4 });
+  const result = await recordWhatsAppDeliveryStatus({
+    phoneNumberId: '948536645017374',
+    status: { id: 'wamid.voice-131053', status: 'failed', errors: [{ code: 131053 }] },
+    database,
+    reconciliationDelaysMs: [0, 0, 0, 0],
+  });
+  assert.deepEqual(result, { updated: true, count: 1, deliveryStatus: 'FAILED' });
+  const updates = calls.filter(({ sql }) => sql.includes('UPDATE conversation_messages m'));
+  assert.equal(updates.length, 4);
+  assert.deepEqual(updates.at(-1).parameters, ['FAILED', '131053', 'wamid.voice-131053', '948536645017374']);
+});
