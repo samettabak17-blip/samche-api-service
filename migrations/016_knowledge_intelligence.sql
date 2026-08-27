@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS knowledge_candidates (
   approved_source_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (id, tenant_id),
   CONSTRAINT fk_knowledge_candidates_assistant
     FOREIGN KEY (assistant_id, tenant_id)
     REFERENCES ai_assistants(id, tenant_id)
@@ -111,6 +112,19 @@ CREATE TABLE IF NOT EXISTS knowledge_candidates (
     REFERENCES knowledge_base_documents(id, tenant_id)
     ON DELETE SET NULL
 );
+
+DO $
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_knowledge_candidates_id_tenant') THEN
+    ALTER TABLE knowledge_candidates
+      ADD CONSTRAINT uq_knowledge_candidates_id_tenant UNIQUE (id, tenant_id);
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_conversation_messages_id_tenant') THEN
+    ALTER TABLE conversation_messages
+      ADD CONSTRAINT uq_conversation_messages_id_tenant UNIQUE (id, tenant_id);
+  END IF;
+END $;
 
 CREATE TABLE IF NOT EXISTS knowledge_candidate_evidence (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -217,11 +231,20 @@ CREATE TABLE IF NOT EXISTS assistant_knowledge_recommendations (
   reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
   reviewed_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (id, tenant_id),
   CONSTRAINT fk_assistant_knowledge_recommendations_assistant
     FOREIGN KEY (assistant_id, tenant_id)
     REFERENCES ai_assistants(id, tenant_id)
     ON DELETE CASCADE
 );
+
+DO $
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_assistant_knowledge_recommendations_id_tenant') THEN
+    ALTER TABLE assistant_knowledge_recommendations
+      ADD CONSTRAINT uq_assistant_knowledge_recommendations_id_tenant UNIQUE (id, tenant_id);
+  END IF;
+END $;
 
 CREATE INDEX IF NOT EXISTS idx_business_profile_versions_review
   ON business_profile_versions (tenant_id, profile_id, status, created_at DESC);
