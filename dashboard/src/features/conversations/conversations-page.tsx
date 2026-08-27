@@ -8,7 +8,7 @@ import { useAuth } from '../auth/auth-context';
 import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
 import { ApiError } from '../../lib/api-client';
 import { useTenant } from '../tenants/tenant-context';
-import { canTakeOverConversation, canUseHumanReplyComposer, clearSentAgentDraft, displayConversationCustomerIdentifier, isInlinePreviewableAttachment, isVoiceResource, resourceDisplayName, senderLabel, voiceResourceDisplayLabel } from './conversation-utils';
+import { canTakeOverConversation, canUseHumanReplyComposer, clearSentAgentDraft, deliveryTickPresentation, displayConversationCustomerIdentifier, isInlinePreviewableAttachment, isVoiceResource, resourceDisplayName, senderLabel, voiceResourceDisplayLabel } from './conversation-utils';
 import { buildVerifiedWhatsAppVoiceFile, selectWhatsAppVoiceRecordingFormat } from './voice-recording';
 import { useLiveSupportAttention } from '../live-support/live-support-attention-provider';
 import { SafeRichMessage } from './safe-rich-message';
@@ -35,12 +35,10 @@ function LiveState({ state }: { state: string }) {
 }
 
 function deliveryIndicator(status?: string | null) {
-  if (status === 'READ') return <span className="ml-1 text-sky-300" title="Read">✓✓</span>;
-  if (status === 'DELIVERED') return <span className="ml-1 text-emerald-200" title="Delivered">✓✓</span>;
-  if (status === 'SENT') return <span className="ml-1" title="Sent">✓</span>;
-  if (status === 'SENDING') return <span className="ml-1" title="Sending">◌</span>;
-  if (status === 'FAILED') return <span className="ml-1 text-red-200" title="Delivery failed">!</span>;
-  return null;
+  const tick = deliveryTickPresentation(status);
+  if (!tick) return null;
+  const tone = tick.tone === 'read' ? 'text-sky-300' : tick.tone === 'delivered' ? 'text-emerald-200' : tick.tone === 'failed' ? 'text-red-200' : '';
+  return <span className={'ml-1 ' + tone} title={tick.label}>{tick.glyph}</span>;
 }
 
 function InlineVoicePlayer({ resource, tenantId, conversationId, tone }: { resource: { id: string; mime_type: string | null }; tenantId: string; conversationId: string; tone: 'inbound' | 'outbound' }) {
