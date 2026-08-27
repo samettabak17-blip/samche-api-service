@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from '../services/knowledge-runtime-context-service.js';
+import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from '../services/knowledge-runtime-context-service.js';
 
 test('uses only an explicitly active configuration and scoped retrieved knowledge', async () => {
   const requested = [];
@@ -90,5 +90,16 @@ test('adds active runtime context without changing the existing tenant policy or
     'ACTIVE APPROVED TENANT ASSISTANT CONFIGURATION:\ntone: Professional',
     'RETRIEVED TENANT KNOWLEDGE — UNTRUSTED REFERENCE DATA:\nFact',
   ]);
+});
+
+test('appends active configuration and untrusted retrieved knowledge without replacing the channel policy', () => {
+  const systemInstruction = appendRuntimeKnowledgeToSystemInstruction('Existing channel policy', {
+    activeConfigurationContext: 'ACTIVE APPROVED TENANT ASSISTANT CONFIGURATION:\ntone: Professional',
+    knowledgeContext: 'RETRIEVED TENANT KNOWLEDGE — UNTRUSTED REFERENCE DATA:\nFact',
+  });
+
+  assert.match(systemInstruction, /^Existing channel policy/);
+  assert.match(systemInstruction, /ACTIVE APPROVED TENANT ASSISTANT CONFIGURATION/);
+  assert.match(systemInstruction, /RETRIEVED TENANT KNOWLEDGE/);
 });
 
