@@ -154,3 +154,61 @@ export function createOpenAIEmbedder(client, config = KNOWLEDGE_EMBEDDING_CONFIG
     return vector;
   };
 }
+
+export async function indexKnowledgeSource({
+  database,
+  embed,
+  tenantId,
+  sourceId,
+  text,
+  config = KNOWLEDGE_EMBEDDING_CONFIG,
+}) {
+  if (!database?.query || typeof embed !== 'function' || !tenantId || !sourceId) {
+    throw new KnowledgeIntelligenceError('KNOWLEDGE_INDEX_CONFIG_INVALID', 'Knowledge indexing is not configured');
+  }
+  const chunks = chunkKnowledgeText(text, {
+    maxCharacters: config.chunkCharacters,
+    overlapCharacters: config.overlapCharacters,
+  });
+  if (!chunks.length) throw new KnowledgeIntelligenceError('KNOWLEDGE_SOURCE_EMPTY', 'Knowledge source does not contain readable text');
+
+  await database.query(
+    `UPDATE knowledge_chunks
+        SET is_active = FALSE, index_status = 'SUPERSEDED', updated_at = CURRENT_TIMESTAMP
+      WHERE tenant_id = $1 AND source_id = $2 AND is_active = TRUE`,
+    [tenantId, sourceId]
+  );
+
+  for (const chunk of chunks) {
+    const embedding = vectorLiteral(await embed(chunk.text));
+    await database.query(
+      `INSERT INTO knowledge_chunks
+          (tenant_id, source_id, chunk_index, normalized_text, text_hash, token_estimate,
+           embedding, embedding_provider, embedding_model, embedding_version, embedding_dimensions,
+           index_status, is_active, indexed_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::vector, $8, $9, $10, $11, 'READY', TRUE, CURRENT_TIMESTAMP)
+       ON CONFLICT (tenant_id, source_id, embedding_model, embedding_version, chunk_index, text_hash)
+       DO UPDATE SET normalized_text = EXCLUDED.normalized_text,
+                     token_estimate = EXCLUDED.token_estimate,
+                     embedding = EXCLUDED.embedding,
+                     index_status = 'READY',
+                     is_active = TRUE,
+                     indexed_at = CURRENT_TIMESTAMP,
+                     updated_at = CURRENT_TIMESTAMP`,
+      [
+        tenantId, sourceId, chunk.chunkIndex, chunk.text, chunk.textHash, chunk.tokenEstimate,
+        embedding, config.provider, config.model, config.version, config.dimensions,
+      ]
+    );
+  }
+
+  await database.query(
+    `UPDATE knowledge_base_documents
+        SET processing_status = 'READY', indexing_status = 'READY',
+            indexed_at = CURRENT_TIMESTAMP, processing_error_code = NULL,
+            updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND tenant_id = $2`,
+    [sourceId, tenantId]
+  );
+  return { chunkCount: chunks.length, status: 'READY' };
+}
