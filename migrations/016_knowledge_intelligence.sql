@@ -170,7 +170,8 @@ CREATE TABLE IF NOT EXISTS business_profiles (
   approved_version_id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (tenant_id)
+  UNIQUE (tenant_id),
+  UNIQUE (id, tenant_id)
 );
 
 CREATE TABLE IF NOT EXISTS business_profile_versions (
