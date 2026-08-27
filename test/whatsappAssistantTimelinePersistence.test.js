@@ -25,7 +25,7 @@ function fakeDatabase(currentConversation) {
   return { database: { async connect() { return client; } }, messages, calls };
 }
 
-test('normal AI response persists as ASSISTANT and is available to the unfiltered timeline history', async () => {
+test('regression: normal WhatsApp AI response persistence never depends on media-only tracing', async () => {
   const currentConversation = { value: { status: 'open', handling_mode: 'AI', handling_version: 4 } };
   const { database, messages, calls } = fakeDatabase(currentConversation);
   const result = await persistAssistantResponseIfCurrent({
