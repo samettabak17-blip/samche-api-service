@@ -39,6 +39,7 @@ import {
   rejectAssistantConfigurationVersion,
   reviewAssistantRecommendation,
 } from '../services/knowledge-assistant-lifecycle.js';
+import { getKnowledgeOverview, KnowledgeOverviewError } from '../services/knowledge-overview-service.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -63,7 +64,7 @@ function sourceId(req, res) {
 
 function safeError(res, error) {
   const code = error?.code;
-  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError || error instanceof KnowledgeGenerationError || error instanceof KnowledgeProfileLifecycleError || error instanceof KnowledgeAssistantLifecycleError) {
+  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError || error instanceof KnowledgeGenerationError || error instanceof KnowledgeProfileLifecycleError || error instanceof KnowledgeAssistantLifecycleError || error instanceof KnowledgeOverviewError) {
     const status = /NOT_FOUND|INVALID|EMPTY|UNSUPPORTED|MISMATCH|REQUIRED/.test(code) ? 400 : 503;
     return res.status(status).json({ error: error.message, code });
   }
@@ -79,6 +80,16 @@ async function verifyAssistant(tenantId, assistantId) {
 
 const router = express.Router();
 router.use(authenticateToken);
+
+router.get('/:tenantId/knowledge-intelligence/overview', requireTenantAccess, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId) return;
+  try {
+    return res.json({ overview: await getKnowledgeOverview({ database: pool, tenantId }) });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
 
 router.get('/:tenantId/knowledge-intelligence/sources', requireTenantAccess, async (req, res) => {
   const tenantId = tenant(req, res);
