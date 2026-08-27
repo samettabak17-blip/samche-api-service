@@ -170,3 +170,45 @@ export async function runOneKnowledgeProcessingJob(dependencies) {
   if (!job) return { status: 'IDLE' };
   return processKnowledgeProcessingJob({ ...dependencies, job });
 }
+
+export function startKnowledgeProcessingWorker({
+  database,
+  embed,
+  createStorage,
+  intervalMs = 2_000,
+  logger = console,
+}) {
+  if (!database?.query || typeof embed !== 'function' || typeof createStorage !== 'function') {
+    throw new KnowledgeSourceProcessingError('KNOWLEDGE_WORKER_CONFIG_INVALID', 'Knowledge processing worker is not configured');
+  }
+
+  let stopped = false;
+  let running = false;
+  const tick = async () => {
+    if (stopped || running) return;
+    running = true;
+    try {
+      const job = await claimNextKnowledgeProcessingJob(database);
+      if (job) {
+        await processKnowledgeProcessingJob({
+          database,
+          embed,
+          job,
+          storage: createStorage(),
+        });
+      }
+    } catch (error) {
+      logger.error('KNOWLEDGE_PROCESSING_WORKER_FAILED', safeErrorCode(error));
+    } finally {
+      running = false;
+    }
+  };
+
+  void tick();
+  const timer = setInterval(() => void tick(), intervalMs);
+  timer.unref?.();
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
+}
