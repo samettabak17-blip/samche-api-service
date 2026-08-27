@@ -35,7 +35,7 @@ jobs:
       - name: Install backend dependencies
         run: npm install
       - name: Verify operator permission rules
-        run: node --test tests/conversation-permissions.test.js tests/samcheguide-runtime.test.js test/dashboardAnalyticsService.test.js test/conversationRoutesProjection.test.js test/whatsappAgentMediaDelivery.test.js test/liveInboxWhatsAppOperatorMedia.test.js test/whatsappDeliveryStatus.test.js test/conversationResourceAudioValidation.test.js test/whatsappMultimodalService.test.js
+        run: node --test tests/conversation-permissions.test.js tests/samcheguide-runtime.test.js test/dashboardAnalyticsService.test.js test/conversationRoutesProjection.test.js test/whatsappAgentMediaDelivery.test.js test/liveInboxWhatsAppOperatorMedia.test.js test/whatsappAssistantTimelinePersistence.test.js test/whatsappDeliveryStatus.test.js test/conversationResourceAudioValidation.test.js test/whatsappMultimodalService.test.js
       - name: Verify live inbox syntax
         run: |
           node --check app.js
