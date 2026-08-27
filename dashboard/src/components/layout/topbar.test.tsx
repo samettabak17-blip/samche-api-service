@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Topbar } from './topbar';
 
 vi.mock('../../features/overview/overview-date-range-context', () => ({
@@ -14,6 +14,8 @@ function renderTopbar() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/app/tenant-1/overview']}><Topbar tenants={[{ id: 'tenant-1', name: 'SamChe', status: 'active', created_at: '' }]} selectedTenantId="tenant-1" email="operator@samche.test" onSelectTenant={() => undefined} onOpenNavigation={() => undefined} onLogout={() => undefined} /></MemoryRouter></QueryClientProvider>);
 }
+
+afterEach(() => cleanup());
 
 describe('Topbar global navigation search', () => {
   it('reopens when the trigger remains focused after selecting a destination', () => {
