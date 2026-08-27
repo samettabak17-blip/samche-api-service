@@ -11,6 +11,12 @@ import {
   createUploadedKnowledgeSource,
   enqueueKnowledgeIndexJob,
 } from '../services/knowledge-source-service.js';
+import {
+  KnowledgeCandidateError,
+  approveConversationKnowledgeCandidate,
+  createConversationKnowledgeCandidate,
+  rejectConversationKnowledgeCandidate,
+} from '../services/knowledge-candidate-service.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -250,6 +256,95 @@ router.post('/:tenantId/knowledge-intelligence/sources/:sourceId/reindex', requi
     );
     const job = await enqueueKnowledgeIndexJob({ database: pool, tenantId, sourceId: id, contentHash: source.rows[0].content_hash, metadata: { reindex: true } });
     return res.status(202).json({ job });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+
+router.get('/:tenantId/knowledge-intelligence/candidates', requireTenantAccess, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId) return;
+  try {
+    const result = await pool.query(
+      `SELECT id, assistant_id, candidate_type, proposed_title, proposed_content, confidence,
+              status, pii_redaction_status, evidence_summary, created_at, reviewed_at
+         FROM knowledge_candidates
+        WHERE tenant_id = $1
+        ORDER BY created_at DESC
+        LIMIT 100`,
+      [tenantId]
+    );
+    return res.json({ candidates: result.rows });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.get('/:tenantId/knowledge-intelligence/candidates/:candidateId/evidence', requireTenantAccess, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId || !isValidUUID(req.params.candidateId)) return res.status(400).json({ error: 'Invalid knowledge candidate ID' });
+  try {
+    const result = await pool.query(
+      `SELECT conversation_id, message_id, channel_type, sender_type, occurred_at
+         FROM knowledge_candidate_evidence
+        WHERE tenant_id = $1 AND candidate_id = $2
+        ORDER BY occurred_at ASC`,
+      [tenantId, req.params.candidateId]
+    );
+    return res.json({ evidence: result.rows });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/candidates', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId) return;
+  try {
+    const candidate = await createConversationKnowledgeCandidate({
+      database: pool,
+      tenantId,
+      assistantId: req.body?.assistant_id ?? null,
+      candidateType: req.body?.candidate_type,
+      title: req.body?.title,
+      content: req.body?.content,
+      confidence: req.body?.confidence ?? null,
+      evidence: req.body?.evidence,
+    });
+    return res.status(201).json({ candidate });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/candidates/:candidateId/approve', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId || !isValidUUID(req.params.candidateId)) return res.status(400).json({ error: 'Invalid knowledge candidate ID' });
+  try {
+    const source = await approveConversationKnowledgeCandidate({
+      database: pool,
+      tenantId,
+      candidateId: req.params.candidateId,
+      reviewedBy: req.user.user_id,
+    });
+    return res.status(202).json({ source });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/candidates/:candidateId/reject', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId || !isValidUUID(req.params.candidateId)) return res.status(400).json({ error: 'Invalid knowledge candidate ID' });
+  try {
+    await rejectConversationKnowledgeCandidate({
+      database: pool,
+      tenantId,
+      candidateId: req.params.candidateId,
+      reviewedBy: req.user.user_id,
+    });
+    return res.status(204).end();
   } catch (error) {
     return safeError(res, error);
   }
