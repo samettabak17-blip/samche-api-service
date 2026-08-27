@@ -5,6 +5,7 @@ import {
   buildUntrustedKnowledgeContext,
   redactConversationCandidate,
   retrieveApprovedKnowledge,
+  createOpenAIEmbedder,
 } from '../services/knowledge-intelligence-service.js';
 
 test('chunks normalized knowledge with deterministic overlap', () => {
@@ -50,4 +51,20 @@ test('retrieval is tenant and assistant scoped and excludes inactive or unapprov
   assert.match(calls[0].sql, /s\.status = 'active'/);
   assert.match(calls[0].sql, /ksa\.assistant_id = \$2/);
   assert.deepEqual(calls[0].params.slice(0, 2), ['tenant-a', 'assistant-a']);
+});
+
+test('centralizes OpenAI embedding model and dimensional contract', async () => {
+  const calls = [];
+  const embed = createOpenAIEmbedder({
+    embeddings: {
+      create: async (request) => {
+        calls.push(request);
+        return { data: [{ embedding: Array.from({ length: 1536 }, () => 0.02) }] };
+      },
+    },
+  });
+  const vector = await embed('company hours');
+  assert.equal(vector.length, 1536);
+  assert.equal(calls[0].model, 'text-embedding-3-small');
+  assert.equal(calls[0].dimensions, 1536);
 });
