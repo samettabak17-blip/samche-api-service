@@ -6,11 +6,15 @@ export async function createSuggestedCandidateFromKnowledgeGap({ database, tenan
   if (!database?.query) throw new KnowledgeCandidateError('KNOWLEDGE_DATABASE_UNAVAILABLE', 'Knowledge database is unavailable');
   if (![tenantId, gapId, createdBy].every((value) => UUID.test(String(value ?? '')))) throw new KnowledgeCandidateError('KNOWLEDGE_GAP_INVALID', 'Knowledge gap request is invalid');
   const gapResult = await database.query(
-    `SELECT id, assistant_id, normalized_question FROM knowledge_gaps WHERE id = $1 AND tenant_id = $2 AND status = 'NEEDS_REVIEW' FOR UPDATE`,
+    `SELECT id, assistant_id, normalized_question, suggested_candidate_id FROM knowledge_gaps WHERE id = $1 AND tenant_id = $2 AND status = 'NEEDS_REVIEW' FOR UPDATE`,
     [gapId, tenantId],
   );
   const gap = gapResult.rows[0];
   if (!gap) throw new KnowledgeCandidateError('KNOWLEDGE_GAP_NOT_FOUND', 'Knowledge gap was not found');
+  if (gap.suggested_candidate_id) {
+    const existing = await database.query(`SELECT id, status FROM knowledge_candidates WHERE id = $1 AND tenant_id = $2`, [gap.suggested_candidate_id, tenantId]);
+    if (existing.rowCount) return { ...existing.rows[0], existing: true };
+  }
   const signals = await database.query(
     `SELECT conversation_id, message_id, channel_type, created_at FROM knowledge_gap_signals WHERE tenant_id = $1 AND assistant_id IS NOT DISTINCT FROM $2 AND redacted_question = $3 ORDER BY created_at ASC LIMIT 20`,
     [tenantId, gap.assistant_id, gap.normalized_question],
