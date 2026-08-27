@@ -43,8 +43,13 @@ export function chunkKnowledgeText(value, {
     const next = current ? current + ' ' + word : word;
     if (current && next.length > maxCharacters) {
       chunks.push(current);
-      const overlap = overlapCharacters ? current.slice(-overlapCharacters).trim() : '';
-      current = overlap ? overlap + ' ' + word : word;
+      const overlapWords = overlapCharacters
+        ? current.split(/\s+/).reduceRight((selected, priorWord) => {
+          const candidate = selected.length ? priorWord + ' ' + selected : priorWord;
+          return !selected.length || candidate.length <= overlapCharacters ? candidate : selected;
+        }, '')
+        : '';
+      current = overlapWords ? overlapWords + ' ' + word : word;
     } else {
       current = next;
     }
