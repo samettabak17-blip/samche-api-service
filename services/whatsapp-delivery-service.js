@@ -1,4 +1,5 @@
 import axios from 'axios';
+import FormData from 'form-data';
 import https from 'https';
 
 export class WhatsAppDeliveryError extends Error {
@@ -184,11 +185,12 @@ export async function deliverWhatsAppMedia({
     if (isVoiceMessage) console.info('VOICE_AUDIO_DIAGNOSTIC meta_upload_mime=' + mimeType + ' filename_extension=' + (filename.includes('.') ? filename.slice(filename.lastIndexOf('.') + 1).toLowerCase() : 'none'));
     const form = new FormData();
     form.append('messaging_product', 'whatsapp');
-    form.append('file', new Blob([buffer], { type: mimeType }), filename);
+    // Node form-data preserves the binary stream, multipart boundary, and per-file Content-Type.
+    form.append('file', buffer, { filename, contentType: mimeType, knownLength: buffer.length });
     upload = await httpClient.post(
       `https://graph.facebook.com/v20.0/${configuredPhoneNumberId}/media`,
       form,
-      { httpsAgent, headers: { Authorization: `Bearer ${accessToken}` }, timeout: 20000 }
+      { httpsAgent, headers: { Authorization: `Bearer ${accessToken}`, ...form.getHeaders() }, timeout: 20000 }
     );
     timing('UPLOAD_COMPLETED');
   } catch (error) {
