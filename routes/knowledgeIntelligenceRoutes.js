@@ -32,6 +32,13 @@ import {
   KnowledgeProfileLifecycleError,
   rejectBusinessProfileVersion,
 } from '../services/knowledge-profile-lifecycle.js';
+import {
+  generateAssistantConfigurationVersion,
+  generateAssistantRecommendation,
+  KnowledgeAssistantLifecycleError,
+  rejectAssistantConfigurationVersion,
+  reviewAssistantRecommendation,
+} from '../services/knowledge-assistant-lifecycle.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -56,7 +63,7 @@ function sourceId(req, res) {
 
 function safeError(res, error) {
   const code = error?.code;
-  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError || error instanceof KnowledgeGenerationError || error instanceof KnowledgeProfileLifecycleError) {
+  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError || error instanceof KnowledgeGenerationError || error instanceof KnowledgeProfileLifecycleError || error instanceof KnowledgeAssistantLifecycleError) {
     const status = /NOT_FOUND|INVALID|EMPTY|UNSUPPORTED|MISMATCH|REQUIRED/.test(code) ? 400 : 503;
     return res.status(status).json({ error: error.message, code });
   }
@@ -482,6 +489,34 @@ router.post('/:tenantId/knowledge-intelligence/profiles/:versionId/activate', re
   }
 });
 
+router.get('/:tenantId/knowledge-intelligence/assistants/:assistantId/recommendations', requireTenantAccess, async (req, res) => {
+  const tenantId = tenant(req, res); const assistantId = req.params.assistantId;
+  if (!tenantId || !isValidUUID(assistantId)) return res.status(400).json({ error: 'Invalid Assistant ID' });
+  try {
+    const result = await pool.query(`SELECT id, recommendation_data, evidence, status, reviewed_by, reviewed_at, generation_run_id, created_at
+      FROM assistant_knowledge_recommendations WHERE tenant_id = $1 AND assistant_id = $2 ORDER BY created_at DESC LIMIT 100`, [tenantId, assistantId]);
+    return res.json({ recommendations: result.rows });
+  } catch (error) { return safeError(res, error); }
+});
+
+router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/recommendations/generate', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res); const assistantId = req.params.assistantId;
+  if (!tenantId || !isValidUUID(assistantId)) return res.status(400).json({ error: 'Invalid Assistant ID' });
+  try {
+    const recommendation = await generateAssistantRecommendation({ database: pool, provider: createKnowledgeGenerationProvider(), tenantId, assistantId, requestedBy: req.user.user_id });
+    return res.status(201).json({ recommendation });
+  } catch (error) { return safeError(res, error); }
+});
+
+router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/recommendations/:recommendationId/:decision(approve|reject)', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res); const assistantId = req.params.assistantId;
+  if (!tenantId || !isValidUUID(assistantId) || !isValidUUID(req.params.recommendationId)) return res.status(400).json({ error: 'Invalid recommendation ID' });
+  try {
+    const recommendation = await reviewAssistantRecommendation({ database: pool, tenantId, assistantId, recommendationId: req.params.recommendationId, reviewedBy: req.user.user_id, decision: req.params.decision === 'approve' ? 'APPROVED' : 'REJECTED' });
+    return res.json({ recommendation });
+  } catch (error) { return safeError(res, error); }
+});
+
 router.get('/:tenantId/knowledge-intelligence/assistants/:assistantId/configurations', requireTenantAccess, async (req, res) => {
   const tenantId = tenant(req, res);
   const assistantId = req.params.assistantId;
@@ -502,6 +537,24 @@ router.get('/:tenantId/knowledge-intelligence/assistants/:assistantId/configurat
   } catch (error) {
     return safeError(res, error);
   }
+});
+
+router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/configurations/generate', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res); const assistantId = req.params.assistantId;
+  if (!tenantId || !isValidUUID(assistantId) || !isValidUUID(req.body?.recommendation_id)) return res.status(400).json({ error: 'Invalid configuration generation request' });
+  try {
+    const configuration = await generateAssistantConfigurationVersion({ database: pool, provider: createKnowledgeGenerationProvider(), tenantId, assistantId, recommendationId: req.body.recommendation_id, requestedBy: req.user.user_id });
+    return res.status(201).json({ configuration });
+  } catch (error) { return safeError(res, error); }
+});
+
+router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/configurations/:versionId/reject', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res); const assistantId = req.params.assistantId;
+  if (!tenantId || !isValidUUID(assistantId) || !isValidUUID(req.params.versionId)) return res.status(400).json({ error: 'Invalid Assistant configuration ID' });
+  try {
+    const configuration = await rejectAssistantConfigurationVersion({ database: pool, tenantId, assistantId, versionId: req.params.versionId, reviewedBy: req.user.user_id });
+    return res.json({ configuration });
+  } catch (error) { return safeError(res, error); }
 });
 
 router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/configurations/:versionId/approve', requireTenantAccess, requireTenantAdmin, async (req, res) => {
