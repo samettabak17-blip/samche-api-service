@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS knowledge_candidates (
     ON DELETE SET NULL
 );
 
-DO $
+DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_knowledge_candidates_id_tenant') THEN
     ALTER TABLE knowledge_candidates
@@ -124,7 +124,7 @@ BEGIN
     ALTER TABLE conversation_messages
       ADD CONSTRAINT uq_conversation_messages_id_tenant UNIQUE (id, tenant_id);
   END IF;
-END $;
+END $$;
 
 CREATE TABLE IF NOT EXISTS knowledge_candidate_evidence (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -238,13 +238,13 @@ CREATE TABLE IF NOT EXISTS assistant_knowledge_recommendations (
     ON DELETE CASCADE
 );
 
-DO $
+DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_assistant_knowledge_recommendations_id_tenant') THEN
     ALTER TABLE assistant_knowledge_recommendations
       ADD CONSTRAINT uq_assistant_knowledge_recommendations_id_tenant UNIQUE (id, tenant_id);
   END IF;
-END $;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_business_profile_versions_review
   ON business_profile_versions (tenant_id, profile_id, status, created_at DESC);
