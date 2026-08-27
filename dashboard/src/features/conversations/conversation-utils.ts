@@ -91,3 +91,12 @@ export function resourceDisplayName(resource: { original_filename?: string | nul
 export function voiceResourceDisplayLabel(resource: { original_filename?: string | null; mime_type?: string | null }): string {
   return resourceDisplayName(resource);
 }
+
+export function deliveryTickPresentation(status?: string | null): { glyph: string; label: string; tone: 'sent' | 'delivered' | 'read' | 'failed' | 'sending' } | null {
+  if (status === 'READ') return { glyph: '✓✓', label: 'Read', tone: 'read' };
+  if (status === 'DELIVERED') return { glyph: '✓✓', label: 'Delivered', tone: 'delivered' };
+  if (status === 'SENT') return { glyph: '✓', label: 'Sent', tone: 'sent' };
+  if (status === 'SENDING') return { glyph: '◌', label: 'Sending', tone: 'sending' };
+  if (status === 'FAILED') return { glyph: '!', label: 'Delivery failed', tone: 'failed' };
+  return null;
+}
