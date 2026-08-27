@@ -46,6 +46,16 @@ function actor(req) {
   };
 }
 
+function traceVoiceSend(stage, fields = {}) {
+  const mime = String(fields.mime ?? '').toLowerCase().replace(/[^a-z0-9.+/-]/g, '').slice(0, 80);
+  const size = Number.isSafeInteger(fields.size) && fields.size >= 0 ? fields.size : null;
+  console.info(
+    'VOICE_SEND stage=' + stage
+    + (mime ? ' mime=' + mime : '')
+    + (size !== null ? ' size=' + size : '')
+  );
+}
+
 function operationError(res, error, label) {
   if (error instanceof ConversationOperationError) {
     return res.status(error.status).json({
@@ -387,6 +397,7 @@ router.post('/:tenantId/conversations/:conversationId/media', requireTenantAcces
   if (!currentTenantId) return;
   if (!isValidUUID(req.params.conversationId)) return res.status(400).json({ error: 'Invalid conversation ID' });
   if (!req.file) return res.status(400).json({ error: 'A single attachment file is required' });
+  if (String(req.file.mimetype ?? '').toLowerCase().startsWith('audio/')) traceVoiceSend('BACKEND_RECEIVED', { mime: req.file.mimetype, size: req.file.size });
   const caption = typeof req.body?.caption === 'string' ? req.body.caption.trim().slice(0, 1024) : '';
   const idempotencyKey = req.get('Idempotency-Key') ?? null;
   if (idempotencyKey && (idempotencyKey.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(idempotencyKey))) {
