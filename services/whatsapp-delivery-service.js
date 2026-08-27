@@ -174,10 +174,13 @@ export async function deliverWhatsAppMedia({
   if (!destination || !Buffer.isBuffer(buffer) || !buffer.length || !mimeType || !resolvedMediaCategory) throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_INVALID_INPUT');
 
   const startedAt = Date.now();
+  const isVoiceMessage = resolvedMediaCategory === 'AUDIO';
   const timing = (stage) => console.info(`AGENT_MEDIA_SEND_TIMING stage=${stage} elapsed_ms=${Date.now() - startedAt}`);
+  const voiceStage = (stage) => { if (isVoiceMessage) console.info('VOICE_SEND stage=' + stage); };
   let upload;
   try {
     timing('UPLOAD_STARTED');
+    voiceStage('META_MEDIA_UPLOAD_STARTED');
     const form = new FormData();
     form.append('messaging_product', 'whatsapp');
     form.append('file', new Blob([buffer], { type: mimeType }), filename);
@@ -200,6 +203,7 @@ export async function deliverWhatsAppMedia({
 
   const mediaId = configuredValue(upload?.data?.id);
   if (!mediaId) throw new WhatsAppDeliveryError('WHATSAPP_MEDIA_UPLOAD_FAILED');
+  if (isVoiceMessage) console.info('VOICE_SEND stage=META_MEDIA_UPLOAD_ACCEPTED media_id_present=1');
 
   let submission;
   try {
@@ -209,6 +213,7 @@ export async function deliverWhatsAppMedia({
       ...mediaPayload({ mediaCategory: resolvedMediaCategory, mediaId, caption: String(caption ?? '').trim().slice(0, 1024), filename }),
     };
     timing('WHATSAPP_SEND_STARTED');
+    voiceStage('META_MESSAGE_SEND_STARTED');
     submission = await httpClient.post(
       `https://graph.facebook.com/v20.0/${configuredPhoneNumberId}/messages`,
       payload,
@@ -231,5 +236,6 @@ export async function deliverWhatsAppMedia({
     timing('WHATSAPP_SEND_UNCORRELATED');
     throw new WhatsAppDeliveryError('WHATSAPP_MEDIA_SEND_UNCORRELATED');
   }
+  if (isVoiceMessage) console.info('VOICE_SEND stage=META_MESSAGE_ACCEPTED wamid_present=1');
   return { delivery: 'SENT_TO_WHATSAPP', mediaId, providerMessageId };
 }
