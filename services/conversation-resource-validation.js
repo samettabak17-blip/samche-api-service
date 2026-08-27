@@ -64,16 +64,24 @@ function isText(buffer) {
   return !buffer.subarray(0, Math.min(buffer.length, 4096)).includes(0);
 }
 
+export function detectConversationAudioContainer(buffer) {
+  if (isOgg(buffer)) return 'OGG';
+  if (isMp4(buffer)) return 'MP4';
+  if (isMpeg(buffer)) return 'MPEG';
+  if (isAac(buffer)) return 'AAC';
+  return 'UNKNOWN';
+}
+
 function hasExpectedSignature(mimeType, buffer) {
   if (mimeType === 'application/pdf') return isPdf(buffer);
   if (mimeType === 'image/png') return isPng(buffer);
   if (mimeType === 'image/jpeg') return isJpeg(buffer);
   if (mimeType === 'image/webp') return isWebp(buffer);
   if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return isZip(buffer);
-  if (mimeType === 'audio/ogg') return isOgg(buffer);
-  if (mimeType === 'audio/mpeg') return isMpeg(buffer);
-  if (mimeType === 'audio/mp4') return isMp4(buffer);
-  if (mimeType === 'audio/aac') return isAac(buffer);
+  if (mimeType === 'audio/ogg') return detectConversationAudioContainer(buffer) === 'OGG';
+  if (mimeType === 'audio/mpeg') return detectConversationAudioContainer(buffer) === 'MPEG';
+  if (mimeType === 'audio/mp4') return detectConversationAudioContainer(buffer) === 'MP4';
+  if (mimeType === 'audio/aac') return detectConversationAudioContainer(buffer) === 'AAC';
   if (mimeType === 'text/plain') return isText(buffer);
   return false;
 }
@@ -109,6 +117,7 @@ export function validateConversationUpload(file, { attachmentCount = 1 } = {}) {
     originalFilename: safeDisplayFilename(file.originalname),
     sizeBytes: file.size,
     contentHash: crypto.createHash('sha256').update(file.buffer).digest('hex'),
+    detectedContainer: mediaCategory === 'AUDIO' ? detectConversationAudioContainer(file.buffer) : null,
   };
 }
 
