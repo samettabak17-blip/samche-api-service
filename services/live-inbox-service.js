@@ -706,13 +706,17 @@ export async function appendAgentMediaMessage({
     validated = validateConversationUpload(file);
   } catch (error) {
     if (error instanceof ConversationResourceValidationError) {
+      const isVoiceUpload = String(file?.mimetype ?? '').toLowerCase().startsWith('audio/');
       console.info('OPERATOR_MEDIA_SEND_FAILED stage=MEDIA_VALIDATION code=' + error.code);
+      if (isVoiceUpload && ['RESOURCE_MEDIA_TYPE_UNSUPPORTED', 'RESOURCE_FILE_SIGNATURE_INVALID', 'RESOURCE_FILE_MALFORMED', 'RESOURCE_FILE_EMPTY'].includes(error.code)) {
+        throw new ConversationOperationError(400, 'Unsupported or invalid voice recording format.', 'VOICE_FORMAT_INVALID');
+      }
       throw new ConversationOperationError(400, 'Voice message could not be prepared. Please record it again.', error.code);
     }
     throw error;
   }
   const isVoiceMessage = validated.mediaCategory === 'AUDIO';
-  if (isVoiceMessage) console.info('VOICE_SEND stage=MEDIA_VALIDATED mime=' + validated.mimeType + ' size=' + validated.sizeBytes);
+  if (isVoiceMessage) console.info('VOICE_SEND stage=MEDIA_VALIDATED mime=' + validated.mimeType + ' size=' + validated.sizeBytes + ' detected_container=' + validated.detectedContainer);
   const client = await database.connect();
   let uploadedStorageKey = null;
   let activeStorage = storage;
