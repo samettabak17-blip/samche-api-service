@@ -17,6 +17,13 @@ import {
   createConversationKnowledgeCandidate,
   rejectConversationKnowledgeCandidate,
 } from '../services/knowledge-candidate-service.js';
+import {
+  KnowledgeConfigurationError,
+  activateAssistantConfigurationVersion,
+  activateBusinessProfileVersion,
+  approveAssistantConfigurationVersion,
+  approveBusinessProfileVersion,
+} from '../services/knowledge-configuration-service.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -41,7 +48,7 @@ function sourceId(req, res) {
 
 function safeError(res, error) {
   const code = error?.code;
-  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError) {
+  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof KnowledgeConfigurationError) {
     const status = /NOT_FOUND|INVALID|EMPTY|UNSUPPORTED|MISMATCH|REQUIRED/.test(code) ? 400 : 503;
     return res.status(status).json({ error: error.message, code });
   }
@@ -350,4 +357,103 @@ router.post('/:tenantId/knowledge-intelligence/candidates/:candidateId/reject', 
   }
 });
 
+router.get('/:tenantId/knowledge-intelligence/profiles', requireTenantAccess, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId) return;
+  try {
+    const result = await pool.query(
+      `SELECT version.id, version.profile_id, version.profile_data, version.evidence, version.status,
+              version.generated_by, version.reviewed_by, version.reviewed_at, version.activated_by,
+              version.activated_at, version.superseded_by_version_id, version.created_at,
+              profile.approved_version_id, profile.active_version_id
+         FROM business_profile_versions version
+         JOIN business_profiles profile ON profile.id = version.profile_id AND profile.tenant_id = version.tenant_id
+        WHERE version.tenant_id = $1
+        ORDER BY version.created_at DESC
+        LIMIT 100`,
+      [tenantId]
+    );
+    return res.json({ profiles: result.rows });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/profiles/:versionId/approve', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId || !isValidUUID(req.params.versionId)) return res.status(400).json({ error: 'Invalid Business Profile version ID' });
+  try {
+    const profile = await approveBusinessProfileVersion({
+      database: pool, tenantId, versionId: req.params.versionId, approvedBy: req.user.user_id,
+    });
+    return res.json({ profile });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/profiles/:versionId/activate', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId || !isValidUUID(req.params.versionId)) return res.status(400).json({ error: 'Invalid Business Profile version ID' });
+  try {
+    const profile = await activateBusinessProfileVersion({
+      database: pool, tenantId, versionId: req.params.versionId, activatedBy: req.user.user_id,
+    });
+    return res.json({ profile });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.get('/:tenantId/knowledge-intelligence/assistants/:assistantId/configurations', requireTenantAccess, async (req, res) => {
+  const tenantId = tenant(req, res);
+  const assistantId = req.params.assistantId;
+  if (!tenantId || !isValidUUID(assistantId)) return res.status(400).json({ error: 'Invalid Assistant ID' });
+  try {
+    await verifyAssistant(tenantId, assistantId);
+    const result = await pool.query(
+      `SELECT id, configuration_data, source_profile_version_id, source_recommendation_id,
+              generated_by, status, approved_by, approved_at, activated_by, activated_at,
+              supersedes_version_id, created_at, updated_at
+         FROM assistant_configuration_versions
+        WHERE tenant_id = $1 AND assistant_id = $2
+        ORDER BY created_at DESC
+        LIMIT 100`,
+      [tenantId, assistantId]
+    );
+    return res.json({ configurations: result.rows });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/configurations/:versionId/approve', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  const assistantId = req.params.assistantId;
+  if (!tenantId || !isValidUUID(assistantId) || !isValidUUID(req.params.versionId)) return res.status(400).json({ error: 'Invalid Assistant configuration ID' });
+  try {
+    const configuration = await approveAssistantConfigurationVersion({
+      database: pool, tenantId, assistantId, versionId: req.params.versionId, approvedBy: req.user.user_id,
+    });
+    return res.json({ configuration });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/configurations/:versionId/activate', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  const assistantId = req.params.assistantId;
+  if (!tenantId || !isValidUUID(assistantId) || !isValidUUID(req.params.versionId)) return res.status(400).json({ error: 'Invalid Assistant configuration ID' });
+  try {
+    const configuration = await activateAssistantConfigurationVersion({
+      database: pool, tenantId, assistantId, versionId: req.params.versionId, activatedBy: req.user.user_id,
+    });
+    return res.json({ configuration });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
 export default router;
+
