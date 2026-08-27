@@ -134,3 +134,23 @@ export async function retrieveApprovedKnowledge({
     similarity: Number(row.similarity),
   }));
 }
+
+export function createOpenAIEmbedder(client, config = KNOWLEDGE_EMBEDDING_CONFIG) {
+  if (!client?.embeddings?.create) {
+    throw new KnowledgeIntelligenceError('KNOWLEDGE_EMBEDDING_CLIENT_UNAVAILABLE', 'Knowledge embeddings are not configured');
+  }
+  return async function embedKnowledgeText(text) {
+    const input = normalizeText(text);
+    if (!input) throw new KnowledgeIntelligenceError('KNOWLEDGE_EMBEDDING_INPUT_REQUIRED', 'Knowledge embedding input is required');
+    const response = await client.embeddings.create({
+      model: config.model,
+      input,
+      dimensions: config.dimensions,
+    });
+    const vector = response?.data?.[0]?.embedding;
+    if (!Array.isArray(vector) || vector.length !== config.dimensions) {
+      throw new KnowledgeIntelligenceError('KNOWLEDGE_EMBEDDING_RESPONSE_INVALID', 'Knowledge embedding response is invalid');
+    }
+    return vector;
+  };
+}
