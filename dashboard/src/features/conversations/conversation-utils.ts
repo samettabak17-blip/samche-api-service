@@ -66,6 +66,28 @@ export function isVoiceResource(resource: { media_category?: string | null; mime
   return resource.media_category === 'AUDIO' || String(resource.mime_type ?? '').startsWith('audio/');
 }
 
+const technicalResourceName = /^(?:whatsapp-(?:image|audio|document|video)-|resource-|upload-|blob-)|\bwamid\.|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
+
+function extensionForMime(mimeType?: string | null): string {
+  const mime = String(mimeType ?? '').toLowerCase();
+  if (mime === 'application/pdf') return 'pdf';
+  if (mime.includes('spreadsheet') || mime.includes('excel')) return 'xlsx';
+  if (mime.includes('wordprocessingml')) return 'docx';
+  if (mime.startsWith('image/')) return mime.split('/')[1] === 'jpeg' ? 'jpg' : mime.split('/')[1] || 'jpg';
+  if (mime.startsWith('video/')) return mime.split('/')[1] || 'mp4';
+  return '';
+}
+
+export function resourceDisplayName(resource: { original_filename?: string | null; mime_type?: string | null; media_category?: string | null }): string {
+  if (isVoiceResource(resource)) return 'Voice message';
+  const original = String(resource.original_filename ?? '').trim();
+  if (original && !technicalResourceName.test(original)) return original;
+  const extension = extensionForMime(resource.mime_type);
+  if (String(resource.mime_type ?? '').startsWith('image/')) return `Image${extension ? '.' + extension : ''}`;
+  if (String(resource.mime_type ?? '').startsWith('video/')) return `Video${extension ? '.' + extension : ''}`;
+  return `Document${extension ? '.' + extension : ''}`;
+}
+
 export function voiceResourceDisplayLabel(resource: { original_filename?: string | null; mime_type?: string | null }): string {
-  return isVoiceResource(resource) ? 'Voice message' : (resource.original_filename || 'Attachment');
+  return resourceDisplayName(resource);
 }
