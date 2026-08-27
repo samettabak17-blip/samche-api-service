@@ -9,6 +9,7 @@ import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
 import { ApiError } from '../../lib/api-client';
 import { useTenant } from '../tenants/tenant-context';
 import { canTakeOverConversation, canUseHumanReplyComposer, clearSentAgentDraft, displayConversationCustomerIdentifier, isInlinePreviewableAttachment, isVoiceResource, resourceDisplayName, senderLabel, voiceResourceDisplayLabel } from './conversation-utils';
+import { buildVerifiedWhatsAppVoiceFile, selectWhatsAppVoiceRecordingFormat } from './voice-recording';
 import { useLiveSupportAttention } from '../live-support/live-support-attention-provider';
 import { SafeRichMessage } from './safe-rich-message';
 import { useTenantConversationLiveEvents } from './use-live-conversation-events';
@@ -24,7 +25,7 @@ function handlingLabel(mode?: string) {
 
 function supportedWhatsAppVoiceMime(): string | null {
   if (!window.MediaRecorder) return null;
-  return ['audio/ogg;codecs=opus', 'audio/mp4;codecs=mp4a.40.2', 'audio/mp4'].find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? null;
+  return selectWhatsAppVoiceRecordingFormat((mimeType) => MediaRecorder.isTypeSupported(mimeType))?.recorderMime ?? null;
 }
 
 function LiveState({ state }: { state: string }) {
@@ -228,6 +229,7 @@ export function ConversationsPage() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const chunks: BlobPart[] = [];
       const recorder = new MediaRecorder(stream, { mimeType });
+      console.info('VOICE_AUDIO_DIAGNOSTIC browser_requested_mime=' + mimeType + ' browser_selected_mime=' + recorder.mimeType);
       console.info('VOICE_RECORDING_STARTED');
       recorderRef.current = recorder;
       recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
@@ -242,7 +244,18 @@ export function ConversationsPage() {
           discardVoiceRecordingRef.current = false;
           return;
         }
-        if (chunks.length) chooseComposerFile(new File(chunks, mimeType === 'audio/ogg;codecs=opus' ? 'voice-note.ogg' : 'voice-note.m4a', { type: mimeType.split(';')[0] }));
+        if (chunks.length) {
+          void buildVerifiedWhatsAppVoiceFile(chunks, recorder.mimeType || mimeType).then((file) => {
+            console.info('VOICE_AUDIO_DIAGNOSTIC browser_requested_mime=' + mimeType
+              + ' browser_selected_mime=' + (recorder.mimeType || 'unknown')
+              + ' blob_mime=' + file.type
+              + ' blob_size=' + file.size
+              + ' detected_container=OGG_OPUS');
+            chooseComposerFile(file);
+          }).catch(() => {
+            setAttachmentError('Unsupported or invalid voice recording format. Please use a browser that records Ogg/Opus voice notes.');
+          });
+        }
       };
       discardVoiceRecordingRef.current = false;
       recorder.start();
