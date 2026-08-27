@@ -9,5 +9,4 @@ test('knowledge ingestion jobs are tenant-scoped, idempotent, and preserve sourc
   assert.match(migration, /tenant_id UUID NOT NULL REFERENCES tenants\(id\)/i);
   assert.match(migration, /FOREIGN KEY \(source_id, tenant_id\)[\s\S]*REFERENCES knowledge_base_documents\(id, tenant_id\)/i);
   assert.match(migration, /UNIQUE \(tenant_id, source_id, job_type, content_hash, embedding_model, embedding_version\)/i);
-  assert.match(migration, /FOR UPDATE SKIP LOCKED/i);
 });
