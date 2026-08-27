@@ -7,7 +7,7 @@ export function senderTone(senderType: string): string {
 }
 
 export function supportsHumanReplyChannel(channelType?: string): boolean {
-  return channelType === 'SAMCHEGUIDE' || channelType === 'WHATSAPP';
+  return channelType === 'SAMCHEGUIDE' || channelType === 'WHATSAPP' || channelType === 'WEB_CHAT';
 }
 
 export function canUseHumanReplyComposer(channelType?: string, humanDeliveryConfigured?: boolean): boolean {
