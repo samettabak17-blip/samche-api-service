@@ -26,6 +26,12 @@ import {
 } from '../services/knowledge-configuration-service.js';
 import { KnowledgeGapError } from '../services/knowledge-gap-service.js';
 import { createSuggestedCandidateFromKnowledgeGap } from '../services/knowledge-gap-candidate-service.js';
+import { createKnowledgeGenerationProvider, KnowledgeGenerationError } from '../services/knowledge-generation-provider.js';
+import {
+  generateBusinessProfileVersion,
+  KnowledgeProfileLifecycleError,
+  rejectBusinessProfileVersion,
+} from '../services/knowledge-profile-lifecycle.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -50,7 +56,7 @@ function sourceId(req, res) {
 
 function safeError(res, error) {
   const code = error?.code;
-  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError) {
+  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError || error instanceof KnowledgeGenerationError || error instanceof KnowledgeProfileLifecycleError) {
     const status = /NOT_FOUND|INVALID|EMPTY|UNSUPPORTED|MISMATCH|REQUIRED/.test(code) ? 400 : 503;
     return res.status(status).json({ error: error.message, code });
   }
@@ -418,6 +424,33 @@ router.get('/:tenantId/knowledge-intelligence/profiles', requireTenantAccess, as
       [tenantId]
     );
     return res.json({ profiles: result.rows });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/profiles/generate', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId) return;
+  try {
+    const profile = await generateBusinessProfileVersion({
+      database: pool,
+      provider: createKnowledgeGenerationProvider(),
+      tenantId,
+      requestedBy: req.user.user_id,
+    });
+    return res.status(201).json({ profile });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/profiles/:versionId/reject', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId || !isValidUUID(req.params.versionId)) return res.status(400).json({ error: 'Invalid Business Profile version ID' });
+  try {
+    const profile = await rejectBusinessProfileVersion({ database: pool, tenantId, versionId: req.params.versionId, reviewedBy: req.user.user_id });
+    return res.json({ profile });
   } catch (error) {
     return safeError(res, error);
   }
