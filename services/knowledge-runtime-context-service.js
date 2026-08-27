@@ -71,6 +71,18 @@ export function buildActiveAssistantConfigurationContext(configuration) {
   ].join('\n');
 }
 
+export function applyRuntimeKnowledgeContext(tenantContext, runtimeContext) {
+  const additions = [
+    runtimeContext?.activeConfigurationContext,
+    runtimeContext?.knowledgeContext,
+  ].filter((item) => typeof item === 'string' && item.trim());
+  if (!additions.length) return tenantContext;
+  return {
+    ...tenantContext,
+    knowledge: [...(Array.isArray(tenantContext?.knowledge) ? tenantContext.knowledge : []), ...additions],
+  };
+}
+
 export async function resolveAssistantRuntimeKnowledgeContext({
   database,
   embed,
