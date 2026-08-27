@@ -391,6 +391,16 @@ router.post('/:tenantId/knowledge-intelligence/gaps/:gapId/candidate', requireTe
   } catch (error) { return safeError(res, error); }
 });
 
+router.post('/:tenantId/knowledge-intelligence/gaps/:gapId/:action(resolve|dismiss|reopen)', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res); if (!tenantId || !isValidUUID(req.params.gapId)) return res.status(400).json({ error: 'Invalid knowledge gap ID' });
+  const status = req.params.action === 'resolve' ? 'RESOLVED' : req.params.action === 'dismiss' ? 'DISMISSED' : 'NEEDS_REVIEW';
+  try {
+    const result = await pool.query(`UPDATE knowledge_gaps SET status = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2 RETURNING id, status, suggested_candidate_id`, [req.params.gapId, tenantId, status]);
+    if (!result.rowCount) return res.status(404).json({ error: 'Knowledge gap not found' });
+    return res.json({ gap: result.rows[0] });
+  } catch (error) { return safeError(res, error); }
+});
+
 router.get('/:tenantId/knowledge-intelligence/profiles', requireTenantAccess, async (req, res) => {
   const tenantId = tenant(req, res);
   if (!tenantId) return;
