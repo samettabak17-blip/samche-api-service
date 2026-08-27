@@ -86,12 +86,23 @@ export async function resolveAssistantRuntimeKnowledgeContext({
   }
 
   const activeConfigurationContext = buildActiveAssistantConfigurationContext(activeConfiguration);
-  const knowledge = await retrieve({ database, embed, tenantId, assistantId, query });
-  return {
-    activeConfiguration,
-    activeConfigurationContext,
-    knowledge,
-    knowledgeContext: buildUntrustedKnowledgeContext(knowledge),
-  };
+  try {
+    const knowledge = await retrieve({ database, embed, tenantId, assistantId, query });
+    return {
+      activeConfiguration,
+      activeConfigurationContext,
+      knowledge,
+      knowledgeContext: buildUntrustedKnowledgeContext(knowledge),
+      retrievalAvailable: true,
+    };
+  } catch {
+    return {
+      activeConfiguration,
+      activeConfigurationContext,
+      knowledge: [],
+      knowledgeContext: '',
+      retrievalAvailable: false,
+    };
+  }
 }
 
