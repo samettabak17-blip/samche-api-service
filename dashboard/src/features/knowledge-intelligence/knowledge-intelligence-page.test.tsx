@@ -44,6 +44,25 @@ it('renders the real Knowledge Intelligence overview and every lifecycle panel',
   expect(mockedApi.getKnowledgeOverview).toHaveBeenCalledWith('tenant-a');
 });
 
+it('uses readable dark navigation surfaces and a distinct active state', async () => {
+  renderPage();
+  await screen.findByText('3 ready sources');
+
+  const active = screen.getByRole('link', { name: 'Overview' });
+  const inactive = screen.getByRole('link', { name: 'Sources' });
+  const legacy = screen.getByRole('link', { name: 'Legacy Knowledge Base' });
+
+  expect(active).toHaveAttribute('aria-current', 'page');
+  expect(active.className).toContain('bg-signal');
+  expect(active.className).toContain('text-white');
+  expect(inactive.className).toContain('bg-elevated');
+  expect(inactive.className).toContain('text-stone-300');
+  expect(inactive.className).not.toContain('bg-white');
+  expect(legacy.className).toContain('bg-elevated');
+  expect(legacy.className).toContain('text-stone-300');
+  expect(legacy.className).not.toContain('bg-white');
+});
+
 it('keeps AGENT users read-only', async () => {
   renderPage(false);
   await screen.findByText('3 ready sources');

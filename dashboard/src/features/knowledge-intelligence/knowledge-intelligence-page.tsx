@@ -12,6 +12,9 @@ const tabs = [
   ['profiles', 'Business Profile'], ['configurations', 'Configurations'], ['retrieval', 'Retrieval Test'],
 ] as const;
 
+const inactiveTabClass = 'border-line bg-elevated text-stone-300 hover:border-stone-400 hover:bg-stone-100 hover:text-white';
+const activeTabClass = 'border-signal bg-signal text-white shadow-signal';
+
 function Cards({ items }: { items: Array<{ label: string; value: string | number; detail: string }> }) {
   return <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{items.map((item) => <article key={item.label} className="panel p-5"><p className="dashboard-section-label">{item.label}</p><p className="mt-3 text-3xl font-semibold text-ink">{item.value}</p><p className="mt-2 text-xs text-stone-500">{item.detail}</p></article>)}</div>;
 }
@@ -40,11 +43,11 @@ export function KnowledgeIntelligencePage() {
   const generateProfile = useMutation({ mutationFn: () => tenantApi.generateBusinessProfile(tenantId), onSuccess: () => queryClient.invalidateQueries({ queryKey: tenantKeys.businessProfiles(tenantId) }) });
   const preview = useMutation({ mutationFn: () => tenantApi.previewKnowledgeRetrieval(tenantId, assistantId, previewQuery.trim()) });
 
-  const assistantSelect = <label className="block text-sm font-medium text-ink">Assistant<select aria-label="Assistant" value={assistantId} onChange={(event) => setAssistantId(event.target.value)} className="mt-2 w-full rounded-lg border border-line bg-white px-3 py-2"><option value="">Select an assistant</option>{(assistants.data ?? []).map((assistant: Assistant) => <option key={assistant.id} value={assistant.id}>{assistant.name}</option>)}</select></label>;
+  const assistantSelect = <label className="block text-sm font-medium text-ink">Assistant<select aria-label="Assistant" value={assistantId} onChange={(event) => setAssistantId(event.target.value)} className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-ink"><option value="">Select an assistant</option>{(assistants.data ?? []).map((assistant: Assistant) => <option key={assistant.id} value={assistant.id}>{assistant.name}</option>)}</select></label>;
 
   return <section className="space-y-6">
     <header><p className="eyebrow">Grounding operations</p><h1 className="page-title mt-2">Knowledge Intelligence</h1><p className="mt-2 text-sm text-stone-600">Review sources, generated artifacts and retrieval behavior before runtime activation.</p></header>
-    <nav aria-label="Knowledge Intelligence sections" className="flex flex-wrap gap-2">{tabs.map(([key, label]) => <Link key={key} to={`/app/${tenantId}/knowledge?tab=${key}`} className={`rounded-lg border px-3 py-2 text-sm font-medium ${tab === key ? 'border-signal bg-signal text-white' : 'border-line bg-white text-stone-600'}`}>{label}</Link>)}<Link to={`/app/${tenantId}/knowledge-base`} className="rounded-lg border border-line bg-white px-3 py-2 text-sm font-medium text-stone-600">Legacy Knowledge Base</Link></nav>
+    <nav aria-label="Knowledge Intelligence sections" className="flex flex-wrap gap-2">{tabs.map(([key, label]) => <Link key={key} to={`/app/${tenantId}/knowledge?tab=${key}`} aria-current={tab === key ? 'page' : undefined} className={`rounded-lg border px-3 py-2 text-sm font-medium transition focus-visible:outline-none ${tab === key ? activeTabClass : inactiveTabClass}`}>{label}</Link>)}<Link to={`/app/${tenantId}/knowledge-base`} className={`rounded-lg border px-3 py-2 text-sm font-medium transition focus-visible:outline-none ${inactiveTabClass}`}>Legacy Knowledge Base</Link></nav>
 
     {tab === 'overview' && (overview.isLoading ? <SkeletonBlock className="h-40" /> : overview.error ? <QueryErrorState error={overview.error} onRetry={() => overview.refetch()} /> : overview.data && <Cards items={[
       { label: 'Sources', value: overview.data.sources.ready, detail: `${overview.data.sources.ready} ready sources` },
