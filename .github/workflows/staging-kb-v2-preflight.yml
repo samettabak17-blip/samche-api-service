@@ -139,6 +139,33 @@ jobs:
                 process.exitCode = 3;
                 return;
               }
+
+              const mappings = await pool.query(`
+                SELECT
+                  ci.tenant_id,
+                  ci.assistant_id,
+                  aa.name AS assistant_name,
+                  array_agg(DISTINCT connected.channel_type ORDER BY connected.channel_type)
+                    FILTER (WHERE connected.status = 'active') AS connected_channels
+                FROM channel_integrations ci
+                JOIN ai_assistants aa
+                  ON aa.id = ci.assistant_id AND aa.tenant_id = ci.tenant_id
+                JOIN tenant_channels mapped
+                  ON mapped.id = ci.channel_id
+                  AND mapped.tenant_id = ci.tenant_id
+                  AND mapped.assistant_id = ci.assistant_id
+                LEFT JOIN tenant_channels connected
+                  ON connected.tenant_id = ci.tenant_id
+                  AND connected.assistant_id = ci.assistant_id
+                WHERE ci.enabled = true
+                  AND ci.integration_type IN ('WHATSAPP', 'SAMCHEGUIDE')
+                GROUP BY ci.tenant_id, ci.assistant_id, aa.name
+                ORDER BY ci.tenant_id, ci.assistant_id
+              `);
+              for (const mapping of mappings.rows) {
+                console.log('CHANNEL_ASSISTANT_MAPPING: ' + JSON.stringify(mapping));
+              }
+              console.log('CHANNEL_ASSISTANT_MAPPING_COUNT: ' + mappings.rowCount);
               console.log('KBV2_PREFLIGHT: TASK6_SCHEMA_COMPATIBLE');
             } finally {
               await pool.end();

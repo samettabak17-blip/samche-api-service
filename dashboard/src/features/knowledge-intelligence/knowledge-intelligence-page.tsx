@@ -3,6 +3,7 @@ import { FormEvent, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { EmptyState, QueryErrorState, SkeletonBlock } from '../../components/ui/async-state';
 import { MutationFeedback } from '../../components/ui/mutation-feedback';
+import { assistantDisplayLabel } from '../../lib/channel-display';
 import type { Assistant } from '../../types/api';
 import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
 import { useTenant } from '../tenants/tenant-context';
@@ -30,9 +31,11 @@ export function KnowledgeIntelligencePage() {
   const [searchParams] = useSearchParams();
   const tab = searchParams.get('tab') ?? 'overview';
   const [assistantId, setAssistantId] = useState('');
+  const [sourceId, setSourceId] = useState('');
   const [previewQuery, setPreviewQuery] = useState('');
   const queryClient = useQueryClient();
   const assistants = useQuery({ queryKey: tenantKeys.assistants(tenantId), queryFn: () => tenantApi.listAssistants(tenantId), enabled: Boolean(tenantId) });
+  const channels = useQuery({ queryKey: tenantKeys.channels(tenantId), queryFn: () => tenantApi.listChannels(tenantId), enabled: Boolean(tenantId) });
   const overview = useQuery({ queryKey: tenantKeys.knowledgeOverview(tenantId), queryFn: () => tenantApi.getKnowledgeOverview(tenantId), enabled: Boolean(tenantId && tab === 'overview') });
   const sources = useQuery({ queryKey: tenantKeys.knowledgeSources(tenantId), queryFn: () => tenantApi.listKnowledgeSources(tenantId), enabled: Boolean(tenantId && tab === 'sources') });
   const candidates = useQuery({ queryKey: tenantKeys.knowledgeCandidates(tenantId), queryFn: () => tenantApi.listKnowledgeCandidates(tenantId), enabled: Boolean(tenantId && tab === 'candidates') });
@@ -42,8 +45,12 @@ export function KnowledgeIntelligencePage() {
   const configurations = useQuery({ queryKey: tenantKeys.assistantConfigurations(tenantId, assistantId), queryFn: () => tenantApi.listAssistantConfigurations(tenantId, assistantId), enabled: Boolean(tenantId && assistantId && tab === 'configurations') });
   const generateProfile = useMutation({ mutationFn: () => tenantApi.generateBusinessProfile(tenantId), onSuccess: () => queryClient.invalidateQueries({ queryKey: tenantKeys.businessProfiles(tenantId) }) });
   const preview = useMutation({ mutationFn: () => tenantApi.previewKnowledgeRetrieval(tenantId, assistantId, previewQuery.trim()) });
+  const assignSource = useMutation({
+    mutationFn: () => tenantApi.assignKnowledgeSource(tenantId, sourceId, assistantId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeSources(tenantId) }),
+  });
 
-  const assistantSelect = <label className="block text-sm font-medium text-ink">Assistant<select aria-label="Assistant" value={assistantId} onChange={(event) => setAssistantId(event.target.value)} className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-ink"><option value="">Select an assistant</option>{(assistants.data ?? []).map((assistant: Assistant) => <option key={assistant.id} value={assistant.id}>{assistant.name}</option>)}</select></label>;
+  const assistantSelect = <label className="block text-sm font-medium text-ink">Assistant<select aria-label="Assistant" value={assistantId} onChange={(event) => setAssistantId(event.target.value)} className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-ink"><option value="">Select an assistant</option>{(assistants.data ?? []).map((assistant: Assistant) => <option key={assistant.id} value={assistant.id}>{assistantDisplayLabel(assistant, channels.data ?? [])}</option>)}</select></label>;
 
   return <section className="space-y-6">
     <header><p className="eyebrow">Grounding operations</p><h1 className="page-title mt-2">Knowledge Intelligence</h1><p className="mt-2 text-sm text-stone-600">Review sources, generated artifacts and retrieval behavior before runtime activation.</p></header>
@@ -55,7 +62,7 @@ export function KnowledgeIntelligencePage() {
       { label: 'Knowledge gaps', value: overview.data.gaps.open, detail: 'Open verified gaps' },
       { label: 'Runtime coverage', value: `${overview.data.runtime.activeConfigurations}/${overview.data.runtime.assistants}`, detail: overview.data.runtime.activeProfile ? 'Active Business Profile' : 'No active Business Profile' },
     ]} />)}
-    {tab === 'sources' && <DataList empty="No sources" rows={(sources.data ?? []).map((row) => ({ id: row.id, title: row.title, status: row.processing_status, detail: `${row.source_type} · Index ${row.indexing_status}` }))} />}
+    {tab === 'sources' && <div className="space-y-5">{canManage && (sources.data ?? []).length > 0 && <form onSubmit={(event: FormEvent) => { event.preventDefault(); if (sourceId && assistantId) assignSource.mutate(); }} className="panel grid gap-4 p-5 md:grid-cols-[1fr_1fr_auto] md:items-end"><label className="block text-sm font-medium text-ink">Knowledge source<select aria-label="Knowledge source" value={sourceId} onChange={(event) => setSourceId(event.target.value)} className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-ink"><option value="">Select a source</option>{(sources.data ?? []).map((source) => <option key={source.id} value={source.id}>{source.title}</option>)}</select></label>{assistantSelect}<button type="submit" disabled={!sourceId || !assistantId || assignSource.isPending} className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">{assignSource.isPending ? 'Assigning…' : 'Assign source'}</button></form>}<MutationFeedback error={assignSource.error} /><DataList empty="No sources" rows={(sources.data ?? []).map((row) => ({ id: row.id, title: row.title, status: row.processing_status, detail: `${row.source_type} · Index ${row.indexing_status}` }))} /></div>}
     {tab === 'candidates' && <DataList empty="No candidates" rows={(candidates.data ?? []).map((row) => ({ id: row.id, title: row.proposed_title, status: row.status, detail: row.proposed_content }))} />}
     {tab === 'gaps' && <DataList empty="No knowledge gaps" rows={(gaps.data ?? []).map((row) => ({ id: row.id, title: row.normalized_question, status: row.status, detail: `${row.occurrence_count} verified occurrence${row.occurrence_count === 1 ? '' : 's'}` }))} />}
     {tab === 'profiles' && <div className="space-y-4"><MutationFeedback error={generateProfile.error} />{canManage && <button type="button" onClick={() => generateProfile.mutate()} disabled={generateProfile.isPending} className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">{generateProfile.isPending ? 'Generating…' : 'Generate Business Profile'}</button>}<DataList empty="No Business Profile versions" rows={(profiles.data ?? []).map((row) => ({ id: row.id, title: `Business Profile ${row.id.slice(0, 8)}`, status: row.status, detail: Object.keys(row.profile_data).join(', ') }))} /></div>}

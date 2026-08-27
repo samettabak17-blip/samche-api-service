@@ -57,6 +57,7 @@ export const tenantApi = {
   deleteKnowledgeDocument: (tenantId: string, documentId: string) => apiClient.delete<{ message: string }>(`${tenantRoot(tenantId)}/knowledge-base/${documentId}`),
   getKnowledgeOverview: (tenantId: string) => apiClient.get<{ overview: KnowledgeOverview }>(`${tenantRoot(tenantId)}/knowledge-intelligence/overview`).then((value) => value.overview),
   listKnowledgeSources: (tenantId: string) => apiClient.get<{ sources: KnowledgeSource[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/sources`).then((value) => value.sources),
+  assignKnowledgeSource: (tenantId: string, sourceId: string, assistantId: string) => apiClient.post<void>(`${tenantRoot(tenantId)}/knowledge-intelligence/sources/${sourceId}/assignments`, { assistant_id: assistantId }),
   listKnowledgeCandidates: (tenantId: string) => apiClient.get<{ candidates: KnowledgeCandidate[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/candidates`).then((value) => value.candidates),
   listKnowledgeGaps: (tenantId: string) => apiClient.get<{ gaps: KnowledgeGap[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/gaps`).then((value) => value.gaps),
   listBusinessProfiles: (tenantId: string) => apiClient.get<{ profiles: BusinessProfileVersion[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/profiles`).then((value) => value.profiles),
