@@ -941,7 +941,7 @@ export async function recordWhatsAppDeliveryStatus({
     console.info('WHATSAPP_DELIVERY_STATUS stage=UPDATE_SUCCEEDED status=' + deliveryStatus + ' correlated=' + updated.rowCount + (providerFailureCode ? ' failure_code=' + providerFailureCode : ''));
     if (deliveryStatus === 'FAILED') {
       console.info(
-        'WHATSAPP_VOICE_DELIVERY_FAILED'
+        'WHATSAPP_DELIVERY_FAILED'
         + ' provider_code=' + (providerFailure.code ?? 'UNKNOWN')
         + ' provider_title=' + (providerFailure.title ?? 'UNKNOWN')
         + ' provider_detail=' + (providerFailure.detail ?? 'UNKNOWN')
