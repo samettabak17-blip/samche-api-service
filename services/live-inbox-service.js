@@ -898,13 +898,14 @@ export async function recordWhatsAppDeliveryStatus({
   const providerMessageId = String(status?.id ?? '').trim();
   const providerStatus = String(status?.status ?? '').trim().toUpperCase();
   const deliveryStatus = { SENT: 'SENT', DELIVERED: 'DELIVERED', READ: 'READ', FAILED: 'FAILED' }[providerStatus];
+  const providerFailureCode = status?.errors?.[0]?.code ? String(status.errors[0].code).slice(0, 80) : null;
   if (!providerMessageId || !deliveryStatus || !phoneNumberId) return { updated: false, reason: 'IGNORED' };
 
   const client = await database.connect();
   try {
     console.info('WHATSAPP_DELIVERY_STATUS stage=LOOKUP');
     await client.query('BEGIN');
-    console.info('WHATSAPP_DELIVERY_STATUS stage=UPDATE_STARTED status=' + deliveryStatus);
+    console.info('WHATSAPP_DELIVERY_STATUS stage=UPDATE_STARTED status=' + deliveryStatus + (providerFailureCode ? ' failure_code=' + providerFailureCode : ''));
     let updated = { rowCount: 0, rows: [] };
     for (let attempt = 0; attempt < reconciliationDelaysMs.length; attempt += 1) {
       if (attempt > 0) {
@@ -914,13 +915,13 @@ export async function recordWhatsAppDeliveryStatus({
       }
       updated = await client.query(
         UPDATE_WHATSAPP_DELIVERY_STATUS_SQL,
-        [deliveryStatus, status?.errors?.[0]?.code ? String(status.errors[0].code) : null, providerMessageId, phoneNumberId]
+        [deliveryStatus, providerFailureCode, providerMessageId, phoneNumberId]
       );
       if (updated.rowCount > 0) break;
     }
     for (const row of updated.rows) await notify(client, row.tenant_id, row.conversation_id, 'WHATSAPP_DELIVERY_STATUS');
     await client.query('COMMIT');
-    console.info('WHATSAPP_DELIVERY_STATUS stage=UPDATE_SUCCEEDED status=' + deliveryStatus + ' correlated=' + updated.rowCount);
+    console.info('WHATSAPP_DELIVERY_STATUS stage=UPDATE_SUCCEEDED status=' + deliveryStatus + ' correlated=' + updated.rowCount + (providerFailureCode ? ' failure_code=' + providerFailureCode : ''));
     return { updated: updated.rowCount === 1, count: updated.rowCount, deliveryStatus };
   } catch (error) {
     await client.query('ROLLBACK');
