@@ -24,6 +24,8 @@ import {
   approveAssistantConfigurationVersion,
   approveBusinessProfileVersion,
 } from '../services/knowledge-configuration-service.js';
+import { KnowledgeGapError } from '../services/knowledge-gap-service.js';
+import { createSuggestedCandidateFromKnowledgeGap } from '../services/knowledge-gap-candidate-service.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -48,7 +50,7 @@ function sourceId(req, res) {
 
 function safeError(res, error) {
   const code = error?.code;
-  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof KnowledgeConfigurationError) {
+  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError) {
     const status = /NOT_FOUND|INVALID|EMPTY|UNSUPPORTED|MISMATCH|REQUIRED/.test(code) ? 400 : 503;
     return res.status(status).json({ error: error.message, code });
   }
@@ -355,6 +357,38 @@ router.post('/:tenantId/knowledge-intelligence/candidates/:candidateId/reject', 
   } catch (error) {
     return safeError(res, error);
   }
+});
+
+router.get('/:tenantId/knowledge-intelligence/gaps', requireTenantAccess, async (req, res) => {
+  const tenantId = tenant(req, res); if (!tenantId) return;
+  const status = String(req.query.status ?? '').toUpperCase();
+  const assistantId = req.query.assistant_id;
+  if (status && !['DRAFT', 'NEEDS_REVIEW', 'RESOLVED', 'DISMISSED'].includes(status)) return res.status(400).json({ error: 'Invalid knowledge gap status' });
+  if (assistantId && !isValidUUID(assistantId)) return res.status(400).json({ error: 'Invalid Assistant ID' });
+  try {
+    const result = await pool.query(`SELECT id, assistant_id, normalized_question, occurrence_count, status, suggested_candidate_id, signal_type, last_detected_at, created_at
+      FROM knowledge_gaps WHERE tenant_id = $1 AND ($2::text IS NULL OR status = $2) AND ($3::uuid IS NULL OR assistant_id = $3)
+      ORDER BY occurrence_count DESC, last_detected_at DESC LIMIT 100`, [tenantId, status || null, assistantId || null]);
+    return res.json({ gaps: result.rows });
+  } catch (error) { return safeError(res, error); }
+});
+
+router.get('/:tenantId/knowledge-intelligence/gaps/:gapId/signals', requireTenantAccess, async (req, res) => {
+  const tenantId = tenant(req, res); if (!tenantId || !isValidUUID(req.params.gapId)) return res.status(400).json({ error: 'Invalid knowledge gap ID' });
+  try {
+    const result = await pool.query(`SELECT s.conversation_id, s.message_id, s.channel_type, s.signal_type, s.created_at
+      FROM knowledge_gap_signals s JOIN knowledge_gaps g ON g.tenant_id = s.tenant_id AND g.normalized_question = lower(regexp_replace(s.redacted_question, '\\s+', ' ', 'g'))
+      WHERE s.tenant_id = $1 AND g.id = $2 ORDER BY s.created_at ASC`, [tenantId, req.params.gapId]);
+    return res.json({ signals: result.rows });
+  } catch (error) { return safeError(res, error); }
+});
+
+router.post('/:tenantId/knowledge-intelligence/gaps/:gapId/candidate', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res); if (!tenantId || !isValidUUID(req.params.gapId)) return res.status(400).json({ error: 'Invalid knowledge gap ID' });
+  try {
+    const candidate = await createSuggestedCandidateFromKnowledgeGap({ database: pool, tenantId, gapId: req.params.gapId, title: req.body?.title, content: req.body?.content, createdBy: req.user.user_id });
+    return res.status(201).json({ candidate });
+  } catch (error) { return safeError(res, error); }
 });
 
 router.get('/:tenantId/knowledge-intelligence/profiles', requireTenantAccess, async (req, res) => {
