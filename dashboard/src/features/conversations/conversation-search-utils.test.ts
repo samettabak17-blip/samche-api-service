@@ -14,7 +14,7 @@ describe('conversation search matching', () => {
   });
 
   it('requires all tokens when searching a current conversation', () => {
-    expect(messageMatchesSearch({ content: 'Merhaba dünya', resourceNames: ['proposal.pdf'] }, ['merhaba', 'proposal'])).toBe(false);
+    expect(messageMatchesSearch({ content: 'Merhaba dünya', resourceNames: ['proposal.pdf'] }, ['merhaba', 'invoice'])).toBe(false);
   });
 
   it('wraps current-conversation navigation in either direction', () => {
