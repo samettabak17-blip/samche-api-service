@@ -26,4 +26,12 @@ describe('Topbar global navigation search', () => {
     fireEvent.click(input);
     expect(screen.getByRole('listbox', { name: 'Dashboard destinations' })).toBeTruthy();
   });
+
+  it('keeps destination aliases keyed independently', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    renderTopbar();
+    fireEvent.focus(screen.getByRole('textbox', { name: 'Search dashboard destinations' }));
+    expect(consoleError.mock.calls.some(([message]) => String(message).includes('same key'))).toBe(false);
+    consoleError.mockRestore();
+  });
 });
