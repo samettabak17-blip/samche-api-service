@@ -78,6 +78,22 @@ test('converts a rejected recorded-audio payload into a safe client error instea
     tenantId, conversationId, actor, file: unsupportedAudio, database: databaseFixture().database,
   }), (error) => error instanceof ConversationOperationError
     && error.status === 400
-    && error.code === 'RESOURCE_MEDIA_TYPE_UNSUPPORTED'
-    && error.message === 'Voice message could not be prepared. Please record it again.');
+    && error.code === 'VOICE_FORMAT_INVALID'
+    && error.message === 'Unsupported or invalid voice recording format.');
+});
+
+
+test('never invokes Meta delivery for audio/mp4 whose bytes are not an MP4 container', async () => {
+  const fakeMp4 = {
+    buffer: Buffer.from('OggSnot-an-mp4-container'),
+    size: Buffer.byteLength('OggSnot-an-mp4-container'),
+    mimetype: 'audio/mp4',
+    originalname: 'voice-note.m4a',
+  };
+  let providerCalls = 0;
+  await assert.rejects(appendAgentMediaMessage({
+    tenantId, conversationId, actor, file: fakeMp4, database: databaseFixture().database,
+    deliverWhatsAppMedia: async () => { providerCalls += 1; return { providerMessageId: 'must-not-exist' }; },
+  }), (error) => error instanceof ConversationOperationError && error.code === 'VOICE_FORMAT_INVALID');
+  assert.equal(providerCalls, 0);
 });
