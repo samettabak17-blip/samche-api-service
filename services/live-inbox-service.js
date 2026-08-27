@@ -903,7 +903,15 @@ WHERE m.conversation_id = c.id
   AND m.sender_type IN ('AGENT', 'ASSISTANT')
   AND tc.channel_type = 'WHATSAPP'
   AND tc.external_channel_id = $4::varchar(255)
-RETURNING m.tenant_id, m.conversation_id, m.id, m.delivery_status, m.delivery_failure_code`;
+RETURNING m.tenant_id, m.conversation_id, m.id, m.delivery_status, m.delivery_failure_code,
+  EXISTS (
+    SELECT 1
+      FROM conversation_resources r
+     WHERE r.tenant_id = m.tenant_id
+       AND r.conversation_id = m.conversation_id
+       AND r.message_id = m.id
+       AND r.media_category = 'AUDIO'
+  ) AS is_audio`;
 
 export async function recordWhatsAppDeliveryStatus({
   phoneNumberId,
@@ -940,8 +948,11 @@ export async function recordWhatsAppDeliveryStatus({
     await client.query('COMMIT');
     console.info('WHATSAPP_DELIVERY_STATUS stage=UPDATE_SUCCEEDED status=' + deliveryStatus + ' correlated=' + updated.rowCount + (providerFailureCode ? ' failure_code=' + providerFailureCode : ''));
     if (deliveryStatus === 'FAILED') {
+      const failureMarker = updated.rows.some((row) => row.is_audio === true || row.is_audio === 't')
+        ? 'WHATSAPP_VOICE_DELIVERY_FAILED'
+        : 'WHATSAPP_DELIVERY_FAILED';
       console.info(
-        'WHATSAPP_DELIVERY_FAILED'
+        failureMarker
         + ' provider_code=' + (providerFailure.code ?? 'UNKNOWN')
         + ' provider_title=' + (providerFailure.title ?? 'UNKNOWN')
         + ' provider_detail=' + (providerFailure.detail ?? 'UNKNOWN')
