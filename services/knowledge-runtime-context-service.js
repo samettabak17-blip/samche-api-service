@@ -83,6 +83,14 @@ export function applyRuntimeKnowledgeContext(tenantContext, runtimeContext) {
   };
 }
 
+export function appendRuntimeKnowledgeToSystemInstruction(systemInstruction, runtimeContext) {
+  return [
+    String(systemInstruction ?? '').trim(),
+    runtimeContext?.activeConfigurationContext,
+    runtimeContext?.knowledgeContext,
+  ].filter((item) => typeof item === 'string' && item.trim()).join('\n\n');
+}
+
 export async function resolveAssistantRuntimeKnowledgeContext({
   database,
   embed,
