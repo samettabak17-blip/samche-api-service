@@ -2,10 +2,31 @@ import axios from 'axios';
 import https from 'https';
 
 export class WhatsAppDeliveryError extends Error {
-  constructor(code, message = 'WhatsApp delivery failed') {
+  constructor(code, message = 'WhatsApp delivery failed', diagnostic = {}) {
     super(message);
     this.code = code;
+    this.providerStage = diagnostic.providerStage ?? null;
+    this.providerStatus = diagnostic.providerStatus ?? null;
+    this.providerCode = diagnostic.providerCode ?? null;
   }
+}
+
+function safeProviderDiagnostic(error, providerStage) {
+  const status = Number(error?.response?.status);
+  const providerCode = error?.response?.data?.error?.code;
+  return {
+    providerStage,
+    providerStatus: Number.isInteger(status) ? status : null,
+    providerCode: providerCode === undefined || providerCode === null ? null : String(providerCode).slice(0, 32),
+  };
+}
+
+function logMediaProviderFailure(diagnostic) {
+  console.info(
+    'WHATSAPP_MEDIA_PROVIDER_FAILURE stage=' + diagnostic.providerStage
+    + ' http_status=' + (diagnostic.providerStatus ?? 'UNKNOWN')
+    + ' provider_code=' + (diagnostic.providerCode ?? 'UNKNOWN')
+  );
 }
 
 export const whatsappHttpsAgent = new https.Agent({ keepAlive: true, maxSockets: 100 });
@@ -168,7 +189,13 @@ export async function deliverWhatsAppMedia({
     timing('UPLOAD_COMPLETED');
   } catch (error) {
     timing('UPLOAD_FAILED');
-    throw new WhatsAppDeliveryError(error?.response?.status === 401 || error?.response?.status === 403 ? 'WHATSAPP_DELIVERY_AUTH_FAILED' : 'WHATSAPP_MEDIA_UPLOAD_FAILED');
+    const diagnostic = safeProviderDiagnostic(error, 'MEDIA_UPLOAD');
+    logMediaProviderFailure(diagnostic);
+    throw new WhatsAppDeliveryError(
+      error?.response?.status === 401 || error?.response?.status === 403 ? 'WHATSAPP_DELIVERY_AUTH_FAILED' : 'WHATSAPP_MEDIA_UPLOAD_FAILED',
+      'WhatsApp delivery failed',
+      diagnostic
+    );
   }
 
   const mediaId = configuredValue(upload?.data?.id);
@@ -190,7 +217,13 @@ export async function deliverWhatsAppMedia({
     timing('WHATSAPP_SEND_COMPLETED');
   } catch (error) {
     timing('WHATSAPP_SEND_FAILED');
-    throw new WhatsAppDeliveryError(error?.response?.status === 401 || error?.response?.status === 403 ? 'WHATSAPP_DELIVERY_AUTH_FAILED' : 'WHATSAPP_MEDIA_SEND_FAILED');
+    const diagnostic = safeProviderDiagnostic(error, 'WHATSAPP_SEND');
+    logMediaProviderFailure(diagnostic);
+    throw new WhatsAppDeliveryError(
+      error?.response?.status === 401 || error?.response?.status === 403 ? 'WHATSAPP_DELIVERY_AUTH_FAILED' : 'WHATSAPP_MEDIA_SEND_FAILED',
+      'WhatsApp delivery failed',
+      diagnostic
+    );
   }
 
   const providerMessageId = configuredValue(submission?.data?.messages?.[0]?.id);
