@@ -90,13 +90,62 @@ jobs:
                       WHERE table_schema = 'public'
                         AND table_name = 'conversation_messages'
                         AND column_name = 'delivery_status'
-                    ) AS has_delivery_status`
+                        AND data_type = 'character varying'
+                        AND character_maximum_length = 20
+                        AND is_nullable = 'YES'
+                    ) AS has_typed_delivery_status,
+                    EXISTS (
+                      SELECT 1
+                      FROM information_schema.columns
+                      WHERE table_schema = 'public'
+                        AND table_name = 'conversation_messages'
+                        AND column_name = 'delivery_status_updated_at'
+                        AND data_type = 'timestamp with time zone'
+                        AND is_nullable = 'YES'
+                    ) AS has_typed_delivery_status_timestamp,
+                    EXISTS (
+                      SELECT 1
+                      FROM information_schema.columns
+                      WHERE table_schema = 'public'
+                        AND table_name = 'conversation_messages'
+                        AND column_name = 'delivery_failure_code'
+                        AND data_type = 'character varying'
+                        AND character_maximum_length = 80
+                        AND is_nullable = 'YES'
+                    ) AS has_typed_delivery_failure_code,
+                    EXISTS (
+                      SELECT 1
+                      FROM information_schema.columns
+                      WHERE table_schema = 'public'
+                        AND table_name = 'conversation_messages'
+                        AND column_name = 'external_message_id'
+                        AND data_type = 'character varying'
+                        AND character_maximum_length = 255
+                    ) AS has_typed_provider_message_id,
+                    EXISTS (
+                      SELECT 1
+                      FROM information_schema.columns
+                      WHERE table_schema = 'public'
+                        AND table_name = 'tenant_channels'
+                        AND column_name = 'external_channel_id'
+                        AND data_type = 'character varying'
+                        AND character_maximum_length = 255
+                    ) AS has_typed_provider_channel_id,
+                    EXISTS (
+                      SELECT 1
+                      FROM pg_constraint
+                      WHERE conrelid = 'public.conversation_messages'::regclass
+                        AND contype = 'c'
+                        AND pg_get_constraintdef(oid) LIKE '%delivery_status%'
+                    ) AS has_delivery_status_constraint`
               );
               const row = result.rows[0];
-              if (!row.has_mapping_table || !row.has_audit_table || !row.has_handling_mode || !row.has_agent_ack_audit_event || !row.has_delivery_status) {
-                throw new Error('Live inbox migration is not applied');
+              if (!row.has_mapping_table || !row.has_audit_table || !row.has_handling_mode || !row.has_agent_ack_audit_event
+                || !row.has_typed_delivery_status || !row.has_typed_delivery_status_timestamp || !row.has_typed_delivery_failure_code
+                || !row.has_typed_provider_message_id || !row.has_typed_provider_channel_id || !row.has_delivery_status_constraint) {
+                throw new Error('Live inbox migration or WhatsApp delivery-status schema contract is not applied');
               }
-              console.log('PASS | STAGING | live inbox schema migration and agent acknowledgement audit event');
+              console.log('PASS | STAGING | live inbox schema and WhatsApp delivery-status type contract');
               await import('./scripts/verify_dashboard_analytics.js');
             } finally {
               await pool.end();
