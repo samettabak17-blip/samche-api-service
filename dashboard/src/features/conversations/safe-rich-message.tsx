@@ -42,6 +42,10 @@ function renderNode(node: Node, key: string, highlightTokens: string[]): ReactNo
   return <span key={key}>{children}</span>;
 }
 
+export function HighlightedText({ content, highlightTokens = [] }: { content: string; highlightTokens?: string[] }) {
+  return <>{highlightedText(content, 'text', highlightTokens)}</>;
+}
+
 export function SafeRichMessage({ content, highlightTokens = [] }: { content: string; highlightTokens?: string[] }) {
   const document = new DOMParser().parseFromString(content, 'text/html');
   return <>{Array.from(document.body.childNodes).map((node, index) => renderNode(node, String(index), highlightTokens))}</>;
