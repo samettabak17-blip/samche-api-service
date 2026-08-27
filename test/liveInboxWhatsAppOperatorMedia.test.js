@@ -65,3 +65,19 @@ test('does not persist a locally uploaded media message as sent without a correl
   }), (error) => error instanceof ConversationOperationError && error.code === 'WHATSAPP_MEDIA_SEND_UNCORRELATED');
   assert.equal(calls.filter(({ sql }) => sql.includes('INSERT INTO conversation_messages')).length, 0);
 });
+
+
+test('converts a rejected recorded-audio payload into a safe client error instead of a generic server failure', async () => {
+  const unsupportedAudio = {
+    buffer: Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x00]),
+    size: 5,
+    mimetype: 'audio/webm',
+    originalname: 'voice-note.webm',
+  };
+  await assert.rejects(appendAgentMediaMessage({
+    tenantId, conversationId, actor, file: unsupportedAudio, database: databaseFixture().database,
+  }), (error) => error instanceof ConversationOperationError
+    && error.status === 400
+    && error.code === 'RESOURCE_MEDIA_TYPE_UNSUPPORTED'
+    && error.message === 'Voice message could not be prepared. Please record it again.');
+});
