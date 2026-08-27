@@ -43,6 +43,8 @@ import { runMigrations } from "./migrations/runMigrations.js";
 import { createOpenAIEmbedder } from "./services/knowledge-intelligence-service.js";
 import { startKnowledgeProcessingWorker } from "./services/knowledge-source-processing-service.js";
 import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from "./services/knowledge-runtime-context-service.js";
+import { configuredPublicWebChatSessionSecret, issuePublicWebChatSession, PublicWebChatSessionError, verifyPublicWebChatSession } from "./services/public-web-chat-session.js";
+import { resolvePublicWebChatIntegration } from "./services/public-web-chat-integration-service.js";
 
 dotenv.config();
 
@@ -955,6 +957,21 @@ app.get("/api/chat/history", (req, res) => {
   res.json(webMemoryStore[userId] || []);
 });
 
+app.post("/api/chat/bootstrap", async (req, res) => {
+  const widgetKey = typeof req.body?.widget_key === 'string' ? req.body.widget_key.trim() : '';
+  const secret = configuredPublicWebChatSessionSecret();
+  if (!widgetKey || !secret) return res.status(503).json({ error: 'Web Chat is unavailable.' });
+  try {
+    const integration = await resolvePublicWebChatIntegration({ database: pool, widgetKey });
+    if (!integration) return res.status(404).json({ error: 'Web Chat integration is unavailable.' });
+    const session = issuePublicWebChatSession({ secret, widgetKey });
+    return res.json({ session: session.token });
+  } catch (error) {
+    console.error('WEB_CHAT_BOOTSTRAP_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    return res.status(503).json({ error: 'Web Chat is temporarily unavailable.' });
+  }
+});
+
 app.post("/api/chat", async (req, res) => {
   try {
     const userMessage = req.body.message;
@@ -963,7 +980,25 @@ app.post("/api/chat", async (req, res) => {
       return res.status(400).json({ error: "A non-empty message is required." });
     }
 
-    const userId = getUserId(req);
+    let webChatSession = null;
+    let webChatIntegration = null;
+    const suppliedWebChatSession = req.get('X-Samche-Web-Chat-Session');
+    if (suppliedWebChatSession) {
+      try {
+        webChatSession = verifyPublicWebChatSession(suppliedWebChatSession, {
+          secret: configuredPublicWebChatSessionSecret(),
+        });
+        webChatIntegration = await resolvePublicWebChatIntegration({
+          database: pool,
+          widgetKey: webChatSession.widgetKey,
+        });
+      } catch (error) {
+        if (!(error instanceof PublicWebChatSessionError)) throw error;
+      }
+      if (!webChatIntegration) return res.status(401).json({ error: 'Web Chat session is invalid.' });
+    }
+
+    const userId = webChatSession?.sessionId ?? getUserId(req);
     const normalizedMessage = userMessage.trim();
 
     addWebMemory(userId, "user", normalizedMessage);
@@ -973,6 +1008,26 @@ app.post("/api/chat", async (req, res) => {
       role: msg.role,
       content: msg.content ? String(msg.content) : ""
     }));
+
+    let webChatRuntimeKnowledge = null;
+    if (webChatIntegration) {
+      try {
+        webChatRuntimeKnowledge = await resolveAssistantRuntimeKnowledgeContext({
+          database: pool,
+          embed: knowledgeEmbedder,
+          tenantId: webChatIntegration.tenant_id,
+          assistantId: webChatIntegration.assistant_id,
+          query: normalizedMessage,
+        });
+        console.info(
+          'KNOWLEDGE_RUNTIME_CONTEXT channel=WEB_CHAT active_configuration=' + (webChatRuntimeKnowledge.activeConfiguration ? '1' : '0') +
+          ' retrieved_chunks=' + webChatRuntimeKnowledge.knowledge.length +
+          ' retrieval_available=' + (webChatRuntimeKnowledge.retrievalAvailable ? '1' : '0')
+        );
+      } catch (error) {
+        console.error('KNOWLEDGE_RUNTIME_CONTEXT_UNAVAILABLE channel=WEB_CHAT code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+      }
+    }
 
     const messages = [
       {
@@ -1335,6 +1390,9 @@ If the user already provided sector info, NEVER ask again.`
       },
       ...cleanMemory
     ];
+    if (webChatRuntimeKnowledge) {
+      messages[0].content = appendRuntimeKnowledgeToSystemInstruction(messages[0].content, webChatRuntimeKnowledge);
+    }
 
     const completion = await openaiClient.chat.completions.create({
       model: "gpt-4o-mini",
