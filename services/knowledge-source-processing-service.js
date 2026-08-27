@@ -83,6 +83,7 @@ async function sourceForJob(database, job) {
 export async function processKnowledgeProcessingJob({
   database,
   storage,
+  createStorage = null,
   job,
   embed,
   extract = extractDocumentText,
@@ -112,10 +113,11 @@ export async function processKnowledgeProcessingJob({
     let extractionMethod = 'MANUAL';
 
     if (source.source_type === 'DOCUMENT') {
-      if (!storage || typeof storage.get !== 'function' || !source.storage_key || !source.mime_type) {
+      const sourceStorage = storage ?? createStorage?.();
+      if (!sourceStorage || typeof sourceStorage.get !== 'function' || !source.storage_key || !source.mime_type) {
         throw new KnowledgeSourceProcessingError('KNOWLEDGE_SOURCE_STORAGE_UNAVAILABLE', 'Knowledge source storage is unavailable');
       }
-      const bytes = await streamToBuffer(await storage.get({ key: source.storage_key }));
+      const bytes = await streamToBuffer(await sourceStorage.get({ key: source.storage_key }));
       const extracted = await extract({
         mimeType: source.mime_type,
         bytes,
@@ -194,7 +196,7 @@ export function startKnowledgeProcessingWorker({
           database,
           embed,
           job,
-          storage: createStorage(),
+          createStorage,
         });
       }
     } catch (error) {
