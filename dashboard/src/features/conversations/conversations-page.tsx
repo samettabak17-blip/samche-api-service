@@ -83,6 +83,7 @@ export function ConversationsPage() {
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [newMessagesWaiting, setNewMessagesWaiting] = useState(false);
+  const [firstNewMessageId, setFirstNewMessageId] = useState<string | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [attachmentPreview, setAttachmentPreview] = useState<{ url: string; mimeType: string; filename: string } | null>(null);
   const [resourcePanel, setResourcePanel] = useState<ConversationCapabilityKey | null>(null);
@@ -104,6 +105,7 @@ export function ConversationsPage() {
   useEffect(() => {
     knownMessageCountRef.current = 0;
     setNewMessagesWaiting(false);
+    setFirstNewMessageId(null);
   }, [conversationId]);
   useEffect(() => {
     const requestedSearch = searchParams.get('q')?.trim();
@@ -327,6 +329,16 @@ export function ConversationsPage() {
     list.scrollTop = list.scrollHeight;
     atMessageBottomRef.current = true;
     setNewMessagesWaiting(false);
+    setFirstNewMessageId(null);
+  };
+  const scrollToFirstNewMessage = () => {
+    if (firstNewMessageId) {
+      document.querySelector('[data-message-id="' + firstNewMessageId + '"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } else {
+      scrollToLatest();
+    }
+    setNewMessagesWaiting(false);
+    setFirstNewMessageId(null);
   };
   useEffect(() => {
     if (!conversationId || messages.length === 0) return;
@@ -335,6 +347,7 @@ export function ConversationsPage() {
     if (previous === 0 || atMessageBottomRef.current) {
       requestAnimationFrame(() => requestAnimationFrame(scrollToLatest));
     } else if (!loadingOlderRef.current && messages.length > previous) {
+      setFirstNewMessageId(messages[previous]?.id ?? messages[messages.length - 1]?.id ?? null);
       setNewMessagesWaiting(true);
     }
   }, [conversationId, messages.length]);
@@ -381,7 +394,7 @@ export function ConversationsPage() {
               <footer className="flex justify-end border-t border-line px-5 py-3"><a href={attachmentPreview.url} download={attachmentPreview.filename} className="button-primary"><Download size={15} />Download</a></footer>
             </section>
           </div>}
-          <div ref={messageListRef} onScroll={(event) => { const element = event.currentTarget; atMessageBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 72; if (atMessageBottomRef.current) setNewMessagesWaiting(false); if (element.scrollTop < 64) void loadOlderMessages(); }} className={"subtle-scrollbar flex-1 space-y-3 overflow-y-auto p-4 sm:p-5 [background-image:radial-gradient(circle_at_20%_20%,rgba(80,108,124,.11)_1px,transparent_1px),radial-gradient(circle_at_80%_75%,rgba(65,112,95,.10)_1px,transparent_1px)] [background-size:22px_22px] " + workspaceVisualIdentity(channelContext.type).canvas}>{messagesQuery.hasNextPage && <div className="flex justify-center"><button type="button" onClick={() => void loadOlderMessages()} disabled={messagesQuery.isFetchingNextPage} className="rounded border border-white/10 px-3 py-1.5 text-xs text-stone-300 hover:bg-white/[0.04] disabled:opacity-50">{messagesQuery.isFetchingNextPage ? 'Loading earlier messages…' : 'Load earlier messages'}</button></div>}{messages.map((message) => {
+          <div ref={messageListRef} onScroll={(event) => { const element = event.currentTarget; atMessageBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 72; if (atMessageBottomRef.current) { setNewMessagesWaiting(false); setFirstNewMessageId(null); } if (element.scrollTop < 64) void loadOlderMessages(); }} className={"subtle-scrollbar flex-1 space-y-3 overflow-y-auto p-4 sm:p-5 [background-image:radial-gradient(circle_at_20%_20%,rgba(80,108,124,.11)_1px,transparent_1px),radial-gradient(circle_at_80%_75%,rgba(65,112,95,.10)_1px,transparent_1px)] [background-size:22px_22px] " + workspaceVisualIdentity(channelContext.type).canvas}>{messagesQuery.hasNextPage && <div className="flex justify-center"><button type="button" onClick={() => void loadOlderMessages()} disabled={messagesQuery.isFetchingNextPage} className="rounded border border-white/10 px-3 py-1.5 text-xs text-stone-300 hover:bg-white/[0.04] disabled:opacity-50">{messagesQuery.isFetchingNextPage ? 'Loading earlier messages…' : 'Load earlier messages'}</button></div>}{messages.map((message) => {
             const isCustomer = message.sender_type === 'CUSTOMER';
             const isAgentMessage = message.sender_type === 'AGENT';
             const identity = workspaceVisualIdentity(channelContext.type);
@@ -390,7 +403,7 @@ export function ConversationsPage() {
             const technicalVoicePlaceholder = message.resources.some(isVoiceResource) && /^\[AUDIO:/i.test(message.content ?? '');
             const isActiveSearchMatch = activeMessageSearchMatch?.id === message.id;
             return <div key={message.id} data-message-id={message.id} className={'flex scroll-mt-24 ' + (isCustomer ? 'justify-start' : 'justify-end')}><article className={'w-fit max-w-[74%] rounded-2xl border px-3.5 py-2.5 shadow-sm transition ' + bubbleTone + (isActiveSearchMatch ? (channelContext.type === 'WHATSAPP' ? ' ring-2 ring-emerald-300/75' : ' ring-2 ring-red-300/75') : '')}><div className="flex items-center justify-between gap-4 text-[10px] opacity-65"><span className="font-semibold uppercase tracking-[0.1em]">{isAgentMessage ? 'AGENT' : senderLabel(message.sender_type)}</span><time>{formatDateTime(message.created_at)}{!isCustomer && deliveryIndicator(message.delivery_status)}</time></div>{message.content && !technicalVoicePlaceholder && <div className="mt-1.5 min-w-0 break-words text-sm leading-6"><SafeRichMessage content={message.content} /></div>}{message.resources.length > 0 && <ul className="mt-3 grid gap-2" aria-label="Message attachments">{message.resources.map((resource) => isVoiceResource(resource) ? <li key={resource.id} className="max-w-full"><InlineVoicePlayer resource={resource} tenantId={tenantId} conversationId={conversationId ?? ''} tone={isCustomer ? 'inbound' : 'outbound'} /><p className={'mt-1 text-[10px] ' + (isCustomer ? 'text-stone-500' : 'text-emerald-100/75')}>{isCustomer ? contactIdentity : 'AGENT'} · {formatDateTime(message.created_at)}</p></li> : <li key={resource.id} className="rounded-xl border border-white/10 bg-black/20 p-2.5 text-xs"><div className="flex items-start gap-2.5">{resource.media_category === 'IMAGE' ? <ImageIcon className="mt-0.5 shrink-0 text-gold" size={17} /> : <FileText className="mt-0.5 shrink-0 text-gold" size={17} />}<div className="min-w-0 flex-1"><p className="truncate font-medium">{resourceDisplayName(resource)}</p><p className="mt-0.5 text-stone-400">{resource.mime_type || 'Unknown type'}{resource.size_bytes ? ' · ' + Math.ceil(resource.size_bytes / 1024) + ' KB' : ''}</p><div className="mt-2 flex flex-wrap gap-2">{resource.processing_status !== 'FAILED' && isInlinePreviewableAttachment(resource.mime_type) && <button type="button" onClick={() => void openAttachment(resource, false)} className={'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-semibold text-white shadow-sm transition focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-[#09111B] ' + (channelContext.type === 'WHATSAPP' ? 'border-emerald-300/60 bg-emerald-500/18 hover:bg-emerald-500/30 focus:ring-emerald-300' : 'border-red-300/60 bg-red-500/18 hover:bg-red-500/30 focus:ring-red-300')}><ExternalLink size={13} />View</button>}<button type="button" onClick={() => void openAttachment(resource, true)} className={'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-semibold text-white shadow-sm transition focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-[#09111B] ' + (channelContext.type === 'WHATSAPP' ? 'border-emerald-300/60 bg-emerald-500/18 hover:bg-emerald-500/30 focus:ring-emerald-300' : 'border-red-300/60 bg-red-500/18 hover:bg-red-500/30 focus:ring-red-300')}><Download size={13} />Download</button></div></div></div></li>)}</ul>}</article></div>;
-          })}{messages.length === 0 && <EmptyState title="No messages yet" description="Messages will appear as the channel receives them." />}{newMessagesWaiting && <div className="pointer-events-none sticky bottom-2 z-10 flex justify-center"><button type="button" onClick={scrollToLatest} className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-white/[.16] bg-[#101b29]/90 px-3 py-1.5 text-xs font-semibold text-white shadow-[0_10px_28px_rgba(0,0,0,.35)] backdrop-blur-xl transition hover:border-white/25 hover:bg-[#172536]">↓ New messages</button></div>}</div>
+          })}{messages.length === 0 && <EmptyState title="No messages yet" description="Messages will appear as the channel receives them." />}{newMessagesWaiting && <div className="pointer-events-none sticky bottom-3 z-10 flex justify-center"><button type="button" onClick={scrollToFirstNewMessage} className={'pointer-events-auto inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold text-white shadow-[0_10px_28px_rgba(0,0,0,.35)] backdrop-blur-xl transition ' + (channelContext.type === 'WHATSAPP' ? 'border-emerald-200/45 bg-emerald-950/85 hover:bg-emerald-900/95' : 'border-red-200/45 bg-red-950/85 hover:bg-red-900/95')}>New messages <span aria-hidden="true">↓</span></button></div>}</div>
           {attachmentError && <p role="alert" className="mx-5 mt-3 text-xs text-red-300">{attachmentError}</p>}<footer className="border-t border-line bg-elevated/35 px-3 py-3">
             {canSend ? <form onKeyDown={(event) => { if (pendingFile?.type.startsWith('audio/') && event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.requestSubmit(); } }} onSubmit={(event: FormEvent<HTMLFormElement>) => {
               event.preventDefault();
