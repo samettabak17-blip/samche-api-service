@@ -36,4 +36,16 @@ describe('Topbar global navigation search', () => {
     expect(consoleError.mock.calls.some(([message]) => String(message).includes('same key'))).toBe(false);
     consoleError.mockRestore();
   });
+
+  it('closes on outside click and Escape, then remains reusable', () => {
+    renderTopbar();
+    const input = screen.getByRole('textbox', { name: 'Search dashboard destinations' });
+    for (let cycle = 0; cycle < 10; cycle += 1) {
+      fireEvent.click(input);
+      expect(screen.getByRole('listbox', { name: 'Dashboard destinations' })).toBeTruthy();
+      if (cycle % 2 === 0) fireEvent.mouseDown(document.body);
+      else fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.queryByRole('listbox', { name: 'Dashboard destinations' })).toBeNull();
+    }
+  });
 });
