@@ -871,6 +871,22 @@ export async function appendAgentMediaMessage({
   }
 }
 
+function safeWhatsAppDeliveryFailureDiagnostic(status) {
+  const providerError = status?.errors?.[0] ?? {};
+  const normalize = (value, limit) => String(value ?? '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\+?\d[\d\s().-]{6,}\d/g, '[redacted]')
+    .replace(/[^\x20-\x7e]/g, ' ')
+    .trim()
+    .slice(0, limit);
+  const code = providerError.code === undefined || providerError.code === null
+    ? null
+    : normalize(providerError.code, 80);
+  const title = normalize(providerError.title, 160) || null;
+  const detail = normalize(providerError.error_data?.details ?? providerError.message, 240) || null;
+  return { code, title, detail };
+}
+
 export const UPDATE_WHATSAPP_DELIVERY_STATUS_SQL = `UPDATE conversation_messages m
   SET delivery_status = $1::varchar(20),
       delivery_status_updated_at = CURRENT_TIMESTAMP,
@@ -898,7 +914,8 @@ export async function recordWhatsAppDeliveryStatus({
   const providerMessageId = String(status?.id ?? '').trim();
   const providerStatus = String(status?.status ?? '').trim().toUpperCase();
   const deliveryStatus = { SENT: 'SENT', DELIVERED: 'DELIVERED', READ: 'READ', FAILED: 'FAILED' }[providerStatus];
-  const providerFailureCode = status?.errors?.[0]?.code ? String(status.errors[0].code).slice(0, 80) : null;
+  const providerFailure = safeWhatsAppDeliveryFailureDiagnostic(status);
+  const providerFailureCode = providerFailure.code;
   if (!providerMessageId || !deliveryStatus || !phoneNumberId) return { updated: false, reason: 'IGNORED' };
 
   const client = await database.connect();
@@ -922,6 +939,15 @@ export async function recordWhatsAppDeliveryStatus({
     for (const row of updated.rows) await notify(client, row.tenant_id, row.conversation_id, 'WHATSAPP_DELIVERY_STATUS');
     await client.query('COMMIT');
     console.info('WHATSAPP_DELIVERY_STATUS stage=UPDATE_SUCCEEDED status=' + deliveryStatus + ' correlated=' + updated.rowCount + (providerFailureCode ? ' failure_code=' + providerFailureCode : ''));
+    if (deliveryStatus === 'FAILED') {
+      console.info(
+        'WHATSAPP_VOICE_DELIVERY_FAILED'
+        + ' provider_code=' + (providerFailure.code ?? 'UNKNOWN')
+        + ' provider_title=' + (providerFailure.title ?? 'UNKNOWN')
+        + ' provider_detail=' + (providerFailure.detail ?? 'UNKNOWN')
+        + ' wamid_present=' + (providerMessageId ? '1' : '0')
+      );
+    }
     return { updated: updated.rowCount === 1, count: updated.rowCount, deliveryStatus };
   } catch (error) {
     await client.query('ROLLBACK');
