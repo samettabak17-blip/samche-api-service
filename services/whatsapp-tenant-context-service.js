@@ -1,10 +1,34 @@
 import { inferConservativeWhatsAppLanguage, normalizeCommunicationLanguage } from './conversation-communication-language.js';
+import { buildTenantRuntimeSystemInstruction } from './tenant-runtime-persona-service.js';
 
 export class WhatsAppTenantContextError extends Error {
   constructor(code) {
     super(code);
     this.code = code;
   }
+}
+
+export function resolveWhatsAppPersonaUnavailableResponse(language) {
+  const normalized = normalizeCommunicationLanguage(language);
+  if (normalized === 'tr') return 'Asistan yapılandırması geçici olarak kullanılamıyor. Lütfen daha sonra tekrar deneyin.';
+  if (normalized === 'ar') return 'إعدادات المساعد غير متاحة مؤقتًا. يرجى المحاولة مرة أخرى لاحقًا.';
+  return 'The assistant configuration is temporarily unavailable. Please try again later.';
+}
+
+export function buildWhatsAppActivePersonaTenantContext({ persona, knowledgeContext = '', communicationLanguage = 'und', deterministicTemplates = null }) {
+  if (!persona?.available) throw new WhatsAppTenantContextError('WHATSAPP_TENANT_PERSONA_NOT_ACTIVE');
+  return {
+    companyName: persona.companyIdentity,
+    assistantName: persona.assistantIdentity,
+    systemPrompt: buildTenantRuntimeSystemInstruction({
+      persona,
+      knowledgeContext,
+      channelRules: 'Use concise conversational plain text suitable for WhatsApp. Do not expose internal metadata.',
+    }),
+    deterministicTemplates,
+    knowledge: [],
+    communicationLanguage,
+  };
 }
 
 // This is intentionally the only policy-text transformation: CRLF becomes LF

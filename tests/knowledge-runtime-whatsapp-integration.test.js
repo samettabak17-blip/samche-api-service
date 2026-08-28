@@ -4,15 +4,19 @@ import assert from 'node:assert/strict';
 
 const appSource = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 
-test('WhatsApp model path resolves and applies only active runtime knowledge context after human-handoff gating', () => {
-  assert.match(appSource, /import \{[^}]*applyRuntimeKnowledgeContext[^}]*resolveAssistantRuntimeKnowledgeContext[^}]*\} from ["']\.\/services\/knowledge-runtime-context-service\.js["']/);
+test('WhatsApp model path resolves active tenant persona after human-handoff gating and before provider invocation', () => {
+  assert.match(appSource, /import \{[^}]*resolveTenantRuntimePersona[^}]*\} from ["']\.\/services\/tenant-runtime-persona-service\.js["']/);
   const humanGate = appSource.indexOf('if (whatsappInbox.duplicate || !whatsappInbox.shouldInvokeAi) return;');
   assert.ok(humanGate >= 0);
   const resolveRuntime = appSource.indexOf('resolveAssistantRuntimeKnowledgeContext({', humanGate);
   assert.ok(resolveRuntime > humanGate);
   assert.match(appSource, /tenantId: whatsappInbox\.integration\.tenant_id,/);
   assert.match(appSource, /assistantId: whatsappInbox\.integration\.assistant_id,/);
-  assert.match(appSource, /runtimeTenantContext = applyRuntimeKnowledgeContext\(tenantContext, runtimeKnowledge\)/);
+  const resolvePersona = appSource.indexOf('resolveTenantRuntimePersona({', humanGate);
+  assert.ok(resolvePersona > humanGate);
+  assert.match(appSource, /runtimeTenantContext = buildWhatsAppActivePersonaTenantContext\(/);
+  assert.match(appSource, /resolveWhatsAppPersonaUnavailableResponse\(tenantContext\.communicationLanguage\)/);
+  assert.ok(appSource.indexOf('callWpGemini(', resolvePersona) > resolvePersona);
   assert.match(appSource, /tenant: runtimeTenantContext,/);
 });
 

@@ -23,7 +23,7 @@ import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.j
 import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from "./services/human-support-service.js";
 import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
 import { persistAndDeliverWhatsAppAssistant } from "./services/whatsapp-assistant-response-service.js";
-import { buildWhatsAppTenantModelContext, classifyWhatsAppCurrentCustomerIntent, detectWhatsAppModelResponseLanguage, isWhatsAppResponseLanguageMismatch, WhatsAppTenantContextError } from "./services/whatsapp-tenant-context-service.js";
+import { buildWhatsAppActivePersonaTenantContext, buildWhatsAppTenantModelContext, classifyWhatsAppCurrentCustomerIntent, detectWhatsAppModelResponseLanguage, isWhatsAppResponseLanguageMismatch, resolveWhatsAppPersonaUnavailableResponse, WhatsAppTenantContextError } from "./services/whatsapp-tenant-context-service.js";
 import { inferWhatsAppDeterministicInboundLanguage, planWhatsAppDeterministicSocialResponse, resolveWhatsAppDeterministicTemplateLanguage } from "./services/whatsapp-deterministic-social-response-service.js";
 import {
   describeStorageCompatibilityProfile,
@@ -43,6 +43,7 @@ import { runMigrations } from "./migrations/runMigrations.js";
 import { createOpenAIEmbedder } from "./services/knowledge-intelligence-service.js";
 import { startKnowledgeProcessingWorker } from "./services/knowledge-source-processing-service.js";
 import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from "./services/knowledge-runtime-context-service.js";
+import { resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
 import { isSameKnowledgeAuthority, resolveAssistantKnowledgeAuthority } from "./services/knowledge-authority-service.js";
 import { filterProviderMemoryByAuthority, stampProviderMemoryEntry } from "./services/channel-knowledge-authority-memory.js";
 import { configuredPublicWebChatSessionSecret, issuePublicWebChatSession, PublicWebChatSessionError, verifyPublicWebChatSession } from "./services/public-web-chat-session.js";
@@ -1781,8 +1782,17 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       // BÜYÜK DİL PROMPTLARI 
       // --------------------------------------
       let modelContext;
-      let runtimeTenantContext = tenantContext;
+      let runtimeTenantContext;
       try {
+        const runtimePersona = await resolveTenantRuntimePersona({
+          database: pool,
+          tenantId: whatsappInbox.integration.tenant_id,
+          assistantId: whatsappInbox.integration.assistant_id,
+        });
+        if (!runtimePersona.available) {
+          await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, resolveWhatsAppPersonaUnavailableResponse(tenantContext.communicationLanguage));
+          return;
+        }
         const runtimeKnowledge = await resolveAssistantRuntimeKnowledgeContext({
           database: pool,
           embed: knowledgeEmbedder,
@@ -1790,7 +1800,12 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           assistantId: whatsappInbox.integration.assistant_id,
           query: text,
         });
-        runtimeTenantContext = applyRuntimeKnowledgeContext(tenantContext, runtimeKnowledge);
+        runtimeTenantContext = buildWhatsAppActivePersonaTenantContext({
+          persona: runtimePersona,
+          knowledgeContext: runtimeKnowledge.knowledgeContext,
+          communicationLanguage: tenantContext.communicationLanguage,
+          deterministicTemplates: tenantContext.deterministicTemplates,
+        });
         console.info(
           'KNOWLEDGE_RUNTIME_CONTEXT active_configuration=' + (runtimeKnowledge.activeConfiguration ? '1' : '0') +
           ' retrieved_chunks=' + runtimeKnowledge.knowledge.length +
@@ -1798,6 +1813,8 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         );
       } catch (error) {
         console.error('KNOWLEDGE_RUNTIME_CONTEXT_UNAVAILABLE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, resolveWhatsAppPersonaUnavailableResponse(tenantContext.communicationLanguage));
+        return;
       }
       try {
         modelContext = buildWhatsAppTenantModelContext({
