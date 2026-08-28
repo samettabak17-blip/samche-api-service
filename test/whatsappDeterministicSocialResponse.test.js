@@ -131,12 +131,14 @@ test('the live WhatsApp path returns after guarded deterministic delivery before
   assert.doesNotMatch(deterministicSource, /LANGUAGE_COMPLIANCE_RETRY/);
 });
 
-test('the persisted first-contact decision checks all assistant history, not only the recent context window', () => {
+test('the persisted first-contact decision uses only current knowledge-authority history', () => {
   const inbox = readFileSync(new URL('../services/whatsapp-live-inbox-service.js', import.meta.url), 'utf8');
 
-  assert.match(inbox, /SELECT EXISTS\(\s*SELECT 1\s*FROM conversation_messages/s);
-  assert.match(inbox, /sender_type = 'ASSISTANT'/);
-  assert.match(inbox, /isFirstAssistantResponse\s*=\s*!.*has_assistant_response/);
+  assert.match(inbox, /loadCurrentProviderHistory\(client/);
+  assert.match(inbox, /assistantId:\s*knowledgeAuthority\?\.assistantId/);
+  assert.match(inbox, /version:\s*knowledgeAuthority\?\.version/);
+  assert.match(inbox, /isFirstAssistantResponse\s*=\s*!conversationHistory\.some\(\(message\) => message\.sender_type === 'ASSISTANT'\)/);
+  assert.doesNotMatch(inbox, /SELECT EXISTS\(\s*SELECT 1\s*FROM conversation_messages/s);
 });
 
 
