@@ -30,6 +30,7 @@
     "form-data": "^4.0.1"
   },
   "devDependencies": {
+    "jszip": "^3.10.1",
     "nodemon": "^3.1.10"
   }
 }
