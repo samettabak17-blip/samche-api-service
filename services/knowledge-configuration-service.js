@@ -97,7 +97,8 @@ export async function approveBusinessProfileVersion({ database, tenantId, versio
          FROM business_profile_versions version
          JOIN business_profiles profile ON profile.id = version.profile_id AND profile.tenant_id = version.tenant_id
          LEFT JOIN business_identities identity ON identity.id = profile.business_identity_id AND identity.tenant_id = profile.tenant_id
-        WHERE version.id = $1 AND version.tenant_id = $2 FOR UPDATE`, [versionId, tenantId]);
+        WHERE version.id = $1 AND version.tenant_id = $2
+        FOR UPDATE OF version, profile`, [versionId, tenantId]);
     assertProfileScopeIntegrity(integrity.rows[0]);
     const result = await client.query(
       `UPDATE business_profile_versions
@@ -142,7 +143,7 @@ async function activateConfigurationVersion({
          LEFT JOIN business_profile_versions profile_version ON profile_version.id = configuration.source_profile_version_id AND profile_version.tenant_id = configuration.tenant_id
          LEFT JOIN business_profiles profile ON profile.id = profile_version.profile_id AND profile.tenant_id = configuration.tenant_id
         WHERE configuration.id = $1 AND configuration.tenant_id = $2 AND configuration.assistant_id = $3
-        FOR UPDATE`,
+        FOR UPDATE OF configuration`,
       [versionId, tenantId, assistantId]
     );
     const target = targetResult.rows[0];
@@ -232,7 +233,7 @@ export async function activateBusinessProfileVersion({ database, tenantId, versi
          JOIN business_profiles profile ON profile.id = version.profile_id AND profile.tenant_id = version.tenant_id
          LEFT JOIN business_identities identity ON identity.id = profile.business_identity_id AND identity.tenant_id = profile.tenant_id
         WHERE version.id = $1 AND version.tenant_id = $2
-        FOR UPDATE`,
+        FOR UPDATE OF version, profile`,
       [versionId, tenantId]
     );
     const version = versionResult.rows[0];
