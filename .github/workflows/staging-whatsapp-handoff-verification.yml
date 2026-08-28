@@ -43,6 +43,8 @@ jobs:
           node --check services/whatsapp-delivery-service.js
           node --check services/live-inbox-service.js
           node --check services/whatsapp-live-inbox-service.js
+          node --check services/knowledge-authority-service.js
+          node --check services/channel-knowledge-authority-memory.js
           node --check services/human-support-service.js
           node --check services/live-event-bus.js
           node --check app.js
@@ -54,6 +56,8 @@ jobs:
           node --check test/whatsappGreetingOnlyPolicy.test.js
           node --check test/whatsappDeterministicSocialResponse.test.js
           node --check test/whatsappSupplementaryKnowledgeAssignment.test.js
+          node --check test/knowledgeAuthorityService.test.js
+          node --check test/channelKnowledgeAuthorityMemory.test.js
           node --check tests/knowledge-authority-epoch.test.js
           node --check test/conversationCommunicationLanguage.test.js
           node --check services/human-support-intent.js
@@ -83,6 +87,8 @@ jobs:
           JWT_SECRET: workflow-test-only-not-for-runtime
         run: >-
           node --test
+          test/knowledgeAuthorityService.test.js
+          test/channelKnowledgeAuthorityMemory.test.js
           test/liveInboxWhatsAppOperatorDelivery.test.js
           test/whatsappAssistantTimelinePersistence.test.js
           test/whatsappTenantContext.test.js

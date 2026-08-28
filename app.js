@@ -43,6 +43,8 @@ import { runMigrations } from "./migrations/runMigrations.js";
 import { createOpenAIEmbedder } from "./services/knowledge-intelligence-service.js";
 import { startKnowledgeProcessingWorker } from "./services/knowledge-source-processing-service.js";
 import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from "./services/knowledge-runtime-context-service.js";
+import { isSameKnowledgeAuthority, resolveAssistantKnowledgeAuthority } from "./services/knowledge-authority-service.js";
+import { filterProviderMemoryByAuthority, stampProviderMemoryEntry } from "./services/channel-knowledge-authority-memory.js";
 import { configuredPublicWebChatSessionSecret, issuePublicWebChatSession, PublicWebChatSessionError, verifyPublicWebChatSession } from "./services/public-web-chat-session.js";
 import { resolvePublicWebChatIntegration } from "./services/public-web-chat-integration-service.js";
 
@@ -254,9 +256,9 @@ async function getTopicSummary(session, text) {
 const guideMemoryStore = {};
 const MAX_GUIDE_MEMORY = 10;
 
-function addGuideMemory(userId, role, text) {
+function addGuideMemory(userId, role, text, knowledgeAuthority = null) {
   if (!guideMemoryStore[userId]) guideMemoryStore[userId] = [];
-  guideMemoryStore[userId].push({ role, parts: [{ text }] });
+  guideMemoryStore[userId].push(stampProviderMemoryEntry({ role, parts: [{ text }] }, knowledgeAuthority));
   if (guideMemoryStore[userId].length > MAX_GUIDE_MEMORY) {
     guideMemoryStore[userId].splice(0, guideMemoryStore[userId].length - MAX_GUIDE_MEMORY);
   }
@@ -496,6 +498,7 @@ async function persistAndSendWhatsAppAssistant(whatsappInbox, recipient, content
     tenantId: whatsappInbox.integration.tenant_id,
     conversationId: whatsappInbox.conversation.id,
     handlingVersion: whatsappInbox.handlingVersion,
+    knowledgeAuthority: whatsappInbox.knowledgeAuthority,
     recipient,
     content,
     persistAssistantResponse: persistAssistantResponseIfCurrent,
@@ -867,8 +870,11 @@ app.post("/chat", async (req, res) => {
     if (sgCorporateShortReplyMap[lowerCleanText]) {
       originalText = sgCorporateShortReplyMap[lowerCleanText];
     } else {
-      addGuideMemory(userId, "user", cleanText);
-      const history = guideMemoryStore[userId] || [];
+      addGuideMemory(userId, "user", cleanText, inboxState?.knowledgeAuthority ?? null);
+      const rawHistory = guideMemoryStore[userId] || [];
+      const history = inboxState
+        ? (inboxState.knowledgeAuthority ? filterProviderMemoryByAuthority(rawHistory, inboxState.knowledgeAuthority) : [])
+        : rawHistory;
       const contents = history.map((msg, index) => {
         if (index === history.length - 1 && msg.role === "user") {
           return {
@@ -917,6 +923,7 @@ app.post("/chat", async (req, res) => {
         conversationId: inboxState.conversation.id,
         content: originalText,
         handlingVersion: inboxState.handlingVersion,
+        knowledgeAuthority: inboxState.knowledgeAuthority,
       });
       if (!persisted.delivered) {
         return res.status(202).json({
@@ -926,7 +933,7 @@ app.post("/chat", async (req, res) => {
       }
     }
 
-    addGuideMemory(userId, "model", originalText);
+    addGuideMemory(userId, "model", originalText, inboxState?.knowledgeAuthority ?? null);
     return res.json({
       conversation_session: publicSession.token,
       candidates: [{ content: { parts: [{ text: parseLinksToHTML(originalText) }] } }]
@@ -943,9 +950,9 @@ app.post("/chat", async (req, res) => {
 const webMemoryStore = {};
 const MAX_WEB_MEMORY = 10;
 
-function addWebMemory(userId, role, content) {
+function addWebMemory(userId, role, content, knowledgeAuthority = null) {
   if (!webMemoryStore[userId]) webMemoryStore[userId] = [];
-  webMemoryStore[userId].push({ role, content });
+  webMemoryStore[userId].push(stampProviderMemoryEntry({ role, content }, knowledgeAuthority));
 
   if (webMemoryStore[userId].length > MAX_WEB_MEMORY) {
     webMemoryStore[userId].splice(0, webMemoryStore[userId].length - MAX_WEB_MEMORY);
@@ -954,7 +961,7 @@ function addWebMemory(userId, role, content) {
 
 app.get("/api/chat/history", (req, res) => {
   const userId = getUserId(req);
-  res.json(webMemoryStore[userId] || []);
+  res.json((webMemoryStore[userId] || []).map(({ role, content }) => ({ role, content })));
 });
 
 app.post("/api/chat/bootstrap", async (req, res) => {
@@ -1000,11 +1007,23 @@ app.post("/api/chat", async (req, res) => {
 
     const userId = webChatSession?.sessionId ?? getUserId(req);
     const normalizedMessage = userMessage.trim();
+    const webChatKnowledgeAuthority = webChatIntegration
+      ? await resolveAssistantKnowledgeAuthority(pool, {
+        tenantId: webChatIntegration.tenant_id,
+        assistantId: webChatIntegration.assistant_id,
+      })
+      : null;
+    if (webChatIntegration && !webChatKnowledgeAuthority) {
+      return res.status(503).json({ error: 'Web Chat knowledge authority is temporarily unavailable.' });
+    }
 
-    addWebMemory(userId, "user", normalizedMessage);
+    addWebMemory(userId, "user", normalizedMessage, webChatKnowledgeAuthority);
 
     const rawMemory = webMemoryStore[userId] || [];
-    const cleanMemory = rawMemory.map(msg => ({
+    const authorityMemory = webChatIntegration
+      ? (webChatKnowledgeAuthority ? filterProviderMemoryByAuthority(rawMemory, webChatKnowledgeAuthority) : [])
+      : rawMemory;
+    const cleanMemory = authorityMemory.map(msg => ({
       role: msg.role,
       content: msg.content ? String(msg.content) : ""
     }));
@@ -1400,7 +1419,16 @@ If the user already provided sector info, NEVER ask again.`
     });
 
     const aiReply = completion.choices[0].message.content;
-    addWebMemory(userId, "assistant", aiReply);
+    if (webChatIntegration && webChatKnowledgeAuthority) {
+      const currentKnowledgeAuthority = await resolveAssistantKnowledgeAuthority(pool, {
+        tenantId: webChatIntegration.tenant_id,
+        assistantId: webChatIntegration.assistant_id,
+      });
+      if (!isSameKnowledgeAuthority(currentKnowledgeAuthority, webChatKnowledgeAuthority)) {
+        return res.status(409).json({ error: 'Knowledge changed while generating the response. Please retry.' });
+      }
+    }
+    addWebMemory(userId, "assistant", aiReply, webChatKnowledgeAuthority);
 
     res.send(aiReply);
   } catch (err) {
@@ -1529,6 +1557,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
             conversationId: whatsappInbox.conversation.id,
             content: processingMessage,
             handlingVersion: whatsappInbox.handlingVersion,
+            knowledgeAuthority: whatsappInbox.knowledgeAuthority,
           });
           if (persisted.delivered) await sendMessage(cleanFrom, processingMessage);
           return;
@@ -1539,7 +1568,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         });
         if (latestResourcePlan.action === 'RESOURCE_FAILED') {
           const failureMessage = resourceFailureAcknowledgement(wpSessions[cleanFrom]?.lang ?? 'tr', whatsappInbox.resourceContext.latestResource.media_category);
-          const persisted = await persistAssistantResponseIfCurrent({ tenantId: whatsappInbox.integration.tenant_id, conversationId: whatsappInbox.conversation.id, content: failureMessage, handlingVersion: whatsappInbox.handlingVersion });
+          const persisted = await persistAssistantResponseIfCurrent({ tenantId: whatsappInbox.integration.tenant_id, conversationId: whatsappInbox.conversation.id, content: failureMessage, handlingVersion: whatsappInbox.handlingVersion, knowledgeAuthority: whatsappInbox.knowledgeAuthority });
           if (persisted.delivered) await sendMessage(cleanFrom, failureMessage);
           return;
         }
@@ -1556,6 +1585,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
             conversationId: whatsappInbox.conversation.id,
             content: standaloneMediaPlan.message,
             handlingVersion: whatsappInbox.handlingVersion,
+            knowledgeAuthority: whatsappInbox.knowledgeAuthority,
           });
           if (acknowledgement.delivered) {
             await sendMessage(cleanFrom, standaloneMediaPlan.message);

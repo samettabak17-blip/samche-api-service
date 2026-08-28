@@ -8,13 +8,18 @@ import { WhatsAppDeliveryError, deliverWhatsAppText } from '../services/whatsapp
 const tenantId = '11111111-1111-4111-8111-111111111111';
 const conversationId = '22222222-2222-4222-8222-222222222222';
 
-function fakeDatabase(currentConversation) {
+function fakeDatabase(currentConversation, currentKnowledgeAuthority = null) {
   const messages = [];
   const calls = [];
   const client = {
     async query(sql, parameters = []) {
       calls.push({ sql, parameters });
       if (sql.includes('SELECT * FROM conversations WHERE id')) return { rows: [currentConversation.value] };
+      if (sql.includes('knowledge_authority_version') && sql.includes('JOIN tenant_channels')) {
+        return currentKnowledgeAuthority
+          ? { rows: [{ assistant_id: currentKnowledgeAuthority.assistantId, knowledge_authority_version: String(currentKnowledgeAuthority.version) }] }
+          : { rows: [] };
+      }
       if (sql.includes('INSERT INTO conversation_messages')) {
         const message = { id: `assistant-${messages.length + 1}`, sender_type: 'ASSISTANT', content: parameters[3] };
         messages.push(message);
@@ -59,6 +64,30 @@ test('takeover race blocks persistence and channel delivery for a stale AI resul
     persistAssistantResponse: (input) => persistAssistantResponseIfCurrent({ ...input, database }),
     persistProviderMessageId: async ({ providerMessageId }) => ({ id: 'assistant-provider-message', external_message_id: providerMessageId }),
     deliver: async () => { deliveries += 1; return { providerMessageId: 'wamid.assistant-test' }; },
+  });
+
+  assert.equal(outcome.delivered, false);
+  assert.equal(messages.length, 0);
+  assert.equal(deliveries, 0);
+});
+
+test('authority epoch race blocks persistence before a revoked answer can be delivered', async () => {
+  const currentConversation = { value: { status: 'open', handling_mode: 'AI', handling_version: 8 } };
+  const oldAuthority = { assistantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', version: 4n };
+  const currentAuthority = { ...oldAuthority, version: 5n };
+  const { database, messages } = fakeDatabase(currentConversation, currentAuthority);
+  let deliveries = 0;
+
+  const outcome = await persistAndDeliverWhatsAppAssistant({
+    tenantId,
+    conversationId,
+    handlingVersion: 8,
+    knowledgeAuthority: oldAuthority,
+    recipient: 'whatsapp:15551234567',
+    content: 'Revoked SAPPHIRE-7319 answer',
+    persistAssistantResponse: (input) => persistAssistantResponseIfCurrent({ ...input, database }),
+    persistProviderMessageId: async () => { throw new Error('must not persist provider id'); },
+    deliver: async () => { deliveries += 1; return { providerMessageId: 'must-not-send' }; },
   });
 
   assert.equal(outcome.delivered, false);

@@ -7,6 +7,7 @@ import { buildConversationStorageKey, validateConversationUpload } from './conve
 import { buildGeminiImagePart, buildUntrustedDocumentContext, whatsappIntegrationKey } from './whatsapp-multimodal-service.js';
 import { waitForReadyResource } from './whatsapp-resource-retry.js';
 import { inferConservativeWhatsAppLanguage, inferReliableWhatsAppCustomerLanguage, resolveWhatsAppCommunicationLanguage, resolveWhatsAppMediaResponseLanguage } from './conversation-communication-language.js';
+import { loadCurrentProviderHistory } from './knowledge-authority-service.js';
 
 export class WhatsAppInboxError extends Error {
   constructor(code, message) {
@@ -403,25 +404,21 @@ export async function persistWhatsAppInbound({
       );
     }
 
-    const historyResult = await client.query(
-      `SELECT sender_type, content
-         FROM conversation_messages
-        WHERE tenant_id = $1 AND conversation_id = $2
-        ORDER BY created_at DESC, id DESC
-        LIMIT 12`,
-      [integration.tenant_id, conversationId]
-    );
-    const conversationHistory = historyResult.rows.reverse();
-    const assistantHistoryResult = await client.query(
-      `SELECT EXISTS(
-         SELECT 1
-           FROM conversation_messages
-          WHERE tenant_id = $1
-            AND conversation_id = $2
-            AND sender_type = 'ASSISTANT'
-       ) AS has_assistant_response`,
-      [integration.tenant_id, conversationId]
-    );
+    const knowledgeAuthority = customerMessage.authority_assistant_id === integration.assistant_id
+      && customerMessage.knowledge_authority_version !== null
+      ? {
+        assistantId: customerMessage.authority_assistant_id,
+        version: BigInt(customerMessage.knowledge_authority_version),
+      }
+      : null;
+    const conversationHistory = await loadCurrentProviderHistory(client, {
+      tenantId: integration.tenant_id,
+      conversationId,
+      assistantId: knowledgeAuthority?.assistantId,
+      version: knowledgeAuthority?.version,
+      limit: 12,
+      excludeMessageId: customerMessage.id,
+    });
     const supplementaryKnowledge = await loadWhatsAppSupplementaryKnowledge(client, {
       tenantId: integration.tenant_id,
       assistantId: integration.assistant_id,
@@ -435,7 +432,7 @@ export async function persistWhatsAppInbound({
       communicationLanguage: resolvedCommunicationLanguage,
       mediaResponseLanguage: mediaResponse?.language ?? resolvedCommunicationLanguage,
     };
-    const isFirstAssistantResponse = !assistantHistoryResult.rows[0]?.has_assistant_response;
+    const isFirstAssistantResponse = !conversationHistory.some((message) => message.sender_type === 'ASSISTANT');
 
     let resource = null;
     let aiContextPart = null;
@@ -482,10 +479,10 @@ export async function persistWhatsAppInbound({
     await client.query('COMMIT');
     queueLeadQualification({ tenantId: integration.tenant_id, conversationId });
     return {
-      integration, conversation, customerMessage, resource, aiContextPart, aiContextParts, resourceContext, tenantContext, conversationHistory, isFirstAssistantResponse,
+      integration, conversation, customerMessage, resource, aiContextPart, aiContextParts, resourceContext, tenantContext, conversationHistory, isFirstAssistantResponse, knowledgeAuthority,
       languageTrace: { previous: previousCommunicationLanguage, detected: detectedCommunicationLanguage, resolved: resolvedCommunicationLanguage, persisted: resolvedCommunicationLanguage, mediaSource: mediaResponse?.source ?? null, mediaResponseLanguage: mediaResponse?.language ?? null },
       duplicate: false,
-      shouldInvokeAi: conversation.status === 'open' && conversation.handling_mode === 'AI',
+      shouldInvokeAi: conversation.status === 'open' && conversation.handling_mode === 'AI' && Boolean(knowledgeAuthority),
       handlingVersion: conversation.handling_version,
     };
   } catch (error) {

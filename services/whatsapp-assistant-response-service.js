@@ -8,6 +8,7 @@ export async function persistAndDeliverWhatsAppAssistant({
   tenantId,
   conversationId,
   handlingVersion,
+  knowledgeAuthority,
   recipient,
   content,
   persistAssistantResponse,
@@ -20,6 +21,7 @@ export async function persistAndDeliverWhatsAppAssistant({
     conversationId,
     content,
     handlingVersion,
+    ...(knowledgeAuthority ? { knowledgeAuthority } : {}),
   });
   if (!persisted?.delivered) return { delivered: false, message: persisted?.message ?? null };
 

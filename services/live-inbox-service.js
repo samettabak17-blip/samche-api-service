@@ -11,6 +11,7 @@ import { createConversationResource } from './conversation-resource-service.js';
 import { createConversationResourceStorage } from './conversation-resource-storage.js';
 import { buildConversationStorageKey, ConversationResourceValidationError, validateConversationUpload } from './conversation-resource-validation.js';
 import { normalizeOperatorVoiceNote, OperatorVoiceNormalizationError } from './operator-voice-normalization-service.js';
+import { isSameKnowledgeAuthority, resolveConversationKnowledgeAuthority } from './knowledge-authority-service.js';
 
 export class ConversationOperationError extends Error {
   constructor(status, message, code = 'CONVERSATION_OPERATION_FAILED') {
@@ -152,6 +153,13 @@ export async function persistSamcheguideInbound({ externalSessionId, content, id
       content,
       idempotencyKey,
     });
+    const knowledgeAuthority = customerMessage?.authority_assistant_id === integration.assistant_id
+      && customerMessage?.knowledge_authority_version !== null
+      ? {
+        assistantId: customerMessage.authority_assistant_id,
+        version: BigInt(customerMessage.knowledge_authority_version),
+      }
+      : null;
 
     if (!customerMessage && idempotencyKey) {
       await client.query('COMMIT');
@@ -184,8 +192,9 @@ export async function persistSamcheguideInbound({ externalSessionId, content, id
       conversation,
       customerMessage,
       duplicate: false,
-      shouldInvokeAi: conversation.status === 'open' && conversation.handling_mode === 'AI',
+      shouldInvokeAi: conversation.status === 'open' && conversation.handling_mode === 'AI' && Boolean(knowledgeAuthority),
       handlingVersion: conversation.handling_version,
+      knowledgeAuthority,
     };
   } catch (error) {
     await client.query('ROLLBACK');
@@ -195,7 +204,7 @@ export async function persistSamcheguideInbound({ externalSessionId, content, id
   }
 }
 
-export async function persistAssistantResponseIfCurrent({ tenantId, conversationId, content, handlingVersion, database = pool }) {
+export async function persistAssistantResponseIfCurrent({ tenantId, conversationId, content, handlingVersion, knowledgeAuthority = null, database = pool }) {
   const client = await database.connect();
   let operatorSendStage = 'BEGIN_TRANSACTION';
   const traceStage = (stage) => {
@@ -212,6 +221,14 @@ export async function persistAssistantResponseIfCurrent({ tenantId, conversation
     if (!conversation || conversation.status !== 'open' || conversation.handling_mode !== 'AI' || conversation.handling_version !== handlingVersion) {
       await client.query('COMMIT');
       return { delivered: false };
+    }
+
+    if (knowledgeAuthority) {
+      const currentKnowledgeAuthority = await resolveConversationKnowledgeAuthority(client, { tenantId, conversationId });
+      if (!isSameKnowledgeAuthority(currentKnowledgeAuthority, knowledgeAuthority)) {
+        await client.query('COMMIT');
+        return { delivered: false, reason: 'KNOWLEDGE_AUTHORITY_CHANGED' };
+      }
     }
 
     traceStage('ASSISTANT_PERSIST_STARTED');
