@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import test from 'node:test';
 
-import { createApiClient, createNonReadyEvidenceSource, querySourceEvidence } from '../scripts/staging-task6-e2e.js';
+import { createApiClient, createNonReadyEvidenceSource, normalizeStagingRecipient, querySourceEvidence } from '../scripts/staging-task6-e2e.js';
 
 async function withServer(handler, run) {
   const server = createServer(handler);
@@ -93,4 +93,11 @@ test('non-ready evidence fixture remains marker-owned, assigned, and PROCESSING'
   assert.match(calls[1].sql, /knowledge_source_assistants/);
   assert.match(calls[2].sql, /INSERT INTO knowledge_chunks/);
   assert.deepEqual(calls[0].params.slice(0, 2), ['tenant-a', 'TASK6_E2E_123_1 non-ready evidence']);
+});
+
+test('staging recipient accepts only canonical digits with an optional leading plus', () => {
+  assert.equal(normalizeStagingRecipient('+971501234567'), '971501234567');
+  assert.equal(normalizeStagingRecipient('971501234567'), '971501234567');
+  assert.throws(() => normalizeStagingRecipient('+971 50 123 4567'), /TASK6_E2E_WHATSAPP_RECIPIENT_INVALID/);
+  assert.throws(() => normalizeStagingRecipient('customer-number'), /TASK6_E2E_WHATSAPP_RECIPIENT_INVALID/);
 });

@@ -91,6 +91,12 @@ function assertCondition(condition, code) {
   if (!condition) throw new Error(code);
 }
 
+export function normalizeStagingRecipient(value) {
+  const recipient = String(value ?? '');
+  if (!/^\+?\d{7,20}$/.test(recipient)) throw new Error('TASK6_E2E_WHATSAPP_RECIPIENT_INVALID');
+  return recipient.replace(/^\+/, '');
+}
+
 function matchesFor(preview, sourceId) {
   return (preview?.preview?.matches ?? []).filter((match) => match.sourceId === sourceId);
 }
@@ -346,9 +352,8 @@ async function main() {
     await waitReady(adminApi, database, sharedTenantId, shared.source.id);
     for (const mapping of Object.values(mappings)) assertCondition(matchesFor(await retrieval(adminApi, sharedTenantId, mapping.assistant_id, channelMarker), shared.source.id).length > 0, 'TASK6_E2E_CHANNEL_RETRIEVAL_SCOPE_FAILED');
 
-    const recipient = process.env.STAGING_WHATSAPP_E2E_RECIPIENT;
+    const recipient = normalizeStagingRecipient(process.env.STAGING_WHATSAPP_E2E_RECIPIENT);
     const channelStartedAt = new Date().toISOString();
-    assertCondition(/^\d{7,20}$/.test(recipient), 'TASK6_E2E_WHATSAPP_RECIPIENT_INVALID');
     const webhookBody = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: marker, changes: [{ field: 'messages', value: { messaging_product: 'whatsapp', metadata: { phone_number_id: process.env.STAGING_WHATSAPP_PHONE_ID }, contacts: [{ wa_id: recipient, profile: { name: 'Task 6 E2E' } }], messages: [{ from: recipient, id: `wamid.${marker}`, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: `What protocol does ${channelMarker} identify?` } }] } }] }] });
     const signature = `sha256=${crypto.createHmac('sha256', process.env.STAGING_WHATSAPP_APP_SECRET).update(webhookBody).digest('hex')}`;
     await safeFetchJson('/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'x-hub-signature-256': signature }, body: webhookBody });
