@@ -43,7 +43,7 @@ import { runMigrations } from "./migrations/runMigrations.js";
 import { createOpenAIEmbedder } from "./services/knowledge-intelligence-service.js";
 import { startKnowledgeProcessingWorker } from "./services/knowledge-source-processing-service.js";
 import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from "./services/knowledge-runtime-context-service.js";
-import { resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
+import { buildTenantRuntimeSystemInstruction, resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
 import { isSameKnowledgeAuthority, resolveAssistantKnowledgeAuthority } from "./services/knowledge-authority-service.js";
 import { filterProviderMemoryByAuthority, stampProviderMemoryEntry } from "./services/channel-knowledge-authority-memory.js";
 import { configuredPublicWebChatSessionSecret, issuePublicWebChatSession, PublicWebChatSessionError, verifyPublicWebChatSession } from "./services/public-web-chat-session.js";
@@ -1030,8 +1030,17 @@ app.post("/api/chat", async (req, res) => {
     }));
 
     let webChatRuntimeKnowledge = null;
+    let webChatRuntimePersona = null;
     if (webChatIntegration) {
       try {
+        webChatRuntimePersona = await resolveTenantRuntimePersona({
+          database: pool,
+          tenantId: webChatIntegration.tenant_id,
+          assistantId: webChatIntegration.assistant_id,
+        });
+        if (!webChatRuntimePersona.available) {
+          return res.status(503).json({ error: 'Web Chat assistant configuration is temporarily unavailable.' });
+        }
         webChatRuntimeKnowledge = await resolveAssistantRuntimeKnowledgeContext({
           database: pool,
           embed: knowledgeEmbedder,
@@ -1410,7 +1419,13 @@ If the user already provided sector info, NEVER ask again.`
       },
       ...cleanMemory
     ];
-    if (webChatRuntimeKnowledge) {
+    if (webChatIntegration && webChatRuntimePersona) {
+      messages[0].content = buildTenantRuntimeSystemInstruction({
+        persona: webChatRuntimePersona,
+        knowledgeContext: webChatRuntimeKnowledge?.knowledgeContext ?? '',
+        channelRules: 'Return safe HTML suitable for Web Chat. Do not reveal internal metadata.',
+      });
+    } else if (webChatRuntimeKnowledge) {
       messages[0].content = appendRuntimeKnowledgeToSystemInstruction(messages[0].content, webChatRuntimeKnowledge);
     }
 
