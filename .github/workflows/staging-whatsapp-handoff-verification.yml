@@ -53,6 +53,7 @@ jobs:
           node --check test/whatsappAuthoritativePolicy.test.js
           node --check test/whatsappGreetingOnlyPolicy.test.js
           node --check test/whatsappDeterministicSocialResponse.test.js
+          node --check test/whatsappSupplementaryKnowledgeAssignment.test.js
           node --check test/conversationCommunicationLanguage.test.js
           node --check services/human-support-intent.js
           node --check services/telegram-live-support-status.js
@@ -79,6 +80,7 @@ jobs:
           test/whatsappGreetingOnlyPolicy.test.js
           test/whatsappDeterministicSocialResponse.test.js
           test/whatsappDeterministicTemplateParity.test.js
+          test/whatsappSupplementaryKnowledgeAssignment.test.js
           test/conversationCommunicationLanguage.test.js
           test/humanSupportService.test.js
           test/humanSupportAcknowledgementAuditSchema.test.js

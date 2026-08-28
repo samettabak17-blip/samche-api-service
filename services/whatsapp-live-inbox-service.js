@@ -69,6 +69,54 @@ export async function resolveWhatsAppIntegration(client, phoneNumberId) {
   return integration;
 }
 
+export async function loadWhatsAppSupplementaryKnowledge(client, { tenantId, assistantId }) {
+  const result = await client.query(
+    `SELECT document.content
+       FROM knowledge_base_documents document
+      WHERE document.tenant_id = $1
+        AND document.status = 'active'
+        AND document.enabled = TRUE
+        AND (
+          (
+            document.content_hash IS NOT NULL
+            AND document.processing_status = 'READY'
+            AND document.indexing_status = 'READY'
+            AND EXISTS (
+              SELECT 1
+                FROM knowledge_chunks chunk
+               WHERE chunk.tenant_id = document.tenant_id
+                 AND chunk.source_id = document.id
+                 AND chunk.is_active = TRUE
+                 AND chunk.index_status = 'READY'
+            )
+            AND EXISTS (
+              SELECT 1
+                FROM knowledge_source_assistants assignment
+               WHERE assignment.tenant_id = document.tenant_id
+                 AND assignment.source_id = document.id
+                 AND assignment.assistant_id = $2
+            )
+          )
+          OR (
+            document.content_hash IS NULL
+            AND NOT EXISTS (
+              SELECT 1
+                FROM knowledge_chunks chunk
+               WHERE chunk.tenant_id = document.tenant_id
+                 AND chunk.source_id = document.id
+                 AND chunk.is_active = TRUE
+                 AND chunk.index_status = 'READY'
+            )
+            AND (document.assistant_id IS NULL OR document.assistant_id = $2)
+          )
+        )
+      ORDER BY document.updated_at DESC, document.id DESC
+      LIMIT 6`,
+    [tenantId, assistantId],
+  );
+  return result.rows.map((row) => row.content);
+}
+
 const EXPLICIT_RESOURCE_REFERENCE = /(az önce gönderdiğim|yukarıdaki|bu\s+(?:pdf|dosya|belge|görsel)|(?:pdf|dosya|belge|görsel)(?:deki|daki|yi|yı|nin|ın|in|un)|this\s+(?:pdf|file|document|image)|the\s+(?:previous|above)\s+(?:pdf|file|document|image))/i;
 const IMAGE_RESOURCE_REFERENCE = /\b(görsel|resim|ekran görüntüsü|image|screenshot|photo)\b/i;
 const DOCUMENT_RESOURCE_REFERENCE = /\b(pdf|dosya|belge|document|file)\b/i;
@@ -374,22 +422,16 @@ export async function persistWhatsAppInbound({
        ) AS has_assistant_response`,
       [integration.tenant_id, conversationId]
     );
-    const knowledgeResult = await client.query(
-      `SELECT content
-         FROM knowledge_base_documents
-        WHERE tenant_id = $1
-          AND status = 'active'
-          AND (assistant_id IS NULL OR assistant_id = $2)
-        ORDER BY updated_at DESC, id DESC
-        LIMIT 6`,
-      [integration.tenant_id, integration.assistant_id]
-    );
+    const supplementaryKnowledge = await loadWhatsAppSupplementaryKnowledge(client, {
+      tenantId: integration.tenant_id,
+      assistantId: integration.assistant_id,
+    });
     const tenantContext = {
       companyName: integration.tenant_name,
       assistantName: integration.assistant_name,
       systemPrompt: integration.assistant_system_prompt,
       deterministicTemplates: integration.assistant_whatsapp_response_templates,
-      knowledge: knowledgeResult.rows.map((row) => row.content),
+      knowledge: supplementaryKnowledge,
       communicationLanguage: resolvedCommunicationLanguage,
       mediaResponseLanguage: mediaResponse?.language ?? resolvedCommunicationLanguage,
     };
