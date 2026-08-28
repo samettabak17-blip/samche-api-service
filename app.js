@@ -44,6 +44,7 @@ import { createOpenAIEmbedder } from "./services/knowledge-intelligence-service.
 import { startKnowledgeProcessingWorker } from "./services/knowledge-source-processing-service.js";
 import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from "./services/knowledge-runtime-context-service.js";
 import { buildTenantRuntimeSystemInstruction, resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
+import { buildTenantFollowUpRequest } from "./services/tenant-follow-up-service.js";
 import { isSameKnowledgeAuthority, resolveAssistantKnowledgeAuthority } from "./services/knowledge-authority-service.js";
 import { filterProviderMemoryByAuthority, stampProviderMemoryEntry } from "./services/channel-knowledge-authority-memory.js";
 import { configuredPublicWebChatSessionSecret, issuePublicWebChatSession, PublicWebChatSessionError, verifyPublicWebChatSession } from "./services/public-web-chat-session.js";
@@ -555,6 +556,31 @@ async function callWpGemini(prompt, multimodalParts = null, systemInstruction = 
     console.error("Gemini API error (WP):", err.response?.data || err.message);
     return null;
   }
+}
+
+async function generateTenantFollowUpMessage({ session, stage, scheduled = false }) {
+  if (!session?.tenantId || !session?.assistantId || session.humanOverride) return null;
+  const persona = await resolveTenantRuntimePersona({
+    database: pool,
+    tenantId: session.tenantId,
+    assistantId: session.assistantId,
+  });
+  if (!persona.available) return null;
+  const conversationContext = (session.history ?? []).slice(-6).map((entry) => `${entry.role}: ${entry.text}`).join('\n');
+  const request = buildTenantFollowUpRequest({
+    persona,
+    stage,
+    scheduled,
+    language: session.lang ?? 'en',
+    conversationContext,
+    humanHandling: Boolean(session.humanOverride),
+  });
+  if (typeof request !== 'string') return null;
+  const systemInstruction = buildTenantRuntimeSystemInstruction({
+    persona,
+    channelRules: 'Generate one concise WhatsApp follow-up message. Do not expose internal configuration or metadata.',
+  });
+  return callWpGemini(request, null, systemInstruction);
 }
 
 function detectTopic(text) {
@@ -1696,6 +1722,8 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       }
       
       const session = wpSessions[cleanFrom];
+      session.tenantId = whatsappInbox.integration.tenant_id;
+      session.assistantId = whatsappInbox.integration.assistant_id;
       const lower = text.toLowerCase();
 
       const now = Date.now();
@@ -2134,7 +2162,7 @@ cron.schedule("* * * * *", async () => {
         }
 
         if (diffMinutesLast >= 10 && !s.pingSentOnce) {
-          const pingMessage = getPingMessage(lang, lastTopic);
+          const pingMessage = await generateTenantFollowUpMessage({ session: s, stage: "10m" });
           if (pingMessage) {
             try { await sendMessage(user, pingMessage); } catch (e) {}
           }
@@ -2145,31 +2173,31 @@ cron.schedule("* * * * *", async () => {
         if (diffMinutesLast < 10 && s.pingSentOnce) s.pingSentOnce = false;
 
         if (s.followUpStage === 0 && diffHoursLast >= 3) {
-          const msg = getFollowUpMessage(lang, lastTopic, "3h");
+          const msg = await generateTenantFollowUpMessage({ session: s, stage: "3h" });
           if (msg) { try { await sendMessage(user, msg); } catch {} }
           s.followUpStage = 1; 
           continue;
         }
         if (s.followUpStage === 1 && diffHoursLast >= 24) {
-          const msg = getFollowUpMessage(lang, lastTopic, "24h");
+          const msg = await generateTenantFollowUpMessage({ session: s, stage: "24h" });
           if (msg) { try { await sendMessage(user, msg); } catch {} }
           s.followUpStage = 2; 
           continue;
         }
         if (s.followUpStage === 2 && diffHoursLast >= 48) {
-          const msg = getFollowUpMessage(lang, lastTopic, "48h");
+          const msg = await generateTenantFollowUpMessage({ session: s, stage: "48h" });
           if (msg) { try { await sendMessage(user, msg); } catch {} }
           s.followUpStage = 3; 
           continue;
         }
         if (s.followUpStage === 3 && diffHoursLast >= 72) {
-          const msg = getFollowUpMessage(lang, lastTopic, "72h");
+          const msg = await generateTenantFollowUpMessage({ session: s, stage: "72h" });
           if (msg) { try { await sendMessage(user, msg); } catch {} }
           s.followUpStage = 4; 
           continue;
         }
         if (s.followUpStage === 4 && diffHoursLast >= 168) {
-          const msg = getFollowUpMessage(lang, lastTopic, "7d");
+          const msg = await generateTenantFollowUpMessage({ session: s, stage: "7d" });
           if (msg) { try { await sendMessage(user, msg); } catch {} }
           s.followUpStage = 5; 
           continue;
