@@ -13,9 +13,12 @@ on:
       - migrations/022_knowledge_generation_provenance.sql
       - migrations/023_web_chat_channel_integration.sql
       - migrations/024_knowledge_authority_epoch.sql
+      - migrations/026_tenant_persona_v2.sql
       - routes/knowledge-*.js
       - services/knowledge-*.js
       - services/channel-knowledge-authority-memory.js
+      - services/tenant-runtime-persona-service.js
+      - services/tenant-follow-up-service.js
       - test/knowledgeAuthorityService.test.js
       - test/channelKnowledgeAuthorityMemory.test.js
       - tests/knowledge-*.test.js
@@ -46,6 +49,10 @@ jobs:
           tests/knowledge-*.test.js
           test/knowledgeAuthorityService.test.js
           test/channelKnowledgeAuthorityMemory.test.js
+          test/whatsappTenantPersonaIsolation.test.js
+          test/tenantFollowUpService.test.js
+          tests/tenant-runtime-persona-service.test.js
+          tests/knowledge-runtime-samcheguide-integration.test.js
 
   postgres:
     if: github.ref == 'refs/heads/staging'
@@ -125,9 +132,9 @@ jobs:
                 knowledge_base_documents: ['source_type', 'storage_key', 'processing_status', 'indexing_status', 'extraction_hash', 'extraction_method', 'extracted_at'],
                 knowledge_gaps: ['dedupe_key', 'signal_type', 'last_detected_at'],
                 business_profiles: ['approved_version_id', 'active_version_id', 'activated_by', 'activated_at'],
-                business_profile_versions: ['generation_run_id', 'activated_by', 'activated_at', 'superseded_by_version_id'],
-                assistant_knowledge_recommendations: ['generation_run_id'],
-                assistant_configuration_versions: ['generation_run_id', 'status', 'approved_at', 'activated_at', 'supersedes_version_id'],
+                business_profile_versions: ['generation_run_id', 'schema_version', 'activated_by', 'activated_at', 'superseded_by_version_id'],
+                assistant_knowledge_recommendations: ['generation_run_id', 'schema_version'],
+                assistant_configuration_versions: ['generation_run_id', 'schema_version', 'status', 'approved_at', 'activated_at', 'supersedes_version_id'],
                 ai_assistants: ['active_configuration_version_id', 'knowledge_authority_version'],
                 conversation_messages: ['authority_assistant_id', 'knowledge_authority_version']
               };
