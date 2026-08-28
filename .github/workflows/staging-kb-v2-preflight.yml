@@ -126,13 +126,14 @@ jobs:
                 'knowledge_candidate_evidence', 'knowledge_gaps', 'knowledge_processing_jobs',
                 'knowledge_gap_signals', 'business_profiles', 'business_profile_versions',
                 'assistant_knowledge_recommendations', 'assistant_configuration_versions',
-                'knowledge_generation_runs'
+                'knowledge_generation_runs', 'business_identities',
+                'knowledge_source_business_identities', 'business_identity_source_evidence'
               ];
               const expectedColumns = {
                 knowledge_base_documents: ['source_type', 'storage_key', 'processing_status', 'indexing_status', 'extraction_hash', 'extraction_method', 'extracted_at'],
                 knowledge_gaps: ['dedupe_key', 'signal_type', 'last_detected_at'],
-                business_profiles: ['approved_version_id', 'active_version_id', 'activated_by', 'activated_at'],
-                business_profile_versions: ['generation_run_id', 'schema_version', 'activated_by', 'activated_at', 'superseded_by_version_id'],
+                business_profiles: ['approved_version_id', 'active_version_id', 'activated_by', 'activated_at', 'business_identity_id'],
+                business_profile_versions: ['generation_run_id', 'schema_version', 'activated_by', 'activated_at', 'superseded_by_version_id', 'source_scope', 'identity_resolution_status'],
                 assistant_knowledge_recommendations: ['generation_run_id', 'schema_version'],
                 assistant_configuration_versions: ['generation_run_id', 'schema_version', 'status', 'approved_at', 'activated_at', 'supersedes_version_id'],
                 ai_assistants: ['active_configuration_version_id', 'knowledge_authority_version'],
@@ -144,7 +145,8 @@ jobs:
                 'idx_knowledge_gap_signals_tenant_assistant',
                 'idx_assistant_configuration_versions_one_active',
                 'idx_knowledge_generation_runs_tenant_created',
-                'idx_conversation_messages_provider_authority'
+                'idx_conversation_messages_provider_authority',
+                'idx_business_identities_tenant_status', 'idx_source_business_identities_identity'
               ];
               const expectedConstraints = [
                 'fk_business_profiles_active_version', 'fk_business_profile_versions_superseded_by',
@@ -157,7 +159,8 @@ jobs:
                 'chk_ai_assistants_knowledge_authority_version',
                 'chk_conversation_messages_knowledge_authority_version',
                 'chk_conversation_messages_authority_provenance_pair',
-                'fk_conversation_messages_authority_assistant'
+                'fk_conversation_messages_authority_assistant',
+                'fk_business_profiles_identity', 'chk_business_profile_identity_resolution'
               ];
               const expectedTriggers = [
                 'trg_stamp_conversation_message_authority',

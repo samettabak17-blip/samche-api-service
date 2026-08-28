@@ -303,13 +303,15 @@ async function main() {
     assertCondition(matchesFor(await retrieval(adminApi, fixtureA.tenant.id, fixtureA.assistantA.id, candidateMarker), approvedCandidate.source.id).length > 0, 'TASK6_E2E_CANDIDATE_APPROVAL_RETRIEVAL_FAILED');
     console.log(safeResultLine('PASS', 'GAP_CANDIDATE', { status: 'APPROVED_RETRIEVABLE' }));
 
-    const profile1 = (await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/profiles/generate`, { method: 'POST', body: {} })).profile;
+    const businessIdentity = (await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/business-identities`, { method: 'POST', body: { display_name: `${marker} Company LLC` } })).business_identity;
+    const profileScope = { business_identity_id: businessIdentity.id, source_ids: [readySources[0].id, readySources[1].id] };
+    const profile1 = (await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/profiles/generate`, { method: 'POST', body: profileScope })).profile;
     await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/profiles/${profile1.id}`, { method: 'PUT', body: { profile_data: { summary: `${marker} reviewed profile one` } } });
     await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/profiles/${profile1.id}/approve`, { method: 'POST', body: {} });
     let profilePointer = await database.query('SELECT active_version_id FROM business_profiles WHERE tenant_id = $1', [fixtureA.tenant.id]);
     assertCondition(profilePointer.rows[0].active_version_id === null, 'TASK6_E2E_PROFILE_APPROVAL_ACTIVATED_RUNTIME');
     await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/profiles/${profile1.id}/activate`, { method: 'POST', body: {} });
-    const profile2 = (await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/profiles/generate`, { method: 'POST', body: {} })).profile;
+    const profile2 = (await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/profiles/generate`, { method: 'POST', body: profileScope })).profile;
     await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/profiles/${profile2.id}`, { method: 'PUT', body: { profile_data: { summary: `${marker} reviewed profile two` } } });
     await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/profiles/${profile2.id}/approve`, { method: 'POST', body: {} });
     profilePointer = await database.query('SELECT active_version_id FROM business_profiles WHERE tenant_id = $1', [fixtureA.tenant.id]);
@@ -323,7 +325,7 @@ async function main() {
     console.log(safeResultLine('PASS', 'BUSINESS_PROFILE_LIFECYCLE', { status: 'APPROVED_ACTIVE_ROLLBACK' }));
 
     async function generateConfiguration(sequence) {
-      const recommendation = (await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/assistants/${fixtureA.assistantA.id}/recommendations/generate`, { method: 'POST', body: {} })).recommendation;
+      const recommendation = (await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/assistants/${fixtureA.assistantA.id}/recommendations/generate`, { method: 'POST', body: { business_profile_version_id: profile1.id } })).recommendation;
       await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/assistants/${fixtureA.assistantA.id}/recommendations/${recommendation.id}/approve`, { method: 'POST', body: {} });
       const configuration = (await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/assistants/${fixtureA.assistantA.id}/configurations/generate`, { method: 'POST', body: { recommendation_id: recommendation.id } })).configuration;
       await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/assistants/${fixtureA.assistantA.id}/configurations/${configuration.id}`, { method: 'PUT', body: { configuration_data: { instruction: `${marker} configuration ${sequence}` } } });

@@ -79,13 +79,13 @@ export function createTxtFixture(marker) {
   const semanticMarker = `${marker}_TXT`;
   return {
     filename: 'task6-e2e.txt', mimeType: 'text/plain', semanticMarker,
-    bytes: Buffer.from(`Task 6 staging acceptance fact: ${semanticMarker} identifies the cedar lighthouse protocol.\n`, 'utf8'),
+    bytes: Buffer.from(`Company identity: ${marker} Company LLC. Task 6 staging acceptance fact: ${semanticMarker} identifies the cedar lighthouse protocol.\n`, 'utf8'),
   };
 }
 
 export function createPdfFixture(marker) {
   const semanticMarker = `${marker}_PDF`;
-  const text = `Task 6 staging acceptance fact: ${semanticMarker} identifies the amber compass protocol.`;
+  const text = `Company identity: ${marker} Company LLC. Task 6 staging acceptance fact: ${semanticMarker} identifies the amber compass protocol.`;
   const stream = `BT\n/F1 12 Tf\n72 720 Td\n(${safePdfText(text)}) Tj\nET`;
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R >>',
@@ -109,7 +109,7 @@ export function createPdfFixture(marker) {
 
 export async function createDocxFixture(marker) {
   const semanticMarker = `${marker}_DOCX`;
-  const text = `Task 6 staging acceptance fact: ${semanticMarker} identifies the silver orchard protocol.`;
+  const text = `Company identity: ${marker} Company LLC. Task 6 staging acceptance fact: ${semanticMarker} identifies the silver orchard protocol.`;
   const archive = new JSZip();
   archive.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
   archive.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');

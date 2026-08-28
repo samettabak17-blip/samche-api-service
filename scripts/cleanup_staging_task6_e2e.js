@@ -9,6 +9,7 @@ const DELETE_TABLES = [
   'knowledge_candidate_evidence', 'knowledge_gap_signals', 'knowledge_gaps',
   'assistant_configuration_versions', 'assistant_knowledge_recommendations',
   'business_profile_versions', 'business_profiles', 'knowledge_generation_runs',
+  'business_identity_source_evidence', 'knowledge_source_business_identities', 'business_identities',
   'knowledge_candidates', 'knowledge_source_assistants', 'knowledge_chunks',
   'knowledge_processing_jobs', 'knowledge_base_documents',
   'crm_lead_analyses', 'crm_activities', 'crm_deals', 'crm_leads',
