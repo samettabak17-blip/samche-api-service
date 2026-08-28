@@ -24,6 +24,8 @@ const ASSISTANT_RECOMMENDATION_FIELDS = Object.freeze([
   'recommendation_rationale', 'evidence_gaps',
 ]);
 
+const BUSINESS_IDENTITY_ANALYSIS_FIELDS = Object.freeze(['detected_identity', 'confidence', 'evidence']);
+
 export class KnowledgeGenerationError extends Error {
   constructor(code, message, options) {
     super(message, options);
@@ -179,6 +181,15 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
     provider: config.provider,
     model: config.model,
     generateBusinessProfile: ({ prompt }) => generate({ prompt, fields: BUSINESS_PROFILE_FIELDS, validate: validateBusinessProfileOutput }),
+    generateBusinessIdentityAnalysis: ({ source }) => generate({
+      prompt: [
+        'Extract the legal or clearly presented company identity from this single tenant source.',
+        'Do not infer a company from platform branding. Return detected_identity, confidence as a decimal string from 0 to 1, and a short source-derived evidence statement.',
+        `SOURCE ${source.id} — ${source.title}\n${String(source.content).slice(0, 12000)}`,
+      ].join('\n\n'),
+      fields: BUSINESS_IDENTITY_ANALYSIS_FIELDS,
+      validate: (value) => validateOutput(value, BUSINESS_IDENTITY_ANALYSIS_FIELDS),
+    }),
     generateAssistantRecommendation: ({ prompt }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput }),
     generateAssistantConfiguration: ({ prompt }) => generate({ prompt, fields: ASSISTANT_CONFIGURATION_FIELDS, validate: validateAssistantConfigurationOutput }),
   });
