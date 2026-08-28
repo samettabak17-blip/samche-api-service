@@ -59,6 +59,7 @@ jobs:
           node --check test/knowledgeAuthorityService.test.js
           node --check test/channelKnowledgeAuthorityMemory.test.js
           node --check test/knowledgeAuthorityEpochPostgres.test.js
+          node --check test/knowledgeConfigurationPostgres.test.js
           node --check test/conversationCommunicationLanguage.test.js
           node --check services/human-support-intent.js
           node --check services/telegram-live-support-status.js
@@ -79,6 +80,13 @@ jobs:
           DATABASE_SSL: 'false'
           JWT_SECRET: workflow-test-only-not-for-runtime
         run: node --test test/knowledgeAuthorityEpochPostgres.test.js
+
+      - name: Run knowledge lifecycle PostgreSQL locking contract
+        env:
+          DATABASE_URL: postgresql://workflow-test:workflow-test@127.0.0.1:5432/workflow_test
+          DATABASE_SSL: 'false'
+          JWT_SECRET: workflow-test-only-not-for-runtime
+        run: node --test test/knowledgeConfigurationPostgres.test.js
 
       - name: Run WhatsApp operator delivery and handoff regressions
         env:
