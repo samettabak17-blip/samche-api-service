@@ -11,7 +11,7 @@ const ARABIC_GREETING_OR_SOCIAL = /^[\u0600-\u06FF\s،؟!.]+$/u;
  */
 const LANGUAGE_EVIDENCE = [
   { code: 'tr', terms: ['şirket', 'kurmak', 'istiyorum', 'hakkında', 'fiyatı', 'nedir', 'maliyetleri', 'vize'] },
-  { code: 'en', terms: ['the', 'and', 'with', 'company', 'setup', 'costs', 'visa', 'options', 'please', 'explain'] },
+  { code: 'en', terms: ['the', 'and', 'with', 'company', 'setup', 'costs', 'visa', 'options', 'please', 'explain', 'does', 'document'] },
   { code: 'es', terms: ['quiero', 'obtener', 'trabajador', 'independiente', 'responde', 'español', 'empresa', 'visado', 'visa', 'costes'] },
   { code: 'fr', terms: ['je', 'souhaite', 'créer', 'entreprise', 'répondez', 'français', 'visa', 'coûts', 'options'] },
   { code: 'de', terms: ['ich', 'möchte', 'kosten', 'firmengründung', 'unternehmen', 'visum', 'bitte', 'deutsch'] },
@@ -81,7 +81,7 @@ export function inferConservativeWhatsAppLanguage(content) {
   const normalized = text.toLocaleLowerCase('tr-TR');
   if (
     TURKISH_GREETING.test(normalized)
-    || /[ığüşöçİĞÜŞÖÇ]/u.test(text)
+    || /[ığşİĞŞ]/u.test(text)
     || /\b(şirket|kurmak|lazım|istiyorum|hakkında|fiyatı|nedir)\b/u.test(normalized)
   ) return 'tr';
   if (
