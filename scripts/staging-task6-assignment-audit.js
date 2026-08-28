@@ -13,6 +13,20 @@ function required(name) {
   return value;
 }
 
+async function fetchWithRetry(url, options) {
+  let response;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      response = await fetch(url, { ...options, signal: AbortSignal.timeout(120_000) });
+      if (response.status !== 502 && response.status !== 503 && response.status !== 504) return response;
+    } catch {
+      if (attempt === 2) throw new Error('TASK6_ASSIGNMENT_AUDIT_PREVIEW_UNAVAILABLE');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000 * (attempt + 1)));
+  }
+  return response;
+}
+
 async function main() {
   const sourceTitle = required('TASK6_AUDIT_SOURCE_TITLE');
   const marker = required('TASK6_AUDIT_MARKER');
@@ -88,22 +102,10 @@ async function main() {
           WHERE tenant_id = $1 AND assistant_id = $2 AND recommendation_data::text ILIKE $3) AS recommendation_count`,
       [source.tenant_id, mapping.assistant_id, `%${marker}%`],
     );
-
-    stage = 'RETRIEVAL_PREVIEW';
-    const response = await fetch(`${API_ORIGIN}/api/v1/tenants/${source.tenant_id}/knowledge-intelligence/assistants/${mapping.assistant_id}/retrieval-preview`, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${required('STAGING_ADMIN_TOKEN')}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ query: 'What is the Enterprise Support Verification Code?' }),
-      signal: AbortSignal.timeout(120_000),
-    });
-    if (!response.ok) throw new Error(`TASK6_ASSIGNMENT_AUDIT_PREVIEW_HTTP_${response.status}`);
-    const preview = await response.json();
-    const previewIncludesSource = (preview?.preview?.matches ?? []).some((match) => match.sourceId === source.id);
     const artifact = artifacts.rows[0];
-    console.log(safeResultLine('PASS', 'ASSIGNMENT_AUDIT', {
+    console.log(safeResultLine('PASS', 'ASSIGNMENT_DB_EVIDENCE', {
       assignment_count: assignments.rowCount,
       whatsapp_assignment_present: assignments.rows.some((row) => row.assistant_id === mapping.assistant_id),
-      retrieval_preview_includes_source: previewIncludesSource,
       legacy_runtime_includes_source: legacyRuntime.rowCount === 1,
       fresh_history_prompt_would_include_source: legacyRuntime.rowCount === 1,
       marker_chunk_count: chunks.rows[0].count,
@@ -115,6 +117,19 @@ async function main() {
       source_indexing_status: source.indexing_status,
       source_enabled: source.enabled,
       legacy_assistant_id_is_null: source.assistant_id === null,
+    }));
+
+    stage = 'RETRIEVAL_PREVIEW';
+    const response = await fetchWithRetry(`${API_ORIGIN}/api/v1/tenants/${source.tenant_id}/knowledge-intelligence/assistants/${mapping.assistant_id}/retrieval-preview`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${required('STAGING_ADMIN_TOKEN')}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'What is the Enterprise Support Verification Code?' }),
+    });
+    if (!response.ok) throw new Error(`TASK6_ASSIGNMENT_AUDIT_PREVIEW_HTTP_${response.status}`);
+    const preview = await response.json();
+    const previewIncludesSource = (preview?.preview?.matches ?? []).some((match) => match.sourceId === source.id);
+    console.log(safeResultLine('PASS', 'ASSIGNMENT_API_EVIDENCE', {
+      retrieval_preview_includes_source: previewIncludesSource,
     }));
     await client.query('ROLLBACK');
   } catch (error) {
