@@ -88,6 +88,18 @@ test('approving a profile records historical approval without activating it', as
   assert.ok(calls.some(({ sql }) => /SET status = 'APPROVED'/.test(sql)));
   assert.ok(calls.some(({ sql }) => /approved_version_id/.test(sql)));
   assert.equal(calls.some(({ sql }) => /active_version_id/.test(sql)), false);
+  assert.match(calls.find(({ sql }) => /UPDATE business_profile_versions/.test(sql)).sql, /identity_resolution_status <> 'IDENTITY_RESOLUTION_REQUIRED'/i);
+});
+
+test('unresolved identity conflict cannot be approved', async () => {
+  const database = { query: async () => ({ rows: [] }) };
+  await assert.rejects(approveBusinessProfileVersion({ database, tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', versionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', approvedBy: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }), (error) => error.code === 'KNOWLEDGE_PROFILE_NOT_REVIEWABLE');
+});
+
+test('unresolved identity conflict cannot be activated', async () => {
+  const database = { query: async (sql) => /SELECT profile_id/.test(sql) ? { rows: [{ profile_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', status: 'APPROVED', identity_resolution_status: 'IDENTITY_RESOLUTION_REQUIRED' }] } : { rows: [] } };
+  const { activateBusinessProfileVersion } = await import('../services/knowledge-configuration-service.js');
+  await assert.rejects(activateBusinessProfileVersion({ database, tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', versionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', activatedBy: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }), (error) => error.code === 'KNOWLEDGE_PROFILE_IDENTITY_UNRESOLVED');
 });
 
 test('edits only NEEDS_REVIEW configuration data without activating it', async () => {

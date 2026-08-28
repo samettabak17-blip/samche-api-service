@@ -94,6 +94,7 @@ export async function approveBusinessProfileVersion({ database, tenantId, versio
           SET status = 'APPROVED', reviewed_by = $3, reviewed_at = CURRENT_TIMESTAMP
         WHERE id = $1 AND tenant_id = $2
           AND status IN ('DRAFT', 'NEEDS_REVIEW', 'APPROVED')
+          AND identity_resolution_status <> 'IDENTITY_RESOLUTION_REQUIRED'
         RETURNING profile_id, id, status`,
       [versionId, tenantId, approvedBy]
     );
@@ -210,13 +211,16 @@ export async function activateBusinessProfileVersion({ database, tenantId, versi
 
   return transaction(database, async (client) => {
     const versionResult = await client.query(
-      `SELECT profile_id, status
+      `SELECT profile_id, status, identity_resolution_status
          FROM business_profile_versions
         WHERE id = $1 AND tenant_id = $2
         FOR UPDATE`,
       [versionId, tenantId]
     );
     const version = versionResult.rows[0];
+    if (version?.identity_resolution_status === 'IDENTITY_RESOLUTION_REQUIRED') {
+      throw new KnowledgeConfigurationError('KNOWLEDGE_PROFILE_IDENTITY_UNRESOLVED', 'Business Profile identity conflict must be resolved before activation');
+    }
     if (!version || version.status !== 'APPROVED') {
       throw new KnowledgeConfigurationError('KNOWLEDGE_PROFILE_NOT_APPROVED', 'Only an approved Business Profile can be activated');
     }

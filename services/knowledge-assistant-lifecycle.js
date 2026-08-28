@@ -24,13 +24,14 @@ async function generate({ database, provider, tenantId, requestedBy, targetType,
 export async function generateAssistantRecommendation({ database, provider, tenantId, assistantId, requestedBy }) {
   requireProvider(database, provider, 'generateAssistantRecommendation'); uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID'); uuid(assistantId, 'KNOWLEDGE_ASSISTANT_INVALID'); uuid(requestedBy, 'KNOWLEDGE_REQUESTER_INVALID');
   const context = await database.query(
-    `SELECT assistant.name AS assistant_name, profile_version.id AS profile_version_id, profile_version.profile_data
+    `SELECT assistant.name AS assistant_name, profile_version.id AS profile_version_id, profile.business_identity_id,
+            profile_version.source_scope, profile_version.profile_data
        FROM ai_assistants assistant
        JOIN business_profiles profile ON profile.tenant_id = assistant.tenant_id AND profile.active_version_id IS NOT NULL
        JOIN business_profile_versions profile_version ON profile_version.id = profile.active_version_id AND profile_version.tenant_id = profile.tenant_id AND profile_version.status = 'APPROVED'
       WHERE assistant.id = $1 AND assistant.tenant_id = $2 AND assistant.status = 'active'`, [assistantId, tenantId]);
   if (!context.rows[0]) throw new KnowledgeAssistantLifecycleError('KNOWLEDGE_RECOMMENDATION_CONTEXT_NOT_FOUND', 'An active approved Business Profile is required');
-  const provenance = { profile_version_id: context.rows[0].profile_version_id, assistant_id: assistantId };
+  const provenance = { profile_version_id: context.rows[0].profile_version_id, business_identity_id: context.rows[0].business_identity_id, source_scope: context.rows[0].source_scope, assistant_id: assistantId };
   const prompt = [
     'Create an AI recommendation with schema_version 2 for the current tenant Assistant using only the ACTIVE factual Business Profile below.',
     'Never use SamChe or another tenant as a default. Do not import another tenant identity, service, price, geography, or behavior.',
@@ -49,13 +50,14 @@ export async function generateAssistantRecommendation({ database, provider, tena
 export async function generateAssistantConfigurationVersion({ database, provider, tenantId, assistantId, recommendationId, requestedBy }) {
   requireProvider(database, provider, 'generateAssistantConfiguration'); uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID'); uuid(assistantId, 'KNOWLEDGE_ASSISTANT_INVALID'); uuid(recommendationId, 'KNOWLEDGE_RECOMMENDATION_INVALID'); uuid(requestedBy, 'KNOWLEDGE_REQUESTER_INVALID');
   const context = await database.query(
-    `SELECT recommendation.recommendation_data, profile_version.id AS profile_version_id, profile_version.profile_data
+    `SELECT recommendation.recommendation_data, profile_version.id AS profile_version_id, profile.business_identity_id,
+            profile_version.source_scope, profile_version.profile_data
        FROM assistant_knowledge_recommendations recommendation
        JOIN business_profiles profile ON profile.tenant_id = recommendation.tenant_id AND profile.active_version_id IS NOT NULL
        JOIN business_profile_versions profile_version ON profile_version.id = profile.active_version_id AND profile_version.tenant_id = profile.tenant_id AND profile_version.status = 'APPROVED'
       WHERE recommendation.id = $1 AND recommendation.tenant_id = $2 AND recommendation.assistant_id = $3 AND recommendation.status = 'APPROVED'`, [recommendationId, tenantId, assistantId]);
   if (!context.rows[0]) throw new KnowledgeAssistantLifecycleError('KNOWLEDGE_CONFIGURATION_CONTEXT_NOT_FOUND', 'An approved recommendation and active Business Profile are required');
-  const provenance = { profile_version_id: context.rows[0].profile_version_id, recommendation_id: recommendationId, assistant_id: assistantId };
+  const provenance = { profile_version_id: context.rows[0].profile_version_id, business_identity_id: context.rows[0].business_identity_id, source_scope: context.rows[0].source_scope, recommendation_id: recommendationId, assistant_id: assistantId };
   const prompt = [
     'Create Assistant Configuration schema_version 2 for the current tenant from the ACTIVE factual profile and APPROVED AI recommendation only.',
     'Never use SamChe or another tenant as a default. Do not import another tenant identity, service, price, geography, or behavior.',
