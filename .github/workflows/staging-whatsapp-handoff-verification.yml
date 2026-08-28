@@ -54,6 +54,7 @@ jobs:
           node --check test/whatsappGreetingOnlyPolicy.test.js
           node --check test/whatsappDeterministicSocialResponse.test.js
           node --check test/whatsappSupplementaryKnowledgeAssignment.test.js
+          node --check tests/knowledge-authority-epoch.test.js
           node --check test/conversationCommunicationLanguage.test.js
           node --check services/human-support-intent.js
           node --check services/telegram-live-support-status.js
@@ -64,7 +65,16 @@ jobs:
           DATABASE_URL: postgresql://workflow-test:workflow-test@127.0.0.1:5432/workflow_test
           DATABASE_SSL: 'false'
           JWT_SECRET: workflow-test-only-not-for-runtime
-        run: npm run migrate
+        run: |
+          npm run migrate
+          npm run migrate
+
+      - name: Run knowledge authority PostgreSQL contract
+        env:
+          DATABASE_URL: postgresql://workflow-test:workflow-test@127.0.0.1:5432/workflow_test
+          DATABASE_SSL: 'false'
+          JWT_SECRET: workflow-test-only-not-for-runtime
+        run: node --test tests/knowledge-authority-epoch.test.js
 
       - name: Run WhatsApp operator delivery and handoff regressions
         env:
