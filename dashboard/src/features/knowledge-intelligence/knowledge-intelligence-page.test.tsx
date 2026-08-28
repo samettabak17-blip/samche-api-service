@@ -8,7 +8,7 @@ import { KnowledgeIntelligencePage } from './knowledge-intelligence-page';
 
 vi.mock('../dashboard/dashboard-api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../dashboard/dashboard-api')>();
-  return { ...actual, tenantApi: { ...actual.tenantApi, getKnowledgeOverview: vi.fn(), listAssistants: vi.fn(), listChannels: vi.fn(), listKnowledgeSources: vi.fn(), getKnowledgeSource: vi.fn(), uploadKnowledgeSource: vi.fn(), createManualKnowledgeSource: vi.fn(), assignKnowledgeSource: vi.fn(), unassignKnowledgeSource: vi.fn(), reindexKnowledgeSource: vi.fn(), archiveKnowledgeSource: vi.fn(), listKnowledgeCandidates: vi.fn(), getKnowledgeCandidateEvidence: vi.fn(), approveKnowledgeCandidate: vi.fn(), rejectKnowledgeCandidate: vi.fn(), listKnowledgeGaps: vi.fn(), getKnowledgeGapSignals: vi.fn(), createCandidateFromKnowledgeGap: vi.fn(), updateKnowledgeGapStatus: vi.fn(), listBusinessProfiles: vi.fn(), generateBusinessProfile: vi.fn(), listKnowledgeRecommendations: vi.fn(), generateKnowledgeRecommendation: vi.fn(), listAssistantConfigurations: vi.fn(), updateBusinessProfile: vi.fn(), reviewBusinessProfile: vi.fn(), activateBusinessProfile: vi.fn(), rollbackBusinessProfile: vi.fn(), reviewRecommendation: vi.fn(), generateAssistantConfiguration: vi.fn(), updateAssistantConfiguration: vi.fn(), reviewAssistantConfiguration: vi.fn(), activateAssistantConfiguration: vi.fn(), rollbackAssistantConfiguration: vi.fn(), previewKnowledgeRetrieval: vi.fn() } };
+  return { ...actual, tenantApi: { ...actual.tenantApi, getKnowledgeOverview: vi.fn(), listAssistants: vi.fn(), listChannels: vi.fn(), listKnowledgeSources: vi.fn(), getKnowledgeSource: vi.fn(), uploadKnowledgeSource: vi.fn(), createManualKnowledgeSource: vi.fn(), assignKnowledgeSource: vi.fn(), unassignKnowledgeSource: vi.fn(), reindexKnowledgeSource: vi.fn(), archiveKnowledgeSource: vi.fn(), listKnowledgeCandidates: vi.fn(), getKnowledgeCandidateEvidence: vi.fn(), approveKnowledgeCandidate: vi.fn(), rejectKnowledgeCandidate: vi.fn(), listKnowledgeGaps: vi.fn(), getKnowledgeGapSignals: vi.fn(), createCandidateFromKnowledgeGap: vi.fn(), updateKnowledgeGapStatus: vi.fn(), listBusinessIdentities: vi.fn(), createBusinessIdentity: vi.fn(), listBusinessProfiles: vi.fn(), generateBusinessProfile: vi.fn(), listKnowledgeRecommendations: vi.fn(), generateKnowledgeRecommendation: vi.fn(), listAssistantConfigurations: vi.fn(), updateBusinessProfile: vi.fn(), reviewBusinessProfile: vi.fn(), activateBusinessProfile: vi.fn(), rollbackBusinessProfile: vi.fn(), reviewRecommendation: vi.fn(), generateAssistantConfiguration: vi.fn(), updateAssistantConfiguration: vi.fn(), reviewAssistantConfiguration: vi.fn(), activateAssistantConfiguration: vi.fn(), rollbackAssistantConfiguration: vi.fn(), previewKnowledgeRetrieval: vi.fn() } };
 });
 vi.mock('../tenants/tenant-context', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../tenants/tenant-context')>();
@@ -37,9 +37,26 @@ beforeEach(() => {
   mockedApi.assignKnowledgeSource.mockResolvedValue(undefined);
   mockedApi.listKnowledgeCandidates.mockResolvedValue([]);
   mockedApi.listKnowledgeGaps.mockResolvedValue([]);
+  mockedApi.listBusinessIdentities.mockResolvedValue([]);
   mockedApi.listBusinessProfiles.mockResolvedValue([]);
   mockedApi.listKnowledgeRecommendations.mockResolvedValue([]);
   mockedApi.listAssistantConfigurations.mockResolvedValue([]);
+});
+
+it('requires a Business Identity and explicit READY source scope before generation', async () => {
+  mockedApi.listBusinessIdentities.mockResolvedValue([{ id: 'identity-meridian', display_name: 'Meridian Arc Technologies LLC', normalized_identity: 'meridian arc technologies', status: 'ACTIVE' }]);
+  mockedApi.listKnowledgeSources.mockResolvedValue([
+    { id: 'source-meridian', title: 'Meridian DOCX', source_type: 'DOCUMENT', processing_status: 'READY', indexing_status: 'READY', enabled: true },
+    { id: 'source-nova', title: 'Nova TXT', source_type: 'DOCUMENT', processing_status: 'READY', indexing_status: 'READY', enabled: true },
+  ]);
+  mockedApi.generateBusinessProfile.mockResolvedValue({ id: 'profile-a', profile_data: {}, status: 'NEEDS_REVIEW' });
+  renderPage(true, '/app/tenant-a/knowledge-base/profile');
+  await screen.findByRole('option', { name: 'Meridian Arc Technologies LLC' });
+  fireEvent.change(await screen.findByRole('combobox', { name: 'Business Identity' }), { target: { value: 'identity-meridian' } });
+  fireEvent.click(await screen.findByRole('checkbox', { name: 'Meridian DOCX' }));
+  expect(screen.getByRole('checkbox', { name: 'Nova TXT' })).not.toBeChecked();
+  fireEvent.click(screen.getByRole('button', { name: 'Generate scoped Business Profile' }));
+  await waitFor(() => expect(mockedApi.generateBusinessProfile).toHaveBeenCalledWith('tenant-a', 'identity-meridian', ['source-meridian']));
 });
 
 it('exposes upload and manual source creation with the supported formats', async () => {

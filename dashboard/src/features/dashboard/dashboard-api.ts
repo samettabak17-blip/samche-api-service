@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { AgentMessageResponse, HumanAttentionSummary, DashboardOverview, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmContact, CrmContactList, CrmDeal, CrmDealList, CrmLead, CrmLeadList, CrmOverviewMetrics, CrmPipelineStage, CrmPipelineSummary, KnowledgeDocument, KnowledgeOverview, KnowledgeSource, KnowledgeCandidate, KnowledgeCandidateEvidence, KnowledgeGap, KnowledgeGapSignal, BusinessProfileVersion, KnowledgeRecommendation, AssistantConfigurationVersion, KnowledgeRetrievalPreview, TeamMember, TenantChannel } from '../../types/api';
+import type { AgentMessageResponse, HumanAttentionSummary, DashboardOverview, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmContact, CrmContactList, CrmDeal, CrmDealList, CrmLead, CrmLeadList, CrmOverviewMetrics, CrmPipelineStage, CrmPipelineSummary, KnowledgeDocument, KnowledgeOverview, KnowledgeSource, KnowledgeCandidate, KnowledgeCandidateEvidence, KnowledgeGap, KnowledgeGapSignal, BusinessIdentity, BusinessProfileVersion, KnowledgeRecommendation, AssistantConfigurationVersion, KnowledgeRetrievalPreview, TeamMember, TenantChannel } from '../../types/api';
 
 const tenantRoot = (tenantId: string) => `/api/v1/tenants/${tenantId}`;
 export const tenantKeys = {
@@ -30,6 +30,7 @@ export const tenantKeys = {
   knowledgeCandidates: (tenantId: string) => ['tenant', tenantId, 'knowledge-intelligence', 'candidates'] as const,
   knowledgeGaps: (tenantId: string) => ['tenant', tenantId, 'knowledge-intelligence', 'gaps'] as const,
   businessProfiles: (tenantId: string) => ['tenant', tenantId, 'knowledge-intelligence', 'profiles'] as const,
+  businessIdentities: (tenantId: string) => ['tenant', tenantId, 'knowledge-intelligence', 'business-identities'] as const,
   knowledgeRecommendations: (tenantId: string, assistantId: string) => ['tenant', tenantId, 'knowledge-intelligence', 'recommendations', assistantId] as const,
   assistantConfigurations: (tenantId: string, assistantId: string) => ['tenant', tenantId, 'knowledge-intelligence', 'configurations', assistantId] as const,
 };
@@ -73,13 +74,15 @@ export const tenantApi = {
   createCandidateFromKnowledgeGap: (tenantId: string, gapId: string, title: string, content: string) => apiClient.post(`${tenantRoot(tenantId)}/knowledge-intelligence/gaps/${gapId}/candidate`, { title, content }),
   updateKnowledgeGapStatus: (tenantId: string, gapId: string, action: 'resolve' | 'dismiss' | 'reopen') => apiClient.post(`${tenantRoot(tenantId)}/knowledge-intelligence/gaps/${gapId}/${action}`, {}),
   listBusinessProfiles: (tenantId: string) => apiClient.get<{ profiles: BusinessProfileVersion[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/profiles`).then((value) => value.profiles),
-  generateBusinessProfile: (tenantId: string) => apiClient.post<{ profile: BusinessProfileVersion }>(`${tenantRoot(tenantId)}/knowledge-intelligence/profiles/generate`, {}).then((value) => value.profile),
+  listBusinessIdentities: (tenantId: string) => apiClient.get<{ business_identities: BusinessIdentity[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/business-identities`).then((value) => value.business_identities),
+  createBusinessIdentity: (tenantId: string, displayName: string) => apiClient.post<{ business_identity: BusinessIdentity }>(`${tenantRoot(tenantId)}/knowledge-intelligence/business-identities`, { display_name: displayName }).then((value) => value.business_identity),
+  generateBusinessProfile: (tenantId: string, businessIdentityId: string, sourceIds: string[]) => apiClient.post<{ profile: BusinessProfileVersion }>(`${tenantRoot(tenantId)}/knowledge-intelligence/profiles/generate`, { business_identity_id: businessIdentityId, source_ids: sourceIds }).then((value) => value.profile),
   updateBusinessProfile: (tenantId: string, versionId: string, profileData: Record<string, unknown>) => apiClient.put<{ profile: BusinessProfileVersion }>(`${tenantRoot(tenantId)}/knowledge-intelligence/profiles/${versionId}`, { profile_data: profileData }).then((value) => value.profile),
   reviewBusinessProfile: (tenantId: string, versionId: string, decision: 'approve' | 'reject') => apiClient.post<{ profile: BusinessProfileVersion }>(`${tenantRoot(tenantId)}/knowledge-intelligence/profiles/${versionId}/${decision}`, {}).then((value) => value.profile),
   activateBusinessProfile: (tenantId: string, versionId: string) => apiClient.post<{ profile: BusinessProfileVersion }>(`${tenantRoot(tenantId)}/knowledge-intelligence/profiles/${versionId}/activate`, {}).then((value) => value.profile),
   rollbackBusinessProfile: (tenantId: string, versionId: string) => apiClient.post<{ profile: BusinessProfileVersion }>(`${tenantRoot(tenantId)}/knowledge-intelligence/profiles/${versionId}/rollback`, {}).then((value) => value.profile),
   listKnowledgeRecommendations: (tenantId: string, assistantId: string) => apiClient.get<{ recommendations: KnowledgeRecommendation[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/assistants/${assistantId}/recommendations`).then((value) => value.recommendations),
-  generateKnowledgeRecommendation: (tenantId: string, assistantId: string) => apiClient.post(`${tenantRoot(tenantId)}/knowledge-intelligence/assistants/${assistantId}/recommendations/generate`, {}),
+  generateKnowledgeRecommendation: (tenantId: string, assistantId: string, businessProfileVersionId: string) => apiClient.post(`${tenantRoot(tenantId)}/knowledge-intelligence/assistants/${assistantId}/recommendations/generate`, { business_profile_version_id: businessProfileVersionId }),
   listAssistantConfigurations: (tenantId: string, assistantId: string) => apiClient.get<{ configurations: AssistantConfigurationVersion[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/assistants/${assistantId}/configurations`).then((value) => value.configurations),
   reviewRecommendation: (tenantId: string, assistantId: string, recommendationId: string, decision: 'approve' | 'reject') => apiClient.post(`${tenantRoot(tenantId)}/knowledge-intelligence/assistants/${assistantId}/recommendations/${recommendationId}/${decision}`, {}),
   generateAssistantConfiguration: (tenantId: string, assistantId: string, recommendationId: string) => apiClient.post<{ configuration: AssistantConfigurationVersion }>(`${tenantRoot(tenantId)}/knowledge-intelligence/assistants/${assistantId}/configurations/generate`, { recommendation_id: recommendationId }).then((value) => value.configuration),
