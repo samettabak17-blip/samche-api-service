@@ -26,9 +26,13 @@ test('generates a review-only Business Profile from ready tenant sources with pr
 
   assert.equal(version.status, 'NEEDS_REVIEW');
   assert.match(prompts[0], /Approved company facts/);
+  assert.match(prompts[0], /current tenant approved knowledge only/i);
+  assert.match(prompts[0], /Never use SamChe.*as a default/i);
+  assert.match(prompts[0], /unknown/i);
   assert.ok(calls.some(({ sql }) => /enabled = TRUE[\s\S]*processing_status = 'READY'/i.test(sql)));
   const insert = calls.find(({ sql }) => /INSERT INTO business_profile_versions/i.test(sql));
   assert.equal(insert.params[4], '22222222-2222-4222-8222-222222222222');
+  assert.equal(insert.params[5], 2);
 });
 
 test('rejects only a reviewable tenant Business Profile version', async () => {

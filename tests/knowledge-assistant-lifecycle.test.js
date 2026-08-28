@@ -12,7 +12,11 @@ const actorId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const assistantId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 
 function provider(output) {
-  return { provider: 'GEMINI', model: 'gemini-3-flash-preview', generateAssistantConfiguration: async () => output };
+  return {
+    provider: 'GEMINI', model: 'gemini-3-flash-preview',
+    generateAssistantRecommendation: async ({ prompt }) => ({ ...output, captured_prompt: prompt }),
+    generateAssistantConfiguration: async ({ prompt }) => ({ ...output, captured_prompt: prompt }),
+  };
 }
 
 test('generates an assistant-scoped review recommendation from the active approved profile', async () => {
@@ -26,12 +30,15 @@ test('generates an assistant-scoped review recommendation from the active approv
     return { rows: [] };
   } };
 
-  const result = await generateAssistantRecommendation({ database, provider: provider({ tone: 'Professional' }), tenantId, assistantId, requestedBy: actorId });
+  const result = await generateAssistantRecommendation({ database, provider: provider({ schema_version: 2, tone: 'Professional' }), tenantId, assistantId, requestedBy: actorId });
 
   assert.equal(result.status, 'NEEDS_REVIEW');
   assert.ok(calls.some(({ sql }) => /profile\.active_version_id[\s\S]*profile_version\.status = 'APPROVED'/i.test(sql)));
   const insert = calls.find(({ sql }) => /INSERT INTO assistant_knowledge_recommendations/i.test(sql));
-  assert.deepEqual(insert.params.slice(0, 3), [tenantId, assistantId, { tone: 'Professional' }]);
+  assert.equal(insert.params[2].schema_version, 2);
+  assert.match(insert.params[2].captured_prompt, /current tenant/i);
+  assert.match(insert.params[2].captured_prompt, /Never use SamChe.*as a default/i);
+  assert.equal(insert.params[5], 2);
 });
 
 test('generates a review-only configuration from an approved recommendation', async () => {
@@ -46,12 +53,15 @@ test('generates a review-only configuration from an approved recommendation', as
     return { rows: [] };
   } };
 
-  const result = await generateAssistantConfigurationVersion({ database, provider: provider({ assistant_instructions: 'Use approved facts.' }), tenantId, assistantId, recommendationId, requestedBy: actorId });
+  const result = await generateAssistantConfigurationVersion({ database, provider: provider({ schema_version: 2, assistant_instructions: 'Use approved facts.' }), tenantId, assistantId, recommendationId, requestedBy: actorId });
 
   assert.equal(result.status, 'NEEDS_REVIEW');
   const insert = calls.find(({ sql }) => /INSERT INTO assistant_configuration_versions/i.test(sql));
   assert.equal(insert.params[4], recommendationId);
   assert.equal(insert.params[5], '22222222-2222-4222-8222-222222222222');
+  assert.equal(insert.params[6], 2);
+  assert.match(insert.params[2].captured_prompt, /factual profile/i);
+  assert.match(insert.params[2].captured_prompt, /approved AI recommendation/i);
 });
 
 test('review transitions remain explicit and tenant scoped', async () => {

@@ -1,17 +1,27 @@
 const DEFAULT_TIMEOUT_MS = 20_000;
 
 const BUSINESS_PROFILE_FIELDS = Object.freeze([
-  'company_summary', 'industry', 'business_type', 'products', 'services',
+  'schema_version', 'company_identity', 'company_display_name',
+  'company_summary', 'industry', 'business_type', 'products', 'services', 'packages',
   'faq_themes', 'pricing_information', 'policies', 'procedures',
   'operating_information', 'sales_information', 'support_escalation_rules',
-  'tone', 'terminology',
+  'tone', 'communication_style', 'customer_handling', 'terminology',
+  'supported_languages', 'unsupported_claims',
 ]);
 
 const ASSISTANT_CONFIGURATION_FIELDS = Object.freeze([
-  'company_context', 'assistant_instructions', 'tone', 'greeting',
+  'schema_version', 'assistant_identity', 'role_and_purpose',
+  'company_context', 'assistant_instructions', 'tone', 'greeting', 'customer_handling',
   'faq_guidance', 'qualification_guidance', 'fallback_guidance',
   'escalation_guidance', 'sales_guidance', 'prohibited_claims',
-  'terminology', 'operating_rules',
+  'follow_up_behavior', 'scheduled_messaging_behavior', 'supported_languages',
+  'language_selection_policy', 'unsupported_claim_behavior', 'terminology',
+  'operating_rules', 'channel_adaptations',
+]);
+
+const ASSISTANT_RECOMMENDATION_FIELDS = Object.freeze([
+  ...ASSISTANT_CONFIGURATION_FIELDS,
+  'recommendation_rationale', 'evidence_gaps',
 ]);
 
 export class KnowledgeGenerationError extends Error {
@@ -41,12 +51,9 @@ export function getKnowledgeGenerationConfig(env = process.env) {
 function responseSchema(fields) {
   return {
     type: 'OBJECT',
-    properties: Object.fromEntries(fields.map((field) => [field, {
-      anyOf: [
-        { type: 'STRING' },
-        { type: 'ARRAY', items: { type: 'STRING' } },
-      ],
-    }])),
+    properties: Object.fromEntries(fields.map((field) => [field, field === 'schema_version'
+      ? { type: 'INTEGER' }
+      : { anyOf: [{ type: 'STRING' }, { type: 'ARRAY', items: { type: 'STRING' } }] }])),
   };
 }
 
@@ -61,6 +68,11 @@ function validateOutput(value, fields) {
   }
   const normalized = {};
   for (const [key, item] of entries) {
+    if (key === 'schema_version') {
+      if (item !== 2) throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation schema version is invalid');
+      normalized[key] = 2;
+      continue;
+    }
     if (typeof item === 'string') {
       const text = item.trim();
       if (!text || text.length > 4000) throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation field is invalid');
@@ -78,6 +90,10 @@ function validateOutput(value, fields) {
 
 export function validateBusinessProfileOutput(value) {
   return validateOutput(value, BUSINESS_PROFILE_FIELDS);
+}
+
+export function validateAssistantRecommendationOutput(value) {
+  return validateOutput(value, ASSISTANT_RECOMMENDATION_FIELDS);
 }
 
 export function validateAssistantConfigurationOutput(value) {
@@ -163,6 +179,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
     provider: config.provider,
     model: config.model,
     generateBusinessProfile: ({ prompt }) => generate({ prompt, fields: BUSINESS_PROFILE_FIELDS, validate: validateBusinessProfileOutput }),
+    generateAssistantRecommendation: ({ prompt }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput }),
     generateAssistantConfiguration: ({ prompt }) => generate({ prompt, fields: ASSISTANT_CONFIGURATION_FIELDS, validate: validateAssistantConfigurationOutput }),
   });
 }

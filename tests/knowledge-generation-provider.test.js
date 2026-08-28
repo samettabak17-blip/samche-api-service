@@ -4,6 +4,7 @@ import {
   createKnowledgeGenerationProvider,
   getKnowledgeGenerationConfig,
   validateBusinessProfileOutput,
+  validateAssistantRecommendationOutput,
   validateAssistantConfigurationOutput,
 } from '../services/knowledge-generation-provider.js';
 
@@ -15,6 +16,56 @@ test('defaults knowledge generation centrally to Gemini 3 Flash Preview', () => 
   });
 });
 
+test('Business Profile V2 accepts source-derived tenant facts without a platform persona default', () => {
+  const output = validateBusinessProfileOutput({
+    schema_version: 2,
+    company_identity: 'Meridian Arc Technologies LLC',
+    company_display_name: 'Meridian Arc',
+    packages: ['Growth Accelerator Package'],
+    communication_style: 'Clear and technical',
+    customer_handling: 'Confirm the requested support tier before advising.',
+    supported_languages: ['English'],
+    unsupported_claims: ['Do not claim 24-hour support.'],
+  });
+  assert.equal(output.company_identity, 'Meridian Arc Technologies LLC');
+  assert.equal(output.schema_version, 2);
+});
+
+test('Assistant recommendation and final configuration have separate V2 contracts', () => {
+  const recommendation = validateAssistantRecommendationOutput({
+    schema_version: 2,
+    assistant_identity: 'Meridian Client Advisor',
+    role_and_purpose: 'Recommend a reviewed support workflow.',
+    recommendation_rationale: 'The approved profile describes enterprise support.',
+    evidence_gaps: ['No scheduled messaging timing is documented.'],
+  });
+  assert.equal(recommendation.recommendation_rationale, 'The approved profile describes enterprise support.');
+  assert.throws(
+    () => validateAssistantConfigurationOutput({ ...recommendation }),
+    (error) => error.code === 'KNOWLEDGE_GENERATION_SCHEMA_INVALID',
+  );
+});
+
+test('Assistant Configuration V2 supports tenant behavior without accepting platform prompt fields', () => {
+  const output = validateAssistantConfigurationOutput({
+    schema_version: 2,
+    assistant_identity: 'Meridian Client Advisor',
+    role_and_purpose: 'Answer from approved Meridian knowledge.',
+    customer_handling: 'Ask one clarifying question when necessary.',
+    follow_up_behavior: 'Disabled unless explicitly approved by an administrator.',
+    scheduled_messaging_behavior: 'Disabled.',
+    supported_languages: ['English'],
+    language_selection_policy: 'Use the customer language when supported.',
+    unsupported_claim_behavior: 'State that the information is unavailable.',
+    channel_adaptations: ['WhatsApp: concise plain text'],
+  });
+  assert.equal(output.schema_version, 2);
+  assert.throws(
+    () => validateAssistantConfigurationOutput({ schema_version: 2, platform_system_prompt: 'SamChe default' }),
+    (error) => error.code === 'KNOWLEDGE_GENERATION_SCHEMA_INVALID',
+  );
+});
+
 test('Gemini generation uses deterministic JSON mode and the requested response schema', async () => {
   const requests = [];
   const fetchImpl = async (url, request) => {
@@ -22,7 +73,7 @@ test('Gemini generation uses deterministic JSON mode and the requested response 
     return {
       ok: true,
       json: async () => ({
-        candidates: [{ content: { parts: [{ text: '{"company_summary":"Tenant facts","services":["Consulting"]}' }] } }],
+        candidates: [{ content: { parts: [{ text: '{"schema_version":2,"company_summary":"Tenant facts","services":["Consulting"]}' }] } }],
       }),
     };
   };
@@ -33,7 +84,7 @@ test('Gemini generation uses deterministic JSON mode and the requested response 
 
   const output = await provider.generateBusinessProfile({ prompt: 'Approved tenant knowledge' });
 
-  assert.deepEqual(output, { company_summary: 'Tenant facts', services: ['Consulting'] });
+  assert.deepEqual(output, { schema_version: 2, company_summary: 'Tenant facts', services: ['Consulting'] });
   assert.match(requests[0].url, /gemini-3-flash-preview:generateContent/);
   assert.equal(requests[0].body.generationConfig.temperature, 0);
   assert.equal(requests[0].body.generationConfig.responseMimeType, 'application/json');
@@ -80,7 +131,7 @@ test('OpenAI is selected only through central provider configuration', async () 
     openaiClient: {
       chat: { completions: { create: async (request) => {
         calls.push(request);
-        return { choices: [{ message: { content: '{"tone":"Professional","assistant_instructions":"Use approved facts."}' } }] };
+        return { choices: [{ message: { content: '{"schema_version":2,"tone":"Professional","assistant_instructions":"Use approved facts."}' } }] };
       } } },
     },
   });
@@ -89,5 +140,5 @@ test('OpenAI is selected only through central provider configuration', async () 
 
   assert.equal(calls[0].model, 'gpt-5-mini');
   assert.equal(calls[0].temperature, 0);
-  assert.deepEqual(output, { tone: 'Professional', assistant_instructions: 'Use approved facts.' });
+  assert.deepEqual(output, { schema_version: 2, tone: 'Professional', assistant_instructions: 'Use approved facts.' });
 });

@@ -37,7 +37,10 @@ export async function generateBusinessProfileVersion({ database, provider, tenan
   if (!sources.rows.length) throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_SOURCES_EMPTY', 'No ready knowledge sources are available');
   const provenance = { sources: sources.rows.map(({ id, content_hash }) => ({ id, content_hash })) };
   const prompt = [
-    'Create a factual Business Profile using only the approved tenant knowledge below. Return only the requested structured fields.',
+    'Create Business Profile schema_version 2 from the current tenant approved knowledge only.',
+    'Never use SamChe or any other company, persona, service, price, geography, or behavior as a default.',
+    'Extract factual business data only. If evidence is insufficient, use the literal value "unknown"; do not invent a company policy or behavior.',
+    'Keep source-derived facts distinct from later AI recommendations. Return only the requested structured fields.',
     ...sources.rows.map((source) => `SOURCE ${source.id} — ${source.title}\n${String(source.content).slice(0, 12000)}`),
   ].join('\n\n');
   const run = await beginKnowledgeGenerationRun({ database, tenantId, requestedBy, targetType: 'BUSINESS_PROFILE', provider: provider.provider, model: provider.model, prompt, provenance });
@@ -51,10 +54,10 @@ export async function generateBusinessProfileVersion({ database, provider, tenan
     );
     const version = await database.query(
       `INSERT INTO business_profile_versions
-         (profile_id, tenant_id, profile_data, evidence, generation_run_id, generated_by, status)
-       VALUES ($1, $2, $3, $4, $5, 'AI', 'NEEDS_REVIEW')
+         (profile_id, tenant_id, profile_data, evidence, generation_run_id, schema_version, generated_by, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'AI', 'NEEDS_REVIEW')
        RETURNING id, profile_id, status, created_at`,
-      [profile.rows[0].id, tenantId, profileData, provenance, run.id],
+      [profile.rows[0].id, tenantId, profileData, provenance, run.id, 2],
     );
     await completeKnowledgeGenerationRun({ database, tenantId, runId: run.id, targetId: version.rows[0].id, output: profileData });
     return version.rows[0];
