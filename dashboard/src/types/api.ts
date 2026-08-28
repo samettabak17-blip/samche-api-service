@@ -92,7 +92,7 @@ export interface KnowledgeOverview { sources: { ready: number; processing: numbe
 export interface KnowledgeSource { id: string; title: string; source_type: string; processing_status: string; indexing_status: string; processing_error_code?: string | null; enabled: boolean; updated_at?: string; }
 export interface KnowledgeCandidate { id: string; candidate_type: string; proposed_title: string; proposed_content: string; status: string; confidence?: number | null; }
 export interface KnowledgeGap { id: string; assistant_id?: string | null; normalized_question: string; occurrence_count: number; status: string; }
-export interface BusinessProfileVersion { id: string; profile_data: Record<string, unknown>; status: string; active_version_id?: string | null; created_at?: string; }
+export interface BusinessProfileVersion { id: string; profile_data: Record<string, unknown>; status: string; active_version_id?: string | null; superseded_by_version_id?: string | null; created_at?: string; }
 export interface KnowledgeRecommendation { id: string; recommendation_data: Record<string, unknown>; status: string; created_at?: string; }
 export interface AssistantConfigurationVersion { id: string; configuration_data: Record<string, unknown>; status: string; created_at?: string; }
 export interface KnowledgeRetrievalPreview { query: string; matches: Array<{ chunkId: string; sourceId: string; sourceTitle: string; excerpt: string; similarity: number }>; }

@@ -8,7 +8,7 @@ import { KnowledgeIntelligencePage } from './knowledge-intelligence-page';
 
 vi.mock('../dashboard/dashboard-api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../dashboard/dashboard-api')>();
-  return { ...actual, tenantApi: { ...actual.tenantApi, getKnowledgeOverview: vi.fn(), listAssistants: vi.fn(), listChannels: vi.fn(), listKnowledgeSources: vi.fn(), assignKnowledgeSource: vi.fn() } };
+  return { ...actual, tenantApi: { ...actual.tenantApi, getKnowledgeOverview: vi.fn(), listAssistants: vi.fn(), listChannels: vi.fn(), listKnowledgeSources: vi.fn(), assignKnowledgeSource: vi.fn(), listBusinessProfiles: vi.fn(), listKnowledgeRecommendations: vi.fn(), listAssistantConfigurations: vi.fn(), updateBusinessProfile: vi.fn(), reviewBusinessProfile: vi.fn(), activateBusinessProfile: vi.fn(), rollbackBusinessProfile: vi.fn(), reviewRecommendation: vi.fn(), generateAssistantConfiguration: vi.fn(), updateAssistantConfiguration: vi.fn(), reviewAssistantConfiguration: vi.fn(), activateAssistantConfiguration: vi.fn(), rollbackAssistantConfiguration: vi.fn() } };
 });
 vi.mock('../tenants/tenant-context', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../tenants/tenant-context')>();
@@ -21,7 +21,7 @@ const mockedTenant = vi.mocked(useTenant);
 function renderPage(canManage = true, initialEntry = '/app/tenant-a/knowledge') {
   mockedTenant.mockReturnValue({ tenants: [], selectedTenant: undefined, tenantRole: canManage ? 'ADMIN' : 'AGENT', canManage, isLoading: false, error: null, selectTenant: vi.fn() });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[initialEntry]}><Routes><Route path="/app/:tenantId/knowledge" element={<KnowledgeIntelligencePage />} /></Routes></MemoryRouter></QueryClientProvider>);
+  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[initialEntry]}><Routes><Route path="/app/:tenantId/*" element={<KnowledgeIntelligencePage />} /></Routes></MemoryRouter></QueryClientProvider>);
 }
 
 beforeEach(() => {
@@ -35,6 +35,19 @@ beforeEach(() => {
   mockedApi.listChannels.mockResolvedValue([]);
   mockedApi.listKnowledgeSources.mockResolvedValue([]);
   mockedApi.assignKnowledgeSource.mockResolvedValue(undefined);
+  mockedApi.listBusinessProfiles.mockResolvedValue([]);
+  mockedApi.listKnowledgeRecommendations.mockResolvedValue([]);
+  mockedApi.listAssistantConfigurations.mockResolvedValue([]);
+});
+
+it('supports direct routed panels while preserving the legacy query route', async () => {
+  mockedApi.listBusinessProfiles.mockResolvedValue([{ id: 'profile-one', profile_data: { summary: 'Real profile' }, status: 'NEEDS_REVIEW', active_version_id: null }]);
+  renderPage(true, '/app/tenant-a/knowledge-base/profile');
+  expect(await screen.findByText('Business Profile profile-')).toBeVisible();
+  expect(screen.getByRole('link', { name: 'Business Profile' })).toHaveAttribute('aria-current', 'page');
+  expect(screen.getByRole('button', { name: 'Edit' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Approve' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Reject' })).toBeVisible();
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 

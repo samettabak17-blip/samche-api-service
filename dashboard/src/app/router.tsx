@@ -61,6 +61,13 @@ export function AppRouter() {
       <Route path="knowledge-base" element={<KnowledgeBasePage />} />
       <Route path="knowledge-base/:documentId" element={<KnowledgeBasePage />} />
       <Route path="knowledge" element={<KnowledgeIntelligencePage />} />
+      <Route path="knowledge-base/intelligence" element={<KnowledgeIntelligencePage />} />
+      <Route path="knowledge-base/sources" element={<KnowledgeIntelligencePage />} />
+      <Route path="knowledge-base/candidates" element={<KnowledgeIntelligencePage />} />
+      <Route path="knowledge-base/gaps" element={<KnowledgeIntelligencePage />} />
+      <Route path="knowledge-base/profile" element={<KnowledgeIntelligencePage />} />
+      <Route path="knowledge-base/configurations" element={<KnowledgeIntelligencePage />} />
+      <Route path="knowledge-base/retrieval" element={<KnowledgeIntelligencePage />} />
     </Route>
     <Route path="*" element={<Navigate to="/app" replace />} />
   </Routes>;
