@@ -12,8 +12,12 @@ on:
       - migrations/021_knowledge_gap_signals.sql
       - migrations/022_knowledge_generation_provenance.sql
       - migrations/023_web_chat_channel_integration.sql
+      - migrations/024_knowledge_authority_epoch.sql
       - routes/knowledge-*.js
       - services/knowledge-*.js
+      - services/channel-knowledge-authority-memory.js
+      - test/knowledgeAuthorityService.test.js
+      - test/channelKnowledgeAuthorityMemory.test.js
       - tests/knowledge-*.test.js
       - dashboard/src/features/knowledge-intelligence/**
   workflow_dispatch:
@@ -37,7 +41,11 @@ jobs:
       - name: Install API dependencies
         run: npm install --ignore-scripts
       - name: Run Task 6 focused contract tests
-        run: node --test tests/knowledge-*.test.js
+        run: >-
+          node --test
+          tests/knowledge-*.test.js
+          test/knowledgeAuthorityService.test.js
+          test/channelKnowledgeAuthorityMemory.test.js
 
   postgres:
     if: github.ref == 'refs/heads/staging'
@@ -120,14 +128,16 @@ jobs:
                 business_profile_versions: ['generation_run_id', 'activated_by', 'activated_at', 'superseded_by_version_id'],
                 assistant_knowledge_recommendations: ['generation_run_id'],
                 assistant_configuration_versions: ['generation_run_id', 'status', 'approved_at', 'activated_at', 'supersedes_version_id'],
-                ai_assistants: ['active_configuration_version_id']
+                ai_assistants: ['active_configuration_version_id', 'knowledge_authority_version'],
+                conversation_messages: ['authority_assistant_id', 'knowledge_authority_version']
               };
               const expectedIndexes = [
                 'knowledge_chunks_embedding_hnsw', 'idx_knowledge_processing_jobs_claim',
                 'uq_knowledge_gaps_tenant_dedupe', 'idx_knowledge_gaps_tenant_assistant_review',
                 'idx_knowledge_gap_signals_tenant_assistant',
                 'idx_assistant_configuration_versions_one_active',
-                'idx_knowledge_generation_runs_tenant_created'
+                'idx_knowledge_generation_runs_tenant_created',
+                'idx_conversation_messages_provider_authority'
               ];
               const expectedConstraints = [
                 'fk_business_profiles_active_version', 'fk_business_profile_versions_superseded_by',
@@ -136,7 +146,19 @@ jobs:
                 'fk_business_profile_versions_generation_run',
                 'fk_assistant_recommendations_generation_run',
                 'fk_assistant_configurations_generation_run',
-                'ck_channel_integrations_type'
+                'ck_channel_integrations_type',
+                'chk_ai_assistants_knowledge_authority_version',
+                'chk_conversation_messages_knowledge_authority_version',
+                'chk_conversation_messages_authority_provenance_pair',
+                'fk_conversation_messages_authority_assistant'
+              ];
+              const expectedTriggers = [
+                'trg_stamp_conversation_message_authority',
+                'trg_knowledge_source_assignment_authority',
+                'trg_task6_source_authority',
+                'trg_legacy_knowledge_authority',
+                'trg_active_configuration_authority',
+                'trg_active_business_profile_authority'
               ];
 
               const tables = await client.query(
@@ -169,6 +191,12 @@ jobs:
               );
               const presentConstraints = new Set(constraints.rows.map(({ conname }) => conname));
               const missingConstraints = expectedConstraints.filter((name) => !presentConstraints.has(name));
+              const triggers = await client.query(
+                `SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname = ANY($1::text[])`,
+                [expectedTriggers]
+              );
+              const presentTriggers = new Set(triggers.rows.map(({ tgname }) => tgname));
+              const missingTriggers = expectedTriggers.filter((name) => !presentTriggers.has(name));
               const webChatConstraint = await client.query(
                 `SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conname = 'ck_channel_integrations_type'`
               );
@@ -178,8 +206,9 @@ jobs:
               console.log('TASK6_COLUMNS: ' + (missingColumns.length ? 'missing ' + missingColumns.join(',') : 'ok'));
               console.log('TASK6_INDEXES: ' + (missingIndexes.length ? 'missing ' + missingIndexes.join(',') : 'ok'));
               console.log('TASK6_CONSTRAINTS: ' + (missingConstraints.length ? 'missing ' + missingConstraints.join(',') : 'ok'));
+              console.log('TASK6_AUTHORITY_TRIGGERS: ' + (missingTriggers.length ? 'missing ' + missingTriggers.join(',') : 'ok'));
               console.log('SIGNED_WEB_CHAT_INTEGRATION: ' + (webChatIntegrationAllowed ? 'ok' : 'missing'));
-              if (missingTables.length || missingColumns.length || missingIndexes.length || missingConstraints.length || !webChatIntegrationAllowed) {
+              if (missingTables.length || missingColumns.length || missingIndexes.length || missingConstraints.length || missingTriggers.length || !webChatIntegrationAllowed) {
                 console.log('KBV2_PREFLIGHT: BLOCKED_SCHEMA_INCOMPLETE');
                 process.exitCode = 3;
                 return;
