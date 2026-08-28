@@ -115,17 +115,11 @@ export async function retrieveApprovedKnowledge({
          AND s.status = 'active'
          AND s.processing_status = 'READY'
          AND s.indexing_status = 'READY'
-         AND (
-           NOT EXISTS (
-             SELECT 1 FROM knowledge_source_assistants ksa
-              WHERE ksa.tenant_id = s.tenant_id AND ksa.source_id = s.id
-           )
-           OR EXISTS (
-             SELECT 1 FROM knowledge_source_assistants ksa
-              WHERE ksa.tenant_id = s.tenant_id
-                AND ksa.source_id = s.id
-                AND ksa.assistant_id = $2
-           )
+         AND EXISTS (
+           SELECT 1 FROM knowledge_source_assistants ksa
+            WHERE ksa.tenant_id = s.tenant_id
+              AND ksa.source_id = s.id
+              AND ksa.assistant_id = $2
          )
        ORDER BY k.embedding <=> $3::vector
        LIMIT $4`,

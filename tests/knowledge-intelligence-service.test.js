@@ -51,6 +51,7 @@ test('retrieval is tenant and assistant scoped and excludes inactive or unapprov
   assert.match(calls[0].sql, /s\.enabled = TRUE/);
   assert.match(calls[0].sql, /s\.status = 'active'/);
   assert.match(calls[0].sql, /ksa\.assistant_id = \$2/);
+  assert.doesNotMatch(calls[0].sql, /NOT EXISTS/);
   assert.deepEqual(calls[0].params.slice(0, 2), ['tenant-a', 'assistant-a']);
 });
 

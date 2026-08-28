@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import test from 'node:test';
 
-import { createApiClient, querySourceEvidence } from '../scripts/staging-task6-e2e.js';
+import { createApiClient, createNonReadyEvidenceSource, querySourceEvidence } from '../scripts/staging-task6-e2e.js';
 
 async function withServer(handler, run) {
   const server = createServer(handler);
@@ -71,4 +71,26 @@ test('DB evidence returns vector presence and count without selecting raw embedd
   assert.match(calls[0].sql, /embedding IS NOT NULL/);
   assert.doesNotMatch(calls[0].sql, /SELECT[\s\S]*\bembedding\s*(?:,|FROM)/i);
   assert.deepEqual(calls[0].params, ['tenant-a', 'source-a']);
+});
+
+test('non-ready evidence fixture remains marker-owned, assigned, and PROCESSING', async () => {
+  const calls = [];
+  const database = { query: async (sql, params) => {
+    calls.push({ sql, params });
+    if (/RETURNING id/.test(sql)) return { rows: [{ id: 'source-processing' }] };
+    return { rows: [], rowCount: 1 };
+  } };
+  const sourceId = await createNonReadyEvidenceSource({
+    database,
+    tenantId: 'tenant-a',
+    assistantId: 'assistant-a',
+    readySourceId: 'source-ready',
+    marker: 'TASK6_E2E_123_1',
+  });
+  assert.equal(sourceId, 'source-processing');
+  assert.match(calls[0].sql, /processing_status, indexing_status/);
+  assert.match(calls[0].sql, /'PROCESSING', 'PENDING'/);
+  assert.match(calls[1].sql, /knowledge_source_assistants/);
+  assert.match(calls[2].sql, /INSERT INTO knowledge_chunks/);
+  assert.deepEqual(calls[0].params.slice(0, 2), ['tenant-a', 'TASK6_E2E_123_1 non-ready evidence']);
 });

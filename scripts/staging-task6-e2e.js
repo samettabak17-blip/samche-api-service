@@ -132,6 +132,39 @@ async function sourceHashes(database, tenantId, sourceId) {
   return result.rows.map((row) => row.text_hash);
 }
 
+export async function createNonReadyEvidenceSource({ database, tenantId, assistantId, readySourceId, marker }) {
+  const title = `${marker} non-ready evidence`;
+  const normalizedText = `${marker}_NON_READY must never be retrievable while processing is incomplete.`;
+  const textHash = crypto.createHash('sha256').update(normalizedText).digest('hex');
+  const source = await database.query(
+    `INSERT INTO knowledge_base_documents
+       (tenant_id, title, content, status, source_type, processing_status, indexing_status, enabled)
+     VALUES ($1, $2, $3, 'active', 'MANUAL', 'PROCESSING', 'PENDING', TRUE)
+     RETURNING id`,
+    [tenantId, title, normalizedText],
+  );
+  const sourceId = source.rows[0].id;
+  await database.query(
+    'INSERT INTO knowledge_source_assistants (tenant_id, source_id, assistant_id) VALUES ($1, $2, $3)',
+    [tenantId, sourceId, assistantId],
+  );
+  await database.query(
+    `INSERT INTO knowledge_chunks
+       (tenant_id, source_id, chunk_index, normalized_text, text_hash, token_estimate,
+        embedding, embedding_provider, embedding_model, embedding_version, embedding_dimensions,
+        index_status, is_active, metadata, indexed_at)
+     SELECT $1, $2, 0, $3, $4, 20,
+            embedding, embedding_provider, embedding_model, embedding_version, embedding_dimensions,
+            'READY', TRUE, '{"fixture":"non-ready-exclusion"}'::jsonb, CURRENT_TIMESTAMP
+       FROM knowledge_chunks
+      WHERE tenant_id = $1 AND source_id = $5 AND embedding IS NOT NULL
+      ORDER BY chunk_index
+      LIMIT 1`,
+    [tenantId, sourceId, normalizedText, textHash, readySourceId],
+  );
+  return sourceId;
+}
+
 async function safeFetchJson(path, options = {}) {
   const response = await fetch(`${STAGING_API_ORIGIN}${path}`, { ...options, signal: AbortSignal.timeout(120_000) });
   if (!response.ok) throw new Error(`STAGING_PUBLIC_HTTP_${response.status}`);
@@ -203,6 +236,14 @@ async function main() {
     assertCondition(matchesFor(assistantNegative, readySources[0].id).length === 0, 'TASK6_E2E_ASSISTANT_ISOLATION_FAILED');
     assertCondition(matchesFor(tenantNegative, readySources[0].id).length === 0, 'TASK6_E2E_TENANT_ISOLATION_FAILED');
     console.log(safeResultLine('PASS', 'RETRIEVAL_ISOLATION', { status: 'SCOPED' }));
+
+    const nonReadySourceId = await createNonReadyEvidenceSource({
+      database, tenantId: fixtureA.tenant.id, assistantId: fixtureA.assistantA.id,
+      readySourceId: readySources[0].id, marker,
+    });
+    state.sourceIds.push(nonReadySourceId); await persistState(statePath, state);
+    assertCondition(matchesFor(await retrieval(adminApi, fixtureA.tenant.id, fixtureA.assistantA.id, `${marker}_NON_READY`), nonReadySourceId).length === 0, 'TASK6_E2E_NON_READY_EXCLUSION_FAILED');
+    console.log(safeResultLine('PASS', 'NON_READY_EXCLUSION', { status: 'VERIFIED' }));
 
     await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/sources/${readySources[0].id}/assignments/${fixtureA.assistantA.id}`, { method: 'DELETE' });
     assertCondition(matchesFor(await retrieval(adminApi, fixtureA.tenant.id, fixtureA.assistantA.id, readySources[0].document.semanticMarker), readySources[0].id).length === 0, 'TASK6_E2E_UNASSIGNMENT_FAILED');
