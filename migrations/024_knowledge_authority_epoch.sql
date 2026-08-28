@@ -144,16 +144,16 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  IF ROW(
-       NEW.status,
-       NEW.enabled,
-       NEW.processing_status,
-       NEW.indexing_status
-     ) IS NOT DISTINCT FROM ROW(
-       OLD.status,
-       OLD.enabled,
-       OLD.processing_status,
-       OLD.indexing_status
+  IF (
+       NEW.status = 'active'
+       AND NEW.enabled = TRUE
+       AND NEW.processing_status = 'READY'
+       AND NEW.indexing_status = 'READY'
+     ) IS NOT DISTINCT FROM (
+       OLD.status = 'active'
+       AND OLD.enabled = TRUE
+       AND OLD.processing_status = 'READY'
+       AND OLD.indexing_status = 'READY'
      ) THEN
     RETURN NEW;
   END IF;

@@ -119,6 +119,14 @@ test('knowledge authority epoch is atomic, monotonic, scoped, and activation-awa
 
     await client.query(
       `UPDATE knowledge_base_documents
+          SET indexing_status = 'INDEXING'
+        WHERE tenant_id = $1 AND id = $2`,
+      [tenantA, source],
+    );
+    assert.equal(await authorityVersion(client, tenantA, assistantA), 5n, 'non-authoritative intermediate state does not bump again');
+
+    await client.query(
+      `UPDATE knowledge_base_documents
           SET processing_status = 'READY', indexing_status = 'READY'
         WHERE tenant_id = $1 AND id = $2`,
       [tenantA, source],
@@ -353,6 +361,77 @@ test('message provenance preserves the transcript but provider history fails clo
     assert.deepEqual(await loadCurrentProviderHistory(client, {
       tenantId, conversationId, assistantId, version: 4n,
     }), [], 'reassignment never revives old provider history');
+  } finally {
+    await client.query('ROLLBACK');
+    await client.end();
+  }
+});
+
+test('an unrelated source authority change intentionally resets the whole Assistant provider continuity once', async () => {
+  const client = createClient();
+  await client.connect();
+  await client.query('BEGIN');
+
+  try {
+    const tenantId = randomUUID();
+    const assistantId = randomUUID();
+    const channelId = randomUUID();
+    const conversationId = randomUUID();
+    const firstSourceId = randomUUID();
+    const unrelatedSourceId = randomUUID();
+
+    await client.query(`INSERT INTO tenants (id, name) VALUES ($1, 'Coarse Reset Test')`, [tenantId]);
+    await client.query(
+      `INSERT INTO ai_assistants (id, tenant_id, name) VALUES ($1, $2, 'Coarse Reset Assistant')`,
+      [assistantId, tenantId],
+    );
+    await client.query(
+      `INSERT INTO tenant_channels (id, tenant_id, assistant_id, channel_type, display_name)
+       VALUES ($1, $2, $3, 'WHATSAPP', 'Coarse Reset WhatsApp')`,
+      [channelId, tenantId, assistantId],
+    );
+    await client.query(
+      `INSERT INTO conversations (id, tenant_id, channel_id, external_conversation_id)
+       VALUES ($1, $2, $3, 'coarse-reset-test')`,
+      [conversationId, tenantId, channelId],
+    );
+
+    for (const [sourceId, hashCharacter] of [[firstSourceId, 'c'], [unrelatedSourceId, 'd']]) {
+      await client.query(
+        `INSERT INTO knowledge_base_documents (
+           id, tenant_id, title, content, source_type, content_hash,
+           processing_status, indexing_status, enabled
+         ) VALUES ($1, $2, 'Coarse source', 'knowledge', 'DOCUMENT', $3, 'READY', 'READY', TRUE)`,
+        [sourceId, tenantId, hashCharacter.repeat(64)],
+      );
+      await client.query(
+        `INSERT INTO knowledge_source_assistants (tenant_id, source_id, assistant_id)
+         VALUES ($1, $2, $3)`,
+        [tenantId, sourceId, assistantId],
+      );
+    }
+    assert.equal(await authorityVersion(client, tenantId, assistantId), 3n);
+
+    await client.query(
+      `INSERT INTO conversation_messages (tenant_id, conversation_id, sender_type, content)
+       VALUES ($1, $2, 'ASSISTANT', 'still-valid-first-source answer')`,
+      [tenantId, conversationId],
+    );
+    assert.equal((await loadCurrentProviderHistory(client, {
+      tenantId, conversationId, assistantId, version: 3n,
+    })).length, 1);
+
+    await client.query(
+      `UPDATE knowledge_base_documents
+          SET status = 'inactive', enabled = FALSE,
+              processing_status = 'ARCHIVED', indexing_status = 'ARCHIVED'
+        WHERE tenant_id = $1 AND id = $2`,
+      [tenantId, unrelatedSourceId],
+    );
+    assert.equal(await authorityVersion(client, tenantId, assistantId), 4n, 'multi-column archive bumps exactly once');
+    assert.deepEqual(await loadCurrentProviderHistory(client, {
+      tenantId, conversationId, assistantId, version: 4n,
+    }), [], 'Assistant-level safety reset invalidates all older continuity');
   } finally {
     await client.query('ROLLBACK');
     await client.end();
