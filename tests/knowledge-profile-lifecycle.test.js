@@ -62,6 +62,17 @@ test('conflicting selected identities block profile generation and expose safe c
   await assert.rejects(generateBusinessProfileVersion({ database, provider, tenantId, requestedBy: actorId, businessIdentityId: '55555555-5555-4555-8555-555555555555', sourceIds: ['11111111-1111-4111-8111-111111111111', '66666666-6666-4666-8666-666666666666'] }), (error) => error.code === 'IDENTITY_RESOLUTION_REQUIRED' && error.details.identities.length === 2);
 });
 
+test('a selected source identity must match the chosen Business Identity', async () => {
+  const database = { query: async (sql) => {
+    if (/FROM business_identities/i.test(sql)) return { rows: [{ id: '55555555-5555-4555-8555-555555555555', display_name: 'Meridian Arc Technologies LLC', normalized_identity: 'meridian arc technologies' }] };
+    if (/FROM knowledge_base_documents/i.test(sql)) return { rows: [{ id: '66666666-6666-4666-8666-666666666666', title: 'Nova', content: 'Nova Crest Business Services LLC', content_hash: 'b'.repeat(64) }] };
+    if (/business_identity_source_evidence/i.test(sql)) return { rows: [] };
+    assert.fail(`unexpected SQL ${sql}`);
+  } };
+  const provider = { provider: 'GEMINI', model: 'gemini-3-flash-preview', generateBusinessIdentityAnalysis: async () => ({ detected_identity: 'Nova Crest Business Services LLC', confidence: '0.99', evidence: 'Legal name' }), generateBusinessProfile: async () => assert.fail('must not generate') };
+  await assert.rejects(generateBusinessProfileVersion({ database, provider, tenantId, requestedBy: actorId, businessIdentityId: '55555555-5555-4555-8555-555555555555', sourceIds: ['66666666-6666-4666-8666-666666666666'] }), (error) => error.code === 'IDENTITY_RESOLUTION_REQUIRED');
+});
+
 test('rejects only a reviewable tenant Business Profile version', async () => {
   const calls = [];
   const database = { query: async (sql, params) => {

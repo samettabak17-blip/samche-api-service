@@ -30,10 +30,11 @@ test('generates an assistant-scoped review recommendation from the active approv
     return { rows: [] };
   } };
 
-  const result = await generateAssistantRecommendation({ database, provider: provider({ schema_version: 2, tone: 'Professional' }), tenantId, assistantId, requestedBy: actorId });
+  const result = await generateAssistantRecommendation({ database, provider: provider({ schema_version: 2, tone: 'Professional' }), tenantId, assistantId, businessProfileVersionId: '11111111-1111-4111-8111-111111111111', requestedBy: actorId });
 
   assert.equal(result.status, 'NEEDS_REVIEW');
   assert.ok(calls.some(({ sql }) => /profile\.active_version_id[\s\S]*profile_version\.status = 'APPROVED'/i.test(sql)));
+  assert.ok(calls.some(({ sql }) => /profile_version\.id = \$3/i.test(sql)));
   const insert = calls.find(({ sql }) => /INSERT INTO assistant_knowledge_recommendations/i.test(sql));
   assert.equal(insert.params[2].schema_version, 2);
   assert.match(insert.params[2].captured_prompt, /current tenant/i);
@@ -67,6 +68,7 @@ test('generates a review-only configuration from an approved recommendation', as
   const run = calls.find(({ sql }) => /INSERT INTO knowledge_generation_runs/i.test(sql));
   assert.equal(run.params[6].business_identity_id, '55555555-5555-4555-8555-555555555555');
   assert.deepEqual(run.params[6].source_scope.source_ids, ['source-meridian']);
+  assert.match(calls.find(({ sql }) => /FROM assistant_knowledge_recommendations recommendation/i.test(sql)).sql, /recommendation\.evidence->>'profile_version_id'/i);
 });
 
 test('review transitions remain explicit and tenant scoped', async () => {

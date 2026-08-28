@@ -44,6 +44,7 @@ test('active runtime resolution includes only the tenant active approved Busines
   assert.match(calls[0].sql, /business_profile_versions profile_version/i);
   assert.match(calls[0].sql, /profile_version\.status = 'APPROVED'/i);
   assert.match(calls[0].sql, /profile_version\.profile_data AS active_business_profile/i);
+  assert.match(calls[0].sql, /profile_version\.id = configuration\.source_profile_version_id/i);
 });
 
 test('approving configuration preserves the existing runtime assignment until explicit activation', async () => {

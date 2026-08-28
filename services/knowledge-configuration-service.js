@@ -45,8 +45,9 @@ export async function resolveActiveAssistantKnowledgeConfiguration({ database, t
         AND configuration.status = 'ACTIVE'
        LEFT JOIN business_profiles profile
          ON profile.tenant_id = assistant.tenant_id
+        AND profile.active_version_id = configuration.source_profile_version_id
        LEFT JOIN business_profile_versions profile_version
-         ON profile_version.id = profile.active_version_id
+         ON profile_version.id = configuration.source_profile_version_id
         AND profile_version.tenant_id = profile.tenant_id
         AND profile_version.status = 'APPROVED'
       WHERE assistant.id = $1 AND assistant.tenant_id = $2`,

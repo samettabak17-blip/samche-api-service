@@ -46,6 +46,7 @@ import {
 import { getKnowledgeOverview, KnowledgeOverviewError } from '../services/knowledge-overview-service.js';
 import { createOpenAIEmbedder } from '../services/knowledge-intelligence-service.js';
 import { KnowledgeRetrievalPreviewError, previewKnowledgeRetrieval } from '../services/knowledge-retrieval-preview.js';
+import { normalizeBusinessIdentity } from '../services/business-identity-service.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -71,8 +72,8 @@ function sourceId(req, res) {
 function safeError(res, error) {
   const code = error?.code;
   if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError || error instanceof KnowledgeGenerationError || error instanceof KnowledgeProfileLifecycleError || error instanceof KnowledgeAssistantLifecycleError || error instanceof KnowledgeOverviewError || error instanceof KnowledgeRetrievalPreviewError) {
-    const status = /NOT_FOUND|INVALID|EMPTY|UNSUPPORTED|MISMATCH|REQUIRED/.test(code) ? 400 : 503;
-    return res.status(status).json({ error: error.message, code });
+    const status = code === 'IDENTITY_RESOLUTION_REQUIRED' ? 409 : /NOT_FOUND|INVALID|EMPTY|UNSUPPORTED|MISMATCH|REQUIRED/.test(code) ? 400 : 503;
+    return res.status(status).json({ error: error.message, code, ...(error.details ? { details: error.details } : {}) });
   }
   console.error('Knowledge source operation failed:', code ?? error?.name ?? 'Error');
   return res.status(500).json({ error: 'Knowledge source operation failed' });
@@ -95,6 +96,28 @@ router.get('/:tenantId/knowledge-intelligence/overview', requireTenantAccess, as
   } catch (error) {
     return safeError(res, error);
   }
+});
+
+router.get('/:tenantId/knowledge-intelligence/business-identities', requireTenantAccess, async (req, res) => {
+  const tenantId = tenant(req, res); if (!tenantId) return;
+  try {
+    const result = await pool.query(`SELECT id, display_name, normalized_identity, status, created_at, updated_at
+      FROM business_identities WHERE tenant_id = $1 AND status <> 'ARCHIVED' ORDER BY display_name`, [tenantId]);
+    return res.json({ business_identities: result.rows });
+  } catch (error) { return safeError(res, error); }
+});
+
+router.post('/:tenantId/knowledge-intelligence/business-identities', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res); if (!tenantId) return;
+  const displayName = String(req.body?.display_name ?? '').trim();
+  const normalizedIdentity = normalizeBusinessIdentity(displayName);
+  if (!displayName || displayName.length > 255 || !normalizedIdentity) return res.status(400).json({ error: 'Business Identity display name is invalid', code: 'KNOWLEDGE_BUSINESS_IDENTITY_INVALID' });
+  try {
+    const result = await pool.query(`INSERT INTO business_identities (tenant_id, display_name, normalized_identity)
+      VALUES ($1,$2,$3) ON CONFLICT (tenant_id, normalized_identity) DO UPDATE SET display_name = EXCLUDED.display_name, updated_at = CURRENT_TIMESTAMP
+      RETURNING id, display_name, normalized_identity, status, created_at, updated_at`, [tenantId, displayName, normalizedIdentity]);
+    return res.status(201).json({ business_identity: result.rows[0] });
+  } catch (error) { return safeError(res, error); }
 });
 
 router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/retrieval-preview', requireTenantAccess, requireTenantAdmin, async (req, res) => {
@@ -449,12 +472,14 @@ router.get('/:tenantId/knowledge-intelligence/profiles', requireTenantAccess, as
   if (!tenantId) return;
   try {
     const result = await pool.query(
-      `SELECT version.id, version.profile_id, version.schema_version, version.profile_data, version.evidence, version.status,
+      `SELECT version.id, version.profile_id, version.schema_version, version.profile_data, version.evidence, version.source_scope,
+              version.identity_resolution_status, version.status, profile.business_identity_id, identity.display_name AS business_identity_name,
               version.generated_by, version.reviewed_by, version.reviewed_at, version.activated_by,
               version.activated_at, version.superseded_by_version_id, version.created_at,
               profile.approved_version_id, profile.active_version_id
          FROM business_profile_versions version
          JOIN business_profiles profile ON profile.id = version.profile_id AND profile.tenant_id = version.tenant_id
+         LEFT JOIN business_identities identity ON identity.id = profile.business_identity_id AND identity.tenant_id = profile.tenant_id
         WHERE version.tenant_id = $1
         ORDER BY version.created_at DESC
         LIMIT 100`,
@@ -475,6 +500,8 @@ router.post('/:tenantId/knowledge-intelligence/profiles/generate', requireTenant
       provider: createKnowledgeGenerationProvider(),
       tenantId,
       requestedBy: req.user.user_id,
+      businessIdentityId: req.body?.business_identity_id,
+      sourceIds: req.body?.source_ids,
     });
     return res.status(201).json({ profile });
   } catch (error) {
@@ -551,7 +578,7 @@ router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/recommend
   const tenantId = tenant(req, res); const assistantId = req.params.assistantId;
   if (!tenantId || !isValidUUID(assistantId)) return res.status(400).json({ error: 'Invalid Assistant ID' });
   try {
-    const recommendation = await generateAssistantRecommendation({ database: pool, provider: createKnowledgeGenerationProvider(), tenantId, assistantId, requestedBy: req.user.user_id });
+    const recommendation = await generateAssistantRecommendation({ database: pool, provider: createKnowledgeGenerationProvider(), tenantId, assistantId, businessProfileVersionId: req.body?.business_profile_version_id, requestedBy: req.user.user_id });
     return res.status(201).json({ recommendation });
   } catch (error) { return safeError(res, error); }
 });

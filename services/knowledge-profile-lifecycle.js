@@ -4,7 +4,7 @@ import {
   failKnowledgeGenerationRun,
   KnowledgeGenerationPersistenceError,
 } from './knowledge-generation-persistence.js';
-import { analyzeBusinessIdentityScope } from './business-identity-service.js';
+import { analyzeBusinessIdentityScope, normalizeBusinessIdentity } from './business-identity-service.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -33,7 +33,7 @@ export async function generateBusinessProfileVersion({ database, provider, tenan
     throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_GENERATION_UNAVAILABLE', 'Business Profile generation is unavailable');
   }
   const identity = await database.query(
-    `SELECT id, display_name FROM business_identities
+    `SELECT id, display_name, normalized_identity FROM business_identities
       WHERE id = $1 AND tenant_id = $2 AND status = 'ACTIVE'`,
     [businessIdentityId, tenantId],
   );
@@ -59,12 +59,14 @@ export async function generateBusinessProfileVersion({ database, provider, tenan
       [tenantId, businessIdentityId, item.source_id, item.content_hash, item.detected_identity, item.normalized_identity, item.confidence, item.safe_evidence, provider.provider, provider.model],
     );
   }
-  if (analysis.status !== 'RESOLVED') {
+  const selectedIdentity = identity.rows[0].normalized_identity || normalizeBusinessIdentity(identity.rows[0].display_name);
+  if (analysis.status !== 'RESOLVED' || analysis.identities[0]?.normalized_identity !== selectedIdentity) {
     throw new KnowledgeProfileLifecycleError('IDENTITY_RESOLUTION_REQUIRED', 'Selected sources contain unresolved or conflicting company identities', { identities: analysis.identities, evidence: analysis.evidence });
   }
   const provenance = { business_identity_id: businessIdentityId, source_ids: sourceIds, sources: analysis.evidence };
   const prompt = [
     'Create Business Profile schema_version 2 from the current tenant approved knowledge only.',
+    `The resolved Business Identity is "${identity.rows[0].display_name}". Do not merge, rename, or import another company identity.`,
     'Never use SamChe or any other company, persona, service, price, geography, or behavior as a default.',
     'Extract factual business data only. If evidence is insufficient, use the literal value "unknown"; do not invent a company policy or behavior.',
     'Keep source-derived facts distinct from later AI recommendations. Return only the requested structured fields.',

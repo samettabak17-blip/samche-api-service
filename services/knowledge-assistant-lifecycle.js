@@ -21,15 +21,15 @@ async function generate({ database, provider, tenantId, requestedBy, targetType,
   }
 }
 
-export async function generateAssistantRecommendation({ database, provider, tenantId, assistantId, requestedBy }) {
-  requireProvider(database, provider, 'generateAssistantRecommendation'); uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID'); uuid(assistantId, 'KNOWLEDGE_ASSISTANT_INVALID'); uuid(requestedBy, 'KNOWLEDGE_REQUESTER_INVALID');
+export async function generateAssistantRecommendation({ database, provider, tenantId, assistantId, businessProfileVersionId, requestedBy }) {
+  requireProvider(database, provider, 'generateAssistantRecommendation'); uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID'); uuid(assistantId, 'KNOWLEDGE_ASSISTANT_INVALID'); uuid(businessProfileVersionId, 'KNOWLEDGE_PROFILE_VERSION_INVALID'); uuid(requestedBy, 'KNOWLEDGE_REQUESTER_INVALID');
   const context = await database.query(
     `SELECT assistant.name AS assistant_name, profile_version.id AS profile_version_id, profile.business_identity_id,
             profile_version.source_scope, profile_version.profile_data
        FROM ai_assistants assistant
        JOIN business_profiles profile ON profile.tenant_id = assistant.tenant_id AND profile.active_version_id IS NOT NULL
        JOIN business_profile_versions profile_version ON profile_version.id = profile.active_version_id AND profile_version.tenant_id = profile.tenant_id AND profile_version.status = 'APPROVED'
-      WHERE assistant.id = $1 AND assistant.tenant_id = $2 AND assistant.status = 'active'`, [assistantId, tenantId]);
+      WHERE assistant.id = $1 AND assistant.tenant_id = $2 AND profile_version.id = $3 AND assistant.status = 'active'`, [assistantId, tenantId, businessProfileVersionId]);
   if (!context.rows[0]) throw new KnowledgeAssistantLifecycleError('KNOWLEDGE_RECOMMENDATION_CONTEXT_NOT_FOUND', 'An active approved Business Profile is required');
   const provenance = { profile_version_id: context.rows[0].profile_version_id, business_identity_id: context.rows[0].business_identity_id, source_scope: context.rows[0].source_scope, assistant_id: assistantId };
   const prompt = [
@@ -53,8 +53,8 @@ export async function generateAssistantConfigurationVersion({ database, provider
     `SELECT recommendation.recommendation_data, profile_version.id AS profile_version_id, profile.business_identity_id,
             profile_version.source_scope, profile_version.profile_data
        FROM assistant_knowledge_recommendations recommendation
-       JOIN business_profiles profile ON profile.tenant_id = recommendation.tenant_id AND profile.active_version_id IS NOT NULL
-       JOIN business_profile_versions profile_version ON profile_version.id = profile.active_version_id AND profile_version.tenant_id = profile.tenant_id AND profile_version.status = 'APPROVED'
+       JOIN business_profile_versions profile_version ON profile_version.id = (recommendation.evidence->>'profile_version_id')::uuid AND profile_version.tenant_id = recommendation.tenant_id AND profile_version.status = 'APPROVED'
+       JOIN business_profiles profile ON profile.id = profile_version.profile_id AND profile.tenant_id = profile_version.tenant_id AND profile.active_version_id = profile_version.id
       WHERE recommendation.id = $1 AND recommendation.tenant_id = $2 AND recommendation.assistant_id = $3 AND recommendation.status = 'APPROVED'`, [recommendationId, tenantId, assistantId]);
   if (!context.rows[0]) throw new KnowledgeAssistantLifecycleError('KNOWLEDGE_CONFIGURATION_CONTEXT_NOT_FOUND', 'An approved recommendation and active Business Profile are required');
   const provenance = { profile_version_id: context.rows[0].profile_version_id, business_identity_id: context.rows[0].business_identity_id, source_scope: context.rows[0].source_scope, recommendation_id: recommendationId, assistant_id: assistantId };
