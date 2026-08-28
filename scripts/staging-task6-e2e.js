@@ -307,7 +307,7 @@ async function main() {
     const profileScope = { business_identity_id: businessIdentity.id, source_ids: [readySources[0].id, readySources[1].id] };
     const identityAnalysis = (await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/profiles/analyze`, { method: 'POST', body: profileScope })).analysis;
     assertCondition(identityAnalysis.status === 'RESOLVED', 'TASK6_E2E_IDENTITY_SCOPE_NOT_RESOLVED');
-    console.log(safeResultLine('PASS', 'BUSINESS_IDENTITY_SCOPE', { status: identityAnalysis.status, source_count: identityAnalysis.source_ids.length }));
+    console.log(safeResultLine('PASS', 'BUSINESS_IDENTITY_SCOPE', { status: identityAnalysis.status }));
     const profile1 = (await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/profiles/generate`, { method: 'POST', body: profileScope })).profile;
     await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/profiles/${profile1.id}`, { method: 'PUT', body: { profile_data: { schema_version: 2, company_identity: `${marker} Company LLC`, company_summary: `${marker} reviewed profile one` } } });
     await adminApi.request(`/api/v1/tenants/${fixtureA.tenant.id}/knowledge-intelligence/profiles/${profile1.id}/approve`, { method: 'POST', body: {} });
