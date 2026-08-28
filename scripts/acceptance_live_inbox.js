@@ -133,7 +133,6 @@ async function listMessages(tenantId, conversationId, headers) {
 }
 
 async function main() {
-  const sessionHeaders = { 'x-user-id': sessionId };
   const adminHeaders = { Authorization: 'Bearer ' + adminToken };
   const ownerHeaders = { Authorization: 'Bearer ' + ownerToken };
 
@@ -144,14 +143,32 @@ async function main() {
     path: '/chat',
     expected: 200,
     body: { text: initialCustomerText },
-    headers: sessionHeaders,
   });
   if (!initial.passed) return;
+
+  const publicSessionToken = initial.data?.conversation_session;
+  if (typeof publicSessionToken !== 'string') {
+    fail('PUBLIC', 'VERIFY', 'signed conversation session', 'MISSING');
+    return;
+  }
+
+  let publicSessionId;
+  try {
+    publicSessionId = JSON.parse(Buffer.from(publicSessionToken.split('.')[0], 'base64url').toString('utf8')).sid;
+  } catch {
+    fail('PUBLIC', 'VERIFY', 'signed conversation session', 'INVALID');
+    return;
+  }
+  if (typeof publicSessionId !== 'string' || !publicSessionId) {
+    fail('PUBLIC', 'VERIFY', 'signed conversation session', 'INVALID');
+    return;
+  }
+  const sessionHeaders = { 'X-Samcheguide-Session': publicSessionToken };
 
   const tenants = await request({ role: 'ADMIN', method: 'GET', path: '/api/v1/tenants', expected: 200, headers: adminHeaders });
   if (!tenants.passed || !Array.isArray(tenants.data)) return;
 
-  const externalConversationId = conversationKey(sessionId);
+  const externalConversationId = conversationKey(publicSessionId);
   let match = null;
   for (const tenant of tenants.data.filter((item) => item.tenant_role === 'ADMIN')) {
     const list = await request({
@@ -238,7 +255,8 @@ async function main() {
   else pass('ADMIN', 'VERIFY', 'AGENT message persistence', 200);
 
   const publicHistory = await request({ role: 'PUBLIC', method: 'GET', path: '/chat/history', expected: 200, headers: sessionHeaders });
-  if (publicHistory.passed && Array.isArray(publicHistory.data) && publicHistory.data.some((message) => message?.parts?.[0]?.text === humanReply)) {
+  const publicMessages = publicHistory.data?.messages;
+  if (publicHistory.passed && Array.isArray(publicMessages) && publicMessages.some((message) => message?.parts?.[0]?.text === humanReply)) {
     pass('PUBLIC', 'VERIFY', 'Samcheguide agent reply feed', 200);
   } else {
     fail('PUBLIC', 'VERIFY', 'Samcheguide agent reply feed', 'MISSING');
