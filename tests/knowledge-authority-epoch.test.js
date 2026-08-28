@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import pg from 'pg';
+import { loadCurrentProviderHistory } from '../services/knowledge-authority-service.js';
 
 const { Client } = pg;
 
@@ -239,6 +240,119 @@ test('legacy knowledge changes preserve scoped compatibility while bumping autho
     );
     assert.equal(await authorityVersion(client, tenantId, assistantA), 4n);
     assert.equal(await authorityVersion(client, tenantId, assistantB), 2n);
+  } finally {
+    await client.query('ROLLBACK');
+    await client.end();
+  }
+});
+
+test('message provenance preserves the transcript but provider history fails closed across epochs', async () => {
+  const client = createClient();
+  await client.connect();
+  await client.query('BEGIN');
+
+  try {
+    const tenantId = randomUUID();
+    const assistantId = randomUUID();
+    const channelId = randomUUID();
+    const conversationId = randomUUID();
+    const sourceId = randomUUID();
+
+    await client.query(`INSERT INTO tenants (id, name) VALUES ($1, 'History Authority Test')`, [tenantId]);
+    await client.query(
+      `INSERT INTO ai_assistants (id, tenant_id, name) VALUES ($1, $2, 'History Assistant')`,
+      [assistantId, tenantId],
+    );
+    await client.query(
+      `INSERT INTO tenant_channels (id, tenant_id, assistant_id, channel_type, display_name)
+       VALUES ($1, $2, $3, 'WHATSAPP', 'History WhatsApp')`,
+      [channelId, tenantId, assistantId],
+    );
+    await client.query(
+      `INSERT INTO conversations (id, tenant_id, channel_id, external_conversation_id)
+       VALUES ($1, $2, $3, 'history-authority-test')`,
+      [conversationId, tenantId, channelId],
+    );
+
+    const legacyMessage = await client.query(
+      `INSERT INTO conversation_messages (tenant_id, conversation_id, sender_type, content)
+       VALUES ($1, $2, 'CUSTOMER', 'legacy-null-marker') RETURNING id`,
+      [tenantId, conversationId],
+    );
+    await client.query(
+      `UPDATE conversation_messages
+          SET authority_assistant_id = NULL, knowledge_authority_version = NULL
+        WHERE id = $1`,
+      [legacyMessage.rows[0].id],
+    );
+
+    await client.query(
+      `INSERT INTO knowledge_base_documents (
+         id, tenant_id, title, content, source_type, content_hash,
+         processing_status, indexing_status, enabled
+       ) VALUES ($1, $2, 'History source', 'SAPPHIRE-7319', 'DOCUMENT', $3, 'READY', 'READY', TRUE)`,
+      [sourceId, tenantId, 'b'.repeat(64)],
+    );
+    await client.query(
+      `INSERT INTO knowledge_source_assistants (tenant_id, source_id, assistant_id)
+       VALUES ($1, $2, $3)`,
+      [tenantId, sourceId, assistantId],
+    );
+    assert.equal(await authorityVersion(client, tenantId, assistantId), 2n);
+
+    for (const [senderType, content] of [
+      ['CUSTOMER', 'current customer'],
+      ['ASSISTANT', 'current assistant SAPPHIRE-7319'],
+      ['AGENT', 'current agent'],
+      ['SYSTEM', 'current system'],
+    ]) {
+      const inserted = await client.query(
+        `INSERT INTO conversation_messages (tenant_id, conversation_id, sender_type, content)
+         VALUES ($1, $2, $3, $4)
+         RETURNING authority_assistant_id, knowledge_authority_version`,
+        [tenantId, conversationId, senderType, content],
+      );
+      assert.equal(inserted.rows[0].authority_assistant_id, assistantId);
+      assert.equal(BigInt(inserted.rows[0].knowledge_authority_version), 2n);
+    }
+
+    const currentHistory = await loadCurrentProviderHistory(client, {
+      tenantId, conversationId, assistantId, version: 2n,
+    });
+    assert.deepEqual(
+      currentHistory.map((message) => message.sender_type),
+      ['CUSTOMER', 'ASSISTANT', 'AGENT', 'SYSTEM'],
+    );
+    assert.equal(currentHistory.some((message) => message.content.includes('legacy-null-marker')), false);
+
+    await client.query(
+      `DELETE FROM knowledge_source_assistants
+       WHERE tenant_id = $1 AND source_id = $2 AND assistant_id = $3`,
+      [tenantId, sourceId, assistantId],
+    );
+    assert.equal(await authorityVersion(client, tenantId, assistantId), 3n);
+    assert.deepEqual(await loadCurrentProviderHistory(client, {
+      tenantId, conversationId, assistantId, version: 3n,
+    }), []);
+
+    const visibleTranscript = await client.query(
+      `SELECT sender_type, content
+         FROM conversation_messages
+        WHERE tenant_id = $1 AND conversation_id = $2
+        ORDER BY created_at, id`,
+      [tenantId, conversationId],
+    );
+    assert.equal(visibleTranscript.rowCount, 5, 'Live Inbox/audit transcript is not deleted or rewritten');
+
+    await client.query(
+      `INSERT INTO knowledge_source_assistants (tenant_id, source_id, assistant_id)
+       VALUES ($1, $2, $3)`,
+      [tenantId, sourceId, assistantId],
+    );
+    assert.equal(await authorityVersion(client, tenantId, assistantId), 4n);
+    assert.deepEqual(await loadCurrentProviderHistory(client, {
+      tenantId, conversationId, assistantId, version: 4n,
+    }), [], 'reassignment never revives old provider history');
   } finally {
     await client.query('ROLLBACK');
     await client.end();

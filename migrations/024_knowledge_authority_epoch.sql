@@ -37,6 +37,16 @@ BEGIN
       );
   END IF;
 
+  IF EXISTS (
+    SELECT 1
+      FROM pg_constraint
+     WHERE conname = 'fk_conversation_messages_authority_assistant'
+       AND confdeltype <> 'r'
+  ) THEN
+    ALTER TABLE conversation_messages
+      DROP CONSTRAINT fk_conversation_messages_authority_assistant;
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint WHERE conname = 'fk_conversation_messages_authority_assistant'
   ) THEN
@@ -44,7 +54,7 @@ BEGIN
       ADD CONSTRAINT fk_conversation_messages_authority_assistant
       FOREIGN KEY (authority_assistant_id, tenant_id)
       REFERENCES ai_assistants(id, tenant_id)
-      ON DELETE SET NULL (authority_assistant_id);
+      ON DELETE RESTRICT;
   END IF;
 END $$;
 
@@ -56,6 +66,40 @@ CREATE INDEX IF NOT EXISTS idx_conversation_messages_provider_authority
     knowledge_authority_version,
     created_at DESC
   );
+
+CREATE OR REPLACE FUNCTION stamp_conversation_message_authority()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  -- Never trust caller-supplied provenance. Resolve it from the tenant-scoped
+  -- conversation channel and current Assistant epoch in this transaction.
+  NEW.authority_assistant_id := NULL;
+  NEW.knowledge_authority_version := NULL;
+
+  SELECT assistant.id, assistant.knowledge_authority_version
+    INTO NEW.authority_assistant_id, NEW.knowledge_authority_version
+    FROM conversations AS conversation
+    JOIN tenant_channels AS channel
+      ON channel.id = conversation.channel_id
+     AND channel.tenant_id = conversation.tenant_id
+    JOIN ai_assistants AS assistant
+      ON assistant.id = channel.assistant_id
+     AND assistant.tenant_id = channel.tenant_id
+   WHERE conversation.id = NEW.conversation_id
+     AND conversation.tenant_id = NEW.tenant_id
+     AND channel.status = 'active'
+     AND assistant.status = 'active'
+   LIMIT 1;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_stamp_conversation_message_authority ON conversation_messages;
+CREATE TRIGGER trg_stamp_conversation_message_authority
+BEFORE INSERT ON conversation_messages
+FOR EACH ROW EXECUTE FUNCTION stamp_conversation_message_authority();
 
 CREATE OR REPLACE FUNCTION bump_assistant_knowledge_authority(
   authority_tenant_id UUID,
