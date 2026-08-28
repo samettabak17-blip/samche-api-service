@@ -94,7 +94,7 @@ it('derives Assistant channel labels from real channel assignments', async () =>
 it('shows the same channel-aware Assistant labels when assigning a source', async () => {
   mockedApi.listAssistants.mockResolvedValue([{ id: 'assistant-whatsapp', tenant_id: 'tenant-a', name: 'SamChe AI' }]);
   mockedApi.listChannels.mockResolvedValue([{ id: 'channel-wa', tenant_id: 'tenant-a', assistant_id: 'assistant-whatsapp', channel_type: 'WHATSAPP', display_name: 'WhatsApp', status: 'active' }]);
-  mockedApi.listKnowledgeSources.mockResolvedValue([{ id: 'source-a', tenant_id: 'tenant-a', title: 'Sales policy', source_type: 'PDF', processing_status: 'READY', indexing_status: 'READY' }]);
+  mockedApi.listKnowledgeSources.mockResolvedValue([{ id: 'source-a', title: 'Sales policy', source_type: 'PDF', processing_status: 'READY', indexing_status: 'READY', enabled: true }]);
 
   renderPage(true, '/app/tenant-a/knowledge?tab=sources');
 
