@@ -92,7 +92,7 @@ test('returning to AI allows only the next new assistant response to persist and
 });
 
 
-test('regression: nullable assistant delivery status has a concrete PostgreSQL type', { skip: !process.env.DATABASE_URL }, async (t) => {
+test('regression: nullable assistant delivery status has a concrete PostgreSQL type', { skip: !process.env.DATABASE_URL }, async () => {
   const databaseUrl = new URL(process.env.DATABASE_URL);
   const database = new pg.Pool({
     host: databaseUrl.hostname,
@@ -109,17 +109,31 @@ test('regression: nullable assistant delivery status has a concrete PostgreSQL t
   try {
     await client.query('BEGIN');
     transactionOpen = true;
+    const fixtureTenantId = '33333333-3333-4333-8333-333333333333';
+    const fixtureAssistantId = '44444444-4444-4444-8444-444444444444';
+    const fixtureChannelId = '55555555-5555-4555-8555-555555555555';
+    const fixtureConversationId = '66666666-6666-4666-8666-666666666666';
+    await client.query('INSERT INTO tenants (id, name) VALUES ($1, $2)', [fixtureTenantId, 'WhatsApp SQL Contract Fixture']);
+    await client.query(
+      'INSERT INTO ai_assistants (id, tenant_id, name, model) VALUES ($1, $2, $3, $4)',
+      [fixtureAssistantId, fixtureTenantId, 'WhatsApp SQL Contract Assistant', 'gemini-2.5-pro']
+    );
+    await client.query(
+      `INSERT INTO tenant_channels (id, tenant_id, assistant_id, channel_type, display_name, status)
+       VALUES ($1, $2, $3, 'WHATSAPP', $4, 'active')`,
+      [fixtureChannelId, fixtureTenantId, fixtureAssistantId, 'WhatsApp SQL Contract Channel']
+    );
+    await client.query(
+      `INSERT INTO conversations (id, tenant_id, channel_id, external_conversation_id, status)
+       VALUES ($1, $2, $3, $4, 'open')`,
+      [fixtureConversationId, fixtureTenantId, fixtureChannelId, 'whatsapp-sql-contract-fixture']
+    );
     const conversation = await client.query(
       `SELECT id, tenant_id
          FROM conversations
-        WHERE status = 'open'
-        ORDER BY last_activity_at DESC NULLS LAST
-        LIMIT 1`
+        WHERE id = $1 AND tenant_id = $2`,
+      [fixtureConversationId, fixtureTenantId]
     );
-    if (!conversation.rows[0]) {
-      t.skip('No staging conversation is available for the SQL-contract regression check');
-      return;
-    }
 
     const target = conversation.rows[0];
     const inserted = await client.query(INSERT_CONVERSATION_MESSAGE_SQL, [
