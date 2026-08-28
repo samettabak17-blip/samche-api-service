@@ -20,9 +20,10 @@ function database({ wrongName = false, failDelete = false } = {}) {
   const client = {
     async query(sql, params = []) {
       calls.push({ sql, params });
-      if (/SELECT id, name FROM tenants/.test(sql)) {
+    if (/SELECT id, name FROM tenants/.test(sql)) {
         return { rows: [TENANT_A, TENANT_B].map((id, index) => ({ id, name: wrongName && index === 0 ? 'Customer' : `TASK6_E2E_123_1 tenant ${index}` })) };
       }
+      if (/SELECT id, tenant_id, title FROM knowledge_base_documents/.test(sql)) return { rows: [] };
       if (/DELETE FROM knowledge_chunks/.test(sql) && failDelete) throw new Error('DELETE_FAILED');
       return { rows: [], rowCount: 0 };
     },
@@ -35,6 +36,29 @@ test('cleanup refuses a tenant whose name is not owned by the run marker', async
   const db = database({ wrongName: true });
   await assert.rejects(cleanupFixture({ database: db, storage: { remove: async () => {} }, state: state() }), /TASK6_E2E_OWNERSHIP_MISMATCH/);
   assert.equal(db.calls.some(({ sql }) => /^DELETE /i.test(sql.trim())), false);
+});
+
+test('cleanup deletes a marker-owned source from an existing staging tenant without deleting that tenant', async () => {
+  const fixture = state();
+  fixture.scopedTenantIds = ['44444444-4444-4444-8444-444444444444'];
+  fixture.scopedSourceIds = ['55555555-5555-4555-8555-555555555555'];
+  const db = database();
+  const originalConnect = db.connect;
+  db.connect = async () => {
+    const client = await originalConnect();
+    const originalQuery = client.query;
+    client.query = async (sql, params = []) => {
+      if (/SELECT id, tenant_id, title FROM knowledge_base_documents/.test(sql)) {
+        db.calls.push({ sql, params });
+        return { rows: [{ id: fixture.scopedSourceIds[0], tenant_id: fixture.scopedTenantIds[0], title: `${fixture.marker} shared channel source` }] };
+      }
+      return originalQuery(sql, params);
+    };
+    return client;
+  };
+  await cleanupFixture({ database: db, storage: { remove: async () => {} }, state: fixture });
+  assert.ok(db.calls.some(({ sql, params }) => /DELETE FROM knowledge_base_documents WHERE tenant_id = \$1 AND id = ANY/.test(sql) && params[0] === fixture.scopedTenantIds[0]));
+  assert.equal(db.calls.some(({ sql, params }) => /DELETE FROM tenants/.test(sql) && params[0]?.includes(fixture.scopedTenantIds[0])), false);
 });
 
 test('cleanup uses marker-owned parameterized deletes and removes only verified storage keys', async () => {

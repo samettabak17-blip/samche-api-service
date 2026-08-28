@@ -1,0 +1,84 @@
+name: Staging Task 6 E2E Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 60
+    steps:
+      - name: Checkout staging commit
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install API dependencies
+        run: npm install --ignore-scripts
+
+      - name: Run harness security and contract tests
+        run: >
+          node --test
+          tests/staging-task6-e2e-support.test.js
+          tests/staging-task6-e2e-cleanup.test.js
+          tests/staging-task6-e2e-contract.test.js
+          tests/staging-task6-e2e-workflow.test.js
+
+      - name: Run real staging Task 6 acceptance
+        env:
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          STAGING_OWNER_TOKEN: ${{ secrets.STAGING_OWNER_TOKEN }}
+          STAGING_ADMIN_TOKEN: ${{ secrets.STAGING_ADMIN_TOKEN }}
+          STAGING_WHATSAPP_APP_SECRET: ${{ secrets.STAGING_WHATSAPP_APP_SECRET }}
+          STAGING_WHATSAPP_E2E_RECIPIENT: ${{ secrets.STAGING_WHATSAPP_E2E_RECIPIENT }}
+          STAGING_WHATSAPP_PHONE_ID: ${{ secrets.STAGING_WHATSAPP_PHONE_ID }}
+          CONVERSATION_STORAGE_DRIVER: ${{ secrets.CONVERSATION_STORAGE_DRIVER }}
+          CONVERSATION_S3_BUCKET: ${{ secrets.CONVERSATION_S3_BUCKET }}
+          CONVERSATION_S3_REGION: ${{ secrets.CONVERSATION_S3_REGION }}
+          CONVERSATION_S3_ACCESS_KEY_ID: ${{ secrets.CONVERSATION_S3_ACCESS_KEY_ID }}
+          CONVERSATION_S3_SECRET_ACCESS_KEY: ${{ secrets.CONVERSATION_S3_SECRET_ACCESS_KEY }}
+          CONVERSATION_S3_ENDPOINT: ${{ secrets.CONVERSATION_S3_ENDPOINT }}
+          CONVERSATION_S3_FORCE_PATH_STYLE: ${{ secrets.CONVERSATION_S3_FORCE_PATH_STYLE }}
+          TASK6_E2E_STATE_PATH: ${{ runner.temp }}/task6-e2e-state.json
+        run: node scripts/staging-task6-e2e.js
+
+      - name: Select dashboard fixture tenant
+        shell: bash
+        env:
+          TASK6_E2E_STATE_PATH: ${{ runner.temp }}/task6-e2e-state.json
+        run: node -e "const fs=require('fs'); const state=JSON.parse(fs.readFileSync(process.env.TASK6_E2E_STATE_PATH)); fs.appendFileSync(process.env.GITHUB_ENV, 'TASK6_E2E_TENANT_ID='+state.tenantIds[0]+'\n')"
+
+      - name: Install dashboard browser runner
+        working-directory: dashboard
+        run: |
+          npm install --ignore-scripts
+          npm install --no-save @playwright/test@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Run routed responsive dashboard acceptance
+        working-directory: dashboard
+        env:
+          STAGING_ADMIN_TOKEN: ${{ secrets.STAGING_ADMIN_TOKEN }}
+        run: npx playwright test e2e/task6-staging.spec.ts --reporter=line
+
+      - name: Cleanup marker-owned staging fixtures
+        if: always()
+        env:
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          CONVERSATION_STORAGE_DRIVER: ${{ secrets.CONVERSATION_STORAGE_DRIVER }}
+          CONVERSATION_S3_BUCKET: ${{ secrets.CONVERSATION_S3_BUCKET }}
+          CONVERSATION_S3_REGION: ${{ secrets.CONVERSATION_S3_REGION }}
+          CONVERSATION_S3_ACCESS_KEY_ID: ${{ secrets.CONVERSATION_S3_ACCESS_KEY_ID }}
+          CONVERSATION_S3_SECRET_ACCESS_KEY: ${{ secrets.CONVERSATION_S3_SECRET_ACCESS_KEY }}
+          CONVERSATION_S3_ENDPOINT: ${{ secrets.CONVERSATION_S3_ENDPOINT }}
+          CONVERSATION_S3_FORCE_PATH_STYLE: ${{ secrets.CONVERSATION_S3_FORCE_PATH_STYLE }}
+          TASK6_E2E_STATE_PATH: ${{ runner.temp }}/task6-e2e-state.json
+        run: node scripts/cleanup_staging_task6_e2e.js
