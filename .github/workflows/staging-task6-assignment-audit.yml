@@ -1,0 +1,36 @@
+name: Staging Task 6 Assignment Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_title:
+        description: Exact staging test source title
+        required: true
+        type: string
+      marker:
+        description: Exact non-secret source-only marker to audit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Run strict-TLS read-only assignment audit
+        env:
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          STAGING_ADMIN_TOKEN: ${{ secrets.STAGING_ADMIN_TOKEN }}
+          STAGING_WHATSAPP_PHONE_ID: ${{ secrets.STAGING_WHATSAPP_PHONE_ID }}
+          TASK6_AUDIT_SOURCE_TITLE: ${{ inputs.source_title }}
+          TASK6_AUDIT_MARKER: ${{ inputs.marker }}
+        run: node scripts/staging-task6-assignment-audit.js
