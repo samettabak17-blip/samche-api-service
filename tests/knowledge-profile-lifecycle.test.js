@@ -28,13 +28,14 @@ test('generates a review-only Business Profile from an explicit resolved source 
   const businessIdentityId = '55555555-5555-4555-8555-555555555555';
   const sourceIds = ['11111111-1111-4111-8111-111111111111'];
   const version = await generateBusinessProfileVersion({ database, provider, tenantId, requestedBy: actorId, businessIdentityId, sourceIds });
+  assert.match(calls.find(({ sql }) => /FROM knowledge_base_documents/.test(sql)).sql, /ANY\(\$2::uuid\[\]\)/);
 
   assert.equal(version.status, 'NEEDS_REVIEW');
   assert.match(prompts[0], /Approved company facts/);
   assert.match(prompts[0], /current tenant approved knowledge only/i);
   assert.match(prompts[0], /Never use SamChe.*as a default/i);
   assert.match(prompts[0], /unknown/i);
-  assert.ok(calls.some(({ sql }) => /id = ANY\(\$3::uuid\[\]\)[\s\S]*enabled = TRUE[\s\S]*processing_status = 'READY'/i.test(sql)));
+  assert.ok(calls.some(({ sql }) => /id = ANY\(\$2::uuid\[\]\)[\s\S]*enabled = TRUE[\s\S]*processing_status = 'READY'/i.test(sql)));
   const insert = calls.find(({ sql }) => /INSERT INTO business_profile_versions/i.test(sql));
   assert.equal(insert.params[4], '22222222-2222-4222-8222-222222222222');
   assert.equal(insert.params[5], 2);

@@ -40,10 +40,10 @@ export async function analyzeBusinessProfileSourceScope({ database, provider, te
   const sources = await database.query(
     `SELECT id, title, content, content_hash
        FROM knowledge_base_documents
-      WHERE tenant_id = $1 AND id = ANY($3::uuid[]) AND enabled = TRUE AND status = 'active'
+      WHERE tenant_id = $1 AND id = ANY($2::uuid[]) AND enabled = TRUE AND status = 'active'
         AND processing_status = 'READY' AND indexing_status = 'READY' AND content_hash IS NOT NULL
       ORDER BY id`,
-    [tenantId, businessIdentityId, sourceIds],
+    [tenantId, sourceIds],
   );
   if (sources.rows.length !== sourceIds.length) throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_SOURCE_SCOPE_INVALID', 'One or more selected sources are unavailable or ineligible');
   const analysis = await analyzeBusinessIdentityScope({ provider, sources: sources.rows });
