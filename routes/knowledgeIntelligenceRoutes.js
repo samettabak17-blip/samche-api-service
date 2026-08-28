@@ -449,7 +449,7 @@ router.get('/:tenantId/knowledge-intelligence/profiles', requireTenantAccess, as
   if (!tenantId) return;
   try {
     const result = await pool.query(
-      `SELECT version.id, version.profile_id, version.profile_data, version.evidence, version.status,
+      `SELECT version.id, version.profile_id, version.schema_version, version.profile_data, version.evidence, version.status,
               version.generated_by, version.reviewed_by, version.reviewed_at, version.activated_by,
               version.activated_at, version.superseded_by_version_id, version.created_at,
               profile.approved_version_id, profile.active_version_id
@@ -572,7 +572,7 @@ router.get('/:tenantId/knowledge-intelligence/assistants/:assistantId/configurat
   try {
     await verifyAssistant(tenantId, assistantId);
     const result = await pool.query(
-      `SELECT id, configuration_data, source_profile_version_id, source_recommendation_id,
+      `SELECT id, schema_version, configuration_data, source_profile_version_id, source_recommendation_id,
               generated_by, status, approved_by, approved_at, activated_by, activated_at,
               supersedes_version_id, created_at, updated_at
          FROM assistant_configuration_versions

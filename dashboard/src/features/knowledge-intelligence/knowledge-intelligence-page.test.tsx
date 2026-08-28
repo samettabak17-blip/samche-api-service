@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { tenantApi } from '../dashboard/dashboard-api';
@@ -97,6 +97,30 @@ it('supports direct routed panels while preserving the legacy query route', asyn
   expect(screen.getByRole('button', { name: 'Edit' })).toBeVisible();
   expect(screen.getByRole('button', { name: 'Approve' })).toBeVisible();
   expect(screen.getByRole('button', { name: 'Reject' })).toBeVisible();
+});
+
+it('renders structured tenant profile fields and provenance', async () => {
+  mockedApi.listBusinessProfiles.mockResolvedValue([{ id: 'profile-active', schema_version: 2, profile_data: { company_identity: 'Meridian Arc Technologies LLC', company_summary: 'Enterprise technology company', services: ['Enterprise support'], pricing_information: ['35,650 AED'], supported_languages: ['English'] }, evidence: [{ source_id: 'source-a' }], status: 'ACTIVE', active_version_id: 'profile-active' }]);
+  renderPage(true, '/app/tenant-a/knowledge-base/profile');
+  expect(await screen.findByText('Company Identity')).toBeVisible();
+  expect(screen.getAllByText('Meridian Arc Technologies LLC').length).toBeGreaterThan(0);
+  expect(screen.getByText('SOURCE-DERIVED')).toBeVisible();
+});
+
+it('renders structured Assistant configuration and a safe runtime preview', async () => {
+  mockedApi.listAssistants.mockResolvedValue([{ id: 'assistant-a', tenant_id: 'tenant-a', name: 'Meridian Advisor' }]);
+  mockedApi.listBusinessProfiles.mockResolvedValue([{ id: 'profile-active', schema_version: 2, profile_data: { company_identity: 'Meridian Arc Technologies LLC' }, evidence: [{ source_id: 'source-a' }], status: 'ACTIVE', active_version_id: 'profile-active' }]);
+  mockedApi.listAssistantConfigurations.mockResolvedValue([{ id: 'config-active', schema_version: 2, configuration_data: { assistant_identity: 'Meridian Client Advisor', role_and_purpose: 'Support customers', tone: 'Calm and precise', qualification_guidance: 'Ask only relevant questions', fallback_guidance: 'State when information is unavailable', follow_up_behavior: { enabled: true }, scheduled_messaging_behavior: { enabled: true }, prohibited_claims: ['Unsupported prices'] }, status: 'ACTIVE' }]);
+  renderPage(true, '/app/tenant-a/knowledge-base/configurations');
+  const assistant = await screen.findByRole('combobox', { name: 'Assistant' });
+  await screen.findByRole('option', { name: 'Meridian Advisor' });
+  fireEvent.change(assistant, { target: { value: 'assistant-a' } });
+  expect(assistant).toHaveValue('assistant-a');
+  await waitFor(() => expect(mockedApi.listAssistantConfigurations).toHaveBeenCalledWith('tenant-a', 'assistant-a'));
+  expect(await screen.findByText('Runtime Behavior Preview')).toBeVisible();
+  expect(screen.getAllByText('Meridian Client Advisor')).toHaveLength(2);
+  expect(screen.getAllByText('AI RECOMMENDED').length).toBeGreaterThan(0);
+  expect(screen.queryByText(/PLATFORM RUNTIME SAFETY/)).not.toBeInTheDocument();
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
