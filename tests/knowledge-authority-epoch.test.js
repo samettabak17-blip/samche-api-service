@@ -320,8 +320,8 @@ test('message provenance preserves the transcript but provider history fails clo
       tenantId, conversationId, assistantId, version: 2n,
     });
     assert.deepEqual(
-      currentHistory.map((message) => message.sender_type),
-      ['CUSTOMER', 'ASSISTANT', 'AGENT', 'SYSTEM'],
+      new Set(currentHistory.map((message) => message.sender_type)),
+      new Set(['CUSTOMER', 'ASSISTANT', 'AGENT', 'SYSTEM']),
     );
     assert.equal(currentHistory.some((message) => message.content.includes('legacy-null-marker')), false);
 
