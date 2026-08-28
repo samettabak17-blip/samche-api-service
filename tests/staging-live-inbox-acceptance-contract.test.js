@@ -26,4 +26,15 @@ test('live inbox cleanup uses the issued session id and verified TLS', async () 
   assert.match(script, /rejectUnauthorized:\s*true/);
   assert.match(script, /servername:\s*databaseUrl\.hostname/);
   assert.match(script, /socket\?\.encrypted !== true \|\| socket\?\.authorized !== true/);
+  for (const table of [
+    'knowledge_gap_signals',
+    'knowledge_candidate_evidence',
+    'conversation_resources',
+    'crm_deals',
+    'crm_lead_analyses',
+    'crm_activities',
+    'crm_leads',
+  ]) {
+    assert.match(script, new RegExp(`DELETE FROM ${table}`));
+  }
 });

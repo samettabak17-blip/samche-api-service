@@ -38,23 +38,65 @@ try {
   }
   await client.query('BEGIN');
   const conversations = await client.query(
-    'SELECT id, tenant_id FROM conversations WHERE external_conversation_id = $1 FOR UPDATE',
+    'SELECT id, tenant_id, contact_id FROM conversations WHERE external_conversation_id = $1 FOR UPDATE',
     [externalConversationId]
   );
 
   for (const conversation of conversations.rows) {
+    const params = [conversation.tenant_id, conversation.id];
+    await client.query(
+      'DELETE FROM knowledge_gap_signals WHERE tenant_id = $1 AND conversation_id = $2',
+      params
+    );
+    await client.query(
+      'DELETE FROM knowledge_candidate_evidence WHERE tenant_id = $1 AND conversation_id = $2',
+      params
+    );
+    await client.query(
+      'DELETE FROM conversation_resources WHERE tenant_id = $1 AND conversation_id = $2',
+      params
+    );
+    await client.query(
+      `DELETE FROM crm_deals
+        WHERE tenant_id = $1
+          AND lead_id IN (SELECT id FROM crm_leads WHERE tenant_id = $1 AND conversation_id = $2)`,
+      params
+    );
+    await client.query(
+      'DELETE FROM crm_lead_analyses WHERE tenant_id = $1 AND conversation_id = $2',
+      params
+    );
+    await client.query(
+      `DELETE FROM crm_activities
+        WHERE tenant_id = $1
+          AND (conversation_id = $2 OR lead_id IN (SELECT id FROM crm_leads WHERE tenant_id = $1 AND conversation_id = $2))`,
+      params
+    );
+    await client.query(
+      'DELETE FROM crm_leads WHERE tenant_id = $1 AND conversation_id = $2',
+      params
+    );
     await client.query(
       'DELETE FROM conversation_audit_events WHERE tenant_id = $1 AND conversation_id = $2',
-      [conversation.tenant_id, conversation.id]
+      params
     );
     await client.query(
       'DELETE FROM conversation_messages WHERE tenant_id = $1 AND conversation_id = $2',
-      [conversation.tenant_id, conversation.id]
+      params
     );
     await client.query(
       'DELETE FROM conversations WHERE tenant_id = $1 AND id = $2',
-      [conversation.tenant_id, conversation.id]
+      params
     );
+    if (conversation.contact_id) {
+      await client.query(
+        `DELETE FROM crm_contacts
+          WHERE tenant_id = $1 AND id = $2
+            AND NOT EXISTS (SELECT 1 FROM conversations WHERE tenant_id = $1 AND contact_id = $2)
+            AND NOT EXISTS (SELECT 1 FROM crm_leads WHERE tenant_id = $1 AND contact_id = $2)`,
+        [conversation.tenant_id, conversation.contact_id]
+      );
+    }
   }
 
   await client.query(
