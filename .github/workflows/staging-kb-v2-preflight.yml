@@ -16,9 +16,19 @@ on:
       - tests/knowledge-*.test.js
       - dashboard/src/features/knowledge-intelligence/**
   workflow_dispatch:
+    inputs:
+      auth_role_audit:
+        description: Run only the strict-TLS staging authentication role audit
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
 
 jobs:
   focused-tests:
+    if: github.ref == 'refs/heads/staging' && (github.event_name == 'push' || inputs.auth_role_audit != true)
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
@@ -29,27 +39,55 @@ jobs:
         run: node --test tests/knowledge-*.test.js
 
   postgres:
+    if: github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    env:
-      STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
     steps:
       - uses: actions/checkout@v4
       - name: Install database client
         run: npm install --no-save pg@8.16.3
       - name: Inspect Task 6 staging schema without exposing credentials
+        if: github.event_name == 'push' || inputs.auth_role_audit != true
+        env:
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
         shell: bash
         run: |
           node <<'NODE'
           const { Pool } = require('pg');
 
+          function strictTlsConfig(rawUrl) {
+            const databaseUrl = new URL(rawUrl);
+            if (!['postgres:', 'postgresql:'].includes(databaseUrl.protocol)) throw new Error('INVALID_DATABASE_PROTOCOL');
+            return {
+              host: databaseUrl.hostname,
+              port: Number(databaseUrl.port || 5432),
+              user: decodeURIComponent(databaseUrl.username),
+              password: decodeURIComponent(databaseUrl.password),
+              database: decodeURIComponent(databaseUrl.pathname.replace(/^\//, '')),
+              ssl: { rejectUnauthorized: true, servername: databaseUrl.hostname },
+            };
+          }
+
           (async () => {
-            const pool = new Pool({
-              connectionString: process.env.STAGING_DATABASE_URL,
-              ssl: { rejectUnauthorized: false },
-            });
+            const pool = new Pool(strictTlsConfig(process.env.STAGING_DATABASE_URL));
+            let client;
             try {
-              const result = await pool.query(`
+              client = await pool.connect();
+            } catch {
+              console.error('TLS_VERIFICATION_FAILED');
+              process.exitCode = 4;
+              await pool.end();
+              return;
+            }
+            try {
+              const stream = client.connection.stream;
+              if (stream.encrypted !== true || stream.authorized !== true) {
+                console.error('TLS_VERIFICATION_FAILED');
+                process.exitCode = 4;
+                return;
+              }
+              console.log('TLS_VERIFIED: yes');
+              const result = await client.query(`
                 SELECT
                   current_setting('server_version') AS server_version,
                   EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS vector_installed,
@@ -99,7 +137,7 @@ jobs:
                 'fk_assistant_configurations_generation_run'
               ];
 
-              const tables = await pool.query(
+              const tables = await client.query(
                 `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1::text[])`,
                 [expectedTables]
               );
@@ -108,7 +146,7 @@ jobs:
 
               const missingColumns = [];
               for (const [table, columns] of Object.entries(expectedColumns)) {
-                const found = await pool.query(
+                const found = await client.query(
                   `SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = ANY($2::text[])`,
                   [table, columns]
                 );
@@ -116,14 +154,14 @@ jobs:
                 for (const column of columns) if (!present.has(column)) missingColumns.push(table + '.' + column);
               }
 
-              const indexes = await pool.query(
+              const indexes = await client.query(
                 `SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1::text[])`,
                 [expectedIndexes]
               );
               const presentIndexes = new Set(indexes.rows.map(({ indexname }) => indexname));
               const missingIndexes = expectedIndexes.filter((name) => !presentIndexes.has(name));
 
-              const constraints = await pool.query(
+              const constraints = await client.query(
                 `SELECT conname FROM pg_constraint WHERE conname = ANY($1::text[])`,
                 [expectedConstraints]
               );
@@ -140,7 +178,7 @@ jobs:
                 return;
               }
 
-              const mappings = await pool.query(`
+              const mappings = await client.query(`
                 SELECT
                   ci.tenant_id,
                   ci.assistant_id,
@@ -168,10 +206,80 @@ jobs:
               console.log('CHANNEL_ASSISTANT_MAPPING_COUNT: ' + mappings.rowCount);
               console.log('KBV2_PREFLIGHT: TASK6_SCHEMA_COMPATIBLE');
             } finally {
+              client.release();
               await pool.end();
             }
-          })().catch((error) => {
+          })().catch(() => {
             console.error('KBV2_PREFLIGHT: DATABASE_CHECK_FAILED');
+            process.exitCode = 1;
+          });
+          NODE
+
+      - name: Verify staging authentication roles
+        if: github.event_name == 'workflow_dispatch' && inputs.auth_role_audit == true
+        env:
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        shell: bash
+        run: |
+          node <<'NODE'
+          const { Client } = require('pg');
+
+          function strictTlsConfig(rawUrl) {
+            const databaseUrl = new URL(rawUrl);
+            if (!['postgres:', 'postgresql:'].includes(databaseUrl.protocol)) throw new Error('INVALID_DATABASE_PROTOCOL');
+            return {
+              host: databaseUrl.hostname,
+              port: Number(databaseUrl.port || 5432),
+              user: decodeURIComponent(databaseUrl.username),
+              password: decodeURIComponent(databaseUrl.password),
+              database: decodeURIComponent(databaseUrl.pathname.replace(/^\//, '')),
+              ssl: { rejectUnauthorized: true, servername: databaseUrl.hostname },
+            };
+          }
+
+          (async () => {
+            const client = new Client(strictTlsConfig(process.env.STAGING_DATABASE_URL));
+            let transactionStarted = false;
+            try {
+              try {
+                await client.connect();
+              } catch {
+                console.error('TLS_VERIFICATION_FAILED');
+                process.exitCode = 4;
+                return;
+              }
+              const stream = client.connection.stream;
+              if (stream.encrypted !== true || stream.authorized !== true) {
+                console.error('TLS_VERIFICATION_FAILED');
+                process.exitCode = 4;
+                return;
+              }
+
+              await client.query('BEGIN');
+              transactionStarted = true;
+              await client.query('SET TRANSACTION READ ONLY');
+              const owners = await client.query(`
+                SELECT email, system_role, status
+                FROM users
+                WHERE system_role = 'OWNER'
+                ORDER BY email;
+              `);
+              const dashboardAdmin = await client.query(`
+                SELECT email, system_role, status
+                FROM users
+                WHERE email = 'dashboard-e2e-admin-20260822@samche-staging.test';
+              `);
+              await client.query('ROLLBACK');
+              transactionStarted = false;
+
+              for (const row of owners.rows) console.log(JSON.stringify(row));
+              for (const row of dashboardAdmin.rows) console.log(JSON.stringify(row));
+            } finally {
+              if (transactionStarted) await client.query('ROLLBACK').catch(() => {});
+              await client.end().catch(() => {});
+            }
+          })().catch(() => {
+            console.error('AUTH_ROLE_AUDIT_FAILED');
             process.exitCode = 1;
           });
           NODE
