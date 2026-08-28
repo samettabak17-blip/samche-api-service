@@ -77,4 +77,21 @@ export async function rejectBusinessProfileVersion({ database, tenantId, version
   return result.rows[0];
 }
 
+export async function updateBusinessProfileReview({ database, tenantId, versionId, profileData }) {
+  uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
+  uuid(versionId, 'KNOWLEDGE_PROFILE_VERSION_INVALID');
+  if (!profileData || typeof profileData !== 'object' || Array.isArray(profileData) || !Object.keys(profileData).length) {
+    throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_DATA_INVALID', 'Business Profile review data is invalid');
+  }
+  const result = await database.query(
+    `UPDATE business_profile_versions
+        SET profile_data = $3
+      WHERE id = $1 AND tenant_id = $2 AND status = 'NEEDS_REVIEW'
+      RETURNING id, status, profile_data`,
+    [versionId, tenantId, profileData],
+  );
+  if (!result.rows[0]) throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_NOT_REVIEWABLE', 'Business Profile is not available for editing');
+  return result.rows[0];
+}
+
 export { KnowledgeGenerationPersistenceError };

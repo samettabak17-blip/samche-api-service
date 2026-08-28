@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateBusinessProfileVersion, rejectBusinessProfileVersion } from '../services/knowledge-profile-lifecycle.js';
+import { generateBusinessProfileVersion, rejectBusinessProfileVersion, updateBusinessProfileReview } from '../services/knowledge-profile-lifecycle.js';
 
 const tenantId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const actorId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -41,4 +41,25 @@ test('rejects only a reviewable tenant Business Profile version', async () => {
   assert.equal(result.status, 'REJECTED');
   assert.match(calls[0].sql, /status IN \('DRAFT', 'NEEDS_REVIEW'\)/i);
   assert.deepEqual(calls[0].params, ['44444444-4444-4444-8444-444444444444', tenantId, actorId]);
+});
+
+test('edits only NEEDS_REVIEW Business Profile data without changing lifecycle status', async () => {
+  const calls = [];
+  const database = { query: async (sql, params) => {
+    calls.push({ sql, params });
+    return { rows: [{ id: params[0], status: 'NEEDS_REVIEW', profile_data: params[2] }] };
+  } };
+  const profileData = { company_summary: 'Reviewed staging summary' };
+  const result = await updateBusinessProfileReview({ database, tenantId, versionId: '44444444-4444-4444-8444-444444444444', profileData });
+  assert.equal(result.status, 'NEEDS_REVIEW');
+  assert.match(calls[0].sql, /status = 'NEEDS_REVIEW'/i);
+  assert.deepEqual(calls[0].params, ['44444444-4444-4444-8444-444444444444', tenantId, profileData]);
+});
+
+test('rejects an empty Business Profile review edit before querying', async () => {
+  const database = { query: async () => assert.fail('must not query') };
+  await assert.rejects(
+    updateBusinessProfileReview({ database, tenantId, versionId: '44444444-4444-4444-8444-444444444444', profileData: {} }),
+    (error) => error.code === 'KNOWLEDGE_PROFILE_DATA_INVALID',
+  );
 });

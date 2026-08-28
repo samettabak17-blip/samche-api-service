@@ -110,12 +110,13 @@ export async function approveBusinessProfileVersion({ database, tenantId, versio
   });
 }
 
-export async function activateAssistantConfigurationVersion({
+async function activateConfigurationVersion({
   database,
   tenantId,
   assistantId,
   versionId,
   activatedBy,
+  allowSuperseded = false,
 }) {
   uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
   uuid(assistantId, 'KNOWLEDGE_ASSISTANT_INVALID');
@@ -131,7 +132,8 @@ export async function activateAssistantConfigurationVersion({
       [versionId, tenantId, assistantId]
     );
     const target = targetResult.rows[0];
-    if (!target || !['APPROVED', 'ACTIVE'].includes(target.status)) {
+    const allowedStatuses = allowSuperseded ? ['SUPERSEDED'] : ['APPROVED', 'ACTIVE'];
+    if (!target || !allowedStatuses.includes(target.status)) {
       throw new KnowledgeConfigurationError('KNOWLEDGE_CONFIGURATION_NOT_APPROVED', 'Only an approved configuration can be activated');
     }
 
@@ -172,6 +174,32 @@ export async function activateAssistantConfigurationVersion({
     );
     return { id: versionId, supersedesVersionId: previousId, status: 'ACTIVE' };
   });
+}
+
+export async function activateAssistantConfigurationVersion(options) {
+  return activateConfigurationVersion(options);
+}
+
+export async function rollbackAssistantConfigurationVersion(options) {
+  return activateConfigurationVersion({ ...options, allowSuperseded: true });
+}
+
+export async function updateAssistantConfigurationReview({ database, tenantId, assistantId, versionId, configurationData }) {
+  uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
+  uuid(assistantId, 'KNOWLEDGE_ASSISTANT_INVALID');
+  uuid(versionId, 'KNOWLEDGE_CONFIGURATION_INVALID');
+  if (!configurationData || typeof configurationData !== 'object' || Array.isArray(configurationData) || !Object.keys(configurationData).length) {
+    throw new KnowledgeConfigurationError('KNOWLEDGE_CONFIGURATION_DATA_INVALID', 'Assistant configuration review data is invalid');
+  }
+  const result = await database.query(
+    `UPDATE assistant_configuration_versions
+        SET configuration_data = $4, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $1 AND tenant_id = $2 AND assistant_id = $3 AND status = 'NEEDS_REVIEW'
+      RETURNING id, status, configuration_data`,
+    [versionId, tenantId, assistantId, configurationData]
+  );
+  if (!result.rows[0]) throw new KnowledgeConfigurationError('KNOWLEDGE_CONFIGURATION_NOT_REVIEWABLE', 'Assistant configuration is not available for editing');
+  return result.rows[0];
 }
 
 export async function activateBusinessProfileVersion({ database, tenantId, versionId, activatedBy }) {

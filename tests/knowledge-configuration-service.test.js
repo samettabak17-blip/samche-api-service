@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activateAssistantConfigurationVersion, approveAssistantConfigurationVersion, approveBusinessProfileVersion, resolveActiveAssistantKnowledgeConfiguration } from '../services/knowledge-configuration-service.js';
+import { activateAssistantConfigurationVersion, approveAssistantConfigurationVersion, approveBusinessProfileVersion, resolveActiveAssistantKnowledgeConfiguration, rollbackAssistantConfigurationVersion, updateAssistantConfigurationReview } from '../services/knowledge-configuration-service.js';
 
 test('activating an approved assistant configuration supersedes only the previously active version', async () => {
   const calls = [];
@@ -88,5 +88,32 @@ test('approving a profile records historical approval without activating it', as
   assert.ok(calls.some(({ sql }) => /SET status = 'APPROVED'/.test(sql)));
   assert.ok(calls.some(({ sql }) => /approved_version_id/.test(sql)));
   assert.equal(calls.some(({ sql }) => /active_version_id/.test(sql)), false);
+});
+
+test('edits only NEEDS_REVIEW configuration data without activating it', async () => {
+  const calls = [];
+  const database = { query: async (sql, params) => {
+    calls.push({ sql, params });
+    return { rows: [{ id: params[0], status: 'NEEDS_REVIEW', configuration_data: params[3] }] };
+  } };
+  const configurationData = { tone: 'concise' };
+  const result = await updateAssistantConfigurationReview({ database, tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', assistantId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', versionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', configurationData });
+  assert.equal(result.status, 'NEEDS_REVIEW');
+  assert.match(calls[0].sql, /status = 'NEEDS_REVIEW'/i);
+  assert.equal(calls.some(({ sql }) => /active_configuration_version_id/.test(sql)), false);
+});
+
+test('explicit rollback reactivates only a SUPERSEDED configuration target', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/SELECT id, status/i.test(sql)) return { rows: [{ id: params[0], status: 'SUPERSEDED' }] };
+    if (/status = 'ACTIVE'/i.test(sql)) return { rows: [{ id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' }] };
+    return { rows: [] };
+  } };
+  const result = await rollbackAssistantConfigurationVersion({ database, tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', assistantId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', versionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', activatedBy: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' });
+  assert.equal(result.status, 'ACTIVE');
+  assert.equal(result.supersedesVersionId, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee');
+  assert.ok(calls.some(({ sql }) => /active_configuration_version_id/.test(sql)));
 });
 

@@ -24,6 +24,8 @@ import {
   activateBusinessProfileVersion,
   approveAssistantConfigurationVersion,
   approveBusinessProfileVersion,
+  rollbackAssistantConfigurationVersion,
+  updateAssistantConfigurationReview,
 } from '../services/knowledge-configuration-service.js';
 import { KnowledgeGapError } from '../services/knowledge-gap-service.js';
 import { createSuggestedCandidateFromKnowledgeGap } from '../services/knowledge-gap-candidate-service.js';
@@ -32,6 +34,7 @@ import {
   generateBusinessProfileVersion,
   KnowledgeProfileLifecycleError,
   rejectBusinessProfileVersion,
+  updateBusinessProfileReview,
 } from '../services/knowledge-profile-lifecycle.js';
 import {
   generateAssistantConfigurationVersion,
@@ -479,6 +482,15 @@ router.post('/:tenantId/knowledge-intelligence/profiles/generate', requireTenant
   }
 });
 
+router.put('/:tenantId/knowledge-intelligence/profiles/:versionId', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId || !isValidUUID(req.params.versionId)) return res.status(400).json({ error: 'Invalid Business Profile version ID' });
+  try {
+    const profile = await updateBusinessProfileReview({ database: pool, tenantId, versionId: req.params.versionId, profileData: req.body?.profile_data });
+    return res.json({ profile });
+  } catch (error) { return safeError(res, error); }
+});
+
 router.post('/:tenantId/knowledge-intelligence/profiles/:versionId/reject', requireTenantAccess, requireTenantAdmin, async (req, res) => {
   const tenantId = tenant(req, res);
   if (!tenantId || !isValidUUID(req.params.versionId)) return res.status(400).json({ error: 'Invalid Business Profile version ID' });
@@ -514,6 +526,15 @@ router.post('/:tenantId/knowledge-intelligence/profiles/:versionId/activate', re
   } catch (error) {
     return safeError(res, error);
   }
+});
+
+router.post('/:tenantId/knowledge-intelligence/profiles/:versionId/rollback', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId || !isValidUUID(req.params.versionId)) return res.status(400).json({ error: 'Invalid Business Profile version ID' });
+  try {
+    const profile = await activateBusinessProfileVersion({ database: pool, tenantId, versionId: req.params.versionId, activatedBy: req.user.user_id });
+    return res.json({ profile });
+  } catch (error) { return safeError(res, error); }
 });
 
 router.get('/:tenantId/knowledge-intelligence/assistants/:assistantId/recommendations', requireTenantAccess, async (req, res) => {
@@ -575,6 +596,15 @@ router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/configura
   } catch (error) { return safeError(res, error); }
 });
 
+router.put('/:tenantId/knowledge-intelligence/assistants/:assistantId/configurations/:versionId', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res); const assistantId = req.params.assistantId;
+  if (!tenantId || !isValidUUID(assistantId) || !isValidUUID(req.params.versionId)) return res.status(400).json({ error: 'Invalid Assistant configuration ID' });
+  try {
+    const configuration = await updateAssistantConfigurationReview({ database: pool, tenantId, assistantId, versionId: req.params.versionId, configurationData: req.body?.configuration_data });
+    return res.json({ configuration });
+  } catch (error) { return safeError(res, error); }
+});
+
 router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/configurations/:versionId/reject', requireTenantAccess, requireTenantAdmin, async (req, res) => {
   const tenantId = tenant(req, res); const assistantId = req.params.assistantId;
   if (!tenantId || !isValidUUID(assistantId) || !isValidUUID(req.params.versionId)) return res.status(400).json({ error: 'Invalid Assistant configuration ID' });
@@ -610,6 +640,15 @@ router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/configura
   } catch (error) {
     return safeError(res, error);
   }
+});
+
+router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/configurations/:versionId/rollback', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res); const assistantId = req.params.assistantId;
+  if (!tenantId || !isValidUUID(assistantId) || !isValidUUID(req.params.versionId)) return res.status(400).json({ error: 'Invalid Assistant configuration ID' });
+  try {
+    const configuration = await rollbackAssistantConfigurationVersion({ database: pool, tenantId, assistantId, versionId: req.params.versionId, activatedBy: req.user.user_id });
+    return res.json({ configuration });
+  } catch (error) { return safeError(res, error); }
 });
 
 export default router;
