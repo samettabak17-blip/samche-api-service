@@ -61,6 +61,7 @@ jobs:
       - name: Prepare isolated workflow PostgreSQL schema
         env:
           DATABASE_URL: postgresql://workflow-test:workflow-test@127.0.0.1:5432/workflow_test
+          JWT_SECRET: workflow-test-only-not-for-runtime
         run: npm run migrate
 
       - name: Run WhatsApp operator delivery and handoff regressions
