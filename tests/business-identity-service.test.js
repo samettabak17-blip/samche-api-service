@@ -32,9 +32,10 @@ test('two distinct source-derived identities require explicit resolution', async
 test('every selected source must resolve confidently to the same identity', async () => {
   const provider = { provider: 'GEMINI', model: 'gemini-3-flash-preview', generateBusinessIdentityAnalysis: async ({ source }) => source.id === 'a'
     ? { detected_identity: 'Meridian Arc Technologies LLC', confidence: '0.99', evidence: 'Legal name' }
-    : { detected_identity: 'unknown', confidence: '0.20', evidence: 'Contact test@example.com +971501234567' } };
+    : { detected_identity: '', confidence: '0.20', evidence: 'Contact test@example.com +971501234567' } };
   const result = await analyzeBusinessIdentityScope({ provider, sources: [{ id: 'a', title: 'Identity', content: 'x' }, { id: 'b', title: 'Unclear', content: 'y' }] });
   assert.equal(result.status, 'IDENTITY_RESOLUTION_REQUIRED');
+  assert.equal(result.evidence[1].normalized_identity, null);
   assert.doesNotMatch(result.evidence[1].safe_evidence, /test@example|501234567/);
 });
 

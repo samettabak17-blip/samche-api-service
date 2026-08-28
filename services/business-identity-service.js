@@ -25,7 +25,7 @@ export async function analyzeBusinessIdentityScope({ provider, sources }) {
   const evidence = [];
   for (const source of sources) {
     const analysis = await provider.generateBusinessIdentityAnalysis({ source });
-    const detectedIdentity = String(analysis.detected_identity ?? '').trim();
+    const detectedIdentity = String(analysis.detected_identity ?? '').trim().slice(0, 255);
     const normalizedIdentity = normalizeBusinessIdentity(detectedIdentity);
     const confidence = Number(analysis.confidence);
     evidence.push({
@@ -33,7 +33,7 @@ export async function analyzeBusinessIdentityScope({ provider, sources }) {
       source_title: source.title,
       content_hash: source.content_hash ?? null,
       detected_identity: detectedIdentity || 'unknown',
-      normalized_identity: normalizedIdentity,
+      normalized_identity: normalizedIdentity || null,
       confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0,
       safe_evidence: redactSafeEvidence(analysis.evidence),
     });
