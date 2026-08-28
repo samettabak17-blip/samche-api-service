@@ -13,6 +13,11 @@ function required(name) {
   return value;
 }
 
+function auditLine(gate, evidence) {
+  const fields = Object.entries(evidence).map(([key, value]) => `${key}=${String(value).replace(/[^A-Za-z0-9_.-]/g, '')}`);
+  return `PASS | ${gate} | ${fields.join(' ')}`;
+}
+
 async function fetchWithRetry(url, options) {
   let response;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -103,7 +108,7 @@ async function main() {
       [source.tenant_id, mapping.assistant_id, `%${marker}%`],
     );
     const artifact = artifacts.rows[0];
-    console.log(safeResultLine('PASS', 'ASSIGNMENT_DB_EVIDENCE', {
+    console.log(auditLine('ASSIGNMENT_DB_EVIDENCE', {
       assignment_count: assignments.rowCount,
       whatsapp_assignment_present: assignments.rows.some((row) => row.assistant_id === mapping.assistant_id),
       legacy_runtime_includes_source: legacyRuntime.rowCount === 1,
@@ -128,7 +133,7 @@ async function main() {
     if (!response.ok) throw new Error(`TASK6_ASSIGNMENT_AUDIT_PREVIEW_HTTP_${response.status}`);
     const preview = await response.json();
     const previewIncludesSource = (preview?.preview?.matches ?? []).some((match) => match.sourceId === source.id);
-    console.log(safeResultLine('PASS', 'ASSIGNMENT_API_EVIDENCE', {
+    console.log(auditLine('ASSIGNMENT_API_EVIDENCE', {
       retrieval_preview_includes_source: previewIncludesSource,
     }));
     await client.query('ROLLBACK');
