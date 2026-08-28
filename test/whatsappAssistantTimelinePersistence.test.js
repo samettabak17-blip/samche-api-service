@@ -93,9 +93,16 @@ test('returning to AI allows only the next new assistant response to persist and
 
 
 test('regression: nullable assistant delivery status has a concrete PostgreSQL type', { skip: !process.env.DATABASE_URL }, async (t) => {
+  const databaseUrl = new URL(process.env.DATABASE_URL);
   const database = new pg.Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
+    host: databaseUrl.hostname,
+    port: Number(databaseUrl.port || 5432),
+    user: decodeURIComponent(databaseUrl.username),
+    password: decodeURIComponent(databaseUrl.password),
+    database: decodeURIComponent(databaseUrl.pathname.replace(/^\//, '')),
+    ssl: process.env.DATABASE_SSL === 'false'
+      ? false
+      : { rejectUnauthorized: true, servername: databaseUrl.hostname },
   });
   const client = await database.connect();
   let transactionOpen = false;
