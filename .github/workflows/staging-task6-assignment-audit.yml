@@ -19,13 +19,14 @@ jobs:
   audit:
     if: github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
+      - run: npm install --ignore-scripts
       - name: Run strict-TLS read-only assignment audit
         env:
           STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
