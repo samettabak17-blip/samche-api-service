@@ -21,15 +21,14 @@ function uuid(value, code) {
   return String(value);
 }
 
-export async function generateBusinessProfileVersion({ database, provider, tenantId, requestedBy, businessIdentityId, sourceIds }) {
+export async function analyzeBusinessProfileSourceScope({ database, provider, tenantId, businessIdentityId, sourceIds }) {
   uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
-  uuid(requestedBy, 'KNOWLEDGE_REQUESTER_INVALID');
   uuid(businessIdentityId, 'KNOWLEDGE_BUSINESS_IDENTITY_INVALID');
   if (!Array.isArray(sourceIds) || !sourceIds.length || new Set(sourceIds).size !== sourceIds.length) {
     throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_SOURCE_SCOPE_INVALID', 'Business Profile source scope is invalid');
   }
   sourceIds.forEach((id) => uuid(id, 'KNOWLEDGE_PROFILE_SOURCE_SCOPE_INVALID'));
-  if (!database?.query || typeof provider?.generateBusinessProfile !== 'function' || typeof provider?.generateBusinessIdentityAnalysis !== 'function') {
+  if (!database?.query || typeof provider?.generateBusinessIdentityAnalysis !== 'function') {
     throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_GENERATION_UNAVAILABLE', 'Business Profile generation is unavailable');
   }
   const identity = await database.query(
@@ -42,7 +41,7 @@ export async function generateBusinessProfileVersion({ database, provider, tenan
     `SELECT id, title, content, content_hash
        FROM knowledge_base_documents
       WHERE tenant_id = $1 AND id = ANY($3::uuid[]) AND enabled = TRUE AND status = 'active'
-        AND processing_status = 'READY' AND indexing_status = 'READY'
+        AND processing_status = 'READY' AND indexing_status = 'READY' AND content_hash IS NOT NULL
       ORDER BY id`,
     [tenantId, businessIdentityId, sourceIds],
   );
@@ -60,9 +59,20 @@ export async function generateBusinessProfileVersion({ database, provider, tenan
     );
   }
   const selectedIdentity = identity.rows[0].normalized_identity || normalizeBusinessIdentity(identity.rows[0].display_name);
-  if (analysis.status !== 'RESOLVED' || analysis.identities[0]?.normalized_identity !== selectedIdentity) {
-    throw new KnowledgeProfileLifecycleError('IDENTITY_RESOLUTION_REQUIRED', 'Selected sources contain unresolved or conflicting company identities', { identities: analysis.identities, evidence: analysis.evidence });
+  const status = analysis.status === 'RESOLVED' && analysis.identities[0]?.normalized_identity === selectedIdentity ? 'RESOLVED' : 'IDENTITY_RESOLUTION_REQUIRED';
+  return { status, business_identity: identity.rows[0], source_ids: sourceIds, identities: analysis.identities, evidence: analysis.evidence, sources: sources.rows };
+}
+
+export async function generateBusinessProfileVersion({ database, provider, tenantId, requestedBy, businessIdentityId, sourceIds }) {
+  uuid(requestedBy, 'KNOWLEDGE_REQUESTER_INVALID');
+  if (typeof provider?.generateBusinessProfile !== 'function') throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_GENERATION_UNAVAILABLE', 'Business Profile generation is unavailable');
+  const scope = await analyzeBusinessProfileSourceScope({ database, provider, tenantId, businessIdentityId, sourceIds });
+  if (scope.status !== 'RESOLVED') {
+    throw new KnowledgeProfileLifecycleError('IDENTITY_RESOLUTION_REQUIRED', 'Selected sources contain unresolved or conflicting company identities', { identities: scope.identities, evidence: scope.evidence });
   }
+  const identity = { rows: [scope.business_identity] };
+  const sources = { rows: scope.sources };
+  const analysis = { identities: scope.identities, evidence: scope.evidence };
   const provenance = { business_identity_id: businessIdentityId, source_ids: sourceIds, sources: analysis.evidence };
   const prompt = [
     'Create Business Profile schema_version 2 from the current tenant approved knowledge only.',

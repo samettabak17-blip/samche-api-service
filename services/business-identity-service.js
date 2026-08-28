@@ -2,13 +2,23 @@ const CORPORATE_SUFFIXES = new Set(['llc', 'ltd', 'limited', 'inc', 'incorporate
 
 export function normalizeBusinessIdentity(value) {
   return String(value ?? '')
+    .normalize('NFKC')
     .toLowerCase()
     .replace(/\bl\s*\.\s*l\s*\.\s*c\s*\.?\b/g, ' llc ')
-    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
     .split(/\s+/)
     .filter((part) => part && !CORPORATE_SUFFIXES.has(part))
     .join(' ');
+}
+
+function redactSafeEvidence(value) {
+  return String(value ?? '')
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[REDACTED_EMAIL]')
+    .replace(/(?:\+?\d[\d\s().-]{7,}\d)/g, '[REDACTED_PHONE]')
+    .replace(/\b(?:api[_ -]?key|token|password|secret)\s*[:=]\s*\S+/gi, '[REDACTED_CREDENTIAL]')
+    .trim()
+    .slice(0, 1000);
 }
 
 export async function analyzeBusinessIdentityScope({ provider, sources }) {
@@ -25,7 +35,7 @@ export async function analyzeBusinessIdentityScope({ provider, sources }) {
       detected_identity: detectedIdentity || 'unknown',
       normalized_identity: normalizedIdentity,
       confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0,
-      safe_evidence: String(analysis.evidence ?? '').trim().slice(0, 1000),
+      safe_evidence: redactSafeEvidence(analysis.evidence),
     });
   }
   const identities = [];
@@ -37,5 +47,6 @@ export async function analyzeBusinessIdentityScope({ provider, sources }) {
     }
     identity.source_ids.push(item.source_id);
   }
-  return { status: identities.length === 1 ? 'RESOLVED' : 'IDENTITY_RESOLUTION_REQUIRED', identities, evidence };
+  const everySourceResolved = evidence.length > 0 && evidence.every((entry) => entry.normalized_identity && entry.confidence >= 0.7);
+  return { status: everySourceResolved && identities.length === 1 ? 'RESOLVED' : 'IDENTITY_RESOLUTION_REQUIRED', identities, evidence };
 }

@@ -90,12 +90,20 @@ export async function approveBusinessProfileVersion({ database, tenantId, versio
   uuid(approvedBy, 'KNOWLEDGE_APPROVER_INVALID');
 
   return transaction(database, async (client) => {
+    const integrity = await client.query(
+      `SELECT version.profile_id, version.schema_version, version.identity_resolution_status,
+              profile.business_identity_id, identity.status AS business_identity_status,
+              version.source_scope
+         FROM business_profile_versions version
+         JOIN business_profiles profile ON profile.id = version.profile_id AND profile.tenant_id = version.tenant_id
+         LEFT JOIN business_identities identity ON identity.id = profile.business_identity_id AND identity.tenant_id = profile.tenant_id
+        WHERE version.id = $1 AND version.tenant_id = $2 FOR UPDATE`, [versionId, tenantId]);
+    assertProfileScopeIntegrity(integrity.rows[0]);
     const result = await client.query(
       `UPDATE business_profile_versions
           SET status = 'APPROVED', reviewed_by = $3, reviewed_at = CURRENT_TIMESTAMP
         WHERE id = $1 AND tenant_id = $2
           AND status IN ('DRAFT', 'NEEDS_REVIEW', 'APPROVED')
-          AND identity_resolution_status <> 'IDENTITY_RESOLUTION_REQUIRED'
         RETURNING profile_id, id, status`,
       [versionId, tenantId, approvedBy]
     );
@@ -128,9 +136,12 @@ async function activateConfigurationVersion({
 
   return transaction(database, async (client) => {
     const targetResult = await client.query(
-      `SELECT id, status
-         FROM assistant_configuration_versions
-        WHERE id = $1 AND tenant_id = $2 AND assistant_id = $3
+      `SELECT configuration.id, configuration.status, configuration.source_profile_version_id,
+              profile.active_version_id AS current_active_profile_version_id
+         FROM assistant_configuration_versions configuration
+         LEFT JOIN business_profile_versions profile_version ON profile_version.id = configuration.source_profile_version_id AND profile_version.tenant_id = configuration.tenant_id
+         LEFT JOIN business_profiles profile ON profile.id = profile_version.profile_id AND profile.tenant_id = configuration.tenant_id
+        WHERE configuration.id = $1 AND configuration.tenant_id = $2 AND configuration.assistant_id = $3
         FOR UPDATE`,
       [versionId, tenantId, assistantId]
     );
@@ -138,6 +149,9 @@ async function activateConfigurationVersion({
     const allowedStatuses = allowSuperseded ? ['SUPERSEDED'] : ['APPROVED', 'ACTIVE'];
     if (!target || !allowedStatuses.includes(target.status)) {
       throw new KnowledgeConfigurationError('KNOWLEDGE_CONFIGURATION_NOT_APPROVED', 'Only an approved configuration can be activated');
+    }
+    if (!target.source_profile_version_id || target.current_active_profile_version_id !== target.source_profile_version_id) {
+      throw new KnowledgeConfigurationError('KNOWLEDGE_CONFIGURATION_PROFILE_NOT_ACTIVE', 'Configuration source Business Profile is no longer active');
     }
 
     const previousResult = await client.query(
@@ -212,16 +226,17 @@ export async function activateBusinessProfileVersion({ database, tenantId, versi
 
   return transaction(database, async (client) => {
     const versionResult = await client.query(
-      `SELECT profile_id, status, identity_resolution_status
-         FROM business_profile_versions
-        WHERE id = $1 AND tenant_id = $2
+      `SELECT version.profile_id, version.status, version.schema_version, version.identity_resolution_status,
+              profile.business_identity_id, identity.status AS business_identity_status, version.source_scope
+         FROM business_profile_versions version
+         JOIN business_profiles profile ON profile.id = version.profile_id AND profile.tenant_id = version.tenant_id
+         LEFT JOIN business_identities identity ON identity.id = profile.business_identity_id AND identity.tenant_id = profile.tenant_id
+        WHERE version.id = $1 AND version.tenant_id = $2
         FOR UPDATE`,
       [versionId, tenantId]
     );
     const version = versionResult.rows[0];
-    if (version?.identity_resolution_status === 'IDENTITY_RESOLUTION_REQUIRED') {
-      throw new KnowledgeConfigurationError('KNOWLEDGE_PROFILE_IDENTITY_UNRESOLVED', 'Business Profile identity conflict must be resolved before activation');
-    }
+    assertProfileScopeIntegrity(version);
     if (!version || version.status !== 'APPROVED') {
       throw new KnowledgeConfigurationError('KNOWLEDGE_PROFILE_NOT_APPROVED', 'Only an approved Business Profile can be activated');
     }
@@ -258,5 +273,19 @@ export async function activateBusinessProfileVersion({ database, tenantId, versi
     }
     return { id: versionId, supersedesVersionId: previousId, status: 'ACTIVE' };
   });
+}
+
+function assertProfileScopeIntegrity(version) {
+  if (!version) return;
+  if (Number(version.schema_version ?? 1) < 2) {
+    if (version.identity_resolution_status === 'LEGACY_UNSCOPED') return;
+    throw new KnowledgeConfigurationError('KNOWLEDGE_PROFILE_IDENTITY_UNRESOLVED', 'Legacy Business Profile scope is invalid');
+  }
+  const scope = version.source_scope;
+  const sourceIds = scope?.source_ids;
+  if (version.identity_resolution_status !== 'RESOLVED' || !version.business_identity_id || version.business_identity_status !== 'ACTIVE'
+      || scope?.business_identity_id !== version.business_identity_id || !Array.isArray(sourceIds) || sourceIds.length === 0) {
+    throw new KnowledgeConfigurationError('KNOWLEDGE_PROFILE_IDENTITY_UNRESOLVED', 'Business Profile identity scope must be resolved before approval or activation');
+  }
 }
 

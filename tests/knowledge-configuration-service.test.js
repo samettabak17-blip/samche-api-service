@@ -7,7 +7,7 @@ test('activating an approved assistant configuration supersedes only the previou
   const database = {
     async query(sql, params = []) {
       calls.push({ sql, params });
-      if (/SELECT id, status/i.test(sql)) return { rows: [{ id: params[0], status: 'APPROVED' }] };
+      if (/SELECT configuration\.id/i.test(sql)) return { rows: [{ id: params[0], status: 'APPROVED', source_profile_version_id: 'profile-v1', current_active_profile_version_id: 'profile-v1' }] };
       if (/status = 'ACTIVE'/i.test(sql)) return { rows: [{ id: 'old-version' }] };
       return { rows: [] };
     },
@@ -74,6 +74,7 @@ test('approving a profile records historical approval without activating it', as
   const database = {
     async query(sql, params = []) {
       calls.push({ sql, params });
+      if (/SELECT version\.profile_id/i.test(sql)) return { rows: [{ profile_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', schema_version: 2, identity_resolution_status: 'RESOLVED', business_identity_id: 'identity-v1', business_identity_status: 'ACTIVE', source_scope: { business_identity_id: 'identity-v1', source_ids: ['source-v1'] } }] };
       if (/RETURNING profile_id/i.test(sql)) return { rows: [{ profile_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' }] };
       return { rows: [] };
     },
@@ -89,7 +90,7 @@ test('approving a profile records historical approval without activating it', as
   assert.ok(calls.some(({ sql }) => /SET status = 'APPROVED'/.test(sql)));
   assert.ok(calls.some(({ sql }) => /approved_version_id/.test(sql)));
   assert.equal(calls.some(({ sql }) => /active_version_id/.test(sql)), false);
-  assert.match(calls.find(({ sql }) => /UPDATE business_profile_versions/.test(sql)).sql, /identity_resolution_status <> 'IDENTITY_RESOLUTION_REQUIRED'/i);
+  assert.match(calls.find(({ sql }) => /SELECT version\.profile_id/.test(sql)).sql, /business_identity_status/i);
 });
 
 test('unresolved identity conflict cannot be approved', async () => {
@@ -98,7 +99,7 @@ test('unresolved identity conflict cannot be approved', async () => {
 });
 
 test('unresolved identity conflict cannot be activated', async () => {
-  const database = { query: async (sql) => /SELECT profile_id/.test(sql) ? { rows: [{ profile_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', status: 'APPROVED', identity_resolution_status: 'IDENTITY_RESOLUTION_REQUIRED' }] } : { rows: [] } };
+  const database = { query: async (sql) => /SELECT version\.profile_id/.test(sql) ? { rows: [{ profile_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', status: 'APPROVED', schema_version: 2, identity_resolution_status: 'IDENTITY_RESOLUTION_REQUIRED' }] } : { rows: [] } };
   const { activateBusinessProfileVersion } = await import('../services/knowledge-configuration-service.js');
   await assert.rejects(activateBusinessProfileVersion({ database, tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', versionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', activatedBy: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }), (error) => error.code === 'KNOWLEDGE_PROFILE_IDENTITY_UNRESOLVED');
 });
@@ -120,7 +121,7 @@ test('explicit rollback reactivates only a SUPERSEDED configuration target', asy
   const calls = [];
   const database = { query: async (sql, params = []) => {
     calls.push({ sql, params });
-    if (/SELECT id, status/i.test(sql)) return { rows: [{ id: params[0], status: 'SUPERSEDED' }] };
+    if (/SELECT configuration\.id/i.test(sql)) return { rows: [{ id: params[0], status: 'SUPERSEDED', source_profile_version_id: 'profile-v1', current_active_profile_version_id: 'profile-v1' }] };
     if (/status = 'ACTIVE'/i.test(sql)) return { rows: [{ id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' }] };
     return { rows: [] };
   } };
@@ -128,5 +129,12 @@ test('explicit rollback reactivates only a SUPERSEDED configuration target', asy
   assert.equal(result.status, 'ACTIVE');
   assert.equal(result.supersedesVersionId, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee');
   assert.ok(calls.some(({ sql }) => /active_configuration_version_id/.test(sql)));
+});
+
+test('configuration cannot activate when its source profile is no longer active', async () => {
+  const database = { query: async (sql, params = []) => /SELECT configuration\.id/i.test(sql)
+    ? { rows: [{ id: params[0], status: 'APPROVED', source_profile_version_id: 'profile-old', current_active_profile_version_id: 'profile-new' }] }
+    : { rows: [] } };
+  await assert.rejects(activateAssistantConfigurationVersion({ database, tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', assistantId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', versionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', activatedBy: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }), (error) => error.code === 'KNOWLEDGE_CONFIGURATION_PROFILE_NOT_ACTIVE');
 });
 

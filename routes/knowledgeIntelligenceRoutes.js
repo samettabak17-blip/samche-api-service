@@ -31,6 +31,7 @@ import { KnowledgeGapError } from '../services/knowledge-gap-service.js';
 import { createSuggestedCandidateFromKnowledgeGap } from '../services/knowledge-gap-candidate-service.js';
 import { createKnowledgeGenerationProvider, KnowledgeGenerationError } from '../services/knowledge-generation-provider.js';
 import {
+  analyzeBusinessProfileSourceScope,
   generateBusinessProfileVersion,
   KnowledgeProfileLifecycleError,
   rejectBusinessProfileVersion,
@@ -489,6 +490,21 @@ router.get('/:tenantId/knowledge-intelligence/profiles', requireTenantAccess, as
   } catch (error) {
     return safeError(res, error);
   }
+});
+
+router.post('/:tenantId/knowledge-intelligence/profiles/analyze', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId) return;
+  try {
+    const analysis = await analyzeBusinessProfileSourceScope({
+      database: pool,
+      provider: createKnowledgeGenerationProvider(),
+      tenantId,
+      businessIdentityId: req.body?.business_identity_id,
+      sourceIds: req.body?.source_ids,
+    });
+    return res.json({ analysis: { status: analysis.status, business_identity: analysis.business_identity, source_ids: analysis.source_ids, identities: analysis.identities, evidence: analysis.evidence } });
+  } catch (error) { return safeError(res, error); }
 });
 
 router.post('/:tenantId/knowledge-intelligence/profiles/generate', requireTenantAccess, requireTenantAdmin, async (req, res) => {
