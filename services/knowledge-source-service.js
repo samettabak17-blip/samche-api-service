@@ -68,6 +68,7 @@ export async function enqueueKnowledgeIndexJob({
   sourceId,
   contentHash,
   metadata = {},
+  force = false,
 }) {
   requireUuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
   requireUuid(sourceId, 'KNOWLEDGE_SOURCE_INVALID');
@@ -82,16 +83,22 @@ export async function enqueueKnowledgeIndexJob({
      ON CONFLICT (tenant_id, source_id, job_type, content_hash, embedding_model, embedding_version)
      DO UPDATE SET
        status = CASE
-         WHEN knowledge_processing_jobs.status IN ('READY', 'PROCESSING') THEN knowledge_processing_jobs.status
+         WHEN knowledge_processing_jobs.status = 'PROCESSING' THEN knowledge_processing_jobs.status
+         WHEN $7 THEN 'PENDING'
+         WHEN knowledge_processing_jobs.status = 'READY' THEN knowledge_processing_jobs.status
          ELSE 'PENDING'
        END,
        available_at = CASE
-         WHEN knowledge_processing_jobs.status IN ('READY', 'PROCESSING') THEN knowledge_processing_jobs.available_at
+         WHEN knowledge_processing_jobs.status = 'PROCESSING' THEN knowledge_processing_jobs.available_at
+         WHEN $7 THEN CURRENT_TIMESTAMP
+         WHEN knowledge_processing_jobs.status = 'READY' THEN knowledge_processing_jobs.available_at
          ELSE CURRENT_TIMESTAMP
        END,
        updated_at = CURRENT_TIMESTAMP,
        last_error_code = CASE
-         WHEN knowledge_processing_jobs.status IN ('READY', 'PROCESSING') THEN knowledge_processing_jobs.last_error_code
+         WHEN knowledge_processing_jobs.status = 'PROCESSING' THEN knowledge_processing_jobs.last_error_code
+         WHEN $7 THEN NULL
+         WHEN knowledge_processing_jobs.status = 'READY' THEN knowledge_processing_jobs.last_error_code
          ELSE NULL
        END
      RETURNING id, status`,
@@ -102,6 +109,7 @@ export async function enqueueKnowledgeIndexJob({
       KNOWLEDGE_EMBEDDING_CONFIG.model,
       KNOWLEDGE_EMBEDDING_CONFIG.version,
       JSON.stringify(metadata),
+      force === true,
     ]);
 
   return result.rows[0];

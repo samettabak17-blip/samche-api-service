@@ -306,7 +306,7 @@ router.post('/:tenantId/knowledge-intelligence/sources/:sourceId/reindex', requi
         WHERE id = $1 AND tenant_id = $2`,
       [id, tenantId]
     );
-    const job = await enqueueKnowledgeIndexJob({ database: pool, tenantId, sourceId: id, contentHash: source.rows[0].content_hash, metadata: { reindex: true } });
+    const job = await enqueueKnowledgeIndexJob({ database: pool, tenantId, sourceId: id, contentHash: source.rows[0].content_hash, metadata: { reindex: true }, force: true });
     return res.status(202).json({ job });
   } catch (error) {
     return safeError(res, error);
