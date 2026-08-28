@@ -16,7 +16,13 @@ export async function createSuggestedCandidateFromKnowledgeGap({ database, tenan
     if (existing.rowCount) return { ...existing.rows[0], existing: true };
   }
   const signals = await database.query(
-    `SELECT conversation_id, message_id, channel_type, created_at FROM knowledge_gap_signals WHERE tenant_id = $1 AND assistant_id IS NOT DISTINCT FROM $2 AND redacted_question = $3 ORDER BY created_at ASC LIMIT 20`,
+    `SELECT conversation_id, message_id, channel_type, created_at
+       FROM knowledge_gap_signals
+      WHERE tenant_id = $1
+        AND assistant_id IS NOT DISTINCT FROM $2
+        AND lower(regexp_replace(redacted_question, '\\s+', ' ', 'g')) = $3
+      ORDER BY created_at ASC
+      LIMIT 20`,
     [tenantId, gap.assistant_id, gap.normalized_question],
   );
   if (!signals.rowCount) throw new KnowledgeCandidateError('KNOWLEDGE_GAP_EVIDENCE_NOT_FOUND', 'Knowledge gap evidence was not found');

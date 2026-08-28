@@ -15,6 +15,7 @@ test('a gap creates only a tenant-scoped NEEDS_REVIEW candidate with signal evid
   const result = await createSuggestedCandidateFromKnowledgeGap({ database, tenantId: '11111111-1111-4111-8111-111111111111', gapId: '33333333-3333-4333-8333-333333333333', title: 'Renewal policy', content: 'Use the approved renewal policy.', createdBy: '77777777-7777-4777-8777-777777777777' });
   assert.equal(result.status, 'NEEDS_REVIEW');
   assert.ok(calls.some(({ sql }) => /WHERE id = \$1 AND tenant_id = \$2/.test(sql)));
+  assert.ok(calls.some(({ sql }) => /lower\(regexp_replace\(redacted_question/.test(sql)));
   assert.ok(calls.some(({ sql }) => /UPDATE knowledge_gaps/.test(sql)));
 });
 
