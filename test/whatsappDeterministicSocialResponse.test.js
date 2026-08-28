@@ -26,6 +26,7 @@ test('new Turkish greeting returns the full tenant-configured welcome without Ge
   const plan = planWhatsAppDeterministicSocialResponse({
     tenant,
     communicationLanguage: 'tr',
+    currentInboundMessage: 'Merhaba',
     currentIntent: 'GREETING_ONLY',
     firstAssistantResponse: true,
   });
@@ -104,6 +105,7 @@ test('SamChe WhatsApp first-contact template renders the approved Turkish welcom
       deterministicTemplates: samcheTemplates,
     },
     communicationLanguage: 'tr',
+    currentInboundMessage: 'Merhaba',
     currentIntent: 'GREETING_ONLY',
     firstAssistantResponse: true,
   });
