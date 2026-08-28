@@ -5,26 +5,38 @@ import {
 import { resolveActiveAssistantKnowledgeConfiguration } from './knowledge-configuration-service.js';
 
 const CONFIGURATION_FIELDS = Object.freeze([
+  'assistant_identity',
+  'role_and_purpose',
   'company_context',
   'assistant_instructions',
   'tone',
   'greeting',
+  'customer_handling',
   'faq_guidance',
   'qualification_guidance',
   'fallback_guidance',
   'escalation_guidance',
   'sales_guidance',
+  'follow_up_behavior',
+  'scheduled_messaging_behavior',
+  'supported_languages',
+  'language_selection_policy',
   'prohibited_claims',
+  'unsupported_claim_behavior',
   'terminology',
   'operating_rules',
+  'channel_adaptations',
 ]);
 
 const PROFILE_FIELDS = Object.freeze([
+  'company_identity',
+  'company_display_name',
   'company_summary',
   'industry',
   'business_type',
   'products',
   'services',
+  'packages',
   'faq_themes',
   'pricing_information',
   'policies',
@@ -33,7 +45,11 @@ const PROFILE_FIELDS = Object.freeze([
   'sales_information',
   'support_escalation_rules',
   'tone',
+  'communication_style',
+  'customer_handling',
   'terminology',
+  'supported_languages',
+  'unsupported_claims',
 ]);
 
 function compactValue(value) {

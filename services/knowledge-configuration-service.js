@@ -33,10 +33,11 @@ export async function resolveActiveAssistantKnowledgeConfiguration({ database, t
   uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
   uuid(assistantId, 'KNOWLEDGE_ASSISTANT_INVALID');
   const result = await database.query(
-    `SELECT configuration.id, configuration.configuration_data, configuration.source_profile_version_id,
+    `SELECT configuration.id, configuration.configuration_data, configuration.schema_version AS configuration_schema_version, configuration.source_profile_version_id,
             configuration.source_recommendation_id, configuration.activated_at,
             profile.active_version_id AS active_business_profile_version_id,
-            profile_version.profile_data AS active_business_profile
+            profile_version.profile_data AS active_business_profile,
+            profile_version.schema_version AS profile_schema_version
        FROM ai_assistants assistant
        LEFT JOIN assistant_configuration_versions configuration
          ON configuration.id = assistant.active_configuration_version_id

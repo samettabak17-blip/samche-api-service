@@ -103,3 +103,22 @@ test('appends active configuration and untrusted retrieved knowledge without rep
   assert.match(systemInstruction, /RETRIEVED TENANT KNOWLEDGE/);
 });
 
+test('renders Persona V2 identity and behavior fields without dropping them', async () => {
+  const resolved = await resolveAssistantRuntimeKnowledgeContext({
+    database: { query: async () => ({ rows: [] }) },
+    tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    assistantId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    query: 'question',
+    resolveConfiguration: async () => ({
+      id: 'configuration-v2',
+      configuration_data: { schema_version: 2, assistant_identity: 'Meridian Client Advisor', role_and_purpose: 'Support Meridian customers.', customer_handling: 'Clarify support tier.', follow_up_behavior: 'Use approved cadence.', scheduled_messaging_behavior: 'Only approved reminders.', supported_languages: ['English'], unsupported_claim_behavior: 'State unavailable.', channel_adaptations: ['WhatsApp: concise'] },
+      active_business_profile: { schema_version: 2, company_identity: 'Meridian Arc Technologies LLC', packages: ['Growth Accelerator Package'], communication_style: 'Clear and technical', customer_handling: 'Confirm outcomes.', supported_languages: ['English'], unsupported_claims: ['No undocumented response times.'] },
+    }),
+    retrieve: async () => [],
+  });
+  assert.match(resolved.activeConfigurationContext, /assistant identity: Meridian Client Advisor/);
+  assert.match(resolved.activeConfigurationContext, /company identity: Meridian Arc Technologies LLC/);
+  assert.match(resolved.activeConfigurationContext, /scheduled messaging behavior/);
+  assert.match(resolved.activeConfigurationContext, /unsupported claims/);
+});
+
