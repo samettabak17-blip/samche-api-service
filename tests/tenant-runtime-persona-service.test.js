@@ -60,3 +60,13 @@ test('SamChe remains valid only when present in resolved ACTIVE tenant data', as
   assert.match(instruction, /SamChe Company LLC/);
   assert.match(instruction, /SamChe AI/);
 });
+
+test('AI Guide and Web Chat channel presentation rules cannot inject another business persona', async () => {
+  const database = { query: async () => ({ rows: [activeRow('Northstar Labs Ltd', 'Northstar Advisor', 'Research automation', 'USD 900')] }) };
+  const persona = await resolveTenantRuntimePersona({ database, tenantId: tenantB, assistantId: assistantA });
+  for (const channelRules of ['Return safe HTML for AI Guide.', 'Return safe HTML for Web Chat.']) {
+    const instruction = buildTenantRuntimeSystemInstruction({ persona, channelRules });
+    assert.match(instruction, /Northstar Labs Ltd/);
+    assert.doesNotMatch(instruction, /SamChe|Dubai|company formation|35,650/);
+  }
+});

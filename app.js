@@ -18,7 +18,7 @@ import dashboardRoutes from "./routes/dashboardRoutes.js";
 import crmRoutes from "./routes/crmRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
 import knowledgeIntelligenceRoutes from "./routes/knowledgeIntelligenceRoutes.js";
-import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus } from "./services/live-inbox-service.js";
+import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus, resolveSamcheguideRuntimeIntegration } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
 import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from "./services/human-support-service.js";
 import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
@@ -811,13 +811,46 @@ app.post("/plan", async (req, res) => {
 
     const cleanSector = sector.trim();
     if (!cleanSector) return res.status(400).json({ error: "Sector value cannot be empty." });
-    const userId = getUserId(req);
+    const publicSession = issueOrResolvePublicConversationSession(req);
+    const userId = publicSession.sessionId;
+    const integration = await resolveSamcheguideRuntimeIntegration({ database: pool });
+    if (!integration || integration.channel_status !== "active") {
+      return res.status(503).json({ error: "AI Guide configuration is temporarily unavailable." });
+    }
+
+    const runtimePersona = await resolveTenantRuntimePersona({
+      database: pool,
+      tenantId: integration.tenant_id,
+      assistantId: integration.assistant_id,
+    });
+    if (!runtimePersona.available) {
+      return res.status(503).json({ error: "AI Guide assistant configuration is temporarily unavailable." });
+    }
+
+    const runtimeKnowledge = await resolveAssistantRuntimeKnowledgeContext({
+      database: pool,
+      embed: knowledgeEmbedder,
+      tenantId: integration.tenant_id,
+      assistantId: integration.assistant_id,
+      query: cleanSector,
+    });
+    const knowledgeAuthority = await resolveAssistantKnowledgeAuthority({
+      database: pool,
+      tenantId: integration.tenant_id,
+      assistantId: integration.assistant_id,
+    });
+    const planRequest = `Create a structured strategic plan for the customer-requested sector or objective: "${cleanSector}". Use only the ACTIVE tenant business profile, ACTIVE Assistant configuration, and approved tenant knowledge. Do not invent unsupported services, prices, procedures, approvals, jurisdictions, or claims. Reply in the language of the request.`;
+    const runtimeSystemInstruction = buildTenantRuntimeSystemInstruction({
+      persona: runtimePersona,
+      knowledgeContext: runtimeKnowledge.knowledgeContext,
+      channelRules: "Return safe, readable HTML suitable for the AI Guide interface.",
+    });
 
     const payload = {
       contents: [{
-        parts: [{ text: `Generate a structured, strategic UAE business setup proposal for the following industry/sector: "${cleanSector}". Detail whether it fits best in Mainland or Free Zone, required authority approvals, and estimated investment setup. Reply in the language of the prompt.` }]
+        parts: [{ text: planRequest }]
       }],
-      systemInstruction: { parts: [{ text: SAMCHEGUIDE_SYSTEM_PROMPT }] }
+      systemInstruction: { parts: [{ text: runtimeSystemInstruction }] }
     };
 
     const data = await requestGemini(payload);
@@ -825,8 +858,8 @@ app.post("/plan", async (req, res) => {
       let originalText = data.candidates[0].content.parts[0].text;
       data.candidates[0].content.parts[0].text = parseLinksToHTML(originalText);
       // 🔥 HAFIZAYA EKLE (Sayfa yenilendiğinde unutmaması için)
-      addGuideMemory(userId, "user", `Generate a structured, strategic UAE business setup proposal for the following industry/sector: "${cleanSector}".`);
-      addGuideMemory(userId, "model", originalText);
+      addGuideMemory(userId, "user", planRequest, knowledgeAuthority);
+      addGuideMemory(userId, "model", originalText, knowledgeAuthority);
     }
     return res.json(data);
   } catch (err) {
@@ -888,6 +921,17 @@ app.post("/chat", async (req, res) => {
       let runtimeSystemInstruction = SAMCHEGUIDE_SYSTEM_PROMPT;
       if (inboxState) {
         try {
+          const runtimePersona = await resolveTenantRuntimePersona({
+            database: pool,
+            tenantId: inboxState.integration.tenant_id,
+            assistantId: inboxState.integration.assistant_id,
+          });
+          if (!runtimePersona.available) {
+            return res.status(503).json({
+              error: "AI Guide assistant configuration is temporarily unavailable.",
+              conversation_session: publicSession.token,
+            });
+          }
           const runtimeKnowledge = await resolveAssistantRuntimeKnowledgeContext({
             database: pool,
             embed: knowledgeEmbedder,
@@ -895,7 +939,11 @@ app.post("/chat", async (req, res) => {
             assistantId: inboxState.integration.assistant_id,
             query: cleanText,
           });
-          runtimeSystemInstruction = appendRuntimeKnowledgeToSystemInstruction(SAMCHEGUIDE_SYSTEM_PROMPT, runtimeKnowledge);
+          runtimeSystemInstruction = buildTenantRuntimeSystemInstruction({
+            persona: runtimePersona,
+            knowledgeContext: runtimeKnowledge.knowledgeContext,
+            channelRules: "Return safe, readable HTML suitable for the AI Guide interface. Reply in the customer's language.",
+          });
           console.info(
             'KNOWLEDGE_RUNTIME_CONTEXT channel=SAMCHEGUIDE active_configuration=' + (runtimeKnowledge.activeConfiguration ? '1' : '0') +
             ' retrieved_chunks=' + runtimeKnowledge.knowledge.length +
@@ -903,6 +951,10 @@ app.post("/chat", async (req, res) => {
           );
         } catch (error) {
           console.error('KNOWLEDGE_RUNTIME_CONTEXT_UNAVAILABLE channel=SAMCHEGUIDE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+          return res.status(503).json({
+            error: "AI Guide assistant configuration is temporarily unavailable.",
+            conversation_session: publicSession.token,
+          });
         }
       }
 
