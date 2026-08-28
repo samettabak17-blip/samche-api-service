@@ -19,6 +19,19 @@
 - Live Inbox history remains complete while stale persona epochs are excluded from provider context.
 - Automated tests are regression guards, not final acceptance; Task 6 remains BLOCKED until user manual acceptance.
 
+## Future platform dependencies (recorded, not part of this Task 6 fix)
+
+- **Provider-Agnostic AI Architecture** precedes **AI Provider / Model Governance**; provider/model selection remains centrally governed rather than embedded in tenant code.
+- **AI Provider / Model Governance** precedes **Cost Telemetry & Provider Pricing Metadata**, which records provider/model pricing metadata and attributable usage without changing runtime routing implicitly.
+- **Shared Tenant Brand Profile** is a tenant-scoped platform capability built on the reviewed Business Identity/Profile boundary. AI Guide consumes it first; Web Chatbot and **SamChe Voice AI Layer** reuse the same capability later instead of creating channel-specific brand stores.
+- **Tenant-Driven AI Guide** consumes Shared Tenant Brand Profile, ACTIVE Assistant Configuration, approved knowledge, and shared authority state.
+- **White-Label Branding** consumes Shared Tenant Brand Profile and must keep platform branding separate from tenant business identity.
+- **Reusable Guide Component Architecture** precedes **Standard AI Guide vs Custom AI Experience** so standard and custom experiences compose the same tenant-aware components and API contracts.
+- **Page-Aware Shared Context** is a shared client/runtime contract used by reusable guide experiences; it must remain tenant- and Assistant-scoped and must not become a dashboard-only business-logic layer.
+- **SamChe Voice AI Layer** follows provider governance and Shared Tenant Brand Profile, and reuses the same tenant persona/authority contracts rather than introducing a SamChe-wide persona.
+
+These dependencies are backlog placement only. They do not alter completed task numbering, current Task 6 runtime behavior, provider selection, or this PostgreSQL locking fix.
+
 ---
 
 ### Task 1: V2 profile and configuration contracts
