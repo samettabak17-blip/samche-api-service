@@ -10,6 +10,20 @@ jobs:
   handoff:
     name: Verify WhatsApp operator delivery and handoff guards
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: workflow-test
+          POSTGRES_PASSWORD: workflow-test
+          POSTGRES_DB: workflow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workflow-test -d workflow_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout selected staging commit
         uses: actions/checkout@v4
@@ -43,6 +57,11 @@ jobs:
           node --check services/human-support-intent.js
           node --check services/telegram-live-support-status.js
           node --check test/humanSupportIntent.test.js
+
+      - name: Prepare isolated workflow PostgreSQL schema
+        env:
+          DATABASE_URL: postgresql://workflow-test:workflow-test@127.0.0.1:5432/workflow_test
+        run: npm run migrate
 
       - name: Run WhatsApp operator delivery and handoff regressions
         env:
