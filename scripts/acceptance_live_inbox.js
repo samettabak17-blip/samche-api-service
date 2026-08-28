@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { writeFileSync } from 'fs';
 
 const apiBaseUrl = (process.env.STAGING_API_BASE_URL || 'https://samche-api-staging.onrender.com').replace(/\/$/, '');
 const adminToken = process.env.STAGING_ADMIN_TOKEN;
@@ -163,6 +164,7 @@ async function main() {
     fail('PUBLIC', 'VERIFY', 'signed conversation session', 'INVALID');
     return;
   }
+  writeFileSync('.live-inbox-public-session-id', publicSessionId, { encoding: 'utf8', mode: 0o600 });
   const sessionHeaders = { 'X-Samcheguide-Session': publicSessionToken };
 
   const tenants = await request({ role: 'ADMIN', method: 'GET', path: '/api/v1/tenants', expected: 200, headers: adminHeaders });
@@ -256,7 +258,7 @@ async function main() {
 
   const publicHistory = await request({ role: 'PUBLIC', method: 'GET', path: '/chat/history', expected: 200, headers: sessionHeaders });
   const publicMessages = publicHistory.data?.messages;
-  if (publicHistory.passed && Array.isArray(publicMessages) && publicMessages.some((message) => message?.parts?.[0]?.text === humanReply)) {
+  if (publicHistory.passed && Array.isArray(publicMessages) && publicMessages.some((message) => message?.sender_type === 'AGENT' && message?.content === humanReply)) {
     pass('PUBLIC', 'VERIFY', 'Samcheguide agent reply feed', 200);
   } else {
     fail('PUBLIC', 'VERIFY', 'Samcheguide agent reply feed', 'MISSING');
