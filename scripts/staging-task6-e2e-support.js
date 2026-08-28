@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 
 import JSZip from 'jszip';
 
@@ -67,6 +67,12 @@ export async function pollUntil({ operation, accept, reject, intervalMs, timeout
 
 export async function writeFixtureState(path, state) {
   await writeFile(path, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+}
+
+export async function readFixtureState(path) {
+  const state = JSON.parse(await readFile(path, 'utf8'));
+  if (!/^TASK6_E2E_\d{1,20}_\d{1,6}$/.test(String(state?.marker ?? ''))) throw new Error('TASK6_E2E_STATE_INVALID');
+  return state;
 }
 
 export function createTxtFixture(marker) {
