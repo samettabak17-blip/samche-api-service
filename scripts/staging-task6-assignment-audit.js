@@ -18,10 +18,13 @@ async function main() {
   const marker = required('TASK6_AUDIT_MARKER');
   const database = new pg.Pool(strictTlsConfig(required('STAGING_DATABASE_URL')));
   const client = await database.connect();
+  let stage = 'TLS';
   try {
     assertVerifiedTls(client);
+    stage = 'TRANSACTION';
     await client.query('BEGIN');
     await client.query('SET TRANSACTION READ ONLY');
+    stage = 'SOURCE';
     const sourceResult = await client.query(
       `SELECT id, tenant_id, assistant_id, processing_status, indexing_status, enabled
          FROM knowledge_base_documents
@@ -31,6 +34,7 @@ async function main() {
     );
     if (sourceResult.rowCount !== 1) throw new Error('TASK6_ASSIGNMENT_AUDIT_SOURCE_NOT_UNIQUE');
     const source = sourceResult.rows[0];
+    stage = 'MAPPING';
     const mappingResult = await client.query(
       `SELECT tenant_id, assistant_id, channel_id
          FROM channel_integrations
@@ -41,23 +45,27 @@ async function main() {
     const mapping = mappingResult.rows[0];
     if (mapping.tenant_id !== source.tenant_id) throw new Error('TASK6_ASSIGNMENT_AUDIT_TENANT_MISMATCH');
 
+    stage = 'ASSIGNMENTS';
     const assignments = await client.query(
       `SELECT assistant_id FROM knowledge_source_assistants
         WHERE tenant_id = $1 AND source_id = $2 ORDER BY assistant_id`,
       [source.tenant_id, source.id],
     );
+    stage = 'LEGACY_RUNTIME';
     const legacyRuntime = await client.query(
       `SELECT id FROM knowledge_base_documents
         WHERE id = $3 AND tenant_id = $1 AND status = 'active'
           AND (assistant_id IS NULL OR assistant_id = $2)`,
       [source.tenant_id, mapping.assistant_id, source.id],
     );
+    stage = 'CHUNKS';
     const chunks = await client.query(
       `SELECT count(*)::integer AS count FROM knowledge_chunks
         WHERE tenant_id = $1 AND source_id = $2 AND is_active = TRUE
           AND index_status = 'READY' AND normalized_text ILIKE $3`,
       [source.tenant_id, source.id, `%${marker}%`],
     );
+    stage = 'HISTORY';
     const history = await client.query(
       `SELECT count(*)::integer AS count
          FROM conversation_messages message
@@ -66,6 +74,7 @@ async function main() {
         WHERE message.tenant_id = $1 AND conversation.channel_id = $2 AND message.content ILIKE $3`,
       [source.tenant_id, mapping.channel_id, `%${marker}%`],
     );
+    stage = 'ARTIFACTS';
     const artifacts = await client.query(
       `SELECT
          (SELECT count(*)::integer FROM business_profile_versions version
@@ -80,6 +89,7 @@ async function main() {
       [source.tenant_id, mapping.assistant_id, `%${marker}%`],
     );
 
+    stage = 'RETRIEVAL_PREVIEW';
     const response = await fetch(`${API_ORIGIN}/api/v1/tenants/${source.tenant_id}/knowledge-intelligence/assistants/${mapping.assistant_id}/retrieval-preview`, {
       method: 'POST',
       headers: { authorization: `Bearer ${required('STAGING_ADMIN_TOKEN')}`, 'content-type': 'application/json' },
@@ -109,7 +119,7 @@ async function main() {
     await client.query('ROLLBACK');
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch { /* preserve safe failure */ }
-    const code = /^TASK6_ASSIGNMENT_AUDIT_/.test(String(error?.message)) ? error.message : 'TASK6_ASSIGNMENT_AUDIT_FAILED';
+    const code = /^TASK6_ASSIGNMENT_AUDIT_/.test(String(error?.message)) ? error.message : `TASK6_ASSIGNMENT_AUDIT_${stage}_FAILED`;
     console.error(safeResultLine('FAIL', 'ASSIGNMENT_AUDIT', { status: code }));
     process.exitCode = 1;
   } finally {
