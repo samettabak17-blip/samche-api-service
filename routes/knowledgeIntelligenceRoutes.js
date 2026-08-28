@@ -320,7 +320,7 @@ router.get('/:tenantId/knowledge-intelligence/candidates', requireTenantAccess, 
   try {
     const result = await pool.query(
       `SELECT id, assistant_id, candidate_type, proposed_title, proposed_content, confidence,
-              status, pii_redaction_status, evidence_summary, created_at, reviewed_at
+              status, pii_redaction_status, evidence_summary, approved_source_id, created_at, reviewed_at
          FROM knowledge_candidates
         WHERE tenant_id = $1
         ORDER BY created_at DESC
