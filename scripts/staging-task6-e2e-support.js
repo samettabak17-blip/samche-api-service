@@ -86,7 +86,7 @@ export function createTxtFixture(marker) {
 export function createPdfFixture(marker) {
   const semanticMarker = `${marker}_PDF`;
   const text = `Company identity: ${marker} Company LLC. Task 6 staging acceptance fact: ${semanticMarker} identifies the amber compass protocol.`;
-  const stream = `BT\n/F1 12 Tf\n72 720 Td\n(${safePdfText(text)}) Tj\nET`;
+  const stream = `BT\n/F1 8 Tf\n36 720 Td\n(${safePdfText(text)}) Tj\nET`;
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R >>',
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
