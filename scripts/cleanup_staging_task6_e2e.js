@@ -67,6 +67,24 @@ async function verifyOwnership(client, state, tenantIds) {
     );
     if (messages.rows.length !== uniqueIds(state.scopedMessageIds).length) throw new Error('TASK6_E2E_SCOPED_MESSAGE_OWNERSHIP_MISMATCH');
   }
+  const scopedIntegrationIds = uniqueIds(state.scopedIntegrationIds);
+  const scopedChannelIds = uniqueIds(state.scopedChannelIds);
+  if (scopedIntegrationIds.length || scopedChannelIds.length) {
+    const mappings = await client.query(
+      `SELECT ci.id AS integration_id, ci.integration_key, tc.id AS channel_id, tc.display_name
+         FROM channel_integrations ci
+         JOIN tenant_channels tc ON tc.id = ci.channel_id AND tc.tenant_id = ci.tenant_id
+        WHERE ci.tenant_id = ANY($1::uuid[])
+          AND ci.id = ANY($2::uuid[])
+          AND tc.id = ANY($3::uuid[])`,
+      [scopedTenantIds, scopedIntegrationIds, scopedChannelIds],
+    );
+    if (mappings.rows.length !== scopedIntegrationIds.length
+      || mappings.rows.length !== scopedChannelIds.length
+      || mappings.rows.some((row) => !String(row.integration_key).startsWith(state.marker) || !String(row.display_name).startsWith(state.marker))) {
+      throw new Error('TASK6_E2E_SCOPED_CHANNEL_OWNERSHIP_MISMATCH');
+    }
+  }
   for (const object of state.storageObjects ?? []) {
     const expectedPrefix = `knowledge/${object.tenantId}/${object.sourceId}/`;
     const allowedTenants = new Set([...tenantIds, ...scopedTenantIds]);
@@ -79,6 +97,8 @@ async function verifyOwnership(client, state, tenantIds) {
 
 export async function cleanupFixture({ database, storage, state }) {
   const tenantIds = validateState(state);
+  const scopedIntegrationIds = uniqueIds(state.scopedIntegrationIds);
+  const scopedChannelIds = uniqueIds(state.scopedChannelIds);
   const client = await database.connect();
   try {
     await verifyOwnership(client, state, tenantIds);
@@ -110,6 +130,8 @@ export async function cleanupFixture({ database, storage, state }) {
       for (const auditId of uniqueIds(state.scopedAuditIds)) await client.query('DELETE FROM conversation_audit_events WHERE id = $1', [auditId]);
       await client.query('DELETE FROM conversation_messages WHERE tenant_id = ANY($1::uuid[]) AND id = ANY($2::uuid[])', [uniqueIds(state.scopedTenantIds), scopedMessageIds]);
     }
+    if (scopedIntegrationIds.length) await client.query('DELETE FROM channel_integrations WHERE tenant_id = ANY($1::uuid[]) AND id = ANY($2::uuid[])', [uniqueIds(state.scopedTenantIds), scopedIntegrationIds]);
+    if (scopedChannelIds.length) await client.query('DELETE FROM tenant_channels WHERE tenant_id = ANY($1::uuid[]) AND id = ANY($2::uuid[])', [uniqueIds(state.scopedTenantIds), scopedChannelIds]);
     for (const scopedTenantId of uniqueIds(state.scopedTenantIds)) {
       const scopedSourceIds = uniqueIds(state.scopedSourceIds);
       if (scopedSourceIds.length) {

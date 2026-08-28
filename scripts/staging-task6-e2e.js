@@ -172,7 +172,7 @@ async function safeFetchJson(path, options = {}) {
   try { return JSON.parse(text); } catch { return { text }; }
 }
 
-async function verifyChannelMappings(database) {
+async function verifyChannelMappings({ database, adminApi, marker, state, statePath }) {
   const phoneKey = whatsappIntegrationKey(process.env.STAGING_WHATSAPP_PHONE_ID);
   const result = await database.query(
     `SELECT ci.integration_type, ci.integration_key, ci.tenant_id, ci.channel_id, ci.assistant_id
@@ -185,7 +185,28 @@ async function verifyChannelMappings(database) {
       ORDER BY ci.integration_type`, [phoneKey],
   );
   const byType = Object.fromEntries(result.rows.map((row) => [row.integration_type, row]));
-  for (const type of ['WHATSAPP', 'SAMCHEGUIDE', 'WEB_CHAT']) assertCondition(byType[type], `TASK6_E2E_${type}_MAPPING_MISSING`);
+  for (const type of ['WHATSAPP', 'SAMCHEGUIDE']) assertCondition(byType[type], `TASK6_E2E_${type}_MAPPING_MISSING`);
+  assertCondition(byType.WHATSAPP.tenant_id === byType.SAMCHEGUIDE.tenant_id, 'TASK6_E2E_CROSS_CHANNEL_TENANT_MISMATCH');
+  if (!byType.WEB_CHAT) {
+    const tenantId = byType.WHATSAPP.tenant_id;
+    const assistantId = byType.WHATSAPP.assistant_id;
+    const channel = await adminApi.request(`/api/v1/tenants/${tenantId}/channels`, {
+      method: 'POST',
+      body: { channel_type: 'WEB_CHAT', display_name: `${marker} Web Chat`, external_channel_id: `${marker}_web_chat`, assistant_id: assistantId, status: 'active' },
+    });
+    state.scopedTenantIds.push(tenantId);
+    state.scopedChannelIds.push(channel.id);
+    await persistState(statePath, state);
+    const integration = await database.query(
+      `INSERT INTO channel_integrations (integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled)
+       VALUES ($1, 'WEB_CHAT', $2, $3, $4, TRUE)
+       RETURNING id, integration_type, integration_key, tenant_id, channel_id, assistant_id`,
+      [`${marker}_widget`, tenantId, channel.id, assistantId],
+    );
+    byType.WEB_CHAT = integration.rows[0];
+    state.scopedIntegrationIds.push(integration.rows[0].id);
+    await persistState(statePath, state);
+  }
   assertCondition(new Set(Object.values(byType).map((row) => row.tenant_id)).size === 1, 'TASK6_E2E_CROSS_CHANNEL_TENANT_MISMATCH');
   return byType;
 }
@@ -197,7 +218,7 @@ async function main() {
   ]);
   const marker = createRunMarker();
   const statePath = process.env.TASK6_E2E_STATE_PATH;
-  const state = { marker, tenantIds: [], assistantIds: [], channelIds: [], integrationIds: [], sourceIds: [], scopedTenantIds: [], scopedSourceIds: [], scopedConversationIds: [], scopedMessageIds: [], scopedAuditIds: [], conversationIds: [], userIds: [], storageObjects: [] };
+  const state = { marker, tenantIds: [], assistantIds: [], channelIds: [], integrationIds: [], sourceIds: [], scopedTenantIds: [], scopedChannelIds: [], scopedIntegrationIds: [], scopedSourceIds: [], scopedConversationIds: [], scopedMessageIds: [], scopedAuditIds: [], conversationIds: [], userIds: [], storageObjects: [] };
   await persistState(statePath, state);
 
   const ownerClaims = jwtClaims(process.env.STAGING_OWNER_TOKEN);
@@ -316,7 +337,7 @@ async function main() {
     assertCondition(configPointer.rows[0].active_configuration_version_id === config1.id, 'TASK6_E2E_CONFIGURATION_ROLLBACK_FAILED');
     console.log(safeResultLine('PASS', 'CONFIGURATION_LIFECYCLE', { status: 'APPROVED_ACTIVE_ROLLBACK' }));
 
-    const mappings = await verifyChannelMappings(database);
+    const mappings = await verifyChannelMappings({ database, adminApi, marker, state, statePath });
     const sharedTenantId = mappings.WHATSAPP.tenant_id;
     const sharedAssistantIds = [...new Set(Object.values(mappings).map((row) => row.assistant_id))];
     const channelMarker = `${marker}_CHANNEL`;
@@ -358,6 +379,9 @@ async function main() {
     const bootstrap = await safeFetchJson('/api/chat/bootstrap', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ widget_key: mappings.WEB_CHAT.integration_key }) });
     const web = await safeFetchJson('/api/chat', { method: 'POST', headers: { 'content-type': 'application/json', 'x-samche-web-chat-session': bootstrap.session }, body: JSON.stringify({ message: `What protocol does ${channelMarker} identify?` }) });
     assertCondition(/cobalt lantern/i.test(JSON.stringify(web)), 'TASK6_E2E_WEB_CHAT_RESPONSE_FAILED');
+    const webConversation = await database.query(`SELECT DISTINCT c.id FROM conversations c JOIN conversation_messages m ON m.conversation_id = c.id AND m.tenant_id = c.tenant_id WHERE c.tenant_id = $1 AND c.channel_id = $2 AND m.content LIKE $3 AND c.created_at >= $4::timestamptz`, [sharedTenantId, mappings.WEB_CHAT.channel_id, `%${marker}%`, channelStartedAt]);
+    assertCondition(webConversation.rowCount === 1, 'TASK6_E2E_WEB_CHAT_CONVERSATION_EVIDENCE_FAILED');
+    state.scopedConversationIds.push(webConversation.rows[0].id); await persistState(statePath, state);
     console.log(safeResultLine('PASS', 'CROSS_CHANNEL', { status: 'WHATSAPP_AI_GUIDE_WEB_CHAT' }));
     console.log(safeResultLine('PASS', 'TASK6_E2E', { status: 'COMPLETE' }));
   } finally {

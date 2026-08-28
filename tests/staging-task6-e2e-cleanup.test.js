@@ -61,6 +61,33 @@ test('cleanup deletes a marker-owned source from an existing staging tenant with
   assert.equal(db.calls.some(({ sql, params }) => /DELETE FROM tenants/.test(sql) && params[0]?.includes(fixture.scopedTenantIds[0])), false);
 });
 
+test('cleanup verifies and deletes only marker-owned scoped Web Chat mapping records', async () => {
+  const fixture = state();
+  fixture.scopedTenantIds = ['44444444-4444-4444-8444-444444444444'];
+  fixture.scopedChannelIds = ['55555555-5555-4555-8555-555555555555'];
+  fixture.scopedIntegrationIds = ['66666666-6666-4666-8666-666666666666'];
+  const db = database();
+  const originalConnect = db.connect;
+  db.connect = async () => {
+    const client = await originalConnect();
+    const originalQuery = client.query;
+    client.query = async (sql, params = []) => {
+      if (/SELECT ci.id AS integration_id/.test(sql)) {
+        db.calls.push({ sql, params });
+        return { rows: [{
+          integration_id: fixture.scopedIntegrationIds[0], integration_key: `${fixture.marker}_widget`,
+          channel_id: fixture.scopedChannelIds[0], display_name: `${fixture.marker} Web Chat`,
+        }] };
+      }
+      return originalQuery(sql, params);
+    };
+    return client;
+  };
+  await cleanupFixture({ database: db, storage: { remove: async () => {} }, state: fixture });
+  assert.ok(db.calls.some(({ sql, params }) => /DELETE FROM channel_integrations WHERE tenant_id = ANY/.test(sql) && params[1][0] === fixture.scopedIntegrationIds[0]));
+  assert.ok(db.calls.some(({ sql, params }) => /DELETE FROM tenant_channels WHERE tenant_id = ANY/.test(sql) && params[1][0] === fixture.scopedChannelIds[0]));
+});
+
 test('cleanup uses marker-owned parameterized deletes and removes only verified storage keys', async () => {
   const db = database();
   const removed = [];
