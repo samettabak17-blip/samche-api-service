@@ -41,10 +41,10 @@ test('Overview aggregates real PostgreSQL activity by tenant and equivalent peri
         VALUES ($1, $2, 'CUSTOMER', 'analytics fixture', $3)`, [tenantId, id, createdAt]);
     }
 
-    const fixtureBuckets = await client.query(`SELECT to_char(date_trunc('hour', timezone('UTC', created_at)), 'HH24:00') AS hour, COUNT(*)::int AS count
+    const fixtureBuckets = await client.query(`SELECT LPAD(EXTRACT(HOUR FROM timezone('UTC', created_at))::int::text, 2, '0') || ':00' AS hour, COUNT(*)::int AS count
       FROM conversation_messages
       WHERE tenant_id = $1 AND created_at >= '2026-08-10T00:00:00Z' AND created_at <= '2026-08-16T23:59:59.999Z'
-      GROUP BY date_trunc('hour', timezone('UTC', created_at)) ORDER BY count DESC, hour ASC`, [tenantA]);
+      GROUP BY EXTRACT(HOUR FROM timezone('UTC', created_at)) ORDER BY count DESC, hour ASC`, [tenantA]);
     assert.deepEqual(fixtureBuckets.rows, [{ hour: '17:00', count: 2 }, { hour: '10:00', count: 1 }]);
 
     let queryQueue = Promise.resolve();

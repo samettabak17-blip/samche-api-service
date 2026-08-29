@@ -13,7 +13,7 @@ function fixtureQuery(overrides = {}) {
     if (sql.includes('GROUP BY tc.channel_type')) return { rows: overrides.channels ?? [{ channel: 'WHATSAPP', count: 6 }, { channel: 'WEB_CHAT', count: 2 }] };
     if (sql.includes('latest.content')) return { rows: [] };
     if (sql.includes("NULLIF(TRIM(l.intent)")) return { rows: [] };
-    if (sql.includes("date_trunc('hour'")) return { rows: overrides.peak ?? [{ hour: '17:00', count: 7 }] };
+    if (sql.includes('EXTRACT(HOUR')) return { rows: overrides.peak ?? [{ hour: '17:00', count: 7 }] };
     if (sql.includes('JOIN ai_assistants')) return { rows: overrides.assistant ?? [{ id: 'assistant-a', name: 'SamChe AI', channel_types: ['WHATSAPP'], count: 6 }] };
     if (sql.includes('GROUP BY c.status')) return { rows: [] };
     throw new Error('Unexpected analytics query');
@@ -36,10 +36,11 @@ test('uses deterministic channel and assistant tie ordering in SQL', async () =>
   await getDashboardOverview(fixture.query, { tenantId });
   const channelSql = fixture.calls.find((call) => call.sql.includes('GROUP BY tc.channel_type')).sql;
   const assistantSql = fixture.calls.find((call) => call.sql.includes('JOIN ai_assistants')).sql;
-  const peakSql = fixture.calls.find((call) => call.sql.includes("date_trunc('hour'")).sql;
+  const peakSql = fixture.calls.find((call) => call.sql.includes('EXTRACT(HOUR')).sql;
   assert.match(channelSql, /ORDER BY count DESC, tc\.channel_type ASC/);
   assert.match(assistantSql, /ORDER BY count DESC, a\.id ASC/);
   assert.match(peakSql, /timezone\('UTC', m\.created_at\)/);
+  assert.match(peakSql, /GROUP BY EXTRACT\(HOUR/);
 });
 
 test('returns honest no-data and zero-baseline comparison states', async () => {

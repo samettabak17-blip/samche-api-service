@@ -86,10 +86,10 @@ export async function getDashboardOverview(query, { tenantId, days = 7, startDat
       WHERE l.tenant_id = $1 AND l.created_at >= $2::timestamptz AND l.created_at <= $3::timestamptz
         AND COALESCE(NULLIF(TRIM(l.intent), ''), NULLIF(TRIM(l.service_interest), '')) IS NOT NULL
       GROUP BY label ORDER BY count DESC, label ASC LIMIT 6`, rangeParams),
-    query(`SELECT to_char(date_trunc('hour', timezone('UTC', m.created_at)), 'HH24:00') AS hour, COUNT(*)::int AS count
+    query(`SELECT LPAD(EXTRACT(HOUR FROM timezone('UTC', m.created_at))::int::text, 2, '0') || ':00' AS hour, COUNT(*)::int AS count
       FROM conversation_messages m
       WHERE m.tenant_id = $1 AND m.created_at >= $2::timestamptz AND m.created_at <= $3::timestamptz
-      GROUP BY date_trunc('hour', timezone('UTC', m.created_at)) ORDER BY count DESC, hour ASC LIMIT 1`, rangeParams),
+      GROUP BY EXTRACT(HOUR FROM timezone('UTC', m.created_at)) ORDER BY count DESC, hour ASC LIMIT 1`, rangeParams),
     query(`SELECT a.id, a.name, ARRAY_AGG(DISTINCT tc.channel_type ORDER BY tc.channel_type) AS channel_types, COUNT(c.id)::int AS count
       FROM conversations c
       JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
