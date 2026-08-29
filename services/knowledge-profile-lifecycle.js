@@ -99,6 +99,36 @@ function requestFingerprint({ tenantId, businessIdentityId, sources, provider })
   return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
+function advisoryKey(fingerprint) {
+  return BigInt.asIntN(64, BigInt(`0x${fingerprint.slice(0, 16)}`)).toString();
+}
+
+async function withGenerationFingerprintLock(database, fingerprint, operation) {
+  if (typeof database?.connect !== 'function') return operation(database);
+  const client = await database.connect();
+  const key = advisoryKey(fingerprint);
+  try {
+    await client.query('SELECT pg_advisory_lock($1::bigint)', [key]);
+    return await operation(client);
+  } finally {
+    await client.query('SELECT pg_advisory_unlock($1::bigint)', [key]).catch(() => {});
+    client.release();
+  }
+}
+
+async function existingSuccessfulProfile({ database, tenantId, fingerprint }) {
+  const result = await database.query(
+    `SELECT version.id, version.profile_id, version.status, version.created_at
+       FROM knowledge_generation_runs run
+       JOIN business_profile_versions version ON version.id = run.target_id AND version.tenant_id = run.tenant_id
+      WHERE run.tenant_id = $1 AND run.target_type = 'BUSINESS_PROFILE'
+        AND run.request_fingerprint = $2 AND run.status = 'SUCCEEDED'
+      LIMIT 1`,
+    [tenantId, fingerprint],
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function analyzeBusinessProfileSourceScope({ database, provider, tenantId, businessIdentityId, sourceIds }) {
   if (typeof provider?.generateBusinessIdentityAnalysis !== 'function') throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_GENERATION_UNAVAILABLE', 'Business Profile generation is unavailable');
   const scope = await loadBusinessProfileSourceScope({ database, tenantId, businessIdentityId, sourceIds });
@@ -111,17 +141,28 @@ export async function analyzeBusinessProfileSourceScope({ database, provider, te
 export async function generateBusinessProfileVersion({ database, provider, tenantId, requestedBy, businessIdentityId, sourceIds }) {
   uuid(requestedBy, 'KNOWLEDGE_REQUESTER_INVALID');
   if (typeof provider?.generateBusinessProfile !== 'function') throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_GENERATION_UNAVAILABLE', 'Business Profile generation is unavailable');
-  const startedAt = Date.now();
-  let run;
-  let runStage = 'IDENTITY_ANALYSIS';
   const baseScope = await loadBusinessProfileSourceScope({ database, tenantId, businessIdentityId, sourceIds });
   const fingerprint = requestFingerprint({ tenantId, businessIdentityId, sources: baseScope.sources, provider });
-  const baseProvenance = { business_identity_id: businessIdentityId, source_ids: sourceIds, source_hashes: baseScope.sources.map(({ id, content_hash }) => ({ id, content_hash })) };
-  run = await beginKnowledgeGenerationRun({ database, tenantId, requestedBy, targetType: 'BUSINESS_PROFILE', provider: provider.provider, model: provider.model,
-    prompt: `generation-attempt:${fingerprint}`, provenance: baseProvenance, businessIdentityId, requestFingerprint: fingerprint,
-    stage: runStage, promptCharacterCount: 0, sourceCount: baseScope.sources.length });
-  try {
-    const analysis = await resolveBusinessIdentityAnalysis({ database, provider, tenantId, businessIdentityId, scope: baseScope });
+  return withGenerationFingerprintLock(database, fingerprint, async (generationDatabase) => {
+    const successful = await existingSuccessfulProfile({ database: generationDatabase, tenantId, fingerprint });
+    if (successful) return successful;
+    const active = await generationDatabase.query(
+      `SELECT id FROM knowledge_generation_runs
+        WHERE tenant_id = $1 AND target_type = 'BUSINESS_PROFILE' AND request_fingerprint = $2 AND status = 'RUNNING'
+        LIMIT 1`,
+      [tenantId, fingerprint],
+    );
+    if (active.rows[0]) throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_GENERATION_IN_PROGRESS', 'An identical Business Profile generation attempt is already running');
+
+    const startedAt = Date.now();
+    let run;
+    let runStage = 'IDENTITY_ANALYSIS';
+    const baseProvenance = { business_identity_id: businessIdentityId, source_ids: sourceIds, source_hashes: baseScope.sources.map(({ id, content_hash }) => ({ id, content_hash })) };
+    run = await beginKnowledgeGenerationRun({ database: generationDatabase, tenantId, requestedBy, targetType: 'BUSINESS_PROFILE', provider: provider.provider, model: provider.model,
+      prompt: `generation-attempt:${fingerprint}`, provenance: baseProvenance, businessIdentityId, requestFingerprint: fingerprint,
+      stage: runStage, promptCharacterCount: 0, sourceCount: baseScope.sources.length });
+    try {
+    const analysis = await resolveBusinessIdentityAnalysis({ database: generationDatabase, provider, tenantId, businessIdentityId, scope: baseScope });
     const selectedIdentity = baseScope.business_identity.normalized_identity || normalizeBusinessIdentity(baseScope.business_identity.display_name);
     const status = analysis.status === 'RESOLVED' && analysis.identities[0]?.normalized_identity === selectedIdentity ? 'RESOLVED' : 'IDENTITY_RESOLUTION_REQUIRED';
     if (status !== 'RESOLVED') {
@@ -137,34 +178,42 @@ export async function generateBusinessProfileVersion({ database, provider, tenan
     ...baseScope.sources.map((source) => `SOURCE ${source.id} — ${source.title}\n${String(source.content).slice(0, 12000)}`),
   ].join('\n\n');
     runStage = 'PROFILE_GENERATION';
-    await advanceKnowledgeGenerationRun({ database, tenantId, runId: run.id, stage: runStage, promptCharacterCount: prompt.length, sourceCount: baseScope.sources.length, elapsedMs: Date.now() - startedAt });
+    await advanceKnowledgeGenerationRun({ database: generationDatabase, tenantId, runId: run.id, stage: runStage, promptCharacterCount: prompt.length, sourceCount: baseScope.sources.length, elapsedMs: Date.now() - startedAt });
     const profileData = await provider.generateBusinessProfile({ prompt });
     runStage = 'PERSISTENCE';
-    await advanceKnowledgeGenerationRun({ database, tenantId, runId: run.id, stage: runStage, promptCharacterCount: prompt.length, sourceCount: baseScope.sources.length, elapsedMs: Date.now() - startedAt });
-    const profile = await database.query(
+    await advanceKnowledgeGenerationRun({ database: generationDatabase, tenantId, runId: run.id, stage: runStage, promptCharacterCount: prompt.length, sourceCount: baseScope.sources.length, elapsedMs: Date.now() - startedAt });
+    await generationDatabase.query('BEGIN');
+    try {
+    const profile = await generationDatabase.query(
     `INSERT INTO business_profiles (tenant_id, business_identity_id) VALUES ($1, $2)
        ON CONFLICT (tenant_id, business_identity_id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
        RETURNING id`,
       [tenantId, businessIdentityId],
     );
     for (const sourceId of sourceIds) {
-      await database.query(`INSERT INTO knowledge_source_business_identities (tenant_id, source_id, business_identity_id)
+      await generationDatabase.query(`INSERT INTO knowledge_source_business_identities (tenant_id, source_id, business_identity_id)
         VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [tenantId, sourceId, businessIdentityId]);
     }
-    const version = await database.query(
+    const version = await generationDatabase.query(
       `INSERT INTO business_profile_versions
          (profile_id, tenant_id, profile_data, evidence, generation_run_id, schema_version, identity_resolution_status, source_scope, generated_by, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'AI', 'NEEDS_REVIEW')
        RETURNING id, profile_id, status, created_at`,
       [profile.rows[0].id, tenantId, profileData, provenance, run.id, BUSINESS_PROFILE_SCHEMA_VERSION, 'RESOLVED', { business_identity_id: businessIdentityId, source_ids: sourceIds }],
     );
-    await completeKnowledgeGenerationRun({ database, tenantId, runId: run.id, targetId: version.rows[0].id, output: profileData });
+    await completeKnowledgeGenerationRun({ database: generationDatabase, tenantId, runId: run.id, targetId: version.rows[0].id, output: profileData, elapsedMs: Date.now() - startedAt });
+    await generationDatabase.query('COMMIT');
     return version.rows[0];
+    } catch (persistenceError) {
+      await generationDatabase.query('ROLLBACK').catch(() => {});
+      throw persistenceError;
+    }
   } catch (error) {
     const errorCode = /^[A-Z][A-Z0-9_]{2,63}$/.test(String(error?.code ?? '')) ? error.code : 'KNOWLEDGE_PROFILE_GENERATION_FAILED';
-    await failKnowledgeGenerationRun({ database, tenantId, runId: run.id, errorCode, stage: runStage, elapsedMs: Date.now() - startedAt }).catch(() => {});
+    await failKnowledgeGenerationRun({ database: generationDatabase, tenantId, runId: run.id, errorCode, stage: runStage, elapsedMs: Date.now() - startedAt }).catch(() => {});
     throw error;
   }
+  });
 }
 
 export async function rejectBusinessProfileVersion({ database, tenantId, versionId, reviewedBy }) {

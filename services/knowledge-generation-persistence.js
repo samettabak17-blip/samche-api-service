@@ -89,13 +89,13 @@ export async function advanceKnowledgeGenerationRun({ database, tenantId, runId,
   return result.rows[0];
 }
 
-export async function completeKnowledgeGenerationRun({ database, tenantId, runId, targetId, output }) {
+export async function completeKnowledgeGenerationRun({ database, tenantId, runId, targetId, output, elapsedMs = null }) {
   const result = await databaseQuery(database)(
     `UPDATE knowledge_generation_runs
-        SET status = 'SUCCEEDED', target_id = $3, output_hash = $4, completed_at = CURRENT_TIMESTAMP
+        SET status = 'SUCCEEDED', target_id = $3, output_hash = $4, elapsed_ms = COALESCE($5, elapsed_ms), completed_at = CURRENT_TIMESTAMP
       WHERE id = $1 AND tenant_id = $2 AND status = 'RUNNING'
       RETURNING id, status, target_id`,
-    [uuid(runId, 'KNOWLEDGE_GENERATION_RUN_INVALID'), uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID'), uuid(targetId, 'KNOWLEDGE_GENERATION_TARGET_INVALID'), hash(JSON.stringify(output))],
+    [uuid(runId, 'KNOWLEDGE_GENERATION_RUN_INVALID'), uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID'), uuid(targetId, 'KNOWLEDGE_GENERATION_TARGET_INVALID'), hash(JSON.stringify(output)), boundedInteger(elapsedMs, 'KNOWLEDGE_GENERATION_ELAPSED_INVALID')],
   );
   if (!result.rows[0]) throw new KnowledgeGenerationPersistenceError('KNOWLEDGE_GENERATION_RUN_NOT_RUNNING', 'Knowledge generation run is not running');
   return result.rows[0];

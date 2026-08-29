@@ -59,6 +59,7 @@ test('conflicting selected identities block profile generation and expose safe c
     if (/business_identity_source_evidence|knowledge_source_business_identities/i.test(sql)) return { rows: [] };
     if (/INSERT INTO knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'RUNNING' }] };
     if (/UPDATE knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'FAILED' }] };
+    if (/FROM knowledge_generation_runs/i.test(sql)) return { rows: [] };
     assert.fail(`unexpected SQL ${sql}`);
   } };
   const provider = { provider: 'GEMINI', model: 'gemini-3-flash-preview', generateBusinessIdentityAnalysis: async ({ source }) => ({ detected_identity: source.title, confidence: '0.99', evidence: 'Legal name' }), generateBusinessProfile: async () => assert.fail('must not generate') };
@@ -72,6 +73,7 @@ test('a selected source identity must match the chosen Business Identity', async
     if (/business_identity_source_evidence/i.test(sql)) return { rows: [] };
     if (/INSERT INTO knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'RUNNING' }] };
     if (/UPDATE knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'FAILED' }] };
+    if (/FROM knowledge_generation_runs/i.test(sql)) return { rows: [] };
     assert.fail(`unexpected SQL ${sql}`);
   } };
   const provider = { provider: 'GEMINI', model: 'gemini-3-flash-preview', generateBusinessIdentityAnalysis: async () => ({ detected_identity: 'Nova Crest Business Services LLC', confidence: '0.99', evidence: 'Legal name' }), generateBusinessProfile: async () => assert.fail('must not generate') };
