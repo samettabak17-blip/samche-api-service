@@ -1,154 +1,2032 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { FormEvent, useState } from 'react';
-import { useLocation, useParams, useSearchParams } from 'react-router-dom';
-import { EmptyState, QueryErrorState, SkeletonBlock } from '../../components/ui/async-state';
-import { MutationFeedback } from '../../components/ui/mutation-feedback';
-import { assistantDisplayLabel } from '../../lib/channel-display';
-import { ApiError } from '../../lib/api-client';
-import { dashboardButtonClass, DashboardButton, DashboardTab } from '../../components/ui/dashboard-control';
-import type { Assistant, BusinessIdentityScopeAnalysis } from '../../types/api';
-import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
-import { useTenant } from '../tenants/tenant-context';
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FormEvent, useState } from "react";
+import { useLocation, useParams, useSearchParams } from "react-router-dom";
+import {
+  EmptyState,
+  QueryErrorState,
+  SkeletonBlock,
+} from "../../components/ui/async-state";
+import { MutationFeedback } from "../../components/ui/mutation-feedback";
+import { assistantDisplayLabel } from "../../lib/channel-display";
+import { ApiError } from "../../lib/api-client";
+import {
+  dashboardButtonClass,
+  DashboardButton,
+  DashboardTab,
+} from "../../components/ui/dashboard-control";
+import type { Assistant, BusinessIdentityScopeAnalysis } from "../../types/api";
+import { tenantApi, tenantKeys } from "../dashboard/dashboard-api";
+import { useTenant } from "../tenants/tenant-context";
 
 const tabs = [
-  ['overview', 'Overview'], ['sources', 'Sources'], ['candidates', 'Candidates'], ['gaps', 'Knowledge Gaps'],
-  ['profiles', 'Business Profile'], ['configurations', 'Configurations'], ['retrieval', 'Retrieval Test'],
+  ["overview", "Overview"],
+  ["sources", "Sources"],
+  ["candidates", "Candidates"],
+  ["gaps", "Knowledge Gaps"],
+  ["profiles", "Business Profile"],
+  ["configurations", "Configurations"],
+  ["retrieval", "Retrieval Test"],
 ] as const;
 
-const routeForTab: Record<string, string> = { overview: 'intelligence', sources: 'sources', candidates: 'candidates', gaps: 'gaps', profiles: 'profile', configurations: 'configurations', retrieval: 'retrieval' };
-const personaLabels: Record<string, string> = { company_identity: 'Company Identity', company_display_name: 'Company Display Name', company_summary: 'Company Summary', products: 'Products', services: 'Services', packages: 'Packages', pricing_information: 'Packages / Pricing', policies: 'Policies', procedures: 'Procedures', communication_style: 'Tone / Communication', supported_languages: 'Languages', support_escalation_rules: 'Escalation', assistant_identity: 'Assistant Identity', role_and_purpose: 'Role & Purpose', tone: 'Tone', customer_handling: 'Customer Handling', qualification_guidance: 'Qualification', sales_guidance: 'Sales Behavior', fallback_guidance: 'Fallback', escalation_guidance: 'Escalation', follow_up_behavior: 'Follow-up', scheduled_messaging_behavior: 'Scheduled Messaging', prohibited_claims: 'Prohibited Claims', unsupported_claim_behavior: 'Unsupported Claims', channel_adaptations: 'Channel Adaptations' };
-const personaValue = (value: unknown) => Array.isArray(value) ? value.join(' • ') : value && typeof value === 'object' ? Object.entries(value as Record<string, unknown>).map(([key, item]) => `${personaLabels[key] ?? key.replace(/_/g, ' ')}: ${typeof item === 'object' ? JSON.stringify(item) : String(item)}`).join(' • ') : String(value ?? '');
-function PersonaFields({ data, provenance }: { data: Record<string, unknown>; provenance: 'SOURCE-DERIVED' | 'AI RECOMMENDED' | 'ADMIN EDITED' }) { return <div className="mt-3"><span className="rounded-full border border-line bg-elevated px-2 py-1 text-[10px] font-semibold text-stone-300">{provenance}</span><dl className="mt-3 grid gap-3 text-xs sm:grid-cols-2">{Object.entries(data).map(([key, value]) => <div key={key} className="rounded-lg border border-line bg-elevated p-3"><dt className="font-semibold text-stone-200">{personaLabels[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, (letter: string) => letter.toUpperCase())}</dt><dd className="mt-1 break-words text-stone-400">{personaValue(value)}</dd></div>)}</dl></div>; }
-const tabForRoute: Record<string, string> = Object.fromEntries(Object.entries(routeForTab).map(([tab, route]) => [route, tab]));
-const actionClass = dashboardButtonClass('secondary');
+const routeForTab: Record<string, string> = {
+  overview: "intelligence",
+  sources: "sources",
+  candidates: "candidates",
+  gaps: "gaps",
+  profiles: "profile",
+  configurations: "configurations",
+  retrieval: "retrieval",
+};
+const profileScopeKey = (businessIdentityId: string, sourceIds: string[]) =>
+  JSON.stringify({ businessIdentityId, sourceIds: [...sourceIds].sort() });
+const personaLabels: Record<string, string> = {
+  company_identity: "Company Identity",
+  company_display_name: "Company Display Name",
+  company_summary: "Company Summary",
+  products: "Products",
+  services: "Services",
+  packages: "Packages",
+  pricing_information: "Packages / Pricing",
+  policies: "Policies",
+  procedures: "Procedures",
+  communication_style: "Tone / Communication",
+  supported_languages: "Languages",
+  support_escalation_rules: "Escalation",
+  assistant_identity: "Assistant Identity",
+  role_and_purpose: "Role & Purpose",
+  tone: "Tone",
+  customer_handling: "Customer Handling",
+  qualification_guidance: "Qualification",
+  sales_guidance: "Sales Behavior",
+  fallback_guidance: "Fallback",
+  escalation_guidance: "Escalation",
+  follow_up_behavior: "Follow-up",
+  scheduled_messaging_behavior: "Scheduled Messaging",
+  prohibited_claims: "Prohibited Claims",
+  unsupported_claim_behavior: "Unsupported Claims",
+  channel_adaptations: "Channel Adaptations",
+};
+const personaValue = (value: unknown) =>
+  Array.isArray(value)
+    ? value.join(" • ")
+    : value && typeof value === "object"
+      ? Object.entries(value as Record<string, unknown>)
+          .map(
+            ([key, item]) =>
+              `${personaLabels[key] ?? key.replace(/_/g, " ")}: ${typeof item === "object" ? JSON.stringify(item) : String(item)}`,
+          )
+          .join(" • ")
+      : String(value ?? "");
+function PersonaFields({
+  data,
+  provenance,
+}: {
+  data: Record<string, unknown>;
+  provenance: "SOURCE-DERIVED" | "AI RECOMMENDED" | "ADMIN EDITED";
+}) {
+  return (
+    <div className="mt-3">
+      <span className="rounded-full border border-line bg-elevated px-2 py-1 text-[10px] font-semibold text-stone-300">
+        {provenance}
+      </span>
+      <dl className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
+        {Object.entries(data).map(([key, value]) => (
+          <div
+            key={key}
+            className="rounded-lg border border-line bg-elevated p-3"
+          >
+            <dt className="font-semibold text-stone-200">
+              {personaLabels[key] ??
+                key
+                  .replace(/_/g, " ")
+                  .replace(/\b\w/g, (letter: string) => letter.toUpperCase())}
+            </dt>
+            <dd className="mt-1 break-words text-stone-400">
+              {personaValue(value)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+const tabForRoute: Record<string, string> = Object.fromEntries(
+  Object.entries(routeForTab).map(([tab, route]) => [route, tab]),
+);
+const actionClass = dashboardButtonClass("secondary");
 
-function Cards({ items }: { items: Array<{ label: string; value: string | number; detail: string }> }) {
-  return <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{items.map((item) => <article key={item.label} className="panel p-5"><p className="dashboard-section-label">{item.label}</p><p className="mt-3 text-3xl font-semibold text-ink">{item.value}</p><p className="mt-2 text-xs text-stone-500">{item.detail}</p></article>)}</div>;
+function Cards({
+  items,
+}: {
+  items: Array<{ label: string; value: string | number; detail: string }>;
+}) {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {items.map((item) => (
+        <article key={item.label} className="panel p-5">
+          <p className="dashboard-section-label">{item.label}</p>
+          <p className="mt-3 text-3xl font-semibold text-ink">{item.value}</p>
+          <p className="mt-2 text-xs text-stone-500">{item.detail}</p>
+        </article>
+      ))}
+    </div>
+  );
 }
 
-function DataList({ rows, empty }: { rows: Array<{ id: string; title: string; status: string; detail?: string }>; empty: string }) {
-  if (!rows.length) return <EmptyState title={empty} description="No records match this tenant-scoped view." />;
-  return <div className="panel divide-y divide-line">{rows.map((row) => <article key={row.id} className="p-5"><div className="flex items-start justify-between gap-4"><strong className="text-sm text-ink">{row.title}</strong><span className="rounded-full bg-stone-100 px-2 py-1 text-[10px] font-semibold uppercase text-stone-600">{row.status}</span></div>{row.detail && <p className="mt-2 line-clamp-3 text-sm text-stone-600">{row.detail}</p>}</article>)}</div>;
+function DataList({
+  rows,
+  empty,
+}: {
+  rows: Array<{ id: string; title: string; status: string; detail?: string }>;
+  empty: string;
+}) {
+  if (!rows.length)
+    return (
+      <EmptyState
+        title={empty}
+        description="No records match this tenant-scoped view."
+      />
+    );
+  return (
+    <div className="panel divide-y divide-line">
+      {rows.map((row) => (
+        <article key={row.id} className="p-5">
+          <div className="flex items-start justify-between gap-4">
+            <strong className="text-sm text-ink">{row.title}</strong>
+            <span className="rounded-full bg-stone-100 px-2 py-1 text-[10px] font-semibold uppercase text-stone-600">
+              {row.status}
+            </span>
+          </div>
+          {row.detail && (
+            <p className="mt-2 line-clamp-3 text-sm text-stone-600">
+              {row.detail}
+            </p>
+          )}
+        </article>
+      ))}
+    </div>
+  );
 }
 
 export function KnowledgeIntelligencePage() {
-  const { tenantId = '' } = useParams();
+  const { tenantId = "" } = useParams();
   const { canManage } = useTenant();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const routeParts = location.pathname.split('/').filter(Boolean);
-  const routeSegment = routeParts[routeParts.length - 1] ?? '';
-  const tab = searchParams.get('tab') ?? tabForRoute[routeSegment] ?? 'overview';
-  const [assistantId, setAssistantId] = useState('');
-  const [sourceId, setSourceId] = useState('');
-  const [selectedSourceId, setSelectedSourceId] = useState('');
-  const [selectedCandidateId, setSelectedCandidateId] = useState('');
-  const [selectedGapId, setSelectedGapId] = useState('');
-  const [sourceMode, setSourceMode] = useState<'upload' | 'manual' | null>(null);
+  const routeParts = location.pathname.split("/").filter(Boolean);
+  const routeSegment = routeParts[routeParts.length - 1] ?? "";
+  const tab =
+    searchParams.get("tab") ?? tabForRoute[routeSegment] ?? "overview";
+  const [assistantId, setAssistantId] = useState("");
+  const [sourceId, setSourceId] = useState("");
+  const [selectedSourceId, setSelectedSourceId] = useState("");
+  const [selectedCandidateId, setSelectedCandidateId] = useState("");
+  const [selectedGapId, setSelectedGapId] = useState("");
+  const [sourceMode, setSourceMode] = useState<"upload" | "manual" | null>(
+    null,
+  );
   const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [sourceTitle, setSourceTitle] = useState('');
-  const [manualContent, setManualContent] = useState('');
-  const [gapDraft, setGapDraft] = useState({ title: '', content: '' });
-  const [previewQuery, setPreviewQuery] = useState('');
-  const [businessIdentityId, setBusinessIdentityId] = useState('');
-  const [businessIdentityName, setBusinessIdentityName] = useState('');
+  const [sourceTitle, setSourceTitle] = useState("");
+  const [manualContent, setManualContent] = useState("");
+  const [gapDraft, setGapDraft] = useState({ title: "", content: "" });
+  const [previewQuery, setPreviewQuery] = useState("");
+  const [businessIdentityId, setBusinessIdentityId] = useState("");
+  const [businessIdentityName, setBusinessIdentityName] = useState("");
   const [profileSourceIds, setProfileSourceIds] = useState<string[]>([]);
-  const [profileScopeAnalysis, setProfileScopeAnalysis] = useState<BusinessIdentityScopeAnalysis | null>(null);
-  const [configurationProfileVersionId, setConfigurationProfileVersionId] = useState('');
-  const [editor, setEditor] = useState<{ kind: 'profile' | 'configuration'; id: string; value: string } | null>(null);
+  const [profileScopeAnalysis, setProfileScopeAnalysis] =
+    useState<BusinessIdentityScopeAnalysis | null>(null);
+  const [generationFailure, setGenerationFailure] = useState<{
+    scope: string;
+    error: unknown;
+  } | null>(null);
+  const [configurationProfileVersionId, setConfigurationProfileVersionId] =
+    useState("");
+  const [editor, setEditor] = useState<{
+    kind: "profile" | "configuration";
+    id: string;
+    value: string;
+  } | null>(null);
   const queryClient = useQueryClient();
-  const assistants = useQuery({ queryKey: tenantKeys.assistants(tenantId), queryFn: () => tenantApi.listAssistants(tenantId), enabled: Boolean(tenantId) });
-  const channels = useQuery({ queryKey: tenantKeys.channels(tenantId), queryFn: () => tenantApi.listChannels(tenantId), enabled: Boolean(tenantId) });
-  const overview = useQuery({ queryKey: tenantKeys.knowledgeOverview(tenantId), queryFn: () => tenantApi.getKnowledgeOverview(tenantId), enabled: Boolean(tenantId && tab === 'overview') });
-  const sources = useQuery({ queryKey: tenantKeys.knowledgeSources(tenantId), queryFn: () => tenantApi.listKnowledgeSources(tenantId), enabled: Boolean(tenantId && (tab === 'sources' || tab === 'profiles')), refetchInterval: (query) => (query.state.data ?? []).some((source) => !['READY', 'FAILED', 'ARCHIVED'].includes(source.processing_status)) ? 3000 : false });
-  const selectedSource = useQuery({ queryKey: [...tenantKeys.knowledgeSources(tenantId), selectedSourceId], queryFn: () => tenantApi.getKnowledgeSource(tenantId, selectedSourceId), enabled: Boolean(tenantId && selectedSourceId) });
-  const candidates = useQuery({ queryKey: tenantKeys.knowledgeCandidates(tenantId), queryFn: () => tenantApi.listKnowledgeCandidates(tenantId), enabled: Boolean(tenantId && tab === 'candidates') });
-  const gaps = useQuery({ queryKey: tenantKeys.knowledgeGaps(tenantId), queryFn: () => tenantApi.listKnowledgeGaps(tenantId), enabled: Boolean(tenantId && tab === 'gaps') });
-  const candidateEvidence = useQuery({ queryKey: [...tenantKeys.knowledgeCandidates(tenantId), selectedCandidateId, 'evidence'], queryFn: () => tenantApi.getKnowledgeCandidateEvidence(tenantId, selectedCandidateId), enabled: Boolean(tenantId && selectedCandidateId) });
-  const gapSignals = useQuery({ queryKey: [...tenantKeys.knowledgeGaps(tenantId), selectedGapId, 'signals'], queryFn: () => tenantApi.getKnowledgeGapSignals(tenantId, selectedGapId), enabled: Boolean(tenantId && selectedGapId) });
-  const profiles = useQuery({ queryKey: tenantKeys.businessProfiles(tenantId), queryFn: () => tenantApi.listBusinessProfiles(tenantId), enabled: Boolean(tenantId && (tab === 'profiles' || tab === 'configurations')) });
-  const businessIdentities = useQuery({ queryKey: tenantKeys.businessIdentities(tenantId), queryFn: () => tenantApi.listBusinessIdentities(tenantId), enabled: Boolean(tenantId && tab === 'profiles') });
-  const recommendations = useQuery({ queryKey: tenantKeys.knowledgeRecommendations(tenantId, assistantId), queryFn: () => tenantApi.listKnowledgeRecommendations(tenantId, assistantId), enabled: Boolean(tenantId && assistantId && tab === 'configurations') });
-  const configurations = useQuery({ queryKey: tenantKeys.assistantConfigurations(tenantId, assistantId), queryFn: () => tenantApi.listAssistantConfigurations(tenantId, assistantId), enabled: Boolean(tenantId && assistantId && tab === 'configurations') });
-  const generateProfile = useMutation({ mutationFn: () => tenantApi.generateBusinessProfile(tenantId, businessIdentityId, profileSourceIds), onSuccess: () => queryClient.invalidateQueries({ queryKey: tenantKeys.businessProfiles(tenantId) }) });
-  const analyzeProfileScope = useMutation({ mutationFn: () => tenantApi.analyzeBusinessProfileScope(tenantId, businessIdentityId, profileSourceIds), onSuccess: setProfileScopeAnalysis });
-  const createBusinessIdentity = useMutation({ mutationFn: () => tenantApi.createBusinessIdentity(tenantId, businessIdentityName.trim()), onSuccess: (identity) => { setBusinessIdentityId(identity.id); setBusinessIdentityName(''); queryClient.invalidateQueries({ queryKey: tenantKeys.businessIdentities(tenantId) }); } });
-  const preview = useMutation({ mutationFn: () => tenantApi.previewKnowledgeRetrieval(tenantId, assistantId, previewQuery.trim()) });
-  const assignSource = useMutation({
-    mutationFn: () => tenantApi.assignKnowledgeSource(tenantId, selectedSourceId || sourceId, assistantId),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeSources(tenantId) }); if (selectedSourceId) queryClient.invalidateQueries({ queryKey: [...tenantKeys.knowledgeSources(tenantId), selectedSourceId] }); },
+  const assistants = useQuery({
+    queryKey: tenantKeys.assistants(tenantId),
+    queryFn: () => tenantApi.listAssistants(tenantId),
+    enabled: Boolean(tenantId),
   });
-  const refreshSources = () => { queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeSources(tenantId) }); if (selectedSourceId) queryClient.invalidateQueries({ queryKey: [...tenantKeys.knowledgeSources(tenantId), selectedSourceId] }); };
-  const uploadSource = useMutation({ mutationFn: () => tenantApi.uploadKnowledgeSource(tenantId, uploadFile!, sourceTitle), onSuccess: () => { setUploadFile(null); setSourceTitle(''); setSourceMode(null); refreshSources(); } });
-  const createManualSource = useMutation({ mutationFn: () => tenantApi.createManualKnowledgeSource(tenantId, sourceTitle.trim(), manualContent.trim()), onSuccess: () => { setSourceTitle(''); setManualContent(''); setSourceMode(null); refreshSources(); } });
-  const unassignSource = useMutation({ mutationFn: (targetAssistantId: string) => tenantApi.unassignKnowledgeSource(tenantId, selectedSourceId, targetAssistantId), onSuccess: refreshSources });
-  const reindexSource = useMutation({ mutationFn: () => tenantApi.reindexKnowledgeSource(tenantId, selectedSourceId), onSuccess: refreshSources });
-  const archiveSource = useMutation({ mutationFn: () => tenantApi.archiveKnowledgeSource(tenantId, selectedSourceId), onSuccess: refreshSources });
-  const refreshCandidates = () => queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeCandidates(tenantId) });
-  const candidateAction = useMutation({ mutationFn: (action: 'approve' | 'reject') => action === 'approve' ? tenantApi.approveKnowledgeCandidate(tenantId, selectedCandidateId) : tenantApi.rejectKnowledgeCandidate(tenantId, selectedCandidateId), onSuccess: refreshCandidates });
-  const refreshGaps = () => queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeGaps(tenantId) });
-  const createGapCandidate = useMutation({ mutationFn: () => tenantApi.createCandidateFromKnowledgeGap(tenantId, selectedGapId, gapDraft.title.trim(), gapDraft.content.trim()), onSuccess: () => { refreshGaps(); queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeCandidates(tenantId) }); } });
-  const gapAction = useMutation({ mutationFn: (action: 'resolve' | 'dismiss' | 'reopen') => tenantApi.updateKnowledgeGapStatus(tenantId, selectedGapId, action), onSuccess: refreshGaps });
-  const refreshProfiles = () => queryClient.invalidateQueries({ queryKey: tenantKeys.businessProfiles(tenantId) });
-  const refreshConfigurations = () => queryClient.invalidateQueries({ queryKey: tenantKeys.assistantConfigurations(tenantId, assistantId) });
-  const profileAction = useMutation({ mutationFn: ({ id, action }: { id: string; action: 'approve' | 'reject' | 'activate' | 'rollback' }) => action === 'approve' || action === 'reject' ? tenantApi.reviewBusinessProfile(tenantId, id, action) : action === 'activate' ? tenantApi.activateBusinessProfile(tenantId, id) : tenantApi.rollbackBusinessProfile(tenantId, id), onSuccess: refreshProfiles });
-  const saveProfile = useMutation({ mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) => tenantApi.updateBusinessProfile(tenantId, id, data), onSuccess: () => { setEditor(null); refreshProfiles(); } });
-  const recommendationAction = useMutation({ mutationFn: ({ id, action }: { id: string; action: 'approve' | 'reject' }) => tenantApi.reviewRecommendation(tenantId, assistantId, id, action), onSuccess: () => queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeRecommendations(tenantId, assistantId) }) });
-  const generateRecommendation = useMutation({ mutationFn: () => tenantApi.generateKnowledgeRecommendation(tenantId, assistantId, configurationProfileVersionId), onSuccess: () => queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeRecommendations(tenantId, assistantId) }) });
-  const generateConfiguration = useMutation({ mutationFn: (recommendationId: string) => tenantApi.generateAssistantConfiguration(tenantId, assistantId, recommendationId), onSuccess: refreshConfigurations });
-  const configurationAction = useMutation({ mutationFn: ({ id, action }: { id: string; action: 'approve' | 'reject' | 'activate' | 'rollback' }) => action === 'approve' || action === 'reject' ? tenantApi.reviewAssistantConfiguration(tenantId, assistantId, id, action) : action === 'activate' ? tenantApi.activateAssistantConfiguration(tenantId, assistantId, id) : tenantApi.rollbackAssistantConfiguration(tenantId, assistantId, id), onSuccess: refreshConfigurations });
-  const saveConfiguration = useMutation({ mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) => tenantApi.updateAssistantConfiguration(tenantId, assistantId, id, data), onSuccess: () => { setEditor(null); refreshConfigurations(); } });
+  const channels = useQuery({
+    queryKey: tenantKeys.channels(tenantId),
+    queryFn: () => tenantApi.listChannels(tenantId),
+    enabled: Boolean(tenantId),
+  });
+  const overview = useQuery({
+    queryKey: tenantKeys.knowledgeOverview(tenantId),
+    queryFn: () => tenantApi.getKnowledgeOverview(tenantId),
+    enabled: Boolean(tenantId && tab === "overview"),
+  });
+  const sources = useQuery({
+    queryKey: tenantKeys.knowledgeSources(tenantId),
+    queryFn: () => tenantApi.listKnowledgeSources(tenantId),
+    enabled: Boolean(tenantId && (tab === "sources" || tab === "profiles")),
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some(
+        (source) =>
+          !["READY", "FAILED", "ARCHIVED"].includes(source.processing_status),
+      )
+        ? 3000
+        : false,
+  });
+  const selectedSource = useQuery({
+    queryKey: [...tenantKeys.knowledgeSources(tenantId), selectedSourceId],
+    queryFn: () => tenantApi.getKnowledgeSource(tenantId, selectedSourceId),
+    enabled: Boolean(tenantId && selectedSourceId),
+  });
+  const candidates = useQuery({
+    queryKey: tenantKeys.knowledgeCandidates(tenantId),
+    queryFn: () => tenantApi.listKnowledgeCandidates(tenantId),
+    enabled: Boolean(tenantId && tab === "candidates"),
+  });
+  const gaps = useQuery({
+    queryKey: tenantKeys.knowledgeGaps(tenantId),
+    queryFn: () => tenantApi.listKnowledgeGaps(tenantId),
+    enabled: Boolean(tenantId && tab === "gaps"),
+  });
+  const candidateEvidence = useQuery({
+    queryKey: [
+      ...tenantKeys.knowledgeCandidates(tenantId),
+      selectedCandidateId,
+      "evidence",
+    ],
+    queryFn: () =>
+      tenantApi.getKnowledgeCandidateEvidence(tenantId, selectedCandidateId),
+    enabled: Boolean(tenantId && selectedCandidateId),
+  });
+  const gapSignals = useQuery({
+    queryKey: [...tenantKeys.knowledgeGaps(tenantId), selectedGapId, "signals"],
+    queryFn: () => tenantApi.getKnowledgeGapSignals(tenantId, selectedGapId),
+    enabled: Boolean(tenantId && selectedGapId),
+  });
+  const profiles = useQuery({
+    queryKey: tenantKeys.businessProfiles(tenantId),
+    queryFn: () => tenantApi.listBusinessProfiles(tenantId),
+    enabled: Boolean(
+      tenantId && (tab === "profiles" || tab === "configurations"),
+    ),
+  });
+  const businessIdentities = useQuery({
+    queryKey: tenantKeys.businessIdentities(tenantId),
+    queryFn: () => tenantApi.listBusinessIdentities(tenantId),
+    enabled: Boolean(tenantId && tab === "profiles"),
+  });
+  const recommendations = useQuery({
+    queryKey: tenantKeys.knowledgeRecommendations(tenantId, assistantId),
+    queryFn: () =>
+      tenantApi.listKnowledgeRecommendations(tenantId, assistantId),
+    enabled: Boolean(tenantId && assistantId && tab === "configurations"),
+  });
+  const configurations = useQuery({
+    queryKey: tenantKeys.assistantConfigurations(tenantId, assistantId),
+    queryFn: () => tenantApi.listAssistantConfigurations(tenantId, assistantId),
+    enabled: Boolean(tenantId && assistantId && tab === "configurations"),
+  });
+  const generateProfile = useMutation({
+    mutationFn: (scope: {
+      businessIdentityId: string;
+      sourceIds: string[];
+      fingerprint: string;
+    }) =>
+      tenantApi.generateBusinessProfile(
+        tenantId,
+        scope.businessIdentityId,
+        scope.sourceIds,
+      ),
+    onSuccess: () => {
+      setGenerationFailure(null);
+      queryClient.invalidateQueries({
+        queryKey: tenantKeys.businessProfiles(tenantId),
+      });
+    },
+    onError: (error, scope) =>
+      setGenerationFailure({ scope: scope.fingerprint, error }),
+  });
+  const analyzeProfileScope = useMutation({
+    mutationFn: () =>
+      tenantApi.analyzeBusinessProfileScope(
+        tenantId,
+        businessIdentityId,
+        profileSourceIds,
+      ),
+    onSuccess: (analysis) => {
+      setProfileScopeAnalysis(analysis);
+      generateProfile.reset();
+      setGenerationFailure(null);
+    },
+  });
+  const createBusinessIdentity = useMutation({
+    mutationFn: () =>
+      tenantApi.createBusinessIdentity(tenantId, businessIdentityName.trim()),
+    onSuccess: (identity) => {
+      setBusinessIdentityId(identity.id);
+      setBusinessIdentityName("");
+      queryClient.invalidateQueries({
+        queryKey: tenantKeys.businessIdentities(tenantId),
+      });
+    },
+  });
+  const preview = useMutation({
+    mutationFn: () =>
+      tenantApi.previewKnowledgeRetrieval(
+        tenantId,
+        assistantId,
+        previewQuery.trim(),
+      ),
+  });
+  const assignSource = useMutation({
+    mutationFn: () =>
+      tenantApi.assignKnowledgeSource(
+        tenantId,
+        selectedSourceId || sourceId,
+        assistantId,
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: tenantKeys.knowledgeSources(tenantId),
+      });
+      if (selectedSourceId)
+        queryClient.invalidateQueries({
+          queryKey: [
+            ...tenantKeys.knowledgeSources(tenantId),
+            selectedSourceId,
+          ],
+        });
+    },
+  });
+  const refreshSources = () => {
+    queryClient.invalidateQueries({
+      queryKey: tenantKeys.knowledgeSources(tenantId),
+    });
+    if (selectedSourceId)
+      queryClient.invalidateQueries({
+        queryKey: [...tenantKeys.knowledgeSources(tenantId), selectedSourceId],
+      });
+  };
+  const uploadSource = useMutation({
+    mutationFn: () =>
+      tenantApi.uploadKnowledgeSource(tenantId, uploadFile!, sourceTitle),
+    onSuccess: () => {
+      setUploadFile(null);
+      setSourceTitle("");
+      setSourceMode(null);
+      refreshSources();
+    },
+  });
+  const createManualSource = useMutation({
+    mutationFn: () =>
+      tenantApi.createManualKnowledgeSource(
+        tenantId,
+        sourceTitle.trim(),
+        manualContent.trim(),
+      ),
+    onSuccess: () => {
+      setSourceTitle("");
+      setManualContent("");
+      setSourceMode(null);
+      refreshSources();
+    },
+  });
+  const unassignSource = useMutation({
+    mutationFn: (targetAssistantId: string) =>
+      tenantApi.unassignKnowledgeSource(
+        tenantId,
+        selectedSourceId,
+        targetAssistantId,
+      ),
+    onSuccess: refreshSources,
+  });
+  const reindexSource = useMutation({
+    mutationFn: () =>
+      tenantApi.reindexKnowledgeSource(tenantId, selectedSourceId),
+    onSuccess: refreshSources,
+  });
+  const archiveSource = useMutation({
+    mutationFn: () =>
+      tenantApi.archiveKnowledgeSource(tenantId, selectedSourceId),
+    onSuccess: refreshSources,
+  });
+  const refreshCandidates = () =>
+    queryClient.invalidateQueries({
+      queryKey: tenantKeys.knowledgeCandidates(tenantId),
+    });
+  const candidateAction = useMutation({
+    mutationFn: (action: "approve" | "reject") =>
+      action === "approve"
+        ? tenantApi.approveKnowledgeCandidate(tenantId, selectedCandidateId)
+        : tenantApi.rejectKnowledgeCandidate(tenantId, selectedCandidateId),
+    onSuccess: refreshCandidates,
+  });
+  const refreshGaps = () =>
+    queryClient.invalidateQueries({
+      queryKey: tenantKeys.knowledgeGaps(tenantId),
+    });
+  const createGapCandidate = useMutation({
+    mutationFn: () =>
+      tenantApi.createCandidateFromKnowledgeGap(
+        tenantId,
+        selectedGapId,
+        gapDraft.title.trim(),
+        gapDraft.content.trim(),
+      ),
+    onSuccess: () => {
+      refreshGaps();
+      queryClient.invalidateQueries({
+        queryKey: tenantKeys.knowledgeCandidates(tenantId),
+      });
+    },
+  });
+  const gapAction = useMutation({
+    mutationFn: (action: "resolve" | "dismiss" | "reopen") =>
+      tenantApi.updateKnowledgeGapStatus(tenantId, selectedGapId, action),
+    onSuccess: refreshGaps,
+  });
+  const refreshProfiles = () =>
+    queryClient.invalidateQueries({
+      queryKey: tenantKeys.businessProfiles(tenantId),
+    });
+  const refreshConfigurations = () =>
+    queryClient.invalidateQueries({
+      queryKey: tenantKeys.assistantConfigurations(tenantId, assistantId),
+    });
+  const profileAction = useMutation({
+    mutationFn: ({
+      id,
+      action,
+    }: {
+      id: string;
+      action: "approve" | "reject" | "activate" | "rollback";
+    }) =>
+      action === "approve" || action === "reject"
+        ? tenantApi.reviewBusinessProfile(tenantId, id, action)
+        : action === "activate"
+          ? tenantApi.activateBusinessProfile(tenantId, id)
+          : tenantApi.rollbackBusinessProfile(tenantId, id),
+    onSuccess: refreshProfiles,
+  });
+  const saveProfile = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
+      tenantApi.updateBusinessProfile(tenantId, id, data),
+    onSuccess: () => {
+      setEditor(null);
+      refreshProfiles();
+    },
+  });
+  const recommendationAction = useMutation({
+    mutationFn: ({
+      id,
+      action,
+    }: {
+      id: string;
+      action: "approve" | "reject";
+    }) => tenantApi.reviewRecommendation(tenantId, assistantId, id, action),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: tenantKeys.knowledgeRecommendations(tenantId, assistantId),
+      }),
+  });
+  const generateRecommendation = useMutation({
+    mutationFn: () =>
+      tenantApi.generateKnowledgeRecommendation(
+        tenantId,
+        assistantId,
+        configurationProfileVersionId,
+      ),
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: tenantKeys.knowledgeRecommendations(tenantId, assistantId),
+      }),
+  });
+  const generateConfiguration = useMutation({
+    mutationFn: (recommendationId: string) =>
+      tenantApi.generateAssistantConfiguration(
+        tenantId,
+        assistantId,
+        recommendationId,
+      ),
+    onSuccess: refreshConfigurations,
+  });
+  const configurationAction = useMutation({
+    mutationFn: ({
+      id,
+      action,
+    }: {
+      id: string;
+      action: "approve" | "reject" | "activate" | "rollback";
+    }) =>
+      action === "approve" || action === "reject"
+        ? tenantApi.reviewAssistantConfiguration(
+            tenantId,
+            assistantId,
+            id,
+            action,
+          )
+        : action === "activate"
+          ? tenantApi.activateAssistantConfiguration(tenantId, assistantId, id)
+          : tenantApi.rollbackAssistantConfiguration(tenantId, assistantId, id),
+    onSuccess: refreshConfigurations,
+  });
+  const saveConfiguration = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
+      tenantApi.updateAssistantConfiguration(tenantId, assistantId, id, data),
+    onSuccess: () => {
+      setEditor(null);
+      refreshConfigurations();
+    },
+  });
 
   const saveEditor = () => {
     if (!editor) return;
     let data: Record<string, unknown>;
-    try { data = JSON.parse(editor.value) as Record<string, unknown>; } catch { return; }
-    if (editor.kind === 'profile') saveProfile.mutate({ id: editor.id, data });
+    try {
+      data = JSON.parse(editor.value) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+    if (editor.kind === "profile") saveProfile.mutate({ id: editor.id, data });
     else saveConfiguration.mutate({ id: editor.id, data });
   };
 
-  const assistantSelect = <label className="block text-sm font-medium text-ink">Assistant<select aria-label="Assistant" value={assistantId} onChange={(event) => setAssistantId(event.target.value)} className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-ink"><option value="">Select an assistant</option>{(assistants.data ?? []).map((assistant: Assistant) => <option key={assistant.id} value={assistant.id}>{assistantDisplayLabel(assistant, channels.data ?? [])}</option>)}</select></label>;
-  const profileConflict = generateProfile.error instanceof ApiError && generateProfile.error.body && typeof generateProfile.error.body === 'object' && 'details' in generateProfile.error.body
-    ? (generateProfile.error.body as { details?: { identities?: Array<{ detected_identity: string; source_ids: string[] }> } }).details?.identities ?? []
-    : [];
-  const profileGenerationTimedOut = Boolean(generateProfile.error instanceof ApiError
-    && generateProfile.error.body && typeof generateProfile.error.body === 'object'
-    && 'code' in generateProfile.error.body
-    && (generateProfile.error.body as { code?: string }).code === 'KNOWLEDGE_GENERATION_TIMEOUT');
-  const eligibleProfileSources = (sources.data ?? []).filter((source) => source.enabled && source.processing_status === 'READY' && source.indexing_status === 'READY');
+  const assistantSelect = (
+    <label className="block text-sm font-medium text-ink">
+      Assistant
+      <select
+        aria-label="Assistant"
+        value={assistantId}
+        onChange={(event) => setAssistantId(event.target.value)}
+        className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-ink"
+      >
+        <option value="">Select an assistant</option>
+        {(assistants.data ?? []).map((assistant: Assistant) => (
+          <option key={assistant.id} value={assistant.id}>
+            {assistantDisplayLabel(assistant, channels.data ?? [])}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+  const currentProfileScope = profileScopeKey(
+    businessIdentityId,
+    profileSourceIds,
+  );
+  const currentGenerationError =
+    generationFailure?.scope === currentProfileScope
+      ? generationFailure.error
+      : null;
+  const generationErrorBody =
+    currentGenerationError instanceof ApiError &&
+    currentGenerationError.body &&
+    typeof currentGenerationError.body === "object"
+      ? (currentGenerationError.body as {
+          code?: string;
+          details?: {
+            identities?: Array<{
+              detected_identity: string;
+              normalized_identity?: string;
+              source_ids: string[];
+            }>;
+            evidence?: Array<{
+              source_id: string;
+              source_title?: string;
+              detected_identity: string;
+              confidence: number;
+              safe_evidence?: string;
+            }>;
+          };
+        })
+      : null;
+  const profileConflict = generationErrorBody?.details?.identities ?? [];
+  const profileEvidence = generationErrorBody?.details?.evidence ?? [];
+  const identityResolutionFailed =
+    generationErrorBody?.code === "IDENTITY_RESOLUTION_REQUIRED";
+  const profileGenerationTimedOut =
+    generationErrorBody?.code === "KNOWLEDGE_GENERATION_TIMEOUT";
+  const eligibleProfileSources = (sources.data ?? []).filter(
+    (source) =>
+      source.enabled &&
+      source.processing_status === "READY" &&
+      source.indexing_status === "READY",
+  );
 
-  return <section className="space-y-6">
-    <header><p className="eyebrow">Grounding operations</p><h1 className="page-title mt-2">Knowledge Intelligence</h1><p className="mt-2 text-sm text-stone-600">Review sources, generated artifacts and retrieval behavior before runtime activation.</p></header>
-    {tab === 'profiles' && canManage && <section className="panel space-y-3 p-5" aria-label="Business identity analysis"><div><h2 className="font-semibold text-white">Identity analysis gate</h2><p className="mt-1 text-sm text-stone-400">Select the Business Identity and sources below, then analyze every source before generation. Unknown or conflicting identities require a narrower source scope.</p></div><button type="button" className={actionClass} disabled={!businessIdentityId || !profileSourceIds.length || analyzeProfileScope.isPending} onClick={() => analyzeProfileScope.mutate()}>{analyzeProfileScope.isPending ? 'Analyzing…' : 'Analyze selected sources'}</button>{profileScopeAnalysis && <div role="status" className="rounded-lg border border-line bg-elevated p-4"><strong className={profileScopeAnalysis.status === 'RESOLVED' ? 'text-emerald-300' : 'text-red-300'}>{profileScopeAnalysis.status === 'RESOLVED' ? 'Identity resolved' : 'Identity resolution required'}</strong><ul className="mt-3 space-y-2 text-xs text-stone-300">{profileScopeAnalysis.evidence.map((item) => <li key={item.source_id}><strong>{item.source_title}</strong> — {item.detected_identity} ({Math.round(item.confidence * 100)}%)<span className="block text-stone-400">{item.safe_evidence}</span></li>)}</ul></div>}<MutationFeedback error={analyzeProfileScope.error} /></section>}
-    <nav aria-label="Knowledge Intelligence sections" className="flex flex-wrap gap-2">{tabs.map(([key, label]) => <DashboardTab key={key} to={`/app/${tenantId}/knowledge-base/${routeForTab[key]}`} active={tab === key}>{label}</DashboardTab>)}<DashboardTab to={`/app/${tenantId}/knowledge-base`}>Legacy Knowledge Base</DashboardTab></nav>
+  return (
+    <section className="space-y-6">
+      <header>
+        <p className="eyebrow">Grounding operations</p>
+        <h1 className="page-title mt-2">Knowledge Intelligence</h1>
+        <p className="mt-2 text-sm text-stone-600">
+          Review sources, generated artifacts and retrieval behavior before
+          runtime activation.
+        </p>
+      </header>
+      {tab === "profiles" && canManage && (
+        <section
+          className="panel space-y-3 p-5"
+          aria-label="Business identity analysis"
+        >
+          <div>
+            <h2 className="font-semibold text-white">Identity analysis gate</h2>
+            <p className="mt-1 text-sm text-stone-400">
+              Select the Business Identity and sources below, then analyze every
+              source before generation. Unknown or conflicting identities
+              require a narrower source scope.
+            </p>
+          </div>
+          <button
+            type="button"
+            className={actionClass}
+            disabled={
+              !businessIdentityId ||
+              !profileSourceIds.length ||
+              analyzeProfileScope.isPending
+            }
+            onClick={() => analyzeProfileScope.mutate()}
+          >
+            {analyzeProfileScope.isPending
+              ? "Analyzing…"
+              : "Analyze selected sources"}
+          </button>
+          {profileScopeAnalysis && (
+            <div
+              role="status"
+              className="rounded-lg border border-line bg-elevated p-4"
+            >
+              <strong
+                className={
+                  profileScopeAnalysis.status === "RESOLVED"
+                    ? "text-emerald-300"
+                    : "text-red-300"
+                }
+              >
+                {profileScopeAnalysis.status === "RESOLVED"
+                  ? "Identity resolved"
+                  : "Identity resolution required"}
+              </strong>
+              <ul className="mt-3 space-y-2 text-xs text-stone-300">
+                {profileScopeAnalysis.evidence.map((item) => (
+                  <li key={item.source_id}>
+                    <strong>{item.source_title}</strong> —{" "}
+                    {item.detected_identity} (
+                    {Math.round(item.confidence * 100)}%)
+                    <span className="block text-stone-400">
+                      {item.safe_evidence}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <MutationFeedback error={analyzeProfileScope.error} />
+        </section>
+      )}
+      <nav
+        aria-label="Knowledge Intelligence sections"
+        className="flex flex-wrap gap-2"
+      >
+        {tabs.map(([key, label]) => (
+          <DashboardTab
+            key={key}
+            to={`/app/${tenantId}/knowledge-base/${routeForTab[key]}`}
+            active={tab === key}
+          >
+            {label}
+          </DashboardTab>
+        ))}
+        <DashboardTab to={`/app/${tenantId}/knowledge-base`}>
+          Legacy Knowledge Base
+        </DashboardTab>
+      </nav>
 
-    {tab === 'profiles' && (profiles.data ?? []).map((row) => <section key={`structured-${row.id}`} className="panel p-5"><h2 className="font-semibold text-white">Business Profile fields</h2><PersonaFields data={row.profile_data} provenance={row.reviewed_at ? 'ADMIN EDITED' : 'SOURCE-DERIVED'} /></section>)}
-    {tab === 'configurations' && assistantId && (() => { const activeConfiguration = (configurations.data ?? []).find((row) => row.status === 'ACTIVE'); const activeProfile = (profiles.data ?? []).find((row) => row.id === activeConfiguration?.source_profile_version_id && row.active_version_id === row.id); if (!activeProfile || !activeConfiguration) return null; const safePreview = { company_identity: activeProfile.profile_data.company_identity ?? activeProfile.profile_data.company_display_name, assistant_identity: activeConfiguration.configuration_data.assistant_identity, role_and_purpose: activeConfiguration.configuration_data.role_and_purpose, tone: activeConfiguration.configuration_data.tone, supported_languages: activeConfiguration.configuration_data.supported_languages, qualification_guidance: activeConfiguration.configuration_data.qualification_guidance, sales_guidance: activeConfiguration.configuration_data.sales_guidance, fallback_guidance: activeConfiguration.configuration_data.fallback_guidance, follow_up_behavior: activeConfiguration.configuration_data.follow_up_behavior, scheduled_messaging_behavior: activeConfiguration.configuration_data.scheduled_messaging_behavior, prohibited_claims: activeConfiguration.configuration_data.prohibited_claims }; return <section className="panel p-5" aria-label="Runtime Behavior Preview"><h2 className="font-semibold text-white">Runtime Behavior Preview</h2><p className="mt-1 text-xs text-stone-400">Safe ACTIVE tenant behavior summary. Hidden safety instructions and secrets are never shown.</p><PersonaFields data={Object.fromEntries(Object.entries(safePreview).filter(([, value]) => value !== undefined && value !== null && value !== ''))} provenance="AI RECOMMENDED" /></section>; })()}
-    {tab === 'configurations' && (configurations.data ?? []).map((row) => <section key={`structured-${row.id}`} className="panel p-5"><h2 className="font-semibold text-white">Assistant Configuration fields</h2><PersonaFields data={row.configuration_data} provenance={row.approved_at ? 'ADMIN EDITED' : 'AI RECOMMENDED'} /></section>)}
+      {tab === "profiles" &&
+        (profiles.data ?? []).map((row) => (
+          <section key={`structured-${row.id}`} className="panel p-5">
+            <h2 className="font-semibold text-white">
+              Business Profile fields
+            </h2>
+            <PersonaFields
+              data={row.profile_data}
+              provenance={row.reviewed_at ? "ADMIN EDITED" : "SOURCE-DERIVED"}
+            />
+          </section>
+        ))}
+      {tab === "configurations" &&
+        assistantId &&
+        (() => {
+          const activeConfiguration = (configurations.data ?? []).find(
+            (row) => row.status === "ACTIVE",
+          );
+          const activeProfile = (profiles.data ?? []).find(
+            (row) =>
+              row.id === activeConfiguration?.source_profile_version_id &&
+              row.active_version_id === row.id,
+          );
+          if (!activeProfile || !activeConfiguration) return null;
+          const safePreview = {
+            company_identity:
+              activeProfile.profile_data.company_identity ??
+              activeProfile.profile_data.company_display_name,
+            assistant_identity:
+              activeConfiguration.configuration_data.assistant_identity,
+            role_and_purpose:
+              activeConfiguration.configuration_data.role_and_purpose,
+            tone: activeConfiguration.configuration_data.tone,
+            supported_languages:
+              activeConfiguration.configuration_data.supported_languages,
+            qualification_guidance:
+              activeConfiguration.configuration_data.qualification_guidance,
+            sales_guidance:
+              activeConfiguration.configuration_data.sales_guidance,
+            fallback_guidance:
+              activeConfiguration.configuration_data.fallback_guidance,
+            follow_up_behavior:
+              activeConfiguration.configuration_data.follow_up_behavior,
+            scheduled_messaging_behavior:
+              activeConfiguration.configuration_data
+                .scheduled_messaging_behavior,
+            prohibited_claims:
+              activeConfiguration.configuration_data.prohibited_claims,
+          };
+          return (
+            <section
+              className="panel p-5"
+              aria-label="Runtime Behavior Preview"
+            >
+              <h2 className="font-semibold text-white">
+                Runtime Behavior Preview
+              </h2>
+              <p className="mt-1 text-xs text-stone-400">
+                Safe ACTIVE tenant behavior summary. Hidden safety instructions
+                and secrets are never shown.
+              </p>
+              <PersonaFields
+                data={Object.fromEntries(
+                  Object.entries(safePreview).filter(
+                    ([, value]) =>
+                      value !== undefined && value !== null && value !== "",
+                  ),
+                )}
+                provenance="AI RECOMMENDED"
+              />
+            </section>
+          );
+        })()}
+      {tab === "configurations" &&
+        (configurations.data ?? []).map((row) => (
+          <section key={`structured-${row.id}`} className="panel p-5">
+            <h2 className="font-semibold text-white">
+              Assistant Configuration fields
+            </h2>
+            <PersonaFields
+              data={row.configuration_data}
+              provenance={row.approved_at ? "ADMIN EDITED" : "AI RECOMMENDED"}
+            />
+          </section>
+        ))}
 
-    {tab === 'profiles' && canManage && <section className="panel space-y-5 p-5" aria-label="Business Profile source scope"><div><h2 className="font-semibold text-white">Generate Business Profile</h2><p className="mt-1 text-sm text-stone-400">Choose one tenant Business Identity and the exact READY sources that describe it. Assistant assignment is independent.</p></div><div className="grid gap-4 lg:grid-cols-2"><label className="text-sm font-medium text-stone-200">Business Identity<select aria-label="Business Identity" value={businessIdentityId} onChange={(event) => setBusinessIdentityId(event.target.value)} className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-ink"><option value="">Select a Business Identity</option>{(businessIdentities.data ?? []).map((identity) => <option key={identity.id} value={identity.id}>{identity.display_name}</option>)}</select></label><form onSubmit={(event) => { event.preventDefault(); if (businessIdentityName.trim()) createBusinessIdentity.mutate(); }} className="flex flex-col gap-2 sm:flex-row sm:items-end"><label className="flex-1 text-sm font-medium text-stone-200">New Business Identity<input aria-label="New Business Identity" value={businessIdentityName} onChange={(event) => setBusinessIdentityName(event.target.value)} className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-ink" /></label><DashboardButton type="submit" disabled={!businessIdentityName.trim() || createBusinessIdentity.isPending}>Create</DashboardButton></form></div><fieldset><legend className="text-sm font-semibold text-stone-200">Selected source scope</legend><div className="mt-3 grid gap-2 sm:grid-cols-2">{eligibleProfileSources.map((source) => <label key={source.id} className="flex items-start gap-3 rounded-lg border border-line bg-elevated p-3 text-sm text-stone-200"><input type="checkbox" aria-label={source.title} checked={profileSourceIds.includes(source.id)} onChange={(event) => setProfileSourceIds((current) => event.target.checked ? [...current, source.id] : current.filter((id) => id !== source.id))} /><span><strong>{source.title}</strong><span className="block text-xs text-stone-400">READY · Index READY</span></span></label>)}</div>{!eligibleProfileSources.length && <p className="mt-3 text-sm text-stone-400">No eligible READY sources are available.</p>}</fieldset><DashboardButton variant="primary" type="button" onClick={() => generateProfile.mutate()} disabled={!businessIdentityId || !profileSourceIds.length || generateProfile.isPending}>{generateProfile.isPending ? 'Generating Business Profile…' : profileGenerationTimedOut ? 'Retry scoped Business Profile' : 'Generate scoped Business Profile'}</DashboardButton>{profileGenerationTimedOut && <p role="status" className="rounded-lg border border-amber-700/60 bg-amber-950/30 p-3 text-sm text-amber-200">Generation timed out. No Business Profile was created. You can retry this exact source scope safely.</p>}{profileConflict.length > 0 && <div role="alert" className="rounded-lg border border-red-700 bg-red-950/30 p-4"><strong className="text-red-200">Identity resolution required</strong><p className="mt-1 text-sm text-red-300">Selected sources describe multiple businesses. Adjust the source scope before generation.</p><ul className="mt-3 space-y-2 text-sm text-red-200">{profileConflict.map((identity) => <li key={identity.detected_identity}><strong>{identity.detected_identity}</strong><span className="block text-xs">Sources: {identity.source_ids.map((id) => eligibleProfileSources.find((source) => source.id === id)?.title ?? id).join(', ')}</span></li>)}</ul></div>}</section>}
+      {tab === "profiles" && canManage && (
+        <section
+          className="panel space-y-5 p-5"
+          aria-label="Business Profile source scope"
+        >
+          <div>
+            <h2 className="font-semibold text-white">
+              Generate Business Profile
+            </h2>
+            <p className="mt-1 text-sm text-stone-400">
+              Choose one tenant Business Identity and the exact READY sources
+              that describe it. Assistant assignment is independent.
+            </p>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <label className="text-sm font-medium text-stone-200">
+              Business Identity
+              <select
+                aria-label="Business Identity"
+                value={businessIdentityId}
+                onChange={(event) => {
+                  generateProfile.reset();
+                  setGenerationFailure(null);
+                  setProfileScopeAnalysis(null);
+                  setBusinessIdentityId(event.target.value);
+                }}
+                className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-ink"
+              >
+                <option value="">Select a Business Identity</option>
+                {(businessIdentities.data ?? []).map((identity) => (
+                  <option key={identity.id} value={identity.id}>
+                    {identity.display_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (businessIdentityName.trim())
+                  createBusinessIdentity.mutate();
+              }}
+              className="flex flex-col gap-2 sm:flex-row sm:items-end"
+            >
+              <label className="flex-1 text-sm font-medium text-stone-200">
+                New Business Identity
+                <input
+                  aria-label="New Business Identity"
+                  value={businessIdentityName}
+                  onChange={(event) =>
+                    setBusinessIdentityName(event.target.value)
+                  }
+                  className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-ink"
+                />
+              </label>
+              <DashboardButton
+                type="submit"
+                disabled={
+                  !businessIdentityName.trim() ||
+                  createBusinessIdentity.isPending
+                }
+              >
+                Create
+              </DashboardButton>
+            </form>
+          </div>
+          <fieldset>
+            <legend className="text-sm font-semibold text-stone-200">
+              Selected source scope
+            </legend>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {eligibleProfileSources.map((source) => (
+                <label
+                  key={source.id}
+                  className="flex items-start gap-3 rounded-lg border border-line bg-elevated p-3 text-sm text-stone-200"
+                >
+                  <input
+                    type="checkbox"
+                    aria-label={source.title}
+                    checked={profileSourceIds.includes(source.id)}
+                    onChange={(event) => {
+                      generateProfile.reset();
+                      setGenerationFailure(null);
+                      setProfileScopeAnalysis(null);
+                      setProfileSourceIds((current) =>
+                        event.target.checked
+                          ? [...current, source.id]
+                          : current.filter((id) => id !== source.id),
+                      );
+                    }}
+                  />
+                  <span>
+                    <strong>{source.title}</strong>
+                    <span className="block text-xs text-stone-400">
+                      READY · Index READY
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {!eligibleProfileSources.length && (
+              <p className="mt-3 text-sm text-stone-400">
+                No eligible READY sources are available.
+              </p>
+            )}
+          </fieldset>
+          <DashboardButton
+            variant="primary"
+            type="button"
+            onClick={() =>
+              generateProfile.mutate({
+                businessIdentityId,
+                sourceIds: [...profileSourceIds].sort(),
+                fingerprint: currentProfileScope,
+              })
+            }
+            disabled={
+              !businessIdentityId ||
+              !profileSourceIds.length ||
+              generateProfile.isPending
+            }
+          >
+            {generateProfile.isPending
+              ? "Generating Business Profile…"
+              : profileGenerationTimedOut
+                ? "Retry scoped Business Profile"
+                : "Generate scoped Business Profile"}
+          </DashboardButton>
+          {profileGenerationTimedOut && (
+            <p
+              role="status"
+              className="rounded-lg border border-amber-700/60 bg-amber-950/30 p-3 text-sm text-amber-200"
+            >
+              Generation timed out. No Business Profile was created. You can
+              retry this exact source scope safely.
+            </p>
+          )}
+          {identityResolutionFailed && (
+            <div
+              role="alert"
+              className="rounded-lg border border-red-700 bg-red-950/30 p-4"
+            >
+              <strong className="text-red-200">
+                Identity resolution required
+              </strong>
+              <p className="mt-1 text-sm text-red-300">
+                {profileConflict.length > 1
+                  ? "Selected sources describe multiple businesses. Adjust the source scope before generation."
+                  : "Business identity could not be confidently resolved"}
+              </p>
+              {profileConflict.length > 0 && (
+                <ul className="mt-3 space-y-2 text-sm text-red-200">
+                  {profileConflict.map((identity) => (
+                    <li
+                      key={`${identity.normalized_identity ?? identity.detected_identity}-${identity.source_ids.join("-")}`}
+                    >
+                      <strong>{identity.detected_identity}</strong>
+                      <span className="block text-xs">
+                        Sources:{" "}
+                        {identity.source_ids
+                          .map(
+                            (id) =>
+                              eligibleProfileSources.find(
+                                (source) => source.id === id,
+                              )?.title ?? id,
+                          )
+                          .join(", ")}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {profileEvidence.length > 0 && (
+                <ul className="mt-3 space-y-2 text-xs text-red-100">
+                  {profileEvidence.map((evidence, index) => (
+                    <li key={`${evidence.source_id}-${index}`}>
+                      <strong>
+                        {evidence.source_title ??
+                          eligibleProfileSources.find(
+                            (source) => source.id === evidence.source_id,
+                          )?.title ??
+                          "Selected source"}
+                      </strong>{" "}
+                      — {evidence.detected_identity || "unknown"} ·{" "}
+                      {Math.round(Number(evidence.confidence || 0) * 100)}%
+                      <span className="block text-red-200">
+                        {evidence.safe_evidence ||
+                          "No safe identity evidence was reported."}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
-    {tab === 'overview' && (overview.isLoading ? <SkeletonBlock className="h-40" /> : overview.error ? <QueryErrorState error={overview.error} onRetry={() => overview.refetch()} /> : overview.data && <Cards items={[
-      { label: 'Sources', value: overview.data.sources.ready, detail: `${overview.data.sources.ready} ready sources` },
-      { label: 'Review queue', value: Object.values(overview.data.reviewQueue).reduce((sum, value) => sum + value, 0), detail: 'Candidates, profiles and configurations' },
-      { label: 'Knowledge gaps', value: overview.data.gaps.open, detail: 'Open verified gaps' },
-      { label: 'Runtime coverage', value: `${overview.data.runtime.activeConfigurations}/${overview.data.runtime.assistants}`, detail: overview.data.runtime.activeProfile ? 'Active Business Profile' : 'No active Business Profile' },
-    ]} />)}
-    {tab === 'sources' && <div className="space-y-5">
-      {canManage && <div className="panel p-5"><div className="flex flex-wrap gap-2"><button className={actionClass} onClick={() => setSourceMode('upload')}>Upload source</button><button className={actionClass} onClick={() => setSourceMode('manual')}>Add manual knowledge</button></div><p className="mt-2 text-xs text-stone-400">Supported files: <span>PDF, DOCX or TXT</span>. Files are stored privately and processed asynchronously.</p></div>}
-      {canManage && (sources.data ?? []).length > 0 && <form onSubmit={(event: FormEvent) => { event.preventDefault(); if (sourceId && assistantId) assignSource.mutate(); }} className="panel grid gap-4 p-5 md:grid-cols-[1fr_1fr_auto] md:items-end"><label className="block text-sm font-medium text-ink">Knowledge source<select aria-label="Knowledge source" value={sourceId} onChange={(event) => setSourceId(event.target.value)} className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-ink"><option value="">Select a source</option>{(sources.data ?? []).map((source) => <option key={source.id} value={source.id}>{source.title}</option>)}</select></label>{assistantSelect}<button type="submit" disabled={!sourceId || !assistantId || assignSource.isPending} className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{assignSource.isPending ? 'Assigning…' : 'Assign source'}</button></form>}
-      {sourceMode === 'upload' && <form className="panel grid gap-4 p-5 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); if (uploadFile) uploadSource.mutate(); }}><label className="text-sm font-medium">Title<input aria-label="Upload title" value={sourceTitle} onChange={(event) => setSourceTitle(event.target.value)} className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2" /></label><label className="text-sm font-medium">PDF, DOCX or TXT<input aria-label="Source file" required accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" type="file" onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)} className="mt-2 block w-full text-sm" /></label><div className="flex flex-wrap gap-2 sm:col-span-2"><button type="submit" disabled={!uploadFile || uploadSource.isPending} className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{uploadSource.isPending ? 'Uploading…' : 'Upload'}</button><button type="button" className={actionClass} onClick={() => setSourceMode(null)}>Cancel</button></div></form>}
-      {sourceMode === 'manual' && <form className="panel space-y-4 p-5" onSubmit={(event) => { event.preventDefault(); if (sourceTitle.trim() && manualContent.trim()) createManualSource.mutate(); }}><label className="block text-sm font-medium">Title<input aria-label="Manual knowledge title" required value={sourceTitle} onChange={(event) => setSourceTitle(event.target.value)} className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2" /></label><label className="block text-sm font-medium">Knowledge content<textarea aria-label="Manual knowledge content" required rows={7} value={manualContent} onChange={(event) => setManualContent(event.target.value)} className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2" /></label><div className="flex flex-wrap gap-2"><button type="submit" disabled={createManualSource.isPending} className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{createManualSource.isPending ? 'Creating…' : 'Create knowledge'}</button><button type="button" className={actionClass} onClick={() => setSourceMode(null)}>Cancel</button></div></form>}
-      <MutationFeedback error={uploadSource.error ?? createManualSource.error ?? assignSource.error ?? unassignSource.error ?? reindexSource.error ?? archiveSource.error} />
-      {(uploadSource.isSuccess || createManualSource.isSuccess) && <p role="status" className="rounded-lg border border-emerald-700 bg-emerald-950/30 p-3 text-sm text-emerald-300">Source accepted. Processing status will refresh automatically until READY, FAILED or ARCHIVED.</p>}
-      {(assignSource.isSuccess || unassignSource.isSuccess || reindexSource.isSuccess || archiveSource.isSuccess) && <p role="status" className="rounded-lg border border-emerald-700 bg-emerald-950/30 p-3 text-sm text-emerald-300">Source lifecycle action completed.</p>}
-      {sources.isLoading ? <SkeletonBlock className="h-40" /> : sources.error ? <QueryErrorState error={sources.error} onRetry={() => sources.refetch()} /> : !(sources.data ?? []).length ? <EmptyState title="No sources" description="Upload a PDF, DOCX or TXT file, or add manual knowledge." /> : <div className="panel divide-y divide-line">{(sources.data ?? []).map((row) => <article key={row.id} className="p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><strong className="text-sm text-ink">{row.title}</strong><p className="mt-1 text-xs text-stone-400">{row.source_type} · {row.processing_status} · Index {row.indexing_status}</p>{row.processing_error_code && <p role="alert" className="mt-2 text-sm text-red-400">Processing failed: {row.processing_error_code}</p>}</div><button aria-label={`View ${row.title}`} className={actionClass} onClick={() => setSelectedSourceId(selectedSourceId === row.id ? '' : row.id)}>{selectedSourceId === row.id ? 'Close' : 'View details'}</button></div>{selectedSourceId === row.id && <div className="mt-4 border-t border-line pt-4">{selectedSource.isLoading ? <SkeletonBlock className="h-20" /> : selectedSource.error ? <QueryErrorState error={selectedSource.error} onRetry={() => selectedSource.refetch()} /> : selectedSource.data && <><p className="text-xs text-stone-400">File: {selectedSource.data.original_filename ?? 'Manual knowledge'} · {selectedSource.data.size_bytes ? `${selectedSource.data.size_bytes} bytes` : 'Text source'}</p><div className="mt-4 flex flex-wrap gap-2">{(selectedSource.data.assistant_ids ?? []).map((id) => { const assistant = (assistants.data ?? []).find((item) => item.id === id); return <button key={id} aria-label={`Unassign ${assistant?.name ?? id}`} className={actionClass} onClick={() => unassignSource.mutate(id)}>Unassign {assistant ? assistantDisplayLabel(assistant, channels.data ?? []) : 'Assistant'}</button>; })}{canManage && selectedSource.data.enabled && <><button className={actionClass} onClick={() => reindexSource.mutate()}>Re-index</button><button className={actionClass} onClick={() => archiveSource.mutate()}>Archive</button></>}</div><form onSubmit={(event) => { event.preventDefault(); if (assistantId) assignSource.mutate(); }} className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">{assistantSelect}<button type="submit" disabled={!assistantId || assignSource.isPending} className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{assignSource.isPending ? 'Assigning…' : 'Assign / re-assign'}</button></form></>}</div>}</article>)}</div>}
-    </div>}
-    {tab === 'candidates' && <div className="space-y-4"><MutationFeedback error={candidateAction.error ?? candidateEvidence.error} />{candidateAction.isSuccess && <p role="status" className="text-sm text-emerald-300">Candidate review completed.</p>}{candidates.isLoading ? <SkeletonBlock className="h-40" /> : candidates.error ? <QueryErrorState error={candidates.error} onRetry={() => candidates.refetch()} /> : !(candidates.data ?? []).length ? <EmptyState title="No candidates" description="Verified suggestions awaiting review appear here." /> : <div className="panel divide-y divide-line">{(candidates.data ?? []).map((row) => <article key={row.id} className="p-5"><div className="flex flex-wrap justify-between gap-3"><div><strong>{row.proposed_title}</strong><p className="mt-1 text-xs text-stone-400">{row.status} · PII {row.pii_redaction_status ?? 'not reported'}{row.approved_source_id ? ` · Canonical source ${row.approved_source_id.slice(0, 8)}` : ''}</p><p className="mt-2 text-sm text-stone-300">{row.proposed_content}</p></div><button aria-label={`Review ${row.proposed_title}`} className={actionClass} onClick={() => setSelectedCandidateId(selectedCandidateId === row.id ? '' : row.id)}>Review</button></div>{selectedCandidateId === row.id && <div className="mt-4 border-t border-line pt-4"><p className="text-xs text-stone-400">Safe evidence only; message content and credentials are not exposed.</p>{candidateEvidence.isLoading ? <SkeletonBlock className="mt-3 h-16" /> : <ul className="mt-3 space-y-1 text-xs text-stone-300">{(candidateEvidence.data ?? []).map((evidence) => <li key={`${evidence.message_id}-${evidence.occurred_at}`}>{evidence.channel_type} · {evidence.sender_type} · {evidence.occurred_at}</li>)}</ul>}{canManage && row.status === 'NEEDS_REVIEW' && <div className="mt-4 flex gap-2"><button aria-label="Approve candidate" className={actionClass} onClick={() => candidateAction.mutate('approve')}>Approve</button><button aria-label="Reject candidate" className={actionClass} onClick={() => candidateAction.mutate('reject')}>Reject</button></div>}</div>}</article>)}</div>}</div>}
-    {tab === 'gaps' && (gaps.isLoading ? <SkeletonBlock className="h-40" /> : gaps.error ? <QueryErrorState error={gaps.error} onRetry={() => gaps.refetch()} /> : !(gaps.data ?? []).length ? <EmptyState title="No knowledge gaps" description="Verified unresolved questions appear here." /> : <div className="panel divide-y divide-line">{(gaps.data ?? []).map((row) => <article key={row.id} className="p-5"><div className="flex flex-wrap justify-between gap-3"><div><strong>{row.normalized_question}</strong><p className="mt-1 text-xs text-stone-400">{row.status} · {row.occurrence_count} verified occurrence{row.occurrence_count === 1 ? '' : 's'}{row.suggested_candidate_id ? ` · Candidate ${row.suggested_candidate_id.slice(0, 8)}` : ''}</p></div><button aria-label={`Review ${row.normalized_question}`} className={actionClass} onClick={() => setSelectedGapId(selectedGapId === row.id ? '' : row.id)}>Review</button></div>{selectedGapId === row.id && <div className="mt-4 border-t border-line pt-4">{gapSignals.isLoading ? <SkeletonBlock className="h-16" /> : <ul className="space-y-1 text-xs text-stone-300">{(gapSignals.data ?? []).map((signal) => <li key={`${signal.message_id}-${signal.created_at}`}>{signal.channel_type} · {signal.signal_type} · {signal.created_at}</li>)}</ul>}{canManage && !row.suggested_candidate_id && <div className="mt-4 grid gap-3"><input aria-label="Candidate title" placeholder="Candidate title" value={gapDraft.title} onChange={(event) => setGapDraft({ ...gapDraft, title: event.target.value })} className="rounded-lg border border-line bg-elevated px-3 py-2" /><textarea aria-label="Candidate content" placeholder="Reviewed candidate content" value={gapDraft.content} onChange={(event) => setGapDraft({ ...gapDraft, content: event.target.value })} className="rounded-lg border border-line bg-elevated px-3 py-2" /><button disabled={!gapDraft.title.trim() || !gapDraft.content.trim()} className={actionClass} onClick={() => createGapCandidate.mutate()}>Create suggested candidate</button></div>}{canManage && <div className="mt-4 flex flex-wrap gap-2">{row.status !== 'RESOLVED' && <button aria-label="Resolve gap" className={actionClass} onClick={() => gapAction.mutate('resolve')}>Resolve</button>}{row.status !== 'DISMISSED' && <button aria-label="Dismiss gap" className={actionClass} onClick={() => gapAction.mutate('dismiss')}>Dismiss</button>}{['RESOLVED', 'DISMISSED'].includes(row.status) && <button aria-label="Reopen gap" className={actionClass} onClick={() => gapAction.mutate('reopen')}>Reopen</button>}</div>}</div>}</article>)}</div>)}
-    {tab === 'profiles' && <div className="space-y-4"><MutationFeedback error={generateProfile.error ?? createBusinessIdentity.error ?? profileAction.error ?? saveProfile.error} /><div className="panel p-4 text-sm text-stone-300"><strong className="text-white">Approval does not activate runtime.</strong> APPROVED versions remain inactive until explicitly activated. The ACTIVE badge marks the version currently used by runtime.</div>{profiles.isLoading ? <SkeletonBlock className="h-40" /> : profiles.error ? <QueryErrorState error={profiles.error} onRetry={() => profiles.refetch()} /> : !(profiles.data ?? []).length ? <EmptyState title="No Business Profile versions" description="Generate a review-only version from an explicit Business Identity and source scope." /> : <div className="panel divide-y divide-line">{(profiles.data ?? []).map((row) => <article key={row.id} className="p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><strong className="text-sm text-ink">Business Profile {row.id.slice(0, 8)}</strong><p className="mt-1 text-xs text-stone-400">{row.business_identity_name ?? 'Legacy unscoped identity'} · {row.status}{row.active_version_id === row.id ? ' · ACTIVE' : ' · NOT ACTIVE'} · {row.identity_resolution_status ?? 'LEGACY_UNSCOPED'}</p><p className="mt-2 text-xs text-stone-400">Sources: {row.source_scope?.source_ids?.map((id) => (sources.data ?? []).find((source) => source.id === id)?.title ?? id.slice(0, 8)).join(', ') || 'Legacy provenance'}</p><dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">{Object.entries(row.profile_data).map(([key, value]) => <div key={key}><dt className="font-semibold text-stone-300">{key}</dt><dd className="mt-1 text-stone-400">{typeof value === 'string' ? value : JSON.stringify(value)}</dd></div>)}</dl></div>{canManage && <div className="flex flex-wrap gap-2">{row.status === 'NEEDS_REVIEW' && <><button className={actionClass} onClick={() => setEditor({ kind: 'profile', id: row.id, value: JSON.stringify(row.profile_data, null, 2) })}>Edit</button><button className={actionClass} disabled={row.identity_resolution_status === 'IDENTITY_RESOLUTION_REQUIRED'} onClick={() => profileAction.mutate({ id: row.id, action: 'approve' })}>Approve</button><button className={actionClass} onClick={() => profileAction.mutate({ id: row.id, action: 'reject' })}>Reject</button></>}{row.status === 'APPROVED' && row.active_version_id !== row.id && <button className={actionClass} disabled={row.identity_resolution_status === 'IDENTITY_RESOLUTION_REQUIRED'} onClick={() => profileAction.mutate({ id: row.id, action: row.superseded_by_version_id ? 'rollback' : 'activate' })}>{row.superseded_by_version_id ? 'Rollback' : 'Activate'}</button>}</div>}</div></article>)}</div>}</div>}
-    {tab === 'configurations' && <div className="space-y-5"><div className="panel max-w-xl space-y-3 p-5">{assistantSelect}<label className="block text-sm font-medium text-ink">ACTIVE Business Profile<select aria-label="ACTIVE Business Profile" value={configurationProfileVersionId} onChange={(event) => setConfigurationProfileVersionId(event.target.value)} className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-ink"><option value="">Select an ACTIVE Business Profile</option>{(profiles.data ?? []).filter((profile) => profile.active_version_id === profile.id).map((profile) => <option key={profile.id} value={profile.id}>{profile.business_identity_name ?? `Business Profile ${profile.id.slice(0, 8)}`}</option>)}</select></label>{assistantId && canManage && <button className={actionClass} disabled={!configurationProfileVersionId || generateRecommendation.isPending} onClick={() => generateRecommendation.mutate()}>{generateRecommendation.isPending ? 'Generating…' : 'Generate recommendation'}</button>}</div><MutationFeedback error={generateRecommendation.error ?? recommendationAction.error ?? generateConfiguration.error ?? configurationAction.error ?? saveConfiguration.error} />{assistantId && <div className="grid gap-5 lg:grid-cols-2"><div><h2 className="mb-3 font-semibold">Recommendations</h2>{recommendations.isLoading ? <SkeletonBlock className="h-32" /> : recommendations.error ? <QueryErrorState error={recommendations.error} onRetry={() => recommendations.refetch()} /> : !(recommendations.data ?? []).length ? <EmptyState title="No recommendations" description="Generate a recommendation from the selected active Business Profile scope." /> : <div className="panel divide-y divide-line">{(recommendations.data ?? []).map((row) => <article key={row.id} className="p-4"><strong className="text-sm">Recommendation {row.id.slice(0, 8)}</strong><p className="mt-1 text-xs text-stone-400">{row.status}</p>{canManage && <div className="mt-3 flex flex-wrap gap-2">{row.status === 'NEEDS_REVIEW' && <><button className={actionClass} onClick={() => recommendationAction.mutate({ id: row.id, action: 'approve' })}>Approve</button><button className={actionClass} onClick={() => recommendationAction.mutate({ id: row.id, action: 'reject' })}>Reject</button></>}{row.status === 'APPROVED' && <button className={actionClass} onClick={() => generateConfiguration.mutate(row.id)}>Generate configuration</button>}</div>}</article>)}</div>}</div><div><h2 className="mb-3 font-semibold">Configurations</h2>{configurations.isLoading ? <SkeletonBlock className="h-32" /> : configurations.error ? <QueryErrorState error={configurations.error} onRetry={() => configurations.refetch()} /> : !(configurations.data ?? []).length ? <EmptyState title="No configurations" description="Approve a recommendation, then generate a review-only configuration." /> : <div className="panel divide-y divide-line">{(configurations.data ?? []).map((row) => <article key={row.id} className="p-4"><strong className="text-sm">Configuration {row.id.slice(0, 8)}</strong><p className="mt-1 text-xs text-stone-400">{row.status}{row.status === 'ACTIVE' ? ' · ACTIVE RUNTIME' : row.status === 'APPROVED' ? ' · NOT ACTIVE' : ''}</p>{canManage && <div className="mt-3 flex flex-wrap gap-2">{row.status === 'NEEDS_REVIEW' && <><button className={actionClass} onClick={() => setEditor({ kind: 'configuration', id: row.id, value: JSON.stringify(row.configuration_data, null, 2) })}>Edit</button><button className={actionClass} onClick={() => configurationAction.mutate({ id: row.id, action: 'approve' })}>Approve</button><button className={actionClass} onClick={() => configurationAction.mutate({ id: row.id, action: 'reject' })}>Reject</button></>}{row.status === 'APPROVED' && <button className={actionClass} onClick={() => configurationAction.mutate({ id: row.id, action: 'activate' })}>Activate</button>}{row.status === 'SUPERSEDED' && <button className={actionClass} onClick={() => configurationAction.mutate({ id: row.id, action: 'rollback' })}>Rollback</button>}</div>}</article>)}</div>}</div></div>}</div>}
-    {editor && <div role="dialog" aria-modal="true" aria-label={`Edit ${editor.kind}`} className="panel max-w-2xl p-5"><label className="block text-sm font-medium text-ink">Review JSON<textarea aria-label="Review JSON" rows={10} value={editor.value} onChange={(event) => setEditor({ ...editor, value: event.target.value })} className="mt-2 w-full rounded-lg border border-line bg-elevated p-3 font-mono text-xs text-ink" /></label><div className="mt-3 flex gap-2"><button className={actionClass} onClick={saveEditor}>Save review</button><button className={actionClass} onClick={() => setEditor(null)}>Cancel</button></div></div>}
-    {tab === 'retrieval' && <div className="space-y-5"><form onSubmit={(event: FormEvent) => { event.preventDefault(); if (canManage && assistantId && previewQuery.trim()) preview.mutate(); }} className="panel max-w-2xl space-y-4 p-5">{assistantSelect}<label className="block text-sm font-medium">Test question<textarea aria-label="Test question" value={previewQuery} onChange={(event) => setPreviewQuery(event.target.value)} rows={3} className="mt-2 w-full rounded-lg border border-line px-3 py-2" /></label>{canManage && <button type="submit" disabled={!assistantId || !previewQuery.trim() || preview.isPending} className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white">{preview.isPending ? 'Running…' : 'Run retrieval'}</button>}</form><MutationFeedback error={preview.error} />{preview.data && <DataList empty="No matches" rows={preview.data.matches.map((match) => ({ id: match.chunkId, title: match.sourceTitle, status: `${Math.round(match.similarity * 100)}%`, detail: match.excerpt }))} />}</div>}
-  </section>;
+      {tab === "overview" &&
+        (overview.isLoading ? (
+          <SkeletonBlock className="h-40" />
+        ) : overview.error ? (
+          <QueryErrorState
+            error={overview.error}
+            onRetry={() => overview.refetch()}
+          />
+        ) : (
+          overview.data && (
+            <Cards
+              items={[
+                {
+                  label: "Sources",
+                  value: overview.data.sources.ready,
+                  detail: `${overview.data.sources.ready} ready sources`,
+                },
+                {
+                  label: "Review queue",
+                  value: Object.values(overview.data.reviewQueue).reduce(
+                    (sum, value) => sum + value,
+                    0,
+                  ),
+                  detail: "Candidates, profiles and configurations",
+                },
+                {
+                  label: "Knowledge gaps",
+                  value: overview.data.gaps.open,
+                  detail: "Open verified gaps",
+                },
+                {
+                  label: "Runtime coverage",
+                  value: `${overview.data.runtime.activeConfigurations}/${overview.data.runtime.assistants}`,
+                  detail: overview.data.runtime.activeProfile
+                    ? "Active Business Profile"
+                    : "No active Business Profile",
+                },
+              ]}
+            />
+          )
+        ))}
+      {tab === "sources" && (
+        <div className="space-y-5">
+          {canManage && (
+            <div className="panel p-5">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className={actionClass}
+                  onClick={() => setSourceMode("upload")}
+                >
+                  Upload source
+                </button>
+                <button
+                  className={actionClass}
+                  onClick={() => setSourceMode("manual")}
+                >
+                  Add manual knowledge
+                </button>
+              </div>
+              <p className="mt-2 text-xs text-stone-400">
+                Supported files: <span>PDF, DOCX or TXT</span>. Files are stored
+                privately and processed asynchronously.
+              </p>
+            </div>
+          )}
+          {canManage && (sources.data ?? []).length > 0 && (
+            <form
+              onSubmit={(event: FormEvent) => {
+                event.preventDefault();
+                if (sourceId && assistantId) assignSource.mutate();
+              }}
+              className="panel grid gap-4 p-5 md:grid-cols-[1fr_1fr_auto] md:items-end"
+            >
+              <label className="block text-sm font-medium text-ink">
+                Knowledge source
+                <select
+                  aria-label="Knowledge source"
+                  value={sourceId}
+                  onChange={(event) => setSourceId(event.target.value)}
+                  className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-ink"
+                >
+                  <option value="">Select a source</option>
+                  {(sources.data ?? []).map((source) => (
+                    <option key={source.id} value={source.id}>
+                      {source.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {assistantSelect}
+              <button
+                type="submit"
+                disabled={!sourceId || !assistantId || assignSource.isPending}
+                className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {assignSource.isPending ? "Assigning…" : "Assign source"}
+              </button>
+            </form>
+          )}
+          {sourceMode === "upload" && (
+            <form
+              className="panel grid gap-4 p-5 sm:grid-cols-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (uploadFile) uploadSource.mutate();
+              }}
+            >
+              <label className="text-sm font-medium">
+                Title
+                <input
+                  aria-label="Upload title"
+                  value={sourceTitle}
+                  onChange={(event) => setSourceTitle(event.target.value)}
+                  className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2"
+                />
+              </label>
+              <label className="text-sm font-medium">
+                PDF, DOCX or TXT
+                <input
+                  aria-label="Source file"
+                  required
+                  accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                  type="file"
+                  onChange={(event) =>
+                    setUploadFile(event.target.files?.[0] ?? null)
+                  }
+                  className="mt-2 block w-full text-sm"
+                />
+              </label>
+              <div className="flex flex-wrap gap-2 sm:col-span-2">
+                <button
+                  type="submit"
+                  disabled={!uploadFile || uploadSource.isPending}
+                  className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {uploadSource.isPending ? "Uploading…" : "Upload"}
+                </button>
+                <button
+                  type="button"
+                  className={actionClass}
+                  onClick={() => setSourceMode(null)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+          {sourceMode === "manual" && (
+            <form
+              className="panel space-y-4 p-5"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (sourceTitle.trim() && manualContent.trim())
+                  createManualSource.mutate();
+              }}
+            >
+              <label className="block text-sm font-medium">
+                Title
+                <input
+                  aria-label="Manual knowledge title"
+                  required
+                  value={sourceTitle}
+                  onChange={(event) => setSourceTitle(event.target.value)}
+                  className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2"
+                />
+              </label>
+              <label className="block text-sm font-medium">
+                Knowledge content
+                <textarea
+                  aria-label="Manual knowledge content"
+                  required
+                  rows={7}
+                  value={manualContent}
+                  onChange={(event) => setManualContent(event.target.value)}
+                  className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2"
+                />
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  disabled={createManualSource.isPending}
+                  className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {createManualSource.isPending
+                    ? "Creating…"
+                    : "Create knowledge"}
+                </button>
+                <button
+                  type="button"
+                  className={actionClass}
+                  onClick={() => setSourceMode(null)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+          <MutationFeedback
+            error={
+              uploadSource.error ??
+              createManualSource.error ??
+              assignSource.error ??
+              unassignSource.error ??
+              reindexSource.error ??
+              archiveSource.error
+            }
+          />
+          {(uploadSource.isSuccess || createManualSource.isSuccess) && (
+            <p
+              role="status"
+              className="rounded-lg border border-emerald-700 bg-emerald-950/30 p-3 text-sm text-emerald-300"
+            >
+              Source accepted. Processing status will refresh automatically
+              until READY, FAILED or ARCHIVED.
+            </p>
+          )}
+          {(assignSource.isSuccess ||
+            unassignSource.isSuccess ||
+            reindexSource.isSuccess ||
+            archiveSource.isSuccess) && (
+            <p
+              role="status"
+              className="rounded-lg border border-emerald-700 bg-emerald-950/30 p-3 text-sm text-emerald-300"
+            >
+              Source lifecycle action completed.
+            </p>
+          )}
+          {sources.isLoading ? (
+            <SkeletonBlock className="h-40" />
+          ) : sources.error ? (
+            <QueryErrorState
+              error={sources.error}
+              onRetry={() => sources.refetch()}
+            />
+          ) : !(sources.data ?? []).length ? (
+            <EmptyState
+              title="No sources"
+              description="Upload a PDF, DOCX or TXT file, or add manual knowledge."
+            />
+          ) : (
+            <div className="panel divide-y divide-line">
+              {(sources.data ?? []).map((row) => (
+                <article key={row.id} className="p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <strong className="text-sm text-ink">{row.title}</strong>
+                      <p className="mt-1 text-xs text-stone-400">
+                        {row.source_type} · {row.processing_status} · Index{" "}
+                        {row.indexing_status}
+                      </p>
+                      {row.processing_error_code && (
+                        <p role="alert" className="mt-2 text-sm text-red-400">
+                          Processing failed: {row.processing_error_code}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      aria-label={`View ${row.title}`}
+                      className={actionClass}
+                      onClick={() =>
+                        setSelectedSourceId(
+                          selectedSourceId === row.id ? "" : row.id,
+                        )
+                      }
+                    >
+                      {selectedSourceId === row.id ? "Close" : "View details"}
+                    </button>
+                  </div>
+                  {selectedSourceId === row.id && (
+                    <div className="mt-4 border-t border-line pt-4">
+                      {selectedSource.isLoading ? (
+                        <SkeletonBlock className="h-20" />
+                      ) : selectedSource.error ? (
+                        <QueryErrorState
+                          error={selectedSource.error}
+                          onRetry={() => selectedSource.refetch()}
+                        />
+                      ) : (
+                        selectedSource.data && (
+                          <>
+                            <p className="text-xs text-stone-400">
+                              File:{" "}
+                              {selectedSource.data.original_filename ??
+                                "Manual knowledge"}{" "}
+                              ·{" "}
+                              {selectedSource.data.size_bytes
+                                ? `${selectedSource.data.size_bytes} bytes`
+                                : "Text source"}
+                            </p>
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              {(selectedSource.data.assistant_ids ?? []).map(
+                                (id) => {
+                                  const assistant = (
+                                    assistants.data ?? []
+                                  ).find((item) => item.id === id);
+                                  return (
+                                    <button
+                                      key={id}
+                                      aria-label={`Unassign ${assistant?.name ?? id}`}
+                                      className={actionClass}
+                                      onClick={() => unassignSource.mutate(id)}
+                                    >
+                                      Unassign{" "}
+                                      {assistant
+                                        ? assistantDisplayLabel(
+                                            assistant,
+                                            channels.data ?? [],
+                                          )
+                                        : "Assistant"}
+                                    </button>
+                                  );
+                                },
+                              )}
+                              {canManage && selectedSource.data.enabled && (
+                                <>
+                                  <button
+                                    className={actionClass}
+                                    onClick={() => reindexSource.mutate()}
+                                  >
+                                    Re-index
+                                  </button>
+                                  <button
+                                    className={actionClass}
+                                    onClick={() => archiveSource.mutate()}
+                                  >
+                                    Archive
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                            <form
+                              onSubmit={(event) => {
+                                event.preventDefault();
+                                if (assistantId) assignSource.mutate();
+                              }}
+                              className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end"
+                            >
+                              {assistantSelect}
+                              <button
+                                type="submit"
+                                disabled={
+                                  !assistantId || assignSource.isPending
+                                }
+                                className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                              >
+                                {assignSource.isPending
+                                  ? "Assigning…"
+                                  : "Assign / re-assign"}
+                              </button>
+                            </form>
+                          </>
+                        )
+                      )}
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {tab === "candidates" && (
+        <div className="space-y-4">
+          <MutationFeedback
+            error={candidateAction.error ?? candidateEvidence.error}
+          />
+          {candidateAction.isSuccess && (
+            <p role="status" className="text-sm text-emerald-300">
+              Candidate review completed.
+            </p>
+          )}
+          {candidates.isLoading ? (
+            <SkeletonBlock className="h-40" />
+          ) : candidates.error ? (
+            <QueryErrorState
+              error={candidates.error}
+              onRetry={() => candidates.refetch()}
+            />
+          ) : !(candidates.data ?? []).length ? (
+            <EmptyState
+              title="No candidates"
+              description="Verified suggestions awaiting review appear here."
+            />
+          ) : (
+            <div className="panel divide-y divide-line">
+              {(candidates.data ?? []).map((row) => (
+                <article key={row.id} className="p-5">
+                  <div className="flex flex-wrap justify-between gap-3">
+                    <div>
+                      <strong>{row.proposed_title}</strong>
+                      <p className="mt-1 text-xs text-stone-400">
+                        {row.status} · PII{" "}
+                        {row.pii_redaction_status ?? "not reported"}
+                        {row.approved_source_id
+                          ? ` · Canonical source ${row.approved_source_id.slice(0, 8)}`
+                          : ""}
+                      </p>
+                      <p className="mt-2 text-sm text-stone-300">
+                        {row.proposed_content}
+                      </p>
+                    </div>
+                    <button
+                      aria-label={`Review ${row.proposed_title}`}
+                      className={actionClass}
+                      onClick={() =>
+                        setSelectedCandidateId(
+                          selectedCandidateId === row.id ? "" : row.id,
+                        )
+                      }
+                    >
+                      Review
+                    </button>
+                  </div>
+                  {selectedCandidateId === row.id && (
+                    <div className="mt-4 border-t border-line pt-4">
+                      <p className="text-xs text-stone-400">
+                        Safe evidence only; message content and credentials are
+                        not exposed.
+                      </p>
+                      {candidateEvidence.isLoading ? (
+                        <SkeletonBlock className="mt-3 h-16" />
+                      ) : (
+                        <ul className="mt-3 space-y-1 text-xs text-stone-300">
+                          {(candidateEvidence.data ?? []).map((evidence) => (
+                            <li
+                              key={`${evidence.message_id}-${evidence.occurred_at}`}
+                            >
+                              {evidence.channel_type} · {evidence.sender_type} ·{" "}
+                              {evidence.occurred_at}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {canManage && row.status === "NEEDS_REVIEW" && (
+                        <div className="mt-4 flex gap-2">
+                          <button
+                            aria-label="Approve candidate"
+                            className={actionClass}
+                            onClick={() => candidateAction.mutate("approve")}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            aria-label="Reject candidate"
+                            className={actionClass}
+                            onClick={() => candidateAction.mutate("reject")}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {tab === "gaps" &&
+        (gaps.isLoading ? (
+          <SkeletonBlock className="h-40" />
+        ) : gaps.error ? (
+          <QueryErrorState error={gaps.error} onRetry={() => gaps.refetch()} />
+        ) : !(gaps.data ?? []).length ? (
+          <EmptyState
+            title="No knowledge gaps"
+            description="Verified unresolved questions appear here."
+          />
+        ) : (
+          <div className="panel divide-y divide-line">
+            {(gaps.data ?? []).map((row) => (
+              <article key={row.id} className="p-5">
+                <div className="flex flex-wrap justify-between gap-3">
+                  <div>
+                    <strong>{row.normalized_question}</strong>
+                    <p className="mt-1 text-xs text-stone-400">
+                      {row.status} · {row.occurrence_count} verified occurrence
+                      {row.occurrence_count === 1 ? "" : "s"}
+                      {row.suggested_candidate_id
+                        ? ` · Candidate ${row.suggested_candidate_id.slice(0, 8)}`
+                        : ""}
+                    </p>
+                  </div>
+                  <button
+                    aria-label={`Review ${row.normalized_question}`}
+                    className={actionClass}
+                    onClick={() =>
+                      setSelectedGapId(selectedGapId === row.id ? "" : row.id)
+                    }
+                  >
+                    Review
+                  </button>
+                </div>
+                {selectedGapId === row.id && (
+                  <div className="mt-4 border-t border-line pt-4">
+                    {gapSignals.isLoading ? (
+                      <SkeletonBlock className="h-16" />
+                    ) : (
+                      <ul className="space-y-1 text-xs text-stone-300">
+                        {(gapSignals.data ?? []).map((signal) => (
+                          <li key={`${signal.message_id}-${signal.created_at}`}>
+                            {signal.channel_type} · {signal.signal_type} ·{" "}
+                            {signal.created_at}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {canManage && !row.suggested_candidate_id && (
+                      <div className="mt-4 grid gap-3">
+                        <input
+                          aria-label="Candidate title"
+                          placeholder="Candidate title"
+                          value={gapDraft.title}
+                          onChange={(event) =>
+                            setGapDraft({
+                              ...gapDraft,
+                              title: event.target.value,
+                            })
+                          }
+                          className="rounded-lg border border-line bg-elevated px-3 py-2"
+                        />
+                        <textarea
+                          aria-label="Candidate content"
+                          placeholder="Reviewed candidate content"
+                          value={gapDraft.content}
+                          onChange={(event) =>
+                            setGapDraft({
+                              ...gapDraft,
+                              content: event.target.value,
+                            })
+                          }
+                          className="rounded-lg border border-line bg-elevated px-3 py-2"
+                        />
+                        <button
+                          disabled={
+                            !gapDraft.title.trim() || !gapDraft.content.trim()
+                          }
+                          className={actionClass}
+                          onClick={() => createGapCandidate.mutate()}
+                        >
+                          Create suggested candidate
+                        </button>
+                      </div>
+                    )}
+                    {canManage && (
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {row.status !== "RESOLVED" && (
+                          <button
+                            aria-label="Resolve gap"
+                            className={actionClass}
+                            onClick={() => gapAction.mutate("resolve")}
+                          >
+                            Resolve
+                          </button>
+                        )}
+                        {row.status !== "DISMISSED" && (
+                          <button
+                            aria-label="Dismiss gap"
+                            className={actionClass}
+                            onClick={() => gapAction.mutate("dismiss")}
+                          >
+                            Dismiss
+                          </button>
+                        )}
+                        {["RESOLVED", "DISMISSED"].includes(row.status) && (
+                          <button
+                            aria-label="Reopen gap"
+                            className={actionClass}
+                            onClick={() => gapAction.mutate("reopen")}
+                          >
+                            Reopen
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        ))}
+      {tab === "profiles" && (
+        <div className="space-y-4">
+          <MutationFeedback
+            error={
+              currentGenerationError ??
+              createBusinessIdentity.error ??
+              profileAction.error ??
+              saveProfile.error
+            }
+          />
+          <div className="panel p-4 text-sm text-stone-300">
+            <strong className="text-white">
+              Approval does not activate runtime.
+            </strong>{" "}
+            APPROVED versions remain inactive until explicitly activated. The
+            ACTIVE badge marks the version currently used by runtime.
+          </div>
+          {profiles.isLoading ? (
+            <SkeletonBlock className="h-40" />
+          ) : profiles.error ? (
+            <QueryErrorState
+              error={profiles.error}
+              onRetry={() => profiles.refetch()}
+            />
+          ) : !(profiles.data ?? []).length ? (
+            <EmptyState
+              title="No Business Profile versions"
+              description="Generate a review-only version from an explicit Business Identity and source scope."
+            />
+          ) : (
+            <div className="panel divide-y divide-line">
+              {(profiles.data ?? []).map((row) => (
+                <article key={row.id} className="p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <strong className="text-sm text-ink">
+                        Business Profile {row.id.slice(0, 8)}
+                      </strong>
+                      <p className="mt-1 text-xs text-stone-400">
+                        {row.business_identity_name ??
+                          "Legacy unscoped identity"}{" "}
+                        · {row.status}
+                        {row.active_version_id === row.id
+                          ? " · ACTIVE"
+                          : " · NOT ACTIVE"}{" "}
+                        · {row.identity_resolution_status ?? "LEGACY_UNSCOPED"}
+                      </p>
+                      <p className="mt-2 text-xs text-stone-400">
+                        Sources:{" "}
+                        {row.source_scope?.source_ids
+                          ?.map(
+                            (id) =>
+                              (sources.data ?? []).find(
+                                (source) => source.id === id,
+                              )?.title ?? id.slice(0, 8),
+                          )
+                          .join(", ") || "Legacy provenance"}
+                      </p>
+                      <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                        {Object.entries(row.profile_data).map(
+                          ([key, value]) => (
+                            <div key={key}>
+                              <dt className="font-semibold text-stone-300">
+                                {key}
+                              </dt>
+                              <dd className="mt-1 text-stone-400">
+                                {typeof value === "string"
+                                  ? value
+                                  : JSON.stringify(value)}
+                              </dd>
+                            </div>
+                          ),
+                        )}
+                      </dl>
+                    </div>
+                    {canManage && (
+                      <div className="flex flex-wrap gap-2">
+                        {row.status === "NEEDS_REVIEW" && (
+                          <>
+                            <button
+                              className={actionClass}
+                              onClick={() =>
+                                setEditor({
+                                  kind: "profile",
+                                  id: row.id,
+                                  value: JSON.stringify(
+                                    row.profile_data,
+                                    null,
+                                    2,
+                                  ),
+                                })
+                              }
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className={actionClass}
+                              disabled={
+                                row.identity_resolution_status ===
+                                "IDENTITY_RESOLUTION_REQUIRED"
+                              }
+                              onClick={() =>
+                                profileAction.mutate({
+                                  id: row.id,
+                                  action: "approve",
+                                })
+                              }
+                            >
+                              Approve
+                            </button>
+                            <button
+                              className={actionClass}
+                              onClick={() =>
+                                profileAction.mutate({
+                                  id: row.id,
+                                  action: "reject",
+                                })
+                              }
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+                        {row.status === "APPROVED" &&
+                          row.active_version_id !== row.id && (
+                            <button
+                              className={actionClass}
+                              disabled={
+                                row.identity_resolution_status ===
+                                "IDENTITY_RESOLUTION_REQUIRED"
+                              }
+                              onClick={() =>
+                                profileAction.mutate({
+                                  id: row.id,
+                                  action: row.superseded_by_version_id
+                                    ? "rollback"
+                                    : "activate",
+                                })
+                              }
+                            >
+                              {row.superseded_by_version_id
+                                ? "Rollback"
+                                : "Activate"}
+                            </button>
+                          )}
+                      </div>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {tab === "configurations" && (
+        <div className="space-y-5">
+          <div className="panel max-w-xl space-y-3 p-5">
+            {assistantSelect}
+            <label className="block text-sm font-medium text-ink">
+              ACTIVE Business Profile
+              <select
+                aria-label="ACTIVE Business Profile"
+                value={configurationProfileVersionId}
+                onChange={(event) =>
+                  setConfigurationProfileVersionId(event.target.value)
+                }
+                className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-ink"
+              >
+                <option value="">Select an ACTIVE Business Profile</option>
+                {(profiles.data ?? [])
+                  .filter((profile) => profile.active_version_id === profile.id)
+                  .map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.business_identity_name ??
+                        `Business Profile ${profile.id.slice(0, 8)}`}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            {assistantId && canManage && (
+              <button
+                className={actionClass}
+                disabled={
+                  !configurationProfileVersionId ||
+                  generateRecommendation.isPending
+                }
+                onClick={() => generateRecommendation.mutate()}
+              >
+                {generateRecommendation.isPending
+                  ? "Generating…"
+                  : "Generate recommendation"}
+              </button>
+            )}
+          </div>
+          <MutationFeedback
+            error={
+              generateRecommendation.error ??
+              recommendationAction.error ??
+              generateConfiguration.error ??
+              configurationAction.error ??
+              saveConfiguration.error
+            }
+          />
+          {assistantId && (
+            <div className="grid gap-5 lg:grid-cols-2">
+              <div>
+                <h2 className="mb-3 font-semibold">Recommendations</h2>
+                {recommendations.isLoading ? (
+                  <SkeletonBlock className="h-32" />
+                ) : recommendations.error ? (
+                  <QueryErrorState
+                    error={recommendations.error}
+                    onRetry={() => recommendations.refetch()}
+                  />
+                ) : !(recommendations.data ?? []).length ? (
+                  <EmptyState
+                    title="No recommendations"
+                    description="Generate a recommendation from the selected active Business Profile scope."
+                  />
+                ) : (
+                  <div className="panel divide-y divide-line">
+                    {(recommendations.data ?? []).map((row) => (
+                      <article key={row.id} className="p-4">
+                        <strong className="text-sm">
+                          Recommendation {row.id.slice(0, 8)}
+                        </strong>
+                        <p className="mt-1 text-xs text-stone-400">
+                          {row.status}
+                        </p>
+                        {canManage && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {row.status === "NEEDS_REVIEW" && (
+                              <>
+                                <button
+                                  className={actionClass}
+                                  onClick={() =>
+                                    recommendationAction.mutate({
+                                      id: row.id,
+                                      action: "approve",
+                                    })
+                                  }
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  className={actionClass}
+                                  onClick={() =>
+                                    recommendationAction.mutate({
+                                      id: row.id,
+                                      action: "reject",
+                                    })
+                                  }
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )}
+                            {row.status === "APPROVED" && (
+                              <button
+                                className={actionClass}
+                                onClick={() =>
+                                  generateConfiguration.mutate(row.id)
+                                }
+                              >
+                                Generate configuration
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <h2 className="mb-3 font-semibold">Configurations</h2>
+                {configurations.isLoading ? (
+                  <SkeletonBlock className="h-32" />
+                ) : configurations.error ? (
+                  <QueryErrorState
+                    error={configurations.error}
+                    onRetry={() => configurations.refetch()}
+                  />
+                ) : !(configurations.data ?? []).length ? (
+                  <EmptyState
+                    title="No configurations"
+                    description="Approve a recommendation, then generate a review-only configuration."
+                  />
+                ) : (
+                  <div className="panel divide-y divide-line">
+                    {(configurations.data ?? []).map((row) => (
+                      <article key={row.id} className="p-4">
+                        <strong className="text-sm">
+                          Configuration {row.id.slice(0, 8)}
+                        </strong>
+                        <p className="mt-1 text-xs text-stone-400">
+                          {row.status}
+                          {row.status === "ACTIVE"
+                            ? " · ACTIVE RUNTIME"
+                            : row.status === "APPROVED"
+                              ? " · NOT ACTIVE"
+                              : ""}
+                        </p>
+                        {canManage && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {row.status === "NEEDS_REVIEW" && (
+                              <>
+                                <button
+                                  className={actionClass}
+                                  onClick={() =>
+                                    setEditor({
+                                      kind: "configuration",
+                                      id: row.id,
+                                      value: JSON.stringify(
+                                        row.configuration_data,
+                                        null,
+                                        2,
+                                      ),
+                                    })
+                                  }
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  className={actionClass}
+                                  onClick={() =>
+                                    configurationAction.mutate({
+                                      id: row.id,
+                                      action: "approve",
+                                    })
+                                  }
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  className={actionClass}
+                                  onClick={() =>
+                                    configurationAction.mutate({
+                                      id: row.id,
+                                      action: "reject",
+                                    })
+                                  }
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )}
+                            {row.status === "APPROVED" && (
+                              <button
+                                className={actionClass}
+                                onClick={() =>
+                                  configurationAction.mutate({
+                                    id: row.id,
+                                    action: "activate",
+                                  })
+                                }
+                              >
+                                Activate
+                              </button>
+                            )}
+                            {row.status === "SUPERSEDED" && (
+                              <button
+                                className={actionClass}
+                                onClick={() =>
+                                  configurationAction.mutate({
+                                    id: row.id,
+                                    action: "rollback",
+                                  })
+                                }
+                              >
+                                Rollback
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {editor && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Edit ${editor.kind}`}
+          className="panel max-w-2xl p-5"
+        >
+          <label className="block text-sm font-medium text-ink">
+            Review JSON
+            <textarea
+              aria-label="Review JSON"
+              rows={10}
+              value={editor.value}
+              onChange={(event) =>
+                setEditor({ ...editor, value: event.target.value })
+              }
+              className="mt-2 w-full rounded-lg border border-line bg-elevated p-3 font-mono text-xs text-ink"
+            />
+          </label>
+          <div className="mt-3 flex gap-2">
+            <button className={actionClass} onClick={saveEditor}>
+              Save review
+            </button>
+            <button className={actionClass} onClick={() => setEditor(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {tab === "retrieval" && (
+        <div className="space-y-5">
+          <form
+            onSubmit={(event: FormEvent) => {
+              event.preventDefault();
+              if (canManage && assistantId && previewQuery.trim())
+                preview.mutate();
+            }}
+            className="panel max-w-2xl space-y-4 p-5"
+          >
+            {assistantSelect}
+            <label className="block text-sm font-medium">
+              Test question
+              <textarea
+                aria-label="Test question"
+                value={previewQuery}
+                onChange={(event) => setPreviewQuery(event.target.value)}
+                rows={3}
+                className="mt-2 w-full rounded-lg border border-line px-3 py-2"
+              />
+            </label>
+            {canManage && (
+              <button
+                type="submit"
+                disabled={
+                  !assistantId || !previewQuery.trim() || preview.isPending
+                }
+                className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white"
+              >
+                {preview.isPending ? "Running…" : "Run retrieval"}
+              </button>
+            )}
+          </form>
+          <MutationFeedback error={preview.error} />
+          {preview.data && (
+            <DataList
+              empty="No matches"
+              rows={preview.data.matches.map((match) => ({
+                id: match.chunkId,
+                title: match.sourceTitle,
+                status: `${Math.round(match.similarity * 100)}%`,
+                detail: match.excerpt,
+              }))}
+            />
+          )}
+        </div>
+      )}
+    </section>
+  );
 }
