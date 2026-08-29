@@ -88,6 +88,13 @@ jobs:
           JWT_SECRET: workflow-test-only-not-for-runtime
         run: node --test test/knowledgeConfigurationPostgres.test.js
 
+      - name: Run scoped generation PostgreSQL idempotency contract
+        env:
+          DATABASE_URL: postgresql://workflow-test:workflow-test@127.0.0.1:5432/workflow_test
+          DATABASE_SSL: 'false'
+          JWT_SECRET: workflow-test-only-not-for-runtime
+        run: node --test test/knowledgeGenerationPostgres.test.js
+
       - name: Run WhatsApp operator delivery and handoff regressions
         env:
           DATABASE_URL: postgresql://workflow-test:workflow-test@127.0.0.1:5432/workflow_test
