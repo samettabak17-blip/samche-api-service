@@ -181,6 +181,7 @@ jobs:
                 'idx_assistant_configuration_versions_one_active',
                 'idx_knowledge_generation_runs_tenant_created',
                 'idx_conversation_messages_provider_authority',
+                'idx_conversation_messages_tenant_created',
                 'idx_business_identities_tenant_status', 'idx_source_business_identities_identity'
               ];
               const expectedConstraints = [
