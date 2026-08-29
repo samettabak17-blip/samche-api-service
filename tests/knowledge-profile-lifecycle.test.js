@@ -57,6 +57,8 @@ test('conflicting selected identities block profile generation and expose safe c
       { id: '66666666-6666-4666-8666-666666666666', title: 'Nova', content: 'Nova', content_hash: 'b'.repeat(64) },
     ] };
     if (/business_identity_source_evidence|knowledge_source_business_identities/i.test(sql)) return { rows: [] };
+    if (/INSERT INTO knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'RUNNING' }] };
+    if (/UPDATE knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'FAILED' }] };
     assert.fail(`unexpected SQL ${sql}`);
   } };
   const provider = { provider: 'GEMINI', model: 'gemini-3-flash-preview', generateBusinessIdentityAnalysis: async ({ source }) => ({ detected_identity: source.title, confidence: '0.99', evidence: 'Legal name' }), generateBusinessProfile: async () => assert.fail('must not generate') };
@@ -68,6 +70,8 @@ test('a selected source identity must match the chosen Business Identity', async
     if (/FROM business_identities/i.test(sql)) return { rows: [{ id: '55555555-5555-4555-8555-555555555555', display_name: 'Meridian Arc Technologies LLC', normalized_identity: 'meridian arc technologies' }] };
     if (/FROM knowledge_base_documents/i.test(sql)) return { rows: [{ id: '66666666-6666-4666-8666-666666666666', title: 'Nova', content: 'Nova Crest Business Services LLC', content_hash: 'b'.repeat(64) }] };
     if (/business_identity_source_evidence/i.test(sql)) return { rows: [] };
+    if (/INSERT INTO knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'RUNNING' }] };
+    if (/UPDATE knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'FAILED' }] };
     assert.fail(`unexpected SQL ${sql}`);
   } };
   const provider = { provider: 'GEMINI', model: 'gemini-3-flash-preview', generateBusinessIdentityAnalysis: async () => ({ detected_identity: 'Nova Crest Business Services LLC', confidence: '0.99', evidence: 'Legal name' }), generateBusinessProfile: async () => assert.fail('must not generate') };
@@ -105,4 +109,62 @@ test('rejects an empty Business Profile review edit before querying', async () =
     updateBusinessProfileReview({ database, tenantId, versionId: '44444444-4444-4444-8444-444444444444', profileData: {} }),
     (error) => error.code === 'KNOWLEDGE_PROFILE_DATA_INVALID',
   );
+});
+
+test('reuses exact RESOLVED identity evidence and does not call the identity provider twice', async () => {
+  const calls = [];
+  let identityCalls = 0;
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/FROM business_identities/i.test(sql)) return { rows: [{ id: '55555555-5555-4555-8555-555555555555', display_name: 'Meridian Arc Technologies LLC', normalized_identity: 'meridian arc technologies' }] };
+    if (/FROM knowledge_base_documents/i.test(sql)) return { rows: [{ id: '11111111-1111-4111-8111-111111111111', title: 'Company', content: 'Approved company facts', content_hash: 'a'.repeat(64) }] };
+    if (/FROM business_identity_source_evidence/i.test(sql)) return { rows: [{ source_id: '11111111-1111-4111-8111-111111111111', source_title: 'Company', content_hash: 'a'.repeat(64), detected_identity: 'Meridian Arc Technologies LLC', normalized_identity: 'meridian arc technologies', confidence: '0.990', safe_evidence: 'Legal name' }] };
+    if (/INSERT INTO knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'RUNNING' }] };
+    if (/UPDATE knowledge_generation_runs[\s\S]*stage =/i.test(sql)) return { rows: [{ id: params[0], status: 'RUNNING' }] };
+    if (/INSERT INTO business_profiles/i.test(sql)) return { rows: [{ id: '33333333-3333-4333-8333-333333333333' }] };
+    if (/INSERT INTO knowledge_source_business_identities/i.test(sql)) return { rows: [] };
+    if (/INSERT INTO business_profile_versions/i.test(sql)) return { rows: [{ id: '44444444-4444-4444-8444-444444444444', status: 'NEEDS_REVIEW' }] };
+    if (/UPDATE knowledge_generation_runs[\s\S]*SUCCEEDED/i.test(sql)) return { rows: [{ id: params[0], status: 'SUCCEEDED', target_id: params[2] }] };
+    return { rows: [] };
+  } };
+  const provider = { provider: 'GEMINI', model: 'gemini-3-flash-preview', generateBusinessIdentityAnalysis: async () => { identityCalls += 1; return {}; }, generateBusinessProfile: async () => ({ schema_version: 2, company_identity: 'Meridian Arc Technologies LLC' }) };
+  await generateBusinessProfileVersion({ database, provider, tenantId, requestedBy: actorId, businessIdentityId: '55555555-5555-4555-8555-555555555555', sourceIds: ['11111111-1111-4111-8111-111111111111'] });
+  assert.equal(identityCalls, 0);
+  assert.ok(calls.some(({ sql }) => /analysis_schema_version/i.test(sql) && /content_hash/i.test(sql)));
+});
+
+test('identity analysis timeout is classified before profile generation and persists no profile artifact', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/FROM business_identities/i.test(sql)) return { rows: [{ id: '55555555-5555-4555-8555-555555555555', display_name: 'Meridian', normalized_identity: 'meridian' }] };
+    if (/FROM knowledge_base_documents/i.test(sql)) return { rows: [{ id: '11111111-1111-4111-8111-111111111111', title: 'Company', content: 'Facts', content_hash: 'a'.repeat(64) }] };
+    if (/FROM business_identity_source_evidence/i.test(sql)) return { rows: [] };
+    if (/INSERT INTO knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'RUNNING' }] };
+    if (/UPDATE knowledge_generation_runs/i.test(sql)) return { rows: [{ id: params[0], status: 'FAILED' }] };
+    return { rows: [] };
+  } };
+  const timeout = Object.assign(new Error('Knowledge generation timed out'), { code: 'KNOWLEDGE_GENERATION_TIMEOUT' });
+  const provider = { provider: 'GEMINI', model: 'gemini-3-flash-preview', generateBusinessIdentityAnalysis: async () => { throw timeout; }, generateBusinessProfile: async () => assert.fail('profile generation must not start') };
+  await assert.rejects(generateBusinessProfileVersion({ database, provider, tenantId, requestedBy: actorId, businessIdentityId: '55555555-5555-4555-8555-555555555555', sourceIds: ['11111111-1111-4111-8111-111111111111'] }), (error) => error.code === 'KNOWLEDGE_GENERATION_TIMEOUT');
+  assert.ok(calls.some(({ sql, params }) => /status = 'FAILED'/i.test(sql) && params.includes('IDENTITY_ANALYSIS')));
+  assert.ok(!calls.some(({ sql }) => /INSERT INTO business_profiles|INSERT INTO business_profile_versions/i.test(sql)));
+});
+
+test('profile generation timeout records PROFILE_GENERATION and leaves no profile artifact', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/FROM business_identities/i.test(sql)) return { rows: [{ id: '55555555-5555-4555-8555-555555555555', display_name: 'Meridian', normalized_identity: 'meridian' }] };
+    if (/FROM knowledge_base_documents/i.test(sql)) return { rows: [{ id: '11111111-1111-4111-8111-111111111111', title: 'Company', content: 'Facts', content_hash: 'a'.repeat(64) }] };
+    if (/FROM business_identity_source_evidence/i.test(sql)) return { rows: [{ source_id: '11111111-1111-4111-8111-111111111111', source_title: 'Company', content_hash: 'a'.repeat(64), detected_identity: 'Meridian', normalized_identity: 'meridian', confidence: '0.99', safe_evidence: 'Legal name' }] };
+    if (/INSERT INTO knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'RUNNING' }] };
+    if (/UPDATE knowledge_generation_runs/i.test(sql)) return { rows: [{ id: params[0], status: /FAILED/.test(sql) ? 'FAILED' : 'RUNNING' }] };
+    return { rows: [] };
+  } };
+  const timeout = Object.assign(new Error('Knowledge generation timed out'), { code: 'KNOWLEDGE_GENERATION_TIMEOUT' });
+  const provider = { provider: 'GEMINI', model: 'gemini-3-flash-preview', generateBusinessIdentityAnalysis: async () => assert.fail('exact evidence must be reused'), generateBusinessProfile: async () => { throw timeout; } };
+  await assert.rejects(generateBusinessProfileVersion({ database, provider, tenantId, requestedBy: actorId, businessIdentityId: '55555555-5555-4555-8555-555555555555', sourceIds: ['11111111-1111-4111-8111-111111111111'] }), (error) => error.code === 'KNOWLEDGE_GENERATION_TIMEOUT');
+  assert.ok(calls.some(({ sql, params }) => /status = 'FAILED'/i.test(sql) && params.includes('PROFILE_GENERATION')));
+  assert.ok(!calls.some(({ sql }) => /INSERT INTO business_profiles|INSERT INTO business_profile_versions/i.test(sql)));
 });
