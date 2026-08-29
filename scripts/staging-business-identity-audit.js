@@ -27,7 +27,8 @@ try {
   const selected = scope.rows[0];
   const evidence = await client.query(
     `SELECT detected_identity, normalized_detected_identity, confidence, safe_evidence,
-            content_hash = $3 AS current_hash_match, provider, model, analysis_schema_version
+            content_hash = $3 AS current_hash_match, provider, model, analysis_schema_version,
+            created_at, updated_at
        FROM business_identity_source_evidence
       WHERE business_identity_id = $1 AND source_id = $2
       ORDER BY updated_at DESC`,
@@ -44,6 +45,8 @@ try {
     provider: row.provider,
     model: row.model,
     analysis_schema_version: row.analysis_schema_version,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
   }));
   const generation = await client.query(
     `SELECT run.id AS run_id, run.request_fingerprint, run.business_identity_id, run.stage,
