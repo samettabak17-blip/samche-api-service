@@ -26,3 +26,10 @@ export function assistantDisplayLabel(assistant: Assistant, channels: TenantChan
     ? productLabel
     : `${assistant.name} — ${productLabel}`;
 }
+
+export function assistantActivityLabel(assistant: { name: string; channel_types: ConversationChannelType[] }) {
+  const products = [...new Set(assistant.channel_types.map(channelProductName))];
+  if (!products.length) return assistant.name;
+  const productLabel = products.join(' • ');
+  return legacyDefaultNames.has(assistant.name.trim().toLocaleLowerCase('en-US')) ? productLabel : `${assistant.name} — ${productLabel}`;
+}

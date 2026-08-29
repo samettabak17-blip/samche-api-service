@@ -18,6 +18,10 @@ on:
       - services/knowledge-*.js
       - services/channel-knowledge-authority-memory.js
       - services/tenant-runtime-persona-service.js
+      - services/dashboard-analytics-service.js
+      - migrations/030_dashboard_analytics_indexes.sql
+      - tests/dashboard-analytics-service.test.js
+      - test/dashboardAnalyticsPostgres.test.js
       - services/tenant-follow-up-service.js
       - test/knowledgeAuthorityService.test.js
       - test/channelKnowledgeAuthorityMemory.test.js
@@ -53,6 +57,37 @@ jobs:
           test/tenantFollowUpService.test.js
           tests/tenant-runtime-persona-service.test.js
           tests/knowledge-runtime-samcheguide-integration.test.js
+
+  dashboard-analytics-postgres:
+    if: github.ref == 'refs/heads/staging' && (github.event_name == 'push' || inputs.auth_role_audit != true)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: workflow-test
+          POSTGRES_PASSWORD: workflow-test
+          POSTGRES_DB: workflow_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U workflow-test -d workflow_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://workflow-test:workflow-test@127.0.0.1:5432/workflow_test
+      DATABASE_SSL: 'false'
+      JWT_SECRET: workflow-test-only-not-for-runtime
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install API dependencies
+        run: npm install --ignore-scripts
+      - name: Prepare isolated PostgreSQL schema
+        run: npm run migrate
+      - name: Run Dashboard Overview PostgreSQL aggregation contract
+        run: node --test test/dashboardAnalyticsPostgres.test.js
 
   postgres:
     if: github.ref == 'refs/heads/staging'

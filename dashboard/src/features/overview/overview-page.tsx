@@ -6,10 +6,11 @@ import type { DashboardOverview } from '../../types/api';
 import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
 import { useTenant } from '../tenants/tenant-context';
 import { overviewRangeRequest, useOverviewDateRange } from './overview-date-range-context';
+import { assistantActivityLabel, channelProductName } from '../../lib/channel-display';
 export { overviewRangeRequest } from './overview-date-range-context';
 
 const channelColors: Record<string, string> = { WHATSAPP: '#20c77a', WEB_CHAT: '#e3343d', SAMCHEGUIDE: '#7767f6' };
-const channelName = (channel?: string | null) => channel === 'WEB_CHAT' ? 'Web Chatbot' : channel === 'SAMCHEGUIDE' ? 'AI Guide' : channel === 'WHATSAPP' ? 'WhatsApp' : '—';
+const channelName = (channel?: DashboardOverview['insights']['best_channel']) => channel ? channelProductName(channel) : 'No data yet';
 const compactDate = (value: string) => new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(value));
 const relativeTime = (value?: string | null) => {
   if (!value) return '—';
@@ -24,6 +25,14 @@ export const overviewConversationLabel = (value?: string | null) => {
   if (!cleaned) return 'Customer';
   if (/^\+?\d{7,15}$/.test(cleaned)) return cleaned.startsWith('+') ? cleaned : '+' + cleaned;
   return cleaned;
+};
+export const formatGrowth = (growth: number | null, status: DashboardOverview['insights']['growth_status']) => status === 'AVAILABLE' && growth !== null ? `${growth}%` : 'Insufficient data';
+export const overviewInsightText = (insights: Pick<DashboardOverview['insights'], 'best_channel' | 'growth' | 'growth_status'>) => {
+  const channel = insights.best_channel ? `${channelProductName(insights.best_channel)} is currently your highest-volume channel.` : 'No activity yet.';
+  const comparison = insights.growth_status === 'AVAILABLE' && insights.growth !== null
+    ? ` Activity ${insights.growth >= 0 ? 'increased' : 'decreased'} ${Math.abs(insights.growth)}% compared with the previous period.`
+    : ' More data is needed for a period comparison.';
+  return channel + comparison;
 };
 
 function MiniTrend({ trend }: { trend: number | null }) {
@@ -91,6 +100,7 @@ export function OverviewPage() {
   ] as const;
   const maxIntent = Math.max(...data.top_intents.map((item) => item.count), 1);
   const peakTime = data.insights.peak_hour ? data.insights.peak_hour.replace(/^0/, '') : null;
+  const mostActiveAssistant = data.insights.most_active_assistant ? assistantActivityLabel(data.insights.most_active_assistant) : null;
 
   return <div className="mx-auto max-w-[1540px] space-y-4 pb-6">
     <header className="flex flex-wrap items-end justify-between gap-4 px-1">
@@ -111,9 +121,9 @@ export function OverviewPage() {
       <article className="dashboard-card p-4"><p className="dashboard-section-label">Demand signals</p><h2 className="mt-1 text-sm font-semibold text-ink">Top Intents</h2><div className="mt-5 space-y-3">{data.top_intents.length ? data.top_intents.map((item) => <div key={item.label}><div className="flex justify-between gap-3 text-xs"><span className="truncate text-stone-300" title={item.label}>{item.label}</span><span className="text-stone-500">{item.count}</span></div><div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white/[.055]"><div className="h-full rounded-full bg-gradient-to-r from-signal to-[#ff4b55]" style={{ width: Math.max(8, (item.count / maxIntent) * 100) + '%' }} /></div></div>) : <p className="py-9 text-center text-xs text-stone-500">No intent data yet.</p>}</div></article>
     </section>
 
-    <section className="dashboard-card relative overflow-hidden p-4 sm:p-5"><div className="pointer-events-none absolute inset-y-0 left-0 w-40 bg-[radial-gradient(circle_at_20%_50%,rgba(212,33,41,.16),transparent_72%)]" /><div className="relative grid gap-4 md:grid-cols-[1.45fr_repeat(4,1fr)]"><div className="flex items-center gap-3 border-b border-line/80 pb-4 md:border-b-0 md:border-r md:pb-0"><NeuralBrain /><div><p className="text-sm font-semibold text-ink">AI Insights</p><p className="mt-1 max-w-[15rem] text-xs text-stone-400">{data.insights.best_channel ? channelName(data.insights.best_channel) + ' is currently the highest-volume channel.' : 'More activity is needed to generate reliable insights.'}</p></div></div><div className="flex items-center gap-3 border-b border-line/80 pb-4 md:border-b-0 md:border-r md:pb-0"><span className="icon-orb h-9 w-9 text-stone-300"><Clock3 size={17} /></span><div className="min-w-0"><p className="text-[10px] uppercase tracking-[.14em] text-stone-500">Peak Time</p><p className="mt-1 truncate text-sm font-semibold text-ink">{peakTime || '—'}</p><p className="mt-0.5 text-[10px] text-stone-500">{peakTime ? 'Most active hour' : '—'}</p></div></div>
-      <div className="flex items-center gap-3 border-b border-line/80 pb-4 md:border-b-0 md:border-r md:pb-0"><span className="icon-orb h-9 w-9 text-stone-300"><MessagesSquare size={17} /></span><div className="min-w-0"><p className="text-[10px] uppercase tracking-[.14em] text-stone-500">Best Channel</p><p className="mt-1 truncate text-sm font-semibold text-ink">{channelName(data.insights.best_channel)}</p><p className="mt-0.5 text-[10px] text-stone-500">{data.insights.best_channel ? 'Highest conversation volume' : '—'}</p></div></div>
-      <div className="flex items-center gap-3 border-b border-line/80 pb-4 md:border-b-0 md:border-r md:pb-0"><span className="icon-orb h-9 w-9 text-stone-300"><Bot size={17} /></span><div className="min-w-0"><p className="text-[10px] uppercase tracking-[.14em] text-stone-500">Top Performing Bot</p><p className="mt-1 truncate text-sm font-semibold text-ink">{data.insights.top_assistant || '—'}</p><p className="mt-0.5 text-[10px] text-stone-500">{data.insights.top_assistant ? 'Activity volume' : '—'}</p></div></div>
-      <div className="flex items-center gap-3 pb-0"><span className="icon-orb h-9 w-9 text-stone-300"><Sparkles size={17} /></span><div className="min-w-0"><p className="text-[10px] uppercase tracking-[.14em] text-stone-500">Growth</p><p className="mt-1 truncate text-sm font-semibold text-ink">{data.insights.growth === null ? '—' : data.insights.growth + '%'}</p><p className="mt-0.5 text-[10px] text-stone-500">vs previous period</p></div></div></div></section>
+    <section className="dashboard-card relative overflow-hidden p-4 sm:p-5"><div className="pointer-events-none absolute inset-y-0 left-0 w-40 bg-[radial-gradient(circle_at_20%_50%,rgba(212,33,41,.16),transparent_72%)]" /><div className="relative grid gap-4 md:grid-cols-[1.45fr_repeat(4,1fr)]"><div className="flex items-center gap-3 border-b border-line/80 pb-4 md:border-b-0 md:border-r md:pb-0"><NeuralBrain /><div><p className="text-sm font-semibold text-ink">AI Insights</p><p className="mt-1 max-w-[15rem] text-xs text-stone-400">{overviewInsightText(data.insights)}</p></div></div><div className="flex items-center gap-3 border-b border-line/80 pb-4 md:border-b-0 md:border-r md:pb-0"><span className="icon-orb h-9 w-9 text-stone-300"><Clock3 size={17} /></span><div className="min-w-0"><p className="text-[10px] uppercase tracking-[.14em] text-stone-500">Peak Time</p><p className="mt-1 truncate text-sm font-semibold text-ink">{peakTime || 'No data yet'}</p><p className="mt-0.5 text-[10px] text-stone-500">{peakTime ? `Most active hour · ${data.insights.peak_hour_timezone}` : 'No activity yet'}</p></div></div>
+      <div className="flex items-center gap-3 border-b border-line/80 pb-4 md:border-b-0 md:border-r md:pb-0"><span className="icon-orb h-9 w-9 text-stone-300"><MessagesSquare size={17} /></span><div className="min-w-0"><p className="text-[10px] uppercase tracking-[.14em] text-stone-500">Best Channel</p><p className="mt-1 truncate text-sm font-semibold text-ink">{channelName(data.insights.best_channel)}</p><p className="mt-0.5 text-[10px] text-stone-500">{data.insights.best_channel ? 'Highest conversation volume' : 'No activity yet'}</p></div></div>
+      <div className="flex items-center gap-3 border-b border-line/80 pb-4 md:border-b-0 md:border-r md:pb-0"><span className="icon-orb h-9 w-9 text-stone-300"><Bot size={17} /></span><div className="min-w-0"><p className="text-[10px] uppercase tracking-[.14em] text-stone-500">Most Active Assistant</p><p className="mt-1 truncate text-sm font-semibold text-ink">{mostActiveAssistant || 'No data yet'}</p><p className="mt-0.5 text-[10px] text-stone-500">{mostActiveAssistant ? `${data.insights.most_active_assistant?.conversation_count} conversations` : 'No activity yet'}</p></div></div>
+      <div className="flex items-center gap-3 pb-0"><span className="icon-orb h-9 w-9 text-stone-300"><Sparkles size={17} /></span><div className="min-w-0"><p className="text-[10px] uppercase tracking-[.14em] text-stone-500">Growth</p><p className="mt-1 truncate text-sm font-semibold text-ink">{formatGrowth(data.insights.growth, data.insights.growth_status)}</p><p className="mt-0.5 text-[10px] text-stone-500">vs previous equivalent period</p></div></div></div></section>
   </div>;
 }

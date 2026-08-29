@@ -173,6 +173,6 @@ export interface DashboardOverview {
   recent_conversations: Array<{ id: string; contact_name: string; customer_external_id?: string | null; channel_type: ConversationChannelType; last_message_preview?: string | null; last_activity_at?: string | null }>;
   ai_performance: { response_rate: number | null; average_response_time_ms: number | null; containment_rate: number | null; satisfaction_rate: number | null; };
   top_intents: Array<{ label: string; count: number }>;
-  insights: { peak_hour: string | null; best_channel: string | null; top_assistant: string | null; growth: number | null; };
+  insights: { peak_hour: string | null; peak_hour_timezone: 'UTC'; best_channel: ConversationChannelType | null; most_active_assistant: { id: string; name: string; channel_types: ConversationChannelType[]; conversation_count: number } | null; growth: number | null; growth_status: 'AVAILABLE' | 'INSUFFICIENT_DATA'; };
   conversation_status_distribution: Array<{ status: ConversationStatus; count: number }>;
 }

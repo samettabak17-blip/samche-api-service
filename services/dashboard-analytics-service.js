@@ -65,7 +65,7 @@ export async function getDashboardOverview(query, { tenantId, days = 7, startDat
       FROM conversations c
       JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
       WHERE c.tenant_id = $1 AND c.created_at >= $2::timestamptz AND c.created_at <= $3::timestamptz
-      GROUP BY tc.channel_type ORDER BY count DESC, tc.channel_type`, rangeParams),
+      GROUP BY tc.channel_type ORDER BY count DESC, tc.channel_type ASC`, rangeParams),
     query(`SELECT c.id, c.customer_external_id, c.last_activity_at, tc.channel_type,
         COALESCE(NULLIF(contact.display_name, ''), c.customer_external_id, c.external_conversation_id, 'Customer') AS contact_name,
         latest.content AS last_message_preview
@@ -86,16 +86,16 @@ export async function getDashboardOverview(query, { tenantId, days = 7, startDat
       WHERE l.tenant_id = $1 AND l.created_at >= $2::timestamptz AND l.created_at <= $3::timestamptz
         AND COALESCE(NULLIF(TRIM(l.intent), ''), NULLIF(TRIM(l.service_interest), '')) IS NOT NULL
       GROUP BY label ORDER BY count DESC, label ASC LIMIT 6`, rangeParams),
-    query(`SELECT to_char(date_trunc('hour', m.created_at), 'HH24:00') AS hour, COUNT(*)::int AS count
+    query(`SELECT to_char(date_trunc('hour', timezone('UTC', m.created_at)), 'HH24:00') AS hour, COUNT(*)::int AS count
       FROM conversation_messages m
       WHERE m.tenant_id = $1 AND m.created_at >= $2::timestamptz AND m.created_at <= $3::timestamptz
-      GROUP BY date_trunc('hour', m.created_at) ORDER BY count DESC, hour ASC LIMIT 1`, rangeParams),
-    query(`SELECT a.name, COUNT(c.id)::int AS count
+      GROUP BY date_trunc('hour', timezone('UTC', m.created_at)) ORDER BY count DESC, hour ASC LIMIT 1`, rangeParams),
+    query(`SELECT a.id, a.name, ARRAY_AGG(DISTINCT tc.channel_type ORDER BY tc.channel_type) AS channel_types, COUNT(c.id)::int AS count
       FROM conversations c
       JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
       JOIN ai_assistants a ON a.id = tc.assistant_id AND a.tenant_id = tc.tenant_id
       WHERE c.tenant_id = $1 AND c.created_at >= $2::timestamptz AND c.created_at <= $3::timestamptz
-      GROUP BY a.name ORDER BY count DESC, a.name ASC LIMIT 1`, rangeParams),
+      GROUP BY a.id, a.name ORDER BY count DESC, a.id ASC LIMIT 1`, rangeParams),
     query(`SELECT c.status, COUNT(*)::int AS count
       FROM conversations c
       WHERE c.tenant_id = $1 AND c.created_at >= $2::timestamptz AND c.created_at <= $3::timestamptz
@@ -106,6 +106,9 @@ export async function getDashboardOverview(query, { tenantId, days = 7, startDat
   const previous = number(total.previous_conversations);
   const growth = previous > 0 ? Number((((current - previous) / previous) * 100).toFixed(1)) : null;
   const channelDistribution = channels.rows.map((row) => ({ channel: row.channel, count: number(row.count) }));
+  const mostActiveAssistant = assistant.rows[0]
+    ? { id: assistant.rows[0].id, name: assistant.rows[0].name, channel_types: assistant.rows[0].channel_types ?? [], conversation_count: number(assistant.rows[0].count) }
+    : null;
   return {
     range_days: range.rangeDays,
     range: { start_date: range.startDate, end_date: range.endDate, previous_start_date: range.previousStartDate, previous_end_date: range.previousEndDate },
@@ -124,9 +127,11 @@ export async function getDashboardOverview(query, { tenantId, days = 7, startDat
     top_intents: intents.rows.map((row) => ({ label: row.label, count: number(row.count) })),
     insights: {
       peak_hour: peak.rows[0]?.hour ?? null,
+      peak_hour_timezone: 'UTC',
       best_channel: channelDistribution[0]?.channel ?? null,
-      top_assistant: assistant.rows[0]?.name ?? null,
+      most_active_assistant: mostActiveAssistant,
       growth,
+      growth_status: previous > 0 ? 'AVAILABLE' : 'INSUFFICIENT_DATA',
     },
     conversation_status_distribution: statuses.rows.map((row) => ({ status: row.status, count: number(row.count) })),
   };
