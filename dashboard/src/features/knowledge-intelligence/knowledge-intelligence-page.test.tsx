@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { tenantApi } from '../dashboard/dashboard-api';
 import { useTenant } from '../tenants/tenant-context';
 import { KnowledgeIntelligencePage } from './knowledge-intelligence-page';
+import { ApiError } from '../../lib/api-client';
 
 vi.mock('../dashboard/dashboard-api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../dashboard/dashboard-api')>();
@@ -58,6 +59,26 @@ it('requires a Business Identity and explicit READY source scope before generati
   expect(screen.getByRole('button', { name: 'Analyze selected sources' })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Generate scoped Business Profile' }));
   await waitFor(() => expect(mockedApi.generateBusinessProfile).toHaveBeenCalledWith('tenant-a', 'identity-meridian', ['source-meridian']));
+});
+
+it('shows a clear generating state and a duplicate-safe retry after timeout', async () => {
+  mockedApi.listBusinessIdentities.mockResolvedValue([{ id: 'identity-meridian', display_name: 'Meridian Arc Technologies LLC', normalized_identity: 'meridian arc technologies', status: 'ACTIVE' }]);
+  mockedApi.listKnowledgeSources.mockResolvedValue([{ id: 'source-meridian', title: 'Meridian DOCX', source_type: 'DOCUMENT', processing_status: 'READY', indexing_status: 'READY', enabled: true }]);
+  let rejectGeneration!: (error: unknown) => void;
+  mockedApi.generateBusinessProfile.mockImplementation(() => new Promise((_, reject) => { rejectGeneration = reject; }));
+  renderPage(true, '/app/tenant-a/knowledge-base/profile');
+  await screen.findByRole('option', { name: 'Meridian Arc Technologies LLC' });
+  fireEvent.change(await screen.findByRole('combobox', { name: 'Business Identity' }), { target: { value: 'identity-meridian' } });
+  fireEvent.click(await screen.findByRole('checkbox', { name: 'Meridian DOCX' }));
+  const generate = screen.getByRole('button', { name: 'Generate scoped Business Profile' });
+  await waitFor(() => expect(generate).toBeEnabled());
+  fireEvent.click(generate);
+  await waitFor(() => expect(mockedApi.generateBusinessProfile).toHaveBeenCalledTimes(1));
+  expect(await screen.findByRole('button', { name: 'Generating Business Profile…' })).toBeDisabled();
+  rejectGeneration(new ApiError(503, 'Knowledge generation timed out', { code: 'KNOWLEDGE_GENERATION_TIMEOUT' }));
+  expect(await screen.findByRole('status')).toHaveTextContent('No Business Profile was created');
+  expect(screen.getByRole('button', { name: 'Retry scoped Business Profile' })).toBeEnabled();
+  expect(screen.queryByText(/GEMINI|provider|model/i)).not.toBeInTheDocument();
 });
 
 it('exposes upload and manual source creation with the supported formats', async () => {
