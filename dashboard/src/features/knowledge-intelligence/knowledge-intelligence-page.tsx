@@ -13,6 +13,7 @@ import {
   dashboardButtonClass,
   DashboardButton,
   DashboardCheckbox,
+  DashboardFileInput,
   DashboardTab,
 } from "../../components/ui/dashboard-control";
 import type { Assistant, BusinessIdentityScopeAnalysis } from "../../types/api";
@@ -1103,19 +1104,20 @@ export function KnowledgeIntelligencePage() {
                   className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2"
                 />
               </label>
-              <label className="text-sm font-medium">
-                PDF, DOCX or TXT
-                <input
+              <div className="text-sm font-medium">
+                Source document
+                <DashboardFileInput
                   aria-label="Source file"
-                  required
                   accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
-                  type="file"
+                  className="mt-2"
+                  formatHint="Accepted formats: PDF, DOCX or TXT"
+                  selectedFileName={uploadFile?.name ?? null}
+                  disabled={uploadSource.isPending}
                   onChange={(event) =>
                     setUploadFile(event.target.files?.[0] ?? null)
                   }
-                  className="mt-2 block w-full text-sm"
                 />
-              </label>
+              </div>
               <div className="flex flex-wrap gap-2 sm:col-span-2">
                 <DashboardButton
                   variant="primary"

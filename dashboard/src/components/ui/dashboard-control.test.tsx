@@ -1,7 +1,7 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DashboardButton, DashboardCheckbox, DashboardTab } from './dashboard-control';
+import { DashboardButton, DashboardCheckbox, DashboardFileInput, DashboardTab } from './dashboard-control';
 
 afterEach(cleanup);
 
@@ -41,5 +41,27 @@ describe('Dashboard controls', () => {
     expect(screen.getByRole('button', { name: 'Approve' }).className).toContain('hover:bg-red-700');
     expect(screen.getByRole('button', { name: 'Edit' }).className).toContain('hover:bg-stone-800');
     expect(screen.getByRole('button', { name: 'Reject' }).className).toContain('hover:bg-red-900');
+  });
+
+  it('hides browser-localized file chrome and renders controlled English copy', () => {
+    render(<DashboardFileInput aria-label="Source document" accept=".pdf,.docx,.txt" formatHint="PDF, DOCX or TXT" />);
+    expect(screen.getByRole('button', { name: 'Choose File' })).toBeVisible();
+    expect(screen.getByText('No file selected')).toBeVisible();
+    expect(screen.getByText('PDF, DOCX or TXT')).toBeVisible();
+    expect(screen.getByLabelText('Source document')).toHaveClass('sr-only');
+    expect(screen.queryByText('Dosya Seç')).not.toBeInTheDocument();
+    expect(screen.queryByText('Seçilen dosya yok')).not.toBeInTheDocument();
+  });
+
+  it('shows the selected filename unchanged and controls disabled styling', () => {
+    const { rerender } = render(<DashboardFileInput aria-label="Source document" />);
+    const input = screen.getByLabelText('Source document');
+    const file = new File(['tenant content'], 'müşteri-belgesi.pdf', { type: 'application/pdf' });
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(screen.getByText('müşteri-belgesi.pdf')).toBeVisible();
+    rerender(<DashboardFileInput aria-label="Source document" disabled />);
+    const button = screen.getByRole('button', { name: 'Choose File' });
+    expect(button).toBeDisabled();
+    expect(button.className).toContain('cursor-not-allowed');
   });
 });

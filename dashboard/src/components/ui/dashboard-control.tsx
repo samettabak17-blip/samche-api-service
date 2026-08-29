@@ -1,4 +1,5 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react';
+import { useId, useRef, useState } from 'react';
+import type { ButtonHTMLAttributes, ChangeEvent, InputHTMLAttributes, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 
 type ButtonVariant = 'primary' | 'secondary' | 'destructive' | 'selected';
@@ -28,4 +29,35 @@ export function DashboardCheckbox({ label, className = '', ...props }: Omit<Inpu
     <input type="checkbox" className={`mt-0.5 h-5 w-5 shrink-0 appearance-none rounded-md border border-stone-600 bg-[#0b1624] transition checked:border-signal checked:bg-signal checked:bg-[linear-gradient(135deg,transparent_42%,white_42%,white_52%,transparent_52%),linear-gradient(45deg,transparent_53%,white_53%,white_63%,transparent_63%)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:border-stone-700 disabled:bg-stone-900 ${className}`} {...props} />
     <span>{label}</span>
   </label>;
+}
+
+type DashboardFileInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'className'> & {
+  className?: string;
+  chooseLabel?: string;
+  emptyLabel?: string;
+  selectedFileName?: string | null;
+  formatHint?: string;
+  error?: string | null;
+};
+
+export function DashboardFileInput({ className = '', chooseLabel = 'Choose File', emptyLabel = 'No file selected', selectedFileName, formatHint, error, disabled, onChange, id, ...props }: DashboardFileInputProps) {
+  const generatedId = useId();
+  const inputId = id ?? generatedId;
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [internalFileName, setInternalFileName] = useState<string | null>(null);
+  const visibleFileName = selectedFileName === undefined ? internalFileName : selectedFileName;
+  const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setInternalFileName(event.target.files?.[0]?.name ?? null);
+    onChange?.(event);
+  };
+
+  return <div className={`space-y-2 ${className}`}>
+    <input ref={inputRef} id={inputId} type="file" disabled={disabled} onChange={handleChange} className="sr-only" {...props} />
+    <div className={`flex min-h-11 flex-wrap items-center gap-3 rounded-xl border bg-[#0b1624] p-2 ${error ? 'border-red-500/60' : 'border-line'} ${disabled ? 'text-stone-600' : ''}`}>
+      <DashboardButton type="button" variant="secondary" disabled={disabled} onClick={() => inputRef.current?.click()}>{chooseLabel}</DashboardButton>
+      <span className={`min-w-0 flex-1 truncate text-sm ${visibleFileName ? 'text-stone-200' : 'text-stone-500'}`}>{visibleFileName || emptyLabel}</span>
+    </div>
+    {formatHint && <p className="text-xs text-stone-500">{formatHint}</p>}
+    {error && <p role="alert" className="text-xs text-red-300">{error}</p>}
+  </div>;
 }
