@@ -36,7 +36,7 @@ test('Overview aggregates real PostgreSQL activity by tenant and equivalent peri
     ];
     for (const [id, tenantId, channelId, createdAt] of conversations) {
       await client.query(`INSERT INTO conversations (id, tenant_id, channel_id, external_conversation_id, created_at, updated_at, last_activity_at)
-        VALUES ($1, $2, $3, $1, $4, $4, $4)`, [id, tenantId, channelId, createdAt]);
+        VALUES ($1::uuid, $2, $3, $1::text, $4, $4, $4)`, [id, tenantId, channelId, createdAt]);
       await client.query(`INSERT INTO conversation_messages (tenant_id, conversation_id, sender_type, content, created_at)
         VALUES ($1, $2, 'CUSTOMER', 'analytics fixture', $3)`, [tenantId, id, createdAt]);
     }
