@@ -41,7 +41,13 @@ test('Overview aggregates real PostgreSQL activity by tenant and equivalent peri
         VALUES ($1, $2, 'CUSTOMER', 'analytics fixture', $3)`, [tenantId, id, createdAt]);
     }
 
-    const overview = await getDashboardOverview(client.query.bind(client), {
+    let queryQueue = Promise.resolve();
+    const transactionQuery = (...args) => {
+      const result = queryQueue.then(() => client.query(...args));
+      queryQueue = result.then(() => undefined, () => undefined);
+      return result;
+    };
+    const overview = await getDashboardOverview(transactionQuery, {
       tenantId: tenantA,
       startDate: '2026-08-10',
       endDate: '2026-08-16',
