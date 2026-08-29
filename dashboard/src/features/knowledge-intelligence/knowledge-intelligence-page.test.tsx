@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -152,9 +153,14 @@ it("requires a Business Identity and explicit READY source scope before generati
     },
   ]);
   mockedApi.generateBusinessProfile.mockResolvedValue({
-    id: "profile-a",
-    profile_data: {},
-    status: "NEEDS_REVIEW",
+    profile: {
+      id: "profile-a",
+      profile_data: {},
+      status: "NEEDS_REVIEW",
+      active_version_id: null,
+    },
+    reused: false,
+    run_id: "run-a",
   });
   renderPage(true, "/app/tenant-a/knowledge-base/profile");
   await screen.findByRole("option", { name: "Meridian Arc Technologies LLC" });
@@ -179,6 +185,92 @@ it("requires a Business Identity and explicit READY source scope before generati
       ["source-meridian"],
     ),
   );
+});
+
+it("surfaces a new review-only generation and opens the exact returned version even when refetch fails", async () => {
+  prepareIdentityScope();
+  mockedApi.listBusinessProfiles
+    .mockResolvedValueOnce([])
+    .mockRejectedValueOnce(new Error("refetch failed"));
+  mockedApi.generateBusinessProfile.mockResolvedValue({
+    profile: {
+      id: "12345678-1234-4234-8234-123456789012",
+      profile_data: { company_identity: "Meridian Arc Technologies LLC" },
+      status: "NEEDS_REVIEW",
+      active_version_id: null,
+    },
+    reused: false,
+    run_id: "run-new",
+  });
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: vi.fn(),
+  });
+  renderPage(true, "/app/tenant-a/knowledge-base/profile");
+  await selectMeridianScope();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Generate scoped Business Profile" }),
+  );
+  expect(await screen.findByText("Business Profile generated")).toBeVisible();
+  expect(screen.getAllByText("NEEDS_REVIEW").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("NOT ACTIVE").length).toBeGreaterThan(0);
+  expect(screen.getByText("Version 12345678")).toBeVisible();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Review generated profile" }),
+  );
+  await waitFor(() =>
+    expect(document.activeElement).toHaveAttribute(
+      "data-profile-version-id",
+      "12345678-1234-4234-8234-123456789012",
+    ),
+  );
+});
+
+it("surfaces an exact reused generation result and clears it when scope changes", async () => {
+  prepareIdentityScope();
+  mockedApi.generateBusinessProfile.mockResolvedValue({
+    profile: {
+      id: "87654321-1234-4234-8234-123456789012",
+      profile_data: {},
+      status: "NEEDS_REVIEW",
+      active_version_id: null,
+    },
+    reused: true,
+    run_id: "run-existing",
+  });
+  renderPage(true, "/app/tenant-a/knowledge-base/profile");
+  await selectMeridianScope();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Generate scoped Business Profile" }),
+  );
+  expect(
+    await screen.findByText("Existing exact generation result reused"),
+  ).toBeVisible();
+  expect(screen.getByText("Version 87654321")).toBeVisible();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Nova TXT" }));
+  expect(
+    screen.queryByText("Existing exact generation result reused"),
+  ).not.toBeInTheDocument();
+});
+
+it("keeps a safe generation failure beside the generate panel", async () => {
+  prepareIdentityScope();
+  mockedApi.generateBusinessProfile.mockRejectedValue(
+    new ApiError(503, "Business Profile generation failed", {
+      code: "KNOWLEDGE_PROFILE_GENERATION_FAILED",
+    }),
+  );
+  renderPage(true, "/app/tenant-a/knowledge-base/profile");
+  await selectMeridianScope();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Generate scoped Business Profile" }),
+  );
+  const panel = screen.getByRole("region", {
+    name: "Business Profile source scope",
+  });
+  expect(
+    await within(panel).findByText("Business Profile generation failed"),
+  ).toBeVisible();
 });
 
 it("shows a clear generating state and a duplicate-safe retry after timeout", async () => {

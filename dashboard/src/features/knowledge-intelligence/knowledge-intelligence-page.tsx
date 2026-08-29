@@ -16,7 +16,12 @@ import {
   DashboardFileInput,
   DashboardTab,
 } from "../../components/ui/dashboard-control";
-import type { Assistant, BusinessIdentityScopeAnalysis } from "../../types/api";
+import type {
+  Assistant,
+  BusinessIdentityScopeAnalysis,
+  BusinessProfileGenerationResult,
+  BusinessProfileVersion,
+} from "../../types/api";
 import { tenantApi, tenantKeys } from "../dashboard/dashboard-api";
 import { useTenant } from "../tenants/tenant-context";
 
@@ -203,6 +208,10 @@ export function KnowledgeIntelligencePage() {
     scope: string;
     error: unknown;
   } | null>(null);
+  const [generationResult, setGenerationResult] = useState<{
+    scope: string;
+    result: BusinessProfileGenerationResult;
+  } | null>(null);
   const [configurationProfileVersionId, setConfigurationProfileVersionId] =
     useState("");
   const [editor, setEditor] = useState<{
@@ -302,9 +311,17 @@ export function KnowledgeIntelligencePage() {
         scope.businessIdentityId,
         scope.sourceIds,
       ),
-    onSuccess: () => {
+    onSuccess: (result, scope) => {
       setGenerationFailure(null);
-      queryClient.invalidateQueries({
+      setGenerationResult({ scope: scope.fingerprint, result });
+      queryClient.setQueryData<BusinessProfileVersion[]>(
+        tenantKeys.businessProfiles(tenantId),
+        (current) => [
+          result.profile,
+          ...(current ?? []).filter((profile) => profile.id !== result.profile.id),
+        ],
+      );
+      void queryClient.invalidateQueries({
         queryKey: tenantKeys.businessProfiles(tenantId),
       });
     },
@@ -322,6 +339,7 @@ export function KnowledgeIntelligencePage() {
       setProfileScopeAnalysis(analysis);
       generateProfile.reset();
       setGenerationFailure(null);
+      setGenerationResult(null);
     },
   });
   const createBusinessIdentity = useMutation({
@@ -582,6 +600,10 @@ export function KnowledgeIntelligencePage() {
     generationFailure?.scope === currentProfileScope
       ? generationFailure.error
       : null;
+  const currentGenerationResult =
+    generationResult?.scope === currentProfileScope
+      ? generationResult.result
+      : null;
   const generationErrorBody =
     currentGenerationError instanceof ApiError &&
     currentGenerationError.body &&
@@ -814,6 +836,7 @@ export function KnowledgeIntelligencePage() {
                 onChange={(event) => {
                   generateProfile.reset();
                   setGenerationFailure(null);
+                  setGenerationResult(null);
                   setProfileScopeAnalysis(null);
                   setBusinessIdentityId(event.target.value);
                 }}
@@ -873,6 +896,7 @@ export function KnowledgeIntelligencePage() {
                     onChange={(event) => {
                       generateProfile.reset();
                       setGenerationFailure(null);
+                      setGenerationResult(null);
                       setProfileScopeAnalysis(null);
                       setProfileSourceIds((current) =>
                         event.target.checked
@@ -927,6 +951,64 @@ export function KnowledgeIntelligencePage() {
               retry this exact source scope safely.
             </p>
           )}
+          {currentGenerationResult && (
+            <div
+              role="status"
+              aria-live="polite"
+              id={`generated-profile-result-${currentGenerationResult.profile.id}`}
+              data-profile-version-id={currentGenerationResult.profile.id}
+              tabIndex={-1}
+              className="rounded-lg border border-emerald-700/60 bg-emerald-950/30 p-4 text-sm text-emerald-100"
+            >
+              <strong className="text-emerald-200">
+                {currentGenerationResult.reused
+                  ? "Existing exact generation result reused"
+                  : "Business Profile generated"}
+              </strong>
+              <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold">
+                <span>{currentGenerationResult.profile.status}</span>
+                <span>
+                  {currentGenerationResult.profile.active_version_id ===
+                  currentGenerationResult.profile.id
+                    ? "ACTIVE"
+                    : "NOT ACTIVE"}
+                </span>
+                <span>
+                  Version {currentGenerationResult.profile.id.slice(0, 8)}
+                </span>
+              </div>
+              <DashboardButton
+                className="mt-3"
+                variant="secondary"
+                type="button"
+                onClick={() => {
+                  window.setTimeout(() => {
+                    const target =
+                      document.getElementById(
+                        `business-profile-version-${currentGenerationResult.profile.id}`,
+                      ) ??
+                      document.getElementById(
+                        `generated-profile-result-${currentGenerationResult.profile.id}`,
+                      );
+                    target?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "center",
+                    });
+                    target?.focus();
+                  }, 0);
+                }}
+              >
+                Review generated profile
+              </DashboardButton>
+            </div>
+          )}
+          {Boolean(currentGenerationError) &&
+            !profileGenerationTimedOut &&
+            !identityResolutionFailed && (
+              <div className="rounded-lg border border-red-700/60 bg-red-950/30 p-3">
+                <MutationFeedback error={currentGenerationError} />
+              </div>
+            )}
           {identityResolutionFailed && (
             <div
               role="alert"
@@ -1575,7 +1657,6 @@ export function KnowledgeIntelligencePage() {
         <div className="space-y-4">
           <MutationFeedback
             error={
-              currentGenerationError ??
               createBusinessIdentity.error ??
               profileAction.error ??
               saveProfile.error
@@ -1603,7 +1684,13 @@ export function KnowledgeIntelligencePage() {
           ) : (
             <div className="panel divide-y divide-line">
               {(profiles.data ?? []).map((row) => (
-                <article key={row.id} className="p-5">
+                <article
+                  key={row.id}
+                  id={`business-profile-version-${row.id}`}
+                  data-profile-version-id={row.id}
+                  tabIndex={-1}
+                  className="p-5 focus:outline-none focus:ring-2 focus:ring-brand"
+                >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <strong className="text-sm text-ink">

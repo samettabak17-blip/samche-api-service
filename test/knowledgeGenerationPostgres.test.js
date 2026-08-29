@@ -48,7 +48,7 @@ test('real PostgreSQL persists one atomic scoped profile and reuses exact succes
   try {
     const f = await fixture(pool); const generationProvider = provider();
     const first = await request(pool, f, generationProvider); const retry = await request(pool, f, generationProvider);
-    assert.equal(retry.id, first.id); assert.deepEqual(generationProvider.counts(), { identityCalls: 1, profileCalls: 1 });
+    assert.equal(first.reused, false); assert.equal(retry.reused, true); assert.equal(retry.profile.id, first.profile.id); assert.equal(retry.run_id, first.run_id); assert.deepEqual(generationProvider.counts(), { identityCalls: 1, profileCalls: 1 });
     const evidence = await pool.query(`SELECT status, stage, source_count, prompt_character_count, elapsed_ms, input_provenance, request_fingerprint FROM knowledge_generation_runs WHERE tenant_id=$1 ORDER BY created_at`, [f.tenantId]);
     assert.equal(evidence.rowCount, 1); assert.equal(evidence.rows[0].status, 'SUCCEEDED'); assert.equal(evidence.rows[0].stage, 'PERSISTENCE');
     assert.equal(evidence.rows[0].source_count, 1); assert.ok(evidence.rows[0].prompt_character_count > 0); assert.ok(evidence.rows[0].elapsed_ms >= 0);
@@ -64,7 +64,7 @@ test('real PostgreSQL serializes parallel exact requests without duplicate versi
     const f = await fixture(pool); let release; const barrier = new Promise((resolve) => { release = resolve; });
     const generationProvider = provider({ delayProfile: () => barrier });
     const first = request(pool, f, generationProvider); await new Promise((resolve) => setTimeout(resolve, 100)); const second = request(pool, f, generationProvider); release();
-    const [a, b] = await Promise.all([first, second]); assert.equal(a.id, b.id); assert.equal(generationProvider.counts().profileCalls, 1);
+    const [a, b] = await Promise.all([first, second]); assert.equal(a.profile.id, b.profile.id); assert.equal(Number(a.reused) + Number(b.reused), 1); assert.equal(generationProvider.counts().profileCalls, 1);
     const versions = await pool.query(`SELECT count(*)::integer AS count FROM business_profile_versions WHERE tenant_id=$1`, [f.tenantId]); assert.equal(versions.rows[0].count, 1);
   } finally { await pool.end(); }
 });
@@ -81,7 +81,7 @@ test('real PostgreSQL classifies identity and profile timeouts without partial a
     let artifacts = await pool.query(`SELECT count(*)::integer AS count FROM business_profile_versions WHERE tenant_id=$1`, [profileFixture.tenantId]); assert.equal(artifacts.rows[0].count, 0);
     run = await pool.query(`SELECT status, stage, error_code FROM knowledge_generation_runs WHERE tenant_id=$1 ORDER BY created_at`, [profileFixture.tenantId]);
     assert.deepEqual(run.rows[0], { status: 'FAILED', stage: 'PROFILE_GENERATION', error_code: 'KNOWLEDGE_GENERATION_TIMEOUT' });
-    const recovered = await request(pool, profileFixture, retryProvider); assert.equal(recovered.status, 'NEEDS_REVIEW');
+    const recovered = await request(pool, profileFixture, retryProvider); assert.equal(recovered.profile.status, 'NEEDS_REVIEW'); assert.equal(recovered.reused, false);
     artifacts = await pool.query(`SELECT count(*)::integer AS count FROM business_profile_versions WHERE tenant_id=$1`, [profileFixture.tenantId]); assert.equal(artifacts.rows[0].count, 1);
   } finally { await pool.end(); }
 });

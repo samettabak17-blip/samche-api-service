@@ -118,9 +118,14 @@ async function withGenerationFingerprintLock(database, fingerprint, operation) {
 
 async function existingSuccessfulProfile({ database, tenantId, fingerprint }) {
   const result = await database.query(
-    `SELECT version.id, version.profile_id, version.status, version.created_at
+    `SELECT version.id, version.profile_id, version.schema_version, version.profile_data,
+            version.evidence, version.source_scope, version.status, version.identity_resolution_status,
+            version.created_at, profile.business_identity_id, identity.display_name AS business_identity_name,
+            profile.active_version_id, run.id AS run_id
        FROM knowledge_generation_runs run
        JOIN business_profile_versions version ON version.id = run.target_id AND version.tenant_id = run.tenant_id
+       JOIN business_profiles profile ON profile.id = version.profile_id AND profile.tenant_id = version.tenant_id
+       LEFT JOIN business_identities identity ON identity.id = profile.business_identity_id AND identity.tenant_id = profile.tenant_id
       WHERE run.tenant_id = $1 AND run.target_type = 'BUSINESS_PROFILE'
         AND run.request_fingerprint = $2 AND run.status = 'SUCCEEDED'
       LIMIT 1`,
@@ -145,7 +150,10 @@ export async function generateBusinessProfileVersion({ database, provider, tenan
   const fingerprint = requestFingerprint({ tenantId, businessIdentityId, sources: baseScope.sources, provider });
   return withGenerationFingerprintLock(database, fingerprint, async (generationDatabase) => {
     const successful = await existingSuccessfulProfile({ database: generationDatabase, tenantId, fingerprint });
-    if (successful) return successful;
+    if (successful) {
+      const { run_id: runId, ...profile } = successful;
+      return { profile, reused: true, run_id: runId };
+    }
     const active = await generationDatabase.query(
       `SELECT id FROM knowledge_generation_runs
         WHERE tenant_id = $1 AND target_type = 'BUSINESS_PROFILE' AND request_fingerprint = $2 AND status = 'RUNNING'
@@ -187,7 +195,7 @@ export async function generateBusinessProfileVersion({ database, provider, tenan
     const profile = await generationDatabase.query(
     `INSERT INTO business_profiles (tenant_id, business_identity_id) VALUES ($1, $2)
        ON CONFLICT (tenant_id, business_identity_id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
-       RETURNING id`,
+       RETURNING id, active_version_id`,
       [tenantId, businessIdentityId],
     );
     for (const sourceId of sourceIds) {
@@ -198,12 +206,22 @@ export async function generateBusinessProfileVersion({ database, provider, tenan
       `INSERT INTO business_profile_versions
          (profile_id, tenant_id, profile_data, evidence, generation_run_id, schema_version, identity_resolution_status, source_scope, generated_by, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'AI', 'NEEDS_REVIEW')
-       RETURNING id, profile_id, status, created_at`,
+       RETURNING id, profile_id, schema_version, profile_data, evidence, source_scope,
+                 status, identity_resolution_status, created_at`,
       [profile.rows[0].id, tenantId, profileData, provenance, run.id, BUSINESS_PROFILE_SCHEMA_VERSION, 'RESOLVED', { business_identity_id: businessIdentityId, source_ids: sourceIds }],
     );
     await completeKnowledgeGenerationRun({ database: generationDatabase, tenantId, runId: run.id, targetId: version.rows[0].id, output: profileData, elapsedMs: Date.now() - startedAt });
     await generationDatabase.query('COMMIT');
-    return version.rows[0];
+    return {
+      profile: {
+        ...version.rows[0],
+        business_identity_id: businessIdentityId,
+        business_identity_name: baseScope.business_identity.display_name,
+        active_version_id: profile.rows[0].active_version_id,
+      },
+      reused: false,
+      run_id: run.id,
+    };
     } catch (persistenceError) {
       await generationDatabase.query('ROLLBACK').catch(() => {});
       throw persistenceError;

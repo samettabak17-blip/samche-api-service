@@ -511,7 +511,7 @@ router.post('/:tenantId/knowledge-intelligence/profiles/generate', requireTenant
   const tenantId = tenant(req, res);
   if (!tenantId) return;
   try {
-    const profile = await generateBusinessProfileVersion({
+    const result = await generateBusinessProfileVersion({
       database: pool,
       provider: createKnowledgeGenerationProvider(),
       tenantId,
@@ -519,7 +519,7 @@ router.post('/:tenantId/knowledge-intelligence/profiles/generate', requireTenant
       businessIdentityId: req.body?.business_identity_id,
       sourceIds: req.body?.source_ids,
     });
-    return res.status(201).json({ profile });
+    return res.status(result.reused ? 200 : 201).json(result);
   } catch (error) {
     return safeError(res, error);
   }

@@ -27,10 +27,13 @@ test('generates a review-only Business Profile from an explicit resolved source 
 
   const businessIdentityId = '55555555-5555-4555-8555-555555555555';
   const sourceIds = ['11111111-1111-4111-8111-111111111111'];
-  const version = await generateBusinessProfileVersion({ database, provider, tenantId, requestedBy: actorId, businessIdentityId, sourceIds });
+  const result = await generateBusinessProfileVersion({ database, provider, tenantId, requestedBy: actorId, businessIdentityId, sourceIds });
   assert.match(calls.find(({ sql }) => /FROM knowledge_base_documents/.test(sql)).sql, /ANY\(\$2::uuid\[\]\)/);
 
-  assert.equal(version.status, 'NEEDS_REVIEW');
+  assert.equal(result.reused, false);
+  assert.equal(result.run_id, '22222222-2222-4222-8222-222222222222');
+  assert.equal(result.profile.status, 'NEEDS_REVIEW');
+  assert.notEqual(result.profile.active_version_id, result.profile.id);
   assert.match(prompts[0], /Approved company facts/);
   assert.match(prompts[0], /current tenant approved knowledge only/i);
   assert.match(prompts[0], /Never use SamChe.*as a default/i);
@@ -41,6 +44,23 @@ test('generates a review-only Business Profile from an explicit resolved source 
   assert.equal(insert.params[5], 2);
   assert.equal(insert.params[6], 'RESOLVED');
   assert.deepEqual(insert.params[7].source_ids, sourceIds);
+});
+
+test('returns the exact successful generation as a reused result with its run id', async () => {
+  const database = { query: async (sql) => {
+    if (/FROM business_identities/i.test(sql)) return { rows: [{ id: '55555555-5555-4555-8555-555555555555', display_name: 'Meridian Arc Technologies LLC', normalized_identity: 'meridian arc technologies' }] };
+    if (/FROM knowledge_base_documents/i.test(sql)) return { rows: [{ id: '11111111-1111-4111-8111-111111111111', title: 'Company', content: 'Approved company facts', content_hash: 'a'.repeat(64) }] };
+    if (/FROM knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '44444444-4444-4444-8444-444444444444', profile_id: '33333333-3333-4333-8333-333333333333', status: 'NEEDS_REVIEW', active_version_id: null, created_at: '2026-08-29T00:00:00.000Z', run_id: '22222222-2222-4222-8222-222222222222' }] };
+    assert.fail(`unexpected SQL ${sql}`);
+  } };
+  const provider = { provider: 'GEMINI', model: 'gemini-3-flash-preview', generateBusinessIdentityAnalysis: async () => assert.fail('must reuse'), generateBusinessProfile: async () => assert.fail('must reuse') };
+  const result = await generateBusinessProfileVersion({ database, provider, tenantId, requestedBy: actorId, businessIdentityId: '55555555-5555-4555-8555-555555555555', sourceIds: ['11111111-1111-4111-8111-111111111111'] });
+  assert.equal(result.reused, true);
+  assert.equal(result.run_id, '22222222-2222-4222-8222-222222222222');
+  assert.equal(result.profile.id, '44444444-4444-4444-8444-444444444444');
+  assert.equal(result.profile.status, 'NEEDS_REVIEW');
+  assert.equal(result.profile.active_version_id, null);
+  assert.equal(result.profile.run_id, undefined);
 });
 
 test('rejects cross-tenant or ineligible selected source sets before provider generation', async () => {
