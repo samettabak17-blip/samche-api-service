@@ -18,8 +18,12 @@ describe('Dashboard controls', () => {
   it('distinguishes inactive, active, and disabled tabs', () => {
     render(<MemoryRouter><DashboardTab to="/one">Inactive</DashboardTab><DashboardTab to="/two" active>Active</DashboardTab><DashboardTab to="/three" disabled>Disabled</DashboardTab></MemoryRouter>);
     expect(screen.getByRole('link', { name: 'Inactive' }).className).toContain('bg-elevated');
+    expect(screen.getByRole('link', { name: 'Inactive' }).className).not.toContain('hover:bg-white');
     expect(screen.getByRole('link', { name: 'Active' }).className).toContain('bg-signal');
+    expect(screen.getByRole('link', { name: 'Active' }).className).toContain('hover:bg-signal');
+    expect(screen.getByRole('link', { name: 'Active' }).className).toContain('hover:text-white');
     expect(screen.getByText('Disabled')).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByText('Disabled').className).toContain('cursor-not-allowed');
+    expect(screen.getByText('Disabled').className).not.toMatch(/(?:^|\s)hover:/);
   });
 });
