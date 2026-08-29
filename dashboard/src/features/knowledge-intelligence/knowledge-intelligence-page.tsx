@@ -12,6 +12,7 @@ import { ApiError } from "../../lib/api-client";
 import {
   dashboardButtonClass,
   DashboardButton,
+  DashboardCheckbox,
   DashboardTab,
 } from "../../components/ui/dashboard-control";
 import type { Assistant, BusinessIdentityScopeAnalysis } from "../../types/api";
@@ -114,6 +115,8 @@ const tabForRoute: Record<string, string> = Object.fromEntries(
   Object.entries(routeForTab).map(([tab, route]) => [route, tab]),
 );
 const actionClass = dashboardButtonClass("secondary");
+const primaryActionClass = dashboardButtonClass("primary");
+const destructiveActionClass = dashboardButtonClass("destructive");
 
 function Cards({
   items,
@@ -636,9 +639,9 @@ export function KnowledgeIntelligencePage() {
               require a narrower source scope.
             </p>
           </div>
-          <button
+          <DashboardButton
+            variant="primary"
             type="button"
-            className={actionClass}
             disabled={
               !businessIdentityId ||
               !profileSourceIds.length ||
@@ -649,7 +652,7 @@ export function KnowledgeIntelligencePage() {
             {analyzeProfileScope.isPending
               ? "Analyzing…"
               : "Analyze selected sources"}
-          </button>
+          </DashboardButton>
           {profileScopeAnalysis && (
             <div
               role="status"
@@ -859,12 +862,11 @@ export function KnowledgeIntelligencePage() {
             </legend>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               {eligibleProfileSources.map((source) => (
-                <label
+                <div
                   key={source.id}
-                  className="flex items-start gap-3 rounded-lg border border-line bg-elevated p-3 text-sm text-stone-200"
+                  className="rounded-lg border border-line bg-elevated p-3"
                 >
-                  <input
-                    type="checkbox"
+                  <DashboardCheckbox
                     aria-label={source.title}
                     checked={profileSourceIds.includes(source.id)}
                     onChange={(event) => {
@@ -877,14 +879,14 @@ export function KnowledgeIntelligencePage() {
                           : current.filter((id) => id !== source.id),
                       );
                     }}
-                  />
-                  <span>
+                    label={<span>
                     <strong>{source.title}</strong>
                     <span className="block text-xs text-stone-400">
                       READY · Index READY
                     </span>
-                  </span>
-                </label>
+                  </span>}
+                  />
+                </div>
               ))}
             </div>
             {!eligibleProfileSources.length && (
@@ -1032,13 +1034,13 @@ export function KnowledgeIntelligencePage() {
             <div className="panel p-5">
               <div className="flex flex-wrap gap-2">
                 <button
-                  className={actionClass}
+                  className={primaryActionClass}
                   onClick={() => setSourceMode("upload")}
                 >
                   Upload source
                 </button>
                 <button
-                  className={actionClass}
+                  className={primaryActionClass}
                   onClick={() => setSourceMode("manual")}
                 >
                   Add manual knowledge
@@ -1075,13 +1077,13 @@ export function KnowledgeIntelligencePage() {
                 </select>
               </label>
               {assistantSelect}
-              <button
+              <DashboardButton
+                variant="primary"
                 type="submit"
                 disabled={!sourceId || !assistantId || assignSource.isPending}
-                className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
               >
                 {assignSource.isPending ? "Assigning…" : "Assign source"}
-              </button>
+              </DashboardButton>
             </form>
           )}
           {sourceMode === "upload" && (
@@ -1115,13 +1117,13 @@ export function KnowledgeIntelligencePage() {
                 />
               </label>
               <div className="flex flex-wrap gap-2 sm:col-span-2">
-                <button
+                <DashboardButton
+                  variant="primary"
                   type="submit"
                   disabled={!uploadFile || uploadSource.isPending}
-                  className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 >
                   {uploadSource.isPending ? "Uploading…" : "Upload"}
-                </button>
+                </DashboardButton>
                 <button
                   type="button"
                   className={actionClass}
@@ -1307,7 +1309,7 @@ export function KnowledgeIntelligencePage() {
                                     Re-index
                                   </button>
                                   <button
-                                    className={actionClass}
+                                    className={destructiveActionClass}
                                     onClick={() => archiveSource.mutate()}
                                   >
                                     Archive
@@ -1323,17 +1325,17 @@ export function KnowledgeIntelligencePage() {
                               className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end"
                             >
                               {assistantSelect}
-                              <button
+                              <DashboardButton
+                                variant="primary"
                                 type="submit"
                                 disabled={
                                   !assistantId || assignSource.isPending
                                 }
-                                className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                               >
                                 {assignSource.isPending
                                   ? "Assigning…"
                                   : "Assign / re-assign"}
-                              </button>
+                              </DashboardButton>
                             </form>
                           </>
                         )
@@ -1422,14 +1424,14 @@ export function KnowledgeIntelligencePage() {
                         <div className="mt-4 flex gap-2">
                           <button
                             aria-label="Approve candidate"
-                            className={actionClass}
+                            className={primaryActionClass}
                             onClick={() => candidateAction.mutate("approve")}
                           >
                             Approve
                           </button>
                           <button
                             aria-label="Reject candidate"
-                            className={actionClass}
+                            className={destructiveActionClass}
                             onClick={() => candidateAction.mutate("reject")}
                           >
                             Reject
@@ -1523,7 +1525,7 @@ export function KnowledgeIntelligencePage() {
                           disabled={
                             !gapDraft.title.trim() || !gapDraft.content.trim()
                           }
-                          className={actionClass}
+                          className={primaryActionClass}
                           onClick={() => createGapCandidate.mutate()}
                         >
                           Create suggested candidate
@@ -1663,7 +1665,7 @@ export function KnowledgeIntelligencePage() {
                               Edit
                             </button>
                             <button
-                              className={actionClass}
+                              className={primaryActionClass}
                               disabled={
                                 row.identity_resolution_status ===
                                 "IDENTITY_RESOLUTION_REQUIRED"
@@ -1678,7 +1680,7 @@ export function KnowledgeIntelligencePage() {
                               Approve
                             </button>
                             <button
-                              className={actionClass}
+                              className={destructiveActionClass}
                               onClick={() =>
                                 profileAction.mutate({
                                   id: row.id,
@@ -1693,7 +1695,7 @@ export function KnowledgeIntelligencePage() {
                         {row.status === "APPROVED" &&
                           row.active_version_id !== row.id && (
                             <button
-                              className={actionClass}
+                              className={row.superseded_by_version_id ? actionClass : primaryActionClass}
                               disabled={
                                 row.identity_resolution_status ===
                                 "IDENTITY_RESOLUTION_REQUIRED"
@@ -1748,7 +1750,7 @@ export function KnowledgeIntelligencePage() {
             </label>
             {assistantId && canManage && (
               <button
-                className={actionClass}
+                className={primaryActionClass}
                 disabled={
                   !configurationProfileVersionId ||
                   generateRecommendation.isPending
@@ -1801,7 +1803,7 @@ export function KnowledgeIntelligencePage() {
                             {row.status === "NEEDS_REVIEW" && (
                               <>
                                 <button
-                                  className={actionClass}
+                                  className={primaryActionClass}
                                   onClick={() =>
                                     recommendationAction.mutate({
                                       id: row.id,
@@ -1812,7 +1814,7 @@ export function KnowledgeIntelligencePage() {
                                   Approve
                                 </button>
                                 <button
-                                  className={actionClass}
+                                  className={destructiveActionClass}
                                   onClick={() =>
                                     recommendationAction.mutate({
                                       id: row.id,
@@ -1826,7 +1828,7 @@ export function KnowledgeIntelligencePage() {
                             )}
                             {row.status === "APPROVED" && (
                               <button
-                                className={actionClass}
+                                className={primaryActionClass}
                                 onClick={() =>
                                   generateConfiguration.mutate(row.id)
                                 }
@@ -1891,7 +1893,7 @@ export function KnowledgeIntelligencePage() {
                                   Edit
                                 </button>
                                 <button
-                                  className={actionClass}
+                                  className={primaryActionClass}
                                   onClick={() =>
                                     configurationAction.mutate({
                                       id: row.id,
@@ -1902,7 +1904,7 @@ export function KnowledgeIntelligencePage() {
                                   Approve
                                 </button>
                                 <button
-                                  className={actionClass}
+                                  className={destructiveActionClass}
                                   onClick={() =>
                                     configurationAction.mutate({
                                       id: row.id,
@@ -1916,7 +1918,7 @@ export function KnowledgeIntelligencePage() {
                             )}
                             {row.status === "APPROVED" && (
                               <button
-                                className={actionClass}
+                                className={primaryActionClass}
                                 onClick={() =>
                                   configurationAction.mutate({
                                     id: row.id,

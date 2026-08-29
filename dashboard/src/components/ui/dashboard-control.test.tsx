@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DashboardButton, DashboardTab } from './dashboard-control';
+import { DashboardButton, DashboardCheckbox, DashboardTab } from './dashboard-control';
 
 afterEach(cleanup);
 
@@ -25,5 +25,21 @@ describe('Dashboard controls', () => {
     expect(screen.getByText('Disabled')).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByText('Disabled').className).toContain('cursor-not-allowed');
     expect(screen.getByText('Disabled').className).not.toMatch(/(?:^|\s)hover:/);
+  });
+
+  it('renders an accessible custom checkbox with distinct checked and focus states', () => {
+    render(<DashboardCheckbox label="Meridian DOCX" checked onChange={() => undefined} />);
+    const checkbox = screen.getByRole('checkbox', { name: 'Meridian DOCX' });
+    expect(checkbox).toBeChecked();
+    expect(checkbox.className).toContain('appearance-none');
+    expect(checkbox.className).toContain('checked:bg-signal');
+    expect(checkbox.className).toContain('focus-visible:ring-2');
+  });
+
+  it('keeps primary, secondary and destructive hover semantics distinct', () => {
+    render(<><DashboardButton variant="primary">Approve</DashboardButton><DashboardButton variant="secondary">Edit</DashboardButton><DashboardButton variant="destructive">Reject</DashboardButton></>);
+    expect(screen.getByRole('button', { name: 'Approve' }).className).toContain('hover:bg-red-700');
+    expect(screen.getByRole('button', { name: 'Edit' }).className).toContain('hover:bg-stone-800');
+    expect(screen.getByRole('button', { name: 'Reject' }).className).toContain('hover:bg-red-900');
   });
 });
