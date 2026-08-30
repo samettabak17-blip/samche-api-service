@@ -95,7 +95,7 @@ test('Gemini generation uses deterministic JSON mode and the requested response 
 test('Recommendation response schema mirrors canonical validator constraints', () => {
   const schema = buildRecommendationResponseSchema();
   assert.equal(schema.type, 'OBJECT');
-  assert.deepEqual(schema.properties.schema_version, { type: 'INTEGER', enum: [2] });
+  assert.deepEqual(schema.properties.schema_version, { type: 'INTEGER' });
   const stringBranch = schema.properties.tone.anyOf.find((entry) => entry.type === 'STRING');
   const arrayBranch = schema.properties.tone.anyOf.find((entry) => entry.type === 'ARRAY');
   assert.deepEqual(stringBranch, { type: 'STRING' });

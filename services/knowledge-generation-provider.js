@@ -85,7 +85,6 @@ function responseSchema(fields) {
 
 export function buildRecommendationResponseSchema() {
   const schema = responseSchema(ASSISTANT_RECOMMENDATION_FIELDS);
-  schema.properties.schema_version = { type: 'INTEGER', enum: [2] };
   return schema;
 }
 
