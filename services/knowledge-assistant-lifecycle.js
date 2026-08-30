@@ -111,7 +111,7 @@ export async function generateAssistantRecommendation({ database, provider, tena
     `Assistant display name: ${context.rows[0].assistant_name}`,
     `ACTIVE factual Business Profile: ${JSON.stringify(context.rows[0].profile_data)}`,
   ].join('\n');
-  const fingerprint = requestFingerprint({ tenant_id: tenantId, assistant_id: assistantId, active_profile_version_id: businessProfileVersionId, business_identity_id: provenance.business_identity_id, source_scope: provenance.source_scope, source_hashes: sourceHashes, schema_version: SCHEMA_VERSION, provider: provider.provider, model: provider.model });
+  const fingerprint = requestFingerprint({ tenant_id: tenantId, assistant_id: assistantId, active_profile_version_id: businessProfileVersionId, business_identity_id: provenance.business_identity_id, source_scope: provenance.source_scope, source_hashes: sourceHashes, schema_version: SCHEMA_VERSION, provider: provider.provider, model: provider.model, generation_policy: provider.assistantGenerationPolicy ?? null });
   const generated = await generate({ database, provider, tenantId, requestedBy, targetType: 'RECOMMENDATION', prompt, provenance, fingerprint, generationStage: 'RECOMMENDATION_GENERATION', sourceCount: provenance.source_scope?.source_ids?.length ?? 0, persist: async (generationDatabase, output, runId) => {
     const result = await generationDatabase.query(`INSERT INTO assistant_knowledge_recommendations
       (tenant_id, assistant_id, recommendation_data, evidence, generation_run_id, schema_version, status)
@@ -141,7 +141,7 @@ export async function generateAssistantConfigurationVersion({ database, provider
     `ACTIVE factual profile: ${JSON.stringify(context.rows[0].profile_data)}`,
     `APPROVED AI recommendation: ${JSON.stringify(context.rows[0].recommendation_data)}`,
   ].join('\n');
-  const fingerprint = requestFingerprint({ tenant_id: tenantId, assistant_id: assistantId, active_profile_version_id: context.rows[0].profile_version_id, business_identity_id: provenance.business_identity_id, source_scope: provenance.source_scope, source_hashes: sourceHashes, recommendation_id: recommendationId, schema_version: SCHEMA_VERSION, provider: provider.provider, model: provider.model });
+  const fingerprint = requestFingerprint({ tenant_id: tenantId, assistant_id: assistantId, active_profile_version_id: context.rows[0].profile_version_id, business_identity_id: provenance.business_identity_id, source_scope: provenance.source_scope, source_hashes: sourceHashes, recommendation_id: recommendationId, schema_version: SCHEMA_VERSION, provider: provider.provider, model: provider.model, generation_policy: provider.assistantGenerationPolicy ?? null });
   const generated = await generate({ database, provider, tenantId, requestedBy, targetType: 'ASSISTANT_CONFIGURATION', prompt, provenance, fingerprint, generationStage: 'CONFIGURATION_GENERATION', sourceCount: provenance.source_scope?.source_ids?.length ?? 0, persist: async (generationDatabase, output, runId) => {
     const result = await generationDatabase.query(`INSERT INTO assistant_configuration_versions
       (tenant_id, assistant_id, configuration_data, source_profile_version_id, source_recommendation_id, generation_run_id, schema_version, generated_by, status)

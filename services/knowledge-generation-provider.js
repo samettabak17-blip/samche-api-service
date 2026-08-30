@@ -123,7 +123,7 @@ function timeoutSignal(timeoutMs) {
 export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl = globalThis.fetch, openaiClient = null } = {}) {
   const config = getKnowledgeGenerationConfig(env);
 
-  async function generate({ prompt, fields, validate }) {
+  async function generate({ prompt, fields, validate, thinkingLevel = null }) {
     if (typeof prompt !== 'string' || !prompt.trim()) {
       throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_INPUT_REQUIRED', 'Knowledge generation input is required');
     }
@@ -146,6 +146,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
                 temperature: 0,
                 responseMimeType: 'application/json',
                 responseSchema: responseSchema(fields),
+                ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
               },
             }),
           },
@@ -180,6 +181,10 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
   return Object.freeze({
     provider: config.provider,
     model: config.model,
+    timeoutMs: config.timeoutMs,
+    assistantGenerationPolicy: config.provider === 'GEMINI'
+      ? 'gemini-structured-v2:thinking-low'
+      : 'openai-structured-v2',
     generateBusinessProfile: ({ prompt }) => generate({ prompt, fields: BUSINESS_PROFILE_FIELDS, validate: validateBusinessProfileOutput }),
     generateBusinessIdentityAnalysis: ({ source }) => generate({
       prompt: [
@@ -190,7 +195,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
       fields: BUSINESS_IDENTITY_ANALYSIS_FIELDS,
       validate: (value) => validateOutput(value, BUSINESS_IDENTITY_ANALYSIS_FIELDS),
     }),
-    generateAssistantRecommendation: ({ prompt }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput }),
-    generateAssistantConfiguration: ({ prompt }) => generate({ prompt, fields: ASSISTANT_CONFIGURATION_FIELDS, validate: validateAssistantConfigurationOutput }),
+    generateAssistantRecommendation: ({ prompt }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null }),
+    generateAssistantConfiguration: ({ prompt }) => generate({ prompt, fields: ASSISTANT_CONFIGURATION_FIELDS, validate: validateAssistantConfigurationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null }),
   });
 }
