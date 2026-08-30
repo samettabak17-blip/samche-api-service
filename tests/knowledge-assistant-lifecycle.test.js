@@ -45,6 +45,7 @@ test('generates an assistant-scoped review recommendation from the active approv
   assert.equal(insert.params[2].schema_version, 2);
   assert.match(insert.params[2].captured_prompt, /current tenant/i);
   assert.match(insert.params[2].captured_prompt, /Never use SamChe.*as a default/i);
+  assert.match(insert.params[2].captured_prompt, /Return only 1 to 4 directly supported recommendation fields; omit every unsupported field/i);
   assert.equal(insert.params[5], 2);
   assert.equal(insert.params[3].business_identity_id, '55555555-5555-4555-8555-555555555555');
   assert.deepEqual(insert.params[3].source_scope.source_ids, ['source-meridian']);

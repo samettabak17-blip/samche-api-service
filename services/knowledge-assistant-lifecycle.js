@@ -105,7 +105,7 @@ export async function generateAssistantRecommendation({ database, provider, tena
   const sourceHashes = context.rows[0].evidence?.source_hashes ?? context.rows[0].evidence?.sources ?? [];
   provenance.source_hashes = sourceHashes;
   const prompt = [
-    'Create an AI recommendation with schema_version 2 for the current tenant Assistant using only the ACTIVE factual Business Profile below.',
+      'Create a concise AI recommendation with schema_version 2 for the current tenant Assistant using only the ACTIVE factual Business Profile below. Return only 1 to 4 directly supported recommendation fields; omit every unsupported field.',
     'Never use SamChe or another tenant as a default. Do not import another tenant identity, service, price, geography, or behavior.',
     'Recommendations are proposals, not source-derived facts. Mark unsupported behavior in evidence_gaps instead of inventing policy.',
     `Assistant display name: ${context.rows[0].assistant_name}`,
