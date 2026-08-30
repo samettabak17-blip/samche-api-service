@@ -21,6 +21,8 @@ import type {
   BusinessIdentityScopeAnalysis,
   BusinessProfileGenerationResult,
   BusinessProfileVersion,
+  ConfigurationGenerationResult,
+  RecommendationGenerationResult,
 } from "../../types/api";
 import { tenantApi, tenantKeys } from "../dashboard/dashboard-api";
 import { useTenant } from "../tenants/tenant-context";
@@ -214,6 +216,14 @@ export function KnowledgeIntelligencePage() {
   } | null>(null);
   const [configurationProfileVersionId, setConfigurationProfileVersionId] =
     useState("");
+  const [recommendationTerminal, setRecommendationTerminal] = useState<{
+    scope: string;
+    result: RecommendationGenerationResult;
+  } | null>(null);
+  const [configurationTerminal, setConfigurationTerminal] = useState<{
+    scope: string;
+    result: ConfigurationGenerationResult;
+  } | null>(null);
   const [editor, setEditor] = useState<{
     kind: "profile" | "configuration";
     id: string;
@@ -519,10 +529,18 @@ export function KnowledgeIntelligencePage() {
         assistantId,
         configurationProfileVersionId,
       ),
-    onSuccess: () =>
-      queryClient.invalidateQueries({
+    onSuccess: (result) => {
+      const scope = `${assistantId}:${configurationProfileVersionId}`;
+      setRecommendationTerminal({ scope, result });
+      queryClient.setQueryData(
+        tenantKeys.knowledgeRecommendations(tenantId, assistantId),
+        (current: typeof recommendations.data) =>
+          [result.recommendation, ...(current ?? []).filter((row) => row.id !== result.recommendation.id)],
+      );
+      void queryClient.invalidateQueries({
         queryKey: tenantKeys.knowledgeRecommendations(tenantId, assistantId),
-      }),
+      });
+    },
   });
   const generateConfiguration = useMutation({
     mutationFn: (recommendationId: string) =>
@@ -531,7 +549,16 @@ export function KnowledgeIntelligencePage() {
         assistantId,
         recommendationId,
       ),
-    onSuccess: refreshConfigurations,
+    onSuccess: (result, recommendationId) => {
+      const scope = `${assistantId}:${recommendationId}`;
+      setConfigurationTerminal({ scope, result });
+      queryClient.setQueryData(
+        tenantKeys.assistantConfigurations(tenantId, assistantId),
+        (current: typeof configurations.data) =>
+          [result.configuration, ...(current ?? []).filter((row) => row.id !== result.configuration.id)],
+      );
+      void refreshConfigurations();
+    },
   });
   const configurationAction = useMutation({
     mutationFn: ({
@@ -1851,6 +1878,31 @@ export function KnowledgeIntelligencePage() {
                   : "Generate recommendation"}
               </button>
             )}
+            <MutationFeedback error={generateRecommendation.error} />
+            {recommendationTerminal?.scope ===
+              `${assistantId}:${configurationProfileVersionId}` && (
+              <div className="rounded-lg border border-emerald-500/40 bg-emerald-950/30 p-3 text-sm text-ink" role="status">
+                <strong>
+                  {recommendationTerminal.result.reused
+                    ? "Existing exact recommendation reused"
+                    : "Assistant Recommendation generated"}
+                </strong>
+                <p className="mt-1">
+                  Recommendation {recommendationTerminal.result.recommendation.id.slice(0, 8)} · {recommendationTerminal.result.recommendation.status} · NOT ACTIVE
+                </p>
+                <DashboardButton
+                  variant="secondary"
+                  className="mt-2"
+                  onClick={() =>
+                    document
+                      .getElementById(`recommendation-${recommendationTerminal.result.recommendation.id}`)
+                      ?.scrollIntoView({ behavior: "smooth", block: "center" })
+                  }
+                >
+                  Review recommendation
+                </DashboardButton>
+              </div>
+            )}
           </div>
           <MutationFeedback
             error={
@@ -1880,7 +1932,7 @@ export function KnowledgeIntelligencePage() {
                 ) : (
                   <div className="panel divide-y divide-line">
                     {(recommendations.data ?? []).map((row) => (
-                      <article key={row.id} className="p-4">
+                      <article id={`recommendation-${row.id}`} key={row.id} className="p-4">
                         <strong className="text-sm">
                           Recommendation {row.id.slice(0, 8)}
                         </strong>
@@ -1925,6 +1977,33 @@ export function KnowledgeIntelligencePage() {
                                 Generate configuration
                               </button>
                             )}
+                            {configurationTerminal?.scope ===
+                              `${assistantId}:${row.id}` && (
+                              <div className="w-full rounded-lg border border-emerald-500/40 bg-emerald-950/30 p-3 text-sm text-ink" role="status">
+                                <strong>
+                                  {configurationTerminal.result.reused
+                                    ? "Existing exact configuration reused"
+                                    : "Assistant Configuration generated"}
+                                </strong>
+                                <p className="mt-1">
+                                  Configuration {configurationTerminal.result.configuration.id.slice(0, 8)} · {configurationTerminal.result.configuration.status} · NOT ACTIVE
+                                </p>
+                                <DashboardButton
+                                  variant="secondary"
+                                  className="mt-2"
+                                  onClick={() =>
+                                    document
+                                      .getElementById(`configuration-${configurationTerminal.result.configuration.id}`)
+                                      ?.scrollIntoView({ behavior: "smooth", block: "center" })
+                                  }
+                                >
+                                  Review configuration
+                                </DashboardButton>
+                              </div>
+                            )}
+                            {generateConfiguration.variables === row.id && (
+                              <MutationFeedback error={generateConfiguration.error} />
+                            )}
                           </div>
                         )}
                       </article>
@@ -1949,7 +2028,7 @@ export function KnowledgeIntelligencePage() {
                 ) : (
                   <div className="panel divide-y divide-line">
                     {(configurations.data ?? []).map((row) => (
-                      <article key={row.id} className="p-4">
+                      <article id={`configuration-${row.id}`} key={row.id} className="p-4">
                         <strong className="text-sm">
                           Configuration {row.id.slice(0, 8)}
                         </strong>

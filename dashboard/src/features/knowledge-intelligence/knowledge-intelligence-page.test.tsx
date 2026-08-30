@@ -792,6 +792,48 @@ it("renders structured Assistant configuration and a safe runtime preview", asyn
   expect(screen.getAllByText("AI RECOMMENDED").length).toBeGreaterThan(0);
   expect(screen.queryByText(/PLATFORM RUNTIME SAFETY/)).not.toBeInTheDocument();
 });
+
+it("shows a scope-bound reused Recommendation terminal result without silent idle", async () => {
+  cleanup();
+  mockedApi.listAssistants.mockResolvedValue([
+    { id: "assistant-a", tenant_id: "tenant-a", name: "Meridian Advisor" },
+  ]);
+  mockedApi.listBusinessProfiles.mockResolvedValue([
+    {
+      id: "profile-active",
+      schema_version: 2,
+      profile_data: { company_identity: "Meridian Arc Technologies LLC" },
+      evidence: [],
+      status: "APPROVED",
+      active_version_id: "profile-active",
+    },
+  ]);
+  mockedApi.generateKnowledgeRecommendation.mockResolvedValue({
+    recommendation: {
+      id: "recommendation-reused",
+      recommendation_data: { tone: "Professional" },
+      status: "NEEDS_REVIEW",
+    },
+    reused: true,
+    run_id: "run-reused",
+  });
+  renderPage(true, "/app/tenant-a/knowledge-base/configurations");
+  const assistantSelect = await screen.findByRole("combobox", { name: "Assistant" });
+  await screen.findByRole("option", { name: "Meridian Advisor" });
+  fireEvent.change(assistantSelect, {
+    target: { value: "assistant-a" },
+  });
+  await waitFor(() => expect(assistantSelect).toHaveValue("assistant-a"));
+  fireEvent.change(
+    await screen.findByRole("combobox", { name: "ACTIVE Business Profile" }),
+    { target: { value: "profile-active" } },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Generate recommendation" }));
+
+  expect(await screen.findByText("Existing exact recommendation reused")).toBeVisible();
+  expect(screen.getByText(/Recommendation recommen · NEEDS_REVIEW · NOT ACTIVE/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Review recommendation" })).toBeVisible();
+});
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
