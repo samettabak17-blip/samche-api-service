@@ -69,8 +69,8 @@ async function generate({ database, provider, tenantId, requestedBy, targetType,
       runStage = generationStage;
       await advanceKnowledgeGenerationRun({ database: generationDatabase, tenantId, runId: run.id, stage: runStage, promptCharacterCount: prompt.length, sourceCount, elapsedMs: Date.now() - startedAt });
       const output = targetType === 'RECOMMENDATION'
-        ? await provider.generateAssistantRecommendation({ prompt })
-        : await provider.generateAssistantConfiguration({ prompt });
+        ? await provider.generateAssistantRecommendation({ prompt, runId: run.id, requestFingerprint: fingerprint })
+        : await provider.generateAssistantConfiguration({ prompt, runId: run.id, requestFingerprint: fingerprint });
       runStage = 'PERSISTENCE';
       await advanceKnowledgeGenerationRun({ database: generationDatabase, tenantId, runId: run.id, stage: runStage, promptCharacterCount: prompt.length, sourceCount, elapsedMs: Date.now() - startedAt });
       await generationDatabase.query('BEGIN');

@@ -118,6 +118,55 @@ test('Gemini Assistant Recommendation uses bounded low thinking without changing
   assert.equal(provider.configurationTimeoutMs, 30000);
 });
 
+test('Gemini boundary telemetry records safe request and fulfilled status events', async () => {
+  const events = [];
+  const provider = createKnowledgeGenerationProvider({
+    env: { GEMINI_API_KEY: 'secret-key', KNOWLEDGE_GENERATION_TIMEOUT_MS: '20000' },
+    telemetry: (event) => events.push(event),
+    fetchImpl: async (_url, request) => ({ ok: true, status: 200, headers: {}, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"schema_version":2,"tone":"Professional"}' }] } }] }) }),
+  });
+
+  await provider.generateAssistantRecommendation({ prompt: 'PRIVATE PROMPT SHOULD NOT LOG', runId: 'run-123', requestFingerprint: 'fingerprint-abcdef123456' });
+
+  assert.deepEqual(events.map((event) => event.event), ['request_started', 'http_status_received', 'fetch_fulfilled']);
+  assert.equal(events[0].run_id, 'run-123');
+  assert.equal(events[0].provider, 'GEMINI');
+  assert.equal(events[0].model, 'gemini-3-flash-preview');
+  assert.equal(events[0].correlation, 'fingerprint-abcd');
+  assert.equal(events[1].http_status, 200);
+  assert.ok(Number.isInteger(events[2].elapsed_ms));
+  assert.equal(JSON.stringify(events).includes('PRIVATE PROMPT'), false);
+  assert.equal(JSON.stringify(events).includes('secret-key'), false);
+});
+
+test('Gemini boundary telemetry records abort and preserves public timeout error', async () => {
+  const events = [];
+  const provider = createKnowledgeGenerationProvider({
+    env: { GEMINI_API_KEY: 'secret-key', KNOWLEDGE_GENERATION_TIMEOUT_MS: '1000' },
+    telemetry: (event) => events.push(event),
+    fetchImpl: (_url, request) => new Promise((resolve, reject) => request.signal.addEventListener('abort', () => { const error = new Error('aborted'); error.name = 'AbortError'; reject(error); })),
+  });
+
+  await assert.rejects(() => provider.generateBusinessProfile({ prompt: 'PRIVATE PROMPT', runId: 'run-timeout' }), (error) => error.code === 'KNOWLEDGE_GENERATION_TIMEOUT');
+  assert.equal(events.at(-1).event, 'fetch_aborted');
+  assert.equal(events.at(-1).classification, 'ABORT_TIMEOUT');
+  assert.ok(Number.isInteger(events.at(-1).elapsed_ms));
+});
+
+test('Gemini boundary telemetry records network errors without provider details', async () => {
+  const events = [];
+  const provider = createKnowledgeGenerationProvider({
+    env: { GEMINI_API_KEY: 'secret-key' },
+    telemetry: (event) => events.push(event),
+    fetchImpl: async () => { throw new Error('socket detail should not log'); },
+  });
+
+  await assert.rejects(() => provider.generateAssistantRecommendation({ prompt: 'PRIVATE PROMPT', runId: 'run-network' }), (error) => error.code === 'KNOWLEDGE_GENERATION_PROVIDER_FAILED');
+  assert.equal(events.at(-1).event, 'network_error');
+  assert.equal(events.at(-1).classification, 'NETWORK_ERROR');
+  assert.equal(JSON.stringify(events).includes('socket detail'), false);
+});
+
 test('Gemini Assistant Configuration uses the same bounded low-thinking generation policy', async () => {
   const requests = [];
   const provider = createKnowledgeGenerationProvider({

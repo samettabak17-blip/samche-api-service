@@ -121,20 +121,28 @@ function timeoutSignal(timeoutMs) {
   return { signal: controller.signal, clear: () => clearTimeout(timer) };
 }
 
-export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl = globalThis.fetch, openaiClient = null } = {}) {
+export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl = globalThis.fetch, openaiClient = null, telemetry: telemetryImpl = null } = {}) {
   const config = getKnowledgeGenerationConfig(env);
+  const telemetry = typeof telemetryImpl === 'function'
+    ? telemetryImpl
+    : (event) => console.log(`KNOWLEDGE_GENERATION_PROVIDER ${JSON.stringify(event)}`);
 
-  async function generate({ prompt, fields, validate, thinkingLevel = null, timeoutMs = config.timeoutMs }) {
+  async function generate({ prompt, fields, validate, thinkingLevel = null, timeoutMs = config.timeoutMs, runId = null, requestFingerprint = null, operation = 'KNOWLEDGE_GENERATION' }) {
     if (typeof prompt !== 'string' || !prompt.trim()) {
       throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_INPUT_REQUIRED', 'Knowledge generation input is required');
     }
     const timeout = timeoutSignal(timeoutMs);
+    const startedAt = Date.now();
+    const correlation = typeof requestFingerprint === 'string' ? requestFingerprint.slice(0, 16) : null;
+    const emit = (event, extra = {}) => telemetry({ event, run_id: runId, operation, provider: config.provider, model: config.model, correlation, ...extra });
+    let responseReceived = false;
     try {
       let text;
       if (config.provider === 'GEMINI') {
         if (!env.GEMINI_API_KEY || typeof fetchImpl !== 'function') {
           throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_PROVIDER_UNAVAILABLE', 'Gemini knowledge generation is unavailable');
         }
+        emit('request_started');
         const response = await fetchImpl(
           `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.model)}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`,
           {
@@ -152,6 +160,9 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
             }),
           },
         );
+        responseReceived = true;
+        emit('http_status_received', { http_status: response.status });
+        emit('fetch_fulfilled', { elapsed_ms: Date.now() - startedAt });
         const body = await response.json().catch(() => null);
         if (!response.ok) throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_PROVIDER_FAILED', `Gemini knowledge generation failed with status ${response.status}`);
         text = body?.candidates?.[0]?.content?.parts?.map((part) => part?.text || '').join('');
@@ -171,8 +182,10 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
     } catch (error) {
       if (error instanceof KnowledgeGenerationError) throw error;
       if (timeout.signal.aborted || error?.name === 'AbortError') {
+        emit('fetch_aborted', { classification: 'ABORT_TIMEOUT', elapsed_ms: Date.now() - startedAt, http_response_received: responseReceived });
         throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_TIMEOUT', 'Knowledge generation timed out', { cause: error });
       }
+      if (config.provider === 'GEMINI') emit('network_error', { classification: 'NETWORK_ERROR', elapsed_ms: Date.now() - startedAt });
       throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_PROVIDER_FAILED', 'Knowledge generation failed', { cause: error });
     } finally {
       timeout.clear();
@@ -200,7 +213,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
       fields: BUSINESS_IDENTITY_ANALYSIS_FIELDS,
       validate: (value) => validateOutput(value, BUSINESS_IDENTITY_ANALYSIS_FIELDS),
     }),
-    generateAssistantRecommendation: ({ prompt }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS }),
-    generateAssistantConfiguration: ({ prompt }) => generate({ prompt, fields: ASSISTANT_CONFIGURATION_FIELDS, validate: validateAssistantConfigurationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS }),
+    generateAssistantRecommendation: ({ prompt, runId, requestFingerprint }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_RECOMMENDATION' }),
+    generateAssistantConfiguration: ({ prompt, runId, requestFingerprint }) => generate({ prompt, fields: ASSISTANT_CONFIGURATION_FIELDS, validate: validateAssistantConfigurationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_CONFIGURATION' }),
   });
 }
