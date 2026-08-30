@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { advanceKnowledgeGenerationRun, beginKnowledgeGenerationRun, completeKnowledgeGenerationRun, failKnowledgeGenerationRun } from './knowledge-generation-persistence.js';
+import { advanceKnowledgeGenerationRun, beginKnowledgeGenerationRun, completeKnowledgeGenerationRun, failKnowledgeGenerationRun, recordKnowledgeGenerationProviderTelemetry } from './knowledge-generation-persistence.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export class KnowledgeAssistantLifecycleError extends Error { constructor(code, message) { super(message); this.code = code; } }
@@ -69,8 +69,8 @@ async function generate({ database, provider, tenantId, requestedBy, targetType,
       runStage = generationStage;
       await advanceKnowledgeGenerationRun({ database: generationDatabase, tenantId, runId: run.id, stage: runStage, promptCharacterCount: prompt.length, sourceCount, elapsedMs: Date.now() - startedAt });
       const output = targetType === 'RECOMMENDATION'
-        ? await provider.generateAssistantRecommendation({ prompt, runId: run.id, requestFingerprint: fingerprint })
-        : await provider.generateAssistantConfiguration({ prompt, runId: run.id, requestFingerprint: fingerprint });
+        ? await provider.generateAssistantRecommendation({ prompt, runId: run.id, requestFingerprint: fingerprint, telemetry: (event) => recordKnowledgeGenerationProviderTelemetry({ database: generationDatabase, tenantId, runId: run.id, event: event.event, timestamp: event.timestamp, httpStatus: event.http_status, elapsedMs: event.elapsed_ms, abortBeforeHttpResponse: event.http_response_received === false, networkErrorClass: event.classification }) })
+        : await provider.generateAssistantConfiguration({ prompt, runId: run.id, requestFingerprint: fingerprint, telemetry: (event) => recordKnowledgeGenerationProviderTelemetry({ database: generationDatabase, tenantId, runId: run.id, event: event.event, timestamp: event.timestamp, httpStatus: event.http_status, elapsedMs: event.elapsed_ms, abortBeforeHttpResponse: event.http_response_received === false, networkErrorClass: event.classification }) });
       runStage = 'PERSISTENCE';
       await advanceKnowledgeGenerationRun({ database: generationDatabase, tenantId, runId: run.id, stage: runStage, promptCharacterCount: prompt.length, sourceCount, elapsedMs: Date.now() - startedAt });
       await generationDatabase.query('BEGIN');

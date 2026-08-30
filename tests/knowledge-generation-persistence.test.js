@@ -5,6 +5,7 @@ import {
   beginKnowledgeGenerationRun,
   completeKnowledgeGenerationRun,
   failKnowledgeGenerationRun,
+  recordKnowledgeGenerationProviderTelemetry,
 } from '../services/knowledge-generation-persistence.js';
 
 const tenantId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -96,4 +97,15 @@ test('failed generation run persists stage elapsed time and only a safe error co
   await failKnowledgeGenerationRun({ database, tenantId, runId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', errorCode: 'KNOWLEDGE_GENERATION_TIMEOUT', stage: 'PROFILE_GENERATION', elapsedMs: 20004 });
   assert.match(calls[0].sql, /stage =/i);
   assert.deepEqual(calls[0].params.slice(2), ['KNOWLEDGE_GENERATION_TIMEOUT', 'PROFILE_GENERATION', 20004]);
+});
+
+test('provider telemetry updates only the matching tenant run with safe JSON fields', async () => {
+  const calls = [];
+  const database = { query: async (sql, params) => { calls.push({ sql, params }); return { rows: [{ id: params[0], status: 'RUNNING' }] }; } };
+  await recordKnowledgeGenerationProviderTelemetry({ database, tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', runId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', event: 'http_status_received', httpStatus: 200, elapsedMs: 17 });
+  assert.match(calls[0].sql, /WHERE id = \$1 AND tenant_id = \$2 AND status = 'RUNNING'/i);
+  assert.equal(calls[0].params[0], 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+  assert.equal(calls[0].params[1], 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+  assert.deepEqual(JSON.parse(calls[0].params[2]), { provider_http_status: 200 });
+  assert.equal(JSON.stringify(calls[0].params).includes('prompt'), false);
 });

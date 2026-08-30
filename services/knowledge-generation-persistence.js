@@ -8,6 +8,7 @@ const STAGES = new Set([
   'IDENTITY_ANALYSIS', 'PROFILE_GENERATION', 'PROFILE_CONTEXT',
   'RECOMMENDATION_GENERATION', 'CONFIGURATION_GENERATION', 'PERSISTENCE',
 ]);
+const PROVIDER_EVENTS = new Set(['request_started', 'http_status_received', 'fetch_fulfilled', 'fetch_aborted', 'network_error']);
 
 export class KnowledgeGenerationPersistenceError extends Error {
   constructor(code, message) {
@@ -113,6 +114,30 @@ export async function failKnowledgeGenerationRun({ database, tenantId, runId, er
       WHERE id = $1 AND tenant_id = $2 AND status = 'RUNNING'
       RETURNING id, status`,
     [uuid(runId, 'KNOWLEDGE_GENERATION_RUN_INVALID'), uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID'), safeCode, stage(runStage), boundedInteger(elapsedMs, 'KNOWLEDGE_GENERATION_ELAPSED_INVALID')],
+  );
+  if (!result.rows[0]) throw new KnowledgeGenerationPersistenceError('KNOWLEDGE_GENERATION_RUN_NOT_RUNNING', 'Knowledge generation run is not running');
+  return result.rows[0];
+}
+
+export async function recordKnowledgeGenerationProviderTelemetry({ database, tenantId, runId, event, timestamp = new Date().toISOString(), httpStatus = null, elapsedMs = null, abortBeforeHttpResponse = null, networkErrorClass = null }) {
+  const normalizedEvent = String(event ?? '').toLowerCase();
+  if (!PROVIDER_EVENTS.has(normalizedEvent)) throw new KnowledgeGenerationPersistenceError('KNOWLEDGE_PROVIDER_EVENT_INVALID', 'Provider event is invalid');
+  const payload = {};
+  if (normalizedEvent === 'request_started') payload.provider_request_started_at = timestamp;
+  if (normalizedEvent === 'http_status_received') payload.provider_http_status = boundedInteger(Number(httpStatus), 'KNOWLEDGE_PROVIDER_STATUS_INVALID');
+  if (normalizedEvent === 'fetch_fulfilled') payload.provider_fetch_fulfilled_at = timestamp;
+  if (normalizedEvent === 'fetch_aborted') {
+    payload.provider_fetch_aborted_at = timestamp;
+    payload.provider_elapsed_ms = boundedInteger(Number(elapsedMs), 'KNOWLEDGE_PROVIDER_ELAPSED_INVALID');
+    payload.abort_before_http_response = Boolean(abortBeforeHttpResponse);
+  }
+  if (normalizedEvent === 'network_error') payload.provider_network_error_class = String(networkErrorClass ?? 'NETWORK_ERROR').slice(0, 64);
+  const result = await databaseQuery(database)(
+    `UPDATE knowledge_generation_runs
+        SET provider_telemetry = COALESCE(provider_telemetry, '{}'::jsonb) || $3::jsonb
+      WHERE id = $1 AND tenant_id = $2 AND status = 'RUNNING'
+      RETURNING id, tenant_id`,
+    [uuid(runId, 'KNOWLEDGE_GENERATION_RUN_INVALID'), uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID'), JSON.stringify(payload)],
   );
   if (!result.rows[0]) throw new KnowledgeGenerationPersistenceError('KNOWLEDGE_GENERATION_RUN_NOT_RUNNING', 'Knowledge generation run is not running');
   return result.rows[0];

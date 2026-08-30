@@ -17,6 +17,11 @@ test('generation attempt migration is restart-safe and records bounded observabi
   assert.match(sql, /business_identity_source_evidence[\s\S]*ADD COLUMN IF NOT EXISTS analysis_schema_version/i);
 });
 
+test('generation attempt migration adds restart-safe provider telemetry metadata', () => {
+  const telemetrySql = fs.readFileSync(new URL('../migrations/032_provider_boundary_telemetry.sql', import.meta.url), 'utf8');
+  assert.match(telemetrySql, /ADD COLUMN IF NOT EXISTS provider_telemetry/i);
+});
+
 test('assistant generation hardening migration adds bounded stages and run relations', () => {
   assert.match(assistantSql, /DROP CONSTRAINT IF EXISTS chk_knowledge_generation_run_stage/i);
   for (const stage of ['PROFILE_CONTEXT', 'RECOMMENDATION_GENERATION', 'CONFIGURATION_GENERATION']) assert.match(assistantSql, new RegExp(stage));

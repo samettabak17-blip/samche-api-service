@@ -127,14 +127,20 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
     ? telemetryImpl
     : (event) => console.log(`KNOWLEDGE_GENERATION_PROVIDER ${JSON.stringify(event)}`);
 
-  async function generate({ prompt, fields, validate, thinkingLevel = null, timeoutMs = config.timeoutMs, runId = null, requestFingerprint = null, operation = 'KNOWLEDGE_GENERATION' }) {
+  async function generate({ prompt, fields, validate, thinkingLevel = null, timeoutMs = config.timeoutMs, runId = null, requestFingerprint = null, operation = 'KNOWLEDGE_GENERATION', telemetry: callTelemetry = null }) {
     if (typeof prompt !== 'string' || !prompt.trim()) {
       throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_INPUT_REQUIRED', 'Knowledge generation input is required');
     }
     const timeout = timeoutSignal(timeoutMs);
     const startedAt = Date.now();
     const correlation = typeof requestFingerprint === 'string' ? requestFingerprint.slice(0, 16) : null;
-    const emit = (event, extra = {}) => telemetry({ event, run_id: runId, operation, provider: config.provider, model: config.model, correlation, ...extra });
+    const telemetrySinks = [telemetry, ...(typeof callTelemetry === 'function' ? [callTelemetry] : [])];
+    const pendingTelemetry = [];
+    const emit = (event, extra = {}) => {
+      const payload = { event, run_id: runId, operation, provider: config.provider, model: config.model, correlation, timestamp: new Date().toISOString(), ...extra };
+      for (const sink of telemetrySinks) pendingTelemetry.push(Promise.resolve().then(() => sink(payload)));
+    };
+    const flushTelemetry = async () => { await Promise.allSettled(pendingTelemetry); };
     let responseReceived = false;
     try {
       let text;
@@ -178,14 +184,18 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
         }, { signal: timeout.signal });
         text = completion?.choices?.[0]?.message?.content;
       }
-      return validate(parseJson(text));
+      const output = validate(parseJson(text));
+      await flushTelemetry();
+      return output;
     } catch (error) {
       if (error instanceof KnowledgeGenerationError) throw error;
       if (timeout.signal.aborted || error?.name === 'AbortError') {
         emit('fetch_aborted', { classification: 'ABORT_TIMEOUT', elapsed_ms: Date.now() - startedAt, http_response_received: responseReceived });
+        await flushTelemetry();
         throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_TIMEOUT', 'Knowledge generation timed out', { cause: error });
       }
       if (config.provider === 'GEMINI') emit('network_error', { classification: 'NETWORK_ERROR', elapsed_ms: Date.now() - startedAt });
+      await flushTelemetry();
       throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_PROVIDER_FAILED', 'Knowledge generation failed', { cause: error });
     } finally {
       timeout.clear();
@@ -213,7 +223,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
       fields: BUSINESS_IDENTITY_ANALYSIS_FIELDS,
       validate: (value) => validateOutput(value, BUSINESS_IDENTITY_ANALYSIS_FIELDS),
     }),
-    generateAssistantRecommendation: ({ prompt, runId, requestFingerprint }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_RECOMMENDATION' }),
-    generateAssistantConfiguration: ({ prompt, runId, requestFingerprint }) => generate({ prompt, fields: ASSISTANT_CONFIGURATION_FIELDS, validate: validateAssistantConfigurationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_CONFIGURATION' }),
+    generateAssistantRecommendation: ({ prompt, runId, requestFingerprint, telemetry: callTelemetry }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_RECOMMENDATION', telemetry: callTelemetry }),
+    generateAssistantConfiguration: ({ prompt, runId, requestFingerprint, telemetry: callTelemetry }) => generate({ prompt, fields: ASSISTANT_CONFIGURATION_FIELDS, validate: validateAssistantConfigurationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_CONFIGURATION', telemetry: callTelemetry }),
   });
 }

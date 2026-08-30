@@ -31,7 +31,7 @@ try {
             run.input_provenance->'source_scope' AS source_scope,
             run.input_provenance->'source_hashes' AS source_hashes,
             run.provider, run.model, run.prompt_character_count, run.source_count,
-            run.stage, run.elapsed_ms, run.status, run.error_code, run.target_id,
+            run.stage, run.elapsed_ms, run.provider_telemetry, run.status, run.error_code, run.target_id,
             run.created_at, run.completed_at,
             recommendation.id AS recommendation_id, recommendation.status AS recommendation_status
        FROM knowledge_generation_runs run
