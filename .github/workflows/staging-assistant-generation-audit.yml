@@ -1,0 +1,35 @@
+name: Staging Assistant Generation Read-Only Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      tenant_id:
+        description: Exact non-secret staging tenant UUID
+        required: true
+        type: string
+      profile_version_id:
+        description: Exact non-secret ACTIVE Business Profile version UUID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --ignore-scripts
+      - name: Run strict-TLS read-only Assistant generation audit
+        env:
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          TASK6_AUDIT_TENANT_ID: ${{ inputs.tenant_id }}
+          TASK6_AUDIT_PROFILE_VERSION_ID: ${{ inputs.profile_version_id }}
+        run: node scripts/staging-assistant-generation-audit.js
