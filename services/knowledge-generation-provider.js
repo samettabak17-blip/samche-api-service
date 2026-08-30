@@ -53,6 +53,7 @@ export class KnowledgeGenerationError extends Error {
   constructor(code, message, options) {
     super(message, options);
     this.code = code;
+    if (options?.details) this.details = options.details;
   }
 }
 
@@ -82,33 +83,53 @@ function responseSchema(fields) {
   };
 }
 
+export function buildRecommendationResponseSchema() {
+  const schema = responseSchema(ASSISTANT_RECOMMENDATION_FIELDS);
+  schema.additionalProperties = false;
+  schema.properties.schema_version = { type: 'INTEGER', enum: [2] };
+  for (const field of ASSISTANT_RECOMMENDATION_FIELDS.filter((entry) => entry !== 'schema_version')) {
+    schema.properties[field] = {
+      anyOf: [
+        { type: 'STRING', minLength: 1, maxLength: 4000 },
+        { type: 'ARRAY', minItems: 1, maxItems: 50, items: { type: 'STRING', minLength: 1, maxLength: 1000 } },
+      ],
+    };
+  }
+  return schema;
+}
+
 function validateOutput(value, fields) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation output must be an object');
+    throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation output must be an object', { details: { reason: 'INVALID_OBJECT' } });
   }
   const allowed = new Set(fields);
   const entries = Object.entries(value);
   if (!entries.length || entries.some(([key]) => !allowed.has(key))) {
-    throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation output contains unsupported fields');
+    const field = entries.find(([key]) => !allowed.has(key))?.[0];
+    throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation output contains unsupported fields', { details: { reason: 'UNEXPECTED_FIELD', field } });
   }
   const normalized = {};
   for (const [key, item] of entries) {
     if (key === 'schema_version') {
-      if (item !== 2) throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation schema version is invalid');
+      if (item !== 2) throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation schema version is invalid', { details: { reason: 'INVALID_SCHEMA_VERSION', field: key } });
       normalized[key] = 2;
       continue;
     }
     if (typeof item === 'string') {
       const text = item.trim();
-      if (!text || text.length > 4000) throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation field is invalid');
+      if (!text) throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation field is invalid', { details: { reason: 'EMPTY_FIELD', field: key } });
+      if (text.length > 4000) throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation field is invalid', { details: { reason: 'STRING_TOO_LONG', field: key } });
       normalized[key] = text;
       continue;
     }
-    if (Array.isArray(item) && item.length <= 50 && item.every((entry) => typeof entry === 'string' && entry.trim() && entry.trim().length <= 1000)) {
+    if (Array.isArray(item) && item.length > 0 && item.length <= 50 && item.every((entry) => typeof entry === 'string' && entry.trim() && entry.trim().length <= 1000)) {
       normalized[key] = item.map((entry) => entry.trim());
       continue;
     }
-    throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation field is invalid');
+    const reason = Array.isArray(item)
+      ? (item.length > 50 ? 'ARRAY_TOO_LARGE' : item.some((entry) => typeof entry === 'string' && entry.trim().length > 1000) ? 'ARRAY_ITEM_TOO_LONG' : item.some((entry) => typeof entry === 'string' && !entry.trim()) ? 'EMPTY_ARRAY_ITEM' : 'INVALID_FIELD_TYPE')
+      : 'INVALID_FIELD_TYPE';
+    throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation field is invalid', { details: { reason, field: key } });
   }
   return normalized;
 }
@@ -150,7 +171,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
     ? telemetryImpl
     : (event) => console.log(`KNOWLEDGE_GENERATION_PROVIDER ${JSON.stringify(event)}`);
 
-  async function generate({ prompt, fields, validate, thinkingLevel = null, timeoutMs = config.timeoutMs, runId = null, requestFingerprint = null, operation = 'KNOWLEDGE_GENERATION', telemetry: callTelemetry = null }) {
+  async function generate({ prompt, fields, validate, thinkingLevel = null, timeoutMs = config.timeoutMs, runId = null, requestFingerprint = null, operation = 'KNOWLEDGE_GENERATION', telemetry: callTelemetry = null, schema = responseSchema(fields) }) {
     if (typeof prompt !== 'string' || !prompt.trim()) {
       throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_INPUT_REQUIRED', 'Knowledge generation input is required');
     }
@@ -189,7 +210,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
               generationConfig: {
                 temperature: 0,
                 responseMimeType: 'application/json',
-                responseSchema: responseSchema(fields),
+                responseSchema: schema,
                 ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
               },
             }),
@@ -252,7 +273,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
       fields: BUSINESS_IDENTITY_ANALYSIS_FIELDS,
       validate: (value) => validateOutput(value, BUSINESS_IDENTITY_ANALYSIS_FIELDS),
     }),
-    generateAssistantRecommendation: ({ prompt, runId, requestFingerprint, telemetry: callTelemetry }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_RECOMMENDATION', telemetry: callTelemetry }),
+    generateAssistantRecommendation: ({ prompt, runId, requestFingerprint, telemetry: callTelemetry }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_RECOMMENDATION', telemetry: callTelemetry, schema: buildRecommendationResponseSchema() }),
     generateAssistantConfiguration: ({ prompt, runId, requestFingerprint, telemetry: callTelemetry }) => generate({ prompt, fields: ASSISTANT_CONFIGURATION_FIELDS, validate: validateAssistantConfigurationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_CONFIGURATION', telemetry: callTelemetry }),
   });
 }

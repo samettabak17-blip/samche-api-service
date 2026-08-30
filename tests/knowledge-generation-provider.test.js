@@ -6,6 +6,7 @@ import {
   validateBusinessProfileOutput,
   validateAssistantRecommendationOutput,
   validateAssistantConfigurationOutput,
+  buildRecommendationResponseSchema,
 } from '../services/knowledge-generation-provider.js';
 
 test('defaults knowledge generation centrally to Gemini 3 Flash Preview', () => {
@@ -89,6 +90,24 @@ test('Gemini generation uses deterministic JSON mode and the requested response 
   assert.equal(requests[0].body.generationConfig.temperature, 0);
   assert.equal(requests[0].body.generationConfig.responseMimeType, 'application/json');
   assert.equal(requests[0].body.generationConfig.responseSchema.type, 'OBJECT');
+});
+
+test('Recommendation response schema mirrors canonical validator constraints', () => {
+  const schema = buildRecommendationResponseSchema();
+  assert.equal(schema.type, 'OBJECT');
+  assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(schema.properties.schema_version, { type: 'INTEGER', enum: [2] });
+  const stringBranch = schema.properties.tone.anyOf.find((entry) => entry.type === 'STRING');
+  const arrayBranch = schema.properties.tone.anyOf.find((entry) => entry.type === 'ARRAY');
+  assert.deepEqual(stringBranch, { type: 'STRING', minLength: 1, maxLength: 4000 });
+  assert.deepEqual(arrayBranch, { type: 'ARRAY', minItems: 1, maxItems: 50, items: { type: 'STRING', minLength: 1, maxLength: 1000 } });
+});
+
+test('Recommendation validator remains fail-closed with safe contract diagnostics', () => {
+  assert.throws(() => validateAssistantRecommendationOutput({ schema_version: 1 }), (error) => error.code === 'KNOWLEDGE_GENERATION_SCHEMA_INVALID' && error.details?.field === 'schema_version');
+  assert.throws(() => validateAssistantRecommendationOutput({ tone: '' }), (error) => error.details?.reason === 'EMPTY_FIELD' && error.details?.field === 'tone');
+  assert.throws(() => validateAssistantRecommendationOutput({ tone: [''] }), (error) => error.details?.reason === 'EMPTY_ARRAY_ITEM' && error.details?.field === 'tone');
+  assert.deepEqual(validateAssistantRecommendationOutput({ schema_version: 2, tone: 'Professional' }), { schema_version: 2, tone: 'Professional' });
 });
 
 test('Gemini Assistant Recommendation uses bounded low thinking without changing the global timeout', async () => {
