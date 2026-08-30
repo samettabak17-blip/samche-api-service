@@ -594,8 +594,8 @@ router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/recommend
   const tenantId = tenant(req, res); const assistantId = req.params.assistantId;
   if (!tenantId || !isValidUUID(assistantId)) return res.status(400).json({ error: 'Invalid Assistant ID' });
   try {
-    const recommendation = await generateAssistantRecommendation({ database: pool, provider: createKnowledgeGenerationProvider(), tenantId, assistantId, businessProfileVersionId: req.body?.business_profile_version_id, requestedBy: req.user.user_id });
-    return res.status(201).json({ recommendation });
+    const result = await generateAssistantRecommendation({ database: pool, provider: createKnowledgeGenerationProvider(), tenantId, assistantId, businessProfileVersionId: req.body?.business_profile_version_id, requestedBy: req.user.user_id });
+    return res.status(result.reused ? 200 : 201).json(result);
   } catch (error) { return safeError(res, error); }
 });
 
@@ -634,8 +634,8 @@ router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/configura
   const tenantId = tenant(req, res); const assistantId = req.params.assistantId;
   if (!tenantId || !isValidUUID(assistantId) || !isValidUUID(req.body?.recommendation_id)) return res.status(400).json({ error: 'Invalid configuration generation request' });
   try {
-    const configuration = await generateAssistantConfigurationVersion({ database: pool, provider: createKnowledgeGenerationProvider(), tenantId, assistantId, recommendationId: req.body.recommendation_id, requestedBy: req.user.user_id });
-    return res.status(201).json({ configuration });
+    const result = await generateAssistantConfigurationVersion({ database: pool, provider: createKnowledgeGenerationProvider(), tenantId, assistantId, recommendationId: req.body.recommendation_id, requestedBy: req.user.user_id });
+    return res.status(result.reused ? 200 : 201).json(result);
   } catch (error) { return safeError(res, error); }
 });
 

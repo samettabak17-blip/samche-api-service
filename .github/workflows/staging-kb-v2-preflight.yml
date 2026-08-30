@@ -87,7 +87,7 @@ jobs:
       - name: Prepare isolated PostgreSQL schema
         run: npm run migrate
       - name: Run Dashboard Overview PostgreSQL aggregation contract
-        run: node --test test/dashboardAnalyticsPostgres.test.js
+        run: node --test test/dashboardAnalyticsPostgres.test.js test/knowledgeGenerationPostgres.test.js test/knowledgeAssistantGenerationPostgres.test.js
 
   postgres:
     if: github.ref == 'refs/heads/staging'

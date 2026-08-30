@@ -4,7 +4,10 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const TARGET_TYPES = new Set(['BUSINESS_PROFILE', 'RECOMMENDATION', 'ASSISTANT_CONFIGURATION']);
 const PROVIDERS = new Set(['GEMINI', 'OPENAI']);
 const SAFE_ERROR_CODE = /^[A-Z][A-Z0-9_]{2,63}$/;
-const STAGES = new Set(['IDENTITY_ANALYSIS', 'PROFILE_GENERATION', 'PERSISTENCE']);
+const STAGES = new Set([
+  'IDENTITY_ANALYSIS', 'PROFILE_GENERATION', 'PROFILE_CONTEXT',
+  'RECOMMENDATION_GENERATION', 'CONFIGURATION_GENERATION', 'PERSISTENCE',
+]);
 
 export class KnowledgeGenerationPersistenceError extends Error {
   constructor(code, message) {
