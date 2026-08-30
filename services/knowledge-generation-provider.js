@@ -1,5 +1,27 @@
+import diagnosticsChannel from 'node:diagnostics_channel';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 const DEFAULT_TIMEOUT_MS = 20_000;
 const ASSISTANT_GENERATION_TIMEOUT_MS = 30_000;
+const transportContext = new AsyncLocalStorage();
+let transportTelemetryInstalled = false;
+
+function installTransportTelemetry() {
+  if (transportTelemetryInstalled) return;
+  transportTelemetryInstalled = true;
+  const observe = (event, message) => {
+    const context = transportContext.getStore();
+    if (context?.onEvent) context.onEvent(event, message);
+  };
+  diagnosticsChannel.channel('undici:client:beforeConnect').subscribe((message) => observe('transport_connect_started', message));
+  diagnosticsChannel.channel('undici:client:connected').subscribe((message) => {
+    observe('transport_connected', message);
+    if (message?.connectParams?.protocol === 'https:') observe('tls_established', message);
+  });
+  diagnosticsChannel.channel('undici:request:bodySent').subscribe((message) => observe('request_body_sent', message));
+  diagnosticsChannel.channel('undici:request:headers').subscribe((message) => observe('response_headers_received', { statusCode: message?.response?.statusCode }));
+  diagnosticsChannel.channel('undici:request:error').subscribe((message) => observe('transport_error', { error: message?.error }));
+}
 
 const BUSINESS_PROFILE_FIELDS = Object.freeze([
   'schema_version', 'company_identity', 'company_display_name',
@@ -122,6 +144,7 @@ function timeoutSignal(timeoutMs) {
 }
 
 export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl = globalThis.fetch, openaiClient = null, telemetry: telemetryImpl = null } = {}) {
+  installTransportTelemetry();
   const config = getKnowledgeGenerationConfig(env);
   const telemetry = typeof telemetryImpl === 'function'
     ? telemetryImpl
@@ -141,6 +164,12 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
       for (const sink of telemetrySinks) pendingTelemetry.push(Promise.resolve().then(() => sink(payload)));
     };
     const flushTelemetry = async () => { await Promise.allSettled(pendingTelemetry); };
+    const fetchWithTransportTelemetry = (...args) => transportContext.run({
+      onEvent: (event, message = {}) => emit(event, {
+        ...(message.statusCode ? { http_status: message.statusCode } : {}),
+        ...(event === 'transport_error' ? { classification: 'TRANSPORT_ERROR' } : {}),
+      }),
+    }, () => fetchImpl(...args));
     let responseReceived = false;
     try {
       let text;
@@ -149,7 +178,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
           throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_PROVIDER_UNAVAILABLE', 'Gemini knowledge generation is unavailable');
         }
         emit('request_started');
-        const response = await fetchImpl(
+        const response = await fetchWithTransportTelemetry(
           `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.model)}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`,
           {
             method: 'POST',

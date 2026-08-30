@@ -8,7 +8,7 @@ const STAGES = new Set([
   'IDENTITY_ANALYSIS', 'PROFILE_GENERATION', 'PROFILE_CONTEXT',
   'RECOMMENDATION_GENERATION', 'CONFIGURATION_GENERATION', 'PERSISTENCE',
 ]);
-const PROVIDER_EVENTS = new Set(['request_started', 'http_status_received', 'fetch_fulfilled', 'fetch_aborted', 'network_error']);
+const PROVIDER_EVENTS = new Set(['request_started', 'http_status_received', 'fetch_fulfilled', 'fetch_aborted', 'network_error', 'transport_connect_started', 'transport_connected', 'tls_established', 'request_body_sent', 'response_headers_received', 'transport_error']);
 
 export class KnowledgeGenerationPersistenceError extends Error {
   constructor(code, message) {
@@ -132,6 +132,15 @@ export async function recordKnowledgeGenerationProviderTelemetry({ database, ten
     payload.abort_before_http_response = Boolean(abortBeforeHttpResponse);
   }
   if (normalizedEvent === 'network_error') payload.provider_network_error_class = String(networkErrorClass ?? 'NETWORK_ERROR').slice(0, 64);
+  if (normalizedEvent === 'transport_connect_started') payload.transport_connect_started_at = timestamp;
+  if (normalizedEvent === 'transport_connected') payload.transport_connected_at = timestamp;
+  if (normalizedEvent === 'tls_established') payload.tls_established_at = timestamp;
+  if (normalizedEvent === 'request_body_sent') payload.request_body_sent_at = timestamp;
+  if (normalizedEvent === 'response_headers_received') {
+    payload.response_headers_received_at = timestamp;
+    if (httpStatus !== null && httpStatus !== undefined) payload.provider_http_status = boundedInteger(Number(httpStatus), 'KNOWLEDGE_PROVIDER_STATUS_INVALID');
+  }
+  if (normalizedEvent === 'transport_error') payload.provider_transport_error_class = String(networkErrorClass ?? 'TRANSPORT_ERROR').slice(0, 64);
   const result = await databaseQuery(database)(
     `UPDATE knowledge_generation_runs
         SET provider_telemetry = COALESCE(provider_telemetry, '{}'::jsonb) || $3::jsonb

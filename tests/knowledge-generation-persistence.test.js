@@ -109,3 +109,16 @@ test('provider telemetry updates only the matching tenant run with safe JSON fie
   assert.deepEqual(JSON.parse(calls[0].params[2]), { provider_http_status: 200 });
   assert.equal(JSON.stringify(calls[0].params).includes('prompt'), false);
 });
+
+test('provider transport telemetry persists only safe connection fields', async () => {
+  const calls = [];
+  const database = { query: async (sql, params) => { calls.push({ sql, params }); return { rows: [{ id: params[0] }] }; } };
+  await recordKnowledgeGenerationProviderTelemetry({ database, tenantId, runId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', event: 'transport_connected', timestamp: '2026-08-30T20:00:00.000Z' });
+  await recordKnowledgeGenerationProviderTelemetry({ database, tenantId, runId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', event: 'tls_established', timestamp: '2026-08-30T20:00:00.010Z' });
+  await recordKnowledgeGenerationProviderTelemetry({ database, tenantId, runId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', event: 'response_headers_received', httpStatus: 200, timestamp: '2026-08-30T20:00:00.020Z' });
+  const payloads = calls.map(({ params }) => JSON.parse(params[2]));
+  assert.deepEqual(payloads[0], { transport_connected_at: '2026-08-30T20:00:00.000Z' });
+  assert.deepEqual(payloads[1], { tls_established_at: '2026-08-30T20:00:00.010Z' });
+  assert.deepEqual(payloads[2], { response_headers_received_at: '2026-08-30T20:00:00.020Z', provider_http_status: 200 });
+  assert.equal(JSON.stringify(payloads).match(/prompt|authorization|apikey|body|content/gi), null);
+});
