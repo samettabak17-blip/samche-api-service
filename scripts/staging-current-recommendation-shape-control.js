@@ -2,7 +2,7 @@ import { buildRecommendationResponseSchema } from '../services/knowledge-generat
 
 const key = process.env.STAGING_GEMINI_API_KEY;
 const schema = buildRecommendationResponseSchema();
-const prefix = 'Create an AI recommendation with schema_version 2 for a fictional generic tenant Assistant using only the supplied fictional active business profile. Never use another business as a default. Recommendations are proposals; mark unsupported behavior as evidence gaps. Assistant display name: Generic Assistant. ACTIVE factual Business Profile: ';
+const prefix = 'Create a concise AI recommendation for a fictional generic tenant Assistant using only the supplied fictional active business profile. Return only 1 to 4 directly supported recommendation fields; omit every unsupported field. Do not invent policy. Assistant display name: Generic Assistant. ACTIVE factual Business Profile: ';
 const prompt = `${prefix}${'placeholder factual profile entry. '.repeat(120)}`.slice(0, 2808);
 const body = {
   contents: [{ role: 'user', parts: [{ text: prompt }] }],
