@@ -104,9 +104,14 @@ test('Recommendation response schema mirrors canonical validator constraints', (
 });
 
 test('Recommendation validator remains fail-closed with safe contract diagnostics', () => {
-  assert.throws(() => validateAssistantRecommendationOutput({ schema_version: 1 }), (error) => error.code === 'KNOWLEDGE_GENERATION_SCHEMA_INVALID' && error.details?.field === 'schema_version');
-  assert.throws(() => validateAssistantRecommendationOutput({ tone: '' }), (error) => error.details?.reason === 'EMPTY_FIELD' && error.details?.field === 'tone');
-  assert.throws(() => validateAssistantRecommendationOutput({ tone: [''] }), (error) => error.details?.reason === 'EMPTY_ARRAY_ITEM' && error.details?.field === 'tone');
+  assert.throws(() => validateAssistantRecommendationOutput({ schema_version: 1 }), (error) => error.details?.code === 'INVALID_SCHEMA_VERSION' && error.details?.field === 'schema_version');
+  assert.throws(() => validateAssistantRecommendationOutput({ tone: '' }), (error) => error.details?.code === 'EMPTY_FIELD' && error.details?.field === 'tone');
+  assert.throws(() => validateAssistantRecommendationOutput({ tone: [''] }), (error) => error.details?.code === 'EMPTY_FIELD' && error.details?.field === 'tone');
+  assert.throws(() => validateAssistantRecommendationOutput({}), (error) => error.details?.code === 'NO_RECOMMENDATION_FIELDS' && error.details?.field === null);
+  assert.throws(() => validateAssistantRecommendationOutput({ tone: 'x'.repeat(4001) }), (error) => error.details?.code === 'STRING_TOO_LONG' && error.details?.field === 'tone');
+  assert.throws(() => validateAssistantRecommendationOutput({ tone: Array.from({ length: 51 }, () => 'x') }), (error) => error.details?.code === 'ARRAY_TOO_LARGE' && error.details?.field === 'tone');
+  assert.throws(() => validateAssistantRecommendationOutput({ tone: ['x'.repeat(1001)] }), (error) => error.details?.code === 'ARRAY_ITEM_TOO_LONG' && error.details?.field === 'tone');
+  assert.throws(() => validateAssistantRecommendationOutput({ unexpected: 'x' }), (error) => error.details?.code === 'UNEXPECTED_FIELD' && error.details?.field === 'unexpected');
   assert.deepEqual(validateAssistantRecommendationOutput({ schema_version: 2, tone: 'Professional' }), { schema_version: 2, tone: 'Professional' });
 });
 
