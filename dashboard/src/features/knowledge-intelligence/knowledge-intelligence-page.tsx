@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
   EmptyState,
@@ -231,6 +231,10 @@ export function KnowledgeIntelligencePage() {
     value: string;
   } | null>(null);
   const queryClient = useQueryClient();
+  useEffect(() => {
+    setRecommendationTerminal(null);
+    setSelectedRecommendationId(null);
+  }, [assistantId, configurationProfileVersionId]);
   const assistants = useQuery({
     queryKey: tenantKeys.assistants(tenantId),
     queryFn: () => tenantApi.listAssistants(tenantId),
@@ -1889,6 +1893,7 @@ export function KnowledgeIntelligencePage() {
                   Recommendation {recommendationTerminal.result.recommendation.id.slice(0, 8)} · {recommendationTerminal.result.recommendation.status} · NOT ACTIVE
                 </p>
                 <DashboardButton
+                  type="button"
                   variant="secondary"
                   className="mt-2"
                   onClick={() =>
@@ -1901,6 +1906,19 @@ export function KnowledgeIntelligencePage() {
                 >
                   Review recommendation
                 </DashboardButton>
+                {selectedRecommendationId === recommendationTerminal.result.recommendation.id && (
+                  <section className="mt-3 rounded-lg border border-line bg-elevated/60 p-3" role="region" aria-label="Recommendation review" tabIndex={-1}>
+                    <h3 className="text-sm font-semibold">Recommendation review</h3>
+                    <dl className="mt-2 space-y-2 text-sm">
+                      {Object.entries(recommendationTerminal.result.recommendation.recommendation_data ?? {}).map(([field, value]) => (
+                        <div key={field}>
+                          <dt className="text-xs font-semibold uppercase tracking-wide text-stone-500">{field.replace(/_/g, " ")}</dt>
+                          <dd className="text-ink">{Array.isArray(value) ? value.join(", ") : String(value)}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
+                )}
               </div>
             )}
           </div>

@@ -834,9 +834,11 @@ it("shows a scope-bound reused Recommendation terminal result without silent idl
   expect(screen.getByText(/Recommendation recommen · NEEDS_REVIEW · NOT ACTIVE/)).toBeVisible();
   const reviewButton = screen.getByRole("button", { name: "Review recommendation" });
   expect(reviewButton).toBeVisible();
+  expect(reviewButton).not.toBeDisabled();
   fireEvent.click(reviewButton);
   const recommendation = await screen.findByRole("article");
   expect(recommendation).toHaveAttribute("aria-current", "true");
+  expect(screen.getByRole("region", { name: "Recommendation review" })).toBeVisible();
   expect(mockedApi.reviewRecommendation).not.toHaveBeenCalled();
 });
 afterEach(() => {
