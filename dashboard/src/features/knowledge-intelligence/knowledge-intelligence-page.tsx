@@ -220,6 +220,7 @@ export function KnowledgeIntelligencePage() {
     scope: string;
     result: RecommendationGenerationResult;
   } | null>(null);
+  const [selectedRecommendationId, setSelectedRecommendationId] = useState<string | null>(null);
   const [configurationTerminal, setConfigurationTerminal] = useState<{
     scope: string;
     result: ConfigurationGenerationResult;
@@ -537,9 +538,6 @@ export function KnowledgeIntelligencePage() {
         (current: typeof recommendations.data) =>
           [result.recommendation, ...(current ?? []).filter((row) => row.id !== result.recommendation.id)],
       );
-      void queryClient.invalidateQueries({
-        queryKey: tenantKeys.knowledgeRecommendations(tenantId, assistantId),
-      });
     },
   });
   const generateConfiguration = useMutation({
@@ -1894,9 +1892,11 @@ export function KnowledgeIntelligencePage() {
                   variant="secondary"
                   className="mt-2"
                   onClick={() =>
-                    document
-                      .getElementById(`recommendation-${recommendationTerminal.result.recommendation.id}`)
-                      ?.scrollIntoView({ behavior: "smooth", block: "center" })
+                    (() => {
+                      const id = recommendationTerminal.result.recommendation.id;
+                      setSelectedRecommendationId(id);
+                      document.getElementById(`recommendation-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    })()
                   }
                 >
                   Review recommendation
@@ -1932,7 +1932,7 @@ export function KnowledgeIntelligencePage() {
                 ) : (
                   <div className="panel divide-y divide-line">
                     {(recommendations.data ?? []).map((row) => (
-                      <article id={`recommendation-${row.id}`} key={row.id} className="p-4">
+                      <article id={`recommendation-${row.id}`} key={row.id} className="p-4" aria-current={selectedRecommendationId === row.id ? "true" : undefined}>
                         <strong className="text-sm">
                           Recommendation {row.id.slice(0, 8)}
                         </strong>
