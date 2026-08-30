@@ -85,16 +85,7 @@ function responseSchema(fields) {
 
 export function buildRecommendationResponseSchema() {
   const schema = responseSchema(ASSISTANT_RECOMMENDATION_FIELDS);
-  schema.additionalProperties = false;
   schema.properties.schema_version = { type: 'INTEGER', enum: [2] };
-  for (const field of ASSISTANT_RECOMMENDATION_FIELDS.filter((entry) => entry !== 'schema_version')) {
-    schema.properties[field] = {
-      anyOf: [
-        { type: 'STRING', minLength: 1, maxLength: 4000 },
-        { type: 'ARRAY', minItems: 1, maxItems: 50, items: { type: 'STRING', minLength: 1, maxLength: 1000 } },
-      ],
-    };
-  }
   return schema;
 }
 
