@@ -113,7 +113,9 @@ test('Gemini Assistant Recommendation uses bounded low thinking without changing
 
   assert.deepEqual(requests[0].generationConfig.thinkingConfig, { thinkingLevel: 'low' });
   assert.equal(provider.timeoutMs, 20000);
-  assert.equal(provider.assistantGenerationPolicy, 'gemini-structured-v2:thinking-low');
+  assert.equal(provider.assistantGenerationPolicy, 'gemini-structured-v2:thinking-low:timeout-30000');
+  assert.equal(provider.recommendationTimeoutMs, 30000);
+  assert.equal(provider.configurationTimeoutMs, 30000);
 });
 
 test('Gemini Assistant Configuration uses the same bounded low-thinking generation policy', async () => {
@@ -132,6 +134,13 @@ test('Gemini Assistant Configuration uses the same bounded low-thinking generati
   await provider.generateAssistantConfiguration({ prompt: 'Approved recommendation' });
 
   assert.deepEqual(requests[0].generationConfig.thinkingConfig, { thinkingLevel: 'low' });
+});
+
+test('Business Profile and identity analysis retain the global 20 second timeout policy', () => {
+  const provider = createKnowledgeGenerationProvider({ env: { GEMINI_API_KEY: 'test-key' }, fetchImpl: async () => ({ ok: true, json: async () => ({}) }) });
+  assert.equal(provider.timeoutMs, 20000);
+  assert.equal(provider.businessProfileTimeoutMs, 20000);
+  assert.equal(provider.identityAnalysisTimeoutMs, 20000);
 });
 
 test('provider-independent validation rejects unknown Business Profile fields', () => {

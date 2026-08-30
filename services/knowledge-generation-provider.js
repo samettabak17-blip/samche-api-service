@@ -1,4 +1,5 @@
 const DEFAULT_TIMEOUT_MS = 20_000;
+const ASSISTANT_GENERATION_TIMEOUT_MS = 30_000;
 
 const BUSINESS_PROFILE_FIELDS = Object.freeze([
   'schema_version', 'company_identity', 'company_display_name',
@@ -123,11 +124,11 @@ function timeoutSignal(timeoutMs) {
 export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl = globalThis.fetch, openaiClient = null } = {}) {
   const config = getKnowledgeGenerationConfig(env);
 
-  async function generate({ prompt, fields, validate, thinkingLevel = null }) {
+  async function generate({ prompt, fields, validate, thinkingLevel = null, timeoutMs = config.timeoutMs }) {
     if (typeof prompt !== 'string' || !prompt.trim()) {
       throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_INPUT_REQUIRED', 'Knowledge generation input is required');
     }
-    const timeout = timeoutSignal(config.timeoutMs);
+    const timeout = timeoutSignal(timeoutMs);
     try {
       let text;
       if (config.provider === 'GEMINI') {
@@ -182,9 +183,13 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
     provider: config.provider,
     model: config.model,
     timeoutMs: config.timeoutMs,
+    businessProfileTimeoutMs: config.timeoutMs,
+    identityAnalysisTimeoutMs: config.timeoutMs,
+    recommendationTimeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS,
+    configurationTimeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS,
     assistantGenerationPolicy: config.provider === 'GEMINI'
-      ? 'gemini-structured-v2:thinking-low'
-      : 'openai-structured-v2',
+      ? 'gemini-structured-v2:thinking-low:timeout-30000'
+      : 'openai-structured-v2:timeout-30000',
     generateBusinessProfile: ({ prompt }) => generate({ prompt, fields: BUSINESS_PROFILE_FIELDS, validate: validateBusinessProfileOutput }),
     generateBusinessIdentityAnalysis: ({ source }) => generate({
       prompt: [
@@ -195,7 +200,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
       fields: BUSINESS_IDENTITY_ANALYSIS_FIELDS,
       validate: (value) => validateOutput(value, BUSINESS_IDENTITY_ANALYSIS_FIELDS),
     }),
-    generateAssistantRecommendation: ({ prompt }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null }),
-    generateAssistantConfiguration: ({ prompt }) => generate({ prompt, fields: ASSISTANT_CONFIGURATION_FIELDS, validate: validateAssistantConfigurationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null }),
+    generateAssistantRecommendation: ({ prompt }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS }),
+    generateAssistantConfiguration: ({ prompt }) => generate({ prompt, fields: ASSISTANT_CONFIGURATION_FIELDS, validate: validateAssistantConfigurationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS }),
   });
 }
