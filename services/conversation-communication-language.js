@@ -10,7 +10,7 @@ const ARABIC_GREETING_OR_SOCIAL = /^[\u0600-\u06FF\s،؟!.]+$/u;
  * scoring path, while short/weak messages remain unresolved for continuity.
  */
 const LANGUAGE_EVIDENCE = [
-  { code: 'tr', terms: ['şirket', 'kurmak', 'istiyorum', 'hakkında', 'fiyatı', 'nedir', 'maliyetleri', 'vize'] },
+  { code: 'tr', terms: ['şirket', 'kurmak', 'istiyorum', 'hakkında', 'fiyatı', 'nedir', 'maliyetleri', 'vize', 'hizmet', 'hizmetleri', 'veriyorsunuz', 'sunuyorsunuz', 'sağlıyorsunuz', 'hangi'] },
   { code: 'en', terms: ['the', 'and', 'with', 'company', 'setup', 'costs', 'visa', 'options', 'please', 'explain', 'does', 'document'] },
   { code: 'es', terms: ['quiero', 'obtener', 'trabajador', 'independiente', 'responde', 'español', 'empresa', 'visado', 'visa', 'costes'] },
   { code: 'fr', terms: ['je', 'souhaite', 'créer', 'entreprise', 'répondez', 'français', 'visa', 'coûts', 'options'] },
