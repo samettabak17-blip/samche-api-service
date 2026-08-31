@@ -82,6 +82,78 @@ async function sourceForJob(database, job) {
   return result.rows[0] ?? null;
 }
 
+async function withTransaction(database, work) {
+  if (!database || typeof database.connect !== 'function') {
+    throw new KnowledgeSourceProcessingError('KNOWLEDGE_DATABASE_TRANSACTION_UNAVAILABLE', 'Knowledge transaction is unavailable');
+  }
+  const client = await database.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await work(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release?.();
+  }
+}
+
+export async function persistImageExtractionSegments({ database, source, job, extraction }) {
+  return withTransaction(database, async (client) => {
+    await client.query(
+      `UPDATE knowledge_base_documents
+          SET content = $3,
+              extraction_hash = $4,
+              extraction_method = $5,
+              extracted_at = CURRENT_TIMESTAMP,
+              processed_at = CURRENT_TIMESTAMP,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1 AND tenant_id = $2`,
+      [source.id, source.tenant_id, extraction.text, extraction.sourceHash, `IMAGE:${extraction.extractionMethod}`.slice(0, 32)]);
+
+    await client.query(
+      `DELETE FROM knowledge_source_extraction_segments
+        WHERE tenant_id = $1 AND source_id = $2 AND extraction_hash = $3`,
+      [source.tenant_id, source.id, extraction.sourceHash]);
+    await client.query(
+      `UPDATE knowledge_source_extraction_segments
+          SET is_current = FALSE
+        WHERE tenant_id = $1 AND source_id = $2 AND is_current = TRUE`,
+      [source.tenant_id, source.id]);
+
+    for (const segment of extraction.segments) {
+      await client.query(
+        `INSERT INTO knowledge_source_extraction_segments (
+           tenant_id, source_id, extraction_version, extraction_hash, segment_order,
+           role, role_confidence, normalized_text, extraction_method, source_locator, is_current
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, TRUE)`,
+        [source.tenant_id, source.id, extraction.extractionVersion, extraction.sourceHash, segment.order,
+          segment.role, segment.confidence, segment.text, extraction.extractionMethod,
+          segment.sourceLocator === undefined ? null : JSON.stringify(segment.sourceLocator)]);
+    }
+
+    await client.query(
+      `UPDATE knowledge_processing_jobs
+          SET status = 'READY',
+              locked_at = NULL,
+              locked_until = NULL,
+              last_error_code = NULL,
+              metadata = metadata || $3::jsonb,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1 AND tenant_id = $2`,
+      [job.id, job.tenant_id, JSON.stringify({
+        extractionVersion: extraction.extractionVersion,
+        extractionMethod: extraction.extractionMethod,
+        extractionConfidence: extraction.extractionConfidence,
+        segmentCount: extraction.segments.length,
+        segmentRoles: [...new Set(extraction.segments.map(({ role }) => role))],
+      })]);
+    return { segmentCount: extraction.segments.length };
+  });
+}
+
 export async function processKnowledgeProcessingJob({
   database,
   storage,
@@ -139,9 +211,10 @@ export async function processKnowledgeProcessingJob({
         extractionMetadata = {
           extractionVersion: extracted.extractionVersion,
           extractionMethod: extracted.extractionMethod,
-          extractionConfidence: extracted.extractionConfidence,
-          segmentCount: extracted.segments.length,
-          segmentRoles: [...new Set(extracted.segments.map(({ role }) => role))],
+        extractionConfidence: extracted.extractionConfidence,
+        segmentCount: extracted.segments.length,
+        segmentRoles: [...new Set(extracted.segments.map(({ role }) => role))],
+          segments: extracted.segments,
         };
       } else {
         const extracted = await extract({
@@ -158,6 +231,15 @@ export async function processKnowledgeProcessingJob({
       throw new KnowledgeSourceProcessingError('KNOWLEDGE_SOURCE_EMPTY', 'Knowledge source does not contain readable text');
     }
 
+    if (source.mime_type === 'image/jpeg' || source.mime_type === 'image/png') {
+      const persisted = await persistImageExtractionSegments({ database, source, job, extraction: {
+        ...extractionMetadata,
+        text,
+        sourceHash: String(source.content_hash ?? '').toLowerCase(),
+      } });
+      return { status: 'READY', chunkCount: 0, indexed: false, segmentCount: persisted.segmentCount };
+    }
+
     await dbQuery(database,
       `UPDATE knowledge_base_documents
           SET content = $3,
@@ -168,11 +250,6 @@ export async function processKnowledgeProcessingJob({
               updated_at = CURRENT_TIMESTAMP
         WHERE id = $1 AND tenant_id = $2`,
       [source.id, source.tenant_id, text, source.content_hash, extractionMethod]);
-
-    if (source.mime_type === 'image/jpeg' || source.mime_type === 'image/png') {
-      await markJob(database, job, 'READY', null, extractionMetadata);
-      return { status: 'READY', chunkCount: 0, indexed: false };
-    }
 
     const indexed = await index({
       database,
