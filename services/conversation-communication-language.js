@@ -108,9 +108,10 @@ export function isClearlySubstantiveWhatsAppMessage(content) {
 }
 
 /**
- * The inbound message is the only authority for an intentional language
- * transition. Greeting-only and ambiguous fragments retain the persisted
- * language; a clear substantive message may replace it.
+ * The current inbound message is the authority for a response-language
+ * transition. A reliably recognized greeting is enough to change this turn
+ * and the persisted conversation language; only ambiguous text retains
+ * continuity.
  */
 /**
  * A reliable customer language signal is distinct from substantive continuity:
@@ -143,10 +144,5 @@ export function resolveWhatsAppCommunicationLanguage({ currentLanguage, content 
   const current = normalizeCommunicationLanguage(currentLanguage) ?? 'und';
   const candidate = inferConservativeWhatsAppLanguage(content);
   if (!candidate) return current;
-  return shouldUpdateCommunicationLanguage({
-    currentLanguage: current,
-    candidateLanguage: candidate,
-    confidence: 'high',
-    substantive: isClearlySubstantiveWhatsAppMessage(content),
-  }) ? candidate : current;
+  return candidate;
 }

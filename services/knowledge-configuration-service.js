@@ -44,6 +44,7 @@ export async function resolveActiveAssistantKnowledgeConfiguration({ database, t
   const result = await database.query(
     `SELECT configuration.id, configuration.configuration_data, configuration.schema_version AS configuration_schema_version, configuration.source_profile_version_id,
             configuration.source_recommendation_id, configuration.activated_at,
+            assistant.name AS assistant_metadata_name,
             profile.active_version_id AS active_business_profile_version_id,
             profile_version.profile_data AS active_business_profile,
             profile_version.schema_version AS profile_schema_version

@@ -32,6 +32,18 @@ test('mapped runtime fails closed when both ACTIVE V2 artifacts are not proven',
   assert.deepEqual(await resolveTenantRuntimePersona({ database, tenantId: tenantA, assistantId: assistantA }), { available: false, code: 'TENANT_PERSONA_NOT_ACTIVE' });
 });
 
+test('fails closed when active configuration copies untrusted platform Assistant metadata', async () => {
+  const contaminated = {
+    ...activeRow('Northstar Labs Ltd', 'SamChe AI', 'Research automation', 'USD 900'),
+    assistant_metadata_name: 'SamChe AI',
+  };
+  const database = { query: async () => ({ rows: [contaminated] }) };
+  assert.deepEqual(
+    await resolveTenantRuntimePersona({ database, tenantId: tenantA, assistantId: assistantA }),
+    { available: false, code: 'TENANT_PERSONA_NOT_ACTIVE' },
+  );
+});
+
 test('system instruction contains only resolved tenant business data plus platform safety', async () => {
   const database = { query: async () => ({ rows: [activeRow('Meridian Arc Technologies LLC', 'Meridian Client Advisor', 'Enterprise support', '35,650 AED')] }) };
   const persona = await resolveTenantRuntimePersona({ database, tenantId: tenantA, assistantId: assistantA });
