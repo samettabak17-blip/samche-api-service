@@ -85,8 +85,16 @@ export async function createImageKnowledgeCandidates({
           AND source.enabled = TRUE
           AND source.status = 'active'
           AND source.processing_status = 'READY'
+          AND source.mime_type IN ('image/jpeg', 'image/png')
+          AND source.indexing_status = 'DISABLED'
+          AND ($4::uuid IS NULL OR EXISTS (
+                SELECT 1 FROM knowledge_source_assistants assignment
+                 WHERE assignment.tenant_id = source.tenant_id
+                   AND assignment.source_id = source.id
+                   AND assignment.assistant_id = $4
+              ))
         ORDER BY segment.segment_order ASC`,
-      [tenantId, sourceId, String(extractionHash).toLowerCase()]);
+      [tenantId, sourceId, String(extractionHash).toLowerCase(), assistantId]);
     const segments = segmentsResult.rows ?? [];
     const businessSegments = segments.filter((segment) => segment.role === 'BUSINESS');
     const results = [];

@@ -15,6 +15,7 @@ import {
 import {
   KnowledgeCandidateError,
   approveConversationKnowledgeCandidate,
+  createImageKnowledgeCandidates,
   createConversationKnowledgeCandidate,
   rejectConversationKnowledgeCandidate,
 } from '../services/knowledge-candidate-service.js';
@@ -344,6 +345,7 @@ router.get('/:tenantId/knowledge-intelligence/candidates', requireTenantAccess, 
   try {
     const result = await pool.query(
       `SELECT id, assistant_id, candidate_type, proposed_title, proposed_content, confidence,
+              candidate_fingerprint,
               status, pii_redaction_status, evidence_summary, approved_source_id, created_at, reviewed_at
          FROM knowledge_candidates
         WHERE tenant_id = $1
@@ -362,13 +364,41 @@ router.get('/:tenantId/knowledge-intelligence/candidates/:candidateId/evidence',
   if (!tenantId || !isValidUUID(req.params.candidateId)) return res.status(400).json({ error: 'Invalid knowledge candidate ID' });
   try {
     const result = await pool.query(
-      `SELECT conversation_id, message_id, channel_type, sender_type, occurred_at
+      `SELECT 'CONVERSATION' AS evidence_type, conversation_id, message_id, NULL::uuid AS source_id,
+              NULL::uuid AS segment_id, channel_type, sender_type, NULL::varchar AS evidence_kind,
+              NULL::numeric AS role_confidence, NULL::text AS normalized_text, occurred_at
          FROM knowledge_candidate_evidence
+        WHERE tenant_id = $1 AND candidate_id = $2
+      UNION ALL
+       SELECT 'IMAGE' AS evidence_type, NULL::uuid AS conversation_id, NULL::uuid AS message_id,
+              source_id, segment_id, 'IMAGE' AS channel_type, role AS sender_type, evidence_kind,
+              role_confidence, normalized_text, created_at AS occurred_at
+         FROM knowledge_candidate_image_evidence
         WHERE tenant_id = $1 AND candidate_id = $2
         ORDER BY occurred_at ASC`,
       [tenantId, req.params.candidateId]
     );
     return res.json({ evidence: result.rows });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/sources/:sourceId/candidates/generate', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  const id = sourceId(req, res);
+  if (!tenantId || !id) return;
+  try {
+    const candidates = await createImageKnowledgeCandidates({
+      database: pool,
+      tenantId,
+      sourceId: id,
+      assistantId: req.body?.assistant_id ?? null,
+      extractionHash: req.body?.extraction_hash,
+      candidateType: req.body?.candidate_type ?? 'POLICY',
+    });
+    const reused = candidates.length > 0 && candidates.every((candidate) => candidate.reused === true);
+    return res.status(reused ? 200 : 201).json({ candidates, reused });
   } catch (error) {
     return safeError(res, error);
   }
