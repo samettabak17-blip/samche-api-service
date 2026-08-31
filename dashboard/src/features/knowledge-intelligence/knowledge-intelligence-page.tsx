@@ -90,9 +90,16 @@ function PersonaFields({
   data,
   provenance,
 }: {
-  data: Record<string, unknown>;
+  data?: Record<string, unknown> | null;
   provenance: "SOURCE-DERIVED" | "AI RECOMMENDED" | "ADMIN EDITED";
 }) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return (
+      <p role="alert" className="mt-3 text-sm text-stone-400">
+        Configuration details are unavailable. Refresh the page before reviewing this result.
+      </p>
+    );
+  }
   return (
     <div className="mt-3">
       <span className="rounded-full border border-line bg-elevated px-2 py-1 text-[10px] font-semibold text-stone-300">
@@ -225,6 +232,11 @@ export function KnowledgeIntelligencePage() {
     scope: string;
     result: ConfigurationGenerationResult;
   } | null>(null);
+  const [configurationTerminalFailure, setConfigurationTerminalFailure] = useState<{
+    scope: string;
+    message: string;
+  } | null>(null);
+  const [selectedConfigurationId, setSelectedConfigurationId] = useState<string | null>(null);
   const [editor, setEditor] = useState<{
     kind: "profile" | "configuration";
     id: string;
@@ -234,6 +246,9 @@ export function KnowledgeIntelligencePage() {
   useEffect(() => {
     setRecommendationTerminal(null);
     setSelectedRecommendationId(null);
+    setConfigurationTerminal(null);
+    setConfigurationTerminalFailure(null);
+    setSelectedConfigurationId(null);
   }, [assistantId, configurationProfileVersionId]);
   const assistants = useQuery({
     queryKey: tenantKeys.assistants(tenantId),
@@ -553,11 +568,28 @@ export function KnowledgeIntelligencePage() {
       ),
     onSuccess: (result, recommendationId) => {
       const scope = `${assistantId}:${recommendationId}`;
+      const configuration = result?.configuration;
+      if (
+        !configuration ||
+        typeof configuration.id !== "string" ||
+        typeof configuration.status !== "string" ||
+        !configuration.configuration_data ||
+        typeof configuration.configuration_data !== "object" ||
+        Array.isArray(configuration.configuration_data)
+      ) {
+        setConfigurationTerminal(null);
+        setConfigurationTerminalFailure({
+          scope,
+          message: "Configuration generation returned an unusable result. Refresh and retry.",
+        });
+        return;
+      }
+      setConfigurationTerminalFailure(null);
       setConfigurationTerminal({ scope, result });
       queryClient.setQueryData(
         tenantKeys.assistantConfigurations(tenantId, assistantId),
         (current: typeof configurations.data) =>
-          [result.configuration, ...(current ?? []).filter((row) => row.id !== result.configuration.id)],
+          [configuration, ...(current ?? []).filter((row) => row.id !== configuration.id)],
       );
       void refreshConfigurations();
     },
@@ -2007,16 +2039,33 @@ export function KnowledgeIntelligencePage() {
                                   Configuration {configurationTerminal.result.configuration.id.slice(0, 8)} · {configurationTerminal.result.configuration.status} · NOT ACTIVE
                                 </p>
                                 <DashboardButton
+                                  type="button"
                                   variant="secondary"
                                   className="mt-2"
-                                  onClick={() =>
+                                  onClick={() => {
+                                    const id = configurationTerminal.result.configuration.id;
+                                    setSelectedConfigurationId(id);
                                     document
-                                      .getElementById(`configuration-${configurationTerminal.result.configuration.id}`)
-                                      ?.scrollIntoView({ behavior: "smooth", block: "center" })
-                                  }
+                                      .getElementById(`configuration-${id}`)
+                                      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                                  }}
                                 >
                                   Review configuration
                                 </DashboardButton>
+                                {selectedConfigurationId === configurationTerminal.result.configuration.id && (
+                                  <section className="mt-3 rounded-lg border border-line bg-elevated/60 p-3" role="region" aria-label="Configuration review" tabIndex={-1}>
+                                    <h3 className="text-sm font-semibold">Configuration review</h3>
+                                    <PersonaFields
+                                      data={configurationTerminal.result.configuration.configuration_data}
+                                      provenance="AI RECOMMENDED"
+                                    />
+                                  </section>
+                                )}
+                              </div>
+                            )}
+                            {configurationTerminalFailure?.scope === `${assistantId}:${row.id}` && (
+                              <div className="w-full" role="status">
+                                <MutationFeedback error={new Error(configurationTerminalFailure.message)} />
                               </div>
                             )}
                             {generateConfiguration.variables === row.id && (
@@ -2046,7 +2095,7 @@ export function KnowledgeIntelligencePage() {
                 ) : (
                   <div className="panel divide-y divide-line">
                     {(configurations.data ?? []).map((row) => (
-                      <article id={`configuration-${row.id}`} key={row.id} className="p-4">
+                      <article id={`configuration-${row.id}`} key={row.id} className="p-4" aria-current={selectedConfigurationId === row.id ? "true" : undefined}>
                         <strong className="text-sm">
                           Configuration {row.id.slice(0, 8)}
                         </strong>

@@ -145,7 +145,8 @@ export async function generateAssistantConfigurationVersion({ database, provider
   const generated = await generate({ database, provider, tenantId, requestedBy, targetType: 'ASSISTANT_CONFIGURATION', prompt, provenance, fingerprint, generationStage: 'CONFIGURATION_GENERATION', sourceCount: provenance.source_scope?.source_ids?.length ?? 0, persist: async (generationDatabase, output, runId) => {
     const result = await generationDatabase.query(`INSERT INTO assistant_configuration_versions
       (tenant_id, assistant_id, configuration_data, source_profile_version_id, source_recommendation_id, generation_run_id, schema_version, generated_by, status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'AI', 'NEEDS_REVIEW') RETURNING id, status, created_at`, [tenantId, assistantId, output, context.rows[0].profile_version_id, recommendationId, runId, 2]);
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'AI', 'NEEDS_REVIEW')
+      RETURNING id, schema_version, configuration_data, source_profile_version_id, source_recommendation_id, status, created_at`, [tenantId, assistantId, output, context.rows[0].profile_version_id, recommendationId, runId, 2]);
     return result.rows[0];
   } });
   return { configuration: generated.artifact, reused: generated.reused, run_id: generated.run_id };

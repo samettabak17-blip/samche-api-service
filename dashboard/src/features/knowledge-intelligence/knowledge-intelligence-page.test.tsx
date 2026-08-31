@@ -841,6 +841,97 @@ it("shows a scope-bound reused Recommendation terminal result without silent idl
   expect(screen.getByRole("region", { name: "Recommendation review" })).toBeVisible();
   expect(mockedApi.reviewRecommendation).not.toHaveBeenCalled();
 });
+
+it("keeps the Configuration page rendered when generation returns an unusable summary artifact", async () => {
+  mockedApi.listAssistants.mockResolvedValue([
+    { id: "assistant-a", tenant_id: "tenant-a", name: "Meridian Advisor" },
+  ]);
+  mockedApi.listBusinessProfiles.mockResolvedValue([
+    {
+      id: "profile-active",
+      schema_version: 2,
+      profile_data: { company_identity: "Meridian Arc Technologies LLC" },
+      status: "APPROVED",
+      active_version_id: "profile-active",
+    },
+  ]);
+  mockedApi.listKnowledgeRecommendations.mockResolvedValue([
+    {
+      id: "recommendation-approved",
+      recommendation_data: { tone: "Professional" },
+      status: "APPROVED",
+    },
+  ]);
+  mockedApi.generateAssistantConfiguration.mockResolvedValue({
+    configuration: {
+      id: "configuration-new",
+      status: "NEEDS_REVIEW",
+    } as never,
+    reused: false,
+    run_id: "configuration-run",
+  });
+
+  renderPage(true, "/app/tenant-a/knowledge-base/configurations");
+  const assistantSelect = await screen.findByRole("combobox", { name: "Assistant" });
+  await screen.findByRole("option", { name: "Meridian Advisor" });
+  fireEvent.change(assistantSelect, { target: { value: "assistant-a" } });
+  await waitFor(() => expect(assistantSelect).toHaveValue("assistant-a"));
+  fireEvent.click(await screen.findByRole("button", { name: "Generate configuration" }));
+
+  expect(await screen.findByText("Configuration generation returned an unusable result. Refresh and retry.")).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Configurations" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Review configuration" })).not.toBeInTheDocument();
+});
+
+it("surfaces and reviews the exact generated Configuration before refetch", async () => {
+  mockedApi.listAssistants.mockResolvedValue([
+    { id: "assistant-a", tenant_id: "tenant-a", name: "Meridian Advisor" },
+  ]);
+  mockedApi.listBusinessProfiles.mockResolvedValue([
+    {
+      id: "profile-active",
+      schema_version: 2,
+      profile_data: { company_identity: "Meridian Arc Technologies LLC" },
+      status: "APPROVED",
+      active_version_id: "profile-active",
+    },
+  ]);
+  mockedApi.listKnowledgeRecommendations.mockResolvedValue([
+    {
+      id: "recommendation-approved",
+      recommendation_data: { tone: "Professional" },
+      status: "APPROVED",
+    },
+  ]);
+  mockedApi.generateAssistantConfiguration.mockResolvedValue({
+    configuration: {
+      id: "configuration-new",
+      status: "NEEDS_REVIEW",
+      configuration_data: { assistant_instructions: "Use approved facts." },
+      source_profile_version_id: "profile-active",
+      source_recommendation_id: "recommendation-approved",
+    },
+    reused: false,
+    run_id: "configuration-run",
+  });
+
+  renderPage(true, "/app/tenant-a/knowledge-base/configurations");
+  const assistantSelect = await screen.findByRole("combobox", { name: "Assistant" });
+  await screen.findByRole("option", { name: "Meridian Advisor" });
+  fireEvent.change(assistantSelect, { target: { value: "assistant-a" } });
+  await waitFor(() => expect(assistantSelect).toHaveValue("assistant-a"));
+  fireEvent.click(await screen.findByRole("button", { name: "Generate configuration" }));
+
+  expect(await screen.findByText("Assistant Configuration generated")).toBeVisible();
+  expect(screen.getByText(/Configuration configur · NEEDS_REVIEW · NOT ACTIVE/)).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Configurations" })).toBeVisible();
+  const reviewButton = screen.getByRole("button", { name: "Review configuration" });
+  expect(reviewButton).not.toBeDisabled();
+  fireEvent.click(reviewButton);
+  expect(screen.getByRole("region", { name: "Configuration review" })).toBeVisible();
+  expect(mockedApi.reviewAssistantConfiguration).not.toHaveBeenCalled();
+  expect(mockedApi.activateAssistantConfiguration).not.toHaveBeenCalled();
+});
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
