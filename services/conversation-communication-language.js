@@ -10,8 +10,8 @@ const ARABIC_GREETING_OR_SOCIAL = /^[\u0600-\u06FF\s،؟!.]+$/u;
  * scoring path, while short/weak messages remain unresolved for continuity.
  */
 const LANGUAGE_EVIDENCE = [
-  { code: 'tr', terms: ['şirket', 'kurmak', 'istiyorum', 'hakkında', 'fiyatı', 'nedir', 'maliyetleri', 'vize', 'hizmet', 'hizmetleri', 'veriyorsunuz', 'sunuyorsunuz', 'sağlıyorsunuz', 'hangi'] },
-  { code: 'en', terms: ['the', 'and', 'with', 'company', 'setup', 'costs', 'visa', 'options', 'please', 'explain', 'does', 'document'] },
+  { code: 'tr', terms: ['şirket', 'kurmak', 'istiyorum', 'hakkında', 'fiyatı', 'nedir', 'maliyetleri', 'vize', 'hizmet', 'hizmetleri', 'veriyorsunuz', 'sunuyorsunuz', 'sağlıyorsunuz', 'hangi', 'siz', 'kimsiniz', 'ofisiniz', 'nerede', 'destek', 'süreciniz', 'nasıl', 'çalışıyor', 'çalışma', 'saatleriniz'] },
+  { code: 'en', terms: ['the', 'and', 'with', 'company', 'setup', 'costs', 'visa', 'options', 'please', 'explain', 'does', 'document', 'who', 'are', 'you', 'what', 'services', 'do', 'provide', 'where', 'is', 'your', 'office', 'how', 'support', 'process', 'work', 'business', 'hours'] },
   { code: 'es', terms: ['quiero', 'obtener', 'trabajador', 'independiente', 'responde', 'español', 'empresa', 'visado', 'visa', 'costes'] },
   { code: 'fr', terms: ['je', 'souhaite', 'créer', 'entreprise', 'répondez', 'français', 'visa', 'coûts', 'options'] },
   { code: 'de', terms: ['ich', 'möchte', 'kosten', 'firmengründung', 'unternehmen', 'visum', 'bitte', 'deutsch'] },
@@ -38,7 +38,7 @@ function tokenize(text) {
 
 function bestEvidenceLanguage(text) {
   const tokens = tokenize(text);
-  if (tokens.length < 3) return null;
+  if (tokens.length < 2) return null;
   const tokenSet = new Set(tokens);
   const matches = LANGUAGE_EVIDENCE
     .map(({ code, terms }) => ({ code, score: terms.reduce((total, term) => total + (tokenSet.has(term) ? 1 : 0), 0) }))

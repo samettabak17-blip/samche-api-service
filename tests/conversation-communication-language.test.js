@@ -53,3 +53,27 @@ test('ambiguous current text preserves the persisted conversation language', () 
   assert.equal(inferConservativeWhatsAppLanguage('ok'), null);
   assert.equal(resolveWhatsAppCommunicationLanguage({ currentLanguage: 'tr', content: 'ok' }), 'tr');
 });
+
+test('recognizes different-intent English and Turkish substantive turns', () => {
+  const english = ['Who are you?', 'What services do you provide?', 'Where is your office?', 'How does your support process work?', 'What are your business hours?'];
+  const turkish = ['Siz kimsiniz?', 'Hangi hizmetleri veriyorsunuz?', 'Ofisiniz nerede?', 'Destek süreciniz nasıl çalışıyor?', 'Çalışma saatleriniz nedir?'];
+  for (const message of english) assert.equal(inferConservativeWhatsAppLanguage(message), 'en', message);
+  for (const message of turkish) assert.equal(inferConservativeWhatsAppLanguage(message), 'tr', message);
+});
+
+test('current language wins across different intents in one conversation', () => {
+  let language = 'en';
+  for (const [message, expected] of [
+    ['What services do you provide?', 'en'],
+    ['Ofisiniz nerede?', 'tr'],
+    ['ما هي ساعات العمل؟', 'ar'],
+    ['How does your support process work?', 'en'],
+  ]) {
+    language = resolveWhatsAppCommunicationLanguage({ currentLanguage: language, content: message });
+    assert.equal(language, expected, message);
+  }
+  assert.equal(resolveWhatsAppCommunicationLanguage({ currentLanguage: 'tr', content: 'Who are you?' }), 'en');
+  assert.equal(resolveWhatsAppCommunicationLanguage({ currentLanguage: 'ar', content: 'Where is your office?' }), 'en');
+  assert.equal(resolveWhatsAppCommunicationLanguage({ currentLanguage: 'en', content: 'Ofisiniz nerede?' }), 'tr');
+  assert.equal(resolveWhatsAppCommunicationLanguage({ currentLanguage: 'en', content: 'كيف تعمل عملية الدعم لديكم؟' }), 'ar');
+});
