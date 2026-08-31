@@ -1516,14 +1516,29 @@ export function KnowledgeIntelligencePage() {
                             </p>
                             {isImageKnowledgeSource(selectedSource.data) && (
                               <div className="mt-3 rounded-lg border border-line bg-elevated p-3 text-xs text-stone-300">
-                                <p className="font-semibold text-ink">Image extraction completed</p>
-                                <p className="mt-1">
-                                  {selectedSource.data.image_segment_count ?? 0} segments · BUSINESS {selectedSource.data.image_role_summary?.BUSINESS ?? 0} · CUSTOMER {selectedSource.data.image_role_summary?.CUSTOMER ?? 0} · UNKNOWN {selectedSource.data.image_role_summary?.UNKNOWN ?? 0}
-                                </p>
-                                <p className="mt-1 text-stone-400">
-                                  {selectedSource.data.extraction_method ?? "Extraction method not reported"}
-                                  {selectedSource.data.extraction_version ? ` · ${selectedSource.data.extraction_version}` : ""}
-                                </p>
+                                {selectedSource.data.processing_status === "READY" ? (
+                                  <>
+                                    <p className="font-semibold text-ink">Image extraction completed</p>
+                                    <p className="mt-1">
+                                      {selectedSource.data.image_segment_count ?? 0} segments · BUSINESS {selectedSource.data.image_role_summary?.BUSINESS ?? 0} · CUSTOMER {selectedSource.data.image_role_summary?.CUSTOMER ?? 0} · UNKNOWN {selectedSource.data.image_role_summary?.UNKNOWN ?? 0}
+                                    </p>
+                                    <p className="mt-1 text-stone-400">
+                                      {selectedSource.data.extraction_method ?? "Extraction method not reported"}
+                                      {selectedSource.data.extraction_version ? ` · ${selectedSource.data.extraction_version}` : ""}
+                                    </p>
+                                  </>
+                                ) : selectedSource.data.processing_status === "FAILED" ? (
+                                  <>
+                                    <p className="font-semibold text-red-300">Image processing failed safely</p>
+                                    <p className="mt-1 text-stone-400">
+                                      {selectedSource.data.processing_error_code ?? "No further safe diagnostic is available."}
+                                    </p>
+                                  </>
+                                ) : (
+                                  <p className="font-semibold text-stone-200">
+                                    Image processing status: {selectedSource.data.processing_status}
+                                  </p>
+                                )}
                               </div>
                             )}
                             <div className="mt-4 flex flex-wrap gap-2">

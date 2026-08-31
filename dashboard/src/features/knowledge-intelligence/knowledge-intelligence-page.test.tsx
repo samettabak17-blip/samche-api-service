@@ -692,6 +692,39 @@ it("shows a READY image extraction summary and an explicit candidate action", as
   expect(screen.getByRole("button", { name: "Generate candidates" })).toBeEnabled();
 });
 
+it("shows a safe failed image processing state without offering candidate generation", async () => {
+  mockedApi.listKnowledgeSources.mockResolvedValue([
+    {
+      id: "image-source-failed",
+      title: "Unreadable screenshot",
+      source_type: "IMAGE",
+      mime_type: "image/jpeg",
+      processing_status: "FAILED",
+      indexing_status: "DISABLED",
+      processing_error_code: "IMAGE_EXTRACTION_FAILED",
+      enabled: true,
+    },
+  ]);
+  mockedApi.getKnowledgeSource.mockResolvedValue({
+    id: "image-source-failed",
+    title: "Unreadable screenshot",
+    source_type: "IMAGE",
+    mime_type: "image/jpeg",
+    processing_status: "FAILED",
+    indexing_status: "DISABLED",
+    processing_error_code: "IMAGE_EXTRACTION_FAILED",
+    enabled: true,
+    assistant_ids: [],
+  });
+
+  renderPage(true, "/app/tenant-a/knowledge-base/sources");
+  fireEvent.click(await screen.findByRole("button", { name: "View Unreadable screenshot" }));
+
+  expect(await screen.findByText("Image processing failed safely")).toBeVisible();
+  expect(screen.queryByText("Image extraction completed")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Generate candidates" })).not.toBeInTheDocument();
+});
+
 it("generates image candidates only after the explicit source action", async () => {
   mockedApi.listKnowledgeSources.mockResolvedValue([
     {
