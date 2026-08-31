@@ -69,6 +69,40 @@ try {
     [tenantId, profileVersionId],
   );
   const latestConfigurationRun = configurationRuns.rows[0] ?? null;
+  const runtime = await client.query(
+    `SELECT ci.tenant_id, ci.assistant_id AS whatsapp_assistant_id,
+            ci.channel_id, ci.enabled AS integration_enabled,
+            channel.channel_type, channel.status AS channel_status,
+            assistant.status AS assistant_status,
+            assistant.active_configuration_version_id,
+            assistant.knowledge_authority_version,
+            configuration.id AS configuration_id,
+            configuration.status AS configuration_status,
+            configuration.schema_version AS configuration_schema_version,
+            configuration.source_profile_version_id,
+            configuration.source_recommendation_id,
+            CASE WHEN NULLIF(btrim(configuration.configuration_data->>'assistant_identity'), '') IS NULL THEN false ELSE true END AS has_assistant_identity,
+            profile.active_version_id AS active_business_profile_version_id,
+            profile_version.status AS profile_version_status,
+            profile_version.schema_version AS profile_schema_version,
+            CASE WHEN NULLIF(btrim(COALESCE(profile_version.profile_data->>'company_identity', profile_version.profile_data->>'company_display_name')), '') IS NULL THEN false ELSE true END AS has_company_identity,
+            (configuration.source_profile_version_id = profile.active_version_id) AS source_profile_matches_active
+       FROM channel_integrations ci
+       JOIN tenant_channels channel ON channel.id = ci.channel_id AND channel.tenant_id = ci.tenant_id
+       JOIN ai_assistants assistant ON assistant.id = ci.assistant_id AND assistant.tenant_id = ci.tenant_id
+       LEFT JOIN assistant_configuration_versions configuration
+         ON configuration.id = assistant.active_configuration_version_id
+        AND configuration.tenant_id = assistant.tenant_id
+       LEFT JOIN business_profiles profile ON profile.tenant_id = assistant.tenant_id
+       LEFT JOIN business_profile_versions profile_version
+         ON profile_version.id = profile.active_version_id AND profile_version.tenant_id = profile.tenant_id
+      WHERE ci.tenant_id = $1
+        AND ci.integration_type = 'WHATSAPP'
+        AND ci.enabled = TRUE
+        AND channel.channel_type = 'WHATSAPP'
+      ORDER BY ci.created_at ASC`,
+    [tenantId],
+  );
   const counts = latest ? await client.query(
     `SELECT
        (SELECT count(*)::integer FROM knowledge_generation_runs WHERE tenant_id=$1 AND target_type='RECOMMENDATION' AND request_fingerprint=$2) AS exact_attempt_count,
@@ -80,6 +114,7 @@ try {
     profile_context: context.rows[0],
     latest_run: latest,
     latest_configuration_run: latestConfigurationRun,
+    whatsapp_runtime_rows: runtime.rows,
     counts: counts.rows[0],
     stage_history_available: false,
     stage_history_note: 'The bounded run model stores the latest stage and total elapsed_ms, not an event ledger.',
