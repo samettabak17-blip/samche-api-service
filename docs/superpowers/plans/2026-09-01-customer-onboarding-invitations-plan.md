@@ -16,7 +16,7 @@
 - `OWNER` is platform-wide; `CUSTOMER` remains customer system role; tenant roles are only `ADMIN` and `AGENT`.
 - New invited CUSTOMER membership is created only by acceptance of that tenant's invitation.
 - Existing ACTIVE CUSTOMER password and system role are never changed by assignment.
-- Invitation tokens are >=32 random bytes, hash-only at rest, one-time, bounded expiry, and never logged.
+- Invitation authority tokens are >=32 random bytes, hash-only in `customer_invitations`, one-time, bounded expiry, and never logged. A separate transient outbox envelope may hold AES-256-GCM ciphertext until delivery/retry completes.
 - SMTP sender is environment-configured (`support@samchecompany.com`, `SamChe Support`); onboarding/email/password flows make zero LLM calls.
 - Use TDD: each production change starts with a focused failing test and ends with focused verification.
 
@@ -54,7 +54,7 @@
 - Create: `services/customer-invitation-service.js`
 - Test: `tests/customer-invitation-service.test.js`, `tests/customer-invitations-migration.test.js`
 
-**Migration:** Add `customer_invitations` with user/tenant FKs, intended role, token hash, `PENDING|CONSUMED|REVOKED|EXPIRED`, expiry and lifecycle timestamps, delivery metadata, and partial unique `(user_id, tenant_id) WHERE status='PENDING'`. Add indexes for hash and tenant/user status.
+**Migration:** Add `customer_invitations` with user/tenant FKs, intended role, token hash, `PENDING|CONSUMED|REVOKED|EXPIRED`, expiry and lifecycle timestamps, delivery metadata, and partial unique `(user_id, tenant_id) WHERE status='PENDING'`. Add indexes for hash and tenant/user status. The invitation table remains hash-only; delivery token material is never stored here.
 
 **RED → GREEN:**
 - [ ] Test >=32-byte random token generation, SHA-256 hash-only persistence, bounded 72-hour expiry, malformed token rejection, and status transitions.
@@ -62,7 +62,7 @@
 - [ ] Implement service transactions using `SELECT ... FOR UPDATE`; make accept/resend/revoke first-commit-wins.
 - [ ] Test replay, expiry, concurrent accept/resend/revoke, and idempotent resend.
 
-**Stop condition:** no raw token leaves the service except the single mail-template invocation; no operation can activate another tenant membership. Rollback is migration omission; existing tables remain untouched.
+**Stop condition:** no raw token is persisted outside the short-lived encrypted outbox envelope or leaves the service except the single mail-template invocation; no operation can activate another tenant membership. Rollback is migration omission; existing tables remain untouched.
 
 ### Slice 3: Durable SMTP outbox and replaceable mail adapter
 
@@ -76,13 +76,13 @@
 - Modify: `package.json`/lockfile only if an approved SMTP library is absent
 - Test: `tests/customer-invitation-mailer.test.js`, `tests/customer-invitation-outbox.test.js`
 
-**API/config:** Validate `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, and HTTPS `PUBLIC_DASHBOARD_URL` at readiness/use time. From values are configuration, with staging expected as `support@samchecompany.com` / `SamChe Support`.
+**API/config:** Validate `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, HTTPS `PUBLIC_INVITATION_BASE_URL`, and `INVITATION_ENVELOPE_ENCRYPTION_KEY` at readiness/use time. From values are configuration, with staging expected as `support@samchecompany.com` / `SamChe Support`.
 
 **RED → GREEN:**
 - [ ] Test missing/invalid configuration and verify safe non-secret errors.
 - [ ] Test template contains company/email/expiry/link but no password, token in logs, or internal IDs.
-- [ ] Test outbox `PENDING_DELIVERY → SENT|DELIVERY_FAILED`, dedupe, bounded retry/backoff, crash recovery, and unknown SMTP timeout recovery.
-- [ ] Implement interface, SMTP adapter, transactional claim/update worker, and readiness preflight.
+- [ ] Test outbox `PENDING_DELIVERY → SENT|DELIVERY_FAILED`, AES-256-GCM encrypted transient envelope, envelope destruction after sent/revoke/expiry/terminal failure, dedupe, bounded retry/backoff, crash recovery, and unknown SMTP timeout recovery.
+- [ ] Implement interface, SMTP adapter, SamChe-owned encryption boundary, transactional claim/update worker, and readiness preflight.
 - [ ] Assert mocked OpenAI/Gemini/LLM call counts are zero.
 
 **Stop condition:** database commit never depends on SMTP; failed delivery remains resendable. Rollback disables worker/configuration and leaves domain rows auditable.
@@ -97,7 +97,7 @@
 - Modify: `routes/tenantRoutes.js`, `middleware/auth.js` only for endpoint guard reuse
 - Test: `tests/customer-onboarding-service.test.js`, `tests/tenant-onboarding-routes.test.js`
 
-**API:** `POST /api/v1/tenants/onboard` (OWNER only) accepts company/name/email/ADMIN and requires `Idempotency-Key` 32–128 safe ASCII characters. Return safe tenant/user/invitation/delivery status, never token/password. Add OWNER-only `GET /api/v1/tenants/:tenantId/invitations`, `POST /api/v1/tenants/:tenantId/invitations/:invitationId/resend`, and `POST /api/v1/tenants/:tenantId/invitations/:invitationId/revoke`. Keep existing `POST /:tenantId/users` semantics.
+**API:** `POST /api/v1/tenants/onboard` (OWNER only) accepts company/name/email/ADMIN and requires `Idempotency-Key` 32–128 safe ASCII characters. Return safe tenant/user/invitation/delivery status, never token/password. Add OWNER-only `GET /api/v1/tenants/:tenantId/invitations`, `POST /api/v1/tenants/:tenantId/invitations/:invitationId/resend`, and `POST /api/v1/tenants/:tenantId/invitations/:invitationId/revoke`. Restrict existing `POST /:tenantId/users` and customer discovery to ACTIVE, non-fixture CUSTOMER users; direct assignment is idempotent and cannot bypass invitation acceptance.
 
 **RED → GREEN:**
 - [ ] Test new canonical email creates tenant + INVITED CUSTOMER + invitation/outbox and no membership.
@@ -117,7 +117,7 @@
 - Create: `services/customer-invitation-acceptance-service.js`
 - Test: `tests/customer-invitation-acceptance.test.js`, auth regression tests
 
-**API:** Public `POST /api/v1/auth/invitations/validate` and `POST /api/v1/auth/invitations/accept` with token 43–512 chars, body <=4 KiB, password 8–256 chars, rate limits 20/15m validation and 5/15m acceptance per IP+token hash. Generic invalid/expired/revoked/used responses avoid enumeration.
+**API:** Public `POST /api/v1/auth/invitations/validate` and `POST /api/v1/auth/invitations/accept` with token 43–512 chars, body <=4 KiB enforced before excessive JSON body parsing, password 8–256 chars, rate limits 20/15m validation and 5/15m acceptance per IP+token hash. Generic invalid/expired/revoked/used responses avoid enumeration.
 
 **RED → GREEN:**
 - [ ] Test valid acceptance creates only intended `(tenant,user)` membership, hashes Argon2id, marks ACTIVE, consumes invitation.

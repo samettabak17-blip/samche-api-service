@@ -57,7 +57,7 @@ The database transaction commits domain state and an outbox entry together. SMTP
 
 ## Password and public acceptance security
 
-The public Dashboard route is `/accept-invitation`; it is explicitly excluded from authenticated-route guards. The link can carry an opaque token only over an HTTPS `PUBLIC_DASHBOARD_URL` configured and validated at startup. The server rejects non-HTTPS public URLs except an explicit local-development mode.
+The public Dashboard route is `/accept-invitation`; it is explicitly excluded from authenticated-route guards. The link can carry an opaque token only over an HTTPS `PUBLIC_INVITATION_BASE_URL` configured and validated at startup. The server rejects non-HTTPS public URLs except an explicit local-development mode.
 
 The page captures the token once, immediately replaces the browser URL/history with `/accept-invitation`, sets `Referrer-Policy: no-referrer`, and never sends the token to analytics, error reporting, or application logs. Public validation accepts only 43–512 character URL-safe tokens. Public acceptance bodies are limited to 4 KiB; passwords must be 8–256 characters. Validation is rate-limited to 20 requests per 15 minutes per IP and hashed-token key; acceptance is limited to 5 per 15 minutes per IP and hashed-token key. OWNER resend is limited to 10 per hour per invitation user/tenant. Responses do not return token hashes, internal ids, or account-existence details.
 
@@ -67,11 +67,11 @@ The customer supplies and confirms their password. The acceptance transaction va
 
 `CustomerInvitationMailer` is SamChe-owned. `SmtpCustomerInvitationMailer` is the first adapter; core onboarding does not depend on Hostinger or any provider SDK. It validates before readiness/onboarding is advertised:
 
-`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, and HTTPS `PUBLIC_DASHBOARD_URL`.
+`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, HTTPS `PUBLIC_INVITATION_BASE_URL`, and `INVITATION_ENVELOPE_ENCRYPTION_KEY`.
 
 The adapter uses authenticated standard SMTP and sends from configurable `SMTP_FROM_EMAIL` / `SMTP_FROM_NAME`; staging is configured as `support@samchecompany.com` / `SamChe Support`. It never logs credentials, headers, raw invitation URLs, or tokens.
 
-`customer_invitation_outbox` is the durable delivery record. It has `PENDING_DELIVERY`, `SENT`, and `DELIVERY_FAILED` states, attempt count, next attempt time, safe provider code, and a dedupe key unique per invitation + delivery template/version. A worker claims rows transactionally and retries bounded failures with backoff. Unknown SMTP timeout outcomes are not blindly resent in the same attempt; they remain recoverable for controlled retry/resend. Resend revokes the old invitation and makes a new outbox record, preventing duplicate current-token mail. A crash after transaction commit is recovered by the worker; SMTP failure leaves visible recoverable onboarding status.
+`customer_invitation_outbox` is the durable delivery record. It has `PENDING_DELIVERY`, `SENT`, and `DELIVERY_FAILED` states, attempt count, next attempt time, safe provider code, and a dedupe key unique per invitation + delivery template/version. The invitation authority table stores only `SHA-256(token)`; the outbox may hold a separate, transient AES-256-GCM encrypted delivery envelope containing only the token material needed to construct the email link. The envelope uses `INVITATION_ENVELOPE_ENCRYPTION_KEY`, is decrypted only immediately before SMTP delivery, and is cleared after a confirmed send, expiry, revocation, resend replacement, or terminal failure. Encryption/decryption failure fails closed without email or plaintext fallback. A worker claims rows transactionally and retries bounded failures with backoff. Unknown SMTP timeout outcomes are not blindly resent in the same attempt; they remain recoverable for controlled retry/resend. Resend revokes the old invitation, destroys its delivery envelope, and makes a new outbox record, preventing duplicate current-token mail. A crash after transaction commit is recovered by the worker; SMTP failure leaves visible recoverable onboarding status.
 
 No LLM/API call is permitted in any onboarding, invitation, password, or SMTP execution path. Focused acceptance tests assert OpenAI calls = 0, Gemini calls = 0, other LLM calls = 0.
 
@@ -79,7 +79,7 @@ No LLM/API call is permitted in any onboarding, invitation, password, or SMTP ex
 
 Use one existing Dashboard portal/dialog primitive for Create company, Assign existing customer, invitation status, resend, and revoke. The portal root is above page/header stacking contexts with a documented z-index scale; dialogs have backdrop, focus trap, initial focus, focus restoration, Escape handling, scroll lock, keyboard navigation, visible focus, and controlled internal scrolling. Buttons, fields, selects, errors, loading, disabled behavior, and contrast reuse Dashboard primitives. No overlay may clip behind cards, header, or dropdowns at wide desktop, narrow desktop, or tablet widths.
 
-Create company presents company name, first name, last name, and email, with `ADMIN` as the fixed initial role, and a primary `Create company & invite administrator` action. It validates fields, supplies idempotency, shows delivery/onboarding status, and safely exposes resend/revoke where authorized. `Assign existing customer` is secondary and lists/searches only ACTIVE, non-fixture CUSTOMER users; it allows only ADMIN or AGENT.
+Create company presents company name, first name, last name, and email, with `ADMIN` as the fixed initial role, and a primary `Create company & invite administrator` action. It validates fields, supplies idempotency, shows delivery/onboarding status, and safely exposes resend/revoke where authorized. `Assign existing customer` is secondary and lists/searches only ACTIVE, non-fixture CUSTOMER users; it allows only ADMIN or AGENT. The legacy direct-assignment endpoint enforces the same ACTIVE/non-fixture CUSTOMER restriction, so an INVITED user can gain a membership only through acceptance of that specific tenant invitation.
 
 Role display is presentation-only:
 
@@ -99,7 +99,7 @@ The dry run reports safe fixture identifiers/counts and all dependent records. E
 
 ## API and authorization boundaries
 
-OWNER-only endpoints: onboarding, invitation status, resend/revoke, existing-customer search, and membership assignment. Public endpoints: bounded invitation validation and acceptance only. Customer endpoints retain membership-based tenant access. Cross-tenant invitation/user/membership reads and writes are denied by tenant/user scoping.
+OWNER-only endpoints: onboarding, invitation status, resend/revoke, existing-customer search, and membership assignment. Direct membership assignment accepts only an ACTIVE, non-fixture CUSTOMER and only ADMIN or AGENT; INVITED, DISABLED, fixture, and OWNER targets are rejected. Public endpoints: bounded invitation validation and acceptance only. Customer endpoints retain membership-based tenant access. Cross-tenant invitation/user/membership reads and writes are denied by tenant/user scoping.
 
 Existing ACTIVE CUSTOMER path: resolve canonical email, preserve password and role, create/reuse requested membership, return safe assignment status, and optionally send a non-sensitive membership notification. It never creates a password-setup invitation.
 
