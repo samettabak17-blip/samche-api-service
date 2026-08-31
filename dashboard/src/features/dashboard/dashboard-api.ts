@@ -2,6 +2,7 @@ import { apiClient } from '../../lib/api-client';
 import type { AgentMessageResponse, HumanAttentionSummary, DashboardOverview, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmContact, CrmContactList, CrmDeal, CrmDealList, CrmLead, CrmLeadList, CrmOverviewMetrics, CrmPipelineStage, CrmPipelineSummary, KnowledgeDocument, KnowledgeOverview, KnowledgeSource, KnowledgeCandidate, KnowledgeCandidateEvidence, KnowledgeGap, KnowledgeGapSignal, BusinessIdentity, BusinessIdentityScopeAnalysis, BusinessProfileGenerationResult, BusinessProfileVersion, KnowledgeRecommendation, AssistantConfigurationVersion, RecommendationGenerationResult, ConfigurationGenerationResult, KnowledgeRetrievalPreview, TeamMember, TenantChannel, Tenant, TenantRole } from '../../types/api';
 
 const tenantRoot = (tenantId: string) => `/api/v1/tenants/${tenantId}`;
+type CustomerDirectoryUser = Pick<TeamMember, 'id' | 'email' | 'system_role'>;
 export const tenantKeys = {
   assistants: (tenantId: string) => ['tenant', tenantId, 'assistants'] as const,
   assistant: (tenantId: string, assistantId: string) => ['tenant', tenantId, 'assistant', assistantId] as const,
@@ -44,6 +45,7 @@ export const tenantApi = {
   listTenants: () => apiClient.get<Tenant[]>('/api/v1/tenants'),
   createTenant: (name: string) => apiClient.post<Tenant>('/api/v1/tenants', { name }),
   assignTenantUser: (tenantId: string, userId: string, tenantRole: Extract<TenantRole, 'ADMIN' | 'AGENT'>) => apiClient.post(`${tenantRoot(tenantId)}/users`, { user_id: userId, tenant_role: tenantRole }),
+  listCustomerUsers: (search = '') => apiClient.get<CustomerDirectoryUser[]>(`/api/v1/tenants/users?search=${encodeURIComponent(search)}`),
   listAssistants: (tenantId: string) => apiClient.get<Assistant[]>(`${tenantRoot(tenantId)}/assistants`),
   getAssistant: (tenantId: string, assistantId: string) => apiClient.get<Assistant>(`${tenantRoot(tenantId)}/assistants/${assistantId}`),
   createAssistant: (tenantId: string, body: Pick<Assistant, 'name'> & Partial<Pick<Assistant, 'model' | 'system_prompt' | 'status'>>) => apiClient.post<Assistant>(`${tenantRoot(tenantId)}/assistants`, body),

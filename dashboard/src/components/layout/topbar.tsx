@@ -3,12 +3,12 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
-import type { Tenant } from '../../types/api';
+import type { AuthUser, Tenant, TenantRole } from '../../types/api';
 import { useOverviewDateRange } from '../../features/overview/overview-date-range-context';
 import { useLiveSupportAttention } from '../../features/live-support/live-support-attention-provider';
 import { tenantApi } from '../../features/dashboard/dashboard-api';
 
-interface TopbarProps { tenants: Tenant[]; selectedTenantId: string; email: string; systemRole: 'OWNER' | 'CUSTOMER'; onCreateTenant(name: string): Promise<Tenant>; onSelectTenant(tenantId: string): void; onOpenNavigation(): void; onLogout(): void; }
+interface TopbarProps { tenants: Tenant[]; selectedTenantId: string; tenantId: string; email: string; systemRole: 'OWNER' | 'CUSTOMER'; selectedTenantRole?: TenantRole; onCreateTenant(name: string): Promise<Tenant>; onSelectTenant(tenantId: string): void; onOpenNavigation(): void; onLogout(): void; }
 
 const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const navigationDestinations = [
@@ -83,7 +83,7 @@ function DateRangeControl() {
   </div>;
 }
 
-export function Topbar({ tenants, selectedTenantId, email, systemRole, onCreateTenant, onSelectTenant, onOpenNavigation, onLogout }: TopbarProps) {
+export function Topbar({ tenants, selectedTenantId, tenantId, email, systemRole, selectedTenantRole, onCreateTenant, onSelectTenant, onOpenNavigation, onLogout }: TopbarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { requestedCount } = useLiveSupportAttention();
@@ -102,6 +102,13 @@ export function Topbar({ tenants, selectedTenantId, email, systemRole, onCreateT
   const [createError, setCreateError] = useState<string | null>(null);
   const [createPending, setCreatePending] = useState(false);
   const [createSuccess, setCreateSuccess] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [customerUsers, setCustomerUsers] = useState<Array<Pick<AuthUser, 'id' | 'email' | 'system_role'>>>([]);
+  const [assignedUserId, setAssignedUserId] = useState('');
+  const [tenantRole, setTenantRole] = useState<'ADMIN' | 'AGENT'>('ADMIN');
+  const [assignPending, setAssignPending] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
+  const [assignSuccess, setAssignSuccess] = useState(false);
   const navigationMatches = navigationDestinations.filter(([label, group]) => (label + ' ' + group).toLowerCase().includes(search.trim().toLowerCase())).slice(0, 7);
   const openDestination = (path: string) => { setSearch(''); setSearchOpen(false); navigate('/app/' + selectedTenantId + '/' + path); };
   useEffect(() => {
@@ -117,6 +124,10 @@ export function Topbar({ tenants, selectedTenantId, email, systemRole, onCreateT
     window.addEventListener('scroll', position, true);
     return () => { window.removeEventListener('resize', position); window.removeEventListener('scroll', position, true); };
   }, [searchOpen, notificationsOpen]);
+  useEffect(() => {
+    if (!assignOpen || systemRole !== 'OWNER') return;
+    void tenantApi.listCustomerUsers().then((users) => { setCustomerUsers(users); setAssignedUserId((current) => current || users[0]?.id || ''); }).catch(() => setAssignError('Could not load customer users. Please try again.'));
+  }, [assignOpen, systemRole]);
   useEffect(() => {
     const dismiss = (event: MouseEvent) => {
       const target = event.target as Node;
@@ -139,7 +150,7 @@ export function Topbar({ tenants, selectedTenantId, email, systemRole, onCreateT
     enabled: notificationsOpen && requestedCount > 0,
   });
   const waiting = (notifications.data ?? []).filter((item) => item.human_attention_state === 'REQUESTED');
-  const displayRole = 'Administrator';
+  const displayRole = systemRole === 'OWNER' ? 'Platform Owner' : selectedTenantRole === 'AGENT' ? 'Agent' : 'Administrator';
   const submitCreateTenant = async (event: FormEvent) => {
     event.preventDefault();
     const name = companyName.trim();
@@ -152,7 +163,15 @@ export function Topbar({ tenants, selectedTenantId, email, systemRole, onCreateT
     } catch { setCreateError('Could not create company. Please try again.'); }
     finally { setCreatePending(false); }
   };
-  return <header className="flex min-h-[4.25rem] items-center justify-between border-b border-line/80 bg-shell/85 px-4 backdrop-blur-xl sm:px-6 lg:px-7">
+  const submitAssignment = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!assignedUserId) { setAssignError('Select a customer user.'); return; }
+    setAssignPending(true); setAssignError(null); setAssignSuccess(false);
+    try { await tenantApi.assignTenantUser(tenantId, assignedUserId, tenantRole); setAssignSuccess(true); setAssignOpen(false); }
+    catch { setAssignError('Could not assign customer. Please try again.'); }
+    finally { setAssignPending(false); }
+  };
+  return <header className="relative z-50 flex min-h-[4.25rem] items-center justify-between border-b border-line/80 bg-shell/85 px-4 backdrop-blur-xl sm:px-6 lg:px-7">
     <div className="flex min-w-0 items-center gap-3"><button type="button" onClick={onOpenNavigation} className="grid h-10 w-10 place-items-center rounded-lg text-stone-300 hover:bg-white/[0.04] lg:hidden" aria-label="Open navigation"><Menu aria-hidden="true" size={21} /></button><p className="truncate text-lg font-semibold tracking-tight text-ink sm:text-xl">{title}</p></div>
     <div className="flex min-w-0 items-center gap-2 sm:gap-3">
       <form ref={searchTriggerRef} onSubmit={(event) => { event.preventDefault(); if (navigationMatches[searchIndex]) openDestination(navigationMatches[searchIndex][2]); }} className="relative hidden xl:block"><Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" /><input value={search} onFocus={() => { requestHeaderOverlayClose(); setSearchOpen(true); }} onClick={() => { requestHeaderOverlayClose(); setSearchOpen(true); }} onChange={(event) => { setSearch(event.target.value); setSearchIndex(0); setSearchOpen(true); }} onKeyDown={(event) => { if (event.key === 'ArrowDown') { event.preventDefault(); setSearchIndex((index) => Math.min(index + 1, Math.max(navigationMatches.length - 1, 0))); } if (event.key === 'ArrowUp') { event.preventDefault(); setSearchIndex((index) => Math.max(index - 1, 0)); } }} className="h-10 w-48 rounded-xl border border-line bg-black/15 pl-9 pr-3 text-xs text-ink outline-none transition placeholder:text-stone-500 focus:border-signal/50 2xl:w-60" placeholder="Search anything…" aria-label="Search dashboard destinations" />{searchOpen && typeof document !== 'undefined' && createPortal(<section ref={searchOverlayRef} role="listbox" aria-label="Dashboard destinations" style={{ position: 'fixed', top: searchPosition.top, left: searchPosition.left, zIndex: 60 }} className="w-72 overflow-hidden rounded-xl border border-white/[.14] bg-[#09121f]/95 p-1 shadow-2xl backdrop-blur-2xl">{navigationMatches.length ? navigationMatches.map(([label, group, path], index) => <button key={label + '-' + path} type="button" role="option" aria-selected={index === searchIndex} onMouseDown={(event) => event.preventDefault()} onClick={() => openDestination(path)} className={'flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs transition ' + (index === searchIndex ? 'bg-white/[.09] text-white' : 'text-stone-300 hover:bg-white/[.06]')}><span>{label}</span><span className="text-[10px] text-stone-500">{group}</span></button>) : <p className="px-3 py-2 text-xs text-stone-500">No dashboard destinations</p>}</section>, document.body)}</form>
@@ -161,6 +180,7 @@ export function Topbar({ tenants, selectedTenantId, email, systemRole, onCreateT
       <div className="glass-surface hidden min-w-0 items-center gap-2 rounded-xl px-3 py-2 lg:flex"><span className="inline-grid h-7 w-7 place-items-center rounded-full bg-signal/15 text-xs font-bold text-signal">{displayRole.slice(0, 1)}</span><div className="min-w-0"><p className="max-w-40 truncate text-xs font-semibold text-ink">{tenants.find((tenant) => tenant.id === selectedTenantId)?.name || 'Workspace'}</p><p className="text-[10px] text-stone-400">{displayRole}</p></div></div>
       <div className="hidden 2xl:block"><label className="sr-only" htmlFor="tenant-select">Selected tenant</label><select id="tenant-select" value={selectedTenantId} onChange={(event) => onSelectTenant(event.target.value)} className="max-w-40 truncate rounded-xl border border-line bg-elevated/60 px-2 py-2 text-xs font-semibold text-ink outline-none">{tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></div>
       {systemRole === 'OWNER' && <div className="relative"><button type="button" onClick={() => { setCreateOpen((value) => !value); setCreateError(null); setCreateSuccess(false); }} className="inline-flex h-10 items-center gap-2 rounded-xl border border-signal/40 bg-signal/10 px-3 text-xs font-semibold text-white hover:bg-signal/20"> <Building2 size={15} />Create company</button>{createOpen && <form role="dialog" aria-label="Create company" onSubmit={submitCreateTenant} className="absolute right-0 top-12 z-50 w-72 rounded-2xl border border-line bg-[#09121f] p-4 shadow-2xl"><label htmlFor="company-name" className="text-xs font-semibold text-stone-200">Company name</label><input id="company-name" aria-label="Company name" value={companyName} onChange={(event) => setCompanyName(event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-line bg-black/20 px-3 text-sm text-white outline-none" autoFocus /><div className="mt-3 flex justify-end gap-2"><button type="button" onClick={() => setCreateOpen(false)} className="rounded-lg px-3 py-2 text-xs text-stone-300">Cancel</button><button type="submit" disabled={createPending} className="rounded-lg bg-signal px-3 py-2 text-xs font-semibold text-white disabled:opacity-60">{createPending ? 'Creating…' : 'Create'}</button></div>{createError && <p role="alert" className="mt-2 text-xs text-red-300">{createError}</p>}</form>}{createSuccess && <span role="status" className="sr-only">Company created.</span>}</div>}
+      {systemRole === 'OWNER' && tenantId && <div className="relative"><button type="button" onClick={() => { setAssignOpen((value) => !value); setAssignError(null); setAssignSuccess(false); }} className="inline-flex h-10 items-center gap-2 rounded-xl border border-line bg-elevated/60 px-3 text-xs font-semibold text-stone-200 hover:border-signal/40"><Building2 size={15} />Assign customer</button>{assignOpen && <form role="dialog" aria-label="Assign customer" onSubmit={submitAssignment} className="absolute right-0 top-12 z-50 w-80 rounded-2xl border border-line bg-[#09121f] p-4 shadow-2xl"><label htmlFor="customer-user" className="text-xs font-semibold text-stone-200">Customer user</label><select id="customer-user" value={assignedUserId} onChange={(event) => setAssignedUserId(event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-line bg-black/20 px-3 text-sm text-white"><option value="">Select customer</option>{customerUsers.map((user) => <option key={user.id} value={user.id}>{user.email}</option>)}</select><label htmlFor="tenant-role" className="mt-3 block text-xs font-semibold text-stone-200">Tenant role</label><select id="tenant-role" aria-label="Tenant role" value={tenantRole} onChange={(event) => setTenantRole(event.target.value === 'AGENT' ? 'AGENT' : 'ADMIN')} className="mt-2 h-10 w-full rounded-lg border border-line bg-black/20 px-3 text-sm text-white"><option value="ADMIN">ADMIN</option><option value="AGENT">AGENT</option></select><div className="mt-3 flex justify-end"><button type="submit" disabled={assignPending || !assignedUserId} className="rounded-lg bg-signal px-3 py-2 text-xs font-semibold text-white disabled:opacity-60">{assignPending ? 'Assigning…' : 'Assign'}</button></div>{assignError && <p role="alert" className="mt-2 text-xs text-red-300">{assignError}</p>}</form>}{assignSuccess && <span role="status" className="sr-only">Customer assigned.</span>}</div>}
       <button type="button" onClick={onLogout} className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-elevated/60 text-stone-400 transition hover:border-signal/30 hover:text-ink" aria-label="Sign out"><LogOut aria-hidden="true" size={18} /></button>
     </div>
   </header>;

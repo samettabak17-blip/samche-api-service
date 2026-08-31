@@ -95,6 +95,25 @@ router.post('/', requireOwner, async (req, res) => {
 // OWNER-ONLY TENANT USER MANAGEMENT
 // ==========================================
 
+// GET /api/v1/tenants/users?search=... — discover assignable CUSTOMER users
+router.get('/users', requireOwner, async (req, res) => {
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    try {
+        const result = await query(`
+            SELECT id, email, system_role
+            FROM users
+            WHERE system_role = 'CUSTOMER'
+              AND ($1 = '' OR email ILIKE '%' || $1 || '%')
+            ORDER BY email ASC
+            LIMIT 50
+        `, [search]);
+        return res.json(result.rows);
+    } catch (err) {
+        console.error('Fetch assignable users error:', err);
+        return res.status(500).json({ error: 'Server error' });
+    }
+});
+
 // GET /api/v1/tenants/:tenantId/users
 router.get('/:tenantId/users', requireOwner, async (req, res) => {
     const { tenantId } = req.params;

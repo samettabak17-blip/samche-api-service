@@ -8,12 +8,12 @@ vi.mock('../../features/overview/overview-date-range-context', () => ({
   useOverviewDateRange: () => ({ preset: 'last-7-days', setPreset: vi.fn(), customStart: '2026-08-01', setCustomStart: vi.fn(), customEnd: '2026-08-07', setCustomEnd: vi.fn(), applyCustomRange: vi.fn(), clearCustomRange: vi.fn(), activeRange: { label: 'Last 7 days' } }),
 }));
 vi.mock('../../features/live-support/live-support-attention-provider', () => ({ useLiveSupportAttention: () => ({ requestedCount: 0 }) }));
-vi.mock('../../features/dashboard/dashboard-api', () => ({ tenantApi: { listConversations: vi.fn(), createTenant: vi.fn() } }));
+vi.mock('../../features/dashboard/dashboard-api', () => ({ tenantApi: { listConversations: vi.fn(), createTenant: vi.fn(), listCustomerUsers: vi.fn(), assignTenantUser: vi.fn() } }));
 import { tenantApi } from '../../features/dashboard/dashboard-api';
 
-function renderTopbar(systemRole: 'OWNER' | 'CUSTOMER' = 'CUSTOMER', onSelectTenant = vi.fn()) {
+function renderTopbar(systemRole: 'OWNER' | 'CUSTOMER' = 'CUSTOMER', onSelectTenant = vi.fn(), tenantRole: 'ADMIN' | 'AGENT' = 'ADMIN') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/app/tenant-1/overview']}><Topbar tenants={[{ id: 'tenant-1', name: 'SamChe', status: 'active', created_at: '' }]} selectedTenantId="tenant-1" email="operator@samche.test" systemRole={systemRole} onCreateTenant={(name) => tenantApi.createTenant(name)} onSelectTenant={onSelectTenant} onOpenNavigation={() => undefined} onLogout={() => undefined} /></MemoryRouter></QueryClientProvider>);
+  return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/app/tenant-1/overview']}><Topbar tenants={[{ id: 'tenant-1', name: 'SamChe', status: 'active', created_at: '' }]} selectedTenantId="tenant-1" email="operator@samche.test" systemRole={systemRole} selectedTenantRole={tenantRole} onCreateTenant={(name) => tenantApi.createTenant(name)} onSelectTenant={onSelectTenant} onOpenNavigation={() => undefined} onLogout={() => undefined} tenantId="tenant-1" /></MemoryRouter></QueryClientProvider>);
 }
 
 afterEach(() => cleanup());
@@ -34,6 +34,32 @@ describe('Topbar global navigation search', () => {
   it('does not render company creation for a CUSTOMER even with tenant ADMIN membership', () => {
     renderTopbar('CUSTOMER');
     expect(screen.queryByRole('button', { name: 'Create company' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Assign customer' })).toBeNull();
+  });
+
+  it('uses platform and tenant role labels without conflating them', () => {
+    const { unmount } = renderTopbar('OWNER');
+    expect(screen.getByText('Platform Owner')).toBeVisible();
+    unmount();
+    renderTopbar('CUSTOMER', vi.fn(), 'AGENT');
+    expect(screen.getByText('Agent')).toBeVisible();
+  });
+
+  it('keeps owner popovers above the header stacking context', () => {
+    renderTopbar('OWNER');
+    expect(screen.getByRole('banner')).toHaveClass('z-50');
+  });
+
+  it('lets an OWNER assign an existing CUSTOMER with an allowed tenant role', async () => {
+    vi.mocked(tenantApi.listCustomerUsers).mockResolvedValue([{ id: 'user-1', email: 'customer@example.test', system_role: 'CUSTOMER' }]);
+    vi.mocked(tenantApi.assignTenantUser).mockResolvedValue({});
+    renderTopbar('OWNER');
+    fireEvent.click(screen.getByRole('button', { name: 'Assign customer' }));
+    expect(await screen.findByRole('option', { name: 'customer@example.test' })).toBeVisible();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Tenant role' }), { target: { value: 'ADMIN' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    expect(await screen.findByText('Customer assigned.')).toBeVisible();
+    expect(tenantApi.assignTenantUser).toHaveBeenCalledWith('tenant-1', 'user-1', 'ADMIN');
   });
 
   it('reopens when the trigger remains focused after selecting a destination', () => {
