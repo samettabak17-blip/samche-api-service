@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useEffect, useState } from "react";
-import { useLocation, useParams, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   EmptyState,
   QueryErrorState,
@@ -157,6 +157,41 @@ const tabForRoute: Record<string, string> = Object.fromEntries(
 const actionClass = dashboardButtonClass("secondary");
 const primaryActionClass = dashboardButtonClass("primary");
 const destructiveActionClass = dashboardButtonClass("destructive");
+const knowledgeUploadAccept = ".pdf,.docx,.txt,.jpg,.jpeg,.png,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,image/jpeg,image/png";
+const maxImageUploadBytes = 25 * 1024 * 1024;
+const allowedKnowledgeUploadExtensions = new Set([
+  "pdf",
+  "docx",
+  "txt",
+  "jpg",
+  "jpeg",
+  "png",
+]);
+const allowedKnowledgeImageMimeTypes = new Set(["image/jpeg", "image/png"]);
+const isImageKnowledgeSource = (source: {
+  mime_type?: string | null;
+  source_type?: string | null;
+}) =>
+  allowedKnowledgeImageMimeTypes.has(source.mime_type ?? "") ||
+  source.source_type === "IMAGE";
+
+function knowledgeUploadValidationError(file: File): string | null {
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (!allowedKnowledgeUploadExtensions.has(extension)) {
+    return "This file type is not supported. Choose PDF, DOCX, TXT, JPG, JPEG or PNG.";
+  }
+  if (file.type && !allowedKnowledgeImageMimeTypes.has(file.type) && ![
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/plain",
+  ].includes(file.type)) {
+    return "This file type is not supported. Choose PDF, DOCX, TXT, JPG, JPEG or PNG.";
+  }
+  if (allowedKnowledgeImageMimeTypes.has(file.type) && file.size > maxImageUploadBytes) {
+    return "Image files must be 25 MiB or smaller.";
+  }
+  return null;
+}
 
 function Cards({
   items,
@@ -213,6 +248,7 @@ function DataList({
 
 export function KnowledgeIntelligencePage() {
   const { tenantId = "" } = useParams();
+  const navigate = useNavigate();
   const { canManage } = useTenant();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -229,6 +265,7 @@ export function KnowledgeIntelligencePage() {
     null,
   );
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadValidationError, setUploadValidationError] = useState<string | null>(null);
   const [sourceTitle, setSourceTitle] = useState("");
   const [manualContent, setManualContent] = useState("");
   const [gapDraft, setGapDraft] = useState({ title: "", content: "" });
@@ -450,6 +487,7 @@ export function KnowledgeIntelligencePage() {
       tenantApi.uploadKnowledgeSource(tenantId, uploadFile!, sourceTitle),
     onSuccess: () => {
       setUploadFile(null);
+      setUploadValidationError(null);
       setSourceTitle("");
       setSourceMode(null);
       refreshSources();
@@ -492,6 +530,17 @@ export function KnowledgeIntelligencePage() {
     queryClient.invalidateQueries({
       queryKey: tenantKeys.knowledgeCandidates(tenantId),
     });
+  const generateImageCandidates = useMutation({
+    mutationFn: ({ sourceId, extractionHash }: { sourceId: string; extractionHash?: string | null }) =>
+      tenantApi.generateImageKnowledgeCandidates(tenantId, sourceId, {
+        assistantId: assistantId || null,
+        extractionHash,
+      }),
+    onSuccess: () => {
+      refreshCandidates();
+      navigate(`/app/${tenantId}/knowledge-base/candidates`);
+    },
+  });
   const candidateAction = useMutation({
     mutationFn: (action: "approve" | "reject") =>
       action === "approve"
@@ -1224,7 +1273,7 @@ export function KnowledgeIntelligencePage() {
                 </button>
               </div>
               <p className="mt-2 text-xs text-stone-400">
-                Supported files: <span>PDF, DOCX or TXT</span>. Files are stored
+                Supported files: <span>PDF, DOCX, TXT, JPG, JPEG or PNG</span>. Files are stored
                 privately and processed asynchronously.
               </p>
             </div>
@@ -1268,7 +1317,7 @@ export function KnowledgeIntelligencePage() {
               className="panel grid gap-4 p-5 sm:grid-cols-2"
               onSubmit={(event) => {
                 event.preventDefault();
-                if (uploadFile) uploadSource.mutate();
+                if (uploadFile && !uploadValidationError) uploadSource.mutate();
               }}
             >
               <label className="text-sm font-medium">
@@ -1284,21 +1333,29 @@ export function KnowledgeIntelligencePage() {
                 Source document
                 <DashboardFileInput
                   aria-label="Source file"
-                  accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                  accept={knowledgeUploadAccept}
                   className="mt-2"
-                  formatHint="Accepted formats: PDF, DOCX or TXT"
+                  formatHint="Accepted formats: PDF, DOCX, TXT, JPG, JPEG or PNG. Image files must be 25 MiB or smaller."
                   selectedFileName={uploadFile?.name ?? null}
                   disabled={uploadSource.isPending}
-                  onChange={(event) =>
-                    setUploadFile(event.target.files?.[0] ?? null)
-                  }
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] ?? null;
+                    const error = file ? knowledgeUploadValidationError(file) : null;
+                    setUploadFile(error ? null : file);
+                    setUploadValidationError(error);
+                  }}
                 />
               </div>
+              {uploadValidationError && (
+                <p role="alert" className="text-sm text-red-400 sm:col-span-2">
+                  {uploadValidationError}
+                </p>
+              )}
               <div className="flex flex-wrap gap-2 sm:col-span-2">
                 <DashboardButton
                   variant="primary"
                   type="submit"
-                  disabled={!uploadFile || uploadSource.isPending}
+                  disabled={!uploadFile || Boolean(uploadValidationError) || uploadSource.isPending}
                 >
                   {uploadSource.isPending ? "Uploading…" : "Upload"}
                 </DashboardButton>
@@ -1365,11 +1422,13 @@ export function KnowledgeIntelligencePage() {
           <MutationFeedback
             error={
               uploadSource.error ??
+              uploadValidationError ??
               createManualSource.error ??
               assignSource.error ??
               unassignSource.error ??
               reindexSource.error ??
               archiveSource.error
+              ?? generateImageCandidates.error
             }
           />
           {(uploadSource.isSuccess || createManualSource.isSuccess) && (
@@ -1384,7 +1443,8 @@ export function KnowledgeIntelligencePage() {
           {(assignSource.isSuccess ||
             unassignSource.isSuccess ||
             reindexSource.isSuccess ||
-            archiveSource.isSuccess) && (
+            archiveSource.isSuccess ||
+            generateImageCandidates.isSuccess) && (
             <p
               role="status"
               className="rounded-lg border border-emerald-700 bg-emerald-950/30 p-3 text-sm text-emerald-300"
@@ -1402,7 +1462,7 @@ export function KnowledgeIntelligencePage() {
           ) : !(sources.data ?? []).length ? (
             <EmptyState
               title="No sources"
-              description="Upload a PDF, DOCX or TXT file, or add manual knowledge."
+              description="Upload a PDF, DOCX, TXT, JPG, JPEG or PNG file, or add manual knowledge."
             />
           ) : (
             <div className="panel divide-y divide-line">
@@ -1454,6 +1514,18 @@ export function KnowledgeIntelligencePage() {
                                 ? `${selectedSource.data.size_bytes} bytes`
                                 : "Text source"}
                             </p>
+                            {isImageKnowledgeSource(selectedSource.data) && (
+                              <div className="mt-3 rounded-lg border border-line bg-elevated p-3 text-xs text-stone-300">
+                                <p className="font-semibold text-ink">Image extraction completed</p>
+                                <p className="mt-1">
+                                  {selectedSource.data.image_segment_count ?? 0} segments · BUSINESS {selectedSource.data.image_role_summary?.BUSINESS ?? 0} · CUSTOMER {selectedSource.data.image_role_summary?.CUSTOMER ?? 0} · UNKNOWN {selectedSource.data.image_role_summary?.UNKNOWN ?? 0}
+                                </p>
+                                <p className="mt-1 text-stone-400">
+                                  {selectedSource.data.extraction_method ?? "Extraction method not reported"}
+                                  {selectedSource.data.extraction_version ? ` · ${selectedSource.data.extraction_version}` : ""}
+                                </p>
+                              </div>
+                            )}
                             <div className="mt-4 flex flex-wrap gap-2">
                               {(selectedSource.data.assistant_ids ?? []).map(
                                 (id) => {
@@ -1480,6 +1552,25 @@ export function KnowledgeIntelligencePage() {
                               )}
                               {canManage && selectedSource.data.enabled && (
                                 <>
+                                  {isImageKnowledgeSource(selectedSource.data) &&
+                                    selectedSource.data.processing_status === "READY" &&
+                                    selectedSource.data.indexing_status === "DISABLED" &&
+                                    selectedSource.data.extraction_hash && (
+                                      <DashboardButton
+                                        variant="primary"
+                                        onClick={() =>
+                                          generateImageCandidates.mutate({
+                                            sourceId: selectedSource.data!.id,
+                                            extractionHash: selectedSource.data!.extraction_hash,
+                                          })
+                                        }
+                                        disabled={generateImageCandidates.isPending}
+                                      >
+                                        {generateImageCandidates.isPending
+                                          ? "Generating candidates…"
+                                          : "Generate candidates"}
+                                      </DashboardButton>
+                                    )}
                                   <button
                                     className={actionClass}
                                     onClick={() => reindexSource.mutate()}
@@ -1590,10 +1681,31 @@ export function KnowledgeIntelligencePage() {
                         <ul className="mt-3 space-y-1 text-xs text-stone-300">
                           {(candidateEvidence.data ?? []).map((evidence) => (
                             <li
-                              key={`${evidence.message_id}-${evidence.occurred_at}`}
+                              key={`${evidence.evidence_type ?? "CONVERSATION"}-${evidence.segment_id ?? evidence.message_id ?? evidence.occurred_at}`}
                             >
-                              {evidence.channel_type} · {evidence.sender_type} ·{" "}
-                              {evidence.occurred_at}
+                              {evidence.evidence_type === "IMAGE" ? (
+                                <div className="rounded-lg border border-line bg-elevated p-3">
+                                  <p className="font-semibold text-stone-200">
+                                    {evidence.evidence_kind === "SUPPORTING_CONTEXT"
+                                      ? "Supporting customer context — not business truth"
+                                      : "Business evidence"}
+                                  </p>
+                                  <p className="mt-1 text-stone-400">
+                                    {evidence.source_title ?? "Image source"} · {evidence.sender_type}
+                                    {typeof evidence.role_confidence === "number"
+                                      ? ` · ${Math.round(evidence.role_confidence * 100)}% confidence`
+                                      : ""}
+                                    {typeof evidence.segment_order === "number"
+                                      ? ` · Segment ${evidence.segment_order + 1}`
+                                      : ""}
+                                  </p>
+                                  {evidence.normalized_text && (
+                                    <p className="mt-2 text-sm text-stone-300">{evidence.normalized_text}</p>
+                                  )}
+                                </div>
+                              ) : (
+                                <>{evidence.channel_type} · {evidence.sender_type} · {evidence.occurred_at}</>
+                              )}
                             </li>
                           ))}
                         </ul>

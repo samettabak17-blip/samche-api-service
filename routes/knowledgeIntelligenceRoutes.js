@@ -146,6 +146,10 @@ router.get('/:tenantId/knowledge-intelligence/sources', requireTenantAccess, asy
     const result = await pool.query(
       `SELECT id, title, source_type, original_filename, mime_type, size_bytes,
               processing_status, indexing_status, processing_error_code, enabled,
+              extraction_hash, extraction_method,
+              (SELECT extraction_version FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = knowledge_base_documents.tenant_id AND segment.source_id = knowledge_base_documents.id AND segment.is_current = TRUE ORDER BY segment.created_at DESC LIMIT 1) AS extraction_version,
+              (SELECT COUNT(*)::integer FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = knowledge_base_documents.tenant_id AND segment.source_id = knowledge_base_documents.id AND segment.is_current = TRUE) AS image_segment_count,
+              COALESCE((SELECT json_object_agg(role, role_count) FROM (SELECT segment.role, COUNT(*)::integer AS role_count FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = knowledge_base_documents.tenant_id AND segment.source_id = knowledge_base_documents.id AND segment.is_current = TRUE GROUP BY segment.role) image_roles), '{}'::json) AS image_role_summary,
               created_at, updated_at, processed_at, indexed_at
          FROM knowledge_base_documents
         WHERE tenant_id = $1
@@ -169,6 +173,10 @@ router.get('/:tenantId/knowledge-intelligence/sources/:sourceId', requireTenantA
     const result = await pool.query(
       `SELECT d.id, d.title, d.source_type, d.original_filename, d.mime_type, d.size_bytes,
               d.processing_status, d.indexing_status, d.processing_error_code, d.enabled,
+              d.extraction_hash, d.extraction_method,
+              (SELECT extraction_version FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = d.tenant_id AND segment.source_id = d.id AND segment.is_current = TRUE ORDER BY segment.created_at DESC LIMIT 1) AS extraction_version,
+              (SELECT COUNT(*)::integer FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = d.tenant_id AND segment.source_id = d.id AND segment.is_current = TRUE) AS image_segment_count,
+              COALESCE((SELECT json_object_agg(role, role_count) FROM (SELECT segment.role, COUNT(*)::integer AS role_count FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = d.tenant_id AND segment.source_id = d.id AND segment.is_current = TRUE GROUP BY segment.role) image_roles), '{}'::json) AS image_role_summary,
               d.created_at, d.updated_at, d.processed_at, d.indexed_at,
               COALESCE(json_agg(a.assistant_id) FILTER (WHERE a.assistant_id IS NOT NULL), '[]'::json) AS assistant_ids
          FROM knowledge_base_documents d
@@ -366,15 +374,20 @@ router.get('/:tenantId/knowledge-intelligence/candidates/:candidateId/evidence',
     const result = await pool.query(
       `SELECT 'CONVERSATION' AS evidence_type, conversation_id, message_id, NULL::uuid AS source_id,
               NULL::uuid AS segment_id, channel_type, sender_type, NULL::varchar AS evidence_kind,
-              NULL::numeric AS role_confidence, NULL::text AS normalized_text, occurred_at
+              NULL::numeric AS role_confidence, NULL::text AS normalized_text, NULL::varchar AS source_title,
+              NULL::varchar AS extraction_version, NULL::char(64) AS extraction_hash,
+              NULL::integer AS segment_order, NULL::jsonb AS source_locator, occurred_at
          FROM knowledge_candidate_evidence
         WHERE tenant_id = $1 AND candidate_id = $2
       UNION ALL
        SELECT 'IMAGE' AS evidence_type, NULL::uuid AS conversation_id, NULL::uuid AS message_id,
-              source_id, segment_id, 'IMAGE' AS channel_type, role AS sender_type, evidence_kind,
-              role_confidence, normalized_text, created_at AS occurred_at
-         FROM knowledge_candidate_image_evidence
-        WHERE tenant_id = $1 AND candidate_id = $2
+              image.source_id, image.segment_id, 'IMAGE' AS channel_type, image.role AS sender_type, image.evidence_kind,
+              image.role_confidence, image.normalized_text, source.title AS source_title,
+              image.extraction_version, image.extraction_hash, image.segment_order, image.source_locator, image.created_at AS occurred_at
+         FROM knowledge_candidate_image_evidence image
+         LEFT JOIN knowledge_base_documents source
+           ON source.id = image.source_id AND source.tenant_id = image.tenant_id
+        WHERE image.tenant_id = $1 AND image.candidate_id = $2
         ORDER BY occurred_at ASC`,
       [tenantId, req.params.candidateId]
     );

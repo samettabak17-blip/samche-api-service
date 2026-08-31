@@ -31,6 +31,7 @@ vi.mock("../dashboard/dashboard-api", async (importOriginal) => {
       assignKnowledgeSource: vi.fn(),
       unassignKnowledgeSource: vi.fn(),
       reindexKnowledgeSource: vi.fn(),
+      generateImageKnowledgeCandidates: vi.fn(),
       archiveKnowledgeSource: vi.fn(),
       listKnowledgeCandidates: vi.fn(),
       getKnowledgeCandidateEvidence: vi.fn(),
@@ -117,6 +118,10 @@ beforeEach(() => {
   mockedApi.listChannels.mockResolvedValue([]);
   mockedApi.listKnowledgeSources.mockResolvedValue([]);
   mockedApi.assignKnowledgeSource.mockResolvedValue(undefined);
+  mockedApi.generateImageKnowledgeCandidates.mockResolvedValue({
+    candidates: [],
+    reused: false,
+  });
   mockedApi.listKnowledgeCandidates.mockResolvedValue([]);
   mockedApi.listKnowledgeGaps.mockResolvedValue([]);
   mockedApi.listBusinessIdentities.mockResolvedValue([]);
@@ -579,15 +584,45 @@ it("does not label unknown or low-confidence evidence as multiple businesses", a
   ).not.toBeInTheDocument();
 });
 
-it("exposes upload and manual source creation with the supported formats", async () => {
+it("accepts JPG, JPEG and PNG source uploads with the image size boundary", async () => {
   renderPage(true, "/app/tenant-a/knowledge-base/sources");
   expect(
     await screen.findByRole("button", { name: "Upload source" }),
   ).toBeVisible();
-  expect(screen.getByText("PDF, DOCX or TXT")).toBeVisible();
+  expect(screen.getByText("PDF, DOCX, TXT, JPG, JPEG or PNG")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Upload source" }));
+  const input = screen.getByLabelText("Source file");
+  expect(input).toHaveAttribute("accept", expect.stringContaining(".jpg"));
+  expect(input).toHaveAttribute("accept", expect.stringContaining(".jpeg"));
+  expect(input).toHaveAttribute("accept", expect.stringContaining(".png"));
+  expect(screen.getByText(/25 MiB/)).toBeVisible();
   expect(
     screen.getByRole("button", { name: "Add manual knowledge" }),
   ).toBeVisible();
+});
+
+it("keeps unsupported and oversized images out of the upload request", async () => {
+  renderPage(true, "/app/tenant-a/knowledge-base/sources");
+  fireEvent.click(await screen.findByRole("button", { name: "Upload source" }));
+  const input = screen.getByLabelText("Source file");
+
+  fireEvent.change(input, {
+    target: { files: [new File(["not an image"], "unsupported.gif", { type: "image/gif" })] },
+  });
+  expect(await screen.findByRole("alert")).toHaveTextContent("This file type is not supported");
+  expect(screen.getByRole("button", { name: "Upload" })).toBeDisabled();
+
+  fireEvent.change(input, {
+    target: {
+      files: [
+        new File([new Uint8Array(25 * 1024 * 1024 + 1)], "too-large.png", {
+          type: "image/png",
+        }),
+      ],
+    },
+  });
+  expect(await screen.findByRole("alert")).toHaveTextContent("25 MiB or smaller");
+  expect(mockedApi.uploadKnowledgeSource).not.toHaveBeenCalled();
 });
 
 it("shows source detail lifecycle actions and real assignment state", async () => {
@@ -620,6 +655,137 @@ it("shows source detail lifecycle actions and real assignment state", async () =
   ).toBeVisible();
   expect(screen.getByRole("button", { name: "Re-index" })).toBeVisible();
   expect(screen.getByRole("button", { name: "Archive" })).toBeVisible();
+});
+
+it("shows a READY image extraction summary and an explicit candidate action", async () => {
+  mockedApi.listKnowledgeSources.mockResolvedValue([
+    {
+      id: "image-source-a",
+      title: "Support screenshot",
+      source_type: "IMAGE",
+      mime_type: "image/png",
+      processing_status: "READY",
+      indexing_status: "DISABLED",
+      enabled: true,
+    },
+  ]);
+  mockedApi.getKnowledgeSource.mockResolvedValue({
+    id: "image-source-a",
+    title: "Support screenshot",
+    source_type: "IMAGE",
+    mime_type: "image/png",
+    processing_status: "READY",
+    indexing_status: "DISABLED",
+    enabled: true,
+    extraction_hash: "a".repeat(64),
+    extraction_method: "GEMINI_VISION",
+    image_segment_count: 3,
+    image_role_summary: { BUSINESS: 1, CUSTOMER: 1, UNKNOWN: 1 },
+    assistant_ids: [],
+  });
+
+  renderPage(true, "/app/tenant-a/knowledge-base/sources");
+  fireEvent.click(await screen.findByRole("button", { name: "View Support screenshot" }));
+
+  expect(await screen.findByText("Image extraction completed")).toBeVisible();
+  expect(screen.getByText("3 segments · BUSINESS 1 · CUSTOMER 1 · UNKNOWN 1")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Generate candidates" })).toBeEnabled();
+});
+
+it("generates image candidates only after the explicit source action", async () => {
+  mockedApi.listKnowledgeSources.mockResolvedValue([
+    {
+      id: "image-source-a",
+      title: "Support screenshot",
+      source_type: "IMAGE",
+      mime_type: "image/png",
+      processing_status: "READY",
+      indexing_status: "DISABLED",
+      enabled: true,
+    },
+  ]);
+  mockedApi.getKnowledgeSource.mockResolvedValue({
+    id: "image-source-a",
+    title: "Support screenshot",
+    source_type: "IMAGE",
+    mime_type: "image/png",
+    processing_status: "READY",
+    indexing_status: "DISABLED",
+    enabled: true,
+    extraction_hash: "a".repeat(64),
+    assistant_ids: [],
+  });
+  mockedApi.listKnowledgeCandidates.mockResolvedValue([
+    {
+      id: "image-candidate-a",
+      candidate_type: "POLICY",
+      proposed_title: "Payment timing",
+      proposed_content: "The remaining balance is due before the event.",
+      status: "NEEDS_REVIEW",
+      pii_redaction_status: "REDACTED",
+    },
+  ]);
+
+  renderPage(true, "/app/tenant-a/knowledge-base/sources");
+  fireEvent.click(await screen.findByRole("button", { name: "View Support screenshot" }));
+  expect(mockedApi.generateImageKnowledgeCandidates).not.toHaveBeenCalled();
+  fireEvent.click(await screen.findByRole("button", { name: "Generate candidates" }));
+
+  await waitFor(() =>
+    expect(mockedApi.generateImageKnowledgeCandidates).toHaveBeenCalledWith(
+      "tenant-a",
+      "image-source-a",
+      { assistantId: null, extractionHash: "a".repeat(64) },
+    ),
+  );
+  expect(await screen.findByText("Payment timing")).toBeVisible();
+});
+
+it("renders redacted image BUSINESS evidence and CUSTOMER context without treating it as truth", async () => {
+  mockedApi.listKnowledgeCandidates.mockResolvedValue([
+    {
+      id: "image-candidate-a",
+      candidate_type: "POLICY",
+      proposed_title: "Payment timing",
+      proposed_content: "The remaining balance is due before the event.",
+      status: "NEEDS_REVIEW",
+      pii_redaction_status: "REDACTED",
+    },
+  ]);
+  mockedApi.getKnowledgeCandidateEvidence.mockResolvedValue([
+    {
+      evidence_type: "IMAGE",
+      channel_type: "IMAGE",
+      sender_type: "CUSTOMER",
+      evidence_kind: "SUPPORTING_CONTEXT",
+      source_title: "Support screenshot",
+      role_confidence: 0.91,
+      normalized_text: "Can we pay on the event day? Contact [REDACTED_EMAIL].",
+      segment_order: 0,
+      occurred_at: "2026-09-01T00:00:00Z",
+    },
+    {
+      evidence_type: "IMAGE",
+      channel_type: "IMAGE",
+      sender_type: "BUSINESS",
+      evidence_kind: "PRIMARY",
+      source_title: "Support screenshot",
+      role_confidence: 0.97,
+      normalized_text: "The remaining balance is due 3 business days before the event.",
+      segment_order: 1,
+      occurred_at: "2026-09-01T00:00:01Z",
+    },
+  ]);
+
+  renderPage(true, "/app/tenant-a/knowledge-base/candidates");
+  fireEvent.click(await screen.findByRole("button", { name: "Review Payment timing" }));
+
+  expect(await screen.findByText("Supporting customer context — not business truth")).toBeVisible();
+  expect(screen.getByText("Business evidence")).toBeVisible();
+  expect(screen.getByText(/\[REDACTED_EMAIL\]/)).toBeVisible();
+  expect(screen.queryByText("customer@example.com")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Approve candidate" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Reject candidate" })).toBeVisible();
 });
 
 it("renders candidate review and gap lifecycle controls", async () => {

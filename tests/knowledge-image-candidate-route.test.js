@@ -15,4 +15,14 @@ test('candidate evidence response exposes conversation and image provenance safe
   assert.match(source, /evidence_type/);
   assert.match(source, /role_confidence/);
   assert.match(source, /normalized_text/);
+  assert.match(source, /source_title/);
+  assert.match(source, /extraction_version/);
+  assert.match(source, /segment_order/);
+});
+
+test('source response exposes only safe image extraction summary metadata', () => {
+  assert.match(source, /extraction_hash, extraction_method/);
+  assert.match(source, /image_segment_count/);
+  assert.match(source, /image_role_summary/);
+  assert.match(source, /knowledge_source_extraction_segments/);
 });
