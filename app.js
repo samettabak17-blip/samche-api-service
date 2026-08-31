@@ -42,6 +42,7 @@ import pool from "./config/db.js";
 import { runMigrations } from "./migrations/runMigrations.js";
 import { createOpenAIEmbedder } from "./services/knowledge-intelligence-service.js";
 import { startKnowledgeProcessingWorker } from "./services/knowledge-source-processing-service.js";
+import { createGeminiImageKnowledgeExtractor } from "./services/image-knowledge-gemini-extractor.js";
 import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from "./services/knowledge-runtime-context-service.js";
 import { buildTenantRuntimeSystemInstruction, resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
 import { buildTenantFollowUpRequest } from "./services/tenant-follow-up-service.js";
@@ -158,11 +159,13 @@ const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 const knowledgeEmbedder = process.env.OPENAI_API_KEY ? createOpenAIEmbedder(openaiClient) : null;
+const knowledgeImageExtractor = process.env.GEMINI_API_KEY ? createGeminiImageKnowledgeExtractor() : null;
 
-if (knowledgeEmbedder && process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
+if ((knowledgeEmbedder || knowledgeImageExtractor) && process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
   startKnowledgeProcessingWorker({
     database: pool,
     embed: knowledgeEmbedder,
+    imageExtractor: knowledgeImageExtractor,
     createStorage: () => createConversationResourceStorage(),
   });
 } else {

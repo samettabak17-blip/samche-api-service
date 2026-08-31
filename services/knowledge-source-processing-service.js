@@ -285,11 +285,12 @@ export async function runOneKnowledgeProcessingJob(dependencies) {
 export function startKnowledgeProcessingWorker({
   database,
   embed,
+  imageExtractor = null,
   createStorage,
   intervalMs = 2_000,
   logger = console,
 }) {
-  if (!database?.query || typeof embed !== 'function' || typeof createStorage !== 'function') {
+  if (!database?.query || typeof createStorage !== 'function' || (typeof embed !== 'function' && typeof imageExtractor?.extract !== 'function')) {
     throw new KnowledgeSourceProcessingError('KNOWLEDGE_WORKER_CONFIG_INVALID', 'Knowledge processing worker is not configured');
   }
 
@@ -304,6 +305,7 @@ export function startKnowledgeProcessingWorker({
         await processKnowledgeProcessingJob({
           database,
           embed,
+          imageExtractor,
           job,
           createStorage,
         });
