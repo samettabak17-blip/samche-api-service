@@ -45,6 +45,30 @@ try {
     [tenantId, profileVersionId],
   );
   const latest = runs.rows[0] ?? null;
+  const configurationRuns = await client.query(
+    `SELECT run.id AS run_id, run.request_fingerprint, run.tenant_id,
+            run.input_provenance->>'assistant_id' AS assistant_id,
+            assistant.name AS assistant_name,
+            run.input_provenance->>'profile_version_id' AS business_profile_version_id,
+            run.input_provenance->>'recommendation_id' AS recommendation_id,
+            run.input_provenance->'source_scope' AS source_scope,
+            run.input_provenance->'source_hashes' AS source_hashes,
+            run.provider, run.model, run.prompt_character_count, run.source_count,
+            run.stage, run.elapsed_ms, run.provider_telemetry, run.status, run.error_code, run.target_id,
+            run.created_at, run.completed_at,
+            configuration.id AS configuration_id, configuration.status AS configuration_status,
+            configuration.source_recommendation_id, configuration.source_profile_version_id
+       FROM knowledge_generation_runs run
+       LEFT JOIN ai_assistants assistant
+         ON assistant.id=(run.input_provenance->>'assistant_id')::uuid AND assistant.tenant_id=run.tenant_id
+       LEFT JOIN assistant_configuration_versions configuration
+         ON configuration.id=run.target_id AND configuration.tenant_id=run.tenant_id
+      WHERE run.tenant_id=$1 AND run.target_type='ASSISTANT_CONFIGURATION'
+        AND run.input_provenance->>'profile_version_id'=$2
+      ORDER BY run.created_at DESC LIMIT 10`,
+    [tenantId, profileVersionId],
+  );
+  const latestConfigurationRun = configurationRuns.rows[0] ?? null;
   const counts = latest ? await client.query(
     `SELECT
        (SELECT count(*)::integer FROM knowledge_generation_runs WHERE tenant_id=$1 AND target_type='RECOMMENDATION' AND request_fingerprint=$2) AS exact_attempt_count,
@@ -55,6 +79,7 @@ try {
   console.log(JSON.stringify({
     profile_context: context.rows[0],
     latest_run: latest,
+    latest_configuration_run: latestConfigurationRun,
     counts: counts.rows[0],
     stage_history_available: false,
     stage_history_note: 'The bounded run model stores the latest stage and total elapsed_ms, not an event ledger.',
