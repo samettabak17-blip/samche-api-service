@@ -3,14 +3,15 @@ import argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
 import { query } from '../config/db.js';
 import { authenticateToken } from '../middleware/auth.js';
-import { isValidEmail, isValidPassword } from '../middleware/validators.js';
+import { isValidEmail, isValidPassword, normalizeEmail } from '../middleware/validators.js';
 
 const router = express.Router();
 
 router.post('/register', async (req, res) => {
     const { email, password } = req.body;
+    const canonicalEmail = normalizeEmail(email);
     
-    if (!email || !isValidEmail(email)) return res.status(400).json({ error: 'Valid email is required' });
+    if (!canonicalEmail || !isValidEmail(canonicalEmail)) return res.status(400).json({ error: 'Valid email is required' });
     if (!password || !isValidPassword(password)) return res.status(400).json({ error: 'Password must be at least 8 characters long' });
     
     const role = 'CUSTOMER'; // Enforce CUSTOMER role
@@ -18,8 +19,8 @@ router.post('/register', async (req, res) => {
     try {
         const hashedPassword = await argon2.hash(password, { type: argon2.argon2id });
         const result = await query(
-            'INSERT INTO users (email, password_hash, system_role) VALUES ($1, $2, $3) RETURNING id, email, system_role',
-            [email, hashedPassword, role]
+            'INSERT INTO users (email, email_normalized, password_hash, system_role, status) VALUES ($1, $1, $2, $3, $4) RETURNING id, email, system_role',
+            [canonicalEmail, hashedPassword, role, 'ACTIVE']
         );
         res.status(201).json({ user: { id: result.rows[0].id, email: result.rows[0].email, system_role: result.rows[0].system_role } });
     } catch (error) {
@@ -31,11 +32,12 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', async (req, res) => {
     const { email, password } = req.body;
+    const canonicalEmail = normalizeEmail(email);
     
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
 
     try {
-        const result = await query('SELECT id, email, password_hash, system_role FROM users WHERE email = $1 AND status = $2', [email, 'active']);
+        const result = await query('SELECT id, email, password_hash, system_role FROM users WHERE email_normalized = $1 AND status = $2', [canonicalEmail, 'ACTIVE']);
         if (result.rowCount === 0) return res.status(401).json({ error: 'Invalid credentials' });
 
         const user = result.rows[0];

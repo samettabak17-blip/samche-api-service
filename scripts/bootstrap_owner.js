@@ -1,8 +1,9 @@
 import argon2 from 'argon2';
 import pool from '../config/db.js';
+import { normalizeEmail } from '../middleware/validators.js';
 
 async function bootstrapOwner() {
-    const email = process.env.OWNER_EMAIL;
+    const email = normalizeEmail(process.env.OWNER_EMAIL);
     const password = process.env.OWNER_PASSWORD;
 
     if (!email || !password || password.length < 8) {
@@ -13,8 +14,8 @@ async function bootstrapOwner() {
     try {
         const hashedPassword = await argon2.hash(password, { type: argon2.argon2id });
         const result = await pool.query(
-            'INSERT INTO users (email, password_hash, system_role) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING RETURNING id, email',
-            [email, hashedPassword, 'OWNER']
+            'INSERT INTO users (email, email_normalized, password_hash, system_role, status) VALUES ($1, $1, $2, $3, $4) ON CONFLICT (email_normalized) DO NOTHING RETURNING id, email',
+            [email, hashedPassword, 'OWNER', 'ACTIVE']
         );
 
         if (result.rowCount > 0) {

@@ -6,6 +6,11 @@ export const isValidEmail = (email) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 };
 
+export const normalizeEmail = (email) => {
+    if (typeof email !== 'string') return '';
+    return email.trim().toLowerCase();
+};
+
 export const isValidPassword = (password) => {
     return typeof password === 'string' && password.length >= 8;
 };
