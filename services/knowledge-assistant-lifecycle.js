@@ -7,15 +7,22 @@ function uuid(value, code) { if (!UUID_PATTERN.test(String(value ?? ''))) throw 
 function requireProvider(database, provider, method) { if (!database?.query || typeof provider?.[method] !== 'function') throw new KnowledgeAssistantLifecycleError('KNOWLEDGE_ASSISTANT_GENERATION_UNAVAILABLE', 'Assistant generation is unavailable'); }
 
 const SCHEMA_VERSION = 2;
-const CONFIGURATION_RUNTIME_CONTRACT = 'V2_ASSISTANT_IDENTITY_REQUIRED';
+const RECOMMENDATION_IDENTITY_CONTRACT = 'V2_TENANT_OWNED_IDENTITY_ONLY';
+const CONFIGURATION_RUNTIME_CONTRACT = 'V2_ASSISTANT_IDENTITY_PROVENANCE_REQUIRED';
 
 function nonEmptyText(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-function withRuntimeAssistantIdentity(output, { recommendationData, profileData }) {
-  const assistantIdentity = nonEmptyText(output?.assistant_identity)
-    ?? nonEmptyText(recommendationData?.assistant_identity)
+function tenantOwnedIdentity(candidate, assistantName) {
+  const value = nonEmptyText(candidate);
+  const metadata = nonEmptyText(assistantName);
+  return value && (!metadata || value !== metadata) ? value : null;
+}
+
+function withRuntimeAssistantIdentity(output, { recommendationData, profileData, assistantName }) {
+  const assistantIdentity = tenantOwnedIdentity(output?.assistant_identity, assistantName)
+    ?? tenantOwnedIdentity(recommendationData?.assistant_identity, assistantName)
     ?? nonEmptyText(profileData?.company_display_name)
     ?? nonEmptyText(profileData?.company_identity);
   if (!assistantIdentity) {
@@ -123,11 +130,10 @@ export async function generateAssistantRecommendation({ database, provider, tena
   const prompt = [
       'Create a concise AI recommendation with schema_version 2 for the current tenant Assistant using only the ACTIVE factual Business Profile below. Return only 1 to 4 directly supported recommendation fields; omit every unsupported field.',
     'Never use SamChe or another tenant as a default. Do not import another tenant identity, service, price, geography, or behavior.',
-    'Recommendations are proposals, not source-derived facts. Mark unsupported behavior in evidence_gaps instead of inventing policy.',
-    `Assistant display name: ${context.rows[0].assistant_name}`,
+    'Recommendations are proposals, not source-derived facts. Mark unsupported behavior in evidence_gaps instead of inventing policy. Never treat platform or operator Assistant metadata as tenant identity; derive identity only from tenant-owned profile/source evidence.',
     `ACTIVE factual Business Profile: ${JSON.stringify(context.rows[0].profile_data)}`,
   ].join('\n');
-  const fingerprint = requestFingerprint({ tenant_id: tenantId, assistant_id: assistantId, active_profile_version_id: businessProfileVersionId, business_identity_id: provenance.business_identity_id, source_scope: provenance.source_scope, source_hashes: sourceHashes, schema_version: SCHEMA_VERSION, provider: provider.provider, model: provider.model, generation_policy: provider.assistantGenerationPolicy ?? null });
+  const fingerprint = requestFingerprint({ tenant_id: tenantId, assistant_id: assistantId, active_profile_version_id: businessProfileVersionId, business_identity_id: provenance.business_identity_id, source_scope: provenance.source_scope, source_hashes: sourceHashes, schema_version: SCHEMA_VERSION, identity_contract: RECOMMENDATION_IDENTITY_CONTRACT, provider: provider.provider, model: provider.model, generation_policy: provider.assistantGenerationPolicy ?? null });
   const generated = await generate({ database, provider, tenantId, requestedBy, targetType: 'RECOMMENDATION', prompt, provenance, fingerprint, generationStage: 'RECOMMENDATION_GENERATION', sourceCount: provenance.source_scope?.source_ids?.length ?? 0, persist: async (generationDatabase, output, runId) => {
     const result = await generationDatabase.query(`INSERT INTO assistant_knowledge_recommendations
       (tenant_id, assistant_id, recommendation_data, evidence, generation_run_id, schema_version, status)
@@ -140,9 +146,10 @@ export async function generateAssistantRecommendation({ database, provider, tena
 export async function generateAssistantConfigurationVersion({ database, provider, tenantId, assistantId, recommendationId, requestedBy }) {
   requireProvider(database, provider, 'generateAssistantConfiguration'); uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID'); uuid(assistantId, 'KNOWLEDGE_ASSISTANT_INVALID'); uuid(recommendationId, 'KNOWLEDGE_RECOMMENDATION_INVALID'); uuid(requestedBy, 'KNOWLEDGE_REQUESTER_INVALID');
   const context = await database.query(
-    `SELECT recommendation.recommendation_data, profile_version.id AS profile_version_id, profile.business_identity_id,
+    `SELECT recommendation.recommendation_data, assistant.name AS assistant_name, profile_version.id AS profile_version_id, profile.business_identity_id,
             profile_version.source_scope, profile_version.evidence AS profile_evidence, profile_version.profile_data
        FROM assistant_knowledge_recommendations recommendation
+       JOIN ai_assistants assistant ON assistant.id = recommendation.assistant_id AND assistant.tenant_id = recommendation.tenant_id
        JOIN business_profile_versions profile_version ON profile_version.id = (recommendation.evidence->>'profile_version_id')::uuid AND profile_version.tenant_id = recommendation.tenant_id AND profile_version.status = 'APPROVED'
        JOIN business_profiles profile ON profile.id = profile_version.profile_id AND profile.tenant_id = profile_version.tenant_id AND profile.active_version_id = profile_version.id
       WHERE recommendation.id = $1 AND recommendation.tenant_id = $2 AND recommendation.assistant_id = $3 AND recommendation.status = 'APPROVED'`, [recommendationId, tenantId, assistantId]);
@@ -162,6 +169,7 @@ export async function generateAssistantConfigurationVersion({ database, provider
     const configurationData = withRuntimeAssistantIdentity(output, {
       recommendationData: context.rows[0].recommendation_data,
       profileData: context.rows[0].profile_data,
+      assistantName: context.rows[0].assistant_name,
     });
     const result = await generationDatabase.query(`INSERT INTO assistant_configuration_versions
       (tenant_id, assistant_id, configuration_data, source_profile_version_id, source_recommendation_id, generation_run_id, schema_version, generated_by, status)
