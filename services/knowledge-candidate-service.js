@@ -30,6 +30,123 @@ async function db(database, sql, params = []) {
   return database.query(sql, params);
 }
 
+async function candidateTransaction(database, work) {
+  if (!database || typeof database.connect !== 'function') {
+    throw new KnowledgeCandidateError('KNOWLEDGE_DATABASE_TRANSACTION_UNAVAILABLE', 'Knowledge transaction is unavailable');
+  }
+  const client = await database.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await work(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release?.();
+  }
+}
+
+function imageCandidateFingerprint({ tenantId, assistantId, sourceId, extractionHash, segmentOrder }) {
+  return crypto.createHash('sha256')
+    .update([tenantId, assistantId ?? '', sourceId, extractionHash, segmentOrder].join(':'))
+    .digest('hex');
+}
+
+export async function createImageKnowledgeCandidates({
+  database,
+  tenantId,
+  assistantId = null,
+  sourceId,
+  extractionHash,
+  redact = redactConversationCandidate,
+  candidateType = 'POLICY',
+}) {
+  requireUuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
+  if (assistantId) requireUuid(assistantId, 'KNOWLEDGE_ASSISTANT_INVALID');
+  requireUuid(sourceId, 'KNOWLEDGE_SOURCE_INVALID');
+  if (!/^[a-f0-9]{64}$/i.test(String(extractionHash ?? ''))) throw new KnowledgeCandidateError('KNOWLEDGE_IMAGE_EXTRACTION_HASH_INVALID', 'Image extraction hash is invalid');
+  const normalizedType = String(candidateType).toUpperCase();
+  if (!CANDIDATE_TYPES.has(normalizedType)) throw new KnowledgeCandidateError('KNOWLEDGE_CANDIDATE_TYPE_INVALID', 'Knowledge candidate type is invalid');
+
+  return candidateTransaction(database, async (client) => {
+    const segmentsResult = await client.query(
+      `SELECT segment.id, segment.source_id, segment.extraction_version, segment.extraction_hash,
+              segment.segment_order, segment.role, segment.role_confidence,
+              segment.normalized_text, segment.source_locator
+         FROM knowledge_source_extraction_segments segment
+         JOIN knowledge_base_documents source
+           ON source.id = segment.source_id AND source.tenant_id = segment.tenant_id
+        WHERE segment.tenant_id = $1
+          AND segment.source_id = $2
+          AND segment.extraction_hash = $3
+          AND segment.is_current = TRUE
+          AND source.enabled = TRUE
+          AND source.status = 'active'
+          AND source.processing_status = 'READY'
+        ORDER BY segment.segment_order ASC`,
+      [tenantId, sourceId, String(extractionHash).toLowerCase()]);
+    const segments = segmentsResult.rows ?? [];
+    const businessSegments = segments.filter((segment) => segment.role === 'BUSINESS');
+    const results = [];
+
+    for (const business of businessSegments) {
+      const fingerprint = imageCandidateFingerprint({ tenantId, assistantId, sourceId, extractionHash: business.extraction_hash, segmentOrder: business.segment_order });
+      const existing = await client.query(
+        `SELECT id, status, candidate_fingerprint
+           FROM knowledge_candidates
+          WHERE tenant_id = $1 AND candidate_fingerprint = $2`,
+        [tenantId, fingerprint]);
+      if (existing.rows?.[0]) {
+        results.push({ ...existing.rows[0], reused: true });
+        continue;
+      }
+
+      const proposedContent = String(redact(text(business.normalized_text, 12000, 'KNOWLEDGE_CANDIDATE_CONTENT_INVALID')) ?? '').trim();
+      if (!proposedContent) throw new KnowledgeCandidateError('KNOWLEDGE_IMAGE_REDACTION_EMPTY', 'Redacted image candidate content is empty');
+      const insert = await client.query(
+        `INSERT INTO knowledge_candidates (
+           id, tenant_id, assistant_id, candidate_type, proposed_title, proposed_content,
+           candidate_fingerprint, confidence, status, pii_redaction_status, evidence_summary
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'NEEDS_REVIEW', $9, $10)
+         ON CONFLICT (tenant_id, candidate_fingerprint) DO NOTHING
+         RETURNING id, status, pii_redaction_status, candidate_fingerprint`,
+        [crypto.randomUUID(), tenantId, assistantId, normalizedType, 'Image-extracted business statement', proposedContent,
+          fingerprint, Number(business.role_confidence), proposedContent === String(business.normalized_text).trim() ? 'PASSED' : 'REDACTED',
+          'Image segment provenance is retained in tenant-scoped evidence.']);
+      if (!insert.rows?.[0]) {
+        const reused = await client.query(
+          `SELECT id, status, candidate_fingerprint FROM knowledge_candidates WHERE tenant_id = $1 AND candidate_fingerprint = $2`,
+          [tenantId, fingerprint]);
+        if (reused.rows?.[0]) {
+          results.push({ ...reused.rows[0], reused: true });
+          continue;
+        }
+        throw new KnowledgeCandidateError('KNOWLEDGE_CANDIDATE_CREATE_FAILED', 'Image candidate could not be created');
+      }
+      const candidate = insert.rows[0];
+      const related = segments.filter((segment) => segment.id === business.id ||
+        (segment.role === 'CUSTOMER' && Math.abs(Number(segment.segment_order) - Number(business.segment_order)) === 1));
+      for (const segment of related) {
+        const evidenceText = String(redact(text(segment.normalized_text, 12000, 'KNOWLEDGE_CANDIDATE_CONTENT_INVALID')) ?? '').trim();
+        if (!evidenceText) throw new KnowledgeCandidateError('KNOWLEDGE_IMAGE_REDACTION_EMPTY', 'Redacted image evidence is empty');
+        await client.query(
+          `INSERT INTO knowledge_candidate_image_evidence (
+             tenant_id, candidate_id, source_id, segment_id, extraction_version, extraction_hash,
+             segment_order, role, role_confidence, normalized_text, evidence_kind, source_locator
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)`,
+          [tenantId, candidate.id, sourceId, segment.id, segment.extraction_version, segment.extraction_hash,
+            segment.segment_order, segment.role, Number(segment.role_confidence), evidenceText,
+            segment.id === business.id ? 'PRIMARY' : 'SUPPORTING_CONTEXT',
+            segment.source_locator === null || segment.source_locator === undefined ? null : JSON.stringify(segment.source_locator)]);
+      }
+      results.push({ ...candidate, reused: false });
+    }
+    return results;
+  });
+}
+
 function normalizeEvidence(evidence) {
   if (!Array.isArray(evidence) || !evidence.length || evidence.length > 20) {
     throw new KnowledgeCandidateError('KNOWLEDGE_CANDIDATE_EVIDENCE_INVALID', 'Knowledge candidate evidence is required');
