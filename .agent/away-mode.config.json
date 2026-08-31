@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "model": "gpt-5.6-luna",
+  "aider_command": "aider",
+  "prompt_architect_reasoning_effort": "low",
+  "prompt_architect_max_output_tokens": 2000,
+  "aider_minimum_reserved_cost_usd": 0.05,
+  "api_timeout_seconds": 120,
+  "command_timeout_seconds": 600,
+  "finalization_reserve_seconds": 5,
+  "max_report_characters": 20000,
+  "limits": {
+    "max_cost_per_task_usd": 0.25,
+    "max_iterations": 3,
+    "max_fix_attempts": 2,
+    "max_runtime_minutes": 30
+  },
+  "pricing": {
+    "input_per_million_usd": 0.2,
+    "cached_input_per_million_usd": 0.02,
+    "output_per_million_usd": 1.2
+  },
+  "mandatory_human_review": [
+    "production deploy",
+    "staging/main merge",
+    "destructive migration",
+    "secrets or credentials",
+    "billing/provider configuration",
+    "security architecture",
+    "broad architecture change",
+    "customer-specific hardcoding risk"
+  ]
+}

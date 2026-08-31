@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://samche.local/schemas/prompt-architect-decision.schema.json",
+  "title": "SamChe Prompt Architect Decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "decision",
+    "reason",
+    "next_aider_prompt",
+    "editable_paths",
+    "read_only_paths",
+    "risk_flags"
+  ],
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": [
+        "VERIFY",
+        "IMPLEMENT",
+        "GREEN",
+        "BLOCKED",
+        "HUMAN_REVIEW_REQUIRED"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "next_aider_prompt": {
+      "type": "string"
+    },
+    "editable_paths": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "read_only_paths": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "risk_flags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "production deploy",
+          "staging/main merge",
+          "destructive migration",
+          "secrets or credentials",
+          "billing/provider configuration",
+          "security architecture",
+          "broad architecture change",
+          "customer-specific hardcoding risk"
+        ]
+      }
+    }
+  }
+}

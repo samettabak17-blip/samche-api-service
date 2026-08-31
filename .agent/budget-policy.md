@@ -41,7 +41,9 @@ Aider must not automatically continue to the next step in Manual Mode.
 
 Away Mode may only start when the user explicitly says:
 
-"devam et, ben olmayacagim"
+"devam et, ben olmayacağım"
+
+Design approval, implementation approval, and `ONAYLIYORUM` do not activate Away Mode.
 
 In Away Mode:
 
@@ -63,6 +65,10 @@ Per task:
 - max_iterations: 3
 - max_fix_attempts: 2
 - max_runtime_minutes: 30
+
+These values are also defined in `.agent/away-mode.config.json`, which is the machine-enforced source of truth.
+
+The runner calculates Prompt Architect cost from API usage and accumulates Aider-reported cost after each completed call. It must not dispatch another iteration after the recorded cost reaches the task limit. A single Aider API request cannot be stopped at an exact dollar value while it is in flight, so the dedicated OpenAI project spend limit remains the external hard backstop.
 
 If any limit is reached, the task must stop with:
 

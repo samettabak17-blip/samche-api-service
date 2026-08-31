@@ -64,6 +64,14 @@ Required when:
 - staging/main merge is involved
 - the same issue fails repeatedly
 
+### AWAY MODE ACTIVATION
+
+Away Mode may start only when the user explicitly says:
+
+`devam et, ben olmayacağım`
+
+The same exact phrase must be supplied to the supervisor runner. Design approval, implementation approval, or `ONAYLIYORUM` is not sufficient.
+
 ## Forbidden Automatic Actions
 
 Aider/Supervisor must never automatically:
@@ -95,9 +103,12 @@ All changes must preserve:
 
 Default limits:
 
-- max_iterations: 6
-- max_fix_attempts: 3
-- max_runtime_minutes: 90
+- max_cost_per_task_usd: 0.25
+- max_iterations: 3
+- max_fix_attempts: 2
+- max_runtime_minutes: 30
+
+`.agent/away-mode.config.json` is the machine-enforced source of truth for these values and the required model `gpt-5.6-luna`.
 
 If limits are reached, mark the task as BLOCKED or HUMAN_REVIEW_REQUIRED.
 

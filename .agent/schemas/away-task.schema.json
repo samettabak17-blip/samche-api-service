@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://samche.local/schemas/away-task.schema.json",
+  "title": "SamChe Away Mode Task",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "objective",
+    "allowed_paths",
+    "read_only_paths",
+    "allowed_commands"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^TASK-[A-Za-z0-9_-]+$"
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1
+    },
+    "allowed_paths": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "read_only_paths": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "allowed_commands": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "minItems": 2,
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "latest_report_path": {
+      "type": "string",
+      "pattern": "^\\.agent[\\\\/]reports[\\\\/]"
+    }
+  }
+}
