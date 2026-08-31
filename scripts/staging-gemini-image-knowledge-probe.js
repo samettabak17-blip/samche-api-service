@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { createGeminiImageKnowledgeExtractor } from '../services/image-knowledge-gemini-extractor.js';
 
@@ -22,8 +24,7 @@ function chunk(type, data) {
   return Buffer.concat([length, name, data, checksum]);
 }
 
-function createSyntheticConversationPng() {
-  const lines = ['CUSTOMER:', 'DO YOU ORGANIZE OUTDOOR EVENTS?', 'BUSINESS:', 'YES. OUTDOOR EVENTS ARE AVAILABLE DURING THE COOLER MONTHS.', 'UNKNOWN:', 'FORWARDED MESSAGE'];
+export function createSyntheticTextPng(lines) {
   const scale = 4; const padding = 16; const lineHeight = 9 * scale;
   const width = Math.max(...lines.map((line) => line.length)) * 6 * scale + padding * 2;
   const height = lines.length * lineHeight + padding * 2;
@@ -44,12 +45,13 @@ function createSyntheticConversationPng() {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
-const started = Date.now();
-let requestCount = 0;
-let httpStatus = null;
-try {
+async function main() {
+  const started = Date.now();
+  let requestCount = 0;
+  let httpStatus = null;
+  try {
   if (!process.env.GEMINI_API_KEY) throw Object.assign(new Error('secret unavailable'), { code: 'SECRET_NOT_AVAILABLE' });
-  const bytes = createSyntheticConversationPng();
+  const bytes = createSyntheticTextPng(['CUSTOMER:', 'DO YOU ORGANIZE OUTDOOR EVENTS?', 'BUSINESS:', 'YES. OUTDOOR EVENTS ARE AVAILABLE DURING THE COOLER MONTHS.', 'UNKNOWN:', 'FORWARDED MESSAGE']);
   const sourceHash = createHash('sha256').update(bytes).digest('hex');
   const extractor = createGeminiImageKnowledgeExtractor({
     env: process.env,
@@ -61,9 +63,12 @@ try {
     },
   });
   const result = await extractor.extract({ bytes, mimeType: 'image/png', sourceHash });
-  console.log(JSON.stringify({ request_count: requestCount, http_status: httpStatus, response_received: httpStatus !== null, canonical_validation: 'PASS', elapsed_ms: Date.now() - started, segment_count: result.segments.length, role_summary: [...new Set(result.segments.map((segment) => segment.role))], source_hash_preserved: result.sourceHash === sourceHash, mime_preserved: result.mimeType === 'image/png', extraction_method: result.extractionMethod, extraction_version: result.extractionVersion, classification: 'SUCCESS' }));
-} catch (error) {
-  const classification = error?.code === 'SECRET_NOT_AVAILABLE' ? 'SECRET_NOT_AVAILABLE' : (error?.code || 'IMAGE_PROBE_FAILED');
-  console.log(JSON.stringify({ request_count: requestCount, http_status: httpStatus, response_received: httpStatus !== null, canonical_validation: 'FAIL', elapsed_ms: Date.now() - started, classification }));
-  process.exitCode = classification === 'SECRET_NOT_AVAILABLE' ? 2 : 1;
+    console.log(JSON.stringify({ request_count: requestCount, http_status: httpStatus, response_received: httpStatus !== null, canonical_validation: 'PASS', elapsed_ms: Date.now() - started, segment_count: result.segments.length, role_summary: [...new Set(result.segments.map((segment) => segment.role))], source_hash_preserved: result.sourceHash === sourceHash, mime_preserved: result.mimeType === 'image/png', extraction_method: result.extractionMethod, extraction_version: result.extractionVersion, classification: 'SUCCESS' }));
+  } catch (error) {
+    const classification = error?.code === 'SECRET_NOT_AVAILABLE' ? 'SECRET_NOT_AVAILABLE' : (error?.code || 'IMAGE_PROBE_FAILED');
+    console.log(JSON.stringify({ request_count: requestCount, http_status: httpStatus, response_received: httpStatus !== null, canonical_validation: 'FAIL', elapsed_ms: Date.now() - started, classification }));
+    process.exitCode = classification === 'SECRET_NOT_AVAILABLE' ? 2 : 1;
+  }
 }
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
