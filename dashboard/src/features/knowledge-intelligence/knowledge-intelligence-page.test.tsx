@@ -84,6 +84,8 @@ function renderPage(
     isLoading: false,
     error: null,
     selectTenant: vi.fn(),
+    createTenant: vi.fn(),
+    isOwner: false,
   });
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },

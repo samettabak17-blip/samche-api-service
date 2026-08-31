@@ -8,16 +8,34 @@ vi.mock('../../features/overview/overview-date-range-context', () => ({
   useOverviewDateRange: () => ({ preset: 'last-7-days', setPreset: vi.fn(), customStart: '2026-08-01', setCustomStart: vi.fn(), customEnd: '2026-08-07', setCustomEnd: vi.fn(), applyCustomRange: vi.fn(), clearCustomRange: vi.fn(), activeRange: { label: 'Last 7 days' } }),
 }));
 vi.mock('../../features/live-support/live-support-attention-provider', () => ({ useLiveSupportAttention: () => ({ requestedCount: 0 }) }));
-vi.mock('../../features/dashboard/dashboard-api', () => ({ tenantApi: { listConversations: vi.fn() } }));
+vi.mock('../../features/dashboard/dashboard-api', () => ({ tenantApi: { listConversations: vi.fn(), createTenant: vi.fn() } }));
+import { tenantApi } from '../../features/dashboard/dashboard-api';
 
-function renderTopbar() {
+function renderTopbar(systemRole: 'OWNER' | 'CUSTOMER' = 'CUSTOMER', onSelectTenant = vi.fn()) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/app/tenant-1/overview']}><Topbar tenants={[{ id: 'tenant-1', name: 'SamChe', status: 'active', created_at: '' }]} selectedTenantId="tenant-1" email="operator@samche.test" onSelectTenant={() => undefined} onOpenNavigation={() => undefined} onLogout={() => undefined} /></MemoryRouter></QueryClientProvider>);
+  return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/app/tenant-1/overview']}><Topbar tenants={[{ id: 'tenant-1', name: 'SamChe', status: 'active', created_at: '' }]} selectedTenantId="tenant-1" email="operator@samche.test" systemRole={systemRole} onCreateTenant={(name) => tenantApi.createTenant(name)} onSelectTenant={onSelectTenant} onOpenNavigation={() => undefined} onLogout={() => undefined} /></MemoryRouter></QueryClientProvider>);
 }
 
 afterEach(() => cleanup());
 
 describe('Topbar global navigation search', () => {
+  it('shows company creation only to a platform OWNER and selects the exact created tenant', async () => {
+    vi.mocked(tenantApi.createTenant).mockResolvedValue({ id: 'tenant-new', name: 'New company', status: 'active' });
+    const onSelectTenant = vi.fn();
+    renderTopbar('OWNER', onSelectTenant);
+    fireEvent.click(screen.getByRole('button', { name: 'Create company' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Company name' }), { target: { value: 'New company' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    expect(await screen.findByText('Company created.')).toBeVisible();
+    expect(tenantApi.createTenant).toHaveBeenCalledWith('New company');
+    expect(onSelectTenant).toHaveBeenCalledWith('tenant-new');
+  });
+
+  it('does not render company creation for a CUSTOMER even with tenant ADMIN membership', () => {
+    renderTopbar('CUSTOMER');
+    expect(screen.queryByRole('button', { name: 'Create company' })).toBeNull();
+  });
+
   it('reopens when the trigger remains focused after selecting a destination', () => {
     renderTopbar();
     const input = screen.getByRole('textbox', { name: 'Search dashboard destinations' });

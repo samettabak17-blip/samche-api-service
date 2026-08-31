@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { AgentMessageResponse, HumanAttentionSummary, DashboardOverview, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmContact, CrmContactList, CrmDeal, CrmDealList, CrmLead, CrmLeadList, CrmOverviewMetrics, CrmPipelineStage, CrmPipelineSummary, KnowledgeDocument, KnowledgeOverview, KnowledgeSource, KnowledgeCandidate, KnowledgeCandidateEvidence, KnowledgeGap, KnowledgeGapSignal, BusinessIdentity, BusinessIdentityScopeAnalysis, BusinessProfileGenerationResult, BusinessProfileVersion, KnowledgeRecommendation, AssistantConfigurationVersion, RecommendationGenerationResult, ConfigurationGenerationResult, KnowledgeRetrievalPreview, TeamMember, TenantChannel } from '../../types/api';
+import type { AgentMessageResponse, HumanAttentionSummary, DashboardOverview, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmContact, CrmContactList, CrmDeal, CrmDealList, CrmLead, CrmLeadList, CrmOverviewMetrics, CrmPipelineStage, CrmPipelineSummary, KnowledgeDocument, KnowledgeOverview, KnowledgeSource, KnowledgeCandidate, KnowledgeCandidateEvidence, KnowledgeGap, KnowledgeGapSignal, BusinessIdentity, BusinessIdentityScopeAnalysis, BusinessProfileGenerationResult, BusinessProfileVersion, KnowledgeRecommendation, AssistantConfigurationVersion, RecommendationGenerationResult, ConfigurationGenerationResult, KnowledgeRetrievalPreview, TeamMember, TenantChannel, Tenant, TenantRole } from '../../types/api';
 
 const tenantRoot = (tenantId: string) => `/api/v1/tenants/${tenantId}`;
 export const tenantKeys = {
@@ -41,6 +41,9 @@ const leadQuery = (filters: LeadFilters) => new URLSearchParams(Object.entries(f
 const dealQuery = (filters: DealFilters) => new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined && value !== '').map(([key, value]) => [key, String(value)])).toString();
 
 export const tenantApi = {
+  listTenants: () => apiClient.get<Tenant[]>('/api/v1/tenants'),
+  createTenant: (name: string) => apiClient.post<Tenant>('/api/v1/tenants', { name }),
+  assignTenantUser: (tenantId: string, userId: string, tenantRole: Extract<TenantRole, 'ADMIN' | 'AGENT'>) => apiClient.post(`${tenantRoot(tenantId)}/users`, { user_id: userId, tenant_role: tenantRole }),
   listAssistants: (tenantId: string) => apiClient.get<Assistant[]>(`${tenantRoot(tenantId)}/assistants`),
   getAssistant: (tenantId: string, assistantId: string) => apiClient.get<Assistant>(`${tenantRoot(tenantId)}/assistants/${assistantId}`),
   createAssistant: (tenantId: string, body: Pick<Assistant, 'name'> & Partial<Pick<Assistant, 'model' | 'system_prompt' | 'status'>>) => apiClient.post<Assistant>(`${tenantRoot(tenantId)}/assistants`, body),

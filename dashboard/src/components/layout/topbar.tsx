@@ -1,5 +1,5 @@
 import { Bell, Building2, CalendarDays, ChevronLeft, ChevronRight, LogOut, Menu, Search } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -8,7 +8,7 @@ import { useOverviewDateRange } from '../../features/overview/overview-date-rang
 import { useLiveSupportAttention } from '../../features/live-support/live-support-attention-provider';
 import { tenantApi } from '../../features/dashboard/dashboard-api';
 
-interface TopbarProps { tenants: Tenant[]; selectedTenantId: string; email: string; onSelectTenant(tenantId: string): void; onOpenNavigation(): void; onLogout(): void; }
+interface TopbarProps { tenants: Tenant[]; selectedTenantId: string; email: string; systemRole: 'OWNER' | 'CUSTOMER'; onCreateTenant(name: string): Promise<Tenant>; onSelectTenant(tenantId: string): void; onOpenNavigation(): void; onLogout(): void; }
 
 const weekdayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const navigationDestinations = [
@@ -83,7 +83,7 @@ function DateRangeControl() {
   </div>;
 }
 
-export function Topbar({ tenants, selectedTenantId, email, onSelectTenant, onOpenNavigation, onLogout }: TopbarProps) {
+export function Topbar({ tenants, selectedTenantId, email, systemRole, onCreateTenant, onSelectTenant, onOpenNavigation, onLogout }: TopbarProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { requestedCount } = useLiveSupportAttention();
@@ -97,6 +97,11 @@ export function Topbar({ tenants, selectedTenantId, email, onSelectTenant, onOpe
   const notificationOverlayRef = useRef<HTMLElement | null>(null);
   const [searchPosition, setSearchPosition] = useState({ top: 0, left: 0 });
   const [notificationPosition, setNotificationPosition] = useState({ top: 0, left: 0 });
+  const [createOpen, setCreateOpen] = useState(false);
+  const [companyName, setCompanyName] = useState('');
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createPending, setCreatePending] = useState(false);
+  const [createSuccess, setCreateSuccess] = useState(false);
   const navigationMatches = navigationDestinations.filter(([label, group]) => (label + ' ' + group).toLowerCase().includes(search.trim().toLowerCase())).slice(0, 7);
   const openDestination = (path: string) => { setSearch(''); setSearchOpen(false); navigate('/app/' + selectedTenantId + '/' + path); };
   useEffect(() => {
@@ -135,6 +140,18 @@ export function Topbar({ tenants, selectedTenantId, email, onSelectTenant, onOpe
   });
   const waiting = (notifications.data ?? []).filter((item) => item.human_attention_state === 'REQUESTED');
   const displayRole = 'Administrator';
+  const submitCreateTenant = async (event: FormEvent) => {
+    event.preventDefault();
+    const name = companyName.trim();
+    if (!name) { setCreateError('Company name is required.'); return; }
+    setCreatePending(true); setCreateError(null); setCreateSuccess(false);
+    try {
+      const created = await onCreateTenant(name);
+      onSelectTenant(created.id);
+      setCompanyName(''); setCreateOpen(false); setCreateSuccess(true);
+    } catch { setCreateError('Could not create company. Please try again.'); }
+    finally { setCreatePending(false); }
+  };
   return <header className="flex min-h-[4.25rem] items-center justify-between border-b border-line/80 bg-shell/85 px-4 backdrop-blur-xl sm:px-6 lg:px-7">
     <div className="flex min-w-0 items-center gap-3"><button type="button" onClick={onOpenNavigation} className="grid h-10 w-10 place-items-center rounded-lg text-stone-300 hover:bg-white/[0.04] lg:hidden" aria-label="Open navigation"><Menu aria-hidden="true" size={21} /></button><p className="truncate text-lg font-semibold tracking-tight text-ink sm:text-xl">{title}</p></div>
     <div className="flex min-w-0 items-center gap-2 sm:gap-3">
@@ -143,6 +160,7 @@ export function Topbar({ tenants, selectedTenantId, email, onSelectTenant, onOpe
       <div ref={notificationTriggerRef} className="relative"><button type="button" onClick={() => { if (!notificationsOpen) requestHeaderOverlayClose(); setNotificationsOpen((value) => !value); }} aria-label="Live support notifications" aria-expanded={notificationsOpen} className="relative grid h-10 w-10 place-items-center rounded-xl border border-line bg-elevated/60 text-stone-200 transition hover:border-signal/35 hover:text-white"><Bell size={17} />{requestedCount > 0 && <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full bg-signal px-1 text-[9px] font-bold text-white">{requestedCount}</span>}</button>{notificationsOpen && typeof document !== 'undefined' && createPortal(<section ref={notificationOverlayRef} role="dialog" aria-label="Notifications" style={{ position: 'fixed', top: notificationPosition.top, left: notificationPosition.left, zIndex: 60 }} className="w-80 overflow-hidden rounded-2xl border border-white/[.14] bg-[#09121f]/95 shadow-2xl backdrop-blur-2xl"><header className="border-b border-white/[.08] px-4 py-3"><p className="text-sm font-semibold text-white">Notifications</p><p className="mt-0.5 text-xs text-stone-400">{requestedCount ? requestedCount + ' live support request' + (requestedCount === 1 ? '' : 's') + ' waiting' : 'No active notifications'}</p></header><div className="max-h-72 overflow-y-auto">{waiting.length ? waiting.map((item) => <button key={item.id} type="button" onClick={() => { setNotificationsOpen(false); navigate('/app/' + selectedTenantId + '/conversations/whatsapp/' + item.id); }} className="block w-full border-b border-white/[.06] px-4 py-3 text-left transition hover:bg-white/[.05]"><p className="text-xs font-bold tracking-[.1em] text-red-300">LIVE SUPPORT</p><p className="mt-1 truncate text-sm font-medium text-white">{item.contact_display_name || item.contact_phone || 'Customer waiting'}</p><p className="mt-1 truncate text-xs text-stone-400">{item.last_message_preview || 'Customer requested a representative'}</p></button>) : <p className="px-4 py-7 text-center text-sm text-stone-500">{requestedCount ? 'Loading current requests…' : 'No live support requests.'}</p>}</div></section>, document.body)}</div>
       <div className="glass-surface hidden min-w-0 items-center gap-2 rounded-xl px-3 py-2 lg:flex"><span className="inline-grid h-7 w-7 place-items-center rounded-full bg-signal/15 text-xs font-bold text-signal">{displayRole.slice(0, 1)}</span><div className="min-w-0"><p className="max-w-40 truncate text-xs font-semibold text-ink">{tenants.find((tenant) => tenant.id === selectedTenantId)?.name || 'Workspace'}</p><p className="text-[10px] text-stone-400">{displayRole}</p></div></div>
       <div className="hidden 2xl:block"><label className="sr-only" htmlFor="tenant-select">Selected tenant</label><select id="tenant-select" value={selectedTenantId} onChange={(event) => onSelectTenant(event.target.value)} className="max-w-40 truncate rounded-xl border border-line bg-elevated/60 px-2 py-2 text-xs font-semibold text-ink outline-none">{tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}</select></div>
+      {systemRole === 'OWNER' && <div className="relative"><button type="button" onClick={() => { setCreateOpen((value) => !value); setCreateError(null); setCreateSuccess(false); }} className="inline-flex h-10 items-center gap-2 rounded-xl border border-signal/40 bg-signal/10 px-3 text-xs font-semibold text-white hover:bg-signal/20"> <Building2 size={15} />Create company</button>{createOpen && <form role="dialog" aria-label="Create company" onSubmit={submitCreateTenant} className="absolute right-0 top-12 z-50 w-72 rounded-2xl border border-line bg-[#09121f] p-4 shadow-2xl"><label htmlFor="company-name" className="text-xs font-semibold text-stone-200">Company name</label><input id="company-name" aria-label="Company name" value={companyName} onChange={(event) => setCompanyName(event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-line bg-black/20 px-3 text-sm text-white outline-none" autoFocus /><div className="mt-3 flex justify-end gap-2"><button type="button" onClick={() => setCreateOpen(false)} className="rounded-lg px-3 py-2 text-xs text-stone-300">Cancel</button><button type="submit" disabled={createPending} className="rounded-lg bg-signal px-3 py-2 text-xs font-semibold text-white disabled:opacity-60">{createPending ? 'Creating…' : 'Create'}</button></div>{createError && <p role="alert" className="mt-2 text-xs text-red-300">{createError}</p>}</form>}{createSuccess && <span role="status" className="sr-only">Company created.</span>}</div>}
       <button type="button" onClick={onLogout} className="grid h-10 w-10 place-items-center rounded-xl border border-line bg-elevated/60 text-stone-400 transition hover:border-signal/30 hover:text-ink" aria-label="Sign out"><LogOut aria-hidden="true" size={18} /></button>
     </div>
   </header>;

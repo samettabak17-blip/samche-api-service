@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiClient } from '../../lib/api-client';
+import { tenantApi } from '../dashboard/dashboard-api';
 import { canManageTenant } from '../../lib/permissions';
 import type { Tenant, TenantRole } from '../../types/api';
 import { useAuth } from '../auth/auth-context';
@@ -16,6 +16,8 @@ interface TenantContextValue {
   isLoading: boolean;
   error: Error | null;
   selectTenant(tenantId: string): void;
+  createTenant(name: string): Promise<Tenant>;
+  isOwner: boolean;
 }
 
 const TenantContext = createContext<TenantContextValue | undefined>(undefined);
@@ -26,7 +28,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(() => window.sessionStorage.getItem(tenantStorageKey));
   const tenantsQuery = useQuery({
     queryKey: ['tenants'],
-    queryFn: () => apiClient.get<Tenant[]>('/api/v1/tenants'),
+    queryFn: () => tenantApi.listTenants(),
     enabled: status === 'authenticated',
     staleTime: 60_000,
   });
@@ -58,7 +60,15 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   }, [queryClient, tenants]);
 
   const tenantRole = selectedTenant?.tenant_role;
+  const isOwner = user?.system_role === 'OWNER';
   const canManage = user?.system_role === 'OWNER' || canManageTenant(tenantRole);
+  const createTenant = useCallback(async (name: string) => {
+    const created = await tenantApi.createTenant(name.trim());
+    await tenantsQuery.refetch();
+    setSelectedTenantId(created.id);
+    window.sessionStorage.setItem(tenantStorageKey, created.id);
+    return created;
+  }, [tenantsQuery.refetch]);
   const value = useMemo<TenantContextValue>(() => ({
     tenants,
     selectedTenant,
@@ -67,7 +77,9 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     isLoading: tenantsQuery.isLoading,
     error: tenantsQuery.error,
     selectTenant,
-  }), [canManage, selectTenant, selectedTenant, tenantRole, tenants, tenantsQuery.error, tenantsQuery.isLoading]);
+    createTenant,
+    isOwner,
+  }), [canManage, createTenant, isOwner, selectTenant, selectedTenant, tenantRole, tenants, tenantsQuery.error, tenantsQuery.isLoading]);
 
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>;
 }
