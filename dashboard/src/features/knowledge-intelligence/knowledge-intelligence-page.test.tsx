@@ -793,6 +793,46 @@ it("renders structured Assistant configuration and a safe runtime preview", asyn
   expect(screen.queryByText(/PLATFORM RUNTIME SAFETY/)).not.toBeInTheDocument();
 });
 
+it("does not label an ACTIVE configuration without assistant identity as ACTIVE RUNTIME", async () => {
+  mockedApi.listAssistants.mockResolvedValue([
+    { id: "assistant-a", tenant_id: "tenant-a", name: "Meridian Advisor" },
+  ]);
+  mockedApi.listBusinessProfiles.mockResolvedValue([
+    {
+      id: "profile-active",
+      schema_version: 2,
+      profile_data: { company_identity: "Meridian Arc Technologies LLC" },
+      status: "ACTIVE",
+      active_version_id: "profile-active",
+    },
+  ]);
+  mockedApi.listAssistantConfigurations.mockResolvedValue([
+    {
+      id: "config-incomplete",
+      schema_version: 2,
+      source_profile_version_id: "profile-active",
+      configuration_data: { tone: "Calm and precise" },
+      status: "ACTIVE",
+    },
+  ]);
+
+  renderPage(true, "/app/tenant-a/knowledge-base/configurations");
+  const assistant = await screen.findByRole("combobox", { name: "Assistant" });
+  await screen.findByRole("option", { name: "Meridian Advisor" });
+  fireEvent.change(assistant, { target: { value: "assistant-a" } });
+
+  await waitFor(() =>
+    expect(mockedApi.listAssistantConfigurations).toHaveBeenCalledWith(
+      "tenant-a",
+      "assistant-a",
+    ),
+  );
+
+  expect(await screen.findByText("ACTIVE · CONFIGURATION INCOMPLETE")).toBeVisible();
+  expect(screen.queryByText("ACTIVE · ACTIVE RUNTIME")).not.toBeInTheDocument();
+  expect(screen.queryByText("Runtime Behavior Preview")).not.toBeInTheDocument();
+});
+
 it("shows a scope-bound reused Recommendation terminal result without silent idle", async () => {
   cleanup();
   mockedApi.listAssistants.mockResolvedValue([

@@ -7,7 +7,7 @@ test('activating an approved assistant configuration supersedes only the previou
   const database = {
     async query(sql, params = []) {
       calls.push({ sql, params });
-      if (/SELECT configuration\.id/i.test(sql)) return { rows: [{ id: params[0], status: 'APPROVED', source_profile_version_id: 'profile-v1', current_active_profile_version_id: 'profile-v1' }] };
+      if (/SELECT configuration\.id/i.test(sql)) return { rows: [{ id: params[0], status: 'APPROVED', configuration_data: { assistant_identity: 'Meridian Client Advisor' }, source_profile_version_id: 'profile-v1', current_active_profile_version_id: 'profile-v1' }] };
       if (/status = 'ACTIVE'/i.test(sql)) return { rows: [{ id: 'old-version' }] };
       return { rows: [] };
     },
@@ -52,6 +52,7 @@ test('approving configuration preserves the existing runtime assignment until ex
   const database = {
     async query(sql, params = []) {
       calls.push({ sql, params });
+      if (/SELECT configuration_data/i.test(sql)) return { rows: [{ configuration_data: { assistant_identity: 'Meridian Client Advisor' } }] };
       if (/RETURNING id/i.test(sql)) return { rows: [{ id: params[0] }] };
       return { rows: [] };
     },
@@ -67,6 +68,23 @@ test('approving configuration preserves the existing runtime assignment until ex
 
   assert.ok(calls.some(({ sql }) => /SET status = 'APPROVED'/.test(sql)));
   assert.equal(calls.some(({ sql }) => /active_configuration_version_id/.test(sql)), false);
+});
+
+test('configuration without an assistant identity cannot be approved', async () => {
+  const database = { query: async (sql) => {
+    if (/SELECT configuration_data/i.test(sql)) return { rows: [{ configuration_data: { tone: 'Concise' } }] };
+    return { rows: [{ id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' }] };
+  } };
+  await assert.rejects(
+    approveAssistantConfigurationVersion({
+      database,
+      tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      assistantId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      versionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      approvedBy: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    }),
+    (error) => error.code === 'KNOWLEDGE_CONFIGURATION_RUNTIME_IDENTITY_REQUIRED',
+  );
 });
 
 test('approving a profile records historical approval without activating it', async () => {
@@ -121,7 +139,7 @@ test('explicit rollback reactivates only a SUPERSEDED configuration target', asy
   const calls = [];
   const database = { query: async (sql, params = []) => {
     calls.push({ sql, params });
-    if (/SELECT configuration\.id/i.test(sql)) return { rows: [{ id: params[0], status: 'SUPERSEDED', source_profile_version_id: 'profile-v1', current_active_profile_version_id: 'profile-v1' }] };
+    if (/SELECT configuration\.id/i.test(sql)) return { rows: [{ id: params[0], status: 'SUPERSEDED', configuration_data: { assistant_identity: 'Meridian Client Advisor' }, source_profile_version_id: 'profile-v1', current_active_profile_version_id: 'profile-v1' }] };
     if (/status = 'ACTIVE'/i.test(sql)) return { rows: [{ id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' }] };
     return { rows: [] };
   } };
@@ -133,8 +151,37 @@ test('explicit rollback reactivates only a SUPERSEDED configuration target', asy
 
 test('configuration cannot activate when its source profile is no longer active', async () => {
   const database = { query: async (sql, params = []) => /SELECT configuration\.id/i.test(sql)
-    ? { rows: [{ id: params[0], status: 'APPROVED', source_profile_version_id: 'profile-old', current_active_profile_version_id: 'profile-new' }] }
+    ? { rows: [{ id: params[0], status: 'APPROVED', configuration_data: { assistant_identity: 'Meridian Client Advisor' }, source_profile_version_id: 'profile-old', current_active_profile_version_id: 'profile-new' }] }
     : { rows: [] } };
   await assert.rejects(activateAssistantConfigurationVersion({ database, tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', assistantId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', versionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', activatedBy: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }), (error) => error.code === 'KNOWLEDGE_CONFIGURATION_PROFILE_NOT_ACTIVE');
+});
+
+test('configuration without an assistant identity cannot activate into the runtime pointer', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/SELECT configuration\.id/i.test(sql)) {
+      return { rows: [{
+        id: params[0],
+        status: 'APPROVED',
+        configuration_data: { tone: 'Concise' },
+        source_profile_version_id: 'profile-v1',
+        current_active_profile_version_id: 'profile-v1',
+      }] };
+    }
+    return { rows: [] };
+  } };
+
+  await assert.rejects(
+    activateAssistantConfigurationVersion({
+      database,
+      tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      assistantId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      versionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      activatedBy: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    }),
+    (error) => error.code === 'KNOWLEDGE_CONFIGURATION_RUNTIME_IDENTITY_REQUIRED',
+  );
+  assert.equal(calls.some(({ sql }) => /active_configuration_version_id/.test(sql)), false);
 });
 

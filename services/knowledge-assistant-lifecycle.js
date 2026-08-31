@@ -7,6 +7,22 @@ function uuid(value, code) { if (!UUID_PATTERN.test(String(value ?? ''))) throw 
 function requireProvider(database, provider, method) { if (!database?.query || typeof provider?.[method] !== 'function') throw new KnowledgeAssistantLifecycleError('KNOWLEDGE_ASSISTANT_GENERATION_UNAVAILABLE', 'Assistant generation is unavailable'); }
 
 const SCHEMA_VERSION = 2;
+const CONFIGURATION_RUNTIME_CONTRACT = 'V2_ASSISTANT_IDENTITY_REQUIRED';
+
+function nonEmptyText(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function withRuntimeAssistantIdentity(output, { recommendationData, profileData }) {
+  const assistantIdentity = nonEmptyText(output?.assistant_identity)
+    ?? nonEmptyText(recommendationData?.assistant_identity)
+    ?? nonEmptyText(profileData?.company_display_name)
+    ?? nonEmptyText(profileData?.company_identity);
+  if (!assistantIdentity) {
+    throw new KnowledgeAssistantLifecycleError('KNOWLEDGE_CONFIGURATION_RUNTIME_IDENTITY_UNAVAILABLE', 'Active Business Profile or approved Recommendation must provide an Assistant Identity');
+  }
+  return { ...output, assistant_identity: assistantIdentity };
+}
 
 function requestFingerprint(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -141,12 +157,16 @@ export async function generateAssistantConfigurationVersion({ database, provider
     `ACTIVE factual profile: ${JSON.stringify(context.rows[0].profile_data)}`,
     `APPROVED AI recommendation: ${JSON.stringify(context.rows[0].recommendation_data)}`,
   ].join('\n');
-  const fingerprint = requestFingerprint({ tenant_id: tenantId, assistant_id: assistantId, active_profile_version_id: context.rows[0].profile_version_id, business_identity_id: provenance.business_identity_id, source_scope: provenance.source_scope, source_hashes: sourceHashes, recommendation_id: recommendationId, schema_version: SCHEMA_VERSION, provider: provider.provider, model: provider.model, generation_policy: provider.assistantGenerationPolicy ?? null });
+  const fingerprint = requestFingerprint({ tenant_id: tenantId, assistant_id: assistantId, active_profile_version_id: context.rows[0].profile_version_id, business_identity_id: provenance.business_identity_id, source_scope: provenance.source_scope, source_hashes: sourceHashes, recommendation_id: recommendationId, schema_version: SCHEMA_VERSION, configuration_runtime_contract: CONFIGURATION_RUNTIME_CONTRACT, provider: provider.provider, model: provider.model, generation_policy: provider.assistantGenerationPolicy ?? null });
   const generated = await generate({ database, provider, tenantId, requestedBy, targetType: 'ASSISTANT_CONFIGURATION', prompt, provenance, fingerprint, generationStage: 'CONFIGURATION_GENERATION', sourceCount: provenance.source_scope?.source_ids?.length ?? 0, persist: async (generationDatabase, output, runId) => {
+    const configurationData = withRuntimeAssistantIdentity(output, {
+      recommendationData: context.rows[0].recommendation_data,
+      profileData: context.rows[0].profile_data,
+    });
     const result = await generationDatabase.query(`INSERT INTO assistant_configuration_versions
       (tenant_id, assistant_id, configuration_data, source_profile_version_id, source_recommendation_id, generation_run_id, schema_version, generated_by, status)
       VALUES ($1, $2, $3, $4, $5, $6, $7, 'AI', 'NEEDS_REVIEW')
-      RETURNING id, schema_version, configuration_data, source_profile_version_id, source_recommendation_id, status, created_at`, [tenantId, assistantId, output, context.rows[0].profile_version_id, recommendationId, runId, 2]);
+      RETURNING id, schema_version, configuration_data, source_profile_version_id, source_recommendation_id, status, created_at`, [tenantId, assistantId, configurationData, context.rows[0].profile_version_id, recommendationId, runId, 2]);
     return result.rows[0];
   } });
   return { configuration: generated.artifact, reused: generated.reused, run_id: generated.run_id };

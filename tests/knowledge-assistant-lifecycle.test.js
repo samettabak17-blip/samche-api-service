@@ -56,9 +56,9 @@ test('generates a review-only configuration from an approved recommendation', as
   const recommendationId = '33333333-3333-4333-8333-333333333333';
   const database = { query: async (sql, params = []) => {
     calls.push({ sql, params });
-    if (/FROM assistant_knowledge_recommendations recommendation/i.test(sql)) return { rows: [{ recommendation_data: { tone: 'Professional' }, profile_version_id: '11111111-1111-4111-8111-111111111111', business_identity_id: '55555555-5555-4555-8555-555555555555', source_scope: { source_ids: ['source-meridian'] }, profile_data: { company_summary: 'Facts' } }] };
+    if (/FROM assistant_knowledge_recommendations recommendation/i.test(sql)) return { rows: [{ recommendation_data: { tone: 'Professional' }, profile_version_id: '11111111-1111-4111-8111-111111111111', business_identity_id: '55555555-5555-4555-8555-555555555555', source_scope: { source_ids: ['source-meridian'] }, profile_data: { company_identity: 'Meridian Arc Technologies LLC', company_summary: 'Facts' } }] };
     if (/INSERT INTO knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'RUNNING' }] };
-    if (/INSERT INTO assistant_configuration_versions/i.test(sql)) return { rows: [{ id: '44444444-4444-4444-8444-444444444444', schema_version: 2, configuration_data: { assistant_instructions: 'Use approved facts.' }, source_profile_version_id: '11111111-1111-4111-8111-111111111111', source_recommendation_id: recommendationId, status: 'NEEDS_REVIEW' }] };
+    if (/INSERT INTO assistant_configuration_versions/i.test(sql)) return { rows: [{ id: '44444444-4444-4444-8444-444444444444', schema_version: 2, configuration_data: params[2], source_profile_version_id: '11111111-1111-4111-8111-111111111111', source_recommendation_id: recommendationId, status: 'NEEDS_REVIEW' }] };
     if (/UPDATE knowledge_generation_runs/i.test(sql)) return { rows: [{ id: params[0], status: 'SUCCEEDED' }] };
     return { rows: [] };
   } };
@@ -68,7 +68,8 @@ test('generates a review-only configuration from an approved recommendation', as
   assert.equal(result.reused, false);
   assert.equal(result.run_id, '22222222-2222-4222-8222-222222222222');
   assert.equal(result.configuration.status, 'NEEDS_REVIEW');
-  assert.deepEqual(result.configuration.configuration_data, { assistant_instructions: 'Use approved facts.' });
+  assert.equal(result.configuration.configuration_data.assistant_instructions, 'Use approved facts.');
+  assert.equal(result.configuration.configuration_data.assistant_identity, 'Meridian Arc Technologies LLC');
   assert.equal(result.configuration.source_profile_version_id, '11111111-1111-4111-8111-111111111111');
   assert.equal(result.configuration.source_recommendation_id, recommendationId);
   assert.ok(calls.some(({ sql, params }) => /UPDATE knowledge_generation_runs/i.test(sql) && params.includes('CONFIGURATION_GENERATION')));
@@ -76,6 +77,7 @@ test('generates a review-only configuration from an approved recommendation', as
   assert.equal(insert.params[4], recommendationId);
   assert.equal(insert.params[5], '22222222-2222-4222-8222-222222222222');
   assert.equal(insert.params[6], 2);
+  assert.equal(insert.params[2].assistant_identity, 'Meridian Arc Technologies LLC');
   assert.match(insert.sql, /RETURNING id, schema_version, configuration_data, source_profile_version_id, source_recommendation_id, status, created_at/i);
   assert.match(insert.params[2].captured_prompt, /factual profile/i);
   assert.match(insert.params[2].captured_prompt, /approved AI recommendation/i);

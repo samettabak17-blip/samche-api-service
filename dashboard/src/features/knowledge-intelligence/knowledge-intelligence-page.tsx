@@ -48,6 +48,31 @@ const routeForTab: Record<string, string> = {
 };
 const profileScopeKey = (businessIdentityId: string, sourceIds: string[]) =>
   JSON.stringify({ businessIdentityId, sourceIds: [...sourceIds].sort() });
+const hasRuntimeAssistantIdentity = (data: Record<string, unknown> | null | undefined) =>
+  typeof data?.assistant_identity === "string" && Boolean(data.assistant_identity.trim());
+const hasRuntimeCompanyIdentity = (data: Record<string, unknown> | null | undefined) =>
+  [data?.company_identity, data?.company_display_name].some(
+    (value) => typeof value === "string" && Boolean(value.trim()),
+  );
+const isRuntimeEligibleConfiguration = (
+  configuration: {
+    status: string;
+    schema_version?: number;
+    source_profile_version_id?: string | null;
+    configuration_data: Record<string, unknown>;
+  },
+  profiles: BusinessProfileVersion[],
+) =>
+  configuration.status === "ACTIVE" &&
+  configuration.schema_version === 2 &&
+  hasRuntimeAssistantIdentity(configuration.configuration_data) &&
+  profiles.some(
+    (profile) =>
+      profile.id === configuration.source_profile_version_id &&
+      profile.active_version_id === profile.id &&
+      profile.schema_version === 2 &&
+      hasRuntimeCompanyIdentity(profile.profile_data),
+  );
 const personaLabels: Record<string, string> = {
   company_identity: "Company Identity",
   company_display_name: "Company Display Name",
@@ -811,7 +836,15 @@ export function KnowledgeIntelligencePage() {
               row.id === activeConfiguration?.source_profile_version_id &&
               row.active_version_id === row.id,
           );
-          if (!activeProfile || !activeConfiguration) return null;
+          if (
+            !activeProfile ||
+            !activeConfiguration ||
+            !isRuntimeEligibleConfiguration(
+              activeConfiguration,
+              profiles.data ?? [],
+            )
+          )
+            return null;
           const safePreview = {
             company_identity:
               activeProfile.profile_data.company_identity ??
@@ -2094,7 +2127,12 @@ export function KnowledgeIntelligencePage() {
                   />
                 ) : (
                   <div className="panel divide-y divide-line">
-                    {(configurations.data ?? []).map((row) => (
+                    {(configurations.data ?? []).map((row) => {
+                      const runtimeEligible = isRuntimeEligibleConfiguration(
+                        row,
+                        profiles.data ?? [],
+                      );
+                      return (
                       <article id={`configuration-${row.id}`} key={row.id} className="p-4" aria-current={selectedConfigurationId === row.id ? "true" : undefined}>
                         <strong className="text-sm">
                           Configuration {row.id.slice(0, 8)}
@@ -2102,7 +2140,9 @@ export function KnowledgeIntelligencePage() {
                         <p className="mt-1 text-xs text-stone-400">
                           {row.status}
                           {row.status === "ACTIVE"
-                            ? " · ACTIVE RUNTIME"
+                            ? runtimeEligible
+                              ? " · ACTIVE RUNTIME"
+                              : " · CONFIGURATION INCOMPLETE"
                             : row.status === "APPROVED"
                               ? " · NOT ACTIVE"
                               : ""}
@@ -2180,7 +2220,8 @@ export function KnowledgeIntelligencePage() {
                           </div>
                         )}
                       </article>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

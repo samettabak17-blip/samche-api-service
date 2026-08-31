@@ -12,6 +12,15 @@ function uuid(value, code) {
   return String(value);
 }
 
+function assertRuntimeAssistantIdentity(configurationData) {
+  if (typeof configurationData?.assistant_identity !== 'string' || !configurationData.assistant_identity.trim()) {
+    throw new KnowledgeConfigurationError(
+      'KNOWLEDGE_CONFIGURATION_RUNTIME_IDENTITY_REQUIRED',
+      'Assistant configuration requires an Assistant Identity before approval or activation',
+    );
+  }
+}
+
 async function transaction(database, work) {
   if (!database?.query) throw new KnowledgeConfigurationError('KNOWLEDGE_DATABASE_UNAVAILABLE', 'Knowledge database is unavailable');
   if (typeof database.connect !== 'function') return work(database);
@@ -69,6 +78,18 @@ export async function approveAssistantConfigurationVersion({
   uuid(approvedBy, 'KNOWLEDGE_APPROVER_INVALID');
 
   return transaction(database, async (client) => {
+    const candidate = await client.query(
+      `SELECT configuration_data
+         FROM assistant_configuration_versions
+        WHERE id = $1 AND tenant_id = $2 AND assistant_id = $3
+          AND status IN ('DRAFT', 'NEEDS_REVIEW', 'APPROVED')
+        FOR UPDATE`,
+      [versionId, tenantId, assistantId],
+    );
+    if (!candidate.rows[0]) {
+      throw new KnowledgeConfigurationError('KNOWLEDGE_CONFIGURATION_NOT_REVIEWABLE', 'Assistant configuration is not available for approval');
+    }
+    assertRuntimeAssistantIdentity(candidate.rows[0].configuration_data);
     const result = await client.query(
       `UPDATE assistant_configuration_versions
           SET status = 'APPROVED', approved_by = $4, approved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
@@ -137,7 +158,7 @@ async function activateConfigurationVersion({
 
   return transaction(database, async (client) => {
     const targetResult = await client.query(
-      `SELECT configuration.id, configuration.status, configuration.source_profile_version_id,
+      `SELECT configuration.id, configuration.status, configuration.configuration_data, configuration.source_profile_version_id,
               profile.active_version_id AS current_active_profile_version_id
          FROM assistant_configuration_versions configuration
          LEFT JOIN business_profile_versions profile_version ON profile_version.id = configuration.source_profile_version_id AND profile_version.tenant_id = configuration.tenant_id
@@ -151,6 +172,7 @@ async function activateConfigurationVersion({
     if (!target || !allowedStatuses.includes(target.status)) {
       throw new KnowledgeConfigurationError('KNOWLEDGE_CONFIGURATION_NOT_APPROVED', 'Only an approved configuration can be activated');
     }
+    assertRuntimeAssistantIdentity(target.configuration_data);
     if (!target.source_profile_version_id || target.current_active_profile_version_id !== target.source_profile_version_id) {
       throw new KnowledgeConfigurationError('KNOWLEDGE_CONFIGURATION_PROFILE_NOT_ACTIVE', 'Configuration source Business Profile is no longer active');
     }
