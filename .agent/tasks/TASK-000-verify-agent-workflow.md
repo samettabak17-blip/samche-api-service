@@ -1,4 +1,4 @@
-# TASK-000 — Verify SamChe Agent Workflow
+ï»¿# TASK-000 - Verify SamChe Agent Workflow
 
 ## Mode
 VERIFY
