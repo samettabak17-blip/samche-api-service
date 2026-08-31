@@ -59,3 +59,33 @@ test('explicit reindex requeues an existing READY job without stealing a PROCESS
   assert.match(calls[0].sql, /WHEN knowledge_processing_jobs\.status = 'PROCESSING'/);
   assert.match(calls[0].sql, /WHEN \$7 THEN 'PENDING'/);
 });
+
+test('stores validated JPEG images as private Knowledge Intelligence sources', async () => {
+  const calls = [];
+  const writes = [];
+  const database = {
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+      if (/INSERT INTO knowledge_base_documents/i.test(sql)) return { rows: [{ id: params[0], tenant_id: params[1], processing_status: 'UPLOADED', indexing_status: 'PENDING' }] };
+      if (/INSERT INTO knowledge_processing_jobs/i.test(sql)) return { rows: [{ id: 'image-job', status: 'PENDING' }] };
+      return { rows: [] };
+    },
+  };
+  const storage = { async put(payload) { writes.push(payload); } };
+  const result = await createUploadedKnowledgeSource({
+    database,
+    storage,
+    tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    title: 'Conversation screenshot',
+    file: {
+      originalname: 'conversation.jpeg',
+      mimetype: 'image/jpeg',
+      buffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+      size: 4,
+    },
+  });
+  assert.equal(result.processingStatus, 'UPLOADED');
+  assert.equal(writes[0].mimeType, 'image/jpeg');
+  assert.match(writes[0].key, /^knowledge\/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\//);
+  assert.equal(calls.filter(({ sql }) => /INSERT INTO knowledge_processing_jobs/i.test(sql)).length, 1);
+});

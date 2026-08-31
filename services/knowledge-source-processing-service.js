@@ -1,5 +1,6 @@
 import { extractDocumentText } from './conversation-document-extraction-service.js';
 import { indexKnowledgeSource } from './knowledge-intelligence-service.js';
+import { validateImageKnowledgeExtraction } from './image-knowledge-extraction.js';
 
 export class KnowledgeSourceProcessingError extends Error {
   constructor(code, message) {
@@ -56,16 +57,17 @@ export async function claimNextKnowledgeProcessingJob(database) {
   return result.rows[0] ?? null;
 }
 
-async function markJob(database, job, status, errorCode = null) {
+async function markJob(database, job, status, errorCode = null, metadataPatch = null) {
   await dbQuery(database,
     `UPDATE knowledge_processing_jobs
         SET status = $3,
             locked_at = NULL,
             locked_until = NULL,
             last_error_code = $4,
+            metadata = CASE WHEN $5::jsonb IS NULL THEN metadata ELSE metadata || $5::jsonb END,
             updated_at = CURRENT_TIMESTAMP
       WHERE id = $1 AND tenant_id = $2`,
-    [job.id, job.tenant_id, status, errorCode]);
+    [job.id, job.tenant_id, status, errorCode, metadataPatch ? JSON.stringify(metadataPatch) : null]);
 }
 
 async function sourceForJob(database, job) {
@@ -87,6 +89,7 @@ export async function processKnowledgeProcessingJob({
   job,
   embed,
   extract = extractDocumentText,
+  imageExtractor = null,
   index = indexKnowledgeSource,
 }) {
   if (!job?.id || !job?.tenant_id || !job?.source_id) {
@@ -103,7 +106,7 @@ export async function processKnowledgeProcessingJob({
     await dbQuery(database,
       `UPDATE knowledge_base_documents
           SET processing_status = 'PROCESSING',
-              indexing_status = 'INDEXING',
+              indexing_status = CASE WHEN mime_type IN ('image/jpeg', 'image/png') THEN 'DISABLED' ELSE 'INDEXING' END,
               processing_error_code = NULL,
               updated_at = CURRENT_TIMESTAMP
         WHERE id = $1 AND tenant_id = $2`,
@@ -111,6 +114,7 @@ export async function processKnowledgeProcessingJob({
 
     let text = source.content;
     let extractionMethod = 'MANUAL';
+    let extractionMetadata = null;
 
     if (source.source_type === 'DOCUMENT') {
       const sourceStorage = storage ?? createStorage?.();
@@ -118,13 +122,36 @@ export async function processKnowledgeProcessingJob({
         throw new KnowledgeSourceProcessingError('KNOWLEDGE_SOURCE_STORAGE_UNAVAILABLE', 'Knowledge source storage is unavailable');
       }
       const bytes = await streamToBuffer(await sourceStorage.get({ key: source.storage_key }));
-      const extracted = await extract({
-        mimeType: source.mime_type,
-        bytes,
-        contentHash: source.content_hash,
-      });
-      text = extracted.extractedText;
-      extractionMethod = extracted.method;
+      if (source.mime_type === 'image/jpeg' || source.mime_type === 'image/png') {
+        if (!imageExtractor || typeof imageExtractor.extract !== 'function') {
+          throw new KnowledgeSourceProcessingError('KNOWLEDGE_IMAGE_EXTRACTOR_UNAVAILABLE', 'Image extraction is unavailable');
+        }
+        const extracted = validateImageKnowledgeExtraction(await imageExtractor.extract({
+          mimeType: source.mime_type,
+          bytes,
+          contentHash: source.content_hash,
+        }));
+        if (extracted.sourceHash !== String(source.content_hash ?? '').toLowerCase() || extracted.mimeType !== source.mime_type) {
+          throw new KnowledgeSourceProcessingError('KNOWLEDGE_IMAGE_EXTRACTION_PROVENANCE_MISMATCH', 'Image extraction provenance is invalid');
+        }
+        text = extracted.text;
+        extractionMethod = `IMAGE:${extracted.extractionMethod}`.slice(0, 32);
+        extractionMetadata = {
+          extractionVersion: extracted.extractionVersion,
+          extractionMethod: extracted.extractionMethod,
+          extractionConfidence: extracted.extractionConfidence,
+          segmentCount: extracted.segments.length,
+          segmentRoles: [...new Set(extracted.segments.map(({ role }) => role))],
+        };
+      } else {
+        const extracted = await extract({
+          mimeType: source.mime_type,
+          bytes,
+          contentHash: source.content_hash,
+        });
+        text = extracted.extractedText;
+        extractionMethod = extracted.method;
+      }
     }
 
     if (!String(text ?? '').trim()) {
@@ -141,6 +168,11 @@ export async function processKnowledgeProcessingJob({
               updated_at = CURRENT_TIMESTAMP
         WHERE id = $1 AND tenant_id = $2`,
       [source.id, source.tenant_id, text, source.content_hash, extractionMethod]);
+
+    if (source.mime_type === 'image/jpeg' || source.mime_type === 'image/png') {
+      await markJob(database, job, 'READY', null, extractionMetadata);
+      return { status: 'READY', chunkCount: 0, indexed: false };
+    }
 
     const indexed = await index({
       database,
