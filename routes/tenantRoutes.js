@@ -14,7 +14,7 @@ import { CustomerOnboardingError, onboardCustomer } from '../services/customer-o
 import { validateInvitationMailConfiguration } from '../services/customer-invitation-mailer.js';
 import { resendInvitationLifecycle, revokeInvitationLifecycle } from '../services/customer-invitation-service.js';
 import { AssistantModelAccessError, assertAssistantModelWriteAllowed, serializeAssistantForActor } from '../services/assistant-model-access-policy.js';
-import { PLAN_CODES, TenantPlanError, requestTenantPlanUpgrade, resolveTenantPlanUpgrade } from '../services/tenant-plan-service.js';
+import { PLAN_CODES, TenantPlanError, changeTenantPlanAsOwner, requestTenantPlanUpgrade, resolveTenantPlanUpgrade } from '../services/tenant-plan-service.js';
 import { listPlanUpgradeNotificationsForOwner, markPlanUpgradeNotificationRead, notifyPlatformOwnersOfPlanUpgrade } from '../services/tenant-plan-notification-service.js';
 
 const router = express.Router();
@@ -156,6 +156,21 @@ router.post('/plan-upgrade-requests/:requestId/:decision(approve|reject)', requi
   if (!isValidUUID(req.params.requestId)) return res.status(400).json({ error: 'Plan request is unavailable' });
   try { const request = await resolveTenantPlanUpgrade({ database: pool, requestId: req.params.requestId, ownerUserId: req.user.user_id, decision: req.params.decision === 'approve' ? 'APPROVED' : 'REJECTED' }); return res.json({ request }); }
   catch (error) { return res.status(error instanceof TenantPlanError ? 409 : 503).json({ error: 'Plan request could not be resolved' }); }
+});
+
+// Platform OWNER administrative override. Tenant workspace roles never reach
+// this route; their only supported plan action remains a higher-tier request.
+router.put('/:tenantId/plan', requireOwner, async (req, res) => {
+  if (!isValidUUID(req.params.tenantId)) return res.status(400).json({ error: 'Tenant plan is unavailable' });
+  try {
+    const change = await changeTenantPlanAsOwner({ database: pool, tenantId: req.params.tenantId, ownerUserId: req.user.user_id, planCode: req.body?.plan_code });
+    const result = await query(`SELECT tenant.plan_code, plan.display_name, plan.customer_subtitle, plan.rank
+      FROM tenants tenant JOIN platform_plans plan ON plan.code=tenant.plan_code WHERE tenant.id=$1`, [req.params.tenantId]);
+    return res.json({ plan: result.rows[0], audit: change });
+  } catch (error) {
+    const status = error instanceof TenantPlanError && error.code === 'PLAN_TENANT_NOT_FOUND' ? 404 : error instanceof TenantPlanError ? 409 : 503;
+    return res.status(status).json({ error: error instanceof TenantPlanError ? error.message : 'Tenant plan could not be changed' });
+  }
 });
 
 router.get('/:tenantId/plan', requireTenantAccess, async (req, res) => {

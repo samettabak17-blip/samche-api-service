@@ -3,6 +3,32 @@ export const PLAN_RANK = Object.fromEntries(PLAN_CODES.map((code, index) => [cod
 export function isHigherPlan(current, requested) { return Boolean(PLAN_RANK[requested] > PLAN_RANK[current]); }
 export class TenantPlanError extends Error { constructor(code, message) { super(message); this.code = code; } }
 function valid(code) { return PLAN_CODES.includes(String(code ?? '').toUpperCase()); }
+
+// This is intentionally separate from an upgrade-request resolution: a Platform
+// OWNER may make an explicit administrative assignment in either direction.
+// A pending tenant request is a reviewable commercial decision, so it must be
+// resolved before an owner assignment can make its assumptions stale.
+export async function changeTenantPlanAsOwner({ database, tenantId, ownerUserId, planCode }) {
+  const requested = String(planCode ?? '').toUpperCase();
+  if (!valid(requested)) throw new TenantPlanError('PLAN_INVALID', 'Requested plan is invalid');
+  const client = await database.connect();
+  try {
+    await client.query('BEGIN');
+    const tenant = await client.query('SELECT plan_code FROM tenants WHERE id = $1 FOR UPDATE', [tenantId]);
+    if (!tenant.rowCount) throw new TenantPlanError('PLAN_TENANT_NOT_FOUND', 'Tenant not found');
+    const current = tenant.rows[0].plan_code;
+    const pending = await client.query("SELECT id FROM tenant_plan_upgrade_requests WHERE tenant_id=$1 AND status='PENDING' FOR UPDATE", [tenantId]);
+    if (pending.rowCount) throw new TenantPlanError('PLAN_MANUAL_CHANGE_PENDING_REQUEST', 'Resolve the pending upgrade request before changing this tenant plan');
+    if (current === requested) throw new TenantPlanError('PLAN_UNCHANGED', 'Selected plan is already assigned');
+    await client.query('UPDATE tenants SET plan_code=$2, updated_at=CURRENT_TIMESTAMP WHERE id=$1', [tenantId, requested]);
+    const audit = await client.query(`INSERT INTO tenant_plan_change_audit
+      (tenant_id, previous_plan_code, new_plan_code, changed_by_user_id, change_source)
+      VALUES ($1,$2,$3,$4,'OWNER_MANUAL_CHANGE')
+      RETURNING id, tenant_id, previous_plan_code, new_plan_code, changed_by_user_id, change_source, changed_at`, [tenantId, current, requested, ownerUserId]);
+    await client.query('COMMIT');
+    return audit.rows[0];
+  } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; } finally { client.release(); }
+}
 export async function requestTenantPlanUpgrade({ database, tenantId, requestedBy, requestedPlanCode }) {
   const requested = String(requestedPlanCode ?? '').toUpperCase();
   if (!valid(requested)) throw new TenantPlanError('PLAN_INVALID', 'Requested plan is invalid');

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PLAN_CODES, isHigherPlan, requestTenantPlanUpgrade, resolveTenantPlanUpgrade, TenantPlanError } from '../services/tenant-plan-service.js';
+import { PLAN_CODES, isHigherPlan, requestTenantPlanUpgrade, resolveTenantPlanUpgrade, changeTenantPlanAsOwner, TenantPlanError } from '../services/tenant-plan-service.js';
 
 function databaseFor(steps) {
   const calls = [];
@@ -50,4 +50,18 @@ test('owner rejection leaves the tenant plan untouched', async () => {
   const { database, calls } = databaseFor([{}, { rowCount: 1, rows: [{ id: 'request-1', tenant_id: 'tenant-1', status: 'PENDING', current_plan_code: 'GROWTH', requested_plan_code: 'BUSINESS' }] }, { rowCount: 1, rows: [{ plan_code: 'GROWTH' }] }, { rowCount: 1, rows: [{ id: 'request-1', status: 'REJECTED', previous_plan_code: 'GROWTH', new_plan_code: null }] }, {}]);
   await resolveTenantPlanUpgrade({ database, requestId: 'request-1', ownerUserId: 'owner-1', decision: 'REJECTED' });
   assert.equal(calls.some((call) => call.sql.startsWith('UPDATE tenants')), false);
+});
+
+test('platform owner may explicitly assign any canonical plan and records the manual audit', async () => {
+  const { database, calls } = databaseFor([{}, { rowCount: 1, rows: [{ plan_code: 'GROWTH' }] }, { rowCount: 0, rows: [] }, {}, { rowCount: 1, rows: [{ id: 'audit-1', tenant_id: 'tenant-1', previous_plan_code: 'GROWTH', new_plan_code: 'STARTER', change_source: 'OWNER_MANUAL_CHANGE' }] }, {}]);
+  const change = await changeTenantPlanAsOwner({ database, tenantId: 'tenant-1', ownerUserId: 'owner-1', planCode: 'STARTER' });
+  assert.equal(change.new_plan_code, 'STARTER');
+  assert.equal(calls.some((call) => call.sql.startsWith('UPDATE tenants')), true);
+  assert.equal(calls.some((call) => call.sql.includes('tenant_plan_change_audit')), true);
+  assert.equal(calls.at(-1)?.sql, 'COMMIT');
+});
+
+test('manual owner assignment is blocked while the tenant has a pending request', async () => {
+  const { database } = databaseFor([{}, { rowCount: 1, rows: [{ plan_code: 'STARTER' }] }, { rowCount: 1, rows: [{ id: 'request-1' }] }, {}]);
+  await assert.rejects(() => changeTenantPlanAsOwner({ database, tenantId: 'tenant-1', ownerUserId: 'owner-1', planCode: 'BUSINESS' }), (error) => error instanceof TenantPlanError && error.code === 'PLAN_MANUAL_CHANGE_PENDING_REQUEST');
 });

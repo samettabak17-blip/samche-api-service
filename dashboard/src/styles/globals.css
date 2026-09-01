@@ -25,13 +25,35 @@ body {
     #050a10;
 }
 button, input, select, textarea { font: inherit; }
-button { appearance: none; -webkit-appearance: none; }
-button:disabled { opacity: 1; color: #b7c1d1; }
+button, select { appearance: none; -webkit-appearance: none; color-scheme: dark; }
+button:disabled { opacity: 1; color: #b7c1d1; background-color: #101925; border-color: #43546a; }
 input:not([type='checkbox']), select, textarea { background: rgba(12, 22, 35, 0.82); border-color: rgba(75, 100, 132, 0.38); color: #f4f7fb; }
 option { background: #0d1521; color: #f4f7fb; }
 button.bg-ink { background: #d42129; color: #fff; }
 button.bg-ink:hover { background: #b81920; }
 :focus-visible { outline: 3px solid rgba(236, 51, 60, 0.72); outline-offset: 2px; }
+
+/* Authenticated Dashboard safety net: utility hover/disabled styles must never
+   fall back to a light native surface while retaining light foreground text. */
+.dashboard-shell { color-scheme: dark; }
+.dashboard-shell button[class*="hover:bg-white"]:hover {
+  background-color: rgba(212, 33, 41, 0.14) !important;
+  color: #f4f7fb !important;
+}
+.dashboard-shell button:disabled {
+  opacity: 1 !important;
+  background-color: #101925 !important;
+  border-color: #43546a !important;
+  color: #c7d2e1 !important;
+}
+.dashboard-shell select:disabled,
+.dashboard-shell input:disabled,
+.dashboard-shell textarea:disabled {
+  opacity: 1;
+  background-color: #09111b;
+  border-color: #43546a;
+  color: #b7c1d1;
+}
 
 @layer components {
   .panel {
