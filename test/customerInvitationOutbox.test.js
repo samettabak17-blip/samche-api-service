@@ -97,3 +97,33 @@ test('outbox worker reports a safe failure when it cannot connect to the durable
   worker.stop();
   assert.equal(statuses.some((status) => status.state === 'ERROR' && status.code === 'OUTBOX_WORKER_FAILURE'), true);
 });
+
+test('a started outbox worker claims an eligible pending delivery row and progresses it to a real send attempt', async () => {
+  const key = Buffer.alloc(32, 7).toString('base64');
+  const envelope = encryptInvitationEnvelope(createInvitationToken(), key);
+  const calls = [];
+  const row = {
+    id: 'outbox-ready', status: 'PENDING_DELIVERY', authority_status: 'PENDING', expires_at: new Date(Date.now() + 60_000),
+    encrypted_envelope_ciphertext: envelope.ciphertext, envelope_iv: envelope.iv, envelope_auth_tag: envelope.authTag,
+    envelope_key_version: envelope.keyVersion, company_name: 'Example', email: 'customer@example.test', template_version: 'INVITATION_V1',
+  };
+  const worker = createCustomerInvitationOutboxWorker({
+    database: {
+      connect: async () => ({
+        query: async (sql) => {
+          calls.push(String(sql));
+          return /SELECT o\.\*/.test(String(sql)) ? { rowCount: 1, rows: [row] } : { rowCount: 1, rows: [] };
+        },
+        release: () => undefined,
+      }),
+    },
+    envelopeKey: key,
+    mailer: { sendInvitation: async () => ({ providerCode: 'SMTP_ACCEPTED' }) },
+    intervalMs: 60_000,
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  worker.stop();
+  assert.equal(calls.some((sql) => /FOR UPDATE SKIP LOCKED/.test(sql)), true);
+  assert.equal(calls.some((sql) => /SET status = 'SENT'/.test(sql)), true);
+});

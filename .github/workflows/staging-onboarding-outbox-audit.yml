@@ -6,6 +6,9 @@ on:
     paths:
       - 'scripts/staging-onboarding-outbox-audit.js'
       - '.github/workflows/staging-onboarding-outbox-audit.yml'
+      - 'app.js'
+      - 'services/customer-invitation-outbox-bootstrap.js'
+      - 'services/customer-invitation-outbox-service.js'
   workflow_dispatch:
 
 permissions:

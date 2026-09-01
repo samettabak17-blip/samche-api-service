@@ -50,13 +50,12 @@ import { isSameKnowledgeAuthority, resolveAssistantKnowledgeAuthority } from "./
 import { filterProviderMemoryByAuthority, stampProviderMemoryEntry } from "./services/channel-knowledge-authority-memory.js";
 import { configuredPublicWebChatSessionSecret, issuePublicWebChatSession, PublicWebChatSessionError, verifyPublicWebChatSession } from "./services/public-web-chat-session.js";
 import { resolvePublicWebChatIntegration } from "./services/public-web-chat-integration-service.js";
-import { validateInvitationMailConfiguration } from './services/customer-invitation-mailer.js';
-import { createSmtpCustomerInvitationMailer } from './services/smtp-customer-invitation-mailer.js';
-import { createCustomerInvitationOutboxWorker } from './services/customer-invitation-outbox-service.js';
+import { createCustomerInvitationOutboxStartup } from './services/customer-invitation-outbox-bootstrap.js';
 
 dotenv.config();
 
 const app = express();
+let customerInvitationOutboxStartup = null;
 
 app.use('/api/v1/auth/invitations', (req, res, next) => {
   res.setHeader('Referrer-Policy', 'no-referrer');
@@ -100,7 +99,8 @@ app.use(express.json({
 app.get("/api/v1/health", (req, res) => {
   res.json({
     status: "ok",
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    onboarding_outbox_worker: customerInvitationOutboxStartup?.status() ?? 'NOT_STARTED',
   });
 });
 
@@ -189,24 +189,6 @@ if ((knowledgeEmbedder || knowledgeImageExtractor) && process.env.KNOWLEDGE_PROC
   });
 } else {
   console.info('KNOWLEDGE_PROCESSING_WORKER_DISABLED');
-}
-
-let customerInvitationOutboxWorkerStatus = null;
-try {
-  const invitationMailConfig = validateInvitationMailConfiguration(process.env);
-  createCustomerInvitationOutboxWorker({
-    database: pool,
-    mailer: createSmtpCustomerInvitationMailer({ config: invitationMailConfig }),
-    envelopeKey: process.env.INVITATION_ENVELOPE_ENCRYPTION_KEY,
-    onStatus: ({ state, code }) => {
-      const nextStatus = code ? `${state}_${code}` : state;
-      if (customerInvitationOutboxWorkerStatus === nextStatus) return;
-      customerInvitationOutboxWorkerStatus = nextStatus;
-      console.info(`CUSTOMER_INVITATION_OUTBOX_${nextStatus}`);
-    },
-  });
-} catch {
-  console.info('CUSTOMER_INVITATION_DELIVERY_DISABLED');
 }
 
 // Ortak Link Dönüştürücü
@@ -2263,9 +2245,16 @@ const PORT = process.env.PORT || 3000;
 async function startServer() {
   try {
     await runMigrations();
-    app.listen(PORT, () => {
+    customerInvitationOutboxStartup = createCustomerInvitationOutboxStartup({
+      database: pool,
+      environment: process.env,
+      onStatus: (status) => console.info(`CUSTOMER_INVITATION_OUTBOX_${status}`),
+    });
+    customerInvitationOutboxStartup.start();
+    const server = app.listen(PORT, () => {
       console.log(`Sunucu ${PORT} portunda başarıyla çalışıyor.`);
     });
+    server.on('close', () => customerInvitationOutboxStartup?.stop());
   } catch (error) {
     console.error('Database migration failed:', error);
     process.exit(1);
