@@ -50,10 +50,21 @@ import { isSameKnowledgeAuthority, resolveAssistantKnowledgeAuthority } from "./
 import { filterProviderMemoryByAuthority, stampProviderMemoryEntry } from "./services/channel-knowledge-authority-memory.js";
 import { configuredPublicWebChatSessionSecret, issuePublicWebChatSession, PublicWebChatSessionError, verifyPublicWebChatSession } from "./services/public-web-chat-session.js";
 import { resolvePublicWebChatIntegration } from "./services/public-web-chat-integration-service.js";
+import { validateInvitationMailConfiguration } from './services/customer-invitation-mailer.js';
+import { createSmtpCustomerInvitationMailer } from './services/smtp-customer-invitation-mailer.js';
+import { createCustomerInvitationOutboxWorker } from './services/customer-invitation-outbox-service.js';
 
 dotenv.config();
 
 const app = express();
+
+app.use('/api/v1/auth/invitations', (req, res, next) => {
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
+// This parser is deliberately registered before the global JSON parser so public
+// invitation payloads are bounded before Express consumes a larger request body.
+app.use('/api/v1/auth/invitations', express.raw({ type: 'application/json', limit: '4kb' }));
 
 const allowedCorsOrigins = [
   process.env.DASHBOARD_ALLOWED_ORIGIN,
@@ -124,6 +135,12 @@ app.use("/api/v1/tenants", conversationRoutes);
 app.use("/api/v1/tenants", knowledgeIntelligenceRoutes);
 app.use("/api/v1/tenants", dashboardRoutes);
 app.use("/api/v1/tenants", crmRoutes);
+app.use((error, req, res, next) => {
+  if (req.originalUrl?.startsWith('/api/v1/auth/invitations') && error?.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Invitation request is unavailable' });
+  }
+  return next(error);
+});
 void startLiveEventListener();
 
 // ============================================================================
@@ -170,6 +187,17 @@ if ((knowledgeEmbedder || knowledgeImageExtractor) && process.env.KNOWLEDGE_PROC
   });
 } else {
   console.info('KNOWLEDGE_PROCESSING_WORKER_DISABLED');
+}
+
+try {
+  const invitationMailConfig = validateInvitationMailConfiguration(process.env);
+  createCustomerInvitationOutboxWorker({
+    database: pool,
+    mailer: createSmtpCustomerInvitationMailer({ config: invitationMailConfig }),
+    envelopeKey: process.env.INVITATION_ENVELOPE_ENCRYPTION_KEY,
+  });
+} catch {
+  console.info('CUSTOMER_INVITATION_DELIVERY_DISABLED');
 }
 
 // Ortak Link Dönüştürücü

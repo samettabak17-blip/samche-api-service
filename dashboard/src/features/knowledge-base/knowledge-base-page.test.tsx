@@ -59,6 +59,7 @@ function renderPage({ canManage = true, route = '/app/tenant-a/knowledge-base' }
     isLoading: false,
     error: null,
     selectTenant: vi.fn(),
+    adoptTenant: vi.fn(),
     createTenant: vi.fn(),
     isOwner: false,
   });

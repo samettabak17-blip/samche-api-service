@@ -84,6 +84,7 @@ function renderPage(
     isLoading: false,
     error: null,
     selectTenant: vi.fn(),
+    adoptTenant: vi.fn(),
     createTenant: vi.fn(),
     isOwner: false,
   });

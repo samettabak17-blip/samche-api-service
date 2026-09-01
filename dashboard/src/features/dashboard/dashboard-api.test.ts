@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { apiClient } from '../../lib/api-client';
-import { tenantApi, tenantKeys } from './dashboard-api';
+import { onboardingApi, tenantApi, tenantKeys } from './dashboard-api';
 
 describe('tenant dashboard API', () => {
   it('keeps query keys tenant-scoped', () => {
@@ -56,6 +56,27 @@ describe('tenant dashboard API', () => {
     post.mockRestore();
     put.mockRestore();
     remove.mockRestore();
+  });
+
+  it('creates a company and administrator invitation through the idempotent onboarding endpoint', async () => {
+    const post = vi.spyOn(apiClient, 'post').mockResolvedValue({ status: 'created' });
+    const payload = { name: 'Northwind', first_name: 'Ada', last_name: 'Lovelace', email: 'ada@northwind.example' };
+
+    await onboardingApi.createCompanyInvitation(payload, 'onboarding-key');
+
+    expect(post).toHaveBeenCalledWith('/api/v1/tenants/onboard', payload, { headers: { 'Idempotency-Key': 'onboarding-key' } });
+    post.mockRestore();
+  });
+
+  it('uses unauthenticated invitation validation and acceptance routes', async () => {
+    const post = vi.spyOn(apiClient, 'post').mockResolvedValue({ status: 'VALID' });
+
+    await onboardingApi.validateInvitation('safe-token');
+    await onboardingApi.acceptInvitation({ token: 'safe-token', password: 'correct-horse-battery-staple', confirm_password: 'correct-horse-battery-staple' });
+
+    expect(post).toHaveBeenCalledWith('/api/v1/auth/invitations/validate', { token: 'safe-token' });
+    expect(post).toHaveBeenCalledWith('/api/v1/auth/invitations/accept', { token: 'safe-token', password: 'correct-horse-battery-staple', confirm_password: 'correct-horse-battery-staple' });
+    post.mockRestore();
   });
 });
 

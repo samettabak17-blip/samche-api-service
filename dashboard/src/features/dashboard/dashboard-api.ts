@@ -3,6 +3,35 @@ import type { AgentMessageResponse, HumanAttentionSummary, DashboardOverview, As
 
 const tenantRoot = (tenantId: string) => `/api/v1/tenants/${tenantId}`;
 type CustomerDirectoryUser = Pick<TeamMember, 'id' | 'email' | 'system_role'>;
+export interface CompanyInvitationPayload {
+  name: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+}
+
+export interface CompanyOnboardingResponse {
+  onboarding: {
+    tenant: { id: string; name: string };
+    onboarding_status: string;
+    invitation?: { id: string; status: string; expires_at: string };
+  };
+}
+
+export interface InvitationValidation {
+  status: 'VALID' | 'INVALID' | 'EXPIRED' | 'USED' | 'REVOKED' | string;
+  company_name?: string;
+  email?: string;
+}
+
+export const onboardingApi = {
+  createCompanyInvitation: (payload: CompanyInvitationPayload, idempotencyKey: string) => apiClient.post<CompanyOnboardingResponse>('/api/v1/tenants/onboard', payload, { headers: { 'Idempotency-Key': idempotencyKey } }),
+  validateInvitation: (token: string) => apiClient.post<InvitationValidation>('/api/v1/auth/invitations/validate', { token }),
+  acceptInvitation: (payload: { token: string; password: string; confirm_password: string }) => apiClient.post<{ status: string }>('/api/v1/auth/invitations/accept', payload),
+  resendInvitation: (tenantId: string, invitationId: string) => apiClient.post<{ invitation: { id: string; status: string; expires_at: string } }>(`${tenantRoot(tenantId)}/invitations/${invitationId}/resend`, {}),
+  revokeInvitation: (tenantId: string, invitationId: string) => apiClient.post<{ status: 'REVOKED' }>(`${tenantRoot(tenantId)}/invitations/${invitationId}/revoke`, {}),
+};
+
 export const tenantKeys = {
   assistants: (tenantId: string) => ['tenant', tenantId, 'assistants'] as const,
   assistant: (tenantId: string, assistantId: string) => ['tenant', tenantId, 'assistant', assistantId] as const,

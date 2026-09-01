@@ -16,6 +16,7 @@ interface TenantContextValue {
   isLoading: boolean;
   error: Error | null;
   selectTenant(tenantId: string): void;
+  adoptTenant(tenantId: string): Promise<void>;
   createTenant(name: string): Promise<Tenant>;
   isOwner: boolean;
 }
@@ -58,6 +59,15 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     });
     window.sessionStorage.setItem(tenantStorageKey, tenantId);
   }, [queryClient, tenants]);
+  const adoptTenant = useCallback(async (tenantId: string) => {
+    const refreshed = await tenantsQuery.refetch();
+    const refreshedTenants = refreshed.data ?? [];
+    if (!refreshedTenants.some((tenant) => tenant.id === tenantId)) {
+      throw new Error('New company was not available after refresh');
+    }
+    setSelectedTenantId(tenantId);
+    window.sessionStorage.setItem(tenantStorageKey, tenantId);
+  }, [tenantsQuery]);
 
   const tenantRole = selectedTenant?.tenant_role;
   const isOwner = user?.system_role === 'OWNER';
@@ -77,9 +87,10 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     isLoading: tenantsQuery.isLoading,
     error: tenantsQuery.error,
     selectTenant,
+    adoptTenant,
     createTenant,
     isOwner,
-  }), [canManage, createTenant, isOwner, selectTenant, selectedTenant, tenantRole, tenants, tenantsQuery.error, tenantsQuery.isLoading]);
+  }), [adoptTenant, canManage, createTenant, isOwner, selectTenant, selectedTenant, tenantRole, tenants, tenantsQuery.error, tenantsQuery.isLoading]);
 
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>;
 }

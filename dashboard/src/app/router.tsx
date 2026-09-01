@@ -2,6 +2,7 @@ import { Navigate, Outlet, Route, Routes, useParams } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { AppShell } from '../components/layout/app-shell';
 import { LoginPage } from '../features/auth/login-page';
+import { AcceptInvitationPage } from '../features/auth/accept-invitation-page';
 import { useAuth } from '../features/auth/auth-context';
 import { useTenant } from '../features/tenants/tenant-context';
 import { OverviewPage } from '../features/overview/overview-page';
@@ -42,6 +43,7 @@ function TenantDashboardLayout() {
 export function AppRouter() {
   return <Routes>
     <Route path="/login" element={<LoginPage />} />
+    <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
     <Route path="/app" element={<RequireAuth><DashboardEntry /></RequireAuth>} />
     <Route path="/app/:tenantId" element={<RequireAuth><TenantDashboardLayout /></RequireAuth>}>
       <Route path="overview" element={<OverviewPage />} />

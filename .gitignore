@@ -2,3 +2,4 @@
 # Aider local files
 .aider*
 .aider.tags.cache.v*/
+node_modules/

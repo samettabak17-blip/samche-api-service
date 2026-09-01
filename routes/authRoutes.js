@@ -1,11 +1,56 @@
 import express from 'express';
 import argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
-import { query } from '../config/db.js';
+import pool, { query } from '../config/db.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { isValidEmail, isValidPassword, normalizeEmail } from '../middleware/validators.js';
+import { acceptInvitation, InvitationAcceptanceError, validateInvitation, validatePublicInvitationBody } from '../services/customer-invitation-acceptance-service.js';
+import { allowPublicInvitationAttempt } from '../services/public-invitation-rate-limit.js';
 
 const router = express.Router();
+
+function readPublicInvitationBody(req) {
+    if (!validatePublicInvitationBody(req.body)) return null;
+    try {
+        const body = JSON.parse(req.body.toString('utf8'));
+        return body && typeof body === 'object' ? body : null;
+    } catch {
+        return null;
+    }
+}
+
+router.post('/invitations/validate', async (req, res) => {
+    const body = readPublicInvitationBody(req);
+    if (!body || !allowPublicInvitationAttempt({ kind: 'validate', ip: req.ip, token: body.token })) {
+        return res.status(400).json({ error: 'Invitation is unavailable' });
+    }
+    try {
+        const invitation = await validateInvitation({ database: pool, token: body.token });
+        return res.json({
+            status: 'VALID',
+            company_name: invitation.companyName,
+            email: invitation.email
+        });
+    } catch {
+        return res.status(400).json({ error: 'Invitation is unavailable' });
+    }
+});
+
+router.post('/invitations/accept', async (req, res) => {
+    const body = readPublicInvitationBody(req);
+    if (!body || !allowPublicInvitationAttempt({ kind: 'accept', ip: req.ip, token: body.token })) {
+        return res.status(400).json({ error: 'Invitation is unavailable' });
+    }
+    try {
+        await acceptInvitation({ database: pool, token: body.token, password: body.password, confirmPassword: body.confirm_password });
+        return res.json({ status: 'ACCOUNT_ACTIVATED' });
+    } catch (error) {
+        if (error instanceof InvitationAcceptanceError && error.code === 'PASSWORD_INVALID') {
+            return res.status(400).json({ error: 'Password does not meet requirements' });
+        }
+        return res.status(400).json({ error: 'Invitation is unavailable' });
+    }
+});
 
 router.post('/register', async (req, res) => {
     const { email, password } = req.body;

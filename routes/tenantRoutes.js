@@ -1,5 +1,5 @@
 import express from 'express';
-import { query } from '../config/db.js';
+import pool, { query } from '../config/db.js';
 import {
     authenticateToken,
     requireTenantAccess,
@@ -10,6 +10,9 @@ import {
     isValidUUID,
     isValidTenantRole
 } from '../middleware/validators.js';
+import { CustomerOnboardingError, onboardCustomer } from '../services/customer-onboarding-service.js';
+import { validateInvitationMailConfiguration } from '../services/customer-invitation-mailer.js';
+import { resendInvitationLifecycle, revokeInvitationLifecycle } from '../services/customer-invitation-service.js';
 
 const router = express.Router();
 
@@ -103,6 +106,8 @@ router.get('/users', requireOwner, async (req, res) => {
             SELECT id, email, system_role
             FROM users
             WHERE system_role = 'CUSTOMER'
+              AND status = 'ACTIVE'
+              AND is_test_fixture = FALSE
               AND ($1 = '' OR email ILIKE '%' || $1 || '%')
             ORDER BY email ASC
             LIMIT 50
@@ -112,6 +117,82 @@ router.get('/users', requireOwner, async (req, res) => {
         console.error('Fetch assignable users error:', err);
         return res.status(500).json({ error: 'Server error' });
     }
+});
+
+// OWNER-only onboarding: creates an INVITED customer without granting membership
+// until that tenant-specific invitation is accepted.
+router.post('/onboard', requireOwner, async (req, res) => {
+    let mailConfig;
+    try {
+        mailConfig = validateInvitationMailConfiguration(process.env);
+    } catch {
+        return res.status(503).json({ error: 'Customer invitation delivery is not configured' });
+    }
+    try {
+        const result = await onboardCustomer({
+            database: pool,
+            ownerUserId: req.user.user_id,
+            idempotencyKey: req.get('Idempotency-Key'),
+            payload: req.body,
+            envelopeKey: process.env.INVITATION_ENVELOPE_ENCRYPTION_KEY,
+        });
+        return res.status(result.replayed ? 200 : 201).json({ onboarding: result });
+    } catch (error) {
+        if (error instanceof CustomerOnboardingError) {
+            const status = error.code === 'IDEMPOTENCY_KEY_CONFLICT' ? 409 : error.code === 'ONBOARDING_IN_PROGRESS' ? 409 : 400;
+            return res.status(status).json({ error: 'Customer onboarding request could not be completed' });
+        }
+        console.error('Customer onboarding failed');
+        return res.status(500).json({ error: 'Customer onboarding request could not be completed' });
+    }
+});
+
+router.get('/:tenantId/invitations', requireOwner, async (req, res) => {
+    if (!isValidUUID(req.params.tenantId)) return res.status(400).json({ error: 'Invalid tenant ID' });
+    try {
+        const result = await query(
+            `SELECT i.id, i.status, i.tenant_role, i.expires_at, i.created_at,
+                    o.status AS delivery_status, o.attempt_count
+             FROM customer_invitations i
+             LEFT JOIN customer_invitation_outbox o ON o.invitation_id = i.id
+             WHERE i.tenant_id = $1 ORDER BY i.created_at DESC`,
+            [req.params.tenantId],
+        );
+        return res.json(result.rows);
+    } catch {
+        return res.status(500).json({ error: 'Invitation status is unavailable' });
+    }
+});
+
+router.post('/:tenantId/invitations/:invitationId/resend', requireOwner, async (req, res) => {
+    if (!isValidUUID(req.params.tenantId) || !isValidUUID(req.params.invitationId)) return res.status(400).json({ error: 'Invitation is unavailable' });
+    try {
+        validateInvitationMailConfiguration(process.env);
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            const result = await resendInvitationLifecycle({ client, tenantId: req.params.tenantId, invitationId: req.params.invitationId, envelopeKey: process.env.INVITATION_ENVELOPE_ENCRYPTION_KEY });
+            await client.query('COMMIT');
+            return res.status(201).json({ invitation: { id: result.invitation.id, status: result.invitation.status, expires_at: result.invitation.expires_at } });
+        } catch {
+            await client.query('ROLLBACK').catch(() => {});
+            return res.status(400).json({ error: 'Invitation could not be resent' });
+        } finally { client.release(); }
+    } catch { return res.status(503).json({ error: 'Customer invitation delivery is not configured' }); }
+});
+
+router.post('/:tenantId/invitations/:invitationId/revoke', requireOwner, async (req, res) => {
+    if (!isValidUUID(req.params.tenantId) || !isValidUUID(req.params.invitationId)) return res.status(400).json({ error: 'Invitation is unavailable' });
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        await revokeInvitationLifecycle({ client, tenantId: req.params.tenantId, invitationId: req.params.invitationId });
+        await client.query('COMMIT');
+        return res.json({ status: 'REVOKED' });
+    } catch {
+        await client.query('ROLLBACK').catch(() => {});
+        return res.status(400).json({ error: 'Invitation could not be revoked' });
+    } finally { client.release(); }
 });
 
 // GET /api/v1/tenants/:tenantId/users
@@ -174,13 +255,6 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
     const { tenantId } = req.params;
     const { user_id, tenant_role } = req.body;
 
-    console.log('==========================================');
-    console.log('[POST TENANT USER] ROUTE HIT');
-    console.log('[POST TENANT USER] tenantId:', tenantId);
-    console.log('[POST TENANT USER] user_id:', user_id);
-    console.log('[POST TENANT USER] tenant_role:', tenant_role);
-    console.log('[POST TENANT USER] authenticated user:', req.user);
-
     // ------------------------------------------
     // VALIDATION
     // ------------------------------------------
@@ -218,8 +292,6 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
             [tenantId]
         );
 
-        console.log('[POST TENANT USER] tenantCheck:', tenantCheck.rows);
-
         if (tenantCheck.rowCount === 0) {
             return res.status(404).json({
                 error: 'Tenant not found',
@@ -238,17 +310,14 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
             SELECT
                 id,
                 email,
-                system_role
+                system_role,
+                status,
+                is_test_fixture
             FROM users
             WHERE id = $1::uuid
             LIMIT 1
             `,
             [normalizedUserId]
-        );
-
-  console.log(
-            '[POST TENANT USER] userCheck:',
-            userCheck.rows
         );
 
         if (userCheck.rowCount === 0) {
@@ -260,19 +329,13 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
 
         const targetUser = userCheck.rows[0];
 
-        console.log(
-            '[POST TENANT USER] target user:',
-            targetUser
-        );
-
         // ------------------------------------------
         // 3. USER MUST BE CUSTOMER
         // ------------------------------------------
 
-        if (targetUser.system_role !== 'CUSTOMER') {
+        if (targetUser.system_role !== 'CUSTOMER' || targetUser.status !== 'ACTIVE' || targetUser.is_test_fixture) {
             return res.status(400).json({
-                error: 'Target must be an existing CUSTOMER user',
-                user: targetUser
+                error: 'Target must be an active customer user'
             });
         }
 
@@ -294,15 +357,11 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
             [tenantId, targetUser.id]
         );
 
-        console.log(
-            '[POST TENANT USER] existing assignment:',
-            existingAssignment.rows
-        );
-
         if (existingAssignment.rowCount > 0) {
-            return res.status(409).json({
-                error: 'User is already assigned to this tenant',
-                assignment: existingAssignment.rows[0]
+            return res.status(200).json({
+                message: 'User is already assigned to this tenant',
+                assignment: existingAssignment.rows[0],
+                reused: true
             });
         }
 
@@ -331,23 +390,14 @@ router.post('/:tenantId/users', requireOwner, async (req, res) => {
             ]
         );
 
-        console.log(
-            '[POST TENANT USER] Assignment created:',
-            result.rows[0]
-        );
-
-        console.log('==========================================');
-
         return res.status(201).json({
             message: 'User assigned to tenant successfully',
-            assignment: result.rows[0]
+            assignment: result.rows[0],
+            reused: false
         });
 
     } catch (err) {
-        console.error('==========================================');
-        console.error('[POST TENANT USER] ERROR');
-        console.error(err);
-        console.error('==========================================');
+        console.error('Tenant user assignment failed');
 
         // Duplicate assignment
         if (err.code === '23505') {
