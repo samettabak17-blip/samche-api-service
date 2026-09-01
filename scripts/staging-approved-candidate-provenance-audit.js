@@ -21,6 +21,36 @@ try {
     await client.query('ROLLBACK');
     process.exitCode = 0;
   } else {
+  const jobs = await client.query(
+    `SELECT job.id, job.source_id, job.status, job.attempts, job.last_error_code,
+            job.metadata, job.created_at, job.updated_at
+       FROM knowledge_processing_jobs job
+       JOIN knowledge_base_documents source
+         ON source.id = job.source_id AND source.tenant_id = job.tenant_id
+      WHERE job.tenant_id = $1
+        AND job.job_type = 'GENERATE_IMAGE_CANDIDATES'
+        AND lower(source.title) = lower('whatsapp.png')
+      ORDER BY job.created_at DESC LIMIT 10`,
+    [identities.rows[0].tenant_id],
+  );
+  const recommendations = await client.query(
+    `SELECT recommendation.id, recommendation.tenant_id, recommendation.assistant_id,
+            recommendation.status,
+            recommendation.evidence,
+            recommendation.recommendation_data->'qualification_guidance' IS NOT NULL AS has_qualification_guidance
+       FROM assistant_knowledge_recommendations recommendation
+      WHERE recommendation.tenant_id = $1
+        AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements(recommendation.evidence) evidence_item
+           WHERE evidence_item->>'source_id' IN (
+             SELECT source.id::text FROM knowledge_base_documents source
+              WHERE source.tenant_id = recommendation.tenant_id
+                AND lower(source.title) = lower('whatsapp.png')
+           )
+        )
+      ORDER BY recommendation.created_at DESC LIMIT 20`,
+    [identities.rows[0].tenant_id],
+  );
   const result = await client.query(
     `WITH selected_identity AS (
        SELECT id, tenant_id, display_name
@@ -138,7 +168,26 @@ try {
       ORDER BY candidate.candidate_id`,
     [identityName, identities.rows[0].id],
   );
-  console.log(JSON.stringify({ identity_name: identityName, matched_identity_count: 1, business_identity: identities.rows[0], candidate_count: result.rowCount, candidates: result.rows }));
+  console.log(JSON.stringify({
+    identity_name: identityName,
+    matched_identity_count: 1,
+    business_identity: identities.rows[0],
+    semantic_jobs: jobs.rows.map((job) => ({
+      id: job.id,
+      source_id: job.source_id,
+      status: job.status,
+      attempts: job.attempts,
+      last_error_code: job.last_error_code,
+      candidate_count: Number.isFinite(Number(job.metadata?.candidate_count)) ? Number(job.metadata.candidate_count) : null,
+      behavior_recommendation_count: Number.isFinite(Number(job.metadata?.behavior_recommendation_count)) ? Number(job.metadata.behavior_recommendation_count) : null,
+      warning_count: Array.isArray(job.metadata?.warnings) ? job.metadata.warnings.length : null,
+      created_at: job.created_at,
+      updated_at: job.updated_at,
+    })),
+    behavior_recommendations: recommendations.rows.map(({ evidence, ...row }) => ({ ...row, evidence_item_count: Array.isArray(evidence) ? evidence.length : null })),
+    candidate_count: result.rowCount,
+    candidates: result.rows,
+  }));
   await client.query('ROLLBACK');
   }
 } catch (error) {
