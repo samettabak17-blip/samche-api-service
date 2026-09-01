@@ -14,7 +14,7 @@ try {
     `WITH selected_identity AS (
        SELECT id, tenant_id, display_name
          FROM business_identities
-        WHERE display_name = $1 AND status = 'ACTIVE'
+        WHERE lower(display_name) = lower($1) AND status = 'ACTIVE'
      ), candidate_scope AS (
        SELECT candidate.id AS candidate_id, candidate.tenant_id, candidate.status,
               candidate.approved_source_id AS materialized_source_id,
