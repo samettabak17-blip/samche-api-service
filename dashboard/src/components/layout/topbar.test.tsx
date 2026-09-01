@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,7 +16,7 @@ function renderTopbar(systemRole: 'OWNER' | 'CUSTOMER' = 'CUSTOMER', onSelectTen
   return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/app/tenant-1/overview']}><Topbar tenants={[{ id: 'tenant-1', name: 'SamChe', status: 'active', created_at: '' }]} selectedTenantId="tenant-1" email="operator@samche.test" systemRole={systemRole} selectedTenantRole={tenantRole} onCreateTenant={(name) => tenantApi.createTenant(name)} onAdoptTenant={async (tenantId) => { onSelectTenant(tenantId); }} onSelectTenant={onSelectTenant} onOpenNavigation={() => undefined} onLogout={() => undefined} tenantId="tenant-1" /></MemoryRouter></QueryClientProvider>);
 }
 
-afterEach(() => cleanup());
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 beforeEach(() => {
   vi.mocked(onboardingApi.listInvitationStatuses).mockResolvedValue([]);
 });
@@ -80,6 +80,18 @@ describe('Topbar global navigation search', () => {
     renderTopbar('OWNER');
     expect(await screen.findByText('Invitation delivery failed.')).toBeVisible();
     expect(screen.getByText('SMTP_RECIPIENT_REJECTED')).toBeVisible();
+  });
+
+  it('refreshes the owner invitation state after the durable outbox has had time to progress', async () => {
+    vi.useFakeTimers();
+    vi.mocked(onboardingApi.listInvitationStatuses)
+      .mockResolvedValueOnce([{ id: 'invite-1', status: 'PENDING', tenant_role: 'ADMIN', expires_at: '', created_at: '', delivery_status: 'PENDING_DELIVERY', delivery_code: null, attempt_count: 0 }])
+      .mockResolvedValueOnce([{ id: 'invite-1', status: 'PENDING', tenant_role: 'ADMIN', expires_at: '', created_at: '', delivery_status: 'SENT', delivery_code: 'SMTP_ACCEPTED', attempt_count: 1 }]);
+    renderTopbar('OWNER');
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.getByText('Invitation pending.')).toBeVisible();
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(screen.getByText('Invitation sent.')).toBeVisible();
   });
 
   it('uses platform and tenant role labels without conflating them', () => {

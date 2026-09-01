@@ -1,0 +1,29 @@
+name: Staging Onboarding Outbox Audit
+
+on:
+  push:
+    branches: [staging]
+    paths:
+      - 'scripts/staging-onboarding-outbox-audit.js'
+      - '.github/workflows/staging-onboarding-outbox-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --ignore-scripts
+      - name: Read-only durable-outbox audit
+        env:
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        run: node scripts/staging-onboarding-outbox-audit.js

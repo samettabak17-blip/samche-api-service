@@ -163,6 +163,7 @@ export function Topbar({ tenants, selectedTenantId, tenantId, email, systemRole,
     queryKey: ['tenant', tenantId, 'invitation-delivery-status'],
     queryFn: () => onboardingApi.listInvitationStatuses(tenantId),
     enabled: systemRole === 'OWNER' && Boolean(tenantId),
+    refetchInterval: 15_000,
   });
   const selectedInvitation = pendingInvitation
     ? invitationStatuses.data?.find((invitation) => invitation.id === pendingInvitation.invitationId)
