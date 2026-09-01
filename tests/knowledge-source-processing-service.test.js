@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import { claimNextKnowledgeProcessingJob, persistImageExtractionSegments, processKnowledgeProcessingJob, streamToBuffer } from '../services/knowledge-source-processing-service.js';
 
 test('claims only one pending knowledge job with SKIP LOCKED to keep tenant processing isolated', async () => {
@@ -138,6 +139,11 @@ test('replacing an image hash retires prior current segments before inserting th
   const insertIndex = transactionCalls.findIndex(({ sql }) => /INSERT INTO knowledge_source_extraction_segments/i.test(sql));
   assert.ok(retireIndex >= 0 && insertIndex > retireIndex);
   assert.equal(transactionCalls[insertIndex].params[3], 'd'.repeat(64));
+});
+
+test('image re-extraction does not delete segments still referenced by candidate evidence', () => {
+  const source = fs.readFileSync(new URL('../services/knowledge-source-processing-service.js', import.meta.url), 'utf8');
+  assert.match(source, /DELETE FROM knowledge_source_extraction_segments[\s\S]*NOT EXISTS[\s\S]*knowledge_candidate_image_evidence/i);
 });
 
 test('segment persistence rolls back on partial failure and reports processing failure', async () => {

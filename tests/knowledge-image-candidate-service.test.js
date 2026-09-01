@@ -80,7 +80,7 @@ test('reuses an exact image candidate fingerprint without duplicating it', async
 });
 
 test('an evidence-less approved legacy candidate does not block a stronger provenance regeneration', async () => {
-  const db = database({ existing: { id: 'legacy-candidate', status: 'APPROVED', candidate_fingerprint: 'legacy', has_provenance: false }, allowLegacyRegeneration: true });
+  const db = database({ existing: { id: 'legacy-candidate', status: 'APPROVED', candidate_fingerprint: 'legacy', proposed_content: 'Remaining balance is due three business days before the event.', has_provenance: false }, allowLegacyRegeneration: true });
   const result = await createImageKnowledgeCandidates({ database: db, tenantId, assistantId, sourceId, extractionHash, semanticClassifier });
   assert.equal(result[0].status, 'NEEDS_REVIEW');
   assert.equal(result[0].reused, false);

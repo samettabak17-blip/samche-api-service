@@ -139,8 +139,12 @@ export async function createImageKnowledgeCandidates({
                 EXISTS (SELECT 1 FROM knowledge_candidate_image_evidence evidence
                           WHERE evidence.tenant_id = candidate.tenant_id AND evidence.candidate_id = candidate.id) AS has_provenance
            FROM knowledge_candidates candidate
-          WHERE tenant_id = $1 AND candidate_fingerprint IN ($2, $3)`,
-        [tenantId, baseFingerprint, strongerProvenanceFingerprint]);
+          WHERE tenant_id = $1
+            AND (candidate_fingerprint IN ($2, $3)
+              OR (status = 'APPROVED'
+                  AND proposed_title = 'Canonical image-derived business fact'
+                  AND proposed_content = $4))`,
+        [tenantId, baseFingerprint, strongerProvenanceFingerprint, classification.canonicalText]);
       const provenanceExisting = (existing.rows ?? []).find((row) => row.candidate_fingerprint === strongerProvenanceFingerprint);
       const baseExisting = (existing.rows ?? []).find((row) => row.candidate_fingerprint === baseFingerprint) ?? (existing.rows ?? [])[0];
       if (provenanceExisting || (baseExisting && !(baseExisting.status === 'APPROVED' && baseExisting.has_provenance === false))) {

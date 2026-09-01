@@ -118,7 +118,12 @@ export async function persistImageExtractionSegments({ database, source, job, ex
 
     await client.query(
       `DELETE FROM knowledge_source_extraction_segments
-        WHERE tenant_id = $1 AND source_id = $2 AND extraction_hash = $3`,
+        WHERE tenant_id = $1 AND source_id = $2 AND extraction_hash = $3
+          AND NOT EXISTS (
+            SELECT 1 FROM knowledge_candidate_image_evidence evidence
+             WHERE evidence.tenant_id = knowledge_source_extraction_segments.tenant_id
+               AND evidence.segment_id = knowledge_source_extraction_segments.id
+          )`,
       [source.tenant_id, source.id, extraction.sourceHash]);
     await client.query(
       `UPDATE knowledge_source_extraction_segments

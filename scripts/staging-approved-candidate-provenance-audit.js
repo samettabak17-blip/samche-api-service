@@ -181,6 +181,7 @@ try {
       candidate_count: Number.isFinite(Number(job.metadata?.candidate_count)) ? Number(job.metadata.candidate_count) : null,
       behavior_recommendation_count: Number.isFinite(Number(job.metadata?.behavior_recommendation_count)) ? Number(job.metadata.behavior_recommendation_count) : null,
       warning_count: Array.isArray(job.metadata?.warnings) ? job.metadata.warnings.length : null,
+      metadata_keys: job.metadata && typeof job.metadata === 'object' ? Object.keys(job.metadata).sort() : [],
       created_at: job.created_at,
       updated_at: job.updated_at,
     })),
