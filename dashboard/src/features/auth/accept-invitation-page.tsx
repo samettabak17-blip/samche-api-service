@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ApiError } from '../../lib/api-client';
 import { DashboardPasswordInput } from '../../components/ui/dashboard-control';
 import { onboardingApi, type InvitationValidation } from '../dashboard/dashboard-api';
+import samcheLogo from '../../assets/branding/samche-company-llc-logo.png';
 
 type InvitationView = 'loading' | 'valid' | 'invalid' | 'expired' | 'used' | 'revoked' | 'error' | 'success';
 
@@ -98,5 +99,5 @@ export function AcceptInvitationPage() {
 }
 
 function PageFrame({ children }: { children: React.ReactNode }) {
-  return <main className="grid min-h-screen place-items-center bg-[#0B0B0D] px-5 py-8 text-white"><section className="w-full max-w-md rounded-2xl border border-white/15 bg-[#161618]/90 p-6 shadow-[0_22px_70px_rgba(0,0,0,0.36)] sm:p-8">{children}</section></main>;
+  return <main className="grid min-h-screen place-items-center bg-[#0B0B0D] px-5 py-8 text-white"><section className="auth-surface w-full max-w-md rounded-2xl p-6 sm:p-8"><img src={samcheLogo} alt="SamChe Company LLC" className="h-16 w-44 object-contain object-left" />{children}</section></main>;
 }

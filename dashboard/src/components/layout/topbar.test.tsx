@@ -107,6 +107,12 @@ describe('Topbar global navigation search', () => {
     expect(screen.getByRole('banner')).toHaveClass('z-50');
   });
 
+  it('keeps owner actions compact and on one line', () => {
+    renderTopbar('OWNER');
+    expect(screen.getByRole('button', { name: 'Create company' })).toHaveClass('whitespace-nowrap', 'shrink-0', 'h-10');
+    expect(screen.getByRole('button', { name: 'Assign customer' })).toHaveClass('whitespace-nowrap', 'shrink-0', 'h-10');
+  });
+
   it('lets an OWNER assign an existing CUSTOMER with an allowed tenant role', async () => {
     vi.mocked(tenantApi.listCustomerUsers).mockResolvedValue([{ id: 'user-1', email: 'customer@example.test', system_role: 'CUSTOMER' }]);
     vi.mocked(tenantApi.assignTenantUser).mockResolvedValue({});

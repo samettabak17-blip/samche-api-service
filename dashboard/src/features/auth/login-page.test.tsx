@@ -24,6 +24,7 @@ describe('LoginPage', () => {
     expect(screen.getByRole('heading', { name: 'AI OPERATIONS.' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'SMARTER.' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'STRONGER.' })).toBeTruthy();
+    expect(screen.getByText('Analytics')).toBeTruthy();
     expect(screen.queryByRole('link', { name: /forgot password/i })).toBeNull();
   });
 

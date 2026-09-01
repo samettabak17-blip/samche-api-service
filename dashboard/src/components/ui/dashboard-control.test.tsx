@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DashboardButton, DashboardCheckbox, DashboardFileInput, DashboardFormMessage, DashboardInput, DashboardPasswordInput, DashboardSelect, DashboardTab, DashboardField } from './dashboard-control';
+import { DashboardButton, DashboardCheckbox, DashboardFileInput, DashboardFormMessage, DashboardInput, DashboardPasswordInput, DashboardSelect, DashboardTab, DashboardField, DashboardTextarea } from './dashboard-control';
 
 afterEach(cleanup);
 
@@ -27,6 +27,11 @@ describe('Dashboard controls', () => {
   it('uses the shared select primitive', () => {
     render(<DashboardSelect aria-label="Tenant"><option>Company</option></DashboardSelect>);
     expect(screen.getByLabelText('Tenant')).toHaveClass('dashboard-select');
+  });
+
+  it('provides a shared textarea with the same readable form contract', () => {
+    render(<DashboardField label="Notes"><DashboardTextarea aria-label="Notes" /></DashboardField>);
+    expect(screen.getByRole('textbox', { name: 'Notes' })).toHaveClass('dashboard-input', 'w-full');
   });
 
   it('preserves focused input while its controlled value rerenders', () => {

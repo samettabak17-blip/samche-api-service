@@ -60,7 +60,8 @@ button.bg-ink:hover { background: #b81920; }
   .dashboard-error { color: #ffe0e2; }
   .dashboard-success { color: #d5ffe8; }
   .dashboard-info { color: #d8f0ff; }
+  .topbar-action { white-space: nowrap; flex-shrink: 0; }
   .auth-surface { @apply border border-white/[.14] bg-[#161618]/95 shadow-[0_22px_70px_rgba(0,0,0,.36)]; }
-  .auth-label { @apply text-sm font-semibold text-stone-700; }
+  .auth-label { @apply text-sm font-semibold; color: #dee6f1; }
   .auth-input { @apply mt-2 block w-full rounded-xl border border-white/20 bg-black/20 px-4 py-3 text-white outline-none transition placeholder:text-stone-400 focus:border-signal focus:ring-2 focus:ring-signal/30; }
 }

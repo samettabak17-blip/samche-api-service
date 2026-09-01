@@ -1,4 +1,4 @@
-import { ArrowRight, Bot, BookOpenText, Cable, Eye, EyeOff, KanbanSquare, LockKeyhole, Mail, ShieldCheck, Zap } from 'lucide-react';
+import { Activity, ArrowRight, Bot, BookOpenText, Cable, Eye, EyeOff, KanbanSquare, LockKeyhole, Mail, ShieldCheck, Zap } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import samcheLogo from '../../assets/branding/samche-company-llc-logo.png';
@@ -55,12 +55,13 @@ export function LoginPage() {
           <p className="mt-8 max-w-md text-base leading-7 text-stone-300 xl:text-lg">Manage your AI assistants, channels, knowledge and conversations from a single, powerful command center.</p>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-3 2xl:grid-cols-6">
           <FeatureCard icon={Bot} title="AI Assistants" description="Create and manage intelligent assistants" />
           <FeatureCard icon={BookOpenText} title="Knowledge Intelligence" description="Turn approved knowledge into useful answers" />
           <FeatureCard icon={Cable} title="Omnichannel" description="Connect conversations across every channel" />
           <FeatureCard icon={KanbanSquare} title="CRM & Pipeline" description="Move leads and deals forward with clarity" />
           <FeatureCard icon={Zap} title="Automation / Agentic" description="Automate work with capable AI agents" />
+          <FeatureCard icon={Activity} title="Analytics" description="Turn conversations into clear decisions" />
         </div>
         <p className="mt-8 text-xs text-stone-500">© {new Date().getFullYear()} SamChe Company LLC. All rights reserved.</p>
       </section>
@@ -73,10 +74,10 @@ export function LoginPage() {
           <h1 className="mt-6 text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">Welcome back</h1>
           <p className="mt-4 max-w-md text-sm leading-6 text-stone-300 sm:text-base">Use your SamChe account to access the tenants assigned to you.</p>
           <form className="mt-8 space-y-5" onSubmit={submit} noValidate>
-            <label className="block text-sm font-medium text-stone-100">Email
+            <label className="dashboard-field-label block text-sm font-semibold">Email
               <span className="relative mt-2 block"><Mail aria-hidden="true" size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-stone-500" /><input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required className="block w-full rounded-xl border border-white/20 bg-black/15 py-3.5 pl-11 pr-4 text-white shadow-sm outline-none transition placeholder:text-stone-500 focus:border-signal" placeholder="Enter your email" /></span>
             </label>
-            <label className="block text-sm font-medium text-stone-100">Password
+            <label className="dashboard-field-label block text-sm font-semibold">Password
               <span className="relative mt-2 block"><LockKeyhole aria-hidden="true" size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-stone-500" /><input type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required className="block w-full rounded-xl border border-white/20 bg-black/15 py-3.5 pl-11 pr-12 text-white shadow-sm outline-none transition placeholder:text-stone-500 focus:border-signal" placeholder="Enter your password" /><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword} onClick={() => setShowPassword((visible) => !visible)} className="absolute right-3 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-lg text-stone-400 transition hover:bg-white/10 hover:text-white">{showPassword ? <EyeOff aria-hidden="true" size={18} /> : <Eye aria-hidden="true" size={18} />}</button></span>
             </label>
             <label className="flex items-center gap-2.5 text-sm text-stone-300"><input type="checkbox" className="h-4 w-4 rounded border-white/25 bg-black/20 text-signal accent-signal" />Remember me</label>
