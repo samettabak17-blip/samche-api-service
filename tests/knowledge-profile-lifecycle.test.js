@@ -1,9 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { analyzeBusinessProfileSourceScope, generateBusinessProfileVersion, rejectBusinessProfileVersion, updateBusinessProfileReview } from '../services/knowledge-profile-lifecycle.js';
 
 const tenantId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const actorId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+test('identity provenance follows approved candidate evidence when the original source is selected', async () => {
+  const source = await readFile(new URL('../services/knowledge-profile-lifecycle.js', import.meta.url), 'utf8');
+  assert.match(source, /candidate\.approved_source_id\s*=\s*source\.id\s+OR\s+image_evidence\.source_id\s*=\s*source\.id/i);
+});
 
 test('resolves a canonical fact through its trusted source identity even when its text omits the company name', async () => {
   let providerCalls = 0;
