@@ -794,6 +794,19 @@ it("generates image candidates only after the explicit source action", async () 
       pii_redaction_status: "REDACTED",
     },
   ]);
+  mockedApi.generateImageKnowledgeCandidates.mockResolvedValue({
+    candidates: [
+      {
+        id: "image-candidate-a",
+        candidate_type: "POLICY",
+        proposed_title: "Payment timing",
+        proposed_content: "The remaining balance is due before the event.",
+        status: "NEEDS_REVIEW",
+        pii_redaction_status: "REDACTED",
+      },
+    ],
+    reused: false,
+  });
 
   renderPage(true, "/app/tenant-a/knowledge-base/sources");
   fireEvent.click(await screen.findByRole("button", { name: "View Support screenshot" }));
@@ -808,6 +821,49 @@ it("generates image candidates only after the explicit source action", async () 
     ),
   );
   expect(await screen.findByText("Payment timing")).toBeVisible();
+});
+
+it("does not leak the page assistant selection into tenant-scoped image candidate generation", async () => {
+  mockedApi.listAssistants.mockResolvedValue([
+    { id: "assistant-a", tenant_id: "tenant-a", name: "Blue Dune AI Assistant" },
+  ]);
+  mockedApi.listKnowledgeSources.mockResolvedValue([
+    {
+      id: "image-source-a",
+      title: "WhatsApp screenshot",
+      source_type: "IMAGE",
+      mime_type: "image/png",
+      processing_status: "READY",
+      indexing_status: "DISABLED",
+      enabled: true,
+    },
+  ]);
+  mockedApi.getKnowledgeSource.mockResolvedValue({
+    id: "image-source-a",
+    title: "WhatsApp screenshot",
+    source_type: "IMAGE",
+    mime_type: "image/png",
+    processing_status: "READY",
+    indexing_status: "DISABLED",
+    enabled: true,
+    extraction_hash: "b".repeat(64),
+    assistant_ids: [],
+  });
+  mockedApi.generateImageKnowledgeCandidates.mockResolvedValue({ candidates: [], reused: false });
+
+  renderPage(true, "/app/tenant-a/knowledge-base/sources");
+  fireEvent.click(await screen.findByRole("button", { name: "View WhatsApp screenshot" }));
+  fireEvent.change(screen.getByLabelText("Assistant"), { target: { value: "assistant-a" } });
+  fireEvent.click(await screen.findByRole("button", { name: "Generate candidates" }));
+
+  await waitFor(() =>
+    expect(mockedApi.generateImageKnowledgeCandidates).toHaveBeenCalledWith(
+      "tenant-a",
+      "image-source-a",
+      { assistantId: null, extractionHash: "b".repeat(64) },
+    ),
+  );
+  expect(await screen.findByText("No eligible business facts were found in this image. Customer and unknown segments remain excluded from canonical business knowledge.")).toBeVisible();
 });
 
 it("renders redacted image BUSINESS evidence and CUSTOMER context without treating it as truth", async () => {

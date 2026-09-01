@@ -275,6 +275,10 @@ export function KnowledgeIntelligencePage() {
   const [sourceId, setSourceId] = useState("");
   const [selectedSourceId, setSelectedSourceId] = useState("");
   const [selectedCandidateId, setSelectedCandidateId] = useState("");
+  const [imageCandidateOutcome, setImageCandidateOutcome] = useState<{
+    sourceId: string;
+    candidateCount: number;
+  } | null>(null);
   const [selectedGapId, setSelectedGapId] = useState("");
   const [sourceMode, setSourceMode] = useState<"upload" | "manual" | null>(
     null,
@@ -548,12 +552,18 @@ export function KnowledgeIntelligencePage() {
   const generateImageCandidates = useMutation({
     mutationFn: ({ sourceId, extractionHash }: { sourceId: string; extractionHash?: string | null }) =>
       tenantApi.generateImageKnowledgeCandidates(tenantId, sourceId, {
-        assistantId: assistantId || null,
+        assistantId: null,
         extractionHash,
       }),
-    onSuccess: () => {
+    onSuccess: (result, variables) => {
+      setImageCandidateOutcome({
+        sourceId: variables.sourceId,
+        candidateCount: result.candidates.length,
+      });
       refreshCandidates();
-      navigate(`/app/${tenantId}/knowledge-base/candidates`);
+      if (result.candidates.length) {
+        navigate(`/app/${tenantId}/knowledge-base/candidates`);
+      }
     },
   });
   const candidateAction = useMutation({
@@ -1446,6 +1456,16 @@ export function KnowledgeIntelligencePage() {
               ?? generateImageCandidates.error
             }
           />
+          {imageCandidateOutcome?.sourceId === selectedSourceId && (
+            <p
+              role="status"
+              className="rounded-lg border border-line bg-elevated p-3 text-sm text-stone-200"
+            >
+              {imageCandidateOutcome.candidateCount > 0
+                ? `${imageCandidateOutcome.candidateCount} review candidate${imageCandidateOutcome.candidateCount === 1 ? "" : "s"} created.`
+                : "No eligible business facts were found in this image. Customer and unknown segments remain excluded from canonical business knowledge."}
+            </p>
+          )}
           {(uploadSource.isSuccess || createManualSource.isSuccess) && (
             <p
               role="status"

@@ -46,6 +46,9 @@ test('creates a redacted NEEDS_REVIEW candidate from BUSINESS with adjacent CUST
   assert.equal(evidence.find(({ params }) => params[3] === 's2').params[10], 'PRIMARY');
   assert.equal(evidence.filter(({ params }) => params[10] === 'SUPPORTING_CONTEXT').length, 2);
   assert.ok(evidence.every(({ params }) => params[0] === tenantId));
+  const sourceScope = db.calls.find(({ sql }) => /FROM knowledge_source_extraction_segments/i.test(sql));
+  assert.match(sourceScope.sql, /knowledge_source_assistants/i);
+  assert.equal(sourceScope.params[3], assistantId);
 });
 
 test('CUSTOMER and UNKNOWN segments alone do not create candidates', async () => {
