@@ -8,6 +8,7 @@ export interface CompanyInvitationPayload {
   first_name: string;
   last_name: string;
   email: string;
+  plan_code: 'STARTER' | 'GROWTH' | 'BUSINESS' | 'ENTERPRISE';
 }
 
 export interface CompanyOnboardingResponse {
@@ -87,6 +88,11 @@ const leadQuery = (filters: LeadFilters) => new URLSearchParams(Object.entries(f
 const dealQuery = (filters: DealFilters) => new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== undefined && value !== '').map(([key, value]) => [key, String(value)])).toString();
 
 export const tenantApi = {
+  listPlans: () => apiClient.get<{ plans: Array<{ code: 'STARTER' | 'GROWTH' | 'BUSINESS' | 'ENTERPRISE'; display_name: string; customer_subtitle: string; rank: number }> }>('/api/v1/tenants/plans').then((value) => value.plans),
+  getTenantPlan: (tenantId: string) => apiClient.get<{ plan: { plan_code: string; display_name: string; customer_subtitle: string; rank: number; pending_request?: { requested_plan_code: string } | null } }>(`${tenantRoot(tenantId)}/plan`).then((value) => value.plan),
+  requestPlanUpgrade: (tenantId: string, requestedPlanCode: string) => apiClient.post(`${tenantRoot(tenantId)}/plan-upgrade-requests`, { requested_plan_code: requestedPlanCode }),
+  listPlanUpgradeRequests: () => apiClient.get<{ requests: Array<{ id: string; tenant_name: string; current_plan_code: string; requested_plan_code: string; requested_by_email: string; status: string; created_at: string }> }>('/api/v1/tenants/plan-upgrade-requests').then((value) => value.requests),
+  resolvePlanUpgradeRequest: (requestId: string, decision: 'approve' | 'reject') => apiClient.post(`/api/v1/tenants/plan-upgrade-requests/${requestId}/${decision}`, {}),
   listTenants: () => apiClient.get<Tenant[]>('/api/v1/tenants'),
   createTenant: (name: string) => apiClient.post<Tenant>('/api/v1/tenants', { name }),
   assignTenantUser: (tenantId: string, userId: string, tenantRole: Extract<TenantRole, 'ADMIN' | 'AGENT'>) => apiClient.post(`${tenantRoot(tenantId)}/users`, { user_id: userId, tenant_role: tenantRole }),

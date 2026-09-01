@@ -14,6 +14,8 @@ import { CustomerOnboardingError, onboardCustomer } from '../services/customer-o
 import { validateInvitationMailConfiguration } from '../services/customer-invitation-mailer.js';
 import { resendInvitationLifecycle, revokeInvitationLifecycle } from '../services/customer-invitation-service.js';
 import { AssistantModelAccessError, assertAssistantModelWriteAllowed, serializeAssistantForActor } from '../services/assistant-model-access-policy.js';
+import { PLAN_CODES, TenantPlanError, requestTenantPlanUpgrade, resolveTenantPlanUpgrade } from '../services/tenant-plan-service.js';
+import { notifyPlatformOwnersOfPlanUpgrade } from '../services/tenant-plan-notification-service.js';
 
 const router = express.Router();
 
@@ -28,7 +30,7 @@ router.get('/', async (req, res) => {
     try {
         if (req.user.system_role === 'OWNER') {
             const result = await query(`
-                SELECT id, name, status, created_at
+                SELECT id, name, status, plan_code, created_at
                 FROM tenants
                 ORDER BY created_at DESC
             `);
@@ -42,7 +44,7 @@ router.get('/', async (req, res) => {
                     t.id,
                     t.name,
                     t.status,
-                    t.created_at,
+                    t.plan_code, t.created_at,
                     tu.tenant_role
                 FROM tenants t
                 INNER JOIN tenant_users tu
@@ -69,9 +71,9 @@ router.get('/', async (req, res) => {
 
 // POST /api/v1/tenants
 router.post('/', requireOwner, async (req, res) => {
-    const { name } = req.body;
+    const { name, plan_code } = req.body;
 
-    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+    if (!name || typeof name !== 'string' || name.trim().length === 0 || !PLAN_CODES.includes(String(plan_code ?? '').toUpperCase())) {
         return res.status(400).json({
             error: 'Tenant name is required'
         });
@@ -79,10 +81,10 @@ router.post('/', requireOwner, async (req, res) => {
 
     try {
         const result = await query(`
-            INSERT INTO tenants (name)
-            VALUES ($1)
-            RETURNING id, name, status, created_at
-        `, [name.trim()]);
+            INSERT INTO tenants (name, plan_code)
+            VALUES ($1, $2)
+            RETURNING id, name, status, plan_code, created_at
+        `, [name.trim(), String(plan_code).toUpperCase()]);
 
         return res.status(201).json(result.rows[0]);
 
@@ -118,6 +120,41 @@ router.get('/users', requireOwner, async (req, res) => {
         console.error('Fetch assignable users error:', err);
         return res.status(500).json({ error: 'Server error' });
     }
+});
+
+router.get('/plans', async (_req, res) => {
+  try { const result = await query('SELECT code, rank, display_name, customer_subtitle FROM platform_plans WHERE active = TRUE ORDER BY rank'); return res.json({ plans: result.rows }); }
+  catch { return res.status(503).json({ error: 'Plan catalog is unavailable' }); }
+});
+
+router.get('/plan-upgrade-requests', requireOwner, async (_req, res) => {
+  try { const result = await query(`SELECT request.*, tenant.name AS tenant_name, requester.email AS requested_by_email FROM tenant_plan_upgrade_requests request JOIN tenants tenant ON tenant.id=request.tenant_id JOIN users requester ON requester.id=request.requested_by_user_id ORDER BY request.created_at DESC LIMIT 100`); return res.json({ requests: result.rows }); }
+  catch { return res.status(503).json({ error: 'Plan requests are unavailable' }); }
+});
+
+router.post('/plan-upgrade-requests/:requestId/:decision(approve|reject)', requireOwner, async (req, res) => {
+  if (!isValidUUID(req.params.requestId)) return res.status(400).json({ error: 'Plan request is unavailable' });
+  try { const request = await resolveTenantPlanUpgrade({ database: pool, requestId: req.params.requestId, ownerUserId: req.user.user_id, decision: req.params.decision === 'approve' ? 'APPROVED' : 'REJECTED' }); return res.json({ request }); }
+  catch (error) { return res.status(error instanceof TenantPlanError ? 409 : 503).json({ error: 'Plan request could not be resolved' }); }
+});
+
+router.get('/:tenantId/plan', requireTenantAccess, async (req, res) => {
+  const tenantId = req.verified_tenant_id;
+  try { const result = await query(`SELECT tenant.plan_code, plan.display_name, plan.customer_subtitle, plan.rank, (SELECT row_to_json(request) FROM tenant_plan_upgrade_requests request WHERE request.tenant_id=tenant.id AND request.status='PENDING' ORDER BY request.created_at DESC LIMIT 1) AS pending_request FROM tenants tenant JOIN platform_plans plan ON plan.code=tenant.plan_code WHERE tenant.id=$1`, [tenantId]); if (!result.rowCount) return res.status(404).json({ error: 'Tenant not found' }); return res.json({ plan: result.rows[0] }); }
+  catch { return res.status(503).json({ error: 'Tenant plan is unavailable' }); }
+});
+
+router.post('/:tenantId/plan-upgrade-requests', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  if (req.user.system_role !== 'CUSTOMER') return res.status(403).json({ error: 'Tenant plan mutation is reserved for Platform Super Admin' });
+  try {
+    const request = await requestTenantPlanUpgrade({ database: pool, tenantId: req.verified_tenant_id, requestedBy: req.user.user_id, requestedPlanCode: req.body?.requested_plan_code });
+    if (!request.reused) {
+      // Notification failure must never discard a safely persisted request.
+      try { await notifyPlatformOwnersOfPlanUpgrade({ database: pool, requestId: request.id }); } catch { /* review UI still exposes the persisted request */ }
+    }
+    return res.status(request.reused ? 200 : 201).json({ request });
+  }
+  catch (error) { return res.status(error instanceof TenantPlanError ? 400 : 503).json({ error: 'Plan upgrade request could not be created' }); }
 });
 
 // OWNER-only onboarding: creates an INVITED customer without granting membership

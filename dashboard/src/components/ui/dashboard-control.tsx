@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react';
+import { forwardRef, useId, useRef, useState } from 'react';
 import type { ButtonHTMLAttributes, ChangeEvent, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -26,9 +26,9 @@ export function DashboardField({ label, helper, error, children }: { label: Reac
   return <div className="space-y-1.5"><label className="dashboard-field-label block text-sm font-semibold">{label}{children}</label>{helper && !error && <p className="dashboard-helper text-xs">{helper}</p>}{error && <DashboardFormMessage tone="error">{error}</DashboardFormMessage>}</div>;
 }
 
-export function DashboardInput({ className = '', ...props }: InputHTMLAttributes<HTMLInputElement>) {
-  return <input className={`${fieldClass} ${className}`} {...props} />;
-}
+export const DashboardInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function DashboardInput({ className = '', ...props }, ref) {
+  return <input ref={ref} className={`${fieldClass} ${className}`} {...props} />;
+});
 
 export function DashboardSelect({ className = '', ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
   return <select className={`${fieldClass} dashboard-select`} {...props} />;

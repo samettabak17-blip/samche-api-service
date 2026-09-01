@@ -60,7 +60,7 @@ describe('tenant dashboard API', () => {
 
   it('creates a company and administrator invitation through the idempotent onboarding endpoint', async () => {
     const post = vi.spyOn(apiClient, 'post').mockResolvedValue({ status: 'created' });
-    const payload = { name: 'Northwind', first_name: 'Ada', last_name: 'Lovelace', email: 'ada@northwind.example' };
+    const payload = { name: 'Northwind', plan_code: 'STARTER' as const, first_name: 'Ada', last_name: 'Lovelace', email: 'ada@northwind.example' };
 
     await onboardingApi.createCompanyInvitation(payload, 'onboarding-key');
 

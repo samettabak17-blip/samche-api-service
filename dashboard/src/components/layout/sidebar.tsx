@@ -2,7 +2,11 @@ import { BadgeDollarSign, BookOpenText, Bot, Cable, ChevronDown, KanbanSquare, L
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import samcheLogo from '../../assets/branding/samche-company-llc-logo.png';
 import { useEffect, useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import type { TenantRole } from '../../types/api';
+import { tenantApi } from '../../features/dashboard/dashboard-api';
+import { DashboardButton, DashboardField, DashboardFormMessage, DashboardSelect } from '../ui/dashboard-control';
+import { Modal } from '../ui/modal';
 
 interface SidebarProps { tenantId: string; tenantName: string; tenantRole: TenantRole | 'OWNER' | undefined; email: string; onLogout(): void; onNavigate(): void; }
 
@@ -57,6 +61,12 @@ export function Sidebar({ tenantId, tenantName, tenantRole, email, onLogout, onN
   useEffect(() => { if (conversationRouteActive) setConversationsOpen(true); }, [conversationRouteActive]);
   const isAgent = tenantRole === 'AGENT';
   const access = workspaceAccessCopy(tenantRole);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [requestedPlan, setRequestedPlan] = useState('');
+  const plan = useQuery({ queryKey: ['tenant', tenantId, 'plan'], queryFn: () => tenantApi.getTenantPlan(tenantId), enabled: Boolean(tenantId) && tenantRole !== 'OWNER' });
+  const catalog = useQuery({ queryKey: ['platform-plans'], queryFn: () => tenantApi.listPlans(), enabled: upgradeOpen });
+  const upgrade = useMutation({ mutationFn: () => tenantApi.requestPlanUpgrade(tenantId, requestedPlan), onSuccess: () => { setUpgradeOpen(false); void plan.refetch(); } });
+  const availableUpgrades = (catalog.data ?? []).filter((item) => item.rank > (plan.data?.rank ?? Number.MAX_SAFE_INTEGER));
 
   return <aside className="flex h-full w-full flex-col border-r border-line/80 bg-shell/95 px-2.5 py-5 text-white">
     <div className="mb-6 px-2.5"><img src={samcheLogo} alt="SamChe Company LLC" className="mx-auto h-32 w-full max-w-full object-contain object-center" /><p className="mt-2 text-center text-[10px] font-semibold uppercase tracking-[0.24em] text-gold">AI Platform</p></div>
@@ -69,6 +79,13 @@ export function Sidebar({ tenantId, tenantName, tenantRole, email, onLogout, onN
       </section>)}
     </nav>
     <div className="mt-auto border-t border-line/80 pt-4">
+      {tenantRole !== 'OWNER' && plan.data && <div className="mb-3 rounded-xl border border-gold/25 bg-[linear-gradient(145deg,rgba(23,28,38,.94),rgba(10,14,21,.94))] px-3 py-3">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gold">Current plan</p>
+        <p className="mt-1 text-sm font-semibold text-white">{plan.data.display_name}</p>
+        <p className="mt-1 text-xs text-stone-300">{plan.data.customer_subtitle}</p>
+        {plan.data.pending_request && <p role="status" className="mt-2 text-xs font-medium text-gold">Upgrade requested: {plan.data.pending_request.requested_plan_code}</p>}
+        {tenantRole === 'ADMIN' && availableUpgrades.length > 0 && <DashboardButton type="button" variant="outline" className="mt-3 w-full text-xs" onClick={() => { setRequestedPlan(availableUpgrades[0]?.code ?? ''); setUpgradeOpen(true); }}>Upgrade Plan</DashboardButton>}
+      </div>}
       <div className="rounded-xl border border-signal/30 bg-[radial-gradient(circle_at_16%_18%,rgba(212,33,41,.2),transparent_8rem),rgba(48,16,24,.58)] px-3 py-3 shadow-[0_12px_28px_rgba(0,0,0,.18)]">
         <p className="text-[10px] font-semibold tracking-[0.18em] text-signal">{access.label}</p>
         <p className="mt-1 text-sm font-semibold text-white">{access.detail}</p>
@@ -76,6 +93,14 @@ export function Sidebar({ tenantId, tenantName, tenantRole, email, onLogout, onN
       </div>
       <p className="mt-3 truncate text-xs text-stone-400" title={email}>{email}</p>
       <button type="button" onClick={onLogout} className="mt-3 w-full rounded-lg border border-line bg-elevated/50 px-3 py-2 text-left text-sm text-stone-400 transition hover:border-signal/30 hover:bg-signal/10 hover:text-white">Sign out</button>
+      <Modal open={upgradeOpen} title="Request plan upgrade" onClose={() => { if (!upgrade.isPending) setUpgradeOpen(false); }} className="max-w-md">
+        <form className="mt-5 space-y-4" onSubmit={(event) => { event.preventDefault(); if (requestedPlan) upgrade.mutate(); }}>
+          <p className="text-sm text-stone-300">Your plan will not change until a Platform Super Admin approves this request.</p>
+          <DashboardField label="Requested plan"><DashboardSelect aria-label="Requested plan" value={requestedPlan} onChange={(event) => setRequestedPlan(event.target.value)}>{availableUpgrades.map((item) => <option key={item.code} value={item.code}>{item.display_name}</option>)}</DashboardSelect></DashboardField>
+          {upgrade.isError && <DashboardFormMessage>Could not submit the upgrade request. Please try again.</DashboardFormMessage>}
+          <div className="flex justify-end gap-3"><DashboardButton type="button" variant="ghost" disabled={upgrade.isPending} onClick={() => setUpgradeOpen(false)}>Cancel</DashboardButton><DashboardButton type="submit" variant="primary" disabled={upgrade.isPending || !requestedPlan}>{upgrade.isPending ? 'Submitting…' : 'Submit upgrade request'}</DashboardButton></div>
+        </form>
+      </Modal>
     </div>
   </aside>;
 }

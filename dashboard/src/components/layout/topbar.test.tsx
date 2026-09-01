@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,7 +8,7 @@ vi.mock('../../features/overview/overview-date-range-context', () => ({
   useOverviewDateRange: () => ({ preset: 'last-7-days', setPreset: vi.fn(), customStart: '2026-08-01', setCustomStart: vi.fn(), customEnd: '2026-08-07', setCustomEnd: vi.fn(), applyCustomRange: vi.fn(), clearCustomRange: vi.fn(), activeRange: { label: 'Last 7 days' } }),
 }));
 vi.mock('../../features/live-support/live-support-attention-provider', () => ({ useLiveSupportAttention: () => ({ requestedCount: 0 }) }));
-vi.mock('../../features/dashboard/dashboard-api', () => ({ tenantApi: { listConversations: vi.fn(), createTenant: vi.fn(), listCustomerUsers: vi.fn(), assignTenantUser: vi.fn() }, onboardingApi: { createCompanyInvitation: vi.fn(), listInvitationStatuses: vi.fn() } }));
+vi.mock('../../features/dashboard/dashboard-api', () => ({ tenantApi: { listConversations: vi.fn(), createTenant: vi.fn(), listCustomerUsers: vi.fn(), assignTenantUser: vi.fn(), listPlans: vi.fn(), listPlanUpgradeRequests: vi.fn(), resolvePlanUpgradeRequest: vi.fn() }, onboardingApi: { createCompanyInvitation: vi.fn(), listInvitationStatuses: vi.fn() } }));
 import { onboardingApi, tenantApi } from '../../features/dashboard/dashboard-api';
 
 function renderTopbar(systemRole: 'OWNER' | 'CUSTOMER' = 'CUSTOMER', onSelectTenant = vi.fn(), tenantRole: 'ADMIN' | 'AGENT' = 'ADMIN', route = '/app/tenant-1/overview') {
@@ -19,6 +19,8 @@ function renderTopbar(systemRole: 'OWNER' | 'CUSTOMER' = 'CUSTOMER', onSelectTen
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 beforeEach(() => {
   vi.mocked(onboardingApi.listInvitationStatuses).mockResolvedValue([]);
+  vi.mocked(tenantApi.listPlans).mockResolvedValue([{ code: 'STARTER', display_name: 'Starter Plan', customer_subtitle: 'Core AI Workspace', rank: 1 }]);
+  vi.mocked(tenantApi.listPlanUpgradeRequests).mockResolvedValue([]);
 });
 
 describe('Topbar global navigation search', () => {
@@ -30,12 +32,15 @@ describe('Topbar global navigation search', () => {
     expect(screen.getByRole('dialog', { name: 'Create company' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Assign existing customer' })).toBeVisible();
     fireEvent.change(screen.getByRole('textbox', { name: 'Company name' }), { target: { value: 'New company' } });
+    await screen.findByRole('option', { name: 'Starter Plan' });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Plan' }), { target: { value: 'STARTER' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'First name' }), { target: { value: 'Ada' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Last name' }), { target: { value: 'Lovelace' } });
     fireEvent.change(screen.getByRole('textbox', { name: 'Email' }), { target: { value: 'ada@example.test' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create company & invite administrator' })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: 'Create company & invite administrator' }));
     expect(await screen.findByText('Invitation created.')).toBeVisible();
-    expect(onboardingApi.createCompanyInvitation).toHaveBeenCalledWith({ name: 'New company', first_name: 'Ada', last_name: 'Lovelace', email: 'ada@example.test' }, expect.any(String));
+    expect(onboardingApi.createCompanyInvitation).toHaveBeenCalledWith({ name: 'New company', plan_code: 'STARTER', first_name: 'Ada', last_name: 'Lovelace', email: 'ada@example.test' }, expect.any(String));
     expect(onSelectTenant).toHaveBeenCalledWith('tenant-new');
   });
 

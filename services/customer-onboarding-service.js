@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { normalizeEmail, isValidEmail, isValidTenantRole } from '../middleware/validators.js';
 import { createInvitationLifecycle } from './customer-invitation-service.js';
+import { PLAN_CODES } from './tenant-plan-service.js';
 
 export class CustomerOnboardingError extends Error {
   constructor(code, message = 'Customer onboarding request is invalid') {
@@ -18,10 +19,11 @@ export function validateOnboardingInput({ idempotencyKey, payload }) {
   const lastName = typeof payload?.last_name === 'string' ? payload.last_name.trim() : '';
   const email = normalizeEmail(payload?.email);
   const tenantRole = payload?.tenant_role ?? 'ADMIN';
-  if (!name || name.length > 255 || !firstName || firstName.length > 120 || !lastName || lastName.length > 120 || !isValidEmail(email) || tenantRole !== 'ADMIN' || !isValidTenantRole(tenantRole)) {
+  const planCode = String(payload?.plan_code ?? '').toUpperCase();
+  if (!name || name.length > 255 || !firstName || firstName.length > 120 || !lastName || lastName.length > 120 || !isValidEmail(email) || tenantRole !== 'ADMIN' || !isValidTenantRole(tenantRole) || !PLAN_CODES.includes(planCode)) {
     throw new CustomerOnboardingError('ONBOARDING_INPUT_INVALID');
   }
-  return { name, firstName, lastName, email, tenantRole };
+  return { name, firstName, lastName, email, tenantRole, planCode };
 }
 
 export function createOnboardingPayloadHash(input) {
@@ -31,6 +33,7 @@ export function createOnboardingPayloadHash(input) {
     lastName: input.lastName,
     email: input.email,
     tenantRole: input.tenantRole,
+    planCode: input.planCode,
   })).digest('hex');
 }
 
@@ -72,8 +75,8 @@ export async function onboardCustomer({ database, ownerUserId, idempotencyKey, p
       [ownerUserId, idempotencyKey, payloadHash],
     );
     const tenant = (await client.query(
-      `INSERT INTO tenants (name) VALUES ($1) RETURNING id, name, status, created_at`,
-      [input.name],
+      `INSERT INTO tenants (name, plan_code) VALUES ($1, $2) RETURNING id, name, status, plan_code, created_at`,
+      [input.name, input.planCode],
     )).rows[0];
     const userResult = await client.query(
       `SELECT id, email, system_role, status FROM users WHERE email_normalized = $1 FOR UPDATE`,
