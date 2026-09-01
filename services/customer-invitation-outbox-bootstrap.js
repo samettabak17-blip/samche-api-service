@@ -1,6 +1,6 @@
 import { validateInvitationMailConfiguration } from './customer-invitation-mailer.js';
 import { createCustomerInvitationOutboxWorker } from './customer-invitation-outbox-service.js';
-import { createSmtpCustomerInvitationMailer } from './smtp-customer-invitation-mailer.js';
+import { classifySafeSmtpFailure, createSmtpCustomerInvitationMailer } from './smtp-customer-invitation-mailer.js';
 
 export function createCustomerInvitationOutboxStartup({
   database,
@@ -10,6 +10,7 @@ export function createCustomerInvitationOutboxStartup({
   onStatus = () => {},
 }) {
   let worker = null;
+  let startPromise = null;
   let currentStatus = 'NOT_STARTED';
   const publish = (status) => {
     currentStatus = status;
@@ -17,22 +18,37 @@ export function createCustomerInvitationOutboxStartup({
   };
 
   return {
-    start() {
+    async start() {
       if (worker) return worker;
-      try {
-        const config = validateInvitationMailConfiguration(environment);
+      if (startPromise) return startPromise;
+      startPromise = (async () => {
+        let config;
+        try {
+          config = validateInvitationMailConfiguration(environment);
+        } catch {
+          publish('DISABLED');
+          return null;
+        }
+        try {
+        publish('PREFLIGHTING');
+        const mailer = createMailer({ config });
+        await mailer.verifyConnection();
         publish('STARTING');
         worker = createWorker({
           database,
-          mailer: createMailer({ config }),
+          mailer,
           envelopeKey: environment.INVITATION_ENVELOPE_ENCRYPTION_KEY,
           onStatus: ({ state, code }) => publish(code ? `${state}_${code}` : state),
         });
         return worker;
-      } catch {
-        publish('DISABLED');
-        return null;
-      }
+        } catch (error) {
+          publish(`PREFLIGHT_${classifySafeSmtpFailure(error)}`);
+          return null;
+        } finally {
+          startPromise = null;
+        }
+      })();
+      return startPromise;
     },
     stop() {
       worker?.stop();

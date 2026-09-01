@@ -48,7 +48,7 @@ test('expired invitations are not sent and their envelope is destroyed', async (
   assert.equal(client.calls.some(({ sql }) => /CANCELLED/.test(sql)), true);
 });
 
-test('SMTP timeout preserves the encrypted envelope for a bounded retry with a safe timeout classification', async () => {
+test('SMTP connection timeout preserves the encrypted envelope for a bounded retry with a safe phase classification', async () => {
   const key = Buffer.alloc(32, 5).toString('base64');
   const envelope = encryptInvitationEnvelope(createInvitationToken(), key);
   const client = fakeClient();
@@ -56,12 +56,28 @@ test('SMTP timeout preserves the encrypted envelope for a bounded retry with a s
     client,
     row: { id: 'outbox-2', status: 'PENDING_DELIVERY', encrypted_envelope_ciphertext: envelope.ciphertext, envelope_iv: envelope.iv, envelope_auth_tag: envelope.authTag, envelope_key_version: envelope.keyVersion, expires_at: new Date(Date.now() + 60_000), invitation_status: 'PENDING', company_name: 'Example', email: 'customer@example.test' },
     envelopeKey: key,
-    mailer: { sendInvitation: async () => { const error = new Error('timeout'); error.code = 'ETIMEDOUT'; throw error; } },
+    mailer: { sendInvitation: async () => { const error = new Error('Connection timeout'); error.code = 'ETIMEDOUT'; error.command = 'CONN'; throw error; } },
   });
   assert.equal(result.status, 'DELIVERY_FAILED');
   assert.equal(client.calls.some(({ sql }) => /attempt_count = attempt_count \+ 1/.test(sql)), true);
-  assert.equal(client.calls.some(({ sql, params }) => /provider_code = \$2/.test(sql) && params.includes('SMTP_TIMEOUT')), true);
+  assert.equal(client.calls.some(({ sql, params }) => /provider_code = \$2/.test(sql) && params.includes('SMTP_TCP_CONNECT_TIMEOUT')), true);
   assert.equal(client.calls.some(({ sql }) => /encrypted_envelope_ciphertext = NULL/.test(sql)), false);
+});
+
+test('SMTP timeout classifications distinguish greeting, TLS, auth, envelope, recipient, and data phases without persisting provider detail', async () => {
+  const greeting = new Error('Greeting never received'); greeting.code = 'ETIMEDOUT'; greeting.command = 'CONN';
+  const tls = new Error('TLS handshake timed out'); tls.code = 'ETIMEDOUT'; tls.command = 'CONN';
+  const auth = new Error('Timeout'); auth.code = 'ETIMEDOUT'; auth.command = 'AUTH PLAIN';
+  const sender = new Error('Timeout'); sender.code = 'ETIMEDOUT'; sender.command = 'MAIL FROM';
+  const recipient = new Error('Timeout'); recipient.code = 'ETIMEDOUT'; recipient.command = 'RCPT TO';
+  const data = new Error('Timeout'); data.code = 'ETIMEDOUT'; data.command = 'DATA';
+
+  assert.equal(await persistedFailureCode(greeting), 'SMTP_GREETING_TIMEOUT');
+  assert.equal(await persistedFailureCode(tls), 'SMTP_TLS_HANDSHAKE_TIMEOUT');
+  assert.equal(await persistedFailureCode(auth), 'SMTP_AUTH_TIMEOUT');
+  assert.equal(await persistedFailureCode(sender), 'SMTP_MAIL_FROM_TIMEOUT');
+  assert.equal(await persistedFailureCode(recipient), 'SMTP_RCPT_TO_TIMEOUT');
+  assert.equal(await persistedFailureCode(data), 'SMTP_DATA_TIMEOUT');
 });
 
 test('SMTP failures persist only bounded connection, TLS, authentication, and provider classifications', async () => {
