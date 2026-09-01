@@ -20,6 +20,8 @@ test('explicit approval materializes only redacted candidate text through the ca
   const sourceInsert = calls.find(({ sql }) => /INSERT INTO knowledge_base_documents/i.test(sql));
   assert.equal(sourceInsert.params[4], 'CONVERSATION_CANDIDATE');
   assert.equal(sourceInsert.params[3], 'Redacted business fact');
+  assert.ok(calls.some(({ sql }) => /INSERT INTO knowledge_source_business_identities/i.test(sql)));
+  assert.ok(calls.some(({ sql }) => /knowledge_candidate_image_evidence/i.test(sql)));
   assert.ok(calls.some(({ sql }) => /SET status = 'APPROVED'/i.test(sql)));
 });
 

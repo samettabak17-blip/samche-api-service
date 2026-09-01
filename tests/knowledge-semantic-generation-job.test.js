@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  claimNextImageSemanticGenerationJob,
   enqueueImageSemanticGenerationJob,
   processImageSemanticGenerationJob,
+  recoverStaleImageSemanticGenerationJobs,
 } from '../services/knowledge-semantic-generation-job-service.js';
 
 const tenantId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -57,4 +59,22 @@ test('worker persists durable candidates and assistant recommendations outside t
   assert.equal(result.candidateCount, 1);
   assert.equal(result.behaviorRecommendationCount, 1);
   assert.ok(calls.some(({ sql }) => /SET status = 'READY'/i.test(sql)));
+});
+
+test('recovers an expired semantic PROCESSING lease before a worker claims the next job', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    return { rowCount: 1, rows: [{ id: 'job-1', status: 'PENDING' }] };
+  } };
+
+  const recovered = await recoverStaleImageSemanticGenerationJobs(database);
+  await claimNextImageSemanticGenerationJob(database);
+
+  assert.equal(recovered.recovered, 1);
+  assert.match(calls[0].sql, /status = 'PROCESSING'/);
+  assert.match(calls[0].sql, /locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP/);
+  assert.match(calls[0].sql, /locked_until < CURRENT_TIMESTAMP/);
+  assert.match(calls[0].sql, /KNOWLEDGE_SEMANTIC_LEASE_EXPIRED/);
+  assert.match(calls[1].sql, /status = 'PENDING'/);
 });

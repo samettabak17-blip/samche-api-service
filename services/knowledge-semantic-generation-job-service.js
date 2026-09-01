@@ -48,6 +48,26 @@ export async function getImageSemanticGenerationJob({ database, tenantId, source
   return result.rows[0] ?? null;
 }
 
+export async function recoverStaleImageSemanticGenerationJobs(database) {
+  const result = await database.query(
+    `UPDATE knowledge_processing_jobs
+        SET status = CASE WHEN attempts >= 3 THEN 'FAILED' ELSE 'PENDING' END,
+            locked_at = NULL,
+            locked_until = NULL,
+            available_at = CASE WHEN attempts >= 3 THEN available_at ELSE CURRENT_TIMESTAMP END,
+            last_error_code = 'KNOWLEDGE_SEMANTIC_LEASE_EXPIRED',
+            updated_at = CURRENT_TIMESTAMP
+      WHERE job_type = 'GENERATE_IMAGE_CANDIDATES'
+        AND status = 'PROCESSING'
+        AND (locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP)
+      RETURNING id, status`,
+  );
+  return {
+    recovered: result.rows.filter((job) => job.status === 'PENDING').length,
+    failed: result.rows.filter((job) => job.status === 'FAILED').length,
+  };
+}
+
 export async function claimNextImageSemanticGenerationJob(database) {
   const result = await database.query(
     `WITH candidate AS (
@@ -96,18 +116,37 @@ export function startImageSemanticGenerationWorker({ database, semanticClassifie
   }
   let stopped = false;
   let running = false;
+  let lastTickAt = null;
+  let lastClaimedAt = null;
+  let lastCompletedAt = null;
+  let lastFailureAt = null;
   const tick = async () => {
     if (stopped || running) return;
     running = true;
+    lastTickAt = new Date().toISOString();
     try {
+      await recoverStaleImageSemanticGenerationJobs(database);
       const job = await claimNextImageSemanticGenerationJob(database);
-      if (job) await processImageSemanticGenerationJob({ database, job, semanticClassifier });
+      if (job) {
+        lastClaimedAt = new Date().toISOString();
+        await processImageSemanticGenerationJob({ database, job, semanticClassifier });
+        lastCompletedAt = new Date().toISOString();
+      }
     } catch (error) {
+      lastFailureAt = new Date().toISOString();
       logger.error('KNOWLEDGE_SEMANTIC_GENERATION_WORKER_FAILED', String(error?.code ?? 'UNKNOWN'));
     } finally { running = false; }
   };
   void tick();
   const timer = setInterval(() => void tick(), intervalMs);
   timer.unref?.();
-  return () => { stopped = true; clearInterval(timer); };
+  const stop = () => { stopped = true; clearInterval(timer); };
+  stop.status = () => ({
+    state: stopped ? 'STOPPED' : running ? 'PROCESSING' : 'RUNNING',
+    last_tick_at: lastTickAt,
+    last_claimed_at: lastClaimedAt,
+    last_completed_at: lastCompletedAt,
+    last_failure_at: lastFailureAt,
+  });
+  return stop;
 }

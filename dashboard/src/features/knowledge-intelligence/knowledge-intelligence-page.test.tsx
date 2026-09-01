@@ -875,6 +875,19 @@ it("does not leak the page assistant selection into tenant-scoped image candidat
   expect(await screen.findByText("Assign this source to an assistant to generate behavior recommendations.")).toBeVisible();
 });
 
+it("reconstructs a completed image generation job when a source detail is revisited", async () => {
+  mockedApi.listKnowledgeSources.mockResolvedValue([{ id: "image-source-a", title: "WhatsApp screenshot", source_type: "IMAGE", mime_type: "image/png", processing_status: "READY", indexing_status: "DISABLED", enabled: true }]);
+  mockedApi.getKnowledgeSource.mockResolvedValue({ id: "image-source-a", title: "WhatsApp screenshot", source_type: "IMAGE", mime_type: "image/png", processing_status: "READY", indexing_status: "DISABLED", enabled: true, extraction_hash: "c".repeat(64), assistant_ids: [] });
+  mockedApi.getImageKnowledgeGenerationJob.mockResolvedValue({ id: "job-1", status: "READY", attempts: 1, metadata: { candidate_count: 1, behavior_recommendation_count: 0 } });
+
+  renderPage(true, "/app/tenant-a/knowledge-base/sources");
+  fireEvent.click(await screen.findByRole("button", { name: "View WhatsApp screenshot" }));
+
+  expect(await screen.findByText("Candidate generation completed.")).toBeVisible();
+  expect(mockedApi.getImageKnowledgeGenerationJob).toHaveBeenCalledWith("tenant-a", "image-source-a");
+  expect(screen.getByRole("button", { name: "Generate candidates" })).not.toBeDisabled();
+});
+
 it("does not show a stale source success banner alongside a failed image candidate request", async () => {
   mockedApi.listAssistants.mockResolvedValue([
     { id: "assistant-a", tenant_id: "tenant-a", name: "Blue Dune AI Assistant" },

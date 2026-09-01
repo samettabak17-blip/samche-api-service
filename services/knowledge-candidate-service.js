@@ -323,6 +323,20 @@ export async function approveConversationKnowledgeCandidate({
     sourceType: 'CONVERSATION_CANDIDATE',
   });
 
+  // A materialized canonical fact inherits identity only through its own
+  // image-evidence source chain. Tenant membership alone is never authority.
+  await db(database,
+    `INSERT INTO knowledge_source_business_identities (tenant_id, source_id, business_identity_id)
+       SELECT DISTINCT $1, $3, identity_link.business_identity_id
+         FROM knowledge_candidate_image_evidence evidence
+         JOIN knowledge_source_business_identities identity_link
+           ON identity_link.tenant_id = evidence.tenant_id
+          AND identity_link.source_id = evidence.source_id
+        WHERE evidence.tenant_id = $1 AND evidence.candidate_id = $2
+       ON CONFLICT DO NOTHING`,
+    [tenantId, candidateId, source.id],
+  );
+
   await db(database,
     `UPDATE knowledge_candidates
         SET status = 'APPROVED',

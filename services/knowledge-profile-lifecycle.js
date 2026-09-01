@@ -43,18 +43,94 @@ async function loadBusinessProfileSourceScope({ database, tenantId, businessIden
   );
   if (!identity.rows[0]) throw new KnowledgeProfileLifecycleError('KNOWLEDGE_BUSINESS_IDENTITY_NOT_FOUND', 'Business Identity was not found');
   const sources = await database.query(
-    `SELECT id, title, content, content_hash
-       FROM knowledge_base_documents
-      WHERE tenant_id = $1 AND id = ANY($2::uuid[]) AND enabled = TRUE AND status = 'active'
+    `SELECT source.id, source.title, source.content, source.content_hash,
+            COALESCE((
+              SELECT array_agg(DISTINCT identity_link.business_identity_id)
+                FROM (
+                  SELECT direct_identity.business_identity_id
+                    FROM knowledge_source_business_identities direct_identity
+                   WHERE direct_identity.tenant_id = source.tenant_id
+                     AND direct_identity.source_id = source.id
+                  UNION
+                  SELECT provenance_identity.business_identity_id
+                    FROM knowledge_candidates candidate
+                    JOIN knowledge_candidate_image_evidence image_evidence
+                      ON image_evidence.tenant_id = candidate.tenant_id
+                     AND image_evidence.candidate_id = candidate.id
+                    JOIN knowledge_source_business_identities provenance_identity
+                      ON provenance_identity.tenant_id = image_evidence.tenant_id
+                     AND provenance_identity.source_id = image_evidence.source_id
+                   WHERE candidate.tenant_id = source.tenant_id
+                     AND candidate.approved_source_id = source.id
+                ) AS identity_link
+            ), ARRAY[]::uuid[]) AS trusted_identity_ids
+       FROM knowledge_base_documents source
+      WHERE source.tenant_id = $1 AND source.id = ANY($2::uuid[]) AND source.enabled = TRUE AND source.status = 'active'
         AND processing_status = 'READY' AND indexing_status = 'READY' AND content_hash IS NOT NULL
-      ORDER BY id`,
+      ORDER BY source.id`,
     [tenantId, sourceIds],
   );
   if (sources.rows.length !== sourceIds.length) throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_SOURCE_SCOPE_INVALID', 'One or more selected sources are unavailable or ineligible');
   return { business_identity: identity.rows[0], source_ids: sourceIds, sources: sources.rows };
 }
 
+function uniqueTrustedIdentityIds(source) {
+  return [...new Set(Array.isArray(source.trusted_identity_ids) ? source.trusted_identity_ids.filter(Boolean).map(String) : [])];
+}
+
+function trustedProvenance(scope, businessIdentityId) {
+  const inherited = [];
+  const conflicting = [];
+  const unresolved = [];
+  for (const source of scope.sources) {
+    const identities = uniqueTrustedIdentityIds(source);
+    if (!identities.length) {
+      unresolved.push(source);
+    } else if (identities.length === 1 && identities[0] === String(businessIdentityId)) {
+      inherited.push({
+        source_id: source.id,
+        source_title: source.title,
+        content_hash: source.content_hash ?? null,
+        detected_identity: scope.business_identity.display_name,
+        normalized_identity: scope.business_identity.normalized_identity || normalizeBusinessIdentity(scope.business_identity.display_name),
+        confidence: 1,
+        safe_evidence: 'Trusted source provenance',
+        resolution_origin: 'PROVENANCE_INHERITED',
+      });
+    } else {
+      conflicting.push({
+        source_id: source.id,
+        source_title: source.title,
+        content_hash: source.content_hash ?? null,
+        detected_identity: 'conflicting trusted provenance',
+        normalized_identity: null,
+        confidence: 0,
+        safe_evidence: 'Selected source is linked to a different or ambiguous Business Identity.',
+        resolution_origin: 'CONFLICTING_PROVENANCE',
+      });
+    }
+  }
+  return { inherited, conflicting, unresolved };
+}
+
 async function resolveBusinessIdentityAnalysis({ database, provider, tenantId, businessIdentityId, scope }) {
+  const provenance = trustedProvenance(scope, businessIdentityId);
+  if (provenance.conflicting.length) {
+    return {
+      status: 'IDENTITY_RESOLUTION_REQUIRED',
+      identities: [],
+      evidence: [...provenance.inherited, ...provenance.conflicting],
+      persistable_evidence: [],
+    };
+  }
+  if (!provenance.unresolved.length) {
+    return {
+      status: 'RESOLVED',
+      identities: [{ detected_identity: scope.business_identity.display_name, normalized_identity: scope.business_identity.normalized_identity || normalizeBusinessIdentity(scope.business_identity.display_name), source_ids: provenance.inherited.map((item) => item.source_id) }],
+      evidence: provenance.inherited,
+      persistable_evidence: [],
+    };
+  }
   const existing = await database.query(
     `SELECT evidence.source_id, source.title AS source_title, evidence.content_hash, evidence.detected_identity,
             evidence.normalized_detected_identity AS normalized_identity, evidence.confidence, evidence.safe_evidence
@@ -63,16 +139,24 @@ async function resolveBusinessIdentityAnalysis({ database, provider, tenantId, b
       WHERE evidence.tenant_id = $1 AND evidence.business_identity_id = $2
         AND evidence.source_id = ANY($3::uuid[]) AND evidence.provider = $4 AND evidence.model = $5
         AND evidence.analysis_schema_version = $6`,
-    [tenantId, businessIdentityId, scope.source_ids, provider.provider, provider.model, IDENTITY_ANALYSIS_SCHEMA_VERSION],
+    [tenantId, businessIdentityId, provenance.unresolved.map((source) => source.id), provider.provider, provider.model, IDENTITY_ANALYSIS_SCHEMA_VERSION],
   );
-  const exact = existing.rows.filter((item) => scope.sources.some((source) => source.id === item.source_id && source.content_hash === item.content_hash));
+  const exact = existing.rows.filter((item) => provenance.unresolved.some((source) => source.id === item.source_id && source.content_hash === item.content_hash));
   let analysis;
-  if (exact.length === scope.sources.length) {
+  if (exact.length === provenance.unresolved.length) {
     analysis = summarizeBusinessIdentityEvidence(exact);
   } else {
-    analysis = await analyzeBusinessIdentityScope({ provider, sources: scope.sources });
+    analysis = await analyzeBusinessIdentityScope({ provider, sources: provenance.unresolved });
   }
-  for (const item of analysis.evidence) {
+  const combined = summarizeBusinessIdentityEvidence([...provenance.inherited, ...analysis.evidence]);
+  combined.evidence = combined.evidence.map((item) => ({
+    ...item,
+    resolution_origin: provenance.inherited.some((inherited) => inherited.source_id === item.source_id)
+      ? 'PROVENANCE_INHERITED'
+      : 'SEMANTIC_INFERRED',
+  }));
+  combined.persistable_evidence = analysis.evidence;
+  for (const item of combined.persistable_evidence) {
     await database.query(
       `INSERT INTO business_identity_source_evidence
          (tenant_id, business_identity_id, source_id, content_hash, detected_identity, normalized_detected_identity, confidence, safe_evidence, provider, model, analysis_schema_version)
@@ -84,7 +168,7 @@ async function resolveBusinessIdentityAnalysis({ database, provider, tenantId, b
       [tenantId, businessIdentityId, item.source_id, item.content_hash, item.detected_identity, item.normalized_identity, item.confidence, item.safe_evidence, provider.provider, provider.model, IDENTITY_ANALYSIS_SCHEMA_VERSION],
     );
   }
-  return analysis;
+  return combined;
 }
 
 function requestFingerprint({ tenantId, businessIdentityId, sources, provider }) {

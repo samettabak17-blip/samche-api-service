@@ -59,6 +59,7 @@ dotenv.config();
 
 const app = express();
 let customerInvitationOutboxStartup = null;
+let imageSemanticGenerationWorker = null;
 
 app.use('/api/v1/auth/invitations', (req, res, next) => {
   res.setHeader('Referrer-Policy', 'no-referrer');
@@ -105,6 +106,7 @@ app.get("/api/v1/health", (req, res) => {
     timestamp: new Date().toISOString(),
     revision: process.env.RENDER_GIT_COMMIT ?? process.env.GIT_COMMIT_SHA ?? null,
     onboarding_outbox_worker: customerInvitationOutboxStartup?.status() ?? 'NOT_STARTED',
+    semantic_generation_worker: imageSemanticGenerationWorker?.status?.() ?? { state: 'NOT_STARTED' },
   });
 });
 
@@ -184,24 +186,26 @@ const openaiClient = new OpenAI({
 const knowledgeEmbedder = process.env.OPENAI_API_KEY ? createOpenAIEmbedder(openaiClient) : null;
 const knowledgeImageExtractor = process.env.GEMINI_API_KEY ? createGeminiImageKnowledgeExtractor() : null;
 
-if ((knowledgeEmbedder || knowledgeImageExtractor) && process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
-  startKnowledgeProcessingWorker({
-    database: pool,
-    embed: knowledgeEmbedder,
-    imageExtractor: knowledgeImageExtractor,
-    createStorage: () => createConversationResourceStorage(),
-  });
-} else {
-  console.info('KNOWLEDGE_PROCESSING_WORKER_DISABLED');
-}
+function startKnowledgeWorkers() {
+  if ((knowledgeEmbedder || knowledgeImageExtractor) && process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
+    startKnowledgeProcessingWorker({
+      database: pool,
+      embed: knowledgeEmbedder,
+      imageExtractor: knowledgeImageExtractor,
+      createStorage: () => createConversationResourceStorage(),
+    });
+  } else {
+    console.info('KNOWLEDGE_PROCESSING_WORKER_DISABLED');
+  }
 
-if (process.env.GEMINI_API_KEY && process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
-  startImageSemanticGenerationWorker({
-    database: pool,
-    semanticClassifier: createImageKnowledgeSemanticClassifier({ provider: createKnowledgeGenerationProvider() }),
-  });
-} else {
-  console.info('KNOWLEDGE_SEMANTIC_GENERATION_WORKER_DISABLED');
+  if (process.env.GEMINI_API_KEY && process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
+    imageSemanticGenerationWorker = startImageSemanticGenerationWorker({
+      database: pool,
+      semanticClassifier: createImageKnowledgeSemanticClassifier({ provider: createKnowledgeGenerationProvider() }),
+    });
+  } else {
+    console.info('KNOWLEDGE_SEMANTIC_GENERATION_WORKER_DISABLED');
+  }
 }
 
 // Ortak Link Dönüştürücü
@@ -2258,6 +2262,7 @@ const PORT = process.env.PORT || 3000;
 async function startServer() {
   try {
     await runMigrations();
+    startKnowledgeWorkers();
     customerInvitationOutboxStartup = createCustomerInvitationOutboxStartup({
       database: pool,
       environment: process.env,
@@ -2268,6 +2273,7 @@ async function startServer() {
       console.log(`Sunucu ${PORT} portunda başarıyla çalışıyor.`);
     });
     server.on('close', () => customerInvitationOutboxStartup?.stop());
+    server.on('close', () => imageSemanticGenerationWorker?.());
   } catch (error) {
     console.error('Database migration failed:', error);
     process.exit(1);

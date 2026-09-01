@@ -596,10 +596,11 @@ export function KnowledgeIntelligencePage() {
       if (result.candidates.length) navigate(`/app/${tenantId}/knowledge-base/candidates`);
     },
   });
+  const generationSourceId = imageGenerationSourceId ?? selectedSourceId;
   const imageGeneration = useQuery({
-    queryKey: ['tenant', tenantId, 'knowledge-intelligence', 'generation', imageGenerationSourceId],
-    queryFn: () => tenantApi.getImageKnowledgeGenerationJob(tenantId, imageGenerationSourceId!),
-    enabled: Boolean(tenantId && imageGenerationSourceId),
+    queryKey: ['tenant', tenantId, 'knowledge-intelligence', 'generation', generationSourceId],
+    queryFn: () => tenantApi.getImageKnowledgeGenerationJob(tenantId, generationSourceId!),
+    enabled: Boolean(tenantId && generationSourceId),
     refetchInterval: (query) => ['PENDING', 'PROCESSING'].includes(query.state.data?.status ?? '') ? 2_000 : false,
   });
   useEffect(() => {
@@ -1662,7 +1663,7 @@ export function KnowledgeIntelligencePage() {
                                           ? "Generation in progress…"
                                           : "Generate candidates"}
                                       </DashboardButton>
-                                      {imageGenerationSourceId === selectedSource.data!.id && imageGeneration.data && (
+                                      {generationSourceId === selectedSource.data!.id && imageGeneration.data && (
                                         <DashboardFormMessage tone={imageGeneration.data.status === 'FAILED' ? 'error' : imageGeneration.data.status === 'READY' ? 'success' : 'info'}>
                                           {imageGeneration.data.status === 'READY'
                                             ? 'Candidate generation completed.'

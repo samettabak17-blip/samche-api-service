@@ -22,11 +22,16 @@ describe('Dashboard controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show password' }));
     expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'text');
     expect(screen.getByLabelText('Password')).toHaveValue('secret123');
+    expect(screen.getByRole('button', { name: 'Hide password' }).className).toContain('hover:bg-signal/10');
+    expect(screen.getByRole('button', { name: 'Hide password' }).className).not.toContain('hover:bg-white');
   });
 
   it('uses the shared select primitive', () => {
     render(<DashboardSelect aria-label="Tenant"><option>Company</option></DashboardSelect>);
-    expect(screen.getByLabelText('Tenant')).toHaveClass('dashboard-select');
+    const select = screen.getByLabelText('Tenant');
+    expect(select).toHaveClass('dashboard-select');
+    expect(select.className).toContain('focus:ring-signal/30');
+    expect(select.className).toContain('disabled:text-stone-300');
   });
 
   it('provides a shared textarea with the same readable form contract', () => {
@@ -92,6 +97,18 @@ describe('Dashboard controls', () => {
     expect(upgrade.className).not.toContain('hover:bg-white');
     expect(disabled.className).toContain('disabled:text-stone-300');
     expect(disabled.className).toContain('disabled:opacity-100');
+  });
+
+  it('defines dark readable hover, active, focus and disabled states for every shared button variant', () => {
+    render(<><DashboardButton variant="primary">Primary</DashboardButton><DashboardButton variant="secondary">Secondary</DashboardButton><DashboardButton variant="outline">Outline</DashboardButton><DashboardButton variant="ghost">Ghost</DashboardButton><DashboardButton variant="destructive">Destructive</DashboardButton><DashboardTab to="/tab" disabled>Disabled tab</DashboardTab></>);
+    for (const name of ['Primary', 'Secondary', 'Outline', 'Ghost', 'Destructive']) {
+      const control = screen.getByRole('button', { name });
+      expect(control.className).toContain('focus-visible:ring-2');
+      expect(control.className).toContain('active:');
+      expect(control.className).toContain('hover:text-white');
+      expect(control.className).not.toContain('hover:bg-white');
+    }
+    expect(screen.getByText('Disabled tab').className).toContain('text-stone-300');
   });
 
   it('hides browser-localized file chrome and renders controlled English copy', () => {

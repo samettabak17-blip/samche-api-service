@@ -6,12 +6,12 @@ type ButtonVariant = 'primary' | 'secondary' | 'destructive' | 'selected' | 'gho
 
 const base = 'inline-flex h-10 min-h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-semibold leading-none transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:border-stone-600 disabled:bg-stone-900 disabled:text-stone-300 disabled:opacity-100 disabled:shadow-none disabled:hover:border-stone-600 disabled:hover:bg-stone-900 disabled:hover:text-stone-300';
 const variants: Record<ButtonVariant, string> = {
-  primary: 'border-signal bg-signal text-white shadow-signal hover:bg-red-700 hover:text-white hover:shadow-lg',
-  secondary: 'border-line bg-elevated text-stone-300 hover:border-stone-400 hover:bg-stone-800 hover:text-white',
-  destructive: 'border-red-500/60 bg-red-950/30 text-red-200 hover:border-red-400 hover:bg-red-900/50 hover:text-white',
-  selected: 'border-signal bg-signal text-white shadow-signal hover:border-signal hover:bg-signal hover:text-white hover:shadow-signal',
-  ghost: 'border-transparent bg-transparent text-stone-300 hover:border-line hover:bg-white/[.06] hover:text-white',
-  outline: 'border-signal/70 bg-signal/[.08] text-red-100 hover:border-signal hover:bg-signal/20 hover:text-white',
+  primary: 'border-signal bg-signal text-white shadow-signal hover:bg-red-700 hover:text-white hover:shadow-lg active:border-red-800 active:bg-red-800 active:text-white',
+  secondary: 'border-line bg-elevated text-stone-300 hover:border-stone-400 hover:bg-stone-800 hover:text-white active:border-stone-400 active:bg-stone-800 active:text-white',
+  destructive: 'border-red-500/60 bg-red-950/30 text-red-200 hover:border-red-400 hover:bg-red-900/50 hover:text-white active:border-red-400 active:bg-red-950 active:text-white',
+  selected: 'border-signal bg-signal text-white shadow-signal hover:border-signal hover:bg-signal hover:text-white hover:shadow-signal active:border-red-800 active:bg-red-800 active:text-white',
+  ghost: 'border-transparent bg-transparent text-stone-300 hover:border-signal/40 hover:bg-signal/10 hover:text-white active:border-signal/50 active:bg-signal/15 active:text-white',
+  outline: 'border-signal/70 bg-signal/[.08] text-red-100 hover:border-signal hover:bg-signal/20 hover:text-white active:border-signal active:bg-signal/25 active:text-white',
 };
 
 export const dashboardButtonClass = (variant: ButtonVariant = 'secondary') => `${base} ${variants[variant]}`;
@@ -20,7 +20,7 @@ export function DashboardButton({ variant = 'secondary', className = '', ...prop
   return <button className={`${dashboardButtonClass(variant)} ${className}`} {...props} />;
 }
 
-const fieldClass = 'dashboard-input mt-2 block h-11 w-full rounded-xl border border-line bg-elevated px-3 text-sm text-ink outline-none transition placeholder:text-stone-400 focus:border-signal focus:ring-2 focus:ring-signal/30 disabled:cursor-not-allowed disabled:border-line disabled:bg-canvas disabled:text-stone-400 disabled:placeholder:text-stone-500';
+const fieldClass = 'dashboard-input mt-2 block h-11 w-full rounded-xl border border-line bg-elevated px-3 text-sm text-ink outline-none transition placeholder:text-stone-400 focus:border-signal focus:ring-2 focus:ring-signal/30 disabled:cursor-not-allowed disabled:border-stone-600 disabled:bg-canvas disabled:text-stone-300 disabled:placeholder:text-stone-400 disabled:opacity-100';
 
 export function DashboardField({ label, helper, error, children }: { label: ReactNode; helper?: ReactNode; error?: ReactNode; children: ReactNode }) {
   return <div className="space-y-1.5"><label className="dashboard-field-label block text-sm font-semibold">{label}{children}</label>{helper && !error && <p className="dashboard-helper text-xs">{helper}</p>}{error && <DashboardFormMessage tone="error">{error}</DashboardFormMessage>}</div>;
@@ -41,7 +41,7 @@ export function DashboardTextarea({ className = '', ...props }: TextareaHTMLAttr
 export function DashboardPasswordInput({ className = '', ...props }: InputHTMLAttributes<HTMLInputElement>) {
   const [visible, setVisible] = useState(false);
   const inputId = useId();
-  return <span className="relative block"><input {...props} id={props.id ?? inputId} type={visible ? 'text' : 'password'} className={`${fieldClass} pr-12 ${className}`} /><button type="button" aria-label={visible ? 'Hide password' : 'Show password'} aria-pressed={visible} onClick={() => setVisible((value) => !value)} className="absolute right-2 top-2 grid h-7 w-9 place-items-center rounded-lg text-stone-300 hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-signal">{visible ? 'Hide' : 'Show'}</button></span>;
+  return <span className="relative block"><input {...props} id={props.id ?? inputId} type={visible ? 'text' : 'password'} className={`${fieldClass} pr-12 ${className}`} /><button type="button" aria-label={visible ? 'Hide password' : 'Show password'} aria-pressed={visible} onClick={() => setVisible((value) => !value)} className="absolute right-2 top-2 grid h-7 w-9 place-items-center rounded-lg border border-transparent text-stone-300 hover:border-signal/40 hover:bg-signal/10 hover:text-white focus-visible:ring-2 focus-visible:ring-signal">{visible ? 'Hide' : 'Show'}</button></span>;
 }
 
 export function DashboardFormMessage({ tone = 'error', children }: { tone?: 'error' | 'success' | 'info'; children: ReactNode }) {
@@ -51,7 +51,7 @@ export function DashboardFormMessage({ tone = 'error', children }: { tone?: 'err
 
 export function DashboardTab({ to, active = false, disabled = false, children }: { to: string; active?: boolean; disabled?: boolean; children: ReactNode }) {
   const className = `${base} ${active ? variants.selected : variants.secondary}`;
-  if (disabled) return <span aria-disabled="true" className={`${base} cursor-not-allowed border-stone-700 bg-stone-900 text-stone-500 shadow-none`}>{children}</span>;
+  if (disabled) return <span aria-disabled="true" className={`${base} cursor-not-allowed border-stone-600 bg-stone-900 text-stone-300 shadow-none`}>{children}</span>;
   return <Link to={to} aria-current={active ? 'page' : undefined} className={className}>{children}</Link>;
 }
 
