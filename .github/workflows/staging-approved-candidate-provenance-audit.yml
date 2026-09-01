@@ -1,0 +1,30 @@
+name: Staging Approved Candidate Provenance Read-Only Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      identity_name:
+        description: Exact non-secret staging Business Identity display name
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install --ignore-scripts
+      - name: Run strict-TLS read-only approved candidate provenance audit
+        env:
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          TASK6_AUDIT_IDENTITY_NAME: ${{ inputs.identity_name }}
+        run: node scripts/staging-approved-candidate-provenance-audit.js

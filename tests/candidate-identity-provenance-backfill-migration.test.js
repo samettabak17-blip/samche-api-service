@@ -23,3 +23,13 @@ test('provenance repair backfills both materialized and original sources from on
   assert.match(sql, /ON CONFLICT DO NOTHING/i);
   assert.doesNotMatch(sql, /candidate\.tenant_id\s*=\s*identity_link\.tenant_id\s*$/im);
 });
+
+test('materialized approved candidate sources retain their original evidence chain', async () => {
+  const sql = await readFile(new URL('../migrations/047_materialized_candidate_source_provenance.sql', import.meta.url), 'utf8');
+
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS knowledge_materialized_source_provenance/i);
+  assert.match(sql, /candidate\.approved_source_id/i);
+  assert.match(sql, /knowledge_candidate_image_evidence/i);
+  assert.match(sql, /ON CONFLICT DO NOTHING/i);
+  assert.doesNotMatch(sql, /business_identities[\s\S]*tenant_id\s*=\s*candidate\.tenant_id/i);
+});

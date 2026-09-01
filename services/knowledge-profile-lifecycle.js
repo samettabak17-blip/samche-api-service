@@ -62,6 +62,14 @@ async function loadBusinessProfileSourceScope({ database, tenantId, businessIden
                      AND provenance_identity.source_id = image_evidence.source_id
                    WHERE candidate.tenant_id = source.tenant_id
                      AND (candidate.approved_source_id = source.id OR image_evidence.source_id = source.id)
+                  UNION
+                  SELECT original_identity.business_identity_id
+                    FROM knowledge_materialized_source_provenance provenance
+                    JOIN knowledge_source_business_identities original_identity
+                      ON original_identity.tenant_id = provenance.tenant_id
+                     AND original_identity.source_id = provenance.original_source_id
+                   WHERE provenance.tenant_id = source.tenant_id
+                     AND provenance.materialized_source_id = source.id
                 ) AS identity_link
             ), ARRAY[]::uuid[]) AS trusted_identity_ids
        FROM knowledge_base_documents source
