@@ -6,6 +6,7 @@ import { authenticateToken } from '../middleware/auth.js';
 import { isValidEmail, isValidPassword, normalizeEmail } from '../middleware/validators.js';
 import { acceptInvitation, InvitationAcceptanceError, validateInvitation, validatePublicInvitationBody } from '../services/customer-invitation-acceptance-service.js';
 import { allowPublicInvitationAttempt } from '../services/public-invitation-rate-limit.js';
+import { changePassword, consumePasswordReset, requestPasswordReset, validatePasswordReset } from '../services/password-reset-service.js';
 
 const router = express.Router();
 
@@ -50,6 +51,32 @@ router.post('/invitations/accept', async (req, res) => {
         }
         return res.status(400).json({ error: 'Invitation is unavailable' });
     }
+});
+
+function readPublicResetBody(req) { return readPublicInvitationBody(req); }
+router.post('/forgot-password', async (req, res) => {
+    const body = readPublicResetBody(req);
+    if (!body || !allowPublicInvitationAttempt({ kind: 'forgot-password', ip: req.ip, token: body.email ?? '' })) return res.json({ status: 'REQUEST_ACCEPTED' });
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        await requestPasswordReset({ client, email: body.email, envelopeKey: process.env.INVITATION_ENVELOPE_ENCRYPTION_KEY });
+        await client.query('COMMIT');
+    } catch { await client.query('ROLLBACK').catch(() => {}); }
+    finally { client.release(); }
+    return res.json({ status: 'REQUEST_ACCEPTED' });
+});
+router.post('/password-resets/validate', async (req, res) => {
+    const body = readPublicResetBody(req);
+    if (!body || !allowPublicInvitationAttempt({ kind: 'reset-validate', ip: req.ip, token: body.token })) return res.status(400).json({ error: 'Reset link is unavailable' });
+    try { const reset = await validatePasswordReset({ database: pool, token: body.token }); return res.json({ status: 'VALID', email: reset.email }); }
+    catch { return res.status(400).json({ error: 'Reset link is unavailable' }); }
+});
+router.post('/password-resets/consume', async (req, res) => {
+    const body = readPublicResetBody(req);
+    if (!body || !allowPublicInvitationAttempt({ kind: 'reset-consume', ip: req.ip, token: body.token })) return res.status(400).json({ error: 'Reset link is unavailable' });
+    try { await consumePasswordReset({ database: pool, token: body.token, password: body.password, confirmPassword: body.confirm_password }); return res.json({ status: 'PASSWORD_RESET' }); }
+    catch { return res.status(400).json({ error: 'Reset link is unavailable' }); }
 });
 
 router.post('/register', async (req, res) => {
@@ -112,6 +139,13 @@ router.get('/me', authenticateToken, async (req, res) => {
         console.error('Me endpoint error:', error);
         res.status(500).json({ error: 'Server error' });
     }
+});
+
+router.post('/change-password', authenticateToken, async (req, res) => {
+    try {
+        await changePassword({ database: pool, userId: req.user.user_id, currentPassword: req.body?.current_password, newPassword: req.body?.new_password, confirmPassword: req.body?.confirm_password });
+        return res.json({ status: 'PASSWORD_CHANGED' });
+    } catch { return res.status(400).json({ error: 'Password could not be changed' }); }
 });
 
 export default router;

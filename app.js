@@ -65,6 +65,8 @@ app.use('/api/v1/auth/invitations', (req, res, next) => {
 // This parser is deliberately registered before the global JSON parser so public
 // invitation payloads are bounded before Express consumes a larger request body.
 app.use('/api/v1/auth/invitations', express.raw({ type: 'application/json', limit: '4kb' }));
+app.use('/api/v1/auth/forgot-password', express.raw({ type: 'application/json', limit: '4kb' }));
+app.use('/api/v1/auth/password-resets', express.raw({ type: 'application/json', limit: '4kb' }));
 
 const allowedCorsOrigins = [
   process.env.DASHBOARD_ALLOWED_ORIGIN,

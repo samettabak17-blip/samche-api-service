@@ -20,7 +20,8 @@ async function cancelAndDestroyEnvelope(client, outboxId) {
 }
 
 export async function processInvitationOutboxRow({ client, row, envelopeKey, mailer, now = new Date() }) {
-  if (!['PENDING_DELIVERY', 'DELIVERY_FAILED'].includes(row.status) || row.invitation_status !== 'PENDING' || new Date(row.expires_at) <= now) {
+  const authorityStatus = row.authority_status ?? row.invitation_status;
+  if (!['PENDING_DELIVERY', 'DELIVERY_FAILED'].includes(row.status) || authorityStatus !== 'PENDING' || new Date(row.expires_at) <= now) {
     await cancelAndDestroyEnvelope(client, row.id);
     return { status: 'CANCELLED' };
   }
@@ -36,7 +37,8 @@ export async function processInvitationOutboxRow({ client, row, envelopeKey, mai
     return { status: 'DELIVERY_FAILED' };
   }
   try {
-    await mailer.sendInvitation({ companyName: row.company_name, email: row.email, token, expiresAt: row.expires_at });
+    if (row.template_version === 'PASSWORD_RESET_V1') await mailer.sendPasswordReset({ email: row.email, token, expiresAt: row.expires_at });
+    else await mailer.sendInvitation({ companyName: row.company_name, email: row.email, token, expiresAt: row.expires_at });
     await client.query(
       `UPDATE customer_invitation_outbox
        SET status = 'SENT', sent_at = CURRENT_TIMESTAMP, encrypted_envelope_ciphertext = NULL,
@@ -68,11 +70,12 @@ export function createCustomerInvitationOutboxWorker({ database, mailer, envelop
     try {
       await client.query('BEGIN');
       const claimed = await client.query(
-        `SELECT o.*, i.status AS invitation_status, i.expires_at, t.name AS company_name, u.email
+        `SELECT o.*, COALESCE(i.status, r.status) AS authority_status, COALESCE(i.expires_at, r.expires_at) AS expires_at, t.name AS company_name, u.email
          FROM customer_invitation_outbox o
-         JOIN customer_invitations i ON i.id = o.invitation_id
-         JOIN tenants t ON t.id = i.tenant_id
-         JOIN users u ON u.id = i.user_id
+         LEFT JOIN customer_invitations i ON i.id = o.invitation_id
+         LEFT JOIN password_reset_tokens r ON r.id = o.password_reset_token_id
+         LEFT JOIN tenants t ON t.id = i.tenant_id
+         JOIN users u ON u.id = COALESCE(i.user_id, r.user_id)
          WHERE o.status IN ('PENDING_DELIVERY', 'DELIVERY_FAILED') AND o.next_attempt_at <= CURRENT_TIMESTAMP
          ORDER BY o.created_at ASC
          LIMIT 1 FOR UPDATE SKIP LOCKED`,

@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { buildInvitationMessage } from './customer-invitation-mailer.js';
+import { buildInvitationMessage, buildPasswordResetMessage } from './customer-invitation-mailer.js';
 
 export function createSmtpCustomerInvitationMailer({ config, createTransport = nodemailer.createTransport }) {
   const transport = createTransport({
@@ -13,6 +13,9 @@ export function createSmtpCustomerInvitationMailer({ config, createTransport = n
     async sendInvitation({ companyName, email, token, expiresAt }) {
       const message = buildInvitationMessage({ config, companyName, email, token, expiresAt });
       await transport.sendMail(message);
+    },
+    async sendPasswordReset({ email, token, expiresAt }) {
+      await transport.sendMail(buildPasswordResetMessage({ config, email, token, expiresAt }));
     },
   };
 }

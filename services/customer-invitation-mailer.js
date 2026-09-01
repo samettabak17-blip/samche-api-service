@@ -49,3 +49,9 @@ export function buildInvitationMessage({ config, companyName, email, token, expi
     text,
   };
 }
+
+export function buildPasswordResetMessage({ config, email, token, expiresAt }) {
+  const url = new URL('/reset-password', `${config.publicInvitationBaseUrl}/`);
+  url.searchParams.set('token', token);
+  return { from: `${config.fromName} <${config.fromEmail}>`, to: email, subject: 'Reset your SamChe password', text: [`A password reset was requested for ${email}.`, `Reset your password securely: ${url.toString()}`, `This link expires at ${new Date(expiresAt).toISOString()}.`].join('\n\n') };
+}

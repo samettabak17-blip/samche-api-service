@@ -30,6 +30,10 @@ export const onboardingApi = {
   acceptInvitation: (payload: { token: string; password: string; confirm_password: string }) => apiClient.post<{ status: string }>('/api/v1/auth/invitations/accept', payload),
   resendInvitation: (tenantId: string, invitationId: string) => apiClient.post<{ invitation: { id: string; status: string; expires_at: string } }>(`${tenantRoot(tenantId)}/invitations/${invitationId}/resend`, {}),
   revokeInvitation: (tenantId: string, invitationId: string) => apiClient.post<{ status: 'REVOKED' }>(`${tenantRoot(tenantId)}/invitations/${invitationId}/revoke`, {}),
+  requestPasswordReset: (email: string) => apiClient.post<{ status: string }>('/api/v1/auth/forgot-password', { email }),
+  validatePasswordReset: (token: string) => apiClient.post<{ status: string; email?: string }>('/api/v1/auth/password-resets/validate', { token }),
+  consumePasswordReset: (payload: { token: string; password: string; confirm_password: string }) => apiClient.post<{ status: string }>('/api/v1/auth/password-resets/consume', payload),
+  changePassword: (payload: { current_password: string; new_password: string; confirm_password: string }) => apiClient.post<{ status: string }>('/api/v1/auth/change-password', payload),
 };
 
 export const tenantKeys = {

@@ -4,6 +4,7 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import samcheLogo from '../../assets/branding/samche-company-llc-logo.png';
 import { ApiError } from '../../lib/api-client';
 import { useAuth } from './auth-context';
+import { onboardingApi } from '../dashboard/dashboard-api';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -13,6 +14,8 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotStatus, setForgotStatus] = useState('');
 
   if (status === 'authenticated') return <Navigate to="/app" replace />;
 
@@ -76,9 +79,11 @@ export function LoginPage() {
               <span className="relative mt-2 block"><LockKeyhole aria-hidden="true" size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-stone-500" /><input type={showPassword ? 'text' : 'password'} autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required className="block w-full rounded-xl border border-white/20 bg-black/15 py-3.5 pl-11 pr-12 text-white shadow-sm outline-none transition placeholder:text-stone-500 focus:border-signal" placeholder="Enter your password" /><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword} onClick={() => setShowPassword((visible) => !visible)} className="absolute right-3 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-lg text-stone-400 transition hover:bg-white/10 hover:text-white">{showPassword ? <EyeOff aria-hidden="true" size={18} /> : <Eye aria-hidden="true" size={18} />}</button></span>
             </label>
             <label className="flex items-center gap-2.5 text-sm text-stone-300"><input type="checkbox" className="h-4 w-4 rounded border-white/25 bg-black/20 text-signal accent-signal" />Remember me</label>
+            <button type="button" onClick={() => { setForgotOpen(true); setForgotStatus(''); }} className="text-sm text-stone-300 underline decoration-signal underline-offset-4 hover:text-white">Forgot password?</button>
             {error && <p role="alert" className="rounded-xl border border-red-400/35 bg-red-950/35 px-3.5 py-3 text-sm text-red-100">{error}</p>}
             <button type="submit" disabled={submitting} className="flex w-full items-center justify-center gap-2 rounded-xl bg-signal px-4 py-3.5 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(212,33,41,0.22)] transition hover:bg-[#B81920] disabled:cursor-not-allowed disabled:opacity-60"><LockKeyhole aria-hidden="true" size={17} />{submitting ? 'Signing in…' : 'Sign in'}<ArrowRight aria-hidden="true" size={18} /></button>
           </form>
+          {forgotOpen && <form onSubmit={async (event) => { event.preventDefault(); await onboardingApi.requestPasswordReset(email); setForgotStatus('If an active account matches this email, a reset link will be sent.'); }} className="mt-5 rounded-xl border border-white/10 bg-black/10 p-4"><label className="block text-sm text-stone-200">Email<input aria-label="Reset email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="mt-2 w-full rounded-xl border border-white/20 bg-black/20 px-3 py-2.5 text-white" /></label><div className="mt-3 flex gap-3"><button className="rounded-xl bg-signal px-3 py-2 text-sm font-semibold">Send reset link</button><button type="button" onClick={() => setForgotOpen(false)} className="text-sm text-stone-300">Cancel</button></div>{forgotStatus && <p role="status" className="mt-3 text-sm text-stone-300">{forgotStatus}</p>}</form>}
           <div className="mt-9 border-t border-white/10 pt-6"><p className="text-center text-sm text-stone-400">Secure access to your workspace</p><p className="mt-5 flex gap-3 text-sm leading-6 text-stone-300"><ShieldCheck aria-hidden="true" className="mt-0.5 shrink-0 text-signal" size={19} />Your security is our priority. All connections are encrypted and your data is never shared.</p></div>
         </div>
       </section>
