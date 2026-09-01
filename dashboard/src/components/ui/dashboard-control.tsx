@@ -1,8 +1,8 @@
 import { useId, useRef, useState } from 'react';
-import type { ButtonHTMLAttributes, ChangeEvent, InputHTMLAttributes, ReactNode } from 'react';
+import type { ButtonHTMLAttributes, ChangeEvent, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react';
 import { Link } from 'react-router-dom';
 
-type ButtonVariant = 'primary' | 'secondary' | 'destructive' | 'selected';
+type ButtonVariant = 'primary' | 'secondary' | 'destructive' | 'selected' | 'ghost' | 'outline';
 
 const base = 'inline-flex items-center justify-center rounded-lg border px-3 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:border-stone-700 disabled:bg-stone-900 disabled:text-stone-500 disabled:shadow-none disabled:hover:border-stone-700 disabled:hover:bg-stone-900 disabled:hover:text-stone-500';
 const variants: Record<ButtonVariant, string> = {
@@ -10,12 +10,39 @@ const variants: Record<ButtonVariant, string> = {
   secondary: 'border-line bg-elevated text-stone-300 hover:border-stone-400 hover:bg-stone-800 hover:text-white',
   destructive: 'border-red-500/60 bg-red-950/30 text-red-200 hover:border-red-400 hover:bg-red-900/50 hover:text-white',
   selected: 'border-signal bg-signal text-white shadow-signal hover:border-signal hover:bg-signal hover:text-white hover:shadow-signal',
+  ghost: 'border-transparent bg-transparent text-stone-300 hover:border-line hover:bg-white/[.06] hover:text-white',
+  outline: 'border-line bg-transparent text-stone-200 hover:border-stone-400 hover:bg-white/[.05] hover:text-white',
 };
 
 export const dashboardButtonClass = (variant: ButtonVariant = 'secondary') => `${base} ${variants[variant]}`;
 
 export function DashboardButton({ variant = 'secondary', className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant }) {
   return <button className={`${dashboardButtonClass(variant)} ${className}`} {...props} />;
+}
+
+const fieldClass = 'dashboard-input mt-2 block h-11 w-full rounded-xl border border-line bg-elevated px-3 text-sm text-ink outline-none transition placeholder:text-stone-400 focus:border-signal focus:ring-2 focus:ring-signal/30 disabled:cursor-not-allowed disabled:border-line disabled:bg-canvas disabled:text-stone-400 disabled:placeholder:text-stone-500';
+
+export function DashboardField({ label, helper, error, children }: { label: ReactNode; helper?: ReactNode; error?: ReactNode; children: ReactNode }) {
+  return <div className="space-y-1.5"><label className="dashboard-field-label block text-sm font-semibold text-stone-700">{label}{children}</label>{helper && !error && <p className="dashboard-helper text-xs text-stone-500">{helper}</p>}{error && <DashboardFormMessage tone="error">{error}</DashboardFormMessage>}</div>;
+}
+
+export function DashboardInput({ className = '', ...props }: InputHTMLAttributes<HTMLInputElement>) {
+  return <input className={`${fieldClass} ${className}`} {...props} />;
+}
+
+export function DashboardSelect({ className = '', ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+  return <select className={`${fieldClass} dashboard-select`} {...props} />;
+}
+
+export function DashboardPasswordInput({ className = '', ...props }: InputHTMLAttributes<HTMLInputElement>) {
+  const [visible, setVisible] = useState(false);
+  const inputId = useId();
+  return <span className="relative block"><input {...props} id={props.id ?? inputId} type={visible ? 'text' : 'password'} className={`${fieldClass} pr-12 ${className}`} /><button type="button" aria-label={visible ? 'Hide password' : 'Show password'} aria-pressed={visible} onClick={() => setVisible((value) => !value)} className="absolute right-2 top-2 grid h-7 w-9 place-items-center rounded-lg text-stone-500 hover:bg-white/10 hover:text-ink focus-visible:ring-2 focus-visible:ring-signal">{visible ? 'Hide' : 'Show'}</button></span>;
+}
+
+export function DashboardFormMessage({ tone = 'error', children }: { tone?: 'error' | 'success' | 'info'; children: ReactNode }) {
+  const classes = tone === 'success' ? 'dashboard-success border-emerald-400/40 bg-emerald-950/30 text-emerald-100' : tone === 'info' ? 'dashboard-info border-sky-400/40 bg-sky-950/30 text-sky-100' : 'dashboard-error border-red-400/45 bg-red-950/35 text-red-100';
+  return <p role={tone === 'error' ? 'alert' : 'status'} className={`rounded-xl border px-3 py-2.5 text-sm ${classes}`}>{children}</p>;
 }
 
 export function DashboardTab({ to, active = false, disabled = false, children }: { to: string; active?: boolean; disabled?: boolean; children: ReactNode }) {

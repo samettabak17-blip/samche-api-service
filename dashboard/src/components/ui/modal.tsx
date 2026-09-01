@@ -56,7 +56,7 @@ export function Modal({ open, title, children, onClose, initialFocusRef, closeOn
   if (!open || typeof document === 'undefined') return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-black/70 p-4" role="presentation">
+    <div className="fixed inset-0 z-[500] flex items-center justify-center overflow-y-auto bg-black/70 p-4" role="presentation">
       <button type="button" tabIndex={-1} aria-label="Close dialog" className="absolute inset-0 cursor-default" onClick={onClose} />
       <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className={'relative z-10 max-h-[calc(100vh-2rem)] w-full overflow-y-auto rounded-2xl border border-white/[.14] bg-[#09121f] p-5 text-white shadow-[0_24px_70px_rgba(0,0,0,.6)] sm:p-6 ' + className}>
         <h2 id={titleId} className="text-lg font-semibold text-white">{title}</h2>

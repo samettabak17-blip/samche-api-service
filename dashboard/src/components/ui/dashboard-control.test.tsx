@@ -1,11 +1,46 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it } from 'vitest';
-import { DashboardButton, DashboardCheckbox, DashboardFileInput, DashboardTab } from './dashboard-control';
+import { DashboardButton, DashboardCheckbox, DashboardFileInput, DashboardFormMessage, DashboardInput, DashboardPasswordInput, DashboardSelect, DashboardTab, DashboardField } from './dashboard-control';
 
 afterEach(cleanup);
 
 describe('Dashboard controls', () => {
+  it('provides shared readable field primitives with helper and error states', () => {
+    render(<><DashboardField label="Email" helper="Use your work email."><DashboardInput aria-label="Email" placeholder="you@example.com" /></DashboardField><DashboardField label="Name" error="Name is required."><DashboardInput aria-label="Name" /></DashboardField></>);
+    expect(screen.getByText('Email')).toHaveClass('dashboard-field-label');
+    expect(screen.getByPlaceholderText('you@example.com')).toHaveClass('dashboard-input');
+    expect(screen.getByText('Use your work email.')).toHaveClass('dashboard-helper');
+    expect(screen.getByRole('alert')).toHaveClass('dashboard-error');
+  });
+
+  it('keeps password visibility toggle accessible without clearing the field', () => {
+    render(<DashboardPasswordInput aria-label="Password" value="secret123" onChange={() => undefined} />);
+    const input = screen.getByLabelText('Password');
+    expect(input).toHaveAttribute('type', 'password');
+    fireEvent.click(screen.getByRole('button', { name: 'Show password' }));
+    expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'text');
+    expect(screen.getByLabelText('Password')).toHaveValue('secret123');
+  });
+
+  it('uses the shared select primitive', () => {
+    render(<DashboardSelect aria-label="Tenant"><option>Company</option></DashboardSelect>);
+    expect(screen.getByLabelText('Tenant')).toHaveClass('dashboard-select');
+  });
+
+  it('preserves focused input while its controlled value rerenders', () => {
+    function Form() {
+      const [value, setValue] = useState('');
+      return <DashboardInput aria-label="First name" value={value} onChange={(event) => setValue(event.target.value)} />;
+    }
+    render(<Form />);
+    const input = screen.getByLabelText('First name');
+    input.focus();
+    fireEvent.change(input, { target: { value: 'A' } });
+    fireEvent.change(input, { target: { value: 'Alex' } });
+    expect(document.activeElement).toBe(input);
+  });
   it('uses shared semantic button states', () => {
     render(<><DashboardButton variant="primary">Generate</DashboardButton><DashboardButton variant="secondary">Preview</DashboardButton><DashboardButton variant="destructive">Archive</DashboardButton><DashboardButton disabled>Disabled</DashboardButton></>);
     expect(screen.getByRole('button', { name: 'Generate' }).className).toContain('bg-signal');

@@ -8,6 +8,10 @@
   background: #050a10;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  --dashboard-z-header: 200;
+  --dashboard-z-dropdown: 300;
+  --dashboard-z-popover: 400;
+  --dashboard-z-modal: 500;
 }
 
 * { box-sizing: border-box; }
@@ -25,7 +29,7 @@ input:not([type='checkbox']), select, textarea { background: rgba(12, 22, 35, 0.
 option { background: #0d1521; color: #f4f7fb; }
 button.bg-ink { background: #d42129; color: #fff; }
 button.bg-ink:hover { background: #b81920; }
-:focus-visible { outline: 3px solid rgba(236, 51, 60, 0.42); outline-offset: 2px; }
+:focus-visible { outline: 3px solid rgba(236, 51, 60, 0.72); outline-offset: 2px; }
 
 @layer components {
   .panel {
@@ -49,4 +53,14 @@ button.bg-ink:hover { background: #b81920; }
   .subtle-scrollbar { scrollbar-color: #26364a transparent; scrollbar-width: thin; }
   .subtle-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
   .subtle-scrollbar::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: #26364a; background-clip: padding-box; }
+  .dashboard-field-label { color: #dee6f1; }
+  .dashboard-helper { color: #a6b1c2; }
+  .dashboard-input::placeholder { color: #8e9bb0; opacity: 1; }
+  .dashboard-input:disabled { color: #8391a7; }
+  .dashboard-error { color: #ffe0e2; }
+  .dashboard-success { color: #d5ffe8; }
+  .dashboard-info { color: #d8f0ff; }
+  .auth-surface { @apply border border-white/[.14] bg-[#161618]/95 shadow-[0_22px_70px_rgba(0,0,0,.36)]; }
+  .auth-label { @apply text-sm font-semibold text-stone-700; }
+  .auth-input { @apply mt-2 block w-full rounded-xl border border-white/20 bg-black/20 px-4 py-3 text-white outline-none transition placeholder:text-stone-400 focus:border-signal focus:ring-2 focus:ring-signal/30; }
 }

@@ -1,4 +1,4 @@
-import { ArrowRight, Bot, BookOpenText, Eye, EyeOff, LockKeyhole, Mail, MessageCircle, ShieldCheck } from 'lucide-react';
+import { ArrowRight, Bot, BookOpenText, Cable, Eye, EyeOff, KanbanSquare, LockKeyhole, Mail, ShieldCheck, Zap } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import samcheLogo from '../../assets/branding/samche-company-llc-logo.png';
@@ -55,11 +55,12 @@ export function LoginPage() {
           <p className="mt-8 max-w-md text-base leading-7 text-stone-300 xl:text-lg">Manage your AI assistants, channels, knowledge and conversations from a single, powerful command center.</p>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
           <FeatureCard icon={Bot} title="AI Assistants" description="Create and manage intelligent assistants" />
-          <FeatureCard icon={MessageCircle} title="Channels" description="Connect and control communication channels" />
-          <FeatureCard icon={BookOpenText} title="Knowledge Base" description="Organize knowledge effectively" />
-          <FeatureCard icon={ShieldCheck} title="Secure & Private" description="Tenant-isolated and protected" />
+          <FeatureCard icon={BookOpenText} title="Knowledge Intelligence" description="Turn approved knowledge into useful answers" />
+          <FeatureCard icon={Cable} title="Omnichannel" description="Connect conversations across every channel" />
+          <FeatureCard icon={KanbanSquare} title="CRM & Pipeline" description="Move leads and deals forward with clarity" />
+          <FeatureCard icon={Zap} title="Automation / Agentic" description="Automate work with capable AI agents" />
         </div>
         <p className="mt-8 text-xs text-stone-500">© {new Date().getFullYear()} SamChe Company LLC. All rights reserved.</p>
       </section>

@@ -58,7 +58,7 @@ export function Sidebar({ tenantId, tenantName, tenantRole, email, onLogout, onN
   const access = workspaceAccessCopy(tenantRole);
 
   return <aside className="flex h-full w-full flex-col border-r border-line/80 bg-shell/95 px-2.5 py-5 text-white">
-    <div className="mb-6 px-2.5"><img src={samcheLogo} alt="SamChe Company LLC" className="h-12 w-32 object-contain object-left" /><p className="mt-1 text-[9px] font-semibold uppercase tracking-[0.24em] text-stone-400">AI Platform</p></div>
+    <div className="mb-6 px-2.5"><img src={samcheLogo} alt="SamChe Company LLC" className="h-16 w-40 max-w-full object-contain object-left" /><p className="mt-1 text-[9px] font-semibold uppercase tracking-[0.24em] text-stone-400">AI Platform</p></div>
     <div className="glass-surface mb-6 rounded-xl px-3 py-3"><p className="truncate text-sm font-medium" title={tenantName}>{tenantName}</p><p className="mt-1 text-xs text-stone-400">{isAgent ? 'Read-only access' : tenantRole ?? 'Workspace access'}</p></div>
     <nav aria-label="Dashboard navigation" className="space-y-4">
       {groups.map((group) => <section key={group.title}>
