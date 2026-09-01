@@ -33,18 +33,20 @@ export function validateImageKnowledgeSemanticOutput(value, segments) {
   const business = businessSegments(segments);
   const byOrder = new Map(business.map((segment) => [Number(segment.segment_order), segment]));
   const classifications = value?.classifications;
-  if (!Array.isArray(classifications) || classifications.length !== business.length) {
+  if (!Array.isArray(classifications) || classifications.length < business.length || classifications.length > business.length * 2) {
     throw new ImageKnowledgeSemanticError('IMAGE_SEMANTIC_OUTPUT_INVALID', 'Image semantic classification output is invalid');
   }
-  const seen = new Set();
-  return classifications.map((item) => {
+  const categoriesByOrder = new Map();
+  const output = classifications.map((item) => {
     const segmentOrder = Number(item?.segment_order);
     const segment = byOrder.get(segmentOrder);
     const category = String(item?.category ?? '').toUpperCase();
-    if (!segment || seen.has(segmentOrder) || !SEMANTIC_CATEGORIES.has(category)) {
+    const categories = categoriesByOrder.get(segmentOrder) ?? new Set();
+    if (!segment || categories.has(category) || !SEMANTIC_CATEGORIES.has(category)) {
       throw new ImageKnowledgeSemanticError('IMAGE_SEMANTIC_OUTPUT_INVALID', 'Image semantic classification output is invalid');
     }
-    seen.add(segmentOrder);
+    categories.add(category);
+    categoriesByOrder.set(segmentOrder, categories);
     const confidence = Number(item?.confidence);
     if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
       throw new ImageKnowledgeSemanticError('IMAGE_SEMANTIC_OUTPUT_INVALID', 'Image semantic classification output is invalid');
@@ -64,6 +66,13 @@ export function validateImageKnowledgeSemanticOutput(value, segments) {
       confidence,
     });
   });
+  if (categoriesByOrder.size !== business.length || business.some((segment) => {
+    const categories = categoriesByOrder.get(Number(segment.segment_order));
+    return !categories || (categories.size > 1 && !(categories.has('DURABLE_BUSINESS_FACT') && categories.has('ASSISTANT_BEHAVIOR_OR_QUALIFICATION')));
+  })) {
+    throw new ImageKnowledgeSemanticError('IMAGE_SEMANTIC_OUTPUT_INVALID', 'Image semantic classification output is invalid');
+  }
+  return output;
 }
 
 export function createImageKnowledgeSemanticClassifier({ provider } = {}) {

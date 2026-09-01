@@ -98,7 +98,13 @@ export interface BusinessIdentity { id: string; display_name: string; normalized
 export interface BusinessIdentityConflict { detected_identity: string; normalized_identity: string; source_ids: string[]; }
 export interface BusinessProfileVersion { id: string; schema_version?: number; business_identity_id?: string | null; business_identity_name?: string | null; identity_resolution_status?: string; source_scope?: { business_identity_id?: string; source_ids?: string[] }; profile_data: Record<string, unknown>; evidence?: unknown; status: string; active_version_id?: string | null; superseded_by_version_id?: string | null; reviewed_at?: string | null; created_at?: string; }
 export interface BusinessProfileGenerationResult { profile: BusinessProfileVersion; reused: boolean; run_id: string; }
-export interface KnowledgeRecommendation { id: string; recommendation_data: Record<string, unknown>; status: string; created_at?: string; }
+export interface KnowledgeRecommendation {
+  id: string;
+  recommendation_data: Record<string, unknown>;
+  evidence?: Array<{ semantic_category?: string }> | null;
+  status: string;
+  created_at?: string;
+}
 export interface AssistantConfigurationVersion { id: string; schema_version?: number; configuration_data: Record<string, unknown>; source_profile_version_id?: string | null; source_recommendation_id?: string | null; status: string; approved_at?: string | null; created_at?: string; }
 export interface RecommendationGenerationResult { recommendation: KnowledgeRecommendation; reused: boolean; run_id: string; }
 export interface ConfigurationGenerationResult { configuration: AssistantConfigurationVersion; reused: boolean; run_id: string; }

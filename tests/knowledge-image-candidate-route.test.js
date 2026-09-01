@@ -26,3 +26,14 @@ test('source response exposes only safe image extraction summary metadata', () =
   assert.match(source, /image_role_summary/);
   assert.match(source, /knowledge_source_extraction_segments/);
 });
+
+test('assistant recommendation listing is profile-independent and returns safe evidence metadata', () => {
+  const start = source.indexOf("router.get('/:tenantId/knowledge-intelligence/assistants/:assistantId/recommendations'");
+  const end = source.indexOf("router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/recommendations", start);
+  const handler = source.slice(start, end);
+
+  assert.ok(start >= 0);
+  assert.match(handler, /FROM assistant_knowledge_recommendations/);
+  assert.match(handler, /recommendation_data, evidence, status/);
+  assert.doesNotMatch(handler, /business_profile/i);
+});

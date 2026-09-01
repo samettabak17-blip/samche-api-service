@@ -294,9 +294,9 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
       return generate({
         prompt: [
           'Classify each statement made by a business representative. A BUSINESS speaker is an authority signal, not proof that every statement is durable company knowledge.',
-          'Use exactly one category per segment: DURABLE_BUSINESS_FACT, ASSISTANT_BEHAVIOR_OR_QUALIFICATION, CUSTOMER_SPECIFIC_CONTEXT, TRANSIENT_CONVERSATION, DURABLE_POLICY_OR_COMMITMENT_CANDIDATE, or UNSAFE_OR_AMBIGUOUS.',
+          'Return one category for every segment. A mixed segment may return exactly two artifacts only when it contains both a durable fact and reusable qualification behavior: DURABLE_BUSINESS_FACT plus ASSISTANT_BEHAVIOR_OR_QUALIFICATION. Otherwise return exactly one category: DURABLE_BUSINESS_FACT, ASSISTANT_BEHAVIOR_OR_QUALIFICATION, CUSTOMER_SPECIFIC_CONTEXT, TRANSIENT_CONVERSATION, DURABLE_POLICY_OR_COMMITMENT_CANDIDATE, or UNSAFE_OR_AMBIGUOUS.',
           'For DURABLE_BUSINESS_FACT return a concise, decontextualized canonical_fact in the source language. For ASSISTANT_BEHAVIOR_OR_QUALIFICATION return a concise reusable behavior instruction in canonical_fact. Exclude greetings, timestamps, customer-specific needs, one-off promises, and conversational filler. For every other category canonical_fact must be null.',
-          'Do not infer a durable policy from one occurrence. Return every supplied segment exactly once.',
+          'Do not infer a durable policy from one occurrence. Return every supplied segment at least once and no more than twice; a second artifact is allowed only for the durable-fact plus qualification-behavior pair.',
           JSON.stringify({ segments: safeSegments }),
         ].join('\n\n'),
         fields: [],

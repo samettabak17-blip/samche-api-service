@@ -114,6 +114,25 @@ test('keeps durable candidates tenant-scoped while creating assigned-assistant b
   assert.equal(result.warnings.length, 0);
 });
 
+test('persists both durable knowledge and assistant behavior from one mixed BUSINESS segment', async () => {
+  const db = database({ assistantAssignments: [{ assistant_id: assistantId }] });
+  const classifier = {
+    async classify() {
+      return [
+        { segmentId: 's2', segmentOrder: 1, category: 'DURABLE_BUSINESS_FACT', canonicalText: 'The company provides event planning services.', confidence: 0.9 },
+        { segmentId: 's2', segmentOrder: 1, category: 'ASSISTANT_BEHAVIOR_OR_QUALIFICATION', canonicalText: 'Ask whether the customer already has a venue.', confidence: 0.8 },
+      ];
+    },
+  };
+
+  const result = await createImageKnowledgeCandidates({ database: db, tenantId, sourceId, extractionHash, semanticClassifier: classifier });
+
+  assert.equal(result.candidates.length, 1);
+  assert.equal(result.behavior_recommendations.length, 1);
+  assert.equal(result.behavior_recommendations[0].assistant_id, assistantId);
+  assert.equal(result.behavior_recommendations[0].status, 'NEEDS_REVIEW');
+});
+
 test('unassigned image source still creates durable facts and returns the behavior-assignment warning', async () => {
   const behaviorSegment = { ...rows()[1], id: 's5', segment_order: 4, normalized_text: 'What budget range should the customer share before we recommend a package?' };
   const db = database({ segmentRows: [...rows(), behaviorSegment] });

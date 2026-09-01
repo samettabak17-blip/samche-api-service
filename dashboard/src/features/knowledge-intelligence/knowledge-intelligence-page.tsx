@@ -22,6 +22,7 @@ import type {
   BusinessProfileGenerationResult,
   BusinessProfileVersion,
   ConfigurationGenerationResult,
+  KnowledgeRecommendation,
   RecommendationGenerationResult,
 } from "../../types/api";
 import { tenantApi, tenantKeys } from "../dashboard/dashboard-api";
@@ -36,6 +37,23 @@ const tabs = [
   ["configurations", "Configurations"],
   ["retrieval", "Retrieval Test"],
 ] as const;
+
+function conversationRecommendationGuidance(row: KnowledgeRecommendation) {
+  const guidance = row.recommendation_data.qualification_guidance;
+  if (!Array.isArray(guidance)) return [];
+  return guidance.filter(
+    (item): item is string => typeof item === "string" && item.trim().length > 0,
+  );
+}
+
+function isConversationBehaviorRecommendation(row: KnowledgeRecommendation) {
+  return (
+    conversationRecommendationGuidance(row).length > 0 ||
+    row.evidence?.some(
+      (item) => item?.semantic_category === "ASSISTANT_BEHAVIOR_OR_QUALIFICATION",
+    ) === true
+  );
+}
 
 const routeForTab: Record<string, string> = {
   overview: "intelligence",
@@ -2177,18 +2195,30 @@ export function KnowledgeIntelligencePage() {
                 ) : !(recommendations.data ?? []).length ? (
                   <EmptyState
                     title="No recommendations"
-                    description="Generate a recommendation from the selected active Business Profile scope."
+                    description="Conversation-derived recommendations appear here after source candidate generation. Business Profile recommendations require a selected active profile."
                   />
                 ) : (
                   <div className="panel divide-y divide-line">
-                    {(recommendations.data ?? []).map((row) => (
+                    {(recommendations.data ?? []).map((row) => {
+                      const guidance = conversationRecommendationGuidance(row);
+                      const conversationDerived = isConversationBehaviorRecommendation(row);
+                      return (
                       <article id={`recommendation-${row.id}`} key={row.id} className="p-4" aria-current={selectedRecommendationId === row.id ? "true" : undefined}>
                         <strong className="text-sm">
-                          Recommendation {row.id.slice(0, 8)}
+                          {conversationDerived
+                            ? "Conversation behavior recommendation"
+                            : `Recommendation ${row.id.slice(0, 8)}`}
                         </strong>
                         <p className="mt-1 text-xs text-stone-400">
                           {row.status}
                         </p>
+                        {guidance.length > 0 && (
+                          <ul className="mt-3 space-y-2 text-sm text-ink">
+                            {guidance.map((item) => (
+                              <li key={item}>{item}</li>
+                            ))}
+                          </ul>
+                        )}
                         {canManage && (
                           <div className="mt-3 flex flex-wrap gap-2">
                             {row.status === "NEEDS_REVIEW" && (
@@ -2274,7 +2304,8 @@ export function KnowledgeIntelligencePage() {
                           </div>
                         )}
                       </article>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

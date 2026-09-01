@@ -1207,6 +1207,34 @@ it("shows a scope-bound reused Recommendation terminal result without silent idl
   expect(mockedApi.reviewRecommendation).not.toHaveBeenCalled();
 });
 
+it("shows an assistant-scoped conversation recommendation without an active Business Profile", async () => {
+  mockedApi.listAssistants.mockResolvedValue([
+    { id: "assistant-a", tenant_id: "tenant-a", name: "Meridian Advisor" },
+  ]);
+  mockedApi.listBusinessProfiles.mockResolvedValue([]);
+  mockedApi.listKnowledgeRecommendations.mockResolvedValue([
+    {
+      id: "conversation-recommendation",
+      recommendation_data: {
+        schema_version: 2,
+        qualification_guidance: ["Ask whether the customer already has a venue."],
+      },
+      status: "NEEDS_REVIEW",
+      evidence: [{ semantic_category: "ASSISTANT_BEHAVIOR_OR_QUALIFICATION" }],
+    },
+  ]);
+
+  renderPage(true, "/app/tenant-a/knowledge-base/configurations");
+  const assistantSelect = await screen.findByRole("combobox", { name: "Assistant" });
+  await screen.findByRole("option", { name: "Meridian Advisor" });
+  fireEvent.change(assistantSelect, { target: { value: "assistant-a" } });
+
+  expect(await screen.findByText("Ask whether the customer already has a venue.")).toBeVisible();
+  expect(screen.getByText("NEEDS_REVIEW")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Generate recommendation" })).toBeDisabled();
+  expect(mockedApi.generateKnowledgeRecommendation).not.toHaveBeenCalled();
+});
+
 it("keeps the Configuration page rendered when generation returns an unusable summary artifact", async () => {
   mockedApi.listAssistants.mockResolvedValue([
     { id: "assistant-a", tenant_id: "tenant-a", name: "Meridian Advisor" },
