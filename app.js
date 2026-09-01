@@ -191,12 +191,19 @@ if ((knowledgeEmbedder || knowledgeImageExtractor) && process.env.KNOWLEDGE_PROC
   console.info('KNOWLEDGE_PROCESSING_WORKER_DISABLED');
 }
 
+let customerInvitationOutboxWorkerStatus = null;
 try {
   const invitationMailConfig = validateInvitationMailConfiguration(process.env);
   createCustomerInvitationOutboxWorker({
     database: pool,
     mailer: createSmtpCustomerInvitationMailer({ config: invitationMailConfig }),
     envelopeKey: process.env.INVITATION_ENVELOPE_ENCRYPTION_KEY,
+    onStatus: ({ state, code }) => {
+      const nextStatus = code ? `${state}_${code}` : state;
+      if (customerInvitationOutboxWorkerStatus === nextStatus) return;
+      customerInvitationOutboxWorkerStatus = nextStatus;
+      console.info(`CUSTOMER_INVITATION_OUTBOX_${nextStatus}`);
+    },
   });
 } catch {
   console.info('CUSTOMER_INVITATION_DELIVERY_DISABLED');

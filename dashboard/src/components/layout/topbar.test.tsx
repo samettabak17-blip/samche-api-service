@@ -1,14 +1,14 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Topbar } from './topbar';
 
 vi.mock('../../features/overview/overview-date-range-context', () => ({
   useOverviewDateRange: () => ({ preset: 'last-7-days', setPreset: vi.fn(), customStart: '2026-08-01', setCustomStart: vi.fn(), customEnd: '2026-08-07', setCustomEnd: vi.fn(), applyCustomRange: vi.fn(), clearCustomRange: vi.fn(), activeRange: { label: 'Last 7 days' } }),
 }));
 vi.mock('../../features/live-support/live-support-attention-provider', () => ({ useLiveSupportAttention: () => ({ requestedCount: 0 }) }));
-vi.mock('../../features/dashboard/dashboard-api', () => ({ tenantApi: { listConversations: vi.fn(), createTenant: vi.fn(), listCustomerUsers: vi.fn(), assignTenantUser: vi.fn() }, onboardingApi: { createCompanyInvitation: vi.fn() } }));
+vi.mock('../../features/dashboard/dashboard-api', () => ({ tenantApi: { listConversations: vi.fn(), createTenant: vi.fn(), listCustomerUsers: vi.fn(), assignTenantUser: vi.fn() }, onboardingApi: { createCompanyInvitation: vi.fn(), listInvitationStatuses: vi.fn() } }));
 import { onboardingApi, tenantApi } from '../../features/dashboard/dashboard-api';
 
 function renderTopbar(systemRole: 'OWNER' | 'CUSTOMER' = 'CUSTOMER', onSelectTenant = vi.fn(), tenantRole: 'ADMIN' | 'AGENT' = 'ADMIN') {
@@ -17,6 +17,9 @@ function renderTopbar(systemRole: 'OWNER' | 'CUSTOMER' = 'CUSTOMER', onSelectTen
 }
 
 afterEach(() => cleanup());
+beforeEach(() => {
+  vi.mocked(onboardingApi.listInvitationStatuses).mockResolvedValue([]);
+});
 
 describe('Topbar global navigation search', () => {
   it('lets an OWNER create a company and invite its first administrator through the portal modal', async () => {
@@ -36,10 +39,47 @@ describe('Topbar global navigation search', () => {
     expect(onSelectTenant).toHaveBeenCalledWith('tenant-new');
   });
 
+  it('keeps each create-company field focused while its controlled value changes', () => {
+    renderTopbar('OWNER');
+    fireEvent.click(screen.getByRole('button', { name: 'Create company' }));
+
+    for (const [name, value] of [
+      ['Company name', 'Northwind'],
+      ['First name', 'Ada'],
+      ['Last name', 'Lovelace'],
+      ['Email', 'ada@example.test'],
+    ] as const) {
+      const field = screen.getByRole('textbox', { name });
+      field.focus();
+      fireEvent.change(field, { target: { value } });
+      expect(document.activeElement).toBe(field);
+    }
+  });
+
+  it('keeps the create-company modal Escape close and focus restoration behavior', () => {
+    renderTopbar('OWNER');
+    const trigger = screen.getByRole('button', { name: 'Create company' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(screen.getByRole('textbox', { name: 'Company name' })).toHaveFocus();
+    expect(document.body.style.overflow).toBe('hidden');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Create company' })).toBeNull();
+    expect(trigger).toHaveFocus();
+    expect(document.body.style.overflow).toBe('');
+  });
+
   it('does not render company creation for a CUSTOMER even with tenant ADMIN membership', () => {
     renderTopbar('CUSTOMER');
     expect(screen.queryByRole('button', { name: 'Create company' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Assign customer' })).toBeNull();
+  });
+
+  it('shows an OWNER a safe invitation delivery failure status for the selected company', async () => {
+    vi.mocked(onboardingApi.listInvitationStatuses).mockResolvedValue([{ id: 'invite-1', status: 'PENDING', tenant_role: 'ADMIN', expires_at: '', created_at: '', delivery_status: 'DELIVERY_FAILED', delivery_code: 'SMTP_RECIPIENT_REJECTED', attempt_count: 1 }]);
+    renderTopbar('OWNER');
+    expect(await screen.findByText('Invitation delivery failed.')).toBeVisible();
+    expect(screen.getByText('SMTP_RECIPIENT_REJECTED')).toBeVisible();
   });
 
   it('uses platform and tenant role labels without conflating them', () => {

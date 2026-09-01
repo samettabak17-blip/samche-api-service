@@ -17,7 +17,12 @@ const focusableSelector = 'a[href], button:not([disabled]), input:not([disabled]
 export function Modal({ open, title, children, onClose, initialFocusRef, closeOnEscape = true, className = '' }: ModalProps) {
   const dialogRef = useRef<HTMLElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  const closeOnEscapeRef = useRef(closeOnEscape);
   const titleId = useId();
+
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  useEffect(() => { closeOnEscapeRef.current = closeOnEscape; }, [closeOnEscape]);
 
   useEffect(() => {
     if (!open) return;
@@ -27,9 +32,9 @@ export function Modal({ open, title, children, onClose, initialFocusRef, closeOn
     initialFocusRef?.current?.focus();
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && closeOnEscape) {
+      if (event.key === 'Escape' && closeOnEscapeRef.current) {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== 'Tab') return;
@@ -46,7 +51,7 @@ export function Modal({ open, title, children, onClose, initialFocusRef, closeOn
       document.removeEventListener('keydown', onKeyDown);
       openerRef.current?.focus();
     };
-  }, [closeOnEscape, initialFocusRef, onClose, open]);
+  }, [initialFocusRef, open]);
 
   if (!open || typeof document === 'undefined') return null;
 

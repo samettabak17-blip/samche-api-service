@@ -1,5 +1,14 @@
 import { decryptInvitationEnvelope } from './customer-invitation-crypto.js';
 
+function safeDeliveryFailureCode(error) {
+  if (error?.code === 'SMTP_RECIPIENT_REJECTED') return 'SMTP_RECIPIENT_REJECTED';
+  const command = String(error?.command ?? '').toUpperCase();
+  if (command.includes('MAIL FROM')) return 'SMTP_FROM_REJECTED';
+  if (command.includes('RCPT TO')) return 'SMTP_RECIPIENT_REJECTED';
+  if (error?.code === 'EAUTH' || /auth/i.test(String(error?.code ?? ''))) return 'SMTP_AUTH_FAILED';
+  return 'SMTP_DELIVERY_FAILED';
+}
+
 function envelopeFromRow(row) {
   return {
     ciphertext: row.encrypted_envelope_ciphertext,
@@ -37,23 +46,26 @@ export async function processInvitationOutboxRow({ client, row, envelopeKey, mai
     return { status: 'DELIVERY_FAILED' };
   }
   try {
-    if (row.template_version === 'PASSWORD_RESET_V1') await mailer.sendPasswordReset({ email: row.email, token, expiresAt: row.expires_at });
-    else await mailer.sendInvitation({ companyName: row.company_name, email: row.email, token, expiresAt: row.expires_at });
+    const delivery = row.template_version === 'PASSWORD_RESET_V1'
+      ? await mailer.sendPasswordReset({ email: row.email, token, expiresAt: row.expires_at })
+      : await mailer.sendInvitation({ companyName: row.company_name, email: row.email, token, expiresAt: row.expires_at });
     await client.query(
       `UPDATE customer_invitation_outbox
        SET status = 'SENT', sent_at = CURRENT_TIMESTAMP, encrypted_envelope_ciphertext = NULL,
-           envelope_iv = NULL, envelope_auth_tag = NULL, updated_at = CURRENT_TIMESTAMP
+           envelope_iv = NULL, envelope_auth_tag = NULL, provider_code = $2, last_attempt_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
        WHERE id = $1`,
-      [row.id],
+      [row.id, delivery?.providerCode ?? 'SMTP_ACCEPTED'],
     );
     return { status: 'SENT' };
-  } catch {
+  } catch (error) {
     await client.query(
       `UPDATE customer_invitation_outbox
        SET status = 'DELIVERY_FAILED', attempt_count = attempt_count + 1,
-           next_attempt_at = CURRENT_TIMESTAMP + INTERVAL '15 minutes', updated_at = CURRENT_TIMESTAMP
+           next_attempt_at = CURRENT_TIMESTAMP + INTERVAL '15 minutes', provider_code = $2,
+           last_attempt_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
        WHERE id = $1`,
-      [row.id],
+      [row.id, safeDeliveryFailureCode(error)],
     );
     return { status: 'DELIVERY_FAILED' };
   } finally {
@@ -61,13 +73,14 @@ export async function processInvitationOutboxRow({ client, row, envelopeKey, mai
   }
 }
 
-export function createCustomerInvitationOutboxWorker({ database, mailer, envelopeKey, intervalMs = 60_000 }) {
+export function createCustomerInvitationOutboxWorker({ database, mailer, envelopeKey, intervalMs = 60_000, onStatus = () => {} }) {
   let running = false;
   const runOnce = async () => {
     if (running) return;
     running = true;
-    const client = await database.connect();
+    let client;
     try {
+      client = await database.connect();
       await client.query('BEGIN');
       const claimed = await client.query(
         `SELECT o.*, COALESCE(i.status, r.status) AS authority_status, COALESCE(i.expires_at, r.expires_at) AS expires_at, t.name AS company_name, u.email
@@ -82,10 +95,12 @@ export function createCustomerInvitationOutboxWorker({ database, mailer, envelop
       );
       if (claimed.rowCount) await processInvitationOutboxRow({ client, row: claimed.rows[0], envelopeKey, mailer });
       await client.query('COMMIT');
+      onStatus({ state: 'RUNNING' });
     } catch {
-      await client.query('ROLLBACK').catch(() => {});
+      await client?.query('ROLLBACK').catch(() => {});
+      onStatus({ state: 'ERROR', code: 'OUTBOX_WORKER_FAILURE' });
     } finally {
-      client.release();
+      client?.release();
       running = false;
     }
   };

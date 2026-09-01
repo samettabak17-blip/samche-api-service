@@ -152,7 +152,7 @@ router.get('/:tenantId/invitations', requireOwner, async (req, res) => {
     try {
         const result = await query(
             `SELECT i.id, i.status, i.tenant_role, i.expires_at, i.created_at,
-                    o.status AS delivery_status, o.attempt_count
+                    o.status AS delivery_status, o.attempt_count, o.provider_code AS delivery_code
              FROM customer_invitations i
              LEFT JOIN customer_invitation_outbox o ON o.invitation_id = i.id
              WHERE i.tenant_id = $1 ORDER BY i.created_at DESC`,
