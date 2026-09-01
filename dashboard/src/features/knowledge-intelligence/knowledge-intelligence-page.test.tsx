@@ -866,6 +866,35 @@ it("does not leak the page assistant selection into tenant-scoped image candidat
   expect(await screen.findByText("No eligible business facts were found in this image. Customer and unknown segments remain excluded from canonical business knowledge.")).toBeVisible();
 });
 
+it("does not show a stale source success banner alongside a failed image candidate request", async () => {
+  mockedApi.listAssistants.mockResolvedValue([
+    { id: "assistant-a", tenant_id: "tenant-a", name: "Blue Dune AI Assistant" },
+  ]);
+  mockedApi.listKnowledgeSources.mockResolvedValue([
+    { id: "image-source-a", title: "WhatsApp screenshot", source_type: "IMAGE", mime_type: "image/png", processing_status: "READY", indexing_status: "DISABLED", enabled: true },
+  ]);
+  mockedApi.getKnowledgeSource.mockResolvedValue({
+    id: "image-source-a", title: "WhatsApp screenshot", source_type: "IMAGE", mime_type: "image/png",
+    processing_status: "READY", indexing_status: "DISABLED", enabled: true,
+    extraction_hash: "c".repeat(64), assistant_ids: [],
+  });
+  mockedApi.generateImageKnowledgeCandidates.mockRejectedValue(
+    new ApiError(500, "Knowledge source operation failed"),
+  );
+
+  renderPage(true, "/app/tenant-a/knowledge-base/sources");
+  fireEvent.click(await screen.findByRole("button", { name: "View WhatsApp screenshot" }));
+  await screen.findByRole("button", { name: "Generate candidates" });
+  const assistantControls = screen.getAllByLabelText("Assistant");
+  fireEvent.change(assistantControls[assistantControls.length - 1]!, { target: { value: "assistant-a" } });
+  fireEvent.click(screen.getByRole("button", { name: "Assign / re-assign" }));
+  await screen.findByText("Source lifecycle action completed.");
+  fireEvent.click(screen.getByRole("button", { name: "Generate candidates" }));
+
+  expect(await screen.findByText("Knowledge source operation failed")).toBeVisible();
+  expect(screen.queryByText("Source lifecycle action completed.")).not.toBeInTheDocument();
+});
+
 it("renders redacted image BUSINESS evidence and CUSTOMER context without treating it as truth", async () => {
   mockedApi.listKnowledgeCandidates.mockResolvedValue([
     {

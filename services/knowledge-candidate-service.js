@@ -118,7 +118,7 @@ export async function createImageKnowledgeCandidates({
            id, tenant_id, assistant_id, candidate_type, proposed_title, proposed_content,
            candidate_fingerprint, confidence, status, pii_redaction_status, evidence_summary
          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'NEEDS_REVIEW', $9, $10)
-         ON CONFLICT (tenant_id, candidate_fingerprint) DO NOTHING
+         ON CONFLICT (tenant_id, candidate_fingerprint) WHERE candidate_fingerprint IS NOT NULL DO NOTHING
          RETURNING id, status, pii_redaction_status, candidate_fingerprint`,
         [crypto.randomUUID(), tenantId, assistantId, normalizedType, 'Image-extracted business statement', proposedContent,
           fingerprint, Number(business.role_confidence), proposedContent === String(business.normalized_text).trim() ? 'PASSED' : 'REDACTED',

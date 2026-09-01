@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createImageKnowledgeCandidates } from '../services/knowledge-candidate-service.js';
 
 const tenantId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -76,4 +77,9 @@ test('redaction or evidence failure rolls back without leaving a candidate', asy
   const db = database({ failOnEvidence: true });
   await assert.rejects(() => createImageKnowledgeCandidates({ database: db, tenantId, assistantId, sourceId, extractionHash }), { code: 'IMAGE_EVIDENCE_WRITE_FAILED' });
   assert.ok(db.calls.some(({ sql }) => /^ROLLBACK$/i.test(sql.trim())));
+});
+
+test('candidate insert conflict target matches the partial fingerprint uniqueness invariant', () => {
+  const source = fs.readFileSync(new URL('../services/knowledge-candidate-service.js', import.meta.url), 'utf8');
+  assert.match(source, /ON CONFLICT \(tenant_id, candidate_fingerprint\)\s+WHERE candidate_fingerprint IS NOT NULL\s+DO NOTHING/);
 });

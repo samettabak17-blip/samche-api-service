@@ -555,6 +555,15 @@ export function KnowledgeIntelligencePage() {
         assistantId: null,
         extractionHash,
       }),
+    onMutate: () => {
+      // A previous source assignment is unrelated to this request; its stale
+      // success state must not be presented alongside a candidate error.
+      assignSource.reset();
+      unassignSource.reset();
+      reindexSource.reset();
+      archiveSource.reset();
+      setImageCandidateOutcome(null);
+    },
     onSuccess: (result, variables) => {
       setImageCandidateOutcome({
         sourceId: variables.sourceId,
@@ -1478,8 +1487,7 @@ export function KnowledgeIntelligencePage() {
           {(assignSource.isSuccess ||
             unassignSource.isSuccess ||
             reindexSource.isSuccess ||
-            archiveSource.isSuccess ||
-            generateImageCandidates.isSuccess) && (
+            archiveSource.isSuccess) && (
             <p
               role="status"
               className="rounded-lg border border-emerald-700 bg-emerald-950/30 p-3 text-sm text-emerald-300"
