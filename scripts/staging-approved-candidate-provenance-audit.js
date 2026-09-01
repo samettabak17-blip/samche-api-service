@@ -29,6 +29,7 @@ try {
      ), candidate_scope AS (
        SELECT candidate.id AS candidate_id, candidate.tenant_id, candidate.assistant_id, candidate.status,
               candidate.image_semantic_version,
+              candidate.candidate_fingerprint,
               candidate.candidate_fingerprint IS NOT NULL AS candidate_fingerprint_present,
               candidate.approved_source_id AS materialized_source_id,
               materialized.title AS materialized_source_title
