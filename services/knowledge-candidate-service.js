@@ -60,6 +60,7 @@ export async function createImageKnowledgeCandidates({
   assistantId = null,
   sourceId,
   extractionHash,
+  semanticClassifier = null,
   redact = redactConversationCandidate,
   candidateType = 'POLICY',
 }) {
@@ -69,6 +70,7 @@ export async function createImageKnowledgeCandidates({
   if (!/^[a-f0-9]{64}$/i.test(String(extractionHash ?? ''))) throw new KnowledgeCandidateError('KNOWLEDGE_IMAGE_EXTRACTION_HASH_INVALID', 'Image extraction hash is invalid');
   const normalizedType = String(candidateType).toUpperCase();
   if (!CANDIDATE_TYPES.has(normalizedType)) throw new KnowledgeCandidateError('KNOWLEDGE_CANDIDATE_TYPE_INVALID', 'Knowledge candidate type is invalid');
+  if (typeof semanticClassifier?.classify !== 'function') throw new KnowledgeCandidateError('KNOWLEDGE_IMAGE_SEMANTIC_CLASSIFIER_REQUIRED', 'Image semantic classification is required');
 
   return candidateTransaction(database, async (client) => {
     const segmentsResult = await client.query(
@@ -96,10 +98,29 @@ export async function createImageKnowledgeCandidates({
         ORDER BY segment.segment_order ASC`,
       [tenantId, sourceId, String(extractionHash).toLowerCase(), assistantId]);
     const segments = segmentsResult.rows ?? [];
-    const businessSegments = segments.filter((segment) => segment.role === 'BUSINESS');
+    const classifications = await semanticClassifier.classify({ segments });
+    const businessSegments = classifications
+      .filter((classification) => classification.category === 'DURABLE_BUSINESS_FACT')
+      .map((classification) => ({ classification, segment: segments.find((segment) => segment.id === classification.segmentId) }))
+      .filter(({ segment }) => segment);
+    // Replace only legacy/unapproved raw image candidates for this exact extraction.
+    // Approved knowledge remains immutable and is never silently regenerated.
+    await client.query(
+      `DELETE FROM knowledge_candidates candidate
+        USING knowledge_candidate_image_evidence evidence
+       WHERE candidate.id = evidence.candidate_id
+         AND candidate.tenant_id = evidence.tenant_id
+         AND candidate.tenant_id = $1
+         AND evidence.source_id = $2
+         AND evidence.extraction_hash = $3
+         AND evidence.evidence_kind = 'PRIMARY'
+         AND candidate.status IN ('DRAFT', 'NEEDS_REVIEW')
+         AND candidate.image_semantic_version IS DISTINCT FROM '1'`,
+      [tenantId, sourceId, String(extractionHash).toLowerCase()],
+    );
     const results = [];
 
-    for (const business of businessSegments) {
+    for (const { classification, segment: business } of businessSegments) {
       const fingerprint = imageCandidateFingerprint({ tenantId, assistantId, sourceId, extractionHash: business.extraction_hash, segmentOrder: business.segment_order });
       const existing = await client.query(
         `SELECT id, status, candidate_fingerprint
@@ -111,17 +132,17 @@ export async function createImageKnowledgeCandidates({
         continue;
       }
 
-      const proposedContent = String(redact(text(business.normalized_text, 12000, 'KNOWLEDGE_CANDIDATE_CONTENT_INVALID')) ?? '').trim();
+      const proposedContent = String(redact(text(classification.canonicalText, 12000, 'KNOWLEDGE_CANDIDATE_CONTENT_INVALID')) ?? '').trim();
       if (!proposedContent) throw new KnowledgeCandidateError('KNOWLEDGE_IMAGE_REDACTION_EMPTY', 'Redacted image candidate content is empty');
       const insert = await client.query(
         `INSERT INTO knowledge_candidates (
            id, tenant_id, assistant_id, candidate_type, proposed_title, proposed_content,
-           candidate_fingerprint, confidence, status, pii_redaction_status, evidence_summary
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'NEEDS_REVIEW', $9, $10)
+           candidate_fingerprint, confidence, status, pii_redaction_status, evidence_summary, image_semantic_version
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'NEEDS_REVIEW', $9, $10, '1')
          ON CONFLICT (tenant_id, candidate_fingerprint) WHERE candidate_fingerprint IS NOT NULL DO NOTHING
          RETURNING id, status, pii_redaction_status, candidate_fingerprint`,
-        [crypto.randomUUID(), tenantId, assistantId, normalizedType, 'Image-extracted business statement', proposedContent,
-          fingerprint, Number(business.role_confidence), proposedContent === String(business.normalized_text).trim() ? 'PASSED' : 'REDACTED',
+        [crypto.randomUUID(), tenantId, assistantId, normalizedType, 'Canonical image-derived business fact', proposedContent,
+          fingerprint, Number(classification.confidence), proposedContent === String(classification.canonicalText).trim() ? 'PASSED' : 'REDACTED',
           'Image segment provenance is retained in tenant-scoped evidence.']);
       if (!insert.rows?.[0]) {
         const reused = await client.query(
@@ -142,12 +163,14 @@ export async function createImageKnowledgeCandidates({
         await client.query(
           `INSERT INTO knowledge_candidate_image_evidence (
              tenant_id, candidate_id, source_id, segment_id, extraction_version, extraction_hash,
-             segment_order, role, role_confidence, normalized_text, evidence_kind, source_locator
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)`,
+             segment_order, role, role_confidence, normalized_text, evidence_kind, source_locator, semantic_category, canonical_text
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14)`,
           [tenantId, candidate.id, sourceId, segment.id, segment.extraction_version, segment.extraction_hash,
             segment.segment_order, segment.role, Number(segment.role_confidence), evidenceText,
             segment.id === business.id ? 'PRIMARY' : 'SUPPORTING_CONTEXT',
-            segment.source_locator === null || segment.source_locator === undefined ? null : JSON.stringify(segment.source_locator)]);
+            segment.source_locator === null || segment.source_locator === undefined ? null : JSON.stringify(segment.source_locator),
+            segment.id === business.id ? classification.category : null,
+            segment.id === business.id ? proposedContent : null]);
       }
       results.push({ ...candidate, reused: false });
     }

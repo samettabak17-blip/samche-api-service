@@ -7,6 +7,17 @@ const tenantId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const sourceId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const assistantId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const extractionHash = 'd'.repeat(64);
+const semanticClassifier = {
+  async classify({ segments }) {
+    return segments.filter((segment) => segment.role === 'BUSINESS').map((segment) => ({
+      segmentId: segment.id,
+      segmentOrder: segment.segment_order,
+      category: 'DURABLE_BUSINESS_FACT',
+      canonicalText: 'Remaining balance is due three business days before the event.',
+      confidence: 0.91,
+    }));
+  },
+};
 
 function rows() {
   return [
@@ -35,13 +46,12 @@ function database({ segmentRows = rows(), existing = null, failOnEvidence = fals
 
 test('creates a redacted NEEDS_REVIEW candidate from BUSINESS with adjacent CUSTOMER context', async () => {
   const db = database();
-  const result = await createImageKnowledgeCandidates({ database: db, tenantId, assistantId, sourceId, extractionHash });
+  const result = await createImageKnowledgeCandidates({ database: db, tenantId, assistantId, sourceId, extractionHash, semanticClassifier });
   assert.equal(result.length, 1);
   assert.equal(result[0].status, 'NEEDS_REVIEW');
   assert.equal(result[0].reused, false);
   const insert = db.calls.find(({ sql }) => /INSERT INTO knowledge_candidates/i.test(sql));
-  assert.doesNotMatch(insert.params[5], /sara@example\.com/);
-  assert.match(insert.params[5], /\[redacted email\]/);
+  assert.equal(insert.params[5], 'Remaining balance is due three business days before the event.');
   const evidence = db.calls.filter(({ sql }) => /INSERT INTO knowledge_candidate_image_evidence/i.test(sql));
   assert.equal(evidence.length, 3);
   assert.equal(evidence.find(({ params }) => params[3] === 's2').params[10], 'PRIMARY');
@@ -54,14 +64,14 @@ test('creates a redacted NEEDS_REVIEW candidate from BUSINESS with adjacent CUST
 
 test('CUSTOMER and UNKNOWN segments alone do not create candidates', async () => {
   const db = database({ segmentRows: rows().filter((segment) => segment.role !== 'BUSINESS') });
-  const result = await createImageKnowledgeCandidates({ database: db, tenantId, sourceId, extractionHash });
+  const result = await createImageKnowledgeCandidates({ database: db, tenantId, sourceId, extractionHash, semanticClassifier });
   assert.deepEqual(result, []);
   assert.equal(db.calls.some(({ sql }) => /INSERT INTO knowledge_candidates/i.test(sql)), false);
 });
 
 test('reuses an exact image candidate fingerprint without duplicating it', async () => {
   const db = database({ existing: { id: 'existing-candidate', status: 'NEEDS_REVIEW', candidate_fingerprint: 'existing' } });
-  const result = await createImageKnowledgeCandidates({ database: db, tenantId, assistantId, sourceId, extractionHash });
+  const result = await createImageKnowledgeCandidates({ database: db, tenantId, assistantId, sourceId, extractionHash, semanticClassifier });
   assert.equal(result[0].id, 'existing-candidate');
   assert.equal(result[0].reused, true);
   assert.equal(db.calls.some(({ sql }) => /INSERT INTO knowledge_candidates/i.test(sql)), false);
@@ -69,13 +79,13 @@ test('reuses an exact image candidate fingerprint without duplicating it', async
 
 test('stale or disabled image source produces no candidate', async () => {
   const db = database({ segmentRows: [] });
-  const result = await createImageKnowledgeCandidates({ database: db, tenantId, sourceId, extractionHash });
+  const result = await createImageKnowledgeCandidates({ database: db, tenantId, sourceId, extractionHash, semanticClassifier });
   assert.deepEqual(result, []);
 });
 
 test('redaction or evidence failure rolls back without leaving a candidate', async () => {
   const db = database({ failOnEvidence: true });
-  await assert.rejects(() => createImageKnowledgeCandidates({ database: db, tenantId, assistantId, sourceId, extractionHash }), { code: 'IMAGE_EVIDENCE_WRITE_FAILED' });
+  await assert.rejects(() => createImageKnowledgeCandidates({ database: db, tenantId, assistantId, sourceId, extractionHash, semanticClassifier }), { code: 'IMAGE_EVIDENCE_WRITE_FAILED' });
   assert.ok(db.calls.some(({ sql }) => /^ROLLBACK$/i.test(sql.trim())));
 });
 

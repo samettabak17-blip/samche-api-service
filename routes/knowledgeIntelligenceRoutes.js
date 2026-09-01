@@ -31,6 +31,7 @@ import {
 import { KnowledgeGapError } from '../services/knowledge-gap-service.js';
 import { createSuggestedCandidateFromKnowledgeGap } from '../services/knowledge-gap-candidate-service.js';
 import { createKnowledgeGenerationProvider, KnowledgeGenerationError } from '../services/knowledge-generation-provider.js';
+import { createImageKnowledgeSemanticClassifier, ImageKnowledgeSemanticError } from '../services/image-knowledge-semantic-service.js';
 import {
   analyzeBusinessProfileSourceScope,
   generateBusinessProfileVersion,
@@ -73,7 +74,7 @@ function sourceId(req, res) {
 
 function safeError(res, error) {
   const code = error?.code;
-  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError || error instanceof KnowledgeGenerationError || error instanceof KnowledgeProfileLifecycleError || error instanceof KnowledgeAssistantLifecycleError || error instanceof KnowledgeOverviewError || error instanceof KnowledgeRetrievalPreviewError) {
+  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof ImageKnowledgeSemanticError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError || error instanceof KnowledgeGenerationError || error instanceof KnowledgeProfileLifecycleError || error instanceof KnowledgeAssistantLifecycleError || error instanceof KnowledgeOverviewError || error instanceof KnowledgeRetrievalPreviewError) {
     const status = code === 'IDENTITY_RESOLUTION_REQUIRED' ? 409 : /NOT_FOUND|INVALID|EMPTY|UNSUPPORTED|MISMATCH|REQUIRED/.test(code) ? 400 : 503;
     return res.status(status).json({ error: error.message, code, ...(error.details ? { details: error.details } : {}) });
   }
@@ -409,6 +410,7 @@ router.post('/:tenantId/knowledge-intelligence/sources/:sourceId/candidates/gene
       assistantId: req.body?.assistant_id ?? null,
       extractionHash: req.body?.extraction_hash,
       candidateType: req.body?.candidate_type ?? 'POLICY',
+      semanticClassifier: createImageKnowledgeSemanticClassifier({ provider: createKnowledgeGenerationProvider() }),
     });
     const reused = candidates.length > 0 && candidates.every((candidate) => candidate.reused === true);
     return res.status(reused ? 200 : 201).json({ candidates, reused });

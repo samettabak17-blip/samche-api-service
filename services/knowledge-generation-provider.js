@@ -1,5 +1,6 @@
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { validateImageKnowledgeSemanticOutput } from './image-knowledge-semantic-service.js';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const ASSISTANT_GENERATION_TIMEOUT_MS = 30_000;
@@ -48,6 +49,26 @@ const ASSISTANT_RECOMMENDATION_FIELDS = Object.freeze([
 ]);
 
 const BUSINESS_IDENTITY_ANALYSIS_FIELDS = Object.freeze(['detected_identity', 'confidence', 'evidence']);
+
+function buildImageSemanticResponseSchema() {
+  return {
+    type: 'OBJECT',
+    properties: {
+      classifications: {
+        type: 'ARRAY',
+        items: {
+          type: 'OBJECT',
+          properties: {
+            segment_order: { type: 'INTEGER' },
+            category: { type: 'STRING' },
+            canonical_fact: { anyOf: [{ type: 'STRING' }, { type: 'NULL' }] },
+            confidence: { type: 'NUMBER' },
+          },
+        },
+      },
+    },
+  };
+}
 
 export class KnowledgeGenerationError extends Error {
   constructor(code, message, options) {
@@ -268,5 +289,24 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
     }),
     generateAssistantRecommendation: ({ prompt, runId, requestFingerprint, telemetry: callTelemetry }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_RECOMMENDATION', telemetry: callTelemetry, schema: buildRecommendationResponseSchema() }),
     generateAssistantConfiguration: ({ prompt, runId, requestFingerprint, telemetry: callTelemetry }) => generate({ prompt, fields: ASSISTANT_CONFIGURATION_FIELDS, validate: validateAssistantConfigurationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_CONFIGURATION', telemetry: callTelemetry }),
+    classifyImageKnowledgeSegments: ({ segments }) => {
+      const safeSegments = Array.isArray(segments) ? segments : [];
+      return generate({
+        prompt: [
+          'Classify each statement made by a business representative. A BUSINESS speaker is an authority signal, not proof that every statement is durable company knowledge.',
+          'Use exactly one category per segment: DURABLE_BUSINESS_FACT, ASSISTANT_BEHAVIOR_OR_QUALIFICATION, CUSTOMER_SPECIFIC_CONTEXT, TRANSIENT_CONVERSATION, DURABLE_POLICY_OR_COMMITMENT_CANDIDATE, or UNSAFE_OR_AMBIGUOUS.',
+          'Only for DURABLE_BUSINESS_FACT, return a concise, decontextualized canonical_fact in the source language. Exclude greetings, timestamps, questions, customer-specific needs, one-off promises, and conversational filler. For every other category canonical_fact must be null.',
+          'Do not infer a durable policy from one occurrence. Return every supplied segment exactly once.',
+          JSON.stringify({ segments: safeSegments }),
+        ].join('\n\n'),
+        fields: [],
+        validate: (value) => {
+          validateImageKnowledgeSemanticOutput(value, safeSegments.map((segment) => ({ id: String(segment.segment_order), segment_order: segment.segment_order, role: 'BUSINESS', normalized_text: segment.text })));
+          return value;
+        },
+        schema: buildImageSemanticResponseSchema(),
+        operation: 'IMAGE_SEMANTIC_CLASSIFICATION',
+      });
+    },
   });
 }
