@@ -4,10 +4,10 @@ import { Link } from 'react-router-dom';
 
 type ButtonVariant = 'primary' | 'secondary' | 'destructive' | 'selected' | 'ghost' | 'outline';
 
-const base = 'inline-flex h-10 min-h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-semibold leading-none transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:border-stone-600 disabled:bg-stone-900 disabled:text-stone-300 disabled:opacity-100 disabled:shadow-none disabled:hover:border-stone-600 disabled:hover:bg-stone-900 disabled:hover:text-stone-300';
+const base = 'inline-flex h-10 min-h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-semibold leading-none transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:border-[#43546a] disabled:bg-[#101925] disabled:text-[#c7d2e1] disabled:opacity-100 disabled:shadow-none disabled:hover:border-[#43546a] disabled:hover:bg-[#101925] disabled:hover:text-[#c7d2e1]';
 const variants: Record<ButtonVariant, string> = {
   primary: 'border-signal bg-signal text-white shadow-signal hover:bg-red-700 hover:text-white hover:shadow-lg active:border-red-800 active:bg-red-800 active:text-white',
-  secondary: 'border-line bg-elevated text-stone-300 hover:border-stone-400 hover:bg-stone-800 hover:text-white active:border-stone-400 active:bg-stone-800 active:text-white',
+  secondary: 'border-line bg-elevated text-stone-300 hover:border-[#52677f] hover:bg-[#16283a] hover:text-white active:border-[#52677f] active:bg-[#16283a] active:text-white',
   destructive: 'border-red-500/60 bg-red-950/30 text-red-200 hover:border-red-400 hover:bg-red-900/50 hover:text-white active:border-red-400 active:bg-red-950 active:text-white',
   selected: 'border-signal bg-signal text-white shadow-signal hover:border-signal hover:bg-signal hover:text-white hover:shadow-signal active:border-red-800 active:bg-red-800 active:text-white',
   ghost: 'border-transparent bg-transparent text-stone-300 hover:border-signal/40 hover:bg-signal/10 hover:text-white active:border-signal/50 active:bg-signal/15 active:text-white',
@@ -20,7 +20,7 @@ export function DashboardButton({ variant = 'secondary', className = '', ...prop
   return <button className={`${dashboardButtonClass(variant)} ${className}`} {...props} />;
 }
 
-const fieldClass = 'dashboard-input mt-2 block h-11 w-full rounded-xl border border-line bg-elevated px-3 text-sm text-ink outline-none transition placeholder:text-stone-400 focus:border-signal focus:ring-2 focus:ring-signal/30 disabled:cursor-not-allowed disabled:border-stone-600 disabled:bg-canvas disabled:text-stone-300 disabled:placeholder:text-stone-400 disabled:opacity-100';
+const fieldClass = 'dashboard-input mt-2 block h-11 w-full rounded-xl border border-line bg-elevated px-3 text-sm text-ink outline-none transition placeholder:text-stone-400 focus:border-signal focus:ring-2 focus:ring-signal/30 disabled:cursor-not-allowed disabled:border-[#43546a] disabled:bg-[#09111b] disabled:text-[#b7c1d1] disabled:placeholder:text-[#8e9bb0] disabled:opacity-100';
 
 export function DashboardField({ label, helper, error, children }: { label: ReactNode; helper?: ReactNode; error?: ReactNode; children: ReactNode }) {
   return <div className="space-y-1.5"><label className="dashboard-field-label block text-sm font-semibold">{label}{children}</label>{helper && !error && <p className="dashboard-helper text-xs">{helper}</p>}{error && <DashboardFormMessage tone="error">{error}</DashboardFormMessage>}</div>;
@@ -51,13 +51,13 @@ export function DashboardFormMessage({ tone = 'error', children }: { tone?: 'err
 
 export function DashboardTab({ to, active = false, disabled = false, children }: { to: string; active?: boolean; disabled?: boolean; children: ReactNode }) {
   const className = `${base} ${active ? variants.selected : variants.secondary}`;
-  if (disabled) return <span aria-disabled="true" className={`${base} cursor-not-allowed border-stone-600 bg-stone-900 text-stone-300 shadow-none`}>{children}</span>;
+  if (disabled) return <span aria-disabled="true" className={`${base} cursor-not-allowed border-[#43546a] bg-[#101925] text-[#c7d2e1] shadow-none`}>{children}</span>;
   return <Link to={to} aria-current={active ? 'page' : undefined} className={className}>{children}</Link>;
 }
 
 export function DashboardCheckbox({ label, className = '', ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & { label: ReactNode }) {
   return <label className="inline-flex cursor-pointer items-start gap-3 text-sm text-stone-200 has-[:disabled]:cursor-not-allowed has-[:disabled]:text-stone-400">
-    <input type="checkbox" className={`mt-0.5 h-5 w-5 shrink-0 appearance-none rounded-md border border-stone-600 bg-[#0b1624] transition checked:border-signal checked:bg-signal checked:bg-[linear-gradient(135deg,transparent_42%,white_42%,white_52%,transparent_52%),linear-gradient(45deg,transparent_53%,white_53%,white_63%,transparent_63%)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:border-stone-700 disabled:bg-stone-900 ${className}`} {...props} />
+    <input type="checkbox" className={`mt-0.5 h-5 w-5 shrink-0 appearance-none rounded-md border border-[#43546a] bg-[#0b1624] transition checked:border-signal checked:bg-signal checked:bg-[linear-gradient(135deg,transparent_42%,white_42%,white_52%,transparent_52%),linear-gradient(45deg,transparent_53%,white_53%,white_63%,transparent_63%)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:border-[#43546a] disabled:bg-[#101925] ${className}`} {...props} />
     <span>{label}</span>
   </label>;
 }

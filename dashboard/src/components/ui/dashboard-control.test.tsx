@@ -31,7 +31,7 @@ describe('Dashboard controls', () => {
     const select = screen.getByLabelText('Tenant');
     expect(select).toHaveClass('dashboard-select');
     expect(select.className).toContain('focus:ring-signal/30');
-    expect(select.className).toContain('disabled:text-stone-300');
+    expect(select.className).toContain('disabled:text-[#b7c1d1]');
   });
 
   it('provides a shared textarea with the same readable form contract', () => {
@@ -57,7 +57,7 @@ describe('Dashboard controls', () => {
     expect(screen.getByRole('button', { name: 'Preview' }).className).toContain('bg-elevated');
     expect(screen.getByRole('button', { name: 'Archive' }).className).toContain('border-red');
     expect(screen.getByRole('button', { name: 'Disabled' }).className).toContain('disabled:cursor-not-allowed');
-    expect(screen.getByRole('button', { name: 'Disabled' }).className).toContain('disabled:bg-stone-900');
+    expect(screen.getByRole('button', { name: 'Disabled' }).className).toContain('disabled:bg-[#101925]');
   });
 
   it('distinguishes inactive, active, and disabled tabs', () => {
@@ -84,7 +84,7 @@ describe('Dashboard controls', () => {
   it('keeps primary, secondary and destructive hover semantics distinct', () => {
     render(<><DashboardButton variant="primary">Approve</DashboardButton><DashboardButton variant="secondary">Edit</DashboardButton><DashboardButton variant="destructive">Reject</DashboardButton></>);
     expect(screen.getByRole('button', { name: 'Approve' }).className).toContain('hover:bg-red-700');
-    expect(screen.getByRole('button', { name: 'Edit' }).className).toContain('hover:bg-stone-800');
+    expect(screen.getByRole('button', { name: 'Edit' }).className).toContain('hover:bg-[#16283a]');
     expect(screen.getByRole('button', { name: 'Reject' }).className).toContain('hover:bg-red-900');
   });
 
@@ -95,7 +95,7 @@ describe('Dashboard controls', () => {
     expect(upgrade.className).toContain('border-signal');
     expect(upgrade.className).toContain('hover:bg-signal/20');
     expect(upgrade.className).not.toContain('hover:bg-white');
-    expect(disabled.className).toContain('disabled:text-stone-300');
+    expect(disabled.className).toContain('disabled:text-[#c7d2e1]');
     expect(disabled.className).toContain('disabled:opacity-100');
   });
 
@@ -108,7 +108,8 @@ describe('Dashboard controls', () => {
       expect(control.className).toContain('hover:text-white');
       expect(control.className).not.toContain('hover:bg-white');
     }
-    expect(screen.getByText('Disabled tab').className).toContain('text-stone-300');
+    expect(screen.getByRole('button', { name: 'Secondary' }).className).not.toContain('stone-800');
+    expect(screen.getByText('Disabled tab').className).toContain('text-[#c7d2e1]');
   });
 
   it('hides browser-localized file chrome and renders controlled English copy', () => {
