@@ -4,7 +4,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ApiError } from '../../lib/api-client';
 import { DashboardPasswordInput } from '../../components/ui/dashboard-control';
 import { onboardingApi, type InvitationValidation } from '../dashboard/dashboard-api';
-import samcheLogo from '../../assets/branding/samche-company-llc-logo.png';
+import { AuthVisualLayout } from './auth-visual-layout';
+import { DashboardButton } from '../../components/ui/dashboard-control';
 
 type InvitationView = 'loading' | 'valid' | 'invalid' | 'expired' | 'used' | 'revoked' | 'error' | 'success';
 
@@ -81,11 +82,11 @@ export function AcceptInvitationPage() {
   if (view === 'success') return <PageFrame><CheckCircle2 className="text-emerald-300" size={34} /><h1 className="mt-5 text-3xl font-semibold text-white">Your account is ready.</h1><p className="mt-3 text-sm leading-6 text-stone-300">Taking you to secure sign in…</p></PageFrame>;
   if (view !== 'valid') {
     const copy = statusCopy(view);
-    return <PageFrame><ShieldCheck className="text-signal" size={34} /><h1 className="mt-5 text-3xl font-semibold text-white">{copy.title}</h1><p className="mt-3 text-sm leading-6 text-stone-300">{copy.detail}</p><button type="button" onClick={() => navigate('/login')} className="mt-7 rounded-xl border border-white/20 px-4 py-2.5 text-sm font-semibold text-white hover:bg-white/10">Go to sign in</button></PageFrame>;
+    return <PageFrame><ShieldCheck className="text-signal" size={34} /><h1 className="mt-5 text-3xl font-semibold text-white">{copy.title}</h1><p className="mt-3 text-sm leading-6 text-stone-300">{copy.detail}</p><DashboardButton type="button" variant="secondary" className="mt-7" onClick={() => navigate('/login')}>Go to sign in</DashboardButton></PageFrame>;
   }
 
   return <PageFrame>
-    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-signal">SamChe workspace</p>
+    <p className="eyebrow">Customer invitation</p>
     <h1 className="mt-4 text-3xl font-semibold text-white">Set up your account</h1>
     <p className="mt-3 text-sm leading-6 text-stone-300">{invitation?.company_name ? <>You were invited to join <span className="font-semibold text-white">{invitation.company_name}</span>.</> : 'Choose a password to finish joining your workspace.'}</p>
     {invitation?.email && <p className="mt-2 text-sm text-stone-400">{invitation.email}</p>}
@@ -93,11 +94,11 @@ export function AcceptInvitationPage() {
       <label className="auth-label block">Password<DashboardPasswordInput aria-label="Password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
       <label className="auth-label block">Confirm password<DashboardPasswordInput aria-label="Confirm password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
       {error && <p role="alert" className="rounded-xl border border-red-400/35 bg-red-950/35 px-3.5 py-3 text-sm text-red-100">{error}</p>}
-      <button type="submit" disabled={submitting} className="flex w-full items-center justify-center gap-2 rounded-xl bg-signal px-4 py-3.5 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(212,33,41,0.22)] transition hover:bg-[#B81920] disabled:cursor-not-allowed disabled:opacity-60"><LockKeyhole aria-hidden="true" size={17} />{submitting ? 'Setting up…' : 'Set up account'}</button>
+      <DashboardButton type="submit" variant="primary" disabled={submitting} className="h-12 w-full text-base"><LockKeyhole aria-hidden="true" size={17} />{submitting ? 'Setting up…' : 'Set up account'}</DashboardButton>
     </form>
   </PageFrame>;
 }
 
 function PageFrame({ children }: { children: React.ReactNode }) {
-  return <main className="grid min-h-screen place-items-center bg-[#0B0B0D] px-5 py-8 text-white"><section className="auth-surface w-full max-w-md rounded-2xl p-6 sm:p-8"><img src={samcheLogo} alt="SamChe Company LLC" className="mx-auto mb-6 h-28 w-72 object-contain object-center" />{children}</section></main>;
+  return <AuthVisualLayout heroEyebrow="SamChe AI Platform" heroLines={['JOIN YOUR', 'WORKSPACE.']} heroDescription="You’re one step away from a smarter way to work. Set up your account securely and get access to your workspace." capabilityCount={5} showCardLogo>{children}</AuthVisualLayout>;
 }
