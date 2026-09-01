@@ -10,6 +10,17 @@ try {
   assertVerifiedTls(client);
   await client.query('BEGIN');
   await client.query('SET TRANSACTION READ ONLY');
+  const identities = await client.query(
+    `SELECT id, tenant_id, display_name
+       FROM business_identities
+      WHERE lower(display_name) = lower($1) AND status = 'ACTIVE'`,
+    [identityName],
+  );
+  if (identities.rowCount !== 1) {
+    console.log(JSON.stringify({ identity_name: identityName, matched_identity_count: identities.rowCount, candidate_count: 0, candidates: [] }));
+    await client.query('ROLLBACK');
+    process.exitCode = 0;
+  } else {
   const result = await client.query(
     `WITH selected_identity AS (
        SELECT id, tenant_id, display_name
@@ -64,8 +75,9 @@ try {
       ORDER BY candidate.candidate_id`,
     [identityName],
   );
-  console.log(JSON.stringify({ identity_name: identityName, candidate_count: result.rowCount, candidates: result.rows }));
+  console.log(JSON.stringify({ identity_name: identityName, matched_identity_count: 1, business_identity: identities.rows[0], candidate_count: result.rowCount, candidates: result.rows }));
   await client.query('ROLLBACK');
+  }
 } catch (error) {
   await client.query('ROLLBACK').catch(() => {});
   console.error(String(error?.message ?? 'CANDIDATE_PROVENANCE_AUDIT_FAILED').replace(/[^A-Z0-9_]/gi, '_').slice(0, 120));
