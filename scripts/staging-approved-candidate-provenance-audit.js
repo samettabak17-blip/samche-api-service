@@ -36,13 +36,11 @@ try {
            ON materialized.id = candidate.approved_source_id
           AND materialized.tenant_id = candidate.tenant_id
         WHERE candidate.status = 'APPROVED'
-          AND EXISTS (
-            SELECT 1 FROM knowledge_candidate_image_evidence image
-             WHERE image.tenant_id = candidate.tenant_id AND image.candidate_id = candidate.id
-          )
+          AND candidate.proposed_title = 'Canonical image-derived business fact'
      )
      SELECT candidate.candidate_id, candidate.tenant_id, candidate.status,
             candidate.materialized_source_id, candidate.materialized_source_title,
+            COUNT(image.id)::integer AS evidence_count,
             COALESCE(json_agg(DISTINCT jsonb_build_object(
               'evidence_id', image.id, 'segment_id', image.segment_id,
               'original_source_id', image.source_id, 'original_source_title', original.title,
