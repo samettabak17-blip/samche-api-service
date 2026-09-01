@@ -18,6 +18,7 @@ test('password reset migration has one pending authority per user and reuses the
 test('password routes expose change, forgot, validation and atomic consume without LLM providers', async () => {
   const routes = await readFile(new URL('../routes/authRoutes.js', import.meta.url), 'utf8');
   assert.match(routes, /\/change-password/);
+  assert.match(routes, /kind: 'change-password'/);
   assert.match(routes, /\/forgot-password/);
   assert.match(routes, /\/password-resets\/validate/);
   assert.match(routes, /\/password-resets\/consume/);

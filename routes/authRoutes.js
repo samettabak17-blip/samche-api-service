@@ -142,6 +142,9 @@ router.get('/me', authenticateToken, async (req, res) => {
 });
 
 router.post('/change-password', authenticateToken, async (req, res) => {
+    if (!allowPublicInvitationAttempt({ kind: 'change-password', ip: req.ip, token: req.user.user_id })) {
+        return res.status(429).json({ error: 'Password change temporarily unavailable' });
+    }
     try {
         await changePassword({ database: pool, userId: req.user.user_id, currentPassword: req.body?.current_password, newPassword: req.body?.new_password, confirmPassword: req.body?.confirm_password });
         return res.json({ status: 'PASSWORD_CHANGED' });
