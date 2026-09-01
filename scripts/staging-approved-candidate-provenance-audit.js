@@ -21,11 +21,10 @@ try {
               materialized.title AS materialized_source_title
          FROM knowledge_candidates candidate
          JOIN selected_identity identity ON identity.tenant_id = candidate.tenant_id
-         JOIN knowledge_base_documents materialized
+         LEFT JOIN knowledge_base_documents materialized
            ON materialized.id = candidate.approved_source_id
           AND materialized.tenant_id = candidate.tenant_id
         WHERE candidate.status = 'APPROVED'
-          AND materialized.source_type = 'CONVERSATION_CANDIDATE'
           AND EXISTS (
             SELECT 1 FROM knowledge_candidate_image_evidence image
              WHERE image.tenant_id = candidate.tenant_id AND image.candidate_id = candidate.id
