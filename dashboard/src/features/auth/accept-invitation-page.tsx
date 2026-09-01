@@ -2,6 +2,7 @@ import { CheckCircle2, LockKeyhole, ShieldCheck } from 'lucide-react';
 import { type FormEvent, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ApiError } from '../../lib/api-client';
+import { DashboardPasswordInput } from '../../components/ui/dashboard-control';
 import { onboardingApi, type InvitationValidation } from '../dashboard/dashboard-api';
 
 type InvitationView = 'loading' | 'valid' | 'invalid' | 'expired' | 'used' | 'revoked' | 'error' | 'success';
@@ -88,8 +89,8 @@ export function AcceptInvitationPage() {
     <p className="mt-3 text-sm leading-6 text-stone-300">{invitation?.company_name ? <>You were invited to join <span className="font-semibold text-white">{invitation.company_name}</span>.</> : 'Choose a password to finish joining your workspace.'}</p>
     {invitation?.email && <p className="mt-2 text-sm text-stone-400">{invitation.email}</p>}
     <form className="mt-7 space-y-5" onSubmit={submit} noValidate>
-      <label className="auth-label block">Password<input aria-label="Password" type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} className="auth-input" /></label>
-      <label className="auth-label block">Confirm password<input aria-label="Confirm password" type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} className="auth-input" /></label>
+      <label className="auth-label block">Password<DashboardPasswordInput aria-label="Password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+      <label className="auth-label block">Confirm password<DashboardPasswordInput aria-label="Confirm password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
       {error && <p role="alert" className="rounded-xl border border-red-400/35 bg-red-950/35 px-3.5 py-3 text-sm text-red-100">{error}</p>}
       <button type="submit" disabled={submitting} className="flex w-full items-center justify-center gap-2 rounded-xl bg-signal px-4 py-3.5 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(212,33,41,0.22)] transition hover:bg-[#B81920] disabled:cursor-not-allowed disabled:opacity-60"><LockKeyhole aria-hidden="true" size={17} />{submitting ? 'Setting up…' : 'Set up account'}</button>
     </form>
