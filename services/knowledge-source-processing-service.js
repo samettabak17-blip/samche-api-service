@@ -39,8 +39,9 @@ export async function claimNextKnowledgeProcessingJob(database) {
   const result = await dbQuery(database,
     `WITH candidate AS (
        SELECT id
-         FROM knowledge_processing_jobs
-        WHERE status = 'PENDING'
+        FROM knowledge_processing_jobs
+       WHERE status = 'PENDING'
+          AND job_type <> 'GENERATE_IMAGE_CANDIDATES'
           AND available_at <= CURRENT_TIMESTAMP
         ORDER BY created_at ASC
         FOR UPDATE SKIP LOCKED
