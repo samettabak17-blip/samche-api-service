@@ -42,16 +42,16 @@ export function LoginPage() {
         <div aria-hidden="true" className="absolute right-[18%] top-[28%] -z-10 h-72 w-72 rounded-full border border-signal/30 bg-[radial-gradient(circle,rgba(212,33,41,0.22),transparent_58%)] shadow-[0_0_80px_rgba(212,33,41,0.22)]" />
         <div aria-hidden="true" className="absolute bottom-36 right-[18%] -z-10 h-52 w-52 rounded-full border border-gold/30 bg-[radial-gradient(circle,rgba(200,155,69,0.15),transparent_62%)]" />
 
-        <div className="flex items-center"><img src={samcheLogo} alt="SamChe Company LLC" className="h-32 w-72 object-contain object-left" /></div>
+        <div className="flex items-center justify-center"><img src={samcheLogo} alt="SamChe Company LLC" className="mx-auto h-36 w-80 object-contain object-center" /></div>
 
-        <div className="my-auto max-w-xl py-12 xl:py-16">
+        <div className="mx-auto my-auto max-w-xl py-12 text-center xl:py-16">
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-signal">SamChe AI Platform</p>
           <div className="mt-6 space-y-1 text-5xl font-semibold leading-[0.98] tracking-[-0.055em] sm:text-6xl xl:text-7xl">
             <h1>AI OPERATIONS.</h1>
             <h1>SMARTER.</h1>
             <h1 className="text-signal">STRONGER.</h1>
           </div>
-          <div className="mt-10 h-px w-16 bg-signal" />
+          <div className="mx-auto mt-10 h-px w-16 bg-signal" />
           <p className="mt-8 max-w-md text-base leading-7 text-stone-300 xl:text-lg">Manage your AI assistants, channels, knowledge and conversations from a single, powerful command center.</p>
         </div>
 
@@ -69,7 +69,7 @@ export function LoginPage() {
       <section className="relative flex min-h-screen items-center justify-center overflow-hidden px-5 py-8 sm:px-8 lg:px-10 lg:py-12">
         <div aria-hidden="true" className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.07),transparent_35%),linear-gradient(145deg,#18181A,#101012)]" />
         <div className="relative w-full max-w-xl rounded-2xl border border-white/15 bg-[#161618]/90 p-6 shadow-[0_22px_70px_rgba(0,0,0,0.36)] backdrop-blur sm:p-8 xl:p-9">
-          <div className="mb-9 lg:hidden"><img src={samcheLogo} alt="SamChe Company LLC" className="h-20 w-52 object-contain object-left" /><p className="mt-3 text-xs font-semibold uppercase tracking-[0.22em] text-gold">AI Platform</p></div>
+          <div className="mb-9 text-center lg:hidden"><img src={samcheLogo} alt="SamChe Company LLC" className="mx-auto h-24 w-60 object-contain object-center" /><p className="mt-3 text-xs font-semibold uppercase tracking-[0.22em] text-gold">AI Platform</p></div>
           <p className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.2em] text-signal"><span className="grid h-9 w-9 place-items-center rounded-lg bg-signal/15 text-signal"><LockKeyhole aria-hidden="true" size={17} /></span>Secure sign in</p>
           <h1 className="mt-6 text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">Welcome back</h1>
           <p className="mt-4 max-w-md text-sm leading-6 text-stone-300 sm:text-base">Use your SamChe account to access the tenants assigned to you.</p>

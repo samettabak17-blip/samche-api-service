@@ -22,7 +22,7 @@ describe('LoginPage', () => {
 
     expect(screen.getAllByRole('img', { name: 'SamChe Company LLC' }).length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'AI OPERATIONS.' })).toBeTruthy();
-    expect(screen.getAllByRole('img', { name: 'SamChe Company LLC' })[0]).toHaveClass('h-32', 'w-72');
+    expect(screen.getAllByRole('img', { name: 'SamChe Company LLC' })[0]).toHaveClass('h-36', 'w-80', 'mx-auto');
     expect(screen.getByRole('heading', { name: 'SMARTER.' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'STRONGER.' })).toBeTruthy();
     expect(screen.getByText('Analytics')).toBeTruthy();

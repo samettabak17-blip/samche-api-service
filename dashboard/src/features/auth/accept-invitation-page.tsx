@@ -99,5 +99,5 @@ export function AcceptInvitationPage() {
 }
 
 function PageFrame({ children }: { children: React.ReactNode }) {
-  return <main className="grid min-h-screen place-items-center bg-[#0B0B0D] px-5 py-8 text-white"><section className="auth-surface w-full max-w-md rounded-2xl p-6 sm:p-8"><img src={samcheLogo} alt="SamChe Company LLC" className="h-16 w-44 object-contain object-left" />{children}</section></main>;
+  return <main className="grid min-h-screen place-items-center bg-[#0B0B0D] px-5 py-8 text-white"><section className="auth-surface w-full max-w-md rounded-2xl p-6 sm:p-8"><img src={samcheLogo} alt="SamChe Company LLC" className="mx-auto mb-5 h-24 w-60 object-contain object-center" />{children}</section></main>;
 }

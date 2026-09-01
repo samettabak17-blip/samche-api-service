@@ -9,7 +9,7 @@ describe('Sidebar', () => {
   it('keeps read pages available while marking an AGENT workspace as read-only', () => {
     render(<MemoryRouter><Sidebar tenantId="tenant-agent" tenantName="Agent tenant" tenantRole="AGENT" email="agent@samche.test" onLogout={() => undefined} onNavigate={() => undefined} /></MemoryRouter>);
     expect(screen.getByRole('img', { name: 'SamChe Company LLC' })).toBeTruthy();
-    expect(screen.getByRole('img', { name: 'SamChe Company LLC' })).toHaveClass('h-20', 'w-44', 'object-center');
+    expect(screen.getByRole('img', { name: 'SamChe Company LLC' })).toHaveClass('h-28', 'w-full', 'object-center');
     expect(screen.getByText('AI Platform')).toHaveClass('text-gold', 'text-center');
     expect(screen.getByText('Agent tenant')).toBeTruthy();
     expect(screen.getByText('Read-only access')).toBeTruthy();
