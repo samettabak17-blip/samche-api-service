@@ -229,7 +229,7 @@ export function LiveSupportAttentionProvider({ tenantId, userId, children }: { t
   useEffect(() => {
     const favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
     if (!favicon) return;
-    const normal = favicon.dataset.normalHref ?? samcheBrandLogo;
+    const normal = favicon.dataset.normalHref ?? favicon.getAttribute('href') ?? '/samche-logo.png';
     favicon.dataset.normalHref = normal;
     favicon.href = normal;
     if (requestedCount < 1) { favicon.href = normal; return; }

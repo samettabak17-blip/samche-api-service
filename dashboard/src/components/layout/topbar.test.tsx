@@ -82,6 +82,14 @@ describe('Topbar global navigation search', () => {
     expect(screen.getByText('SMTP_RECIPIENT_REJECTED')).toBeVisible();
   });
 
+  it('renders invitation delivery status with readable hierarchy and actions', async () => {
+    vi.mocked(onboardingApi.listInvitationStatuses).mockResolvedValue([{ id: 'invite-1', status: 'PENDING', tenant_role: 'ADMIN', expires_at: '', created_at: '', delivery_status: 'SENT', delivery_code: 'SMTP_ACCEPTED', attempt_count: 1 }]);
+    renderTopbar('OWNER');
+    expect(await screen.findByText('Invitation sent.')).toHaveClass('invitation-delivery-label');
+    expect(screen.getByText('SMTP_ACCEPTED')).toHaveClass('invitation-delivery-code');
+    expect(screen.getByRole('button', { name: 'Resend' })).toHaveClass('topbar-status-action', 'whitespace-nowrap');
+  });
+
   it('refreshes the owner invitation state after the durable outbox has had time to progress', async () => {
     vi.useFakeTimers();
     vi.mocked(onboardingApi.listInvitationStatuses)

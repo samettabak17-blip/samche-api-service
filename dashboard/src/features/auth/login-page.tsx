@@ -42,7 +42,7 @@ export function LoginPage() {
         <div aria-hidden="true" className="absolute right-[18%] top-[28%] -z-10 h-72 w-72 rounded-full border border-signal/30 bg-[radial-gradient(circle,rgba(212,33,41,0.22),transparent_58%)] shadow-[0_0_80px_rgba(212,33,41,0.22)]" />
         <div aria-hidden="true" className="absolute bottom-36 right-[18%] -z-10 h-52 w-52 rounded-full border border-gold/30 bg-[radial-gradient(circle,rgba(200,155,69,0.15),transparent_62%)]" />
 
-        <div><img src={samcheLogo} alt="SamChe Company LLC" className="h-28 w-64 object-contain object-left" /></div>
+        <div className="flex items-center"><img src={samcheLogo} alt="SamChe Company LLC" className="h-32 w-72 object-contain object-left" /></div>
 
         <div className="my-auto max-w-xl py-12 xl:py-16">
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-signal">SamChe AI Platform</p>

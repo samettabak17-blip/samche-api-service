@@ -61,6 +61,10 @@ button.bg-ink:hover { background: #b81920; }
   .dashboard-success { color: #d5ffe8; }
   .dashboard-info { color: #d8f0ff; }
   .topbar-action { white-space: nowrap; flex-shrink: 0; }
+  .topbar-status-action { min-height: 2rem; height: 2rem; border-radius: 0.5rem; padding-top: 0.25rem; padding-bottom: 0.25rem; }
+  .invitation-delivery-status { white-space: nowrap; }
+  .invitation-delivery-label { color: #d5ffe8; }
+  .invitation-delivery-code { color: #c7d2e1; }
   .auth-surface { @apply border border-white/[.14] bg-[#161618]/95 shadow-[0_22px_70px_rgba(0,0,0,.36)]; }
   .auth-label { @apply text-sm font-semibold; color: #dee6f1; }
   .auth-input { @apply mt-2 block w-full rounded-xl border border-white/20 bg-black/20 px-4 py-3 text-white outline-none transition placeholder:text-stone-400 focus:border-signal focus:ring-2 focus:ring-signal/30; }
