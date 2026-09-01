@@ -91,7 +91,7 @@ export function createCustomerInvitationOutboxWorker({ database, mailer, envelop
          JOIN users u ON u.id = COALESCE(i.user_id, r.user_id)
          WHERE o.status IN ('PENDING_DELIVERY', 'DELIVERY_FAILED') AND o.next_attempt_at <= CURRENT_TIMESTAMP
          ORDER BY o.created_at ASC
-         LIMIT 1 FOR UPDATE SKIP LOCKED`,
+         LIMIT 1 FOR UPDATE OF o SKIP LOCKED`,
       );
       if (claimed.rowCount) await processInvitationOutboxRow({ client, row: claimed.rows[0], envelopeKey, mailer });
       await client.query('COMMIT');

@@ -124,6 +124,6 @@ test('a started outbox worker claims an eligible pending delivery row and progre
 
   await new Promise((resolve) => setImmediate(resolve));
   worker.stop();
-  assert.equal(calls.some((sql) => /FOR UPDATE SKIP LOCKED/.test(sql)), true);
+  assert.equal(calls.some((sql) => /FOR UPDATE OF o SKIP LOCKED/.test(sql)), true);
   assert.equal(calls.some((sql) => /SET status = 'SENT'/.test(sql)), true);
 });
