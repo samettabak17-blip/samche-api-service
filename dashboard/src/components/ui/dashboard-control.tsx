@@ -23,7 +23,7 @@ export function DashboardButton({ variant = 'secondary', className = '', ...prop
 const fieldClass = 'dashboard-input mt-2 block h-11 w-full rounded-xl border border-line bg-elevated px-3 text-sm text-ink outline-none transition placeholder:text-stone-400 focus:border-signal focus:ring-2 focus:ring-signal/30 disabled:cursor-not-allowed disabled:border-line disabled:bg-canvas disabled:text-stone-400 disabled:placeholder:text-stone-500';
 
 export function DashboardField({ label, helper, error, children }: { label: ReactNode; helper?: ReactNode; error?: ReactNode; children: ReactNode }) {
-  return <div className="space-y-1.5"><label className="dashboard-field-label block text-sm font-semibold text-stone-700">{label}{children}</label>{helper && !error && <p className="dashboard-helper text-xs text-stone-500">{helper}</p>}{error && <DashboardFormMessage tone="error">{error}</DashboardFormMessage>}</div>;
+  return <div className="space-y-1.5"><label className="dashboard-field-label block text-sm font-semibold">{label}{children}</label>{helper && !error && <p className="dashboard-helper text-xs">{helper}</p>}{error && <DashboardFormMessage tone="error">{error}</DashboardFormMessage>}</div>;
 }
 
 export function DashboardInput({ className = '', ...props }: InputHTMLAttributes<HTMLInputElement>) {
@@ -56,7 +56,7 @@ export function DashboardTab({ to, active = false, disabled = false, children }:
 }
 
 export function DashboardCheckbox({ label, className = '', ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & { label: ReactNode }) {
-  return <label className="inline-flex cursor-pointer items-start gap-3 text-sm text-stone-200 has-[:disabled]:cursor-not-allowed has-[:disabled]:text-stone-500">
+  return <label className="inline-flex cursor-pointer items-start gap-3 text-sm text-stone-200 has-[:disabled]:cursor-not-allowed has-[:disabled]:text-stone-400">
     <input type="checkbox" className={`mt-0.5 h-5 w-5 shrink-0 appearance-none rounded-md border border-stone-600 bg-[#0b1624] transition checked:border-signal checked:bg-signal checked:bg-[linear-gradient(135deg,transparent_42%,white_42%,white_52%,transparent_52%),linear-gradient(45deg,transparent_53%,white_53%,white_63%,transparent_63%)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:border-stone-700 disabled:bg-stone-900 ${className}`} {...props} />
     <span>{label}</span>
   </label>;
