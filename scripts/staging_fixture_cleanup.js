@@ -1,5 +1,3 @@
-import pool from '../config/db.js';
-
 const execute = process.argv.includes('--execute');
 const confirmation = process.env.STAGING_FIXTURE_CLEANUP_CONFIRMATION;
 
@@ -13,6 +11,7 @@ function assertStagingGuards() {
 
 async function main() {
   assertStagingGuards();
+  const { default: pool } = await import('../config/db.js');
   const client = await pool.connect();
   try {
     const report = await client.query(

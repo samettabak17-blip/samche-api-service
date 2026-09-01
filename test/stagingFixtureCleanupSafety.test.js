@@ -11,4 +11,5 @@ test('fixture cleanup is explicit, staging guarded, dry-run-first, and confirmat
   assert.match(source, /BEGIN/);
   assert.match(source, /DELETE FROM users[\s\S]*is_test_fixture = TRUE/i);
   assert.match(source, /unsafe\.length/);
+  assert.match(source, /assertStagingGuards\(\);\s*const \{ default: pool \} = await import\('\.\.\/config\/db\.js'\)/);
 });
