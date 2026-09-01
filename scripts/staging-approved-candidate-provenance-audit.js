@@ -51,7 +51,9 @@ try {
               'evidence_id', image.id, 'segment_id', image.segment_id,
               'original_source_id', image.source_id, 'original_source_title', original.title,
               'original_identity_ids', COALESCE(original_ids.ids, '[]'::jsonb),
+              'original_identity_evidence', COALESCE(original_evidence.items, '[]'::jsonb),
               'materialized_identity_ids', COALESCE(materialized_ids.ids, '[]'::jsonb),
+              'materialized_identity_evidence', COALESCE(materialized_evidence.items, '[]'::jsonb),
               'provenance_row_exists', provenance.materialized_source_id IS NOT NULL
             )) FILTER (WHERE image.id IS NOT NULL), '[]'::json) AS evidence
        FROM candidate_scope candidate
@@ -64,7 +66,8 @@ try {
                   'original_source_id', segment.source_id,
                   'original_source_title', matched_source.title,
                   'is_current', segment.is_current,
-                  'original_identity_ids', COALESCE(matched_identity_ids.ids, '[]'::jsonb)
+                  'original_identity_ids', COALESCE(matched_identity_ids.ids, '[]'::jsonb),
+                  'original_identity_evidence', COALESCE(matched_identity_evidence.items, '[]'::jsonb)
                 )) AS matches
            FROM knowledge_source_extraction_segments segment
            JOIN knowledge_base_documents matched_source
@@ -75,6 +78,15 @@ try {
                FROM knowledge_source_business_identities link
               WHERE link.tenant_id = segment.tenant_id AND link.source_id = segment.source_id
            ) matched_identity_ids ON TRUE
+           LEFT JOIN LATERAL (
+             SELECT jsonb_agg(jsonb_build_object(
+               'business_identity_id', evidence.business_identity_id,
+               'confidence', evidence.confidence,
+               'matches_selected_identity', evidence.business_identity_id = $2::uuid
+             )) AS items
+               FROM business_identity_source_evidence evidence
+              WHERE evidence.tenant_id = segment.tenant_id AND evidence.source_id = segment.source_id
+           ) matched_identity_evidence ON TRUE
           WHERE segment.tenant_id = candidate.tenant_id
             AND segment.role = 'BUSINESS'
             AND matched_source.mime_type IN ('image/jpeg', 'image/png')
@@ -97,16 +109,34 @@ try {
           WHERE link.tenant_id = candidate.tenant_id AND link.source_id = image.source_id
        ) original_ids ON TRUE
        LEFT JOIN LATERAL (
+         SELECT jsonb_agg(jsonb_build_object(
+           'business_identity_id', evidence.business_identity_id,
+           'confidence', evidence.confidence,
+           'matches_selected_identity', evidence.business_identity_id = $2::uuid
+         )) AS items
+           FROM business_identity_source_evidence evidence
+          WHERE evidence.tenant_id = image.tenant_id AND evidence.source_id = image.source_id
+       ) original_evidence ON TRUE
+       LEFT JOIN LATERAL (
          SELECT jsonb_agg(DISTINCT link.business_identity_id) AS ids
            FROM knowledge_source_business_identities link
           WHERE link.tenant_id = candidate.tenant_id AND link.source_id = candidate.materialized_source_id
        ) materialized_ids ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT jsonb_agg(jsonb_build_object(
+           'business_identity_id', evidence.business_identity_id,
+           'confidence', evidence.confidence,
+           'matches_selected_identity', evidence.business_identity_id = $2::uuid
+         )) AS items
+           FROM business_identity_source_evidence evidence
+          WHERE evidence.tenant_id = candidate.tenant_id AND evidence.source_id = candidate.materialized_source_id
+       ) materialized_evidence ON TRUE
       GROUP BY candidate.candidate_id, candidate.tenant_id, candidate.status,
                candidate.image_semantic_version, candidate.candidate_fingerprint_present,
                candidate.materialized_source_id, candidate.materialized_source_title,
                fingerprint_matches.match_count, fingerprint_matches.matches
       ORDER BY candidate.candidate_id`,
-    [identityName],
+    [identityName, identities.rows[0].id],
   );
   console.log(JSON.stringify({ identity_name: identityName, matched_identity_count: 1, business_identity: identities.rows[0], candidate_count: result.rowCount, candidates: result.rows }));
   await client.query('ROLLBACK');
