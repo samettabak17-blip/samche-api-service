@@ -121,6 +121,12 @@ describe('Topbar global navigation search', () => {
     expect(screen.getByRole('button', { name: 'Assign customer' })).toHaveClass('whitespace-nowrap', 'shrink-0', 'h-10');
   });
 
+  it('keeps overview date and notification controls visibly outlined', () => {
+    renderTopbar('OWNER');
+    expect(screen.getByRole('button', { name: /Last 7 days/ })).toHaveClass('topbar-range-control');
+    expect(screen.getByRole('button', { name: 'Live support notifications' })).toHaveClass('topbar-notification-control');
+  });
+
   it('lets an OWNER assign an existing CUSTOMER with an allowed tenant role', async () => {
     vi.mocked(tenantApi.listCustomerUsers).mockResolvedValue([{ id: 'user-1', email: 'customer@example.test', system_role: 'CUSTOMER' }]);
     vi.mocked(tenantApi.assignTenantUser).mockResolvedValue({});

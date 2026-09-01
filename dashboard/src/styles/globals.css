@@ -61,6 +61,8 @@ button.bg-ink:hover { background: #b81920; }
   .dashboard-success { color: #d5ffe8; }
   .dashboard-info { color: #d8f0ff; }
   .topbar-action { white-space: nowrap; flex-shrink: 0; }
+  .topbar-range-control { color: #f4f7fb; border-color: rgba(212, 33, 41, 0.62); background: rgba(17, 24, 36, 0.78); }
+  .topbar-notification-control { color: #f4f7fb; border: 1px solid rgba(212, 33, 41, 0.62); background: rgba(17, 24, 36, 0.78); }
   .topbar-status-action { min-height: 2rem; height: 2rem; border-radius: 0.5rem; padding-top: 0.25rem; padding-bottom: 0.25rem; }
   .invitation-delivery-status { white-space: nowrap; }
   .invitation-delivery-label { color: #d5ffe8; }
