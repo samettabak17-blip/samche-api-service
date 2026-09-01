@@ -28,15 +28,15 @@ function rows() {
   ];
 }
 
-function database({ segmentRows = rows(), existing = null, failOnEvidence = false, assistantAssignments = [] } = {}) {
+function database({ segmentRows = rows(), existing = null, failOnEvidence = false, assistantAssignments = [], allowLegacyRegeneration = false } = {}) {
   const calls = [];
   const client = {
     async query(sql, params = []) {
       calls.push({ sql, params });
       if (/FROM knowledge_source_extraction_segments/i.test(sql)) return { rows: segmentRows };
       if (/FROM knowledge_source_assistants/i.test(sql)) return { rows: assistantAssignments };
-      if (/SELECT id, status, candidate_fingerprint/i.test(sql)) return { rows: existing ? [existing] : [] };
-      if (/INSERT INTO knowledge_candidates/i.test(sql)) return existing ? { rows: [] } : { rows: [{ id: 'candidate-1', status: 'NEEDS_REVIEW', pii_redaction_status: 'REDACTED', candidate_fingerprint: params[6] }] };
+      if (/SELECT (?:candidate\.)?id, (?:candidate\.)?status, (?:candidate\.)?candidate_fingerprint/i.test(sql)) return { rows: existing ? [existing] : [] };
+      if (/INSERT INTO knowledge_candidates/i.test(sql)) return existing && !allowLegacyRegeneration ? { rows: [] } : { rows: [{ id: 'candidate-1', status: 'NEEDS_REVIEW', pii_redaction_status: 'REDACTED', candidate_fingerprint: params[6] }] };
       if (/INSERT INTO assistant_knowledge_recommendations/i.test(sql)) return { rows: [{ id: 'recommendation-1', status: 'NEEDS_REVIEW' }] };
       if (/INSERT INTO knowledge_candidate_image_evidence/i.test(sql) && failOnEvidence) throw Object.assign(new Error('evidence write failed'), { code: 'IMAGE_EVIDENCE_WRITE_FAILED' });
       return { rows: [] };
@@ -77,6 +77,16 @@ test('reuses an exact image candidate fingerprint without duplicating it', async
   assert.equal(result[0].id, 'existing-candidate');
   assert.equal(result[0].reused, true);
   assert.equal(db.calls.some(({ sql }) => /INSERT INTO knowledge_candidates/i.test(sql)), false);
+});
+
+test('an evidence-less approved legacy candidate does not block a stronger provenance regeneration', async () => {
+  const db = database({ existing: { id: 'legacy-candidate', status: 'APPROVED', candidate_fingerprint: 'legacy', has_provenance: false }, allowLegacyRegeneration: true });
+  const result = await createImageKnowledgeCandidates({ database: db, tenantId, assistantId, sourceId, extractionHash, semanticClassifier });
+  assert.equal(result[0].status, 'NEEDS_REVIEW');
+  assert.equal(result[0].reused, false);
+  const insert = db.calls.find(({ sql }) => /INSERT INTO knowledge_candidates/i.test(sql));
+  assert.notEqual(insert.params[6], 'legacy');
+  assert.match(db.calls.find(({ sql }) => /SELECT candidate\.id, candidate\.status/i.test(sql)).sql, /has_provenance/i);
 });
 
 test('stale or disabled image source produces no candidate', async () => {

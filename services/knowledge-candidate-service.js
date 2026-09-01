@@ -54,6 +54,10 @@ function imageCandidateFingerprint({ tenantId, assistantId, sourceId, extraction
     .digest('hex');
 }
 
+function provenanceCandidateFingerprint(baseFingerprint) {
+  return crypto.createHash('sha256').update(`${baseFingerprint}:PROVENANCE_V2`).digest('hex');
+}
+
 export async function createImageKnowledgeCandidates({
   database,
   tenantId,
@@ -128,16 +132,27 @@ export async function createImageKnowledgeCandidates({
     const behaviorRecommendations = [];
 
     for (const { classification, segment: business } of businessSegments) {
-      const fingerprint = imageCandidateFingerprint({ tenantId, assistantId, sourceId, extractionHash: business.extraction_hash, segmentOrder: business.segment_order });
+      const baseFingerprint = imageCandidateFingerprint({ tenantId, assistantId, sourceId, extractionHash: business.extraction_hash, segmentOrder: business.segment_order });
+      const strongerProvenanceFingerprint = provenanceCandidateFingerprint(baseFingerprint);
       const existing = await client.query(
-        `SELECT id, status, candidate_fingerprint
-           FROM knowledge_candidates
-          WHERE tenant_id = $1 AND candidate_fingerprint = $2`,
-        [tenantId, fingerprint]);
-      if (existing.rows?.[0]) {
-        results.push({ ...existing.rows[0], reused: true });
+        `SELECT candidate.id, candidate.status, candidate.candidate_fingerprint,
+                EXISTS (SELECT 1 FROM knowledge_candidate_image_evidence evidence
+                          WHERE evidence.tenant_id = candidate.tenant_id AND evidence.candidate_id = candidate.id) AS has_provenance
+           FROM knowledge_candidates candidate
+          WHERE tenant_id = $1 AND candidate_fingerprint IN ($2, $3)`,
+        [tenantId, baseFingerprint, strongerProvenanceFingerprint]);
+      const provenanceExisting = (existing.rows ?? []).find((row) => row.candidate_fingerprint === strongerProvenanceFingerprint);
+      const baseExisting = (existing.rows ?? []).find((row) => row.candidate_fingerprint === baseFingerprint) ?? (existing.rows ?? [])[0];
+      if (provenanceExisting || (baseExisting && !(baseExisting.status === 'APPROVED' && baseExisting.has_provenance === false))) {
+        results.push({ ...(provenanceExisting ?? baseExisting), reused: true });
         continue;
       }
+
+      // An evidence-less approved legacy candidate is immutable, but must not
+      // prevent a provenance-complete regeneration from being reviewable.
+      const fingerprint = baseExisting?.status === 'APPROVED' && baseExisting.has_provenance === false
+        ? strongerProvenanceFingerprint
+        : baseFingerprint;
 
       const proposedContent = String(redact(text(classification.canonicalText, 12000, 'KNOWLEDGE_CANDIDATE_CONTENT_INVALID')) ?? '').trim();
       if (!proposedContent) throw new KnowledgeCandidateError('KNOWLEDGE_IMAGE_REDACTION_EMPTY', 'Redacted image candidate content is empty');
