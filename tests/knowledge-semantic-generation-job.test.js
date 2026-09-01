@@ -5,6 +5,7 @@ import {
   enqueueImageSemanticGenerationJob,
   processImageSemanticGenerationJob,
   recoverStaleImageSemanticGenerationJobs,
+  startImageSemanticGenerationWorker,
 } from '../services/knowledge-semantic-generation-job-service.js';
 
 const tenantId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -77,4 +78,15 @@ test('recovers an expired semantic PROCESSING lease before a worker claims the n
   assert.match(calls[0].sql, /locked_until < CURRENT_TIMESTAMP/);
   assert.match(calls[0].sql, /KNOWLEDGE_SEMANTIC_LEASE_EXPIRED/);
   assert.match(calls[1].sql, /status = 'PENDING'/);
+});
+
+test('semantic worker exposes only safe operational status for deployment health checks', async () => {
+  const database = { query: async () => ({ rows: [] }) };
+  const worker = startImageSemanticGenerationWorker({ database, semanticClassifier: { classify: async () => ({}) }, intervalMs: 60_000, logger: { error: () => {} } });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(worker.status().state, 'RUNNING');
+  assert.equal(worker.status().last_failure_code, null);
+  worker();
+  assert.equal(worker.status().state, 'STOPPED');
 });

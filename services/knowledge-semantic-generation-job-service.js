@@ -120,6 +120,7 @@ export function startImageSemanticGenerationWorker({ database, semanticClassifie
   let lastClaimedAt = null;
   let lastCompletedAt = null;
   let lastFailureAt = null;
+  let lastFailureCode = null;
   const tick = async () => {
     if (stopped || running) return;
     running = true;
@@ -131,9 +132,11 @@ export function startImageSemanticGenerationWorker({ database, semanticClassifie
         lastClaimedAt = new Date().toISOString();
         await processImageSemanticGenerationJob({ database, job, semanticClassifier });
         lastCompletedAt = new Date().toISOString();
+        lastFailureCode = null;
       }
     } catch (error) {
       lastFailureAt = new Date().toISOString();
+      lastFailureCode = String(error?.code ?? 'KNOWLEDGE_SEMANTIC_GENERATION_FAILED').replace(/[^A-Z0-9_]/gi, '_').slice(0, 80);
       logger.error('KNOWLEDGE_SEMANTIC_GENERATION_WORKER_FAILED', String(error?.code ?? 'UNKNOWN'));
     } finally { running = false; }
   };
@@ -147,6 +150,7 @@ export function startImageSemanticGenerationWorker({ database, semanticClassifie
     last_claimed_at: lastClaimedAt,
     last_completed_at: lastCompletedAt,
     last_failure_at: lastFailureAt,
+    last_failure_code: lastFailureCode,
   });
   return stop;
 }
