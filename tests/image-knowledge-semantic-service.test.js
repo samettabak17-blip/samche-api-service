@@ -59,6 +59,21 @@ test('preserves separate durable-fact and qualification artifacts from one mixed
   ]);
 });
 
+test('fails closed to an unsafe fact while preserving a separately valid behavior artifact', () => {
+  const output = validateImageKnowledgeSemanticOutput({
+    classifications: [
+      { segment_order: 0, category: 'DURABLE_BUSINESS_FACT', canonical_fact: 'The company has contracted partner venues for corporate events.', confidence: 0.91 },
+      { segment_order: 1, category: 'ASSISTANT_BEHAVIOR_OR_QUALIFICATION', canonical_fact: 'Ask whether the customer already has a venue and request an estimated budget range.', confidence: 0.82 },
+      { segment_order: 2, category: 'CUSTOMER_SPECIFIC_CONTEXT', canonical_fact: null, confidence: 0.95 },
+      { segment_order: 3, category: 'TRANSIENT_CONVERSATION', canonical_fact: null, confidence: 0.98 },
+      { segment_order: 4, category: 'DURABLE_POLICY_OR_COMMITMENT_CANDIDATE', canonical_fact: null, confidence: 0.63 },
+    ],
+  }, segments);
+  assert.equal(output[0].category, 'UNSAFE_OR_AMBIGUOUS');
+  assert.equal(output[0].canonicalText, null);
+  assert.equal(output[1].category, 'ASSISTANT_BEHAVIOR_OR_QUALIFICATION');
+});
+
 test('semantic provider contract permits only the durable-fact plus behavior pair for a mixed segment', () => {
   const provider = fs.readFileSync(new URL('../services/knowledge-generation-provider.js', import.meta.url), 'utf8');
   assert.match(provider, /DURABLE_BUSINESS_FACT plus ASSISTANT_BEHAVIOR_OR_QUALIFICATION/);

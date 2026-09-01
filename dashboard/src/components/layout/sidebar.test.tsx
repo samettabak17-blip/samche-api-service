@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -40,6 +40,29 @@ describe('workspace access presentation', () => {
   it('does not advertise unsupported plan management to a customer tenant administrator', () => {
     renderSidebar(<MemoryRouter><Sidebar tenantId="tenant-admin" tenantName="Admin tenant" tenantRole="ADMIN" email="admin@samche.test" onLogout={() => undefined} onNavigate={() => undefined} /></MemoryRouter>);
     expect(screen.queryByRole('link', { name: 'Manage Plan' })).toBeNull();
+  });
+  it('shows Upgrade Plan for a tenant administrator when a higher canonical plan exists', async () => {
+    vi.mocked(tenantApi.getTenantPlan).mockResolvedValue({ plan_code: 'STARTER', display_name: 'Starter Plan', customer_subtitle: 'Core AI Workspace', rank: 1, pending_request: null });
+    vi.mocked(tenantApi.listPlans).mockResolvedValue([
+      { code: 'STARTER', rank: 1, display_name: 'Starter Plan', customer_subtitle: 'Core AI Workspace' },
+      { code: 'GROWTH', rank: 2, display_name: 'Growth Plan', customer_subtitle: 'Multi-Channel AI Growth' },
+    ]);
+    renderSidebar(<MemoryRouter><Sidebar tenantId="tenant-admin" tenantName="Admin tenant" tenantRole="ADMIN" email="admin@samche.test" onLogout={() => undefined} onNavigate={() => undefined} /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Upgrade Plan' })).toBeVisible());
+  });
+  it('keeps the current plan card unchanged and shows pending status only inside Upgrade Plan', async () => {
+    vi.mocked(tenantApi.getTenantPlan).mockResolvedValue({ plan_code: 'STARTER', display_name: 'Starter Plan', customer_subtitle: 'Core AI Workspace', rank: 1, pending_request: { requested_plan_code: 'BUSINESS' } });
+    vi.mocked(tenantApi.listPlans).mockResolvedValue([
+      { code: 'STARTER', rank: 1, display_name: 'Starter Plan', customer_subtitle: 'Core AI Workspace' },
+      { code: 'BUSINESS', rank: 3, display_name: 'Business Plan', customer_subtitle: 'Advanced AI Operations' },
+    ]);
+    renderSidebar(<MemoryRouter><Sidebar tenantId="tenant-admin" tenantName="Admin tenant" tenantRole="ADMIN" email="admin@samche.test" onLogout={() => undefined} onNavigate={() => undefined} /></MemoryRouter>);
+    await screen.findByRole('button', { name: 'Upgrade Plan' });
+    expect(screen.getByText('Starter Plan')).toBeVisible();
+    expect(screen.queryByText('Pending approval')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Upgrade Plan' }));
+    expect(await screen.findByText('Pending approval')).toBeVisible();
+    expect(screen.getByText('Business Plan')).toBeVisible();
   });
   it('keeps the platform owner plan entry connected to workspace settings', () => {
     renderSidebar(<MemoryRouter><Sidebar tenantId="tenant-owner" tenantName="Owner tenant" tenantRole="OWNER" email="owner@samche.test" onLogout={() => undefined} onNavigate={() => undefined} /></MemoryRouter>);

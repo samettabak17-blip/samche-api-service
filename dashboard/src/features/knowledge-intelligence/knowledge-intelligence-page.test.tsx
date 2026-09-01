@@ -658,6 +658,8 @@ it("shows source detail lifecycle actions and real assignment state", async () =
   expect(
     await screen.findByRole("button", { name: "Unassign Sales Assistant" }),
   ).toBeVisible();
+  expect(screen.getByLabelText("Add assistant assignment")).toBeVisible();
+  expect(screen.getByRole("option", { name: "Choose assistant to assign" })).toBeVisible();
   expect(screen.getByRole("button", { name: "Re-index" })).toBeVisible();
   expect(screen.getByRole("button", { name: "Archive" })).toBeVisible();
 });
@@ -892,9 +894,8 @@ it("does not show a stale source success banner alongside a failed image candida
   renderPage(true, "/app/tenant-a/knowledge-base/sources");
   fireEvent.click(await screen.findByRole("button", { name: "View WhatsApp screenshot" }));
   await screen.findByRole("button", { name: "Generate candidates" });
-  const assistantControls = screen.getAllByLabelText("Assistant");
-  fireEvent.change(assistantControls[assistantControls.length - 1]!, { target: { value: "assistant-a" } });
-  fireEvent.click(screen.getByRole("button", { name: "Assign / re-assign" }));
+  fireEvent.change(screen.getByLabelText("Add assistant assignment"), { target: { value: "assistant-a" } });
+  fireEvent.click(screen.getByRole("button", { name: "Assign assistant" }));
   await screen.findByText("Source lifecycle action completed.");
   fireEvent.click(screen.getByRole("button", { name: "Generate candidates" }));
 

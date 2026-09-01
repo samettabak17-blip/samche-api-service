@@ -25,10 +25,10 @@ export async function enqueueImageSemanticGenerationJob({ database, tenantId, so
      ON CONFLICT (tenant_id, source_id, job_type, content_hash, embedding_model, embedding_version)
      DO UPDATE SET
        status = CASE WHEN knowledge_processing_jobs.status = 'PROCESSING' THEN 'PROCESSING'
-                     WHEN knowledge_processing_jobs.status = 'READY' THEN 'READY'
+                     WHEN knowledge_processing_jobs.status = 'READY' THEN 'PENDING'
                      ELSE 'PENDING' END,
-       available_at = CASE WHEN knowledge_processing_jobs.status IN ('PROCESSING', 'READY') THEN knowledge_processing_jobs.available_at ELSE CURRENT_TIMESTAMP END,
-       last_error_code = CASE WHEN knowledge_processing_jobs.status IN ('PROCESSING', 'READY') THEN knowledge_processing_jobs.last_error_code ELSE NULL END,
+       available_at = CASE WHEN knowledge_processing_jobs.status = 'PROCESSING' THEN knowledge_processing_jobs.available_at ELSE CURRENT_TIMESTAMP END,
+       last_error_code = CASE WHEN knowledge_processing_jobs.status = 'PROCESSING' THEN knowledge_processing_jobs.last_error_code ELSE NULL END,
        updated_at = CURRENT_TIMESTAMP
      RETURNING id, tenant_id, source_id, job_type, status, attempts, available_at, last_error_code, metadata, created_at, updated_at`,
     [tenantId, sourceId, String(extractionHash).toLowerCase()],

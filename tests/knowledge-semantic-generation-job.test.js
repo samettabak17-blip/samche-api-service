@@ -23,6 +23,20 @@ test('accepts an image semantic generation job without waiting for provider work
   assert.equal(calls[0].params.includes(extractionHash), true);
 });
 
+test('requeues a completed image semantic job so a later assistant assignment can produce its missing behavior recommendation', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    return { rows: [{ id: 'job-1', status: 'PENDING' }] };
+  } };
+
+  const job = await enqueueImageSemanticGenerationJob({ database, tenantId, sourceId, extractionHash });
+
+  assert.equal(job.status, 'PENDING');
+  assert.match(calls[0].sql, /WHEN knowledge_processing_jobs\.status = 'READY' THEN 'PENDING'/);
+  assert.match(calls[0].sql, /available_at = CASE WHEN knowledge_processing_jobs\.status = 'PROCESSING' THEN knowledge_processing_jobs\.available_at ELSE CURRENT_TIMESTAMP END/);
+});
+
 test('worker persists durable candidates and assistant recommendations outside the browser request', async () => {
   const calls = [];
   const database = { query: async (sql, params = []) => { calls.push({ sql, params }); return { rows: [] }; } };

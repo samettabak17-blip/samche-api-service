@@ -9,6 +9,14 @@ export const SEMANTIC_CATEGORIES = new Set([
   'UNSAFE_OR_AMBIGUOUS',
 ]);
 
+// Canonicalization may improve grammar, but it must never introduce a
+// commercial or legal relationship that is not present in the source text.
+// The terms are generic claim classes, not tenant-specific vocabulary.
+const PROTECTED_COMMITMENT_TERMS = [
+  'contracted', 'contractual', 'partnership', 'partner', 'guaranteed', 'guarantee',
+  'anlaşmalı', 'sözleşmeli', 'ortaklık', 'garantili', 'garanti',
+];
+
 export class ImageKnowledgeSemanticError extends Error {
   constructor(code, message) {
     super(message);
@@ -27,6 +35,16 @@ function boundedText(value, maximum, code) {
 function businessSegments(segments) {
   if (!Array.isArray(segments)) throw new ImageKnowledgeSemanticError('IMAGE_SEMANTIC_INPUT_INVALID', 'Image semantic input is invalid');
   return segments.filter((segment) => segment?.role === 'BUSINESS');
+}
+
+function normalizedClaimText(value) {
+  return String(value ?? '').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+function addsUnsupportedCommitment(sourceText, canonicalText) {
+  const source = normalizedClaimText(sourceText);
+  const canonical = normalizedClaimText(canonicalText);
+  return PROTECTED_COMMITMENT_TERMS.some((term) => canonical.includes(term) && !source.includes(term));
 }
 
 export function validateImageKnowledgeSemanticOutput(value, segments) {
@@ -52,23 +70,28 @@ export function validateImageKnowledgeSemanticOutput(value, segments) {
       throw new ImageKnowledgeSemanticError('IMAGE_SEMANTIC_OUTPUT_INVALID', 'Image semantic classification output is invalid');
     }
     const rawCanonical = item?.canonical_fact;
-    const canonicalText = rawCanonical === null || rawCanonical === undefined || rawCanonical === ''
+    let canonicalText = rawCanonical === null || rawCanonical === undefined || rawCanonical === ''
       ? null
       : boundedText(redactConversationCandidate(String(rawCanonical)), 2000, 'IMAGE_SEMANTIC_OUTPUT_INVALID');
-    if ((category === 'DURABLE_BUSINESS_FACT' || category === 'ASSISTANT_BEHAVIOR_OR_QUALIFICATION') !== Boolean(canonicalText)) {
+    let normalizedCategory = category;
+    if (category === 'DURABLE_BUSINESS_FACT' && canonicalText && addsUnsupportedCommitment(segment.normalized_text, canonicalText)) {
+      normalizedCategory = 'UNSAFE_OR_AMBIGUOUS';
+      canonicalText = null;
+    }
+    if ((normalizedCategory === 'DURABLE_BUSINESS_FACT' || normalizedCategory === 'ASSISTANT_BEHAVIOR_OR_QUALIFICATION') !== Boolean(canonicalText)) {
       throw new ImageKnowledgeSemanticError('IMAGE_SEMANTIC_OUTPUT_INVALID', 'Image semantic classification output is invalid');
     }
     return Object.freeze({
       segmentId: segment.id,
       segmentOrder,
-      category,
+      category: normalizedCategory,
       canonicalText,
       confidence,
     });
   });
   if (categoriesByOrder.size !== business.length || business.some((segment) => {
     const categories = categoriesByOrder.get(Number(segment.segment_order));
-    return !categories || (categories.size > 1 && !(categories.has('DURABLE_BUSINESS_FACT') && categories.has('ASSISTANT_BEHAVIOR_OR_QUALIFICATION')));
+    return !categories || (categories.size > 1 && !(categories.has('DURABLE_BUSINESS_FACT') && categories.has('ASSISTANT_BEHAVIOR_OR_QUALIFICATION')) && !(categories.has('UNSAFE_OR_AMBIGUOUS') && categories.has('ASSISTANT_BEHAVIOR_OR_QUALIFICATION')));
   })) {
     throw new ImageKnowledgeSemanticError('IMAGE_SEMANTIC_OUTPUT_INVALID', 'Image semantic classification output is invalid');
   }

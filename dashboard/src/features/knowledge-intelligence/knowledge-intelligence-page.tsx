@@ -776,16 +776,16 @@ export function KnowledgeIntelligencePage() {
     else saveConfiguration.mutate({ id: editor.id, data });
   };
 
-  const assistantSelect = (
+  const assistantSelect = (label = "Assistant", placeholder = "Select an assistant") => (
     <label className="block text-sm font-medium text-ink">
-      Assistant
+      {label}
       <select
-        aria-label="Assistant"
+        aria-label={label}
         value={assistantId}
         onChange={(event) => setAssistantId(event.target.value)}
         className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-ink"
       >
-        <option value="">Select an assistant</option>
+        <option value="">{placeholder}</option>
         {(assistants.data ?? []).map((assistant: Assistant) => (
           <option key={assistant.id} value={assistant.id}>
             {assistantDisplayLabel(assistant, channels.data ?? [])}
@@ -1369,7 +1369,7 @@ export function KnowledgeIntelligencePage() {
                   ))}
                 </select>
               </label>
-              {assistantSelect}
+              {assistantSelect()}
               <DashboardButton
                 variant="primary"
                 type="submit"
@@ -1691,7 +1691,7 @@ export function KnowledgeIntelligencePage() {
                               }}
                               className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end"
                             >
-                              {assistantSelect}
+                              {assistantSelect("Add assistant assignment", "Choose assistant to assign")}
                               <DashboardButton
                                 variant="primary"
                                 type="submit"
@@ -1701,7 +1701,7 @@ export function KnowledgeIntelligencePage() {
                               >
                                 {assignSource.isPending
                                   ? "Assigning…"
-                                  : "Assign / re-assign"}
+                                  : "Assign assistant"}
                               </DashboardButton>
                             </form>
                           </>
@@ -2118,7 +2118,7 @@ export function KnowledgeIntelligencePage() {
       {tab === "configurations" && (
         <div className="space-y-5">
           <div className="panel max-w-xl space-y-3 p-5">
-            {assistantSelect}
+            {assistantSelect()}
             <label className="block text-sm font-medium text-ink">
               ACTIVE Business Profile
               <select
@@ -2490,7 +2490,7 @@ export function KnowledgeIntelligencePage() {
             }}
             className="panel max-w-2xl space-y-4 p-5"
           >
-            {assistantSelect}
+            {assistantSelect()}
             <label className="block text-sm font-medium">
               Test question
               <textarea

@@ -92,6 +92,34 @@ test('Gemini generation uses deterministic JSON mode and the requested response 
   assert.equal(requests[0].body.generationConfig.responseSchema.type, 'OBJECT');
 });
 
+test('Gemini image semantic boundary preserves mixed durable and behavior artifacts from one BUSINESS segment', async () => {
+  const requests = [];
+  const provider = createKnowledgeGenerationProvider({
+    env: { GEMINI_API_KEY: 'test-key' },
+    fetchImpl: async (_url, request) => {
+      requests.push(JSON.parse(request.body));
+      return {
+        ok: true,
+        json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ classifications: [
+          { segment_order: 4, category: 'DURABLE_BUSINESS_FACT', canonical_fact: 'The company works with venues for corporate events.', confidence: 0.9 },
+          { segment_order: 4, category: 'ASSISTANT_BEHAVIOR_OR_QUALIFICATION', canonical_fact: 'Ask whether the customer already has a venue.', confidence: 0.8 },
+        ] }) }] } }] }),
+      };
+    },
+  });
+
+  const output = await provider.classifyImageKnowledgeSegments({
+    segments: [{ segment_order: 4, text: 'Do you already have a venue? We work with venues for corporate events.' }],
+  });
+
+  assert.equal(output.classifications.length, 2);
+  assert.deepEqual(output.classifications.map((item) => item.category), [
+    'DURABLE_BUSINESS_FACT',
+    'ASSISTANT_BEHAVIOR_OR_QUALIFICATION',
+  ]);
+  assert.equal(requests[0].generationConfig.responseSchema.properties.classifications.items.properties.category.type, 'STRING');
+});
+
 test('Recommendation response schema mirrors canonical validator constraints', () => {
   const schema = buildRecommendationResponseSchema();
   assert.equal(schema.type, 'OBJECT');
