@@ -150,8 +150,9 @@ export function Topbar({ tenants, selectedTenantId, tenantId, email, systemRole,
     window.addEventListener(headerOverlayCloseEvent, close);
     return () => { document.removeEventListener('mousedown', dismiss); document.removeEventListener('keydown', escape); window.removeEventListener(headerOverlayCloseEvent, close); };
   }, [searchOpen, notificationsOpen]);
-  const knownSection = location.pathname.split('/').find((segment) => ['overview', 'conversations', 'leads', 'pipeline', 'assistants', 'channels', 'knowledge-base', 'team', 'settings'].includes(segment));
-  const title = ({ overview: 'Dashboard Overview', conversations: 'Conversations', leads: 'Leads', pipeline: 'Pipeline', assistants: 'AI Assistants', channels: 'Channels', 'knowledge-base': 'Knowledge Base', team: 'Team', settings: 'Settings' } as Record<string, string>)[knownSection ?? ''] ?? 'Dashboard Overview';
+  const knownSection = location.pathname.split('/').find((segment) => ['overview', 'conversations', 'leads', 'pipeline', 'assistants', 'channels', 'knowledge', 'knowledge-base', 'team', 'settings'].includes(segment));
+  const isKnowledgeIntelligenceRoute = location.pathname.includes('/knowledge') || /\/knowledge-base\/(intelligence|sources|candidates|gaps|profile|configurations|retrieval)$/.test(location.pathname);
+  const title = isKnowledgeIntelligenceRoute ? 'Knowledge Intelligence' : (({ overview: 'Dashboard Overview', conversations: 'Conversations', leads: 'Leads', pipeline: 'Pipeline', assistants: 'AI Assistants', channels: 'Channels', 'knowledge-base': 'Knowledge Base', team: 'Team', settings: 'Settings' } as Record<string, string>)[knownSection ?? ''] ?? 'Dashboard Overview');
   const isOverview = knownSection === 'overview';
   const notifications = useQuery({
     queryKey: ['tenant', selectedTenantId, 'header-live-support'],

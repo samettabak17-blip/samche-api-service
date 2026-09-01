@@ -13,6 +13,7 @@ import {
 import { CustomerOnboardingError, onboardCustomer } from '../services/customer-onboarding-service.js';
 import { validateInvitationMailConfiguration } from '../services/customer-invitation-mailer.js';
 import { resendInvitationLifecycle, revokeInvitationLifecycle } from '../services/customer-invitation-service.js';
+import { AssistantModelAccessError, assertAssistantModelWriteAllowed, serializeAssistantForActor } from '../services/assistant-model-access-policy.js';
 
 const router = express.Router();
 
@@ -528,7 +529,7 @@ router.get('/:tenantId/assistants', requireTenantAccess, async (req, res) => {
             ORDER BY created_at DESC
         `, [req.verified_tenant_id]);
 
-        return res.json(result.rows);
+        return res.json(result.rows.map((assistant) => serializeAssistantForActor(assistant, req.user.system_role)));
 
     } catch (err) {
         console.error('Fetch assistants error:', err);
@@ -548,6 +549,13 @@ router.post(
     requireTenantAccess,
     requireTenantAdmin,
     async (req, res) => {
+
+        try {
+            assertAssistantModelWriteAllowed({ systemRole: req.user.system_role, payload: req.body });
+        } catch (error) {
+            if (error instanceof AssistantModelAccessError) return res.status(403).json({ error: 'Assistant model selection is platform-managed' });
+            throw error;
+        }
 
         const {
             name,
@@ -587,7 +595,7 @@ router.post(
                 model || 'gpt-4o-mini'
             ]);
 
-            return res.status(201).json(result.rows[0]);
+            return res.status(201).json(serializeAssistantForActor(result.rows[0], req.user.system_role));
 
         } catch (err) {
             console.error('Create assistant error:', err);
@@ -633,7 +641,7 @@ router.get(
                 });
             }
 
-            return res.json(result.rows[0]);
+            return res.json(serializeAssistantForActor(result.rows[0], req.user.system_role));
 
         } catch (err) {
             console.error('Fetch assistant error:', err);
@@ -663,6 +671,13 @@ router.put(
             model,
             status
         } = req.body;
+
+        try {
+            assertAssistantModelWriteAllowed({ systemRole: req.user.system_role, payload: req.body });
+        } catch (error) {
+            if (error instanceof AssistantModelAccessError) return res.status(403).json({ error: 'Assistant model selection is platform-managed' });
+            throw error;
+        }
 
         if (!isValidUUID(assistantId)) {
             return res.status(400).json({
@@ -697,7 +712,7 @@ router.put(
                 });
             }
 
-            return res.json(result.rows[0]);
+            return res.json(serializeAssistantForActor(result.rows[0], req.user.system_role));
 
         } catch (err) {
             console.error('Update assistant error:', err);

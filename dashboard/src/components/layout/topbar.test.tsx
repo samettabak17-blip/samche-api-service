@@ -11,9 +11,9 @@ vi.mock('../../features/live-support/live-support-attention-provider', () => ({ 
 vi.mock('../../features/dashboard/dashboard-api', () => ({ tenantApi: { listConversations: vi.fn(), createTenant: vi.fn(), listCustomerUsers: vi.fn(), assignTenantUser: vi.fn() }, onboardingApi: { createCompanyInvitation: vi.fn(), listInvitationStatuses: vi.fn() } }));
 import { onboardingApi, tenantApi } from '../../features/dashboard/dashboard-api';
 
-function renderTopbar(systemRole: 'OWNER' | 'CUSTOMER' = 'CUSTOMER', onSelectTenant = vi.fn(), tenantRole: 'ADMIN' | 'AGENT' = 'ADMIN') {
+function renderTopbar(systemRole: 'OWNER' | 'CUSTOMER' = 'CUSTOMER', onSelectTenant = vi.fn(), tenantRole: 'ADMIN' | 'AGENT' = 'ADMIN', route = '/app/tenant-1/overview') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={['/app/tenant-1/overview']}><Topbar tenants={[{ id: 'tenant-1', name: 'SamChe', status: 'active', created_at: '' }]} selectedTenantId="tenant-1" email="operator@samche.test" systemRole={systemRole} selectedTenantRole={tenantRole} onCreateTenant={(name) => tenantApi.createTenant(name)} onAdoptTenant={async (tenantId) => { onSelectTenant(tenantId); }} onSelectTenant={onSelectTenant} onOpenNavigation={() => undefined} onLogout={() => undefined} tenantId="tenant-1" /></MemoryRouter></QueryClientProvider>);
+  return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={[route]}><Topbar tenants={[{ id: 'tenant-1', name: 'SamChe', status: 'active', created_at: '' }]} selectedTenantId="tenant-1" email="operator@samche.test" systemRole={systemRole} selectedTenantRole={tenantRole} onCreateTenant={(name) => tenantApi.createTenant(name)} onAdoptTenant={async (tenantId) => { onSelectTenant(tenantId); }} onSelectTenant={onSelectTenant} onOpenNavigation={() => undefined} onLogout={() => undefined} tenantId="tenant-1" /></MemoryRouter></QueryClientProvider>);
 }
 
 afterEach(() => { cleanup(); vi.useRealTimers(); });
@@ -125,6 +125,11 @@ describe('Topbar global navigation search', () => {
     renderTopbar('OWNER');
     expect(screen.getByRole('button', { name: /Last 7 days/ })).toHaveClass('topbar-range-control');
     expect(screen.getByRole('button', { name: 'Live support notifications' })).toHaveClass('topbar-notification-control');
+  });
+
+  it('names current and legacy Knowledge Intelligence routes in the top-level header', () => {
+    renderTopbar('CUSTOMER', vi.fn(), 'ADMIN', '/app/tenant-1/knowledge-base/sources');
+    expect(screen.getByRole('banner')).toHaveTextContent('Knowledge Intelligence');
   });
 
   it('lets an OWNER assign an existing CUSTOMER with an allowed tenant role', async () => {

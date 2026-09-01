@@ -27,7 +27,8 @@ const groups = [
 ];
 
 export function workspaceAccessCopy(tenantRole: TenantRole | 'OWNER' | undefined) {
-  if (tenantRole === 'OWNER' || tenantRole === 'ADMIN') return { label: 'ADMIN', detail: 'FULL ACCESS' };
+  if (tenantRole === 'OWNER') return { label: 'ADMIN', detail: 'FULL ACCESS' };
+  if (tenantRole === 'ADMIN') return { label: 'WORKSPACE ADMIN', detail: 'TENANT ADMINISTRATION' };
   return { label: tenantRole === 'AGENT' ? 'TEAM ACCESS' : 'WORKSPACE ACCESS', detail: tenantRole === 'AGENT' ? 'ASSIGNED ROLE' : 'PLAN NOT AVAILABLE' };
 }
 
@@ -71,7 +72,7 @@ export function Sidebar({ tenantId, tenantName, tenantRole, email, onLogout, onN
       <div className="rounded-xl border border-signal/30 bg-[radial-gradient(circle_at_16%_18%,rgba(212,33,41,.2),transparent_8rem),rgba(48,16,24,.58)] px-3 py-3 shadow-[0_12px_28px_rgba(0,0,0,.18)]">
         <p className="text-[10px] font-semibold tracking-[0.18em] text-signal">{access.label}</p>
         <p className="mt-1 text-sm font-semibold text-white">{access.detail}</p>
-        <Link to={'/app/' + tenantId + '/settings'} onClick={onNavigate} className="mt-3 flex w-full items-center justify-center rounded-lg border border-signal/35 bg-black/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-signal hover:shadow-signal">Manage Plan</Link>
+        {tenantRole === 'OWNER' && <Link to={'/app/' + tenantId + '/settings'} onClick={onNavigate} className="mt-3 flex w-full items-center justify-center rounded-lg border border-signal/35 bg-black/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-signal hover:shadow-signal">Manage Plan</Link>}
       </div>
       <p className="mt-3 truncate text-xs text-stone-400" title={email}>{email}</p>
       <button type="button" onClick={onLogout} className="mt-3 w-full rounded-lg border border-line bg-elevated/50 px-3 py-2 text-left text-sm text-stone-400 transition hover:border-signal/30 hover:bg-signal/10 hover:text-white">Sign out</button>

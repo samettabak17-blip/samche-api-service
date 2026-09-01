@@ -1,6 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AssistantForm } from './assistants-page';
+
+afterEach(cleanup);
 
 describe('AssistantForm', () => {
   it('does not render write controls for an AGENT', () => {
@@ -14,6 +16,16 @@ describe('AssistantForm', () => {
     fireEvent.click(screen.getByRole('button', { name: /create assistant/i }));
     expect(screen.getByText('Assistant name is required.')).toBeTruthy();
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('does not expose platform model selection in a customer assistant form', () => {
+    render(<AssistantForm canManage isOwner={false} onSubmit={vi.fn()} />);
+    expect(screen.queryByRole('textbox', { name: 'Model' })).toBeNull();
+  });
+
+  it('keeps platform model selection available to an owner', () => {
+    render(<AssistantForm canManage isOwner onSubmit={vi.fn()} />);
+    expect(screen.getByRole('textbox', { name: 'Model' })).toBeTruthy();
   });
 });
 

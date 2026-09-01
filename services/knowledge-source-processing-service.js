@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { extractDocumentText } from './conversation-document-extraction-service.js';
 import { indexKnowledgeSource } from './knowledge-intelligence-service.js';
 import { validateImageKnowledgeExtraction } from './image-knowledge-extraction.js';
@@ -109,6 +110,8 @@ export async function persistImageExtractionSegments({ database, source, job, ex
               extraction_method = $5,
               extracted_at = CURRENT_TIMESTAMP,
               processed_at = CURRENT_TIMESTAMP,
+              processing_status = 'READY',
+              processing_error_code = NULL,
               updated_at = CURRENT_TIMESTAMP
         WHERE id = $1 AND tenant_id = $2`,
       [source.id, source.tenant_id, extraction.text, extraction.sourceHash, `IMAGE:${extraction.extractionMethod}`.slice(0, 32)]);
@@ -195,13 +198,17 @@ export async function processKnowledgeProcessingJob({
       }
       const bytes = await streamToBuffer(await sourceStorage.get({ key: source.storage_key }));
       if (source.mime_type === 'image/jpeg' || source.mime_type === 'image/png') {
+        const originalSourceHash = crypto.createHash('sha256').update(bytes).digest('hex');
+        if (originalSourceHash !== String(source.content_hash ?? '').toLowerCase()) {
+          throw new KnowledgeSourceProcessingError('IMAGE_SOURCE_HASH_INVALID', 'Image source integrity validation failed');
+        }
         if (!imageExtractor || typeof imageExtractor.extract !== 'function') {
           throw new KnowledgeSourceProcessingError('KNOWLEDGE_IMAGE_EXTRACTOR_UNAVAILABLE', 'Image extraction is unavailable');
         }
         const extracted = validateImageKnowledgeExtraction(await imageExtractor.extract({
           mimeType: source.mime_type,
           bytes,
-          contentHash: source.content_hash,
+          sourceHash: originalSourceHash,
         }));
         if (extracted.sourceHash !== String(source.content_hash ?? '').toLowerCase() || extracted.mimeType !== source.mime_type) {
           throw new KnowledgeSourceProcessingError('KNOWLEDGE_IMAGE_EXTRACTION_PROVENANCE_MISMATCH', 'Image extraction provenance is invalid');

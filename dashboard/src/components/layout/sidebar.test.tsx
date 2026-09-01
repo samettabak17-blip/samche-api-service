@@ -27,13 +27,17 @@ describe('Sidebar', () => {
   });
 });
 describe('workspace access presentation', () => {
-  it('shows real administrator access without fabricating a tenant plan', () => {
+  it('distinguishes platform-wide OWNER access from tenant-scoped customer administration', () => {
     expect(workspaceAccessCopy('OWNER')).toEqual({ label: 'ADMIN', detail: 'FULL ACCESS' });
-    expect(workspaceAccessCopy('ADMIN')).toEqual({ label: 'ADMIN', detail: 'FULL ACCESS' });
+    expect(workspaceAccessCopy('ADMIN')).toEqual({ label: 'WORKSPACE ADMIN', detail: 'TENANT ADMINISTRATION' });
   });
-  it('keeps the persistent access card connected to the real workspace settings route', () => {
+  it('does not advertise unsupported plan management to a customer tenant administrator', () => {
     render(<MemoryRouter><Sidebar tenantId="tenant-admin" tenantName="Admin tenant" tenantRole="ADMIN" email="admin@samche.test" onLogout={() => undefined} onNavigate={() => undefined} /></MemoryRouter>);
+    expect(screen.queryByRole('link', { name: 'Manage Plan' })).toBeNull();
+  });
+  it('keeps the platform owner plan entry connected to workspace settings', () => {
+    render(<MemoryRouter><Sidebar tenantId="tenant-owner" tenantName="Owner tenant" tenantRole="OWNER" email="owner@samche.test" onLogout={() => undefined} onNavigate={() => undefined} /></MemoryRouter>);
     const managePlan = screen.getByRole('link', { name: 'Manage Plan' });
-    expect(managePlan.getAttribute('href')).toBe('/app/tenant-admin/settings');
+    expect(managePlan.getAttribute('href')).toBe('/app/tenant-owner/settings');
   });
 });

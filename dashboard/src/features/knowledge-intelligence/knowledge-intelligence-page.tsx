@@ -175,6 +175,21 @@ const isImageKnowledgeSource = (source: {
   allowedKnowledgeImageMimeTypes.has(source.mime_type ?? "") ||
   source.source_type === "IMAGE";
 
+function sourceProcessingLabel(status: string) {
+  return ({ UPLOADED: "Queued", PROCESSING: "Processing", READY: "Ready", FAILED: "Processing failed", ARCHIVED: "Archived" } as Record<string, string>)[status] ?? "Processing";
+}
+
+function sourceIndexingLabel(status: string, source?: { mime_type?: string | null; source_type?: string | null }) {
+  if (status === "DISABLED" && source && isImageKnowledgeSource(source)) return "Image extraction ready";
+  return ({ PENDING: "Index pending", INDEXING: "Indexing", READY: "Index ready", FAILED: "Index failed", DISABLED: "Index not required", ARCHIVED: "Archived" } as Record<string, string>)[status] ?? "Index pending";
+}
+
+function sourceFailureMessage(code?: string | null) {
+  if (code === "IMAGE_SOURCE_HASH_INVALID") return "The image could not be verified. Re-upload the original file and try again.";
+  if (code?.startsWith("IMAGE_")) return "The image could not be processed. Re-upload the original file and try again.";
+  return "This source could not be processed. Retry it or upload the original file again.";
+}
+
 function knowledgeUploadValidationError(file: File): string | null {
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
   if (!allowedKnowledgeUploadExtensions.has(extension)) {
@@ -1472,12 +1487,12 @@ export function KnowledgeIntelligencePage() {
                     <div>
                       <strong className="text-sm text-ink">{row.title}</strong>
                       <p className="mt-1 text-xs text-stone-400">
-                        {row.source_type} · {row.processing_status} · Index{" "}
-                        {row.indexing_status}
+                        {row.source_type.charAt(0) + row.source_type.slice(1).toLowerCase()} · {sourceProcessingLabel(row.processing_status)}
                       </p>
+                      <p className="mt-0.5 text-xs text-stone-400">{sourceIndexingLabel(row.indexing_status, row)}</p>
                       {row.processing_error_code && (
                         <p role="alert" className="mt-2 text-sm text-red-400">
-                          Processing failed: {row.processing_error_code}
+                          {sourceFailureMessage(row.processing_error_code)}
                         </p>
                       )}
                     </div>
@@ -1522,17 +1537,12 @@ export function KnowledgeIntelligencePage() {
                                     <p className="mt-1">
                                       {selectedSource.data.image_segment_count ?? 0} segments · BUSINESS {selectedSource.data.image_role_summary?.BUSINESS ?? 0} · CUSTOMER {selectedSource.data.image_role_summary?.CUSTOMER ?? 0} · UNKNOWN {selectedSource.data.image_role_summary?.UNKNOWN ?? 0}
                                     </p>
-                                    <p className="mt-1 text-stone-400">
-                                      {selectedSource.data.extraction_method ?? "Extraction method not reported"}
-                                      {selectedSource.data.extraction_version ? ` · ${selectedSource.data.extraction_version}` : ""}
-                                    </p>
+                                    <p className="mt-1 text-stone-400">Image analysis is ready for review.</p>
                                   </>
                                 ) : selectedSource.data.processing_status === "FAILED" ? (
                                   <>
                                     <p className="font-semibold text-red-300">Image processing failed safely</p>
-                                    <p className="mt-1 text-stone-400">
-                                      {selectedSource.data.processing_error_code ?? "No further safe diagnostic is available."}
-                                    </p>
+                                    <p className="mt-1 text-stone-400">{sourceFailureMessage(selectedSource.data.processing_error_code)}</p>
                                   </>
                                 ) : (
                                   <p className="font-semibold text-stone-200">

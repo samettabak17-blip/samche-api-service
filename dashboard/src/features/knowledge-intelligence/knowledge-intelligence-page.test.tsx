@@ -728,6 +728,39 @@ it("shows a safe failed image processing state without offering candidate genera
   expect(screen.queryByRole("button", { name: "Generate candidates" })).not.toBeInTheDocument();
 });
 
+it("formats source lifecycle states without raw duplicate labels or internal image failure codes", async () => {
+  mockedApi.listKnowledgeSources.mockResolvedValue([
+    {
+      id: "image-source-hash-failed",
+      title: "WhatsApp screenshot",
+      source_type: "DOCUMENT",
+      mime_type: "image/png",
+      processing_status: "FAILED",
+      indexing_status: "FAILED",
+      processing_error_code: "IMAGE_SOURCE_HASH_INVALID",
+      enabled: true,
+    },
+  ]);
+  mockedApi.getKnowledgeSource.mockResolvedValue({
+    id: "image-source-hash-failed",
+    title: "WhatsApp screenshot",
+    source_type: "DOCUMENT",
+    mime_type: "image/png",
+    processing_status: "FAILED",
+    indexing_status: "FAILED",
+    processing_error_code: "IMAGE_SOURCE_HASH_INVALID",
+    enabled: true,
+    assistant_ids: [],
+  });
+
+  renderPage(true, "/app/tenant-a/knowledge-base/sources");
+  expect(await screen.findByText("Document · Processing failed")).toBeVisible();
+  expect(screen.getByText("Index failed")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "View WhatsApp screenshot" }));
+  expect(await screen.findByText("The image could not be verified. Re-upload the original file and try again.")).toBeVisible();
+  expect(screen.queryByText("IMAGE_SOURCE_HASH_INVALID")).not.toBeInTheDocument();
+});
+
 it("generates image candidates only after the explicit source action", async () => {
   mockedApi.listKnowledgeSources.mockResolvedValue([
     {

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { claimNextKnowledgeProcessingJob, persistImageExtractionSegments, processKnowledgeProcessingJob, streamToBuffer } from '../services/knowledge-source-processing-service.js';
 
 test('claims only one pending knowledge job with SKIP LOCKED to keep tenant processing isolated', async () => {
@@ -30,19 +31,22 @@ test('reads a private object stream without coercing its binary data to text', a
 test('routes image sources through the canonical extractor and leaves them non-indexed', async () => {
   const calls = [];
   const transactionCalls = [];
+  const storedPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const sourceHash = crypto.createHash('sha256').update(storedPng).digest('hex');
   const client = { async query(sql, params = []) { transactionCalls.push({ sql, params }); return { rows: [] }; }, release() {} };
   const database = {
     async query(sql, params = []) {
       calls.push({ sql, params });
-      if (/SELECT id, tenant_id, source_type/i.test(sql)) return { rows: [{ id: 'source-1', tenant_id: 'tenant-a', source_type: 'DOCUMENT', content: '', mime_type: 'image/png', storage_key: 'private/image', content_hash: 'b'.repeat(64), enabled: true, status: 'active', processing_status: 'UPLOADED', indexing_status: 'PENDING' }] };
+      if (/SELECT id, tenant_id, source_type/i.test(sql)) return { rows: [{ id: 'source-1', tenant_id: 'tenant-a', source_type: 'DOCUMENT', content: '', mime_type: 'image/png', storage_key: 'private/image', content_hash: sourceHash, enabled: true, status: 'active', processing_status: 'UPLOADED', indexing_status: 'PENDING' }] };
       return { rows: [] };
     },
     async connect() { return client; },
   };
   const imageExtractor = { async extract(input) {
     assert.equal(input.mimeType, 'image/png');
+    assert.equal(input.sourceHash, sourceHash);
     return {
-      extractionVersion: '1', sourceHash: 'b'.repeat(64), mimeType: 'image/png',
+      extractionVersion: '1', sourceHash, mimeType: 'image/png',
       text: 'Business statement.', segments: [{ order: 0, text: 'Business statement.', role: 'BUSINESS', confidence: 0.9 }],
       extractionConfidence: 0.9, extractionMethod: 'FAKE_TEST_EXTRACTOR',
     };
@@ -50,7 +54,7 @@ test('routes image sources through the canonical extractor and leaves them non-i
   let indexCalled = false;
   const result = await processKnowledgeProcessingJob({
     database,
-    storage: { async get() { return Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); } },
+    storage: { async get() { return storedPng; } },
     job: { id: 'job-1', tenant_id: 'tenant-a', source_id: 'source-1' },
     imageExtractor,
     index: async () => { indexCalled = true; },
@@ -58,22 +62,46 @@ test('routes image sources through the canonical extractor and leaves them non-i
   assert.equal(result.status, 'READY');
   assert.equal(indexCalled, false);
   assert.ok(transactionCalls.some(({ sql }) => /SET content = \$3[\s\S]*extraction_method/i.test(sql)));
+  assert.ok(transactionCalls.some(({ sql }) => /SET content = \$3[\s\S]*processing_status = 'READY'/i.test(sql)));
   assert.ok(transactionCalls.some(({ sql }) => /INSERT INTO knowledge_source_extraction_segments/i.test(sql)));
   assert.ok(transactionCalls.some(({ sql }) => /is_current = FALSE/i.test(sql)));
   assert.ok(transactionCalls.some(({ sql }) => /SET status = 'READY'/i.test(sql) && /knowledge_processing_jobs/i.test(sql)));
   assert.ok(calls.every(({ params }) => !params.includes('tenant-b')));
 });
 
-test('image extraction failure fails the source and processing job without indexing', async () => {
+test('fails closed when retrieved image bytes do not match the persisted original source hash', async () => {
+  const original = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const corrupted = Buffer.from([...original, 0]);
+  const sourceHash = crypto.createHash('sha256').update(original).digest('hex');
+  let extractorCalled = false;
   const calls = [];
   const database = { async query(sql, params = []) {
     calls.push({ sql, params });
-    if (/SELECT id, tenant_id, source_type/i.test(sql)) return { rows: [{ id: 'source-1', tenant_id: 'tenant-a', source_type: 'DOCUMENT', content: '', mime_type: 'image/jpeg', storage_key: 'private/image', content_hash: 'c'.repeat(64), enabled: true, status: 'active', processing_status: 'UPLOADED', indexing_status: 'PENDING' }] };
+    if (/SELECT id, tenant_id, source_type/i.test(sql)) return { rows: [{ id: 'source-1', tenant_id: 'tenant-a', source_type: 'DOCUMENT', content: '', mime_type: 'image/png', storage_key: 'private/image', content_hash: sourceHash, enabled: true, status: 'active', processing_status: 'UPLOADED', indexing_status: 'PENDING' }] };
     return { rows: [] };
   } };
   await assert.rejects(() => processKnowledgeProcessingJob({
     database,
-    storage: { async get() { return Buffer.from([0xff, 0xd8, 0xff]); } },
+    storage: { async get() { return corrupted; } },
+    job: { id: 'job-1', tenant_id: 'tenant-a', source_id: 'source-1' },
+    imageExtractor: { async extract() { extractorCalled = true; } },
+  }), { code: 'IMAGE_SOURCE_HASH_INVALID' });
+  assert.equal(extractorCalled, false);
+  assert.ok(calls.some(({ sql, params }) => /SET processing_status = 'FAILED'/i.test(sql) && params.includes('IMAGE_SOURCE_HASH_INVALID')));
+});
+
+test('image extraction failure fails the source and processing job without indexing', async () => {
+  const calls = [];
+  const storedJpeg = Buffer.from([0xff, 0xd8, 0xff]);
+  const sourceHash = crypto.createHash('sha256').update(storedJpeg).digest('hex');
+  const database = { async query(sql, params = []) {
+    calls.push({ sql, params });
+    if (/SELECT id, tenant_id, source_type/i.test(sql)) return { rows: [{ id: 'source-1', tenant_id: 'tenant-a', source_type: 'DOCUMENT', content: '', mime_type: 'image/jpeg', storage_key: 'private/image', content_hash: sourceHash, enabled: true, status: 'active', processing_status: 'UPLOADED', indexing_status: 'PENDING' }] };
+    return { rows: [] };
+  } };
+  await assert.rejects(() => processKnowledgeProcessingJob({
+    database,
+    storage: { async get() { return storedJpeg; } },
     job: { id: 'job-1', tenant_id: 'tenant-a', source_id: 'source-1' },
     imageExtractor: { async extract() { throw Object.assign(new Error('invalid'), { code: 'IMAGE_EXTRACTION_OUTPUT_INVALID' }); } },
     index: async () => assert.fail('image failure must not index'),
@@ -114,10 +142,12 @@ test('replacing an image hash retires prior current segments before inserting th
 
 test('segment persistence rolls back on partial failure and reports processing failure', async () => {
   const transactionCalls = [];
+  const storedPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const sourceHash = crypto.createHash('sha256').update(storedPng).digest('hex');
   const database = {
     async query(sql, params = []) {
       transactionCalls.push({ sql, params });
-      if (/SELECT id, tenant_id, source_type/i.test(sql)) return { rows: [{ id: 'source-1', tenant_id: 'tenant-a', source_type: 'DOCUMENT', content: '', mime_type: 'image/png', storage_key: 'private/image', content_hash: 'e'.repeat(64), enabled: true, status: 'active', processing_status: 'UPLOADED', indexing_status: 'PENDING' }] };
+      if (/SELECT id, tenant_id, source_type/i.test(sql)) return { rows: [{ id: 'source-1', tenant_id: 'tenant-a', source_type: 'DOCUMENT', content: '', mime_type: 'image/png', storage_key: 'private/image', content_hash: sourceHash, enabled: true, status: 'active', processing_status: 'UPLOADED', indexing_status: 'PENDING' }] };
       return { rows: [] };
     },
     async connect() {
@@ -130,10 +160,10 @@ test('segment persistence rolls back on partial failure and reports processing f
   };
   await assert.rejects(() => processKnowledgeProcessingJob({
     database,
-    storage: { async get() { return Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); } },
+    storage: { async get() { return storedPng; } },
     job: { id: 'job-1', tenant_id: 'tenant-a', source_id: 'source-1' },
     imageExtractor: { async extract() { return {
-      extractionVersion: '1', sourceHash: 'e'.repeat(64), mimeType: 'image/png', text: 'One. Two.', extractionConfidence: 0.8, extractionMethod: 'FAKE',
+      extractionVersion: '1', sourceHash, mimeType: 'image/png', text: 'One. Two.', extractionConfidence: 0.8, extractionMethod: 'FAKE',
       segments: [{ order: 0, text: 'One.', role: 'BUSINESS', confidence: 0.8 }, { order: 1, text: 'Two.', role: 'UNKNOWN', confidence: 0.7 }],
     }; } },
   }), { code: 'SEGMENT_WRITE_FAILED' });
