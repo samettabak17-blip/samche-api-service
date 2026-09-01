@@ -17,7 +17,7 @@ export function AuthVisualLayout({ children, heroEyebrow = 'SamChe AI Platform',
       <div aria-hidden="true" className="auth-hero-glow auth-hero-glow-red" />
       <div aria-hidden="true" className="auth-hero-glow auth-hero-glow-gold" />
       <div className="auth-hero-content">
-        <img src={samcheLogo} alt="SamChe Company LLC" className="auth-hero-logo" />
+        <div className="auth-hero-logo-frame"><img src={samcheLogo} alt="SamChe Company LLC" className="auth-hero-logo" /></div>
         <p className="auth-hero-eyebrow">{heroEyebrow}</p>
         <div className="auth-hero-heading">{heroLines.map((line, index) => <h1 key={line} className={index === heroLines.length - 1 ? 'text-signal' : undefined}>{line}</h1>)}</div>
         <div className="auth-hero-rule" />
@@ -26,6 +26,6 @@ export function AuthVisualLayout({ children, heroEyebrow = 'SamChe AI Platform',
       <div className="auth-capability-grid">{capabilities.slice(0, capabilityCount).map(([title, description, Icon]) => <article key={title} className="auth-capability-card"><Icon aria-hidden="true" className="text-signal" size={27} strokeWidth={1.8} /><h2>{title}</h2><p>{description}</p></article>)}</div>
       <p className="auth-hero-footer">© {new Date().getFullYear()} SamChe Company LLC. All rights reserved.</p>
     </section>
-    <section className="auth-panel"><div className="auth-card">{showCardLogo && <img src={samcheLogo} alt="SamChe Company LLC" className="auth-card-logo" />}{!showCardLogo && <div className="auth-mobile-brand"><img src={samcheLogo} alt="SamChe Company LLC" /><p>SamChe AI Platform</p></div>}{children}</div></section>
+    <section className={`auth-panel${showCardLogo ? ' auth-panel-invitation' : ''}`}><div className={`auth-card${showCardLogo ? ' auth-card-invitation' : ''}`}>{showCardLogo && <div className="auth-card-logo-frame"><img src={samcheLogo} alt="SamChe Company LLC" className="auth-card-logo" /></div>}{!showCardLogo && <div className="auth-mobile-brand"><img src={samcheLogo} alt="SamChe Company LLC" /><p>SamChe AI Platform</p></div>}{children}</div></section>
   </main>;
 }

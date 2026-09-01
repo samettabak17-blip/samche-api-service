@@ -1,4 +1,4 @@
-import { ArrowRight, LockKeyhole } from 'lucide-react';
+import { ArrowRight, LockKeyhole, ShieldCheck, UserRoundCheck } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { ApiError } from '../../lib/api-client';
@@ -47,6 +47,6 @@ export function LoginPage() {
             <DashboardButton type="submit" variant="primary" disabled={submitting} className="h-12 w-full text-base"><LockKeyhole aria-hidden="true" size={17} />{submitting ? 'Signing in…' : 'Sign in'}<ArrowRight aria-hidden="true" size={18} /></DashboardButton>
           </form>
           {forgotOpen && <form onSubmit={async (event) => { event.preventDefault(); await onboardingApi.requestPasswordReset(email); setForgotStatus('If an active account matches this email, a reset link will be sent.'); }} className="mt-5 rounded-xl border border-white/10 bg-black/10 p-4"><DashboardField label="Email"><DashboardInput aria-label="Reset email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></DashboardField><div className="mt-3 flex gap-3"><DashboardButton type="submit" variant="primary">Send reset link</DashboardButton><DashboardButton type="button" variant="ghost" onClick={() => setForgotOpen(false)}>Cancel</DashboardButton></div>{forgotStatus && <p role="status" className="mt-3 text-sm text-stone-300">{forgotStatus}</p>}</form>}
-          <div className="mt-9 border-t border-white/10 pt-6"><p className="text-center text-sm text-stone-300">Secure and trusted access</p></div>
+          <div className="auth-assurance"><p>Secure and trusted</p><div><span><ShieldCheck aria-hidden="true" size={20} />Secure access</span><span><LockKeyhole aria-hidden="true" size={20} />Protected credentials</span><span><UserRoundCheck aria-hidden="true" size={20} />Role-based workspace</span></div></div>
         </AuthVisualLayout>;
 }

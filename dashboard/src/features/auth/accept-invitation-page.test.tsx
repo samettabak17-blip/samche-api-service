@@ -29,6 +29,7 @@ describe('AcceptInvitationPage', () => {
     expect(window.location.search).toBe('');
     expect(screen.getByText('Northwind')).toBeTruthy();
     expect(screen.getAllByRole('img', { name: 'SamChe Company LLC' }).find((image) => image.classList.contains('auth-card-logo'))).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Back to sign in' })).toBeTruthy();
   });
 
   it('submits matching passwords and navigates to sign in after acceptance', async () => {

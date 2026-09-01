@@ -95,7 +95,9 @@ export function AcceptInvitationPage() {
       <label className="auth-label block">Confirm password<DashboardPasswordInput aria-label="Confirm password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
       {error && <p role="alert" className="rounded-xl border border-red-400/35 bg-red-950/35 px-3.5 py-3 text-sm text-red-100">{error}</p>}
       <DashboardButton type="submit" variant="primary" disabled={submitting} className="h-12 w-full text-base"><LockKeyhole aria-hidden="true" size={17} />{submitting ? 'Setting up…' : 'Set up account'}</DashboardButton>
+      <DashboardButton type="button" variant="ghost" className="w-full" onClick={() => navigate('/login')}>Back to sign in</DashboardButton>
     </form>
+    <div className="auth-invitation-assurance"><span>Secure invitation</span><span>Encrypted access</span><span>Role-based workspace</span></div>
   </PageFrame>;
 }
 
