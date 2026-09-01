@@ -14,6 +14,9 @@ test('SMTP adapter passes only validated standard SMTP configuration and determi
   await mailer.sendInvitation({ companyName: 'Example', email: 'customer@example.test', token: 'a'.repeat(43), expiresAt: new Date('2026-09-04T00:00:00.000Z') });
   assert.equal(calls.length, 1);
   assert.equal(calls[0].options.host, 'smtp.example.test');
+  assert.equal(calls[0].options.connectionTimeout, 15_000);
+  assert.equal(calls[0].options.greetingTimeout, 15_000);
+  assert.equal(calls[0].options.socketTimeout, 30_000);
   assert.equal(calls[0].message.from, 'SamChe Support <support@samchecompany.com>');
 });
 

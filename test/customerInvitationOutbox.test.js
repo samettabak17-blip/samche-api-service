@@ -9,6 +9,19 @@ function fakeClient() {
   return { calls, async query(sql, params = []) { calls.push({ sql: String(sql), params }); return { rowCount: 1, rows: [] }; } };
 }
 
+async function persistedFailureCode(error) {
+  const key = Buffer.alloc(32, 8).toString('base64');
+  const envelope = encryptInvitationEnvelope(createInvitationToken(), key);
+  const client = fakeClient();
+  await processInvitationOutboxRow({
+    client,
+    row: { id: 'outbox-failure', status: 'PENDING_DELIVERY', encrypted_envelope_ciphertext: envelope.ciphertext, envelope_iv: envelope.iv, envelope_auth_tag: envelope.authTag, envelope_key_version: envelope.keyVersion, expires_at: new Date(Date.now() + 60_000), invitation_status: 'PENDING', company_name: 'Example', email: 'customer@example.test' },
+    envelopeKey: key,
+    mailer: { sendInvitation: async () => { throw error; } },
+  });
+  return client.calls.find(({ sql }) => /provider_code = \$2/.test(sql))?.params?.[1];
+}
+
 test('successful outbox delivery decrypts once, sends, and clears the transient encrypted envelope', async () => {
   const key = Buffer.alloc(32, 5).toString('base64');
   const token = createInvitationToken();
@@ -35,7 +48,7 @@ test('expired invitations are not sent and their envelope is destroyed', async (
   assert.equal(client.calls.some(({ sql }) => /CANCELLED/.test(sql)), true);
 });
 
-test('retryable SMTP failure preserves the encrypted envelope for a bounded retry', async () => {
+test('SMTP timeout preserves the encrypted envelope for a bounded retry with a safe timeout classification', async () => {
   const key = Buffer.alloc(32, 5).toString('base64');
   const envelope = encryptInvitationEnvelope(createInvitationToken(), key);
   const client = fakeClient();
@@ -43,12 +56,24 @@ test('retryable SMTP failure preserves the encrypted envelope for a bounded retr
     client,
     row: { id: 'outbox-2', status: 'PENDING_DELIVERY', encrypted_envelope_ciphertext: envelope.ciphertext, envelope_iv: envelope.iv, envelope_auth_tag: envelope.authTag, envelope_key_version: envelope.keyVersion, expires_at: new Date(Date.now() + 60_000), invitation_status: 'PENDING', company_name: 'Example', email: 'customer@example.test' },
     envelopeKey: key,
-    mailer: { sendInvitation: async () => { throw new Error('timeout'); } },
+    mailer: { sendInvitation: async () => { const error = new Error('timeout'); error.code = 'ETIMEDOUT'; throw error; } },
   });
   assert.equal(result.status, 'DELIVERY_FAILED');
   assert.equal(client.calls.some(({ sql }) => /attempt_count = attempt_count \+ 1/.test(sql)), true);
-  assert.equal(client.calls.some(({ sql, params }) => /provider_code = \$2/.test(sql) && params.includes('SMTP_DELIVERY_FAILED')), true);
+  assert.equal(client.calls.some(({ sql, params }) => /provider_code = \$2/.test(sql) && params.includes('SMTP_TIMEOUT')), true);
   assert.equal(client.calls.some(({ sql }) => /encrypted_envelope_ciphertext = NULL/.test(sql)), false);
+});
+
+test('SMTP failures persist only bounded connection, TLS, authentication, and provider classifications', async () => {
+  const connection = new Error('connection refused'); connection.code = 'ECONNREFUSED';
+  const tls = new Error('TLS certificate rejected'); tls.code = 'ESOCKET';
+  const auth = new Error('authentication failed'); auth.code = 'EAUTH';
+  const provider = new Error('message rejected'); provider.code = 'EENVELOPE'; provider.command = 'DATA';
+
+  assert.equal(await persistedFailureCode(connection), 'SMTP_CONNECTION_FAILED');
+  assert.equal(await persistedFailureCode(tls), 'SMTP_TLS_FAILED');
+  assert.equal(await persistedFailureCode(auth), 'SMTP_AUTH_FAILED');
+  assert.equal(await persistedFailureCode(provider), 'SMTP_PROVIDER_REJECTED');
 });
 
 test('SMTP MAIL FROM rejection is persisted only as a safe sender classification', async () => {

@@ -20,6 +20,9 @@ export function createSmtpCustomerInvitationMailer({ config, createTransport = n
     port: config.port,
     secure: config.secure,
     auth: config.auth,
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 30_000,
   });
 
   const sendAccepted = async (message, recipient) => {

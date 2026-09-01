@@ -3,9 +3,15 @@ import { decryptInvitationEnvelope } from './customer-invitation-crypto.js';
 function safeDeliveryFailureCode(error) {
   if (error?.code === 'SMTP_RECIPIENT_REJECTED') return 'SMTP_RECIPIENT_REJECTED';
   const command = String(error?.command ?? '').toUpperCase();
+  const code = String(error?.code ?? '').toUpperCase();
+  const message = String(error?.message ?? '').toUpperCase();
   if (command.includes('MAIL FROM')) return 'SMTP_FROM_REJECTED';
   if (command.includes('RCPT TO')) return 'SMTP_RECIPIENT_REJECTED';
-  if (error?.code === 'EAUTH' || /auth/i.test(String(error?.code ?? ''))) return 'SMTP_AUTH_FAILED';
+  if (code === 'EAUTH' || command.includes('AUTH') || message.includes('AUTHENTICATION')) return 'SMTP_AUTH_FAILED';
+  if (code === 'ETIMEDOUT' || message.includes('TIMED OUT')) return 'SMTP_TIMEOUT';
+  if (message.includes('TLS') || message.includes('CERTIFICATE') || code.startsWith('ERR_TLS')) return 'SMTP_TLS_FAILED';
+  if (['ECONNREFUSED', 'ECONNRESET', 'ENOTFOUND', 'EHOSTUNREACH', 'ENETUNREACH'].includes(code)) return 'SMTP_CONNECTION_FAILED';
+  if (code === 'EENVELOPE' || command) return 'SMTP_PROVIDER_REJECTED';
   return 'SMTP_DELIVERY_FAILED';
 }
 
