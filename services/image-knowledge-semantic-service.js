@@ -53,7 +53,7 @@ export function validateImageKnowledgeSemanticOutput(value, segments) {
     const canonicalText = rawCanonical === null || rawCanonical === undefined || rawCanonical === ''
       ? null
       : boundedText(redactConversationCandidate(String(rawCanonical)), 2000, 'IMAGE_SEMANTIC_OUTPUT_INVALID');
-    if ((category === 'DURABLE_BUSINESS_FACT') !== Boolean(canonicalText)) {
+    if ((category === 'DURABLE_BUSINESS_FACT' || category === 'ASSISTANT_BEHAVIOR_OR_QUALIFICATION') !== Boolean(canonicalText)) {
       throw new ImageKnowledgeSemanticError('IMAGE_SEMANTIC_OUTPUT_INVALID', 'Image semantic classification output is invalid');
     }
     return Object.freeze({

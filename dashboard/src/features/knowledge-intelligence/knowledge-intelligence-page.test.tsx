@@ -849,7 +849,11 @@ it("does not leak the page assistant selection into tenant-scoped image candidat
     extraction_hash: "b".repeat(64),
     assistant_ids: [],
   });
-  mockedApi.generateImageKnowledgeCandidates.mockResolvedValue({ candidates: [], reused: false });
+  mockedApi.generateImageKnowledgeCandidates.mockResolvedValue({
+    candidates: [],
+    reused: false,
+    warnings: ["Assign this source to an assistant to generate behavior recommendations."],
+  });
 
   renderPage(true, "/app/tenant-a/knowledge-base/sources");
   fireEvent.click(await screen.findByRole("button", { name: "View WhatsApp screenshot" }));
@@ -864,6 +868,7 @@ it("does not leak the page assistant selection into tenant-scoped image candidat
     ),
   );
   expect(await screen.findByText("No eligible business facts were found in this image. Customer and unknown segments remain excluded from canonical business knowledge.")).toBeVisible();
+  expect(await screen.findByText("Assign this source to an assistant to generate behavior recommendations.")).toBeVisible();
 });
 
 it("does not show a stale source success banner alongside a failed image candidate request", async () => {

@@ -28,14 +28,16 @@ function rows() {
   ];
 }
 
-function database({ segmentRows = rows(), existing = null, failOnEvidence = false } = {}) {
+function database({ segmentRows = rows(), existing = null, failOnEvidence = false, assistantAssignments = [] } = {}) {
   const calls = [];
   const client = {
     async query(sql, params = []) {
       calls.push({ sql, params });
       if (/FROM knowledge_source_extraction_segments/i.test(sql)) return { rows: segmentRows };
+      if (/FROM knowledge_source_assistants/i.test(sql)) return { rows: assistantAssignments };
       if (/SELECT id, status, candidate_fingerprint/i.test(sql)) return { rows: existing ? [existing] : [] };
       if (/INSERT INTO knowledge_candidates/i.test(sql)) return existing ? { rows: [] } : { rows: [{ id: 'candidate-1', status: 'NEEDS_REVIEW', pii_redaction_status: 'REDACTED', candidate_fingerprint: params[6] }] };
+      if (/INSERT INTO assistant_knowledge_recommendations/i.test(sql)) return { rows: [{ id: 'recommendation-1', status: 'NEEDS_REVIEW' }] };
       if (/INSERT INTO knowledge_candidate_image_evidence/i.test(sql) && failOnEvidence) throw Object.assign(new Error('evidence write failed'), { code: 'IMAGE_EVIDENCE_WRITE_FAILED' });
       return { rows: [] };
     },
@@ -92,4 +94,73 @@ test('redaction or evidence failure rolls back without leaving a candidate', asy
 test('candidate insert conflict target matches the partial fingerprint uniqueness invariant', () => {
   const source = fs.readFileSync(new URL('../services/knowledge-candidate-service.js', import.meta.url), 'utf8');
   assert.match(source, /ON CONFLICT \(tenant_id, candidate_fingerprint\)\s+WHERE candidate_fingerprint IS NOT NULL\s+DO NOTHING/);
+});
+
+test('keeps durable candidates tenant-scoped while creating assigned-assistant behavior recommendations', async () => {
+  const behaviorSegment = { ...rows()[1], id: 's5', segment_order: 4, normalized_text: 'What budget range should the customer share before we recommend a package?' };
+  const db = database({ segmentRows: [...rows(), behaviorSegment], assistantAssignments: [{ assistant_id: assistantId }] });
+  const classifier = {
+    async classify() {
+      return [
+        { segmentId: 's2', segmentOrder: 1, category: 'DURABLE_BUSINESS_FACT', canonicalText: 'The company provides event planning services.', confidence: 0.9 },
+        { segmentId: 's5', segmentOrder: 4, category: 'ASSISTANT_BEHAVIOR_OR_QUALIFICATION', canonicalText: 'Ask for the customer\'s estimated budget range before recommending a package.', confidence: 0.8 },
+      ];
+    },
+  };
+  const result = await createImageKnowledgeCandidates({ database: db, tenantId, sourceId, extractionHash, semanticClassifier: classifier });
+  assert.equal(result.candidates.length, 1);
+  assert.equal(result.behavior_recommendations.length, 1);
+  assert.equal(result.behavior_recommendations[0].status, 'NEEDS_REVIEW');
+  assert.equal(result.warnings.length, 0);
+});
+
+test('unassigned image source still creates durable facts and returns the behavior-assignment warning', async () => {
+  const behaviorSegment = { ...rows()[1], id: 's5', segment_order: 4, normalized_text: 'What budget range should the customer share before we recommend a package?' };
+  const db = database({ segmentRows: [...rows(), behaviorSegment] });
+  const classifier = {
+    async classify() {
+      return [
+        { segmentId: 's2', segmentOrder: 1, category: 'DURABLE_BUSINESS_FACT', canonicalText: 'The company provides event planning services.', confidence: 0.9 },
+        { segmentId: 's5', segmentOrder: 4, category: 'ASSISTANT_BEHAVIOR_OR_QUALIFICATION', canonicalText: 'Ask for the customer\'s estimated budget range.', confidence: 0.8 },
+      ];
+    },
+  };
+  const result = await createImageKnowledgeCandidates({ database: db, tenantId, sourceId, extractionHash, semanticClassifier: classifier });
+  assert.equal(result.candidates.length, 1);
+  assert.equal(result.behavior_recommendations.length, 0);
+  assert.deepEqual(result.warnings, ['Assign this source to an assistant to generate behavior recommendations.']);
+});
+
+test('creates separate behavior recommendations for each assigned assistant', async () => {
+  const secondAssistantId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const db = database({ assistantAssignments: [{ assistant_id: assistantId }, { assistant_id: secondAssistantId }] });
+  const classifier = {
+    async classify() {
+      return [{ segmentId: 's2', segmentOrder: 1, category: 'ASSISTANT_BEHAVIOR_OR_QUALIFICATION', canonicalText: 'Ask for the customer\'s estimated budget range.', confidence: 0.8 }];
+    },
+  };
+  const result = await createImageKnowledgeCandidates({ database: db, tenantId, sourceId, extractionHash, semanticClassifier: classifier });
+  assert.equal(result.behavior_recommendations.length, 2);
+  assert.deepEqual(new Set(result.behavior_recommendations.map((item) => item.assistant_id)), new Set([assistantId, secondAssistantId]));
+});
+
+test('redacts behavior recommendation text before persisting assistant-scoped guidance', async () => {
+  const db = database({ assistantAssignments: [{ assistant_id: assistantId }] });
+  const classifier = {
+    async classify() {
+      return [{ segmentId: 's2', segmentOrder: 1, category: 'ASSISTANT_BEHAVIOR_OR_QUALIFICATION', canonicalText: 'Ask the customer to contact sara@example.com before recommending a package.', confidence: 0.8 }];
+    },
+  };
+  await createImageKnowledgeCandidates({ database: db, tenantId, sourceId, extractionHash, semanticClassifier: classifier });
+  const recommendationInsert = db.calls.find(({ sql }) => /INSERT INTO assistant_knowledge_recommendations/i.test(sql));
+  assert.doesNotMatch(recommendationInsert.params[3], /sara@example\.com/i);
+  assert.match(recommendationInsert.params[3], /\[redacted email\]/);
+});
+
+test('assistant recommendation idempotency is enforced by the scoped semantic fingerprint migration', () => {
+  const migration = fs.readFileSync(new URL('../migrations/042_assistant_behavior_recommendation_semantics.sql', import.meta.url), 'utf8');
+  const service = fs.readFileSync(new URL('../services/knowledge-candidate-service.js', import.meta.url), 'utf8');
+  assert.match(migration, /UNIQUE INDEX IF NOT EXISTS uq_assistant_recommendations_semantic_fingerprint/);
+  assert.match(migration, /\(tenant_id, semantic_fingerprint\)/);
+  assert.match(service, /ON CONFLICT \(tenant_id, semantic_fingerprint\)\s+WHERE semantic_fingerprint IS NOT NULL\s+DO NOTHING/);
 });

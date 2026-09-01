@@ -85,7 +85,29 @@ test('generates a review-only configuration from an approved recommendation', as
   const run = calls.find(({ sql }) => /INSERT INTO knowledge_generation_runs/i.test(sql));
   assert.equal(run.params[6].business_identity_id, '55555555-5555-4555-8555-555555555555');
   assert.deepEqual(run.params[6].source_scope.source_ids, ['source-meridian']);
-  assert.match(calls.find(({ sql }) => /FROM assistant_knowledge_recommendations recommendation/i.test(sql)).sql, /recommendation\.evidence->>'profile_version_id'/i);
+  assert.match(calls.find(({ sql }) => /FROM assistant_knowledge_recommendations recommendation/i.test(sql)).sql, /profile\.active_version_id IS NOT NULL/i);
+});
+
+test('an approved assistant-scoped behavior recommendation uses the current active profile for configuration generation', async () => {
+  const calls = [];
+  const recommendationId = '33333333-3333-4333-8333-333333333333';
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/FROM assistant_knowledge_recommendations recommendation/i.test(sql)) {
+      if (/recommendation\.evidence->>'profile_version_id'/i.test(sql)) return { rows: [] };
+      if (!/profile\.active_version_id IS NOT NULL/i.test(sql)) return { rows: [] };
+      return { rows: [{ recommendation_data: { schema_version: 2, qualification_guidance: ['Ask for the budget range.'] }, assistant_name: 'Sales', profile_version_id: '11111111-1111-4111-8111-111111111111', business_identity_id: '55555555-5555-4555-8555-555555555555', source_scope: { source_ids: ['source-a'] }, profile_evidence: { source_hashes: ['hash-a'] }, profile_data: { company_identity: 'Tenant Co' } }] };
+    }
+    if (/INSERT INTO knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'RUNNING' }] };
+    if (/INSERT INTO assistant_configuration_versions/i.test(sql)) return { rows: [{ id: '44444444-4444-4444-8444-444444444444', status: 'NEEDS_REVIEW', configuration_data: params[2] }] };
+    if (/UPDATE knowledge_generation_runs/i.test(sql)) return { rows: [{ id: params[0], status: 'SUCCEEDED' }] };
+    return { rows: [] };
+  } };
+
+  const result = await generateAssistantConfigurationVersion({ database, provider: provider({ schema_version: 2, assistant_identity: 'Tenant Co', assistant_instructions: 'Use approved qualification guidance.' }), tenantId, assistantId, recommendationId, requestedBy: actorId });
+
+  assert.equal(result.configuration.status, 'NEEDS_REVIEW');
+  assert.match(calls.find(({ sql }) => /FROM assistant_knowledge_recommendations recommendation/i.test(sql)).sql, /profile\.active_version_id IS NOT NULL/i);
 });
 
 test('review transitions remain explicit and tenant scoped', async () => {

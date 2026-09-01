@@ -413,7 +413,9 @@ router.post('/:tenantId/knowledge-intelligence/sources/:sourceId/candidates/gene
       semanticClassifier: createImageKnowledgeSemanticClassifier({ provider: createKnowledgeGenerationProvider() }),
     });
     const reused = candidates.length > 0 && candidates.every((candidate) => candidate.reused === true);
-    return res.status(reused ? 200 : 201).json({ candidates, reused });
+    return res.status(reused ? 200 : 201).json({ candidates, reused,
+      behavior_recommendations: candidates.behavior_recommendations,
+      warnings: candidates.warnings });
   } catch (error) {
     return safeError(res, error);
   }

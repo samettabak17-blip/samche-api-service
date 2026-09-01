@@ -278,6 +278,7 @@ export function KnowledgeIntelligencePage() {
   const [imageCandidateOutcome, setImageCandidateOutcome] = useState<{
     sourceId: string;
     candidateCount: number;
+    warnings: string[];
   } | null>(null);
   const [selectedGapId, setSelectedGapId] = useState("");
   const [sourceMode, setSourceMode] = useState<"upload" | "manual" | null>(
@@ -568,6 +569,7 @@ export function KnowledgeIntelligencePage() {
       setImageCandidateOutcome({
         sourceId: variables.sourceId,
         candidateCount: result.candidates.length,
+        warnings: result.warnings ?? [],
       });
       refreshCandidates();
       if (result.candidates.length) {
@@ -1466,14 +1468,14 @@ export function KnowledgeIntelligencePage() {
             }
           />
           {imageCandidateOutcome?.sourceId === selectedSourceId && (
-            <p
-              role="status"
-              className="rounded-lg border border-line bg-elevated p-3 text-sm text-stone-200"
-            >
-              {imageCandidateOutcome.candidateCount > 0
-                ? `${imageCandidateOutcome.candidateCount} review candidate${imageCandidateOutcome.candidateCount === 1 ? "" : "s"} created.`
-                : "No eligible business facts were found in this image. Customer and unknown segments remain excluded from canonical business knowledge."}
-            </p>
+            <div role="status" className="space-y-2 rounded-lg border border-line bg-elevated p-3 text-sm text-stone-200">
+              <p>
+                {imageCandidateOutcome.candidateCount > 0
+                  ? `${imageCandidateOutcome.candidateCount} review candidate${imageCandidateOutcome.candidateCount === 1 ? "" : "s"} created.`
+                  : "No eligible business facts were found in this image. Customer and unknown segments remain excluded from canonical business knowledge."}
+              </p>
+              {imageCandidateOutcome.warnings.map((warning) => <p key={warning} className="text-amber-200">{warning}</p>)}
+            </div>
           )}
           {(uploadSource.isSuccess || createManualSource.isSuccess) && (
             <p

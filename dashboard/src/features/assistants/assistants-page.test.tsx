@@ -21,6 +21,15 @@ describe('AssistantForm', () => {
   it('does not expose platform model selection in a customer assistant form', () => {
     render(<AssistantForm canManage isOwner={false} onSubmit={vi.fn()} />);
     expect(screen.queryByRole('textbox', { name: 'Model' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'System prompt' })).toBeNull();
+  });
+
+  it('does not submit a raw system prompt from a customer assistant form', () => {
+    const onSubmit = vi.fn();
+    render(<AssistantForm canManage isOwner={false} onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Assistant name' }), { target: { value: 'Customer-safe assistant' } });
+    fireEvent.click(screen.getByRole('button', { name: /create assistant/i }));
+    expect(onSubmit).toHaveBeenCalledWith({ name: 'Customer-safe assistant', status: 'active' });
   });
 
   it('keeps platform model selection available to an owner', () => {

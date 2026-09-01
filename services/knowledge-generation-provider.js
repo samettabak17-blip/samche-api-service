@@ -295,7 +295,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
         prompt: [
           'Classify each statement made by a business representative. A BUSINESS speaker is an authority signal, not proof that every statement is durable company knowledge.',
           'Use exactly one category per segment: DURABLE_BUSINESS_FACT, ASSISTANT_BEHAVIOR_OR_QUALIFICATION, CUSTOMER_SPECIFIC_CONTEXT, TRANSIENT_CONVERSATION, DURABLE_POLICY_OR_COMMITMENT_CANDIDATE, or UNSAFE_OR_AMBIGUOUS.',
-          'Only for DURABLE_BUSINESS_FACT, return a concise, decontextualized canonical_fact in the source language. Exclude greetings, timestamps, questions, customer-specific needs, one-off promises, and conversational filler. For every other category canonical_fact must be null.',
+          'For DURABLE_BUSINESS_FACT return a concise, decontextualized canonical_fact in the source language. For ASSISTANT_BEHAVIOR_OR_QUALIFICATION return a concise reusable behavior instruction in canonical_fact. Exclude greetings, timestamps, customer-specific needs, one-off promises, and conversational filler. For every other category canonical_fact must be null.',
           'Do not infer a durable policy from one occurrence. Return every supplied segment exactly once.',
           JSON.stringify({ segments: safeSegments }),
         ].join('\n\n'),

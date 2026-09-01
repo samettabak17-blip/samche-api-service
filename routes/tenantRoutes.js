@@ -553,7 +553,7 @@ router.post(
         try {
             assertAssistantModelWriteAllowed({ systemRole: req.user.system_role, payload: req.body });
         } catch (error) {
-            if (error instanceof AssistantModelAccessError) return res.status(403).json({ error: 'Assistant model selection is platform-managed' });
+            if (error instanceof AssistantModelAccessError) return res.status(403).json({ error: 'Assistant advanced configuration is platform-managed' });
             throw error;
         }
 
@@ -675,7 +675,7 @@ router.put(
         try {
             assertAssistantModelWriteAllowed({ systemRole: req.user.system_role, payload: req.body });
         } catch (error) {
-            if (error instanceof AssistantModelAccessError) return res.status(403).json({ error: 'Assistant model selection is platform-managed' });
+            if (error instanceof AssistantModelAccessError) return res.status(403).json({ error: 'Assistant advanced configuration is platform-managed' });
             throw error;
         }
 

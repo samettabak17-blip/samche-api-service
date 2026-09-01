@@ -20,7 +20,7 @@ test('accepts only structured, source-bound semantic classifications', () => {
   const output = validateImageKnowledgeSemanticOutput({
     classifications: [
       { segment_order: 0, category: 'DURABLE_BUSINESS_FACT', canonical_fact: 'The company provides corporate events, product launches, gala dinners and private celebrations.', confidence: 0.91 },
-      { segment_order: 1, category: 'ASSISTANT_BEHAVIOR_OR_QUALIFICATION', canonical_fact: null, confidence: 0.82 },
+      { segment_order: 1, category: 'ASSISTANT_BEHAVIOR_OR_QUALIFICATION', canonical_fact: 'Ask whether the customer already has a venue and request an estimated budget range.', confidence: 0.82 },
       { segment_order: 2, category: 'CUSTOMER_SPECIFIC_CONTEXT', canonical_fact: null, confidence: 0.95 },
       { segment_order: 3, category: 'TRANSIENT_CONVERSATION', canonical_fact: null, confidence: 0.98 },
       { segment_order: 4, category: 'DURABLE_POLICY_OR_COMMITMENT_CANDIDATE', canonical_fact: null, confidence: 0.63 },
@@ -54,7 +54,7 @@ test('calls a provider-neutral classifier with redacted BUSINESS-only material',
         return {
           classifications: [
             { segment_order: 0, category: 'DURABLE_BUSINESS_FACT', canonical_fact: 'The company provides corporate events, product launches, gala dinners and private celebrations.', confidence: 0.91 },
-            { segment_order: 1, category: 'ASSISTANT_BEHAVIOR_OR_QUALIFICATION', canonical_fact: null, confidence: 0.82 },
+            { segment_order: 1, category: 'ASSISTANT_BEHAVIOR_OR_QUALIFICATION', canonical_fact: 'Ask whether the customer already has a venue and request an estimated budget range.', confidence: 0.82 },
             { segment_order: 2, category: 'CUSTOMER_SPECIFIC_CONTEXT', canonical_fact: null, confidence: 0.95 },
             { segment_order: 3, category: 'TRANSIENT_CONVERSATION', canonical_fact: null, confidence: 0.98 },
             { segment_order: 4, category: 'DURABLE_POLICY_OR_COMMITMENT_CANDIDATE', canonical_fact: null, confidence: 0.63 },

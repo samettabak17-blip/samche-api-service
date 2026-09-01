@@ -103,6 +103,12 @@ export async function createImageKnowledgeCandidates({
       .filter((classification) => classification.category === 'DURABLE_BUSINESS_FACT')
       .map((classification) => ({ classification, segment: segments.find((segment) => segment.id === classification.segmentId) }))
       .filter(({ segment }) => segment);
+    const behaviorSegments = classifications.filter((classification) => classification.category === 'ASSISTANT_BEHAVIOR_OR_QUALIFICATION' && classification.canonicalText);
+    const assignmentResult = await client.query(
+      `SELECT assistant_id FROM knowledge_source_assistants WHERE tenant_id = $1 AND source_id = $2`,
+      [tenantId, sourceId],
+    );
+    const assignedAssistantIds = (assignmentResult.rows ?? []).map((row) => row.assistant_id);
     // Replace only legacy/unapproved raw image candidates for this exact extraction.
     // Approved knowledge remains immutable and is never silently regenerated.
     await client.query(
@@ -119,6 +125,7 @@ export async function createImageKnowledgeCandidates({
       [tenantId, sourceId, String(extractionHash).toLowerCase()],
     );
     const results = [];
+    const behaviorRecommendations = [];
 
     for (const { classification, segment: business } of businessSegments) {
       const fingerprint = imageCandidateFingerprint({ tenantId, assistantId, sourceId, extractionHash: business.extraction_hash, segmentOrder: business.segment_order });
@@ -174,6 +181,30 @@ export async function createImageKnowledgeCandidates({
       }
       results.push({ ...candidate, reused: false });
     }
+    for (const behavior of behaviorSegments) {
+      for (const assignedAssistantId of assignedAssistantIds) {
+        const guidance = String(redact(text(behavior.canonicalText, 12000, 'KNOWLEDGE_CANDIDATE_CONTENT_INVALID')) ?? '').trim();
+        if (!guidance) throw new KnowledgeCandidateError('KNOWLEDGE_IMAGE_REDACTION_EMPTY', 'Redacted image behavior recommendation is empty');
+        const fingerprint = imageCandidateFingerprint({ tenantId, assistantId: assignedAssistantId, sourceId, extractionHash, segmentOrder: behavior.segmentOrder });
+        const recommendation = await client.query(
+          `INSERT INTO assistant_knowledge_recommendations (
+             id, tenant_id, assistant_id, recommendation_data, evidence, status, semantic_fingerprint, schema_version
+           ) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, 'NEEDS_REVIEW', $6, 2)
+           ON CONFLICT (tenant_id, semantic_fingerprint) WHERE semantic_fingerprint IS NOT NULL DO NOTHING
+           RETURNING id, status`,
+          [crypto.randomUUID(), tenantId, assignedAssistantId,
+            JSON.stringify({ schema_version: 2, qualification_guidance: [guidance] }),
+            JSON.stringify([{ source_id: sourceId, extraction_hash: extractionHash, segment_id: behavior.segmentId, semantic_category: behavior.category }]), fingerprint],
+        );
+        if (recommendation.rows?.[0]) behaviorRecommendations.push({ ...recommendation.rows[0], assistant_id: assignedAssistantId, reused: false });
+      }
+    }
+    Object.defineProperties(results, {
+      candidates: { value: results, enumerable: false },
+      behavior_recommendations: { value: behaviorRecommendations, enumerable: false },
+      warnings: { value: behaviorSegments.length && !assignedAssistantIds.length
+        ? ['Assign this source to an assistant to generate behavior recommendations.'] : [], enumerable: false },
+    });
     return results;
   });
 }

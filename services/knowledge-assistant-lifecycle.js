@@ -150,8 +150,8 @@ export async function generateAssistantConfigurationVersion({ database, provider
             profile_version.source_scope, profile_version.evidence AS profile_evidence, profile_version.profile_data
        FROM assistant_knowledge_recommendations recommendation
        JOIN ai_assistants assistant ON assistant.id = recommendation.assistant_id AND assistant.tenant_id = recommendation.tenant_id
-       JOIN business_profile_versions profile_version ON profile_version.id = (recommendation.evidence->>'profile_version_id')::uuid AND profile_version.tenant_id = recommendation.tenant_id AND profile_version.status = 'APPROVED'
-       JOIN business_profiles profile ON profile.id = profile_version.profile_id AND profile.tenant_id = profile_version.tenant_id AND profile.active_version_id = profile_version.id
+       JOIN business_profiles profile ON profile.tenant_id = assistant.tenant_id AND profile.active_version_id IS NOT NULL
+       JOIN business_profile_versions profile_version ON profile_version.id = profile.active_version_id AND profile_version.tenant_id = profile.tenant_id AND profile_version.status = 'APPROVED'
       WHERE recommendation.id = $1 AND recommendation.tenant_id = $2 AND recommendation.assistant_id = $3 AND recommendation.status = 'APPROVED'`, [recommendationId, tenantId, assistantId]);
   if (!context.rows[0]) throw new KnowledgeAssistantLifecycleError('KNOWLEDGE_CONFIGURATION_CONTEXT_NOT_FOUND', 'An approved recommendation and active Business Profile are required');
   const provenance = { profile_version_id: context.rows[0].profile_version_id, business_identity_id: context.rows[0].business_identity_id, source_scope: context.rows[0].source_scope, recommendation_id: recommendationId, assistant_id: assistantId };
