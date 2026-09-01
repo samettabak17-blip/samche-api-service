@@ -27,7 +27,9 @@ try {
          FROM business_identities
         WHERE lower(display_name) = lower($1) AND status = 'ACTIVE'
      ), candidate_scope AS (
-       SELECT candidate.id AS candidate_id, candidate.tenant_id, candidate.status,
+       SELECT candidate.id AS candidate_id, candidate.tenant_id, candidate.assistant_id, candidate.status,
+              candidate.image_semantic_version,
+              candidate.candidate_fingerprint IS NOT NULL AS candidate_fingerprint_present,
               candidate.approved_source_id AS materialized_source_id,
               materialized.title AS materialized_source_title
          FROM knowledge_candidates candidate
@@ -39,8 +41,11 @@ try {
           AND candidate.proposed_title = 'Canonical image-derived business fact'
      )
      SELECT candidate.candidate_id, candidate.tenant_id, candidate.status,
+            candidate.image_semantic_version, candidate.candidate_fingerprint_present,
             candidate.materialized_source_id, candidate.materialized_source_title,
             COUNT(image.id)::integer AS evidence_count,
+            COALESCE(fingerprint_matches.match_count, 0)::integer AS deterministic_segment_match_count,
+            COALESCE(fingerprint_matches.matches, '[]'::jsonb) AS deterministic_segment_matches,
             COALESCE(json_agg(DISTINCT jsonb_build_object(
               'evidence_id', image.id, 'segment_id', image.segment_id,
               'original_source_id', image.source_id, 'original_source_title', original.title,
@@ -51,6 +56,33 @@ try {
        FROM candidate_scope candidate
        LEFT JOIN knowledge_candidate_image_evidence image
          ON image.tenant_id = candidate.tenant_id AND image.candidate_id = candidate.candidate_id
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*) AS match_count,
+                jsonb_agg(jsonb_build_object(
+                  'segment_id', segment.id,
+                  'original_source_id', segment.source_id,
+                  'original_source_title', matched_source.title,
+                  'is_current', segment.is_current,
+                  'original_identity_ids', COALESCE(matched_identity_ids.ids, '[]'::jsonb)
+                )) AS matches
+           FROM knowledge_source_extraction_segments segment
+           JOIN knowledge_base_documents matched_source
+             ON matched_source.id = segment.source_id
+            AND matched_source.tenant_id = segment.tenant_id
+           LEFT JOIN LATERAL (
+             SELECT jsonb_agg(DISTINCT link.business_identity_id) AS ids
+               FROM knowledge_source_business_identities link
+              WHERE link.tenant_id = segment.tenant_id AND link.source_id = segment.source_id
+           ) matched_identity_ids ON TRUE
+          WHERE segment.tenant_id = candidate.tenant_id
+            AND segment.role = 'BUSINESS'
+            AND matched_source.mime_type IN ('image/jpeg', 'image/png')
+            AND candidate.candidate_fingerprint = encode(digest(
+              candidate.tenant_id::text || ':' || COALESCE(candidate.assistant_id::text, '') || ':' ||
+              segment.source_id::text || ':' || segment.extraction_hash || ':' || segment.segment_order::text,
+              'sha256'
+            ), 'hex')
+       ) fingerprint_matches ON TRUE
        LEFT JOIN knowledge_base_documents original
          ON original.id = image.source_id AND original.tenant_id = image.tenant_id
        LEFT JOIN knowledge_materialized_source_provenance provenance
@@ -69,7 +101,9 @@ try {
           WHERE link.tenant_id = candidate.tenant_id AND link.source_id = candidate.materialized_source_id
        ) materialized_ids ON TRUE
       GROUP BY candidate.candidate_id, candidate.tenant_id, candidate.status,
-               candidate.materialized_source_id, candidate.materialized_source_title
+               candidate.image_semantic_version, candidate.candidate_fingerprint_present,
+               candidate.materialized_source_id, candidate.materialized_source_title,
+               fingerprint_matches.match_count, fingerprint_matches.matches
       ORDER BY candidate.candidate_id`,
     [identityName],
   );
