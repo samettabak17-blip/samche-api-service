@@ -14,6 +14,7 @@ import {
   DashboardButton,
   DashboardCheckbox,
   DashboardFileInput,
+  DashboardFormMessage,
   DashboardTab,
 } from "../../components/ui/dashboard-control";
 import type {
@@ -328,6 +329,7 @@ export function KnowledgeIntelligencePage() {
     result: RecommendationGenerationResult;
   } | null>(null);
   const [selectedRecommendationId, setSelectedRecommendationId] = useState<string | null>(null);
+  const [imageGenerationSourceId, setImageGenerationSourceId] = useState<string | null>(null);
   const [configurationTerminal, setConfigurationTerminal] = useState<{
     scope: string;
     result: ConfigurationGenerationResult;
@@ -584,17 +586,28 @@ export function KnowledgeIntelligencePage() {
       setImageCandidateOutcome(null);
     },
     onSuccess: (result, variables) => {
-      setImageCandidateOutcome({
-        sourceId: variables.sourceId,
-        candidateCount: result.candidates.length,
-        warnings: result.warnings ?? [],
-      });
-      refreshCandidates();
-      if (result.candidates.length) {
-        navigate(`/app/${tenantId}/knowledge-base/candidates`);
+      if ('job' in result) {
+        setImageGenerationSourceId(variables.sourceId);
+        queryClient.setQueryData(['tenant', tenantId, 'knowledge-intelligence', 'generation', variables.sourceId], result.job);
+        return;
       }
+      setImageCandidateOutcome({ sourceId: variables.sourceId, candidateCount: result.candidates.length, warnings: result.warnings ?? [] });
+      refreshCandidates();
+      if (result.candidates.length) navigate(`/app/${tenantId}/knowledge-base/candidates`);
     },
   });
+  const imageGeneration = useQuery({
+    queryKey: ['tenant', tenantId, 'knowledge-intelligence', 'generation', imageGenerationSourceId],
+    queryFn: () => tenantApi.getImageKnowledgeGenerationJob(tenantId, imageGenerationSourceId!),
+    enabled: Boolean(tenantId && imageGenerationSourceId),
+    refetchInterval: (query) => ['PENDING', 'PROCESSING'].includes(query.state.data?.status ?? '') ? 2_000 : false,
+  });
+  useEffect(() => {
+    if (imageGeneration.data?.status === 'READY') {
+      refreshCandidates();
+      queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeRecommendations(tenantId, assistantId) });
+    }
+  }, [imageGeneration.data?.status, tenantId, assistantId]);
   const candidateAction = useMutation({
     mutationFn: (action: "approve" | "reject") =>
       action === "approve"
@@ -1629,6 +1642,7 @@ export function KnowledgeIntelligencePage() {
                                     selectedSource.data.processing_status === "READY" &&
                                     selectedSource.data.indexing_status === "DISABLED" &&
                                     selectedSource.data.extraction_hash && (
+                                      <>
                                       <DashboardButton
                                         variant="primary"
                                         onClick={() =>
@@ -1637,12 +1651,22 @@ export function KnowledgeIntelligencePage() {
                                             extractionHash: selectedSource.data!.extraction_hash,
                                           })
                                         }
-                                        disabled={generateImageCandidates.isPending}
+                                        disabled={generateImageCandidates.isPending || ['PENDING', 'PROCESSING'].includes(imageGeneration.data?.status ?? '')}
                                       >
-                                        {generateImageCandidates.isPending
-                                          ? "Generating candidates…"
+                                        {generateImageCandidates.isPending || ['PENDING', 'PROCESSING'].includes(imageGeneration.data?.status ?? '')
+                                          ? "Generation in progress…"
                                           : "Generate candidates"}
                                       </DashboardButton>
+                                      {imageGenerationSourceId === selectedSource.data!.id && imageGeneration.data && (
+                                        <DashboardFormMessage tone={imageGeneration.data.status === 'FAILED' ? 'error' : imageGeneration.data.status === 'READY' ? 'success' : 'info'}>
+                                          {imageGeneration.data.status === 'READY'
+                                            ? 'Candidate generation completed.'
+                                            : imageGeneration.data.status === 'FAILED'
+                                              ? 'Candidate generation failed. You can safely retry.'
+                                              : 'Candidate generation is processing in the background.'}
+                                        </DashboardFormMessage>
+                                      )}
+                                      </>
                                     )}
                                   <button
                                     className={actionClass}
@@ -1745,8 +1769,7 @@ export function KnowledgeIntelligencePage() {
                   {selectedCandidateId === row.id && (
                     <div className="mt-4 border-t border-line pt-4">
                       <p className="text-xs text-stone-400">
-                        Safe evidence only; message content and credentials are
-                        not exposed.
+                        Redacted supporting evidence. Customer context is shown for review only and is not treated as business truth.
                       </p>
                       {candidateEvidence.isLoading ? (
                         <SkeletonBlock className="mt-3 h-16" />

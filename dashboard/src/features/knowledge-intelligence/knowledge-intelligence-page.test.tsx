@@ -32,6 +32,7 @@ vi.mock("../dashboard/dashboard-api", async (importOriginal) => {
       unassignKnowledgeSource: vi.fn(),
       reindexKnowledgeSource: vi.fn(),
       generateImageKnowledgeCandidates: vi.fn(),
+      getImageKnowledgeGenerationJob: vi.fn(),
       archiveKnowledgeSource: vi.fn(),
       listKnowledgeCandidates: vi.fn(),
       getKnowledgeCandidateEvidence: vi.fn(),
@@ -125,6 +126,7 @@ beforeEach(() => {
     candidates: [],
     reused: false,
   });
+  mockedApi.getImageKnowledgeGenerationJob.mockResolvedValue(null);
   mockedApi.listKnowledgeCandidates.mockResolvedValue([]);
   mockedApi.listKnowledgeGaps.mockResolvedValue([]);
   mockedApi.listBusinessIdentities.mockResolvedValue([]);

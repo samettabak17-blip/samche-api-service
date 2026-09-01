@@ -15,7 +15,6 @@ import {
 import {
   KnowledgeCandidateError,
   approveConversationKnowledgeCandidate,
-  createImageKnowledgeCandidates,
   createConversationKnowledgeCandidate,
   rejectConversationKnowledgeCandidate,
 } from '../services/knowledge-candidate-service.js';
@@ -31,7 +30,8 @@ import {
 import { KnowledgeGapError } from '../services/knowledge-gap-service.js';
 import { createSuggestedCandidateFromKnowledgeGap } from '../services/knowledge-gap-candidate-service.js';
 import { createKnowledgeGenerationProvider, KnowledgeGenerationError } from '../services/knowledge-generation-provider.js';
-import { createImageKnowledgeSemanticClassifier, ImageKnowledgeSemanticError } from '../services/image-knowledge-semantic-service.js';
+import { ImageKnowledgeSemanticError } from '../services/image-knowledge-semantic-service.js';
+import { enqueueImageSemanticGenerationJob, getImageSemanticGenerationJob } from '../services/knowledge-semantic-generation-job-service.js';
 import {
   analyzeBusinessProfileSourceScope,
   generateBusinessProfileVersion,
@@ -403,19 +403,22 @@ router.post('/:tenantId/knowledge-intelligence/sources/:sourceId/candidates/gene
   const id = sourceId(req, res);
   if (!tenantId || !id) return;
   try {
-    const candidates = await createImageKnowledgeCandidates({
-      database: pool,
-      tenantId,
-      sourceId: id,
-      assistantId: req.body?.assistant_id ?? null,
-      extractionHash: req.body?.extraction_hash,
-      candidateType: req.body?.candidate_type ?? 'POLICY',
-      semanticClassifier: createImageKnowledgeSemanticClassifier({ provider: createKnowledgeGenerationProvider() }),
+    const job = await enqueueImageSemanticGenerationJob({
+      database: pool, tenantId, sourceId: id, extractionHash: req.body?.extraction_hash,
     });
-    const reused = candidates.length > 0 && candidates.every((candidate) => candidate.reused === true);
-    return res.status(reused ? 200 : 201).json({ candidates, reused,
-      behavior_recommendations: candidates.behavior_recommendations,
-      warnings: candidates.warnings });
+    return res.status(job.status === 'READY' ? 200 : 202).json({ job });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.get('/:tenantId/knowledge-intelligence/sources/:sourceId/candidates/generation', requireTenantAccess, async (req, res) => {
+  const tenantId = tenant(req, res);
+  const id = sourceId(req, res);
+  if (!tenantId || !id) return;
+  try {
+    const job = await getImageSemanticGenerationJob({ database: pool, tenantId, sourceId: id });
+    return res.json({ job });
   } catch (error) {
     return safeError(res, error);
   }

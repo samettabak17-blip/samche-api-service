@@ -4,10 +4,11 @@ import fs from 'node:fs';
 
 const source = fs.readFileSync(new URL('../routes/knowledgeIntelligenceRoutes.js', import.meta.url), 'utf8');
 
-test('image candidate generation is an explicit tenant-admin source action', () => {
+test('image candidate generation is an explicit tenant-admin source action that queues semantic work', () => {
   assert.match(source, /sources\/:sourceId\/candidates\/generate', requireTenantAccess, requireTenantAdmin/);
-  assert.match(source, /createImageKnowledgeCandidates/);
+  assert.match(source, /enqueueImageSemanticGenerationJob/);
   assert.match(source, /extractionHash: req\.body\?\.extraction_hash/);
+  assert.match(source, /res\.status\(job\.status === 'READY' \? 200 : 202\)/);
 });
 
 test('candidate evidence response exposes conversation and image provenance safely', () => {

@@ -105,6 +105,13 @@ export interface KnowledgeRecommendation {
   status: string;
   created_at?: string;
 }
+export interface ImageSemanticGenerationJob {
+  id: string;
+  status: 'PENDING' | 'PROCESSING' | 'READY' | 'FAILED' | 'CANCELLED';
+  attempts: number;
+  last_error_code?: string | null;
+  metadata?: { candidate_count?: number; behavior_recommendation_count?: number; warnings?: string[] };
+}
 export interface AssistantConfigurationVersion { id: string; schema_version?: number; configuration_data: Record<string, unknown>; source_profile_version_id?: string | null; source_recommendation_id?: string | null; status: string; approved_at?: string | null; created_at?: string; }
 export interface RecommendationGenerationResult { recommendation: KnowledgeRecommendation; reused: boolean; run_id: string; }
 export interface ConfigurationGenerationResult { configuration: AssistantConfigurationVersion; reused: boolean; run_id: string; }

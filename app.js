@@ -43,6 +43,9 @@ import { runMigrations } from "./migrations/runMigrations.js";
 import { createOpenAIEmbedder } from "./services/knowledge-intelligence-service.js";
 import { startKnowledgeProcessingWorker } from "./services/knowledge-source-processing-service.js";
 import { createGeminiImageKnowledgeExtractor } from "./services/image-knowledge-gemini-extractor.js";
+import { createImageKnowledgeSemanticClassifier } from "./services/image-knowledge-semantic-service.js";
+import { createKnowledgeGenerationProvider } from "./services/knowledge-generation-provider.js";
+import { startImageSemanticGenerationWorker } from "./services/knowledge-semantic-generation-job-service.js";
 import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from "./services/knowledge-runtime-context-service.js";
 import { buildTenantRuntimeSystemInstruction, resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
 import { buildTenantFollowUpRequest } from "./services/tenant-follow-up-service.js";
@@ -189,6 +192,15 @@ if ((knowledgeEmbedder || knowledgeImageExtractor) && process.env.KNOWLEDGE_PROC
   });
 } else {
   console.info('KNOWLEDGE_PROCESSING_WORKER_DISABLED');
+}
+
+if (process.env.GEMINI_API_KEY && process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
+  startImageSemanticGenerationWorker({
+    database: pool,
+    semanticClassifier: createImageKnowledgeSemanticClassifier({ provider: createKnowledgeGenerationProvider() }),
+  });
+} else {
+  console.info('KNOWLEDGE_SEMANTIC_GENERATION_WORKER_DISABLED');
 }
 
 // Ortak Link Dönüştürücü
