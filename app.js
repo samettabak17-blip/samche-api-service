@@ -103,6 +103,7 @@ app.get("/api/v1/health", (req, res) => {
   res.json({
     status: "ok",
     timestamp: new Date().toISOString(),
+    revision: process.env.RENDER_GIT_COMMIT ?? process.env.GIT_COMMIT_SHA ?? null,
     onboarding_outbox_worker: customerInvitationOutboxStartup?.status() ?? 'NOT_STARTED',
   });
 });
