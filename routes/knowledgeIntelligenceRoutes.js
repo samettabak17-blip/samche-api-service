@@ -31,7 +31,7 @@ import { KnowledgeGapError } from '../services/knowledge-gap-service.js';
 import { createSuggestedCandidateFromKnowledgeGap } from '../services/knowledge-gap-candidate-service.js';
 import { createKnowledgeGenerationProvider, KnowledgeGenerationError } from '../services/knowledge-generation-provider.js';
 import { ImageKnowledgeSemanticError } from '../services/image-knowledge-semantic-service.js';
-import { enqueueImageSemanticGenerationJob, getImageSemanticGenerationJob } from '../services/knowledge-semantic-generation-job-service.js';
+import { enqueueImageSemanticGenerationJob, getImageSemanticGenerationJob, KnowledgeSemanticGenerationJobError } from '../services/knowledge-semantic-generation-job-service.js';
 import {
   analyzeBusinessProfileSourceScope,
   generateBusinessProfileVersion,
@@ -74,7 +74,7 @@ function sourceId(req, res) {
 
 function safeError(res, error) {
   const code = error?.code;
-  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof ImageKnowledgeSemanticError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError || error instanceof KnowledgeGenerationError || error instanceof KnowledgeProfileLifecycleError || error instanceof KnowledgeAssistantLifecycleError || error instanceof KnowledgeOverviewError || error instanceof KnowledgeRetrievalPreviewError) {
+  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof ImageKnowledgeSemanticError || error instanceof KnowledgeSemanticGenerationJobError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError || error instanceof KnowledgeGenerationError || error instanceof KnowledgeProfileLifecycleError || error instanceof KnowledgeAssistantLifecycleError || error instanceof KnowledgeOverviewError || error instanceof KnowledgeRetrievalPreviewError) {
     const status = code === 'IDENTITY_RESOLUTION_REQUIRED' ? 409 : /NOT_FOUND|INVALID|EMPTY|UNSUPPORTED|MISMATCH|REQUIRED/.test(code) ? 400 : 503;
     return res.status(status).json({ error: error.message, code, ...(error.details ? { details: error.details } : {}) });
   }

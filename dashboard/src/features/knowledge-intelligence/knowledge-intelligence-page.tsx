@@ -1664,6 +1664,7 @@ export function KnowledgeIntelligencePage() {
                                             : imageGeneration.data.status === 'FAILED'
                                               ? 'Candidate generation failed. You can safely retry.'
                                               : 'Candidate generation is processing in the background.'}
+                                          {imageGeneration.data.status === 'READY' && imageGeneration.data.metadata?.warnings?.map((warning) => <span key={warning} className="mt-1 block text-amber-200">{warning}</span>)}
                                         </DashboardFormMessage>
                                       )}
                                       </>
