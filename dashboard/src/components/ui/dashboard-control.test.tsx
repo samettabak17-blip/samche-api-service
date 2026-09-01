@@ -83,6 +83,17 @@ describe('Dashboard controls', () => {
     expect(screen.getByRole('button', { name: 'Reject' }).className).toContain('hover:bg-red-900');
   });
 
+  it('keeps outline and disabled actions legible on the dark theme', () => {
+    render(<><DashboardButton variant="outline">Upgrade Plan</DashboardButton><DashboardButton disabled>Generating</DashboardButton></>);
+    const upgrade = screen.getByRole('button', { name: 'Upgrade Plan' });
+    const disabled = screen.getByRole('button', { name: 'Generating' });
+    expect(upgrade.className).toContain('border-signal');
+    expect(upgrade.className).toContain('hover:bg-signal/20');
+    expect(upgrade.className).not.toContain('hover:bg-white');
+    expect(disabled.className).toContain('disabled:text-stone-300');
+    expect(disabled.className).toContain('disabled:opacity-100');
+  });
+
   it('hides browser-localized file chrome and renders controlled English copy', () => {
     render(<DashboardFileInput aria-label="Source document" accept=".pdf,.docx,.txt" formatHint="PDF, DOCX or TXT" />);
     expect(screen.getByRole('button', { name: 'Choose File' })).toBeVisible();

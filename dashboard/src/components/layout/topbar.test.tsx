@@ -8,7 +8,7 @@ vi.mock('../../features/overview/overview-date-range-context', () => ({
   useOverviewDateRange: () => ({ preset: 'last-7-days', setPreset: vi.fn(), customStart: '2026-08-01', setCustomStart: vi.fn(), customEnd: '2026-08-07', setCustomEnd: vi.fn(), applyCustomRange: vi.fn(), clearCustomRange: vi.fn(), activeRange: { label: 'Last 7 days' } }),
 }));
 vi.mock('../../features/live-support/live-support-attention-provider', () => ({ useLiveSupportAttention: () => ({ requestedCount: 0 }) }));
-vi.mock('../../features/dashboard/dashboard-api', () => ({ tenantApi: { listConversations: vi.fn(), createTenant: vi.fn(), listCustomerUsers: vi.fn(), assignTenantUser: vi.fn(), listPlans: vi.fn(), listPlanUpgradeRequests: vi.fn(), resolvePlanUpgradeRequest: vi.fn() }, onboardingApi: { createCompanyInvitation: vi.fn(), listInvitationStatuses: vi.fn() } }));
+vi.mock('../../features/dashboard/dashboard-api', () => ({ tenantApi: { listConversations: vi.fn(), createTenant: vi.fn(), listCustomerUsers: vi.fn(), assignTenantUser: vi.fn(), listPlans: vi.fn(), listPlanUpgradeRequests: vi.fn(), resolvePlanUpgradeRequest: vi.fn(), listPlanUpgradeNotifications: vi.fn(), markPlanUpgradeNotificationRead: vi.fn() }, onboardingApi: { createCompanyInvitation: vi.fn(), listInvitationStatuses: vi.fn() } }));
 import { onboardingApi, tenantApi } from '../../features/dashboard/dashboard-api';
 
 function renderTopbar(systemRole: 'OWNER' | 'CUSTOMER' = 'CUSTOMER', onSelectTenant = vi.fn(), tenantRole: 'ADMIN' | 'AGENT' = 'ADMIN', route = '/app/tenant-1/overview') {
@@ -21,6 +21,8 @@ beforeEach(() => {
   vi.mocked(onboardingApi.listInvitationStatuses).mockResolvedValue([]);
   vi.mocked(tenantApi.listPlans).mockResolvedValue([{ code: 'STARTER', display_name: 'Starter Plan', customer_subtitle: 'Core AI Workspace', rank: 1 }]);
   vi.mocked(tenantApi.listPlanUpgradeRequests).mockResolvedValue([]);
+  vi.mocked(tenantApi.listPlanUpgradeNotifications).mockResolvedValue([]);
+  vi.mocked(tenantApi.markPlanUpgradeNotificationRead).mockResolvedValue({});
 });
 
 describe('Topbar global navigation search', () => {
@@ -129,7 +131,21 @@ describe('Topbar global navigation search', () => {
   it('keeps overview date and notification controls visibly outlined', () => {
     renderTopbar('OWNER');
     expect(screen.getByRole('button', { name: /Last 7 days/ })).toHaveClass('topbar-range-control');
-    expect(screen.getByRole('button', { name: 'Live support notifications' })).toHaveClass('topbar-notification-control');
+    expect(screen.getByRole('button', { name: 'Notifications' })).toHaveClass('topbar-notification-control');
+  });
+
+  it('shows an unread owner plan request in the shared notification center', async () => {
+    vi.mocked(tenantApi.listPlanUpgradeNotifications).mockResolvedValue([{ id: 'notice-1', request_id: 'request-1', title: 'Plan upgrade request', tenant_name: 'Blue Dune', current_plan_code: 'STARTER', requested_plan_code: 'BUSINESS', requested_by_email: 'admin@example.test', status: 'PENDING', created_at: '2026-09-01T00:00:00.000Z' }]);
+    renderTopbar('OWNER');
+    const trigger = screen.getByRole('button', { name: 'Notifications' });
+    await waitFor(() => expect(tenantApi.listPlanUpgradeNotifications).toHaveBeenCalled());
+    fireEvent.click(trigger);
+    expect(await screen.findByText('1 notification waiting')).toBeVisible();
+    expect(await screen.findByText('Plan upgrade request')).toBeVisible();
+    expect(screen.getByText(/Blue Dune · STARTER → BUSINESS/)).toBeVisible();
+    fireEvent.click(screen.getByText('Plan upgrade request'));
+    await waitFor(() => expect(tenantApi.markPlanUpgradeNotificationRead).toHaveBeenCalledWith('notice-1'));
+    expect(screen.getByRole('dialog', { name: 'Plan upgrade requests' })).toBeVisible();
   });
 
   it('names current and legacy Knowledge Intelligence routes in the top-level header', () => {

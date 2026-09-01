@@ -4,14 +4,14 @@ import { Link } from 'react-router-dom';
 
 type ButtonVariant = 'primary' | 'secondary' | 'destructive' | 'selected' | 'ghost' | 'outline';
 
-const base = 'inline-flex h-10 min-h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-semibold leading-none transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:border-stone-700 disabled:bg-stone-900 disabled:text-stone-400 disabled:shadow-none disabled:hover:border-stone-700 disabled:hover:bg-stone-900 disabled:hover:text-stone-400';
+const base = 'inline-flex h-10 min-h-10 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-semibold leading-none transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:border-stone-600 disabled:bg-stone-900 disabled:text-stone-300 disabled:opacity-100 disabled:shadow-none disabled:hover:border-stone-600 disabled:hover:bg-stone-900 disabled:hover:text-stone-300';
 const variants: Record<ButtonVariant, string> = {
-  primary: 'border-signal bg-signal text-white shadow-signal hover:bg-red-700 hover:shadow-lg',
+  primary: 'border-signal bg-signal text-white shadow-signal hover:bg-red-700 hover:text-white hover:shadow-lg',
   secondary: 'border-line bg-elevated text-stone-300 hover:border-stone-400 hover:bg-stone-800 hover:text-white',
   destructive: 'border-red-500/60 bg-red-950/30 text-red-200 hover:border-red-400 hover:bg-red-900/50 hover:text-white',
   selected: 'border-signal bg-signal text-white shadow-signal hover:border-signal hover:bg-signal hover:text-white hover:shadow-signal',
   ghost: 'border-transparent bg-transparent text-stone-300 hover:border-line hover:bg-white/[.06] hover:text-white',
-  outline: 'border-line bg-transparent text-stone-200 hover:border-stone-400 hover:bg-white/[.05] hover:text-white',
+  outline: 'border-signal/70 bg-signal/[.08] text-red-100 hover:border-signal hover:bg-signal/20 hover:text-white',
 };
 
 export const dashboardButtonClass = (variant: ButtonVariant = 'secondary') => `${base} ${variants[variant]}`;
@@ -41,7 +41,7 @@ export function DashboardTextarea({ className = '', ...props }: TextareaHTMLAttr
 export function DashboardPasswordInput({ className = '', ...props }: InputHTMLAttributes<HTMLInputElement>) {
   const [visible, setVisible] = useState(false);
   const inputId = useId();
-  return <span className="relative block"><input {...props} id={props.id ?? inputId} type={visible ? 'text' : 'password'} className={`${fieldClass} pr-12 ${className}`} /><button type="button" aria-label={visible ? 'Hide password' : 'Show password'} aria-pressed={visible} onClick={() => setVisible((value) => !value)} className="absolute right-2 top-2 grid h-7 w-9 place-items-center rounded-lg text-stone-500 hover:bg-white/10 hover:text-ink focus-visible:ring-2 focus-visible:ring-signal">{visible ? 'Hide' : 'Show'}</button></span>;
+  return <span className="relative block"><input {...props} id={props.id ?? inputId} type={visible ? 'text' : 'password'} className={`${fieldClass} pr-12 ${className}`} /><button type="button" aria-label={visible ? 'Hide password' : 'Show password'} aria-pressed={visible} onClick={() => setVisible((value) => !value)} className="absolute right-2 top-2 grid h-7 w-9 place-items-center rounded-lg text-stone-300 hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-signal">{visible ? 'Hide' : 'Show'}</button></span>;
 }
 
 export function DashboardFormMessage({ tone = 'error', children }: { tone?: 'error' | 'success' | 'info'; children: ReactNode }) {

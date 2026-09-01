@@ -15,7 +15,7 @@ import { validateInvitationMailConfiguration } from '../services/customer-invita
 import { resendInvitationLifecycle, revokeInvitationLifecycle } from '../services/customer-invitation-service.js';
 import { AssistantModelAccessError, assertAssistantModelWriteAllowed, serializeAssistantForActor } from '../services/assistant-model-access-policy.js';
 import { PLAN_CODES, TenantPlanError, requestTenantPlanUpgrade, resolveTenantPlanUpgrade } from '../services/tenant-plan-service.js';
-import { notifyPlatformOwnersOfPlanUpgrade } from '../services/tenant-plan-notification-service.js';
+import { listPlanUpgradeNotificationsForOwner, markPlanUpgradeNotificationRead, notifyPlatformOwnersOfPlanUpgrade } from '../services/tenant-plan-notification-service.js';
 
 const router = express.Router();
 
@@ -130,6 +130,26 @@ router.get('/plans', async (_req, res) => {
 router.get('/plan-upgrade-requests', requireOwner, async (_req, res) => {
   try { const result = await query(`SELECT request.*, tenant.name AS tenant_name, requester.email AS requested_by_email FROM tenant_plan_upgrade_requests request JOIN tenants tenant ON tenant.id=request.tenant_id JOIN users requester ON requester.id=request.requested_by_user_id ORDER BY request.created_at DESC LIMIT 100`); return res.json({ requests: result.rows }); }
   catch { return res.status(503).json({ error: 'Plan requests are unavailable' }); }
+});
+
+router.get('/plan-upgrade-notifications', requireOwner, async (req, res) => {
+  try {
+    const notifications = await listPlanUpgradeNotificationsForOwner({ database: pool, ownerUserId: req.user.user_id });
+    return res.json({ notifications });
+  } catch {
+    return res.status(503).json({ error: 'Plan notifications are unavailable' });
+  }
+});
+
+router.post('/plan-upgrade-notifications/:notificationId/read', requireOwner, async (req, res) => {
+  if (!isValidUUID(req.params.notificationId)) return res.status(400).json({ error: 'Plan notification is unavailable' });
+  try {
+    const notification = await markPlanUpgradeNotificationRead({ database: pool, notificationId: req.params.notificationId, ownerUserId: req.user.user_id });
+    if (!notification) return res.status(404).json({ error: 'Plan notification is unavailable' });
+    return res.json({ notification });
+  } catch {
+    return res.status(503).json({ error: 'Plan notification is unavailable' });
+  }
 });
 
 router.post('/plan-upgrade-requests/:requestId/:decision(approve|reject)', requireOwner, async (req, res) => {

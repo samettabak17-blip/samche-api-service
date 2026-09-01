@@ -603,11 +603,16 @@ export function KnowledgeIntelligencePage() {
     refetchInterval: (query) => ['PENDING', 'PROCESSING'].includes(query.state.data?.status ?? '') ? 2_000 : false,
   });
   useEffect(() => {
-    if (imageGeneration.data?.status === 'READY') {
+    const status = imageGeneration.data?.status;
+    if (status === 'READY' || status === 'FAILED') {
       refreshCandidates();
-      queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeRecommendations(tenantId, assistantId) });
+      refreshSources();
+      queryClient.invalidateQueries({ queryKey: ['tenant', tenantId, 'knowledge-intelligence', 'recommendations'] });
     }
-  }, [imageGeneration.data?.status, tenantId, assistantId]);
+    // A deleted/expired job must never leave a source action permanently
+    // disabled from stale component state.
+    if (imageGeneration.isSuccess && imageGeneration.data === null) setImageGenerationSourceId(null);
+  }, [imageGeneration.data?.status, imageGeneration.data, imageGeneration.isSuccess, tenantId]);
   const candidateAction = useMutation({
     mutationFn: (action: "approve" | "reject") =>
       action === "approve"
