@@ -178,7 +178,7 @@ export async function prepareAssistantConfigurationGeneration({ database, provid
     `ACTIVE factual profile: ${JSON.stringify(context.rows[0].profile_data)}`,
     `APPROVED AI recommendation: ${JSON.stringify(context.rows[0].recommendation_data)}`,
   ].join('\n');
-  const fingerprint = requestFingerprint({ tenant_id: tenantId, assistant_id: assistantId, active_profile_version_id: context.rows[0].profile_version_id, business_identity_id: provenance.business_identity_id, source_scope: provenance.source_scope, source_hashes: sourceHashes, recommendation_id: recommendationId, schema_version: SCHEMA_VERSION, configuration_runtime_contract: CONFIGURATION_RUNTIME_CONTRACT, provider: provider.provider, model: provider.model, generation_policy: provider.assistantGenerationPolicy ?? null });
+  const fingerprint = requestFingerprint({ tenant_id: tenantId, assistant_id: assistantId, active_profile_version_id: context.rows[0].profile_version_id, business_identity_id: provenance.business_identity_id, source_scope: provenance.source_scope, source_hashes: sourceHashes, recommendation_id: recommendationId, schema_version: SCHEMA_VERSION, configuration_runtime_contract: CONFIGURATION_RUNTIME_CONTRACT, provider: provider.provider, model: provider.model, generation_policy: provider.assistantConfigurationGenerationPolicy ?? provider.assistantGenerationPolicy ?? null });
   return { context: context.rows[0], prompt, provenance, fingerprint, sourceCount: provenance.source_scope?.source_ids?.length ?? 0 };
 }
 

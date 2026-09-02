@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   generateAssistantRecommendation,
   prepareAssistantRecommendationGeneration,
+  prepareAssistantConfigurationGeneration,
   generateAssistantConfigurationVersion,
   reviewAssistantRecommendation,
   rejectAssistantConfigurationVersion,
@@ -106,6 +107,44 @@ test('generates a review-only configuration from an approved recommendation', as
   assert.deepEqual(run.params[6].source_scope.source_ids, ['source-meridian']);
   assert.match(calls.find(({ sql }) => /FROM assistant_knowledge_recommendations recommendation/i.test(sql)).sql, /profile\.active_version_id IS NOT NULL/i);
   assert.match(calls.find(({ sql }) => /FROM assistant_knowledge_recommendations recommendation/i.test(sql)).sql, /profile_version\.profile_id = profile\.id/i);
+});
+
+test('configuration generation fingerprints its dedicated provider policy rather than the recommendation policy', async () => {
+  const database = { query: async (sql) => {
+    if (/FROM assistant_knowledge_recommendations recommendation/i.test(sql)) {
+      return { rows: [{
+        recommendation_data: { tone: 'Professional' },
+        assistant_name: 'Sales',
+        profile_version_id: '11111111-1111-4111-8111-111111111111',
+        business_identity_id: '55555555-5555-4555-8555-555555555555',
+        source_scope: { source_ids: ['source-a'] },
+        profile_evidence: { source_hashes: ['hash-a'] },
+        profile_data: { company_identity: 'Tenant Co' },
+      }] };
+    }
+    return { rows: [] };
+  } };
+  const firstProvider = {
+    ...provider({}),
+    assistantGenerationPolicy: 'recommendation-v1',
+    assistantConfigurationGenerationPolicy: 'configuration-v1',
+  };
+  const secondProvider = {
+    ...provider({}),
+    assistantGenerationPolicy: 'recommendation-v1',
+    assistantConfigurationGenerationPolicy: 'configuration-v2',
+  };
+
+  const first = await prepareAssistantConfigurationGeneration({
+    database, provider: firstProvider, tenantId, assistantId,
+    recommendationId: '33333333-3333-4333-8333-333333333333', requestedBy: actorId,
+  });
+  const second = await prepareAssistantConfigurationGeneration({
+    database, provider: secondProvider, tenantId, assistantId,
+    recommendationId: '33333333-3333-4333-8333-333333333333', requestedBy: actorId,
+  });
+
+  assert.notEqual(first.fingerprint, second.fingerprint);
 });
 
 test('an approved assistant-scoped behavior recommendation uses the current active profile for configuration generation', async () => {

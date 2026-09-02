@@ -60,4 +60,38 @@ describe("assistant recommendation generation UI state", () => {
     );
     expect(malformed.phase).toBe("FAILED");
   });
+
+  it("preserves the Configuration operation in enqueue and payload errors", () => {
+    const starting = recommendationGenerationReducer(
+      initialRecommendationGenerationState,
+      { type: "START", operation: "Configuration" },
+    );
+    const enqueueFailure = recommendationGenerationReducer(starting, { type: "ENQUEUE_FAILED" });
+    expect(enqueueFailure.error).toBe("Configuration generation could not be started. You can retry.");
+
+    const malformed = recommendationGenerationReducer(starting, { type: "INVALID_RESPONSE" });
+    expect(malformed.error).toBe("Configuration generation returned an unusable job response. Refresh and retry.");
+  });
+
+  it("handles a fast ready Configuration result and a terminal failure without retaining loading", () => {
+    const starting = recommendationGenerationReducer(
+      initialRecommendationGenerationState,
+      { type: "START", operation: "Configuration" },
+    );
+    const ready = recommendationGenerationReducer(starting, {
+      type: "ACCEPTED",
+      job: { id: "configuration-job", status: "READY", attempts: 1 },
+      reused: false,
+      operation: "Configuration",
+    });
+    expect(ready.phase).toBe("SUCCEEDED");
+    expect(ready.message).toBe("Configuration generated successfully.");
+
+    const failed = recommendationGenerationReducer(starting, {
+      type: "JOB_STATUS",
+      job: { id: "configuration-job", status: "FAILED", attempts: 3, last_error_code: "KNOWLEDGE_GENERATION_TIMEOUT" },
+    });
+    expect(failed.phase).toBe("FAILED");
+    expect(failed.error).toBe("Configuration generation failed. You can retry.");
+  });
 });

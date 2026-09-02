@@ -1475,6 +1475,43 @@ it("surfaces and reviews the exact generated Configuration before refetch", asyn
   expect(mockedApi.reviewAssistantConfiguration).not.toHaveBeenCalled();
   expect(mockedApi.activateAssistantConfiguration).not.toHaveBeenCalled();
 });
+
+it("reconciles a failed Configuration job into one retryable terminal state without blanking the page", async () => {
+  mockedApi.listAssistants.mockResolvedValue([
+    { id: "assistant-a", tenant_id: "tenant-a", name: "Meridian Advisor" },
+  ]);
+  mockedApi.listBusinessProfiles.mockResolvedValue([
+    {
+      id: "profile-active",
+      schema_version: 2,
+      profile_data: { company_identity: "Meridian Arc Technologies LLC" },
+      status: "APPROVED",
+      active_version_id: "profile-active",
+    },
+  ]);
+  mockedApi.listKnowledgeRecommendations.mockResolvedValue([
+    { id: "recommendation-approved", recommendation_data: { tone: "Professional" }, status: "APPROVED" },
+    { id: "conversation-preserved", recommendation_data: { qualification_guidance: "Ask for the budget." }, status: "NEEDS_REVIEW", evidence: null },
+  ]);
+  mockedApi.generateAssistantConfiguration.mockResolvedValue({
+    job: { id: "configuration-job-failed", status: "PENDING", attempts: 0 }, reused: false,
+  });
+  mockedApi.getAssistantConfigurationGenerationJob.mockResolvedValue({
+    id: "configuration-job-failed", status: "FAILED", attempts: 3, last_error_code: "KNOWLEDGE_GENERATION_TIMEOUT",
+  });
+
+  renderPage(true, "/app/tenant-a/knowledge-base/configurations");
+  const assistant = await screen.findByRole("combobox", { name: "Assistant" });
+  await screen.findByRole("option", { name: "Meridian Advisor" });
+  fireEvent.change(assistant, { target: { value: "assistant-a" } });
+  fireEvent.click(await screen.findByRole("button", { name: "Generate configuration" }));
+
+  expect(await screen.findByText("Configuration generation failed. You can retry.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Generate configuration" })).toBeEnabled();
+  expect(screen.getByText("Ask for the budget.")).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Configurations" })).toBeVisible();
+  expect(screen.queryByText("Knowledge source operation failed")).not.toBeInTheDocument();
+});
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();

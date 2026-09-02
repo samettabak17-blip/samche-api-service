@@ -237,7 +237,7 @@ test('Gemini boundary telemetry records network errors without provider details'
   assert.equal(JSON.stringify(events).includes('socket detail'), false);
 });
 
-test('Gemini Assistant Configuration uses the same bounded low-thinking generation policy', async () => {
+test('Gemini Assistant Configuration uses a bounded minimal-thinking policy with an explicit output budget', async () => {
   const requests = [];
   const provider = createKnowledgeGenerationProvider({
     env: { KNOWLEDGE_GENERATION_PROVIDER: 'GEMINI', GEMINI_API_KEY: 'test-key' },
@@ -252,7 +252,9 @@ test('Gemini Assistant Configuration uses the same bounded low-thinking generati
 
   await provider.generateAssistantConfiguration({ prompt: 'Approved recommendation' });
 
-  assert.deepEqual(requests[0].generationConfig.thinkingConfig, { thinkingLevel: 'low' });
+  assert.deepEqual(requests[0].generationConfig.thinkingConfig, { thinkingLevel: 'minimal' });
+  assert.equal(requests[0].generationConfig.maxOutputTokens, 2048);
+  assert.equal(provider.assistantConfigurationGenerationPolicy, 'gemini-assistant-configuration-v2:thinking-minimal:max-output-2048:timeout-30000');
 });
 
 test('Business Profile uses bounded low thinking and an operation-specific timeout', async () => {

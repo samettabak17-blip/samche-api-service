@@ -4,6 +4,7 @@ import {
   claimNextAssistantConfigurationGenerationJob,
   enqueueAssistantConfigurationGenerationJob,
   processAssistantConfigurationGenerationJob,
+  recoverStaleAssistantConfigurationGenerationJobs,
 } from '../services/knowledge-semantic-generation-job-service.js';
 
 const tenantId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -100,4 +101,51 @@ test('configuration worker retries a provider failure without creating a partial
   assert.equal(calls.some(({ sql }) => /SET status = 'PENDING'/i.test(sql)), true);
   assert.equal(calls.some(({ sql }) => /INSERT INTO assistant_knowledge_configurations/i.test(sql)), false);
   assert.equal(calls.some(({ sql }) => /active_configuration_version_id/i.test(sql)), false);
+});
+
+test('configuration worker reaches terminal FAILED after its bounded final provider attempt without a partial artifact', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    return { rows: [] };
+  } };
+
+  await assert.rejects(
+    processAssistantConfigurationGenerationJob({
+      database,
+      job: {
+        id: 'job-configuration-terminal-failure', tenant_id: tenantId, attempts: 3,
+        metadata: {
+          assistant_id: assistantId, recommendation_id: recommendationId,
+          business_profile_version_id: profileVersionId, requested_by: actorId,
+          request_fingerprint: fingerprint,
+        },
+      },
+      generateConfiguration: async () => {
+        const error = new Error('bounded provider timeout');
+        error.code = 'KNOWLEDGE_GENERATION_TIMEOUT';
+        throw error;
+      },
+    }),
+    { code: 'KNOWLEDGE_GENERATION_TIMEOUT' },
+  );
+
+  assert.equal(calls.some(({ sql, params }) => /SET status = 'FAILED'/i.test(sql) && params.includes('KNOWLEDGE_GENERATION_TIMEOUT')), true);
+  assert.equal(calls.some(({ sql }) => /INSERT INTO assistant_configuration_versions/i.test(sql)), false);
+  assert.equal(calls.some(({ sql }) => /active_configuration_version_id/i.test(sql)), false);
+});
+
+test('stale configuration processing jobs recover with bounded retry metadata', async () => {
+  const calls = [];
+  const database = { query: async (sql) => {
+    calls.push(sql);
+    return { rows: [{ id: 'stale-configuration-job', status: 'PENDING' }] };
+  } };
+
+  const result = await recoverStaleAssistantConfigurationGenerationJobs(database);
+
+  assert.equal(result.recovered, 1);
+  assert.equal(result.failed, 0);
+  assert.match(calls[0], /GENERATE_ASSISTANT_CONFIGURATION/);
+  assert.match(calls[0], /stale_recovery_count/);
 });

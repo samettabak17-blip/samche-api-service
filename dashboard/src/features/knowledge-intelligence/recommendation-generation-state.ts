@@ -112,12 +112,14 @@ export function recommendationGenerationReducer(
       return {
         ...initialRecommendationGenerationState,
         phase: "FAILED",
+        operation: state.operation,
         error: `${state.operation} generation could not be started. You can retry.`,
       };
     case "INVALID_RESPONSE":
       return {
         ...initialRecommendationGenerationState,
         phase: "FAILED",
+        operation: state.operation,
         error: `${state.operation} generation returned an unusable job response. Refresh and retry.`,
       };
     case "RESET":
