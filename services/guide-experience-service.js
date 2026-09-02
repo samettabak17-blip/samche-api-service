@@ -1,5 +1,6 @@
 const COLOR = /^#[0-9A-Fa-f]{6}$/;
 const SAFE_URL = /^https:\/\/[^\s]+$/i;
+const GUIDE_ASSET_URL = /^\/guide\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const UNSAFE_MARKUP = /<\s*\/?\s*(?:script|style|iframe|object|embed|svg|img|a\b)/i;
 const PRESETS = new Set(['PROFESSIONAL', 'PREMIUM', 'MINIMAL', 'CONVERSATIONAL', 'COMMERCE', 'SERVICE']);
 const FONTS = new Set(['SYSTEM', 'INTER', 'MANROPE', 'SERIF']);
@@ -42,7 +43,7 @@ function text(value, key, max = 240, fallback = '') {
 function asset(value, key) {
   if (value === undefined || value === null || value === '') return null;
   const normalized = text(value, key, 1024);
-  if (!SAFE_URL.test(normalized) || /\.(?:svg)(?:[?#]|$)/i.test(normalized) || /^data:/i.test(normalized)) throw new GuideExperienceError('GUIDE_EXPERIENCE_INVALID', `${key} is invalid.`);
+  if ((!SAFE_URL.test(normalized) && !GUIDE_ASSET_URL.test(normalized)) || /\.(?:svg)(?:[?#]|$)/i.test(normalized) || /^data:/i.test(normalized)) throw new GuideExperienceError('GUIDE_EXPERIENCE_INVALID', `${key} is invalid.`);
   return normalized;
 }
 
@@ -151,14 +152,18 @@ export async function createGuideExperienceDraft({ database, tenantId, assistant
      RETURNING id, tenant_id, assistant_id, version, status, experience, created_at, published_at`,
     [tenantId, assistantId, JSON.stringify(normalized), actorUserId],
   );
-  return serialize(result.rows[0]);
+  const draft = serialize(result.rows[0]);
+  await database.query(`INSERT INTO guide_experience_audit_events (tenant_id, assistant_id, experience_version_id, actor_user_id, event_type) VALUES ($1,$2,$3,$4,'CREATED')`, [tenantId, assistantId, draft.id, actorUserId]);
+  return draft;
 }
 
 export async function updateGuideExperienceDraft({ database, tenantId, assistantId, versionId, actorUserId, experience }) {
   const normalized = normalizeGuideExperience(experience);
   const result = await database.query(`UPDATE guide_experience_versions SET experience=$1::jsonb, updated_at=CURRENT_TIMESTAMP, updated_by=$2 WHERE id=$3 AND tenant_id=$4 AND assistant_id=$5 AND status='DRAFT' RETURNING id, tenant_id, assistant_id, version, status, experience, created_at, published_at`, [JSON.stringify(normalized), actorUserId, versionId, tenantId, assistantId]);
   if (!result.rowCount) throw new GuideExperienceError('GUIDE_EXPERIENCE_DRAFT_NOT_FOUND');
-  return serialize(result.rows[0]);
+  const draft = serialize(result.rows[0]);
+  await database.query(`INSERT INTO guide_experience_audit_events (tenant_id, assistant_id, experience_version_id, actor_user_id, event_type) VALUES ($1,$2,$3,$4,'UPDATED')`, [tenantId, assistantId, draft.id, actorUserId]);
+  return draft;
 }
 
 export async function publishGuideExperience({ client, tenantId, assistantId, versionId, actorUserId }) {
@@ -168,5 +173,16 @@ export async function publishGuideExperience({ client, tenantId, assistantId, ve
   const published = await client.query(`UPDATE guide_experience_versions SET status='PUBLISHED', published_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP, updated_by=$4 WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3 AND status='DRAFT' RETURNING id, tenant_id, assistant_id, version, status, experience, created_at, published_at`, [versionId, tenantId, assistantId, actorUserId]);
   if (!published.rowCount) throw new GuideExperienceError('GUIDE_EXPERIENCE_PUBLISH_FAILED');
   await client.query(`INSERT INTO guide_experience_audit_events (tenant_id, assistant_id, experience_version_id, actor_user_id, event_type) VALUES ($1,$2,$3,$4,'PUBLISHED')`, [tenantId, assistantId, versionId, actorUserId]);
+  return serialize(published.rows[0]);
+}
+
+export async function rollbackGuideExperience({ client, tenantId, assistantId, versionId, actorUserId }) {
+  const target = await client.query(`SELECT id, tenant_id, assistant_id, version, status, experience, created_at, published_at FROM guide_experience_versions WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3 FOR UPDATE`, [versionId, tenantId, assistantId]);
+  if (!target.rowCount || !['ARCHIVED', 'PUBLISHED'].includes(target.rows[0].status)) throw new GuideExperienceError('GUIDE_EXPERIENCE_ROLLBACK_TARGET_NOT_FOUND');
+  if (target.rows[0].status === 'PUBLISHED') return serialize(target.rows[0]);
+  await client.query(`UPDATE guide_experience_versions SET status='ARCHIVED', updated_at=CURRENT_TIMESTAMP, updated_by=$3 WHERE tenant_id=$1 AND assistant_id=$2 AND status='PUBLISHED'`, [tenantId, assistantId, actorUserId]);
+  const published = await client.query(`UPDATE guide_experience_versions SET status='PUBLISHED', published_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP, updated_by=$4 WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3 AND status='ARCHIVED' RETURNING id, tenant_id, assistant_id, version, status, experience, created_at, published_at`, [versionId, tenantId, assistantId, actorUserId]);
+  if (!published.rowCount) throw new GuideExperienceError('GUIDE_EXPERIENCE_ROLLBACK_FAILED');
+  await client.query(`INSERT INTO guide_experience_audit_events (tenant_id, assistant_id, experience_version_id, actor_user_id, event_type) VALUES ($1,$2,$3,$4,'ROLLED_BACK')`, [tenantId, assistantId, versionId, actorUserId]);
   return serialize(published.rows[0]);
 }

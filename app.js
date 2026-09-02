@@ -54,6 +54,7 @@ import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext
 import { buildTenantRuntimeSystemInstruction, resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
 import { resolveChannelAssistantRuntime } from "./services/assistant-runtime-resolution-service.js";
 import { resolvePublishedGuideExperience } from "./services/guide-experience-service.js";
+import { getPublicGuideExperienceAsset } from "./services/guide-experience-asset-service.js";
 import { samcheguideRuntimeSessionKey } from "./services/samcheguide-runtime-session-service.js";
 import { buildTenantFollowUpRequest } from "./services/tenant-follow-up-service.js";
 import { isSameKnowledgeAuthority, resolveAssistantKnowledgeAuthority } from "./services/knowledge-authority-service.js";
@@ -157,6 +158,21 @@ app.get("/guide/bootstrap", async (_req, res) => {
   } catch (error) {
     console.error('GUIDE_EXPERIENCE_BOOTSTRAP_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return res.status(503).json({ error: 'Guide experience is temporarily unavailable.', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
+  }
+});
+
+app.get('/guide/assets/:assetId', async (req, res) => {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(req.params.assetId))) return res.sendStatus(404);
+  try {
+    const asset = await getPublicGuideExperienceAsset({ database: pool, assetId: req.params.assetId });
+    if (!asset) return res.sendStatus(404);
+    const stream = await createConversationResourceStorage().get({ key: asset.storage_key });
+    res.set({ 'Content-Type': asset.mime_type, 'Content-Length': String(asset.size_bytes), 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff' });
+    stream.on('error', () => { if (!res.headersSent) res.sendStatus(404); else res.end(); });
+    return stream.pipe(res);
+  } catch (error) {
+    console.error('GUIDE_EXPERIENCE_ASSET_READ_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    return res.sendStatus(404);
   }
 });
 

@@ -1,11 +1,15 @@
 import express from 'express';
+import multer from 'multer';
 import pool from '../config/db.js';
 import { authenticateToken, requireTenantAccess, requireTenantAdmin } from '../middleware/auth.js';
 import { isValidUUID } from '../middleware/validators.js';
-import { GuideExperienceError, createGuideExperienceDraft, listGuideExperienceVersions, publishGuideExperience, updateGuideExperienceDraft } from '../services/guide-experience-service.js';
+import { createConversationResourceStorage } from '../services/conversation-resource-storage.js';
+import { GuideExperienceAssetError, storeGuideExperienceAsset } from '../services/guide-experience-asset-service.js';
+import { GuideExperienceError, createGuideExperienceDraft, listGuideExperienceVersions, publishGuideExperience, rollbackGuideExperience, updateGuideExperienceDraft } from '../services/guide-experience-service.js';
 
 const router = express.Router();
 router.use(authenticateToken);
+const upload = multer({ storage: multer.memoryStorage(), limits: { files: 1, fileSize: 5 * 1024 * 1024 } });
 
 function validScope(req, res) {
   if (!isValidUUID(req.params.tenantId) || !isValidUUID(req.params.assistantId)) {
@@ -21,6 +25,7 @@ async function verifyAssistant({ tenantId, assistantId }) {
 }
 
 function sendError(res, error) {
+  if (error instanceof GuideExperienceAssetError) return res.status(/UNSUPPORTED|MISMATCH|INVALID|REQUIRED|KIND/.test(error.code) ? 400 : (/SIZE/.test(error.code) ? 413 : 503)).json({ error: error.message, code: error.code });
   if (error instanceof GuideExperienceError) return res.status(/NOT_FOUND|MISMATCH|INVALID/.test(error.code) ? 400 : 409).json({ error: error.message, code: error.code });
   console.error('Guide experience operation failed:', error?.code ?? error?.name ?? 'UNKNOWN');
   return res.status(503).json({ error: 'Guide experience is temporarily unavailable.' });
@@ -30,6 +35,20 @@ router.get('/:tenantId/guide-experiences/assistants/:assistantId', requireTenant
   const scope = validScope(req, res); if (!scope) return;
   try { await verifyAssistant(scope); return res.json({ versions: await listGuideExperienceVersions({ database: pool, ...scope }) }); }
   catch (error) { return sendError(res, error); }
+});
+
+router.post('/:tenantId/guide-experiences/assistants/:assistantId/assets', requireTenantAccess, requireTenantAdmin, (req, res, next) => {
+  upload.single('file')(req, res, (error) => {
+    if (error) return res.status(error.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: 'Guide branding asset is invalid.', code: error.code });
+    return next();
+  });
+}, async (req, res) => {
+  const scope = validScope(req, res); if (!scope) return;
+  try {
+    await verifyAssistant(scope);
+    const asset = await storeGuideExperienceAsset({ database: pool, storage: createConversationResourceStorage(), ...scope, actorUserId: req.user.user_id, file: req.file, kind: req.body?.kind });
+    return res.status(201).json({ asset: { ...asset, public_url: `/guide/assets/${asset.id}` } });
+  } catch (error) { return sendError(res, error); }
 });
 
 router.post('/:tenantId/guide-experiences/assistants/:assistantId/drafts', requireTenantAccess, requireTenantAdmin, async (req, res) => {
@@ -50,6 +69,18 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/drafts/:versio
   try {
     await verifyAssistant(scope); await client.query('BEGIN');
     const version = await publishGuideExperience({ client, ...scope, versionId: req.params.versionId, actorUserId: req.user.user_id });
+    await client.query('COMMIT'); return res.json({ version, cache_key: `guide-experience:${scope.tenantId}:${scope.assistantId}:${version.version}` });
+  } catch (error) { await client.query('ROLLBACK').catch(() => {}); return sendError(res, error); }
+  finally { client.release(); }
+});
+
+router.post('/:tenantId/guide-experiences/assistants/:assistantId/versions/:versionId/rollback', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const scope = validScope(req, res); if (!scope || !isValidUUID(req.params.versionId)) return res.status(400).json({ error: 'Guide experience version is invalid.' });
+  if (req.body?.confirmed !== true) return res.status(400).json({ error: 'Confirm rollback before publishing a previous Guide experience.', code: 'GUIDE_EXPERIENCE_ROLLBACK_CONFIRMATION_REQUIRED' });
+  const client = await pool.connect();
+  try {
+    await verifyAssistant(scope); await client.query('BEGIN');
+    const version = await rollbackGuideExperience({ client, ...scope, versionId: req.params.versionId, actorUserId: req.user.user_id });
     await client.query('COMMIT'); return res.json({ version, cache_key: `guide-experience:${scope.tenantId}:${scope.assistantId}:${version.version}` });
   } catch (error) { await client.query('ROLLBACK').catch(() => {}); return sendError(res, error); }
   finally { client.release(); }

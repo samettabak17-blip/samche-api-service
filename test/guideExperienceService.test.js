@@ -5,6 +5,7 @@ import {
   normalizeGuideExperience,
   resolvePublishedGuideExperience,
   guideExperienceCacheKey,
+  rollbackGuideExperience,
 } from '../services/guide-experience-service.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
@@ -38,6 +39,11 @@ test('rejects unsafe assets, script-like copy, and arbitrary theme values', () =
   }
 });
 
+test('accepts only opaque platform Guide asset routes for uploaded branding', () => {
+  const experience = normalizeGuideExperience({ logo_url: '/guide/assets/11111111-1111-4111-8111-111111111111' });
+  assert.equal(experience.logo_url, '/guide/assets/11111111-1111-4111-8111-111111111111');
+});
+
 test('published resolution selects only the exact tenant assistant active version and otherwise returns neutral fallback', async () => {
   const database = {
     async query(sql, params) {
@@ -59,4 +65,24 @@ test('cache keys are partitioned by tenant assistant and published experience ve
   const otherTenant = guideExperienceCacheKey({ tenantId: '33333333-3333-4333-8333-333333333333', assistantId, version: 1 });
   assert.notEqual(first, second);
   assert.notEqual(first, otherTenant);
+});
+
+test('explicit rollback promotes only the selected archived version and records an audit event', async () => {
+  const queries = [];
+  const client = {
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      if (sql.includes('FROM guide_experience_versions') && sql.includes('FOR UPDATE')) {
+        return { rowCount: 1, rows: [{ id: 'archived-v1', tenant_id: tenantId, assistant_id: assistantId, version: 1, status: 'ARCHIVED', experience: {}, created_at: null, published_at: null }] };
+      }
+      if (sql.includes("status='PUBLISHED'") && sql.includes('RETURNING id')) {
+        return { rowCount: 1, rows: [{ id: 'archived-v1', tenant_id: tenantId, assistant_id: assistantId, version: 1, status: 'PUBLISHED', experience: {}, created_at: null, published_at: null }] };
+      }
+      return { rowCount: 1, rows: [] };
+    },
+  };
+  const version = await rollbackGuideExperience({ client, tenantId, assistantId, versionId: 'archived-v1', actorUserId: 'actor-a' });
+  assert.equal(version.status, 'PUBLISHED');
+  assert.ok(queries.some(({ sql }) => sql.includes("'ROLLED_BACK'")));
+  assert.ok(queries.some(({ sql }) => sql.includes("status='ARCHIVED'") && sql.includes("status='PUBLISHED'")));
 });

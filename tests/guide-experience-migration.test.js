@@ -13,3 +13,14 @@ test('Guide Experience migration is additive, versioned, tenant scoped, and enfo
   assert.match(sql, /guide_experience_audit_events/i);
   assert.doesNotMatch(sql, /DELETE\s+FROM\s+(?:tenants|ai_assistants|tenant_channels)/i);
 });
+
+test('Guide Experience asset migration uses scoped private storage metadata without widening public access', () => {
+  const sql = fs.readFileSync(new URL('../migrations/057_guide_experience_assets_and_rollback.sql', import.meta.url), 'utf8');
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS guide_experience_assets/i);
+  assert.match(sql, /tenant_id UUID NOT NULL/i);
+  assert.match(sql, /assistant_id UUID NOT NULL/i);
+  assert.match(sql, /storage_key TEXT NOT NULL UNIQUE/i);
+  assert.match(sql, /image\/png.*image\/jpeg.*image\/webp/is);
+  assert.match(sql, /size_bytes INTEGER NOT NULL CHECK \(size_bytes > 0 AND size_bytes <= 5242880\)/i);
+  assert.doesNotMatch(sql, /public_url|api_key|credential/i);
+});
