@@ -47,6 +47,7 @@ import { createImageKnowledgeSemanticClassifier } from "./services/image-knowled
 import { createKnowledgeGenerationProvider } from "./services/knowledge-generation-provider.js";
 import { createGoogleGeminiProvider } from "./services/google-gemini-provider.js";
 import { startImageSemanticGenerationWorker } from "./services/knowledge-semantic-generation-job-service.js";
+import { generateAssistantRecommendation } from "./services/knowledge-assistant-lifecycle.js";
 import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from "./services/knowledge-runtime-context-service.js";
 import { buildTenantRuntimeSystemInstruction, resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
 import { buildTenantFollowUpRequest } from "./services/tenant-follow-up-service.js";
@@ -202,6 +203,10 @@ function startKnowledgeWorkers() {
     imageSemanticGenerationWorker = startImageSemanticGenerationWorker({
       database: pool,
       semanticClassifier: createImageKnowledgeSemanticClassifier({ provider: createKnowledgeGenerationProvider() }),
+      generateRecommendation: (input) => generateAssistantRecommendation({
+        ...input,
+        provider: createKnowledgeGenerationProvider(),
+      }),
     });
   } else {
     console.info('KNOWLEDGE_SEMANTIC_GENERATION_WORKER_DISABLED');

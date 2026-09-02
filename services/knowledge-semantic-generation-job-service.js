@@ -1,12 +1,26 @@
 import { createImageKnowledgeCandidates } from './knowledge-candidate-service.js';
 
 const HASH = /^[a-f0-9]{64}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class KnowledgeSemanticGenerationJobError extends Error {
   constructor(code, message) {
     super(message);
     this.code = code;
   }
+}
+
+function safeAssistantRecommendationJob(job) {
+  if (!job) return job;
+  const metadata = job.metadata && typeof job.metadata === 'object' ? job.metadata : {};
+  return {
+    ...job,
+    metadata: {
+      ...(metadata.recommendation_id ? { recommendation_id: metadata.recommendation_id } : {}),
+      ...(metadata.recommendation_status ? { recommendation_status: metadata.recommendation_status } : {}),
+      ...(metadata.business_profile_version_id ? { business_profile_version_id: metadata.business_profile_version_id } : {}),
+    },
+  };
 }
 
 function validate({ database, tenantId, sourceId, extractionHash }) {
@@ -46,6 +60,49 @@ export async function getImageSemanticGenerationJob({ database, tenantId, source
     [tenantId, sourceId],
   );
   return result.rows[0] ?? null;
+}
+
+export async function enqueueAssistantRecommendationGenerationJob({ database, tenantId, assistantId, businessProfileVersionId, requestedBy, fingerprint, providerPolicy }) {
+  if (!database?.query || !UUID.test(String(tenantId)) || !UUID.test(String(assistantId)) || !UUID.test(String(businessProfileVersionId)) || !UUID.test(String(requestedBy)) || !HASH.test(String(fingerprint))) {
+    throw new KnowledgeSemanticGenerationJobError('KNOWLEDGE_ASSISTANT_RECOMMENDATION_JOB_INVALID', 'Assistant Recommendation generation request is invalid');
+  }
+  const metadata = {
+    assistant_id: String(assistantId),
+    business_profile_version_id: String(businessProfileVersionId),
+    requested_by: String(requestedBy),
+    request_fingerprint: String(fingerprint).toLowerCase(),
+    provider_policy: typeof providerPolicy === 'string' ? providerPolicy.slice(0, 160) : null,
+  };
+  const result = await database.query(
+    `INSERT INTO knowledge_processing_jobs (
+       tenant_id, source_id, job_type, content_hash, embedding_model, embedding_version, status, metadata
+     ) VALUES ($1, NULL, 'GENERATE_ASSISTANT_RECOMMENDATION', $2, 'ASSISTANT_RECOMMENDATION', '1', 'PENDING', $3::jsonb)
+     ON CONFLICT (tenant_id, job_type, content_hash, embedding_model, embedding_version)
+       WHERE job_type = 'GENERATE_ASSISTANT_RECOMMENDATION'
+     DO UPDATE SET
+       status = CASE WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') THEN knowledge_processing_jobs.status ELSE 'PENDING' END,
+       available_at = CASE WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') THEN knowledge_processing_jobs.available_at ELSE CURRENT_TIMESTAMP END,
+       last_error_code = CASE WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') THEN knowledge_processing_jobs.last_error_code ELSE NULL END,
+       metadata = knowledge_processing_jobs.metadata || EXCLUDED.metadata,
+       updated_at = CURRENT_TIMESTAMP
+     RETURNING id, tenant_id, job_type, status, attempts, available_at, last_error_code, metadata, created_at, updated_at`,
+    [tenantId, String(fingerprint).toLowerCase(), JSON.stringify(metadata)],
+  );
+  return safeAssistantRecommendationJob(result.rows[0]);
+}
+
+export async function getAssistantRecommendationGenerationJob({ database, tenantId, assistantId, jobId }) {
+  if (!database?.query || !UUID.test(String(tenantId)) || !UUID.test(String(assistantId)) || !UUID.test(String(jobId))) {
+    throw new KnowledgeSemanticGenerationJobError('KNOWLEDGE_ASSISTANT_RECOMMENDATION_JOB_INVALID', 'Assistant Recommendation generation job is invalid');
+  }
+  const result = await database.query(
+    `SELECT id, tenant_id, job_type, status, attempts, available_at, last_error_code, metadata, created_at, updated_at
+       FROM knowledge_processing_jobs
+      WHERE id = $1 AND tenant_id = $2 AND job_type = 'GENERATE_ASSISTANT_RECOMMENDATION'
+        AND metadata->>'assistant_id' = $3`,
+    [jobId, tenantId, assistantId],
+  );
+  return result.rows[0] ? safeAssistantRecommendationJob(result.rows[0]) : null;
 }
 
 export async function recoverStaleImageSemanticGenerationJobs(database) {
@@ -149,6 +206,88 @@ export async function claimNextImageSemanticGenerationJob(database) {
   return result.rows[0] ?? null;
 }
 
+export async function recoverStaleAssistantRecommendationGenerationJobs(database) {
+  const result = await database.query(
+    `UPDATE knowledge_processing_jobs
+        SET status = CASE WHEN COALESCE((metadata->>'stale_recovery_count')::integer, 0) >= 2 THEN 'FAILED' ELSE 'PENDING' END,
+            locked_at = NULL,
+            locked_until = NULL,
+            available_at = CASE WHEN COALESCE((metadata->>'stale_recovery_count')::integer, 0) >= 2 THEN available_at ELSE CURRENT_TIMESTAMP END,
+            last_error_code = 'KNOWLEDGE_ASSISTANT_RECOMMENDATION_LEASE_EXPIRED',
+            metadata = jsonb_set(metadata, '{stale_recovery_count}', to_jsonb(COALESCE((metadata->>'stale_recovery_count')::integer, 0) + 1), TRUE),
+            updated_at = CURRENT_TIMESTAMP
+      WHERE job_type = 'GENERATE_ASSISTANT_RECOMMENDATION'
+        AND status = 'PROCESSING'
+        AND (locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP)
+      RETURNING id, status`,
+  );
+  return {
+    recovered: (result.rows ?? []).filter((job) => job.status === 'PENDING').length,
+    failed: (result.rows ?? []).filter((job) => job.status === 'FAILED').length,
+  };
+}
+
+export async function claimNextAssistantRecommendationGenerationJob(database) {
+  const result = await database.query(
+    `WITH candidate AS (
+       SELECT id FROM knowledge_processing_jobs
+        WHERE job_type = 'GENERATE_ASSISTANT_RECOMMENDATION' AND status = 'PENDING' AND available_at <= CURRENT_TIMESTAMP
+        ORDER BY created_at ASC FOR UPDATE SKIP LOCKED LIMIT 1
+     ) UPDATE knowledge_processing_jobs job
+          SET status = 'PROCESSING', attempts = attempts + 1, locked_at = CURRENT_TIMESTAMP,
+              locked_until = CURRENT_TIMESTAMP + INTERVAL '5 minutes', updated_at = CURRENT_TIMESTAMP
+         FROM candidate WHERE job.id = candidate.id RETURNING job.*`,
+  );
+  return result.rows[0] ?? null;
+}
+
+function recommendationJobMetadata(job) {
+  const metadata = job?.metadata && typeof job.metadata === 'object' ? job.metadata : {};
+  const values = ['assistant_id', 'business_profile_version_id', 'requested_by'];
+  if (!values.every((key) => UUID.test(String(metadata[key] ?? ''))) || !HASH.test(String(metadata.request_fingerprint ?? ''))) {
+    throw new KnowledgeSemanticGenerationJobError('KNOWLEDGE_ASSISTANT_RECOMMENDATION_JOB_INVALID', 'Assistant Recommendation job metadata is invalid');
+  }
+  return metadata;
+}
+
+export async function processAssistantRecommendationGenerationJob({ database, job, generateRecommendation }) {
+  const metadata = recommendationJobMetadata(job);
+  if (typeof generateRecommendation !== 'function') {
+    throw new KnowledgeSemanticGenerationJobError('KNOWLEDGE_ASSISTANT_RECOMMENDATION_WORKER_CONFIG_INVALID', 'Assistant Recommendation worker is not configured');
+  }
+  try {
+    const result = await generateRecommendation({
+      database,
+      tenantId: job.tenant_id,
+      assistantId: metadata.assistant_id,
+      businessProfileVersionId: metadata.business_profile_version_id,
+      requestedBy: metadata.requested_by,
+      allowInactiveProfileSnapshot: true,
+      expectedFingerprint: metadata.request_fingerprint,
+    });
+    await database.query(
+      `UPDATE knowledge_processing_jobs
+          SET status = 'READY', locked_at = NULL, locked_until = NULL, last_error_code = NULL,
+              metadata = metadata || $3::jsonb, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1 AND tenant_id = $2`,
+      [job.id, job.tenant_id, JSON.stringify({ recommendation_id: result.recommendation.id, recommendation_status: result.recommendation.status, reused: result.reused === true })],
+    );
+    return { status: 'READY', recommendation: result.recommendation, reused: result.reused === true };
+  } catch (error) {
+    const code = String(error?.code ?? 'KNOWLEDGE_ASSISTANT_RECOMMENDATION_FAILED').replace(/[^A-Z0-9_]/gi, '_').slice(0, 80) || 'KNOWLEDGE_ASSISTANT_RECOMMENDATION_FAILED';
+    const retry = Number(job.attempts ?? 1) < 3;
+    await database.query(
+      retry
+        ? `UPDATE knowledge_processing_jobs SET status = 'PENDING', locked_at = NULL, locked_until = NULL,
+             available_at = CURRENT_TIMESTAMP + INTERVAL '30 seconds', last_error_code = $3::varchar(80), updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2`
+        : `UPDATE knowledge_processing_jobs SET status = 'FAILED', locked_at = NULL, locked_until = NULL,
+             last_error_code = $3::varchar(80), updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2`,
+      [job.id, job.tenant_id, code],
+    );
+    throw error;
+  }
+}
+
 export async function processImageSemanticGenerationJob({ database, job, semanticClassifier, createCandidates = createImageKnowledgeCandidates }) {
   try {
     const candidates = await createCandidates({
@@ -180,7 +319,7 @@ export async function processImageSemanticGenerationJob({ database, job, semanti
   }
 }
 
-export function startImageSemanticGenerationWorker({ database, semanticClassifier, intervalMs = 2_000, logger = console }) {
+export function startImageSemanticGenerationWorker({ database, semanticClassifier, generateRecommendation = null, intervalMs = 2_000, logger = console }) {
   if (!database?.query || typeof semanticClassifier?.classify !== 'function') {
     throw new KnowledgeSemanticGenerationJobError('KNOWLEDGE_SEMANTIC_WORKER_CONFIG_INVALID', 'Semantic generation worker is not configured');
   }
@@ -197,12 +336,21 @@ export function startImageSemanticGenerationWorker({ database, semanticClassifie
     lastTickAt = new Date().toISOString();
     try {
       await recoverStaleImageSemanticGenerationJobs(database);
+      await recoverStaleAssistantRecommendationGenerationJobs(database);
       const job = await claimNextImageSemanticGenerationJob(database);
       if (job) {
         lastClaimedAt = new Date().toISOString();
         await processImageSemanticGenerationJob({ database, job, semanticClassifier });
         lastCompletedAt = new Date().toISOString();
         lastFailureCode = null;
+      } else if (typeof generateRecommendation === 'function') {
+        const recommendationJob = await claimNextAssistantRecommendationGenerationJob(database);
+        if (recommendationJob) {
+          lastClaimedAt = new Date().toISOString();
+          await processAssistantRecommendationGenerationJob({ database, job: recommendationJob, generateRecommendation });
+          lastCompletedAt = new Date().toISOString();
+          lastFailureCode = null;
+        }
       }
     } catch (error) {
       lastFailureAt = new Date().toISOString();

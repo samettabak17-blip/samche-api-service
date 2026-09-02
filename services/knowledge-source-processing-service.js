@@ -41,7 +41,7 @@ export async function claimNextKnowledgeProcessingJob(database) {
        SELECT id
         FROM knowledge_processing_jobs
        WHERE status = 'PENDING'
-          AND job_type <> 'GENERATE_IMAGE_CANDIDATES'
+          AND job_type NOT IN ('GENERATE_IMAGE_CANDIDATES', 'GENERATE_ASSISTANT_RECOMMENDATION')
           AND available_at <= CURRENT_TIMESTAMP
         ORDER BY created_at ASC
         FOR UPDATE SKIP LOCKED

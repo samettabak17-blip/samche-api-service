@@ -50,6 +50,7 @@ vi.mock("../dashboard/dashboard-api", async (importOriginal) => {
       generateBusinessProfile: vi.fn(),
       listKnowledgeRecommendations: vi.fn(),
       generateKnowledgeRecommendation: vi.fn(),
+      getKnowledgeRecommendationGenerationJob: vi.fn(),
       listAssistantConfigurations: vi.fn(),
       updateBusinessProfile: vi.fn(),
       reviewBusinessProfile: vi.fn(),
@@ -138,6 +139,7 @@ beforeEach(() => {
   mockedApi.listBusinessIdentities.mockResolvedValue([]);
   mockedApi.listBusinessProfiles.mockResolvedValue([]);
   mockedApi.listKnowledgeRecommendations.mockResolvedValue([]);
+  mockedApi.getKnowledgeRecommendationGenerationJob.mockResolvedValue({ id: "recommendation-job", status: "READY", attempts: 1 });
   mockedApi.listAssistantConfigurations.mockResolvedValue([]);
 });
 
@@ -1227,7 +1229,7 @@ it("does not label an ACTIVE configuration without assistant identity as ACTIVE 
   expect(screen.queryByText("Runtime Behavior Preview")).not.toBeInTheDocument();
 });
 
-it("shows a scope-bound reused Recommendation terminal result without silent idle", async () => {
+it("polls an accepted Recommendation job and refreshes the review-only recommendation list", async () => {
   cleanup();
   mockedApi.listAssistants.mockResolvedValue([
     { id: "assistant-a", tenant_id: "tenant-a", name: "Meridian Advisor" },
@@ -1242,15 +1244,13 @@ it("shows a scope-bound reused Recommendation terminal result without silent idl
       active_version_id: "profile-active",
     },
   ]);
-  mockedApi.generateKnowledgeRecommendation.mockResolvedValue({
-    recommendation: {
-      id: "recommendation-reused",
-      recommendation_data: { tone: "Professional" },
-      status: "NEEDS_REVIEW",
-    },
-    reused: true,
-    run_id: "run-reused",
-  });
+  mockedApi.generateKnowledgeRecommendation.mockResolvedValue({ job: { id: "recommendation-job", status: "PENDING", attempts: 0 }, reused: false });
+  mockedApi.getKnowledgeRecommendationGenerationJob.mockResolvedValue({ id: "recommendation-job", status: "READY", attempts: 1, metadata: { recommendation_id: "recommendation-reused", recommendation_status: "NEEDS_REVIEW" } });
+  mockedApi.listKnowledgeRecommendations.mockResolvedValue([{
+    id: "recommendation-reused",
+    recommendation_data: { tone: "Professional" },
+    status: "NEEDS_REVIEW",
+  }]);
   renderPage(true, "/app/tenant-a/knowledge-base/configurations");
   const assistantSelect = await screen.findByRole("combobox", { name: "Assistant" });
   await screen.findByRole("option", { name: "Meridian Advisor" });
@@ -1264,15 +1264,9 @@ it("shows a scope-bound reused Recommendation terminal result without silent idl
   );
   fireEvent.click(screen.getByRole("button", { name: "Generate recommendation" }));
 
-  expect(await screen.findByText("Existing exact recommendation reused")).toBeVisible();
-  expect(screen.getByText(/Recommendation recommen · NEEDS_REVIEW · NOT ACTIVE/)).toBeVisible();
-  const reviewButton = screen.getByRole("button", { name: "Review recommendation" });
-  expect(reviewButton).toBeVisible();
-  expect(reviewButton).not.toBeDisabled();
-  fireEvent.click(reviewButton);
-  const recommendation = await screen.findByRole("article");
-  expect(recommendation).toHaveAttribute("aria-current", "true");
-  expect(screen.getByRole("region", { name: "Recommendation review" })).toBeVisible();
+  expect(await screen.findByText("Professional")).toBeVisible();
+  await waitFor(() => expect(mockedApi.getKnowledgeRecommendationGenerationJob).toHaveBeenCalledWith("tenant-a", "assistant-a", "recommendation-job"));
+  expect(screen.getByRole("button", { name: "Generate recommendation" })).toBeEnabled();
   expect(mockedApi.reviewRecommendation).not.toHaveBeenCalled();
 });
 
@@ -1289,11 +1283,10 @@ it("keeps recommendation generation review-only and exposes a safe retryable tim
       active_version_id: "profile-active",
     },
   ]);
-  mockedApi.generateKnowledgeRecommendation.mockRejectedValue(
-    new ApiError(503, "Knowledge generation timed out", {
-      code: "KNOWLEDGE_GENERATION_TIMEOUT",
-    }),
-  );
+  mockedApi.generateKnowledgeRecommendation.mockResolvedValue({ job: { id: "recommendation-job-failed", status: "PENDING", attempts: 0 }, reused: false });
+  mockedApi.getKnowledgeRecommendationGenerationJob.mockResolvedValue({
+    id: "recommendation-job-failed", status: "FAILED", attempts: 3, last_error_code: "KNOWLEDGE_GENERATION_TIMEOUT",
+  });
 
   renderPage(true, "/app/tenant-a/knowledge-base/configurations");
   const assistant = await screen.findByRole("combobox", { name: "Assistant" });
@@ -1305,7 +1298,7 @@ it("keeps recommendation generation review-only and exposes a safe retryable tim
   );
   fireEvent.click(screen.getByRole("button", { name: "Generate recommendation" }));
 
-  expect((await screen.findAllByText("Knowledge generation timed out")).length).toBeGreaterThan(0);
+  expect(await screen.findByText("Recommendation generation could not be completed safely. You can retry.")).toBeVisible();
   expect(screen.getByRole("button", { name: "Generate recommendation" })).toBeEnabled();
   expect(mockedApi.listAssistantConfigurations).toHaveBeenCalledWith("tenant-a", "assistant-a");
 });

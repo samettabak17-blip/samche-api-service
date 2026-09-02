@@ -26,7 +26,6 @@ import type {
   BusinessProfileVersion,
   ConfigurationGenerationResult,
   KnowledgeRecommendation,
-  RecommendationGenerationResult,
 } from "../../types/api";
 import { tenantApi, tenantKeys } from "../dashboard/dashboard-api";
 import { useTenant } from "../tenants/tenant-context";
@@ -332,10 +331,8 @@ export function KnowledgeIntelligencePage() {
   } | null>(null);
   const [configurationProfileVersionId, setConfigurationProfileVersionId] =
     useState("");
-  const [recommendationTerminal, setRecommendationTerminal] = useState<{
-    scope: string;
-    result: RecommendationGenerationResult;
-  } | null>(null);
+  const [recommendationGenerationJobId, setRecommendationGenerationJobId] = useState<string | null>(null);
+  const [recommendationGenerationFailure, setRecommendationGenerationFailure] = useState<string | null>(null);
   const [selectedRecommendationId, setSelectedRecommendationId] = useState<string | null>(null);
   const [imageGenerationSourceId, setImageGenerationSourceId] = useState<string | null>(null);
   const [configurationTerminal, setConfigurationTerminal] = useState<{
@@ -354,7 +351,8 @@ export function KnowledgeIntelligencePage() {
   } | null>(null);
   const queryClient = useQueryClient();
   useEffect(() => {
-    setRecommendationTerminal(null);
+    setRecommendationGenerationJobId(null);
+    setRecommendationGenerationFailure(null);
     setSelectedRecommendationId(null);
     setConfigurationTerminal(null);
     setConfigurationTerminalFailure(null);
@@ -439,6 +437,12 @@ export function KnowledgeIntelligencePage() {
     queryKey: tenantKeys.assistantConfigurations(tenantId, assistantId),
     queryFn: () => tenantApi.listAssistantConfigurations(tenantId, assistantId),
     enabled: Boolean(tenantId && assistantId && tab === "configurations"),
+  });
+  const recommendationGenerationJob = useQuery({
+    queryKey: ['tenant', tenantId, 'knowledge-intelligence', 'recommendation-generation', assistantId, recommendationGenerationJobId],
+    queryFn: () => tenantApi.getKnowledgeRecommendationGenerationJob(tenantId, assistantId, recommendationGenerationJobId!),
+    enabled: Boolean(tenantId && assistantId && recommendationGenerationJobId && tab === 'configurations'),
+    refetchInterval: (query) => ['PENDING', 'PROCESSING'].includes(query.state.data?.status ?? '') ? 2_000 : false,
   });
   const generateProfile = useMutation({
     mutationFn: (scope: {
@@ -714,15 +718,21 @@ export function KnowledgeIntelligencePage() {
         configurationProfileVersionId,
       ),
     onSuccess: (result) => {
-      const scope = `${assistantId}:${configurationProfileVersionId}`;
-      setRecommendationTerminal({ scope, result });
-      queryClient.setQueryData(
-        tenantKeys.knowledgeRecommendations(tenantId, assistantId),
-        (current: typeof recommendations.data) =>
-          [result.recommendation, ...(current ?? []).filter((row) => row.id !== result.recommendation.id)],
-      );
+      setRecommendationGenerationFailure(null);
+      setRecommendationGenerationJobId(result.job.id);
     },
   });
+  useEffect(() => {
+    const status = recommendationGenerationJob.data?.status;
+    if (status === 'READY') {
+      setRecommendationGenerationJobId(null);
+      void queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeRecommendations(tenantId, assistantId) });
+    }
+    if (status === 'FAILED' || status === 'CANCELLED') {
+      setRecommendationGenerationFailure('Recommendation generation could not be completed safely. You can retry.');
+      setRecommendationGenerationJobId(null);
+    }
+  }, [assistantId, queryClient, recommendationGenerationJob.data?.status, tenantId]);
   const generateConfiguration = useMutation({
     mutationFn: (recommendationId: string) =>
       tenantApi.generateAssistantConfiguration(
@@ -2231,55 +2241,23 @@ export function KnowledgeIntelligencePage() {
                 className={primaryActionClass}
                 disabled={
                   !configurationProfileVersionId ||
-                  generateRecommendation.isPending
+                  generateRecommendation.isPending ||
+                  ['PENDING', 'PROCESSING'].includes(recommendationGenerationJob.data?.status ?? '')
                 }
                 onClick={() => generateRecommendation.mutate()}
               >
-                {generateRecommendation.isPending
-                  ? "Generating…"
+                {generateRecommendation.isPending || ['PENDING', 'PROCESSING'].includes(recommendationGenerationJob.data?.status ?? '')
+                  ? "Recommendation generation is processing…"
                   : "Generate recommendation"}
               </button>
             )}
-            <MutationFeedback error={generateRecommendation.error} />
-            {recommendationTerminal?.scope ===
-              `${assistantId}:${configurationProfileVersionId}` && (
-              <div className="rounded-lg border border-emerald-500/40 bg-emerald-950/30 p-3 text-sm text-ink" role="status">
-                <strong>
-                  {recommendationTerminal.result.reused
-                    ? "Existing exact recommendation reused"
-                    : "Assistant Recommendation generated"}
-                </strong>
-                <p className="mt-1">
-                  Recommendation {recommendationTerminal.result.recommendation.id.slice(0, 8)} · {recommendationTerminal.result.recommendation.status} · NOT ACTIVE
-                </p>
-                <DashboardButton
-                  type="button"
-                  variant="secondary"
-                  className="mt-2"
-                  onClick={() =>
-                    (() => {
-                      const id = recommendationTerminal.result.recommendation.id;
-                      setSelectedRecommendationId(id);
-                      document.getElementById(`recommendation-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-                    })()
-                  }
-                >
-                  Review recommendation
-                </DashboardButton>
-                {selectedRecommendationId === recommendationTerminal.result.recommendation.id && (
-                  <section className="mt-3 rounded-lg border border-line bg-elevated/60 p-3" role="region" aria-label="Recommendation review" tabIndex={-1}>
-                    <h3 className="text-sm font-semibold">Recommendation review</h3>
-                    <dl className="mt-2 space-y-2 text-sm">
-                      {Object.entries(recommendationTerminal.result.recommendation.recommendation_data ?? {}).map(([field, value]) => (
-                        <div key={field}>
-                          <dt className="text-xs font-semibold uppercase tracking-wide text-stone-500">{field.replace(/_/g, " ")}</dt>
-                          <dd className="text-ink">{Array.isArray(value) ? value.join(", ") : String(value)}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </section>
-                )}
+            {['PENDING', 'PROCESSING'].includes(recommendationGenerationJob.data?.status ?? '') && (
+              <div className="rounded-lg border border-signal/40 bg-signal/10 p-3 text-sm text-ink" role="status">
+                Recommendation generation is processing in the background.
               </div>
+            )}
+            {recommendationGenerationFailure && (
+              <p className="text-sm text-red-300" role="alert">{recommendationGenerationFailure}</p>
             )}
           </div>
           <MutationFeedback
@@ -2328,6 +2306,16 @@ export function KnowledgeIntelligencePage() {
                               <li key={item}>{item}</li>
                             ))}
                           </ul>
+                        )}
+                        {!conversationDerived && (
+                          <dl className="mt-3 space-y-2 text-sm">
+                            {Object.entries(row.recommendation_data ?? {}).filter(([field]) => field !== "schema_version").map(([field, value]) => (
+                              <div key={field}>
+                                <dt className="text-xs font-semibold uppercase tracking-wide text-stone-400">{field.replace(/_/g, " ")}</dt>
+                                <dd className="mt-1 text-ink">{Array.isArray(value) ? value.join(", ") : typeof value === "object" && value !== null ? JSON.stringify(value) : String(value)}</dd>
+                              </div>
+                            ))}
+                          </dl>
                         )}
                         {canManage && (
                           <div className="mt-3 flex flex-wrap gap-2">

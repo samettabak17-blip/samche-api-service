@@ -114,16 +114,16 @@ async function generate({ database, provider, tenantId, requestedBy, targetType,
   });
 }
 
-export async function generateAssistantRecommendation({ database, provider, tenantId, assistantId, businessProfileVersionId, requestedBy }) {
+export async function prepareAssistantRecommendationGeneration({ database, provider, tenantId, assistantId, businessProfileVersionId, requestedBy, allowInactiveProfileSnapshot = false }) {
   requireProvider(database, provider, 'generateAssistantRecommendation'); uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID'); uuid(assistantId, 'KNOWLEDGE_ASSISTANT_INVALID'); uuid(businessProfileVersionId, 'KNOWLEDGE_PROFILE_VERSION_INVALID'); uuid(requestedBy, 'KNOWLEDGE_REQUESTER_INVALID');
   const context = await database.query(
     `SELECT assistant.name AS assistant_name, profile_version.id AS profile_version_id, profile.business_identity_id,
             profile_version.source_scope, profile_version.evidence, profile_version.profile_data
        FROM ai_assistants assistant
-       JOIN business_profiles profile ON profile.tenant_id = assistant.tenant_id AND profile.active_version_id IS NOT NULL
-       JOIN business_profile_versions profile_version ON profile_version.id = profile.active_version_id AND profile_version.tenant_id = profile.tenant_id AND profile_version.status = 'APPROVED'
+       JOIN business_profiles profile ON profile.tenant_id = assistant.tenant_id ${allowInactiveProfileSnapshot ? '' : 'AND profile.active_version_id = $3'}
+       JOIN business_profile_versions profile_version ON profile_version.id = $3 AND profile_version.tenant_id = profile.tenant_id AND profile_version.status = 'APPROVED'
       WHERE assistant.id = $1 AND assistant.tenant_id = $2 AND profile_version.id = $3 AND assistant.status = 'active'`, [assistantId, tenantId, businessProfileVersionId]);
-  if (!context.rows[0]) throw new KnowledgeAssistantLifecycleError('KNOWLEDGE_RECOMMENDATION_CONTEXT_NOT_FOUND', 'An active approved Business Profile is required');
+  if (!context.rows[0] || (!allowInactiveProfileSnapshot && context.rows[0].profile_version_id !== businessProfileVersionId)) throw new KnowledgeAssistantLifecycleError('KNOWLEDGE_RECOMMENDATION_CONTEXT_NOT_FOUND', 'An active approved Business Profile is required');
   const provenance = { profile_version_id: context.rows[0].profile_version_id, business_identity_id: context.rows[0].business_identity_id, source_scope: context.rows[0].source_scope, assistant_id: assistantId };
   const sourceHashes = context.rows[0].evidence?.source_hashes ?? context.rows[0].evidence?.sources ?? [];
   provenance.source_hashes = sourceHashes;
@@ -134,10 +134,18 @@ export async function generateAssistantRecommendation({ database, provider, tena
     `ACTIVE factual Business Profile: ${JSON.stringify(context.rows[0].profile_data)}`,
   ].join('\n');
   const fingerprint = requestFingerprint({ tenant_id: tenantId, assistant_id: assistantId, active_profile_version_id: businessProfileVersionId, business_identity_id: provenance.business_identity_id, source_scope: provenance.source_scope, source_hashes: sourceHashes, schema_version: SCHEMA_VERSION, identity_contract: RECOMMENDATION_IDENTITY_CONTRACT, provider: provider.provider, model: provider.model, generation_policy: provider.assistantGenerationPolicy ?? null });
-  const generated = await generate({ database, provider, tenantId, requestedBy, targetType: 'RECOMMENDATION', prompt, provenance, fingerprint, generationStage: 'RECOMMENDATION_GENERATION', sourceCount: provenance.source_scope?.source_ids?.length ?? 0, persist: async (generationDatabase, output, runId) => {
+  return { prompt, provenance, fingerprint, sourceCount: provenance.source_scope?.source_ids?.length ?? 0 };
+}
+
+export async function generateAssistantRecommendation({ database, provider, tenantId, assistantId, businessProfileVersionId, requestedBy, allowInactiveProfileSnapshot = false, expectedFingerprint = null }) {
+  const prepared = await prepareAssistantRecommendationGeneration({ database, provider, tenantId, assistantId, businessProfileVersionId, requestedBy, allowInactiveProfileSnapshot });
+  if (expectedFingerprint && expectedFingerprint !== prepared.fingerprint) {
+    throw new KnowledgeAssistantLifecycleError('KNOWLEDGE_RECOMMENDATION_POLICY_CHANGED', 'Assistant Recommendation generation policy changed before the job was processed');
+  }
+  const generated = await generate({ database, provider, tenantId, requestedBy, targetType: 'RECOMMENDATION', prompt: prepared.prompt, provenance: prepared.provenance, fingerprint: prepared.fingerprint, generationStage: 'RECOMMENDATION_GENERATION', sourceCount: prepared.sourceCount, persist: async (generationDatabase, output, runId) => {
     const result = await generationDatabase.query(`INSERT INTO assistant_knowledge_recommendations
       (tenant_id, assistant_id, recommendation_data, evidence, generation_run_id, schema_version, status)
-      VALUES ($1, $2, $3, $4, $5, $6, 'NEEDS_REVIEW') RETURNING id, status, created_at`, [tenantId, assistantId, output, provenance, runId, 2]);
+      VALUES ($1, $2, $3, $4, $5, $6, 'NEEDS_REVIEW') RETURNING id, status, created_at`, [tenantId, assistantId, output, prepared.provenance, runId, 2]);
     return result.rows[0];
   } });
   return { recommendation: generated.artifact, reused: generated.reused, run_id: generated.run_id };

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   generateAssistantRecommendation,
+  prepareAssistantRecommendationGeneration,
   generateAssistantConfigurationVersion,
   reviewAssistantRecommendation,
   rejectAssistantConfigurationVersion,
@@ -50,6 +51,24 @@ test('generates an assistant-scoped review recommendation from the active approv
   assert.equal(insert.params[5], 2);
   assert.equal(insert.params[3].business_identity_id, '55555555-5555-4555-8555-555555555555');
   assert.deepEqual(insert.params[3].source_scope.source_ids, ['source-meridian']);
+});
+
+test('a queued recommendation retains its approved profile-version snapshot when the active profile changes', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/FROM ai_assistants assistant/i.test(sql)) return { rows: [{ assistant_name: 'Sales', profile_version_id: '11111111-1111-4111-8111-111111111111', business_identity_id: '55555555-5555-4555-8555-555555555555', source_scope: { source_ids: ['source-a'] }, evidence: { source_hashes: ['hash-a'] }, profile_data: { company_identity: 'Tenant Co' } }] };
+    return { rows: [] };
+  } };
+  const prepared = await prepareAssistantRecommendationGeneration({
+    database, provider: provider({}), tenantId, assistantId,
+    businessProfileVersionId: '11111111-1111-4111-8111-111111111111', requestedBy: actorId,
+    allowInactiveProfileSnapshot: true,
+  });
+  assert.match(prepared.fingerprint, /^[a-f0-9]{64}$/);
+  const context = calls.find(({ sql }) => /FROM ai_assistants assistant/i.test(sql));
+  assert.doesNotMatch(context.sql, /profile\.active_version_id = \$3/i);
+  assert.match(context.sql, /profile_version\.id = \$3/i);
 });
 
 test('generates a review-only configuration from an approved recommendation', async () => {
