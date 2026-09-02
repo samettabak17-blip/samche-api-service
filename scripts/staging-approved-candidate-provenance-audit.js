@@ -57,7 +57,8 @@ try {
             COUNT(image.id)::integer AS evidence_count,
             COUNT(image.id) FILTER (WHERE image.role = 'BUSINESS' AND image.evidence_kind = 'PRIMARY')::integer AS primary_business_evidence_count,
             COUNT(DISTINCT image.business_identity_id) FILTER (WHERE image.business_identity_id IS NOT NULL)::integer AS snapshot_identity_count,
-            COUNT(DISTINCT source_identity.business_identity_id) FILTER (WHERE source_identity.business_identity_id IS NOT NULL)::integer AS original_source_identity_count
+            COUNT(DISTINCT source_identity.business_identity_id) FILTER (WHERE source_identity.business_identity_id IS NOT NULL)::integer AS original_source_identity_count,
+            COALESCE(json_agg(DISTINCT materialized.id) FILTER (WHERE materialized.id IS NOT NULL), '[]'::json) AS matching_unapproved_materialized_source_ids
        FROM knowledge_candidates candidate
        JOIN knowledge_base_documents source
          ON source.tenant_id = candidate.tenant_id
@@ -69,6 +70,10 @@ try {
        LEFT JOIN knowledge_source_business_identities source_identity
          ON source_identity.tenant_id = image.tenant_id
         AND source_identity.source_id = image.source_id
+       LEFT JOIN knowledge_base_documents materialized
+         ON materialized.tenant_id = candidate.tenant_id
+        AND materialized.source_type = 'CONVERSATION_CANDIDATE'
+        AND materialized.content = candidate.proposed_content
       WHERE candidate.tenant_id = $1
         AND candidate.status = 'NEEDS_REVIEW'
         AND candidate.proposed_title = 'Canonical image-derived business fact'
