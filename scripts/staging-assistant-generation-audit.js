@@ -55,7 +55,9 @@ try {
             recommendation.id AS recommendation_id, recommendation.status AS recommendation_status
        FROM knowledge_generation_runs run
        LEFT JOIN ai_assistants assistant
-         ON assistant.id=(run.input_provenance->>'assistant_id')::uuid AND assistant.tenant_id=run.tenant_id
+         ON assistant.id = CASE WHEN run.input_provenance->>'assistant_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                                THEN (run.input_provenance->>'assistant_id')::uuid END
+        AND assistant.tenant_id=run.tenant_id
        LEFT JOIN assistant_knowledge_recommendations recommendation
          ON recommendation.id=run.target_id AND recommendation.tenant_id=run.tenant_id
       WHERE run.tenant_id=$1 AND run.target_type='RECOMMENDATION'
@@ -79,7 +81,9 @@ try {
             configuration.source_recommendation_id, configuration.source_profile_version_id
        FROM knowledge_generation_runs run
        LEFT JOIN ai_assistants assistant
-         ON assistant.id=(run.input_provenance->>'assistant_id')::uuid AND assistant.tenant_id=run.tenant_id
+         ON assistant.id = CASE WHEN run.input_provenance->>'assistant_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                                THEN (run.input_provenance->>'assistant_id')::uuid END
+        AND assistant.tenant_id=run.tenant_id
        LEFT JOIN assistant_configuration_versions configuration
          ON configuration.id=run.target_id AND configuration.tenant_id=run.tenant_id
       WHERE run.tenant_id=$1 AND run.target_type='ASSISTANT_CONFIGURATION'
