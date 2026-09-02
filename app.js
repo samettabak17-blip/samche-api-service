@@ -20,6 +20,7 @@ import conversationRoutes from "./routes/conversationRoutes.js";
 import knowledgeIntelligenceRoutes from "./routes/knowledgeIntelligenceRoutes.js";
 import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus, resolveSamcheguideRuntimeIntegration } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
+import { whatsappRuntimeSessionKey } from "./services/whatsapp-runtime-session-service.js";
 import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from "./services/human-support-service.js";
 import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
 import { persistAndDeliverWhatsAppAssistant } from "./services/whatsapp-assistant-response-service.js";
@@ -1697,7 +1698,12 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           processingResourceCount: whatsappInbox.resourceContext?.processingResourceCount ?? 0,
         });
         if (resourceFollowUp.action === 'RESOURCE_PROCESSING') {
-          const processingMessage = resourceProcessingAcknowledgement(wpSessions[cleanFrom]?.lang ?? 'tr');
+          const runtimeSessionKey = whatsappRuntimeSessionKey({
+            tenantId: whatsappInbox.integration.tenant_id,
+            assistantId: whatsappInbox.integration.assistant_id,
+            customerPhone: cleanFrom,
+          });
+          const processingMessage = resourceProcessingAcknowledgement(wpSessions[runtimeSessionKey]?.lang ?? 'tr');
           const persisted = await persistAssistantResponseIfCurrent({
             tenantId: whatsappInbox.integration.tenant_id,
             conversationId: whatsappInbox.conversation.id,
@@ -1713,7 +1719,12 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           latestResource: whatsappInbox.resourceContext?.latestResource,
         });
         if (latestResourcePlan.action === 'RESOURCE_FAILED') {
-          const failureMessage = resourceFailureAcknowledgement(wpSessions[cleanFrom]?.lang ?? 'tr', whatsappInbox.resourceContext.latestResource.media_category);
+          const runtimeSessionKey = whatsappRuntimeSessionKey({
+            tenantId: whatsappInbox.integration.tenant_id,
+            assistantId: whatsappInbox.integration.assistant_id,
+            customerPhone: cleanFrom,
+          });
+          const failureMessage = resourceFailureAcknowledgement(wpSessions[runtimeSessionKey]?.lang ?? 'tr', whatsappInbox.resourceContext.latestResource.media_category);
           const persisted = await persistAssistantResponseIfCurrent({ tenantId: whatsappInbox.integration.tenant_id, conversationId: whatsappInbox.conversation.id, content: failureMessage, handlingVersion: whatsappInbox.handlingVersion, knowledgeAuthority: whatsappInbox.knowledgeAuthority });
           if (persisted.delivered) await sendMessage(cleanFrom, failureMessage);
           return;
@@ -1763,8 +1774,13 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       // --------------------------------------
       // SESSION OLUŞTURMA VE BAŞLANGIÇ
       // --------------------------------------
-      if (!wpSessions[cleanFrom]) {
-        wpSessions[cleanFrom] = {
+      const runtimeSessionKey = whatsappRuntimeSessionKey({
+        tenantId: whatsappInbox.integration.tenant_id,
+        assistantId: whatsappInbox.integration.assistant_id,
+        customerPhone: cleanFrom,
+      });
+      if (!wpSessions[runtimeSessionKey]) {
+        wpSessions[runtimeSessionKey] = {
           lang: null, history: [], lastMessageTime: Date.now(), followUpStage: 0,
           intentScore: 0, topics: [],
           profile: { name: null, country: null, budget: null, interest: null },
@@ -1773,7 +1789,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         };
       }
       
-      const session = wpSessions[cleanFrom];
+      const session = wpSessions[runtimeSessionKey];
       session.tenantId = whatsappInbox.integration.tenant_id;
       session.assistantId = whatsappInbox.integration.assistant_id;
       const lower = text.toLowerCase();
