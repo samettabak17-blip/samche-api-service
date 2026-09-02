@@ -29,7 +29,7 @@ jobs:
       - name: Invoke the normal tenant-admin recommendation endpoint once
         env:
           API: https://samche-api-staging.onrender.com
-          TOKEN: ${{ secrets.STAGING_ADMIN_TOKEN }}
+          TOKEN: ${{ secrets.STAGING_OWNER_TOKEN }}
           TENANT_ID: ${{ inputs.tenant_id }}
           ASSISTANT_ID: ${{ inputs.assistant_id }}
           PROFILE_VERSION_ID: ${{ inputs.profile_version_id }}
