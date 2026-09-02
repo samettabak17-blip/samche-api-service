@@ -25,3 +25,10 @@ test('WhatsApp Gemini failure telemetry is safe and identifies the provider cont
   assert.doesNotMatch(appSource, /WHATSAPP_GEMINI_RUNTIME_FAILURE[^\n]*(?:prompt|systemInstruction|tenantId|credential|headers|url|message|cause|stack)/i);
 });
 
+test('WhatsApp runtime uses the platform-configured Vertex-compatible chat contract', () => {
+  assert.match(appSource, /const WHATSAPP_GEMINI_MODEL = process\.env\.WHATSAPP_GEMINI_MODEL \|\| 'gemini-3-flash-preview';/);
+  assert.match(appSource, /model: WHATSAPP_GEMINI_MODEL,\s+contents: \[\{ role: 'user', parts \}\],/);
+  assert.doesNotMatch(appSource, /model: 'gemini-2\.5-pro'/);
+  assert.doesNotMatch(appSource, /responseMimeType|responseSchema|thinkingConfig/);
+});
+

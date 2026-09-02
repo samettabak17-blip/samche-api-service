@@ -1,20 +1,27 @@
 import pool from '../config/db.js';
 import { qualifyConversation, persistLeadQualification } from './lead-qualification-service.js';
 import { createGoogleGeminiProvider } from './google-gemini-provider.js';
+import { getLeadQualificationProviderPolicy } from './lead-qualification-provider-policy.js';
 
 const inFlight = new Set();
-const qualificationModel = process.env.LEAD_QUALIFICATION_MODEL || 'gemini-3-flash-preview';
 let googleProvider = null;
+
+const qualificationPolicy = getLeadQualificationProviderPolicy();
 
 async function invokeGeminiQualification(prompt) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20_000);
+  const timeout = setTimeout(() => controller.abort(), qualificationPolicy.timeoutMs);
   try {
     googleProvider ??= createGoogleGeminiProvider();
     const body = await googleProvider.generateContent({
-      model: qualificationModel,
+      model: qualificationPolicy.model,
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: 'application/json',
+        maxOutputTokens: qualificationPolicy.maxOutputTokens,
+        thinkingConfig: { thinkingLevel: qualificationPolicy.thinkingLevel },
+      },
       signal: controller.signal,
     });
     const text = body?.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -72,7 +79,7 @@ export async function runLeadQualification({ tenantId, conversationId, force = f
       force,
       invokeModel,
       provider: 'GEMINI',
-      model: qualificationModel,
+      model: qualificationPolicy.model,
     });
     if (!qualification) return null;
 
@@ -93,7 +100,9 @@ export async function runLeadQualification({ tenantId, conversationId, force = f
 export function queueLeadQualification({ tenantId, conversationId, force = false }) {
   queueMicrotask(() => {
     void runLeadQualification({ tenantId, conversationId, force }).catch((error) => {
-      console.error('Lead qualification deferred:', error?.message || 'LEAD_QUALIFICATION_FAILED');
+      const safeCode = typeof error?.code === 'string' ? error.code : 'LEAD_QUALIFICATION_FAILED';
+      const safeStatus = Number.isInteger(error?.safeMetadata?.http_status) ? error.safeMetadata.http_status : 'none';
+      console.error(`LEAD_QUALIFICATION_DEFERRED_FAILURE code=${safeCode} http_status=${safeStatus} model=${qualificationPolicy.model} timeout_ms=${qualificationPolicy.timeoutMs} max_attempts=${qualificationPolicy.maxAttempts}`);
     });
   });
 }

@@ -8,6 +8,30 @@ import {
   qualifyConversation,
   shouldRunQualification,
 } from '../services/lead-qualification-service.js';
+import { getLeadQualificationProviderPolicy } from '../services/lead-qualification-provider-policy.js';
+
+test('lead qualification uses one bounded low-thinking deferred provider attempt', () => {
+  assert.deepEqual(
+    getLeadQualificationProviderPolicy({}),
+    {
+      model: 'gemini-3-flash-preview',
+      timeoutMs: 30000,
+      maxOutputTokens: 512,
+      thinkingLevel: 'low',
+      maxAttempts: 1,
+    },
+  );
+  assert.deepEqual(
+    getLeadQualificationProviderPolicy({ LEAD_QUALIFICATION_MODEL: 'platform-model', LEAD_QUALIFICATION_TIMEOUT_MS: '45000' }),
+    {
+      model: 'platform-model',
+      timeoutMs: 45000,
+      maxOutputTokens: 512,
+      thinkingLevel: 'low',
+      maxAttempts: 1,
+    },
+  );
+});
 
 test('trivial customer messages do not qualify as meaningful', () => {
   for (const content of ['hi', 'ok', 'thanks', 'teşekkürler']) {

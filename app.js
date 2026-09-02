@@ -180,7 +180,10 @@ const processedTgUpdates = new Set();
 // ============================================================================
 const googleGeminiProvider = createGoogleGeminiProvider();
 const googleGeminiEnabled = process.env.GOOGLE_GENAI_MODE?.trim().toLowerCase() === 'vertex' || Boolean(process.env.GEMINI_API_KEY);
-const WHATSAPP_GEMINI_MODEL = process.env.WHATSAPP_GEMINI_MODEL || 'gemini-2.5-pro';
+// The WhatsApp runtime uses the same Vertex-compatible Gemini model family as
+// the accepted Knowledge Intelligence generation paths. The environment may
+// choose another platform-approved model without exposing that choice to tenants.
+const WHATSAPP_GEMINI_MODEL = process.env.WHATSAPP_GEMINI_MODEL || 'gemini-3-flash-preview';
 
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -570,7 +573,7 @@ async function callWpGemini(prompt, multimodalParts = null, systemInstruction = 
     parts.push(...contextualParts);
     const response = await googleGeminiProvider.generateContent({
       model: WHATSAPP_GEMINI_MODEL,
-      contents: [{ parts }],
+      contents: [{ role: 'user', parts }],
       systemInstruction: typeof systemInstruction === 'string' && systemInstruction.trim()
         ? { parts: [{ text: systemInstruction }] }
         : undefined,
