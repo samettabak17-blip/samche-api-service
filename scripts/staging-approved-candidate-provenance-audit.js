@@ -51,6 +51,32 @@ try {
       ORDER BY recommendation.created_at DESC LIMIT 20`,
     [identities.rows[0].tenant_id],
   );
+  const pendingCandidates = await client.query(
+    `SELECT candidate.id, candidate.status, candidate.pii_redaction_status,
+            candidate.image_semantic_version, candidate.approved_source_id,
+            COUNT(image.id)::integer AS evidence_count,
+            COUNT(image.id) FILTER (WHERE image.role = 'BUSINESS' AND image.evidence_kind = 'PRIMARY')::integer AS primary_business_evidence_count,
+            COUNT(DISTINCT image.business_identity_id) FILTER (WHERE image.business_identity_id IS NOT NULL)::integer AS snapshot_identity_count,
+            COUNT(DISTINCT source_identity.business_identity_id) FILTER (WHERE source_identity.business_identity_id IS NOT NULL)::integer AS original_source_identity_count
+       FROM knowledge_candidates candidate
+       JOIN knowledge_base_documents source
+         ON source.tenant_id = candidate.tenant_id
+        AND lower(source.title) = lower('whatsapp.png')
+       LEFT JOIN knowledge_candidate_image_evidence image
+         ON image.tenant_id = candidate.tenant_id
+        AND image.candidate_id = candidate.id
+        AND image.source_id = source.id
+       LEFT JOIN knowledge_source_business_identities source_identity
+         ON source_identity.tenant_id = image.tenant_id
+        AND source_identity.source_id = image.source_id
+      WHERE candidate.tenant_id = $1
+        AND candidate.status = 'NEEDS_REVIEW'
+        AND candidate.proposed_title = 'Canonical image-derived business fact'
+      GROUP BY candidate.id, candidate.status, candidate.pii_redaction_status,
+               candidate.image_semantic_version, candidate.approved_source_id
+      ORDER BY candidate.id`,
+    [identities.rows[0].tenant_id],
+  );
   const result = await client.query(
     `WITH selected_identity AS (
        SELECT id, tenant_id, display_name
@@ -186,6 +212,7 @@ try {
       updated_at: job.updated_at,
     })),
     behavior_recommendations: recommendations.rows.map(({ evidence, ...row }) => ({ ...row, evidence_item_count: Array.isArray(evidence) ? evidence.length : null })),
+    needs_review_candidates: pendingCandidates.rows,
     candidate_count: result.rowCount,
     candidates: result.rows,
   }));
