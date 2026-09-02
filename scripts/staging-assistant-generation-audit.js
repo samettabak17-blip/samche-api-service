@@ -3,7 +3,11 @@ import { assertVerifiedTls, strictTlsConfig } from './staging-task6-e2e-support.
 
 const tenantId = String(process.env.TASK6_AUDIT_TENANT_ID ?? '').trim();
 const profileVersionId = String(process.env.TASK6_AUDIT_PROFILE_VERSION_ID ?? '').trim();
-if (!tenantId || !profileVersionId || !process.env.STAGING_DATABASE_URL) throw new Error('ASSISTANT_GENERATION_AUDIT_INPUT_REQUIRED');
+const tenantName = String(process.env.TASK6_AUDIT_TENANT_NAME ?? '').trim();
+const profileVersionPrefix = String(process.env.TASK6_AUDIT_PROFILE_VERSION_PREFIX ?? '').trim().toLowerCase();
+const hasExactScope = Boolean(tenantId && profileVersionId);
+const hasNamedScope = Boolean(tenantName && /^[a-f0-9]{8,36}$/.test(profileVersionPrefix));
+if ((!hasExactScope && !hasNamedScope) || !process.env.STAGING_DATABASE_URL) throw new Error('ASSISTANT_GENERATION_AUDIT_INPUT_REQUIRED');
 
 const client = new pg.Client(strictTlsConfig(process.env.STAGING_DATABASE_URL));
 try {
@@ -11,6 +15,21 @@ try {
   assertVerifiedTls(client);
   await client.query('BEGIN');
   await client.query('SET TRANSACTION READ ONLY');
+  const namedScope = hasExactScope ? null : await client.query(
+      `SELECT tenant.id AS tenant_id, version.id AS profile_version_id
+         FROM tenants tenant
+         JOIN business_profiles profile ON profile.tenant_id = tenant.id
+         JOIN business_profile_versions version ON version.id = profile.active_version_id AND version.tenant_id = profile.tenant_id
+        WHERE tenant.name = $1 AND lower(version.id::text) LIKE $2
+        LIMIT 2`,
+      [tenantName, `${profileVersionPrefix}%`],
+    );
+  if (!hasExactScope && namedScope.rowCount !== 1) throw new Error('ASSISTANT_GENERATION_AUDIT_SCOPE_NOT_UNIQUE');
+  const resolvedScope = hasExactScope
+    ? { tenant_id: tenantId, profile_version_id: profileVersionId }
+    : namedScope.rows[0];
+  const scopedTenantId = resolvedScope.tenant_id;
+  const scopedProfileVersionId = resolvedScope.profile_version_id;
   const context = await client.query(
     `SELECT version.id AS profile_version_id, version.status AS profile_status,
             profile.active_version_id, profile.business_identity_id,
@@ -20,7 +39,7 @@ try {
        FROM business_profile_versions version
        JOIN business_profiles profile ON profile.id=version.profile_id AND profile.tenant_id=version.tenant_id
       WHERE version.tenant_id=$1 AND version.id=$2`,
-    [tenantId, profileVersionId],
+    [scopedTenantId, scopedProfileVersionId],
   );
   if (context.rowCount !== 1) throw new Error('ASSISTANT_GENERATION_AUDIT_SCOPE_NOT_UNIQUE');
   const runs = await client.query(
@@ -42,7 +61,7 @@ try {
       WHERE run.tenant_id=$1 AND run.target_type='RECOMMENDATION'
         AND run.input_provenance->>'profile_version_id'=$2
       ORDER BY run.created_at DESC LIMIT 10`,
-    [tenantId, profileVersionId],
+    [scopedTenantId, scopedProfileVersionId],
   );
   const latest = runs.rows[0] ?? null;
   const configurationRuns = await client.query(
@@ -66,7 +85,7 @@ try {
       WHERE run.tenant_id=$1 AND run.target_type='ASSISTANT_CONFIGURATION'
         AND run.input_provenance->>'profile_version_id'=$2
       ORDER BY run.created_at DESC LIMIT 10`,
-    [tenantId, profileVersionId],
+    [scopedTenantId, scopedProfileVersionId],
   );
   const latestConfigurationRun = configurationRuns.rows[0] ?? null;
   const runtime = await client.query(
@@ -101,7 +120,7 @@ try {
         AND ci.enabled = TRUE
         AND channel.channel_type = 'WHATSAPP'
       ORDER BY ci.created_at ASC`,
-    [tenantId],
+    [scopedTenantId],
   );
   const counts = latest ? await client.query(
     `SELECT

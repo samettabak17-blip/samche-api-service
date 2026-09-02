@@ -4,12 +4,20 @@ on:
   workflow_dispatch:
     inputs:
       tenant_id:
-        description: Exact non-secret staging tenant UUID
-        required: true
+        description: Exact non-secret staging tenant UUID (optional when name/prefix are supplied)
+        required: false
         type: string
       profile_version_id:
-        description: Exact non-secret ACTIVE Business Profile version UUID
-        required: true
+        description: Exact non-secret ACTIVE Business Profile version UUID (optional when name/prefix are supplied)
+        required: false
+        type: string
+      tenant_name:
+        description: Exact staging tenant name, used only to resolve one read-only audit scope
+        required: false
+        type: string
+      profile_version_prefix:
+        description: Non-secret ACTIVE Business Profile version ID prefix
+        required: false
         type: string
 
 permissions:
@@ -32,4 +40,6 @@ jobs:
           STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
           TASK6_AUDIT_TENANT_ID: ${{ inputs.tenant_id }}
           TASK6_AUDIT_PROFILE_VERSION_ID: ${{ inputs.profile_version_id }}
+          TASK6_AUDIT_TENANT_NAME: ${{ inputs.tenant_name }}
+          TASK6_AUDIT_PROFILE_VERSION_PREFIX: ${{ inputs.profile_version_prefix }}
         run: node scripts/staging-assistant-generation-audit.js
