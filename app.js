@@ -232,8 +232,13 @@ async function requestGemini(payload) {
     });
   } catch (error) {
     if (error.status) throw error;
+    const safeCode = typeof error?.code === 'string' && /^GOOGLE_(?:VERTEX|GEMINI)_[A-Z0-9_]+$/.test(error.code)
+      ? error.code
+      : 'GOOGLE_GEMINI_REQUEST_FAILED';
+    console.error(`SAMCHE_GOOGLE_GEMINI_ERROR mode=${googleGeminiProvider.mode} model=gemini-3-flash-preview code=${safeCode}`);
     const upstreamError = new Error("Gemini request failed.");
     upstreamError.status = 502;
+    upstreamError.code = safeCode;
     throw upstreamError;
   } finally {
     clearTimeout(timeoutId);

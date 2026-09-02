@@ -103,3 +103,11 @@ test('requested runtime callers route through the centralized adapter', async ()
   assert.match(sources[3], /createGoogleGeminiProvider/);
   for (const source of sources) assert.doesNotMatch(source, /generativelanguage\.googleapis\.com/);
 });
+
+test('/chat preserves a safe normalized provider code and logs only mode, model, and code', async () => {
+  const appSource = await readFile(new URL('../app.js', import.meta.url), 'utf8');
+  assert.match(appSource, /SAMCHE_GOOGLE_GEMINI_ERROR mode=\$\{googleGeminiProvider\.mode\} model=gemini-3-flash-preview code=\$\{safeCode\}/);
+  assert.match(appSource, /upstreamError\.code = safeCode/);
+  assert.match(appSource, /console\.error\(`SAMCHE_GOOGLE_GEMINI_ERROR mode=\$\{googleGeminiProvider\.mode\} model=gemini-3-flash-preview code=\$\{safeCode\}`\)/);
+  assert.doesNotMatch(appSource, /console\.error\(`SAMCHE_GOOGLE_GEMINI_ERROR[^\n]*(?:cause|prompt|request|tenant|credential|headers|url)/i);
+});
