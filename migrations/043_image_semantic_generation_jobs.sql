@@ -3,7 +3,12 @@ ALTER TABLE knowledge_processing_jobs
 
 ALTER TABLE knowledge_processing_jobs
   ADD CONSTRAINT knowledge_processing_jobs_job_type_check
-  CHECK (job_type IN ('INDEX_SOURCE', 'GENERATE_IMAGE_CANDIDATES'));
+  CHECK (job_type IN (
+    'INDEX_SOURCE',
+    'GENERATE_IMAGE_CANDIDATES',
+    'GENERATE_ASSISTANT_RECOMMENDATION',
+    'GENERATE_ASSISTANT_CONFIGURATION'
+  ));
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_processing_jobs_semantic_claim
   ON knowledge_processing_jobs (status, available_at, created_at)

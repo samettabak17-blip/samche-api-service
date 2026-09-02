@@ -8,7 +8,12 @@ ALTER TABLE knowledge_processing_jobs
 
 ALTER TABLE knowledge_processing_jobs
   ADD CONSTRAINT knowledge_processing_jobs_job_type_check
-  CHECK (job_type IN ('INDEX_SOURCE', 'GENERATE_IMAGE_CANDIDATES', 'GENERATE_ASSISTANT_RECOMMENDATION'));
+  CHECK (job_type IN (
+    'INDEX_SOURCE',
+    'GENERATE_IMAGE_CANDIDATES',
+    'GENERATE_ASSISTANT_RECOMMENDATION',
+    'GENERATE_ASSISTANT_CONFIGURATION'
+  ));
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_processing_jobs_assistant_recommendation_identity
   ON knowledge_processing_jobs (tenant_id, job_type, content_hash, embedding_model, embedding_version)
