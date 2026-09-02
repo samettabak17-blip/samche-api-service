@@ -51,7 +51,7 @@ function conversationRecommendationGuidance(row: KnowledgeRecommendation) {
 function isConversationBehaviorRecommendation(row: KnowledgeRecommendation) {
   return (
     conversationRecommendationGuidance(row).length > 0 ||
-    row.evidence?.some(
+    Array.isArray(row.evidence) && row.evidence.some(
       (item) => item?.semantic_category === "ASSISTANT_BEHAVIOR_OR_QUALIFICATION",
     ) === true
   );
@@ -719,7 +719,14 @@ export function KnowledgeIntelligencePage() {
       ),
     onSuccess: (result) => {
       setRecommendationGenerationFailure(null);
-      setRecommendationGenerationJobId(result.job.id);
+      const jobId = result?.job?.id;
+      if (typeof jobId !== "string" || !jobId) {
+        setRecommendationGenerationFailure(
+          "Recommendation generation returned an unusable job response. Refresh and retry.",
+        );
+        return;
+      }
+      setRecommendationGenerationJobId(jobId);
     },
   });
   useEffect(() => {

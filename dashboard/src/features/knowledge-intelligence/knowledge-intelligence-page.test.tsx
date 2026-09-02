@@ -1372,6 +1372,66 @@ it("keeps the Configuration page rendered when generation returns an unusable su
   expect(screen.queryByRole("button", { name: "Review configuration" })).not.toBeInTheDocument();
 });
 
+it("keeps profile-derived recommendations rendered when evidence is an object", async () => {
+  mockedApi.listAssistants.mockResolvedValue([
+    { id: "assistant-a", tenant_id: "tenant-a", name: "Meridian Advisor" },
+  ]);
+  mockedApi.listBusinessProfiles.mockResolvedValue([
+    {
+      id: "profile-active",
+      schema_version: 2,
+      profile_data: { company_identity: "Meridian Arc Technologies LLC" },
+      status: "APPROVED",
+      active_version_id: "profile-active",
+    },
+  ]);
+  mockedApi.listKnowledgeRecommendations.mockResolvedValue([
+    {
+      id: "profile-recommendation",
+      recommendation_data: { schema_version: 2, tone: "Professional" },
+      status: "NEEDS_REVIEW",
+      evidence: { profile_version_id: "profile-active" },
+    } as never,
+  ]);
+
+  renderPage(true, "/app/tenant-a/knowledge-base/configurations");
+  const assistant = await screen.findByRole("combobox", { name: "Assistant" });
+  await screen.findByRole("option", { name: "Meridian Advisor" });
+  fireEvent.change(assistant, { target: { value: "assistant-a" } });
+
+  expect(await screen.findByText("Professional")).toBeVisible();
+  expect(screen.getByText("NEEDS_REVIEW")).toBeVisible();
+});
+
+it("keeps the Configuration page rendered when an accepted job payload is incomplete", async () => {
+  mockedApi.listAssistants.mockResolvedValue([
+    { id: "assistant-a", tenant_id: "tenant-a", name: "Meridian Advisor" },
+  ]);
+  mockedApi.listBusinessProfiles.mockResolvedValue([
+    {
+      id: "profile-active",
+      schema_version: 2,
+      profile_data: { company_identity: "Meridian Arc Technologies LLC" },
+      status: "APPROVED",
+      active_version_id: "profile-active",
+    },
+  ]);
+  mockedApi.generateKnowledgeRecommendation.mockResolvedValue({} as never);
+
+  renderPage(true, "/app/tenant-a/knowledge-base/configurations");
+  const assistant = await screen.findByRole("combobox", { name: "Assistant" });
+  await screen.findByRole("option", { name: "Meridian Advisor" });
+  fireEvent.change(assistant, { target: { value: "assistant-a" } });
+  fireEvent.change(
+    await screen.findByRole("combobox", { name: "ACTIVE Business Profile" }),
+    { target: { value: "profile-active" } },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Generate recommendation" }));
+
+  expect(await screen.findByText("Recommendation generation returned an unusable job response. Refresh and retry.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Generate recommendation" })).toBeEnabled();
+});
+
 it("surfaces and reviews the exact generated Configuration before refetch", async () => {
   mockedApi.listAssistants.mockResolvedValue([
     { id: "assistant-a", tenant_id: "tenant-a", name: "Meridian Advisor" },
