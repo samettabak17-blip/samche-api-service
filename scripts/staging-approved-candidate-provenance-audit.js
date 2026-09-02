@@ -56,6 +56,7 @@ try {
             candidate.image_semantic_version, candidate.approved_source_id,
             COUNT(image.id)::integer AS evidence_count,
             COUNT(image.id) FILTER (WHERE image.role = 'BUSINESS' AND image.evidence_kind = 'PRIMARY')::integer AS primary_business_evidence_count,
+            COALESCE(array_agg(DISTINCT image.segment_order) FILTER (WHERE image.role = 'BUSINESS' AND image.evidence_kind = 'PRIMARY'), ARRAY[]::integer[]) AS primary_business_segment_orders,
             COUNT(DISTINCT image.business_identity_id) FILTER (WHERE image.business_identity_id IS NOT NULL)::integer AS snapshot_identity_count,
             COUNT(DISTINCT source_identity.business_identity_id) FILTER (WHERE source_identity.business_identity_id IS NOT NULL)::integer AS original_source_identity_count,
             COALESCE(json_agg(DISTINCT jsonb_build_object(
@@ -104,6 +105,25 @@ try {
       GROUP BY candidate.id, candidate.status, candidate.pii_redaction_status,
                candidate.image_semantic_version, candidate.approved_source_id
       ORDER BY candidate.id`,
+    [identities.rows[0].tenant_id],
+  );
+  const approvalFailures = await client.query(
+    `SELECT diagnostic.candidate_id, diagnostic.materialized_source_id,
+            diagnostic.original_source_id, diagnostic.phase, diagnostic.database_code,
+            diagnostic.constraint_name, diagnostic.table_name, diagnostic.created_at
+       FROM knowledge_candidate_approval_failure_diagnostics diagnostic
+      WHERE diagnostic.tenant_id = $1
+        AND EXISTS (
+          SELECT 1
+            FROM knowledge_candidate_image_evidence evidence
+            JOIN knowledge_base_documents source
+              ON source.id = evidence.source_id AND source.tenant_id = evidence.tenant_id
+           WHERE evidence.tenant_id = diagnostic.tenant_id
+             AND evidence.candidate_id = diagnostic.candidate_id
+             AND lower(source.title) = lower('whatsapp.png')
+        )
+      ORDER BY diagnostic.created_at DESC
+      LIMIT 10`,
     [identities.rows[0].tenant_id],
   );
   const result = await client.query(
@@ -242,6 +262,7 @@ try {
     })),
     behavior_recommendations: recommendations.rows.map(({ evidence, ...row }) => ({ ...row, evidence_item_count: Array.isArray(evidence) ? evidence.length : null })),
     needs_review_candidates: pendingCandidates.rows,
+    approval_failure_diagnostics: approvalFailures.rows,
     candidate_count: result.rowCount,
     candidates: result.rows,
   }));

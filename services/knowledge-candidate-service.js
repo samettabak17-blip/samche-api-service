@@ -30,6 +30,31 @@ async function db(database, sql, params = []) {
   return database.query(sql, params);
 }
 
+function safeDiagnosticText(value, maxLength = 128) {
+  const normalized = String(value ?? '').replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, maxLength);
+  return normalized || null;
+}
+
+export async function recordKnowledgeCandidateApprovalFailureDiagnostic({ database, diagnostic }) {
+  if (!database?.query || !diagnostic?.tenantId || !diagnostic?.candidateId) return;
+  const payload = {
+    candidate_id: diagnostic.candidateId,
+    materialized_source_id: diagnostic.materializedSourceId ?? null,
+    original_source_id: diagnostic.originalSourceId ?? null,
+    phase: safeDiagnosticText(diagnostic.phase, 80) ?? 'UNKNOWN',
+    database_code: safeDiagnosticText(diagnostic.databaseCode, 16),
+    constraint_name: safeDiagnosticText(diagnostic.constraintName),
+    table_name: safeDiagnosticText(diagnostic.tableName),
+  };
+  await database.query(
+    `INSERT INTO knowledge_candidate_approval_failure_diagnostics
+       (tenant_id, candidate_id, materialized_source_id, original_source_id, phase, database_code, constraint_name, table_name)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [diagnostic.tenantId, payload.candidate_id, payload.materialized_source_id, payload.original_source_id, payload.phase, payload.database_code, payload.constraint_name, payload.table_name],
+  );
+  console.error('KNOWLEDGE_CANDIDATE_APPROVAL_NATIVE_FAILURE', JSON.stringify(payload));
+}
+
 async function candidateTransaction(database, work) {
   if (!database || typeof database.connect !== 'function') {
     throw new KnowledgeCandidateError('KNOWLEDGE_DATABASE_TRANSACTION_UNAVAILABLE', 'Knowledge transaction is unavailable');
@@ -328,10 +353,14 @@ export async function approveConversationKnowledgeCandidate({
   tenantId,
   candidateId,
   reviewedBy,
+  approvalFailureRecorder = null,
 }) {
   requireUuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
   requireUuid(candidateId, 'KNOWLEDGE_CANDIDATE_INVALID');
   requireUuid(reviewedBy, 'KNOWLEDGE_REVIEWER_INVALID');
+  let phase = 'CANDIDATE_LOCK';
+  let materializedSourceId = null;
+  let originalSourceId = null;
   try {
     return await candidateTransaction(database, async (client) => {
       const candidateResult = await db(client,
@@ -351,6 +380,7 @@ export async function approveConversationKnowledgeCandidate({
       // business truth; tenant membership is deliberately not an identity
       // fallback.
       if (candidate.image_semantic_version) {
+        phase = 'IMAGE_PROVENANCE_VALIDATION';
         const provenance = await db(client,
           `SELECT COUNT(*) FILTER (
                     WHERE evidence.role = 'BUSINESS' AND evidence.evidence_kind = 'PRIMARY'
@@ -359,7 +389,10 @@ export async function approveConversationKnowledgeCandidate({
                     WHERE evidence.role = 'BUSINESS'
                       AND evidence.evidence_kind = 'PRIMARY'
                       AND COALESCE(evidence.business_identity_id, identity_link.business_identity_id) IS NOT NULL
-                  )::integer AS trusted_identity_count
+                  )::integer AS trusted_identity_count,
+                  MIN(evidence.source_id::text) FILTER (
+                    WHERE evidence.role = 'BUSINESS' AND evidence.evidence_kind = 'PRIMARY'
+                  ) AS original_source_id
              FROM knowledge_candidate_image_evidence evidence
              LEFT JOIN knowledge_source_business_identities identity_link
                ON identity_link.tenant_id = evidence.tenant_id
@@ -368,11 +401,13 @@ export async function approveConversationKnowledgeCandidate({
           [tenantId, candidateId],
         );
         const evidence = provenance.rows[0] ?? {};
+        originalSourceId = evidence.original_source_id ?? null;
         if (Number(evidence.primary_business_evidence_count ?? 0) < 1 || Number(evidence.trusted_identity_count ?? 0) !== 1) {
           throw new KnowledgeCandidateError('KNOWLEDGE_CANDIDATE_IMAGE_PROVENANCE_INVALID', 'Knowledge candidate does not have one trusted Business Identity evidence chain');
         }
       }
 
+      phase = 'CANONICAL_SOURCE_CREATE';
       const source = await createManualKnowledgeSource({
         database: client,
         tenantId,
@@ -382,9 +417,11 @@ export async function approveConversationKnowledgeCandidate({
         assistantIds: candidate.assistant_id ? [candidate.assistant_id] : [],
         sourceType: 'CONVERSATION_CANDIDATE',
       });
+      materializedSourceId = source.id;
 
       // A materialized canonical fact inherits identity only through its own
       // image-evidence source chain. Tenant membership alone is never authority.
+      phase = 'MATERIALIZED_SOURCE_PROVENANCE';
       await db(client,
         `INSERT INTO knowledge_materialized_source_provenance
            (tenant_id, materialized_source_id, candidate_id, original_source_id)
@@ -395,6 +432,7 @@ export async function approveConversationKnowledgeCandidate({
         [tenantId, candidateId, source.id],
       );
 
+      phase = 'MATERIALIZED_SOURCE_IDENTITY';
       await db(client,
         `INSERT INTO knowledge_source_business_identities (tenant_id, source_id, business_identity_id)
            SELECT DISTINCT $1, $3, COALESCE(evidence.business_identity_id, identity_link.business_identity_id)
@@ -408,6 +446,7 @@ export async function approveConversationKnowledgeCandidate({
         [tenantId, candidateId, source.id],
       );
 
+      phase = 'CANDIDATE_APPROVE';
       await db(client,
         `UPDATE knowledge_candidates
             SET status = 'APPROVED',
@@ -421,6 +460,16 @@ export async function approveConversationKnowledgeCandidate({
     });
   } catch (error) {
     if (error instanceof KnowledgeCandidateError || error instanceof KnowledgeSourceServiceError) throw error;
+    await approvalFailureRecorder?.({
+      tenantId,
+      candidateId,
+      materializedSourceId,
+      originalSourceId,
+      phase,
+      databaseCode: error?.code ?? null,
+      constraintName: error?.constraint ?? null,
+      tableName: error?.table ?? null,
+    }).catch(() => {});
     throw new KnowledgeCandidateError('KNOWLEDGE_CANDIDATE_APPROVAL_FAILED', 'Knowledge candidate approval could not be completed safely');
   }
 }

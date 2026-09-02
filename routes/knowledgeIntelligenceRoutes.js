@@ -15,6 +15,7 @@ import {
 import {
   KnowledgeCandidateError,
   approveConversationKnowledgeCandidate,
+  recordKnowledgeCandidateApprovalFailureDiagnostic,
   createConversationKnowledgeCandidate,
   rejectConversationKnowledgeCandidate,
 } from '../services/knowledge-candidate-service.js';
@@ -489,6 +490,7 @@ router.post('/:tenantId/knowledge-intelligence/candidates/:candidateId/approve',
       tenantId,
       candidateId: req.params.candidateId,
       reviewedBy: req.user.user_id,
+      approvalFailureRecorder: (diagnostic) => recordKnowledgeCandidateApprovalFailureDiagnostic({ database: pool, diagnostic }),
     });
     return res.status(202).json({ source });
   } catch (error) {

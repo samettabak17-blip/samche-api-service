@@ -1,0 +1,48 @@
+name: Staging Candidate Approval Diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      tenant_id:
+        description: Staging tenant UUID already authorized for the diagnostic
+        required: true
+        type: string
+      candidate_id:
+        description: Existing NEEDS_REVIEW candidate UUID
+        required: true
+        type: string
+
+jobs:
+  diagnose:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      API: https://samche-api-staging.onrender.com
+      STAGING_OWNER_TOKEN: ${{ secrets.STAGING_OWNER_TOKEN }}
+      TENANT_ID: ${{ inputs.tenant_id }}
+      CANDIDATE_ID: ${{ inputs.candidate_id }}
+    steps:
+      - name: Invoke the normal authorized approval route once
+        shell: bash
+        run: |
+          node <<'NODE'
+          const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+          const tenantId = process.env.TENANT_ID;
+          const candidateId = process.env.CANDIDATE_ID;
+          if (!uuid.test(tenantId) || !uuid.test(candidateId) || !process.env.STAGING_OWNER_TOKEN) {
+            throw new Error('CANDIDATE_APPROVAL_DIAGNOSTIC_CONFIGURATION_INVALID');
+          }
+          const response = await fetch(`${process.env.API}/api/v1/tenants/${tenantId}/knowledge-intelligence/candidates/${candidateId}/approve`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${process.env.STAGING_OWNER_TOKEN}`, 'Content-Type': 'application/json' },
+            body: '{}',
+          });
+          let body = {};
+          try { body = await response.json(); } catch {}
+          console.log(JSON.stringify({
+            candidate_id: candidateId,
+            http_status: response.status,
+            response_code: typeof body?.code === 'string' ? body.code.replace(/[^A-Z0-9_]/g, '_').slice(0, 80) : null,
+          }));
+          NODE
