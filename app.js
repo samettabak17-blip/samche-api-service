@@ -180,6 +180,7 @@ const processedTgUpdates = new Set();
 // ============================================================================
 const googleGeminiProvider = createGoogleGeminiProvider();
 const googleGeminiEnabled = process.env.GOOGLE_GENAI_MODE?.trim().toLowerCase() === 'vertex' || Boolean(process.env.GEMINI_API_KEY);
+const WHATSAPP_GEMINI_MODEL = process.env.WHATSAPP_GEMINI_MODEL || 'gemini-2.5-pro';
 
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -568,7 +569,7 @@ async function callWpGemini(prompt, multimodalParts = null, systemInstruction = 
       : (multimodalParts ? [multimodalParts] : []);
     parts.push(...contextualParts);
     const response = await googleGeminiProvider.generateContent({
-      model: 'gemini-2.5-pro',
+      model: WHATSAPP_GEMINI_MODEL,
       contents: [{ parts }],
       systemInstruction: typeof systemInstruction === 'string' && systemInstruction.trim()
         ? { parts: [{ text: systemInstruction }] }
@@ -576,7 +577,12 @@ async function callWpGemini(prompt, multimodalParts = null, systemInstruction = 
     });
     return response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
   } catch (err) {
-    console.error("Gemini API error (WP):", err.response?.data || err.message);
+    const safeCode = typeof err?.code === 'string' ? err.code : 'GOOGLE_GEMINI_REQUEST_FAILED';
+    const safeStatus = Number.isInteger(err?.safeMetadata?.http_status) ? err.safeMetadata.http_status : 'none';
+    const safeEndpointClass = typeof err?.safeMetadata?.endpoint_class === 'string'
+      ? err.safeMetadata.endpoint_class
+      : (googleGeminiProvider.mode === 'vertex' ? 'VERTEX_GENERATE_CONTENT' : 'GEMINI_DEVELOPER_GENERATE_CONTENT');
+    console.error(`WHATSAPP_GEMINI_RUNTIME_FAILURE code=${safeCode} http_status=${safeStatus} model=${WHATSAPP_GEMINI_MODEL} endpoint_class=${safeEndpointClass}`);
     return null;
   }
 }

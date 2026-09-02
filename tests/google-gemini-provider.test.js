@@ -170,6 +170,41 @@ test('adapter preserves an SDK abort as GOOGLE_GEMINI_TIMEOUT', async () => {
   );
 });
 
+test('adapter retains safe HTTP rejection metadata without retaining provider response content', async () => {
+  const provider = createGoogleGeminiProvider({
+    env: { GEMINI_API_KEY: 'developer-key' },
+    clientFactory: () => ({
+      models: {
+        generateContent: async () => {
+          const error = new Error('provider rejected a request body that must remain private');
+          error.status = 400;
+          throw error;
+        },
+      },
+    }),
+  });
+
+  await assert.rejects(
+    provider.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: [{ role: 'user', parts: [{ text: 'hello' }] }],
+    }),
+    (error) => {
+      assert.ok(error instanceof GoogleGeminiProviderError);
+      assert.equal(error.code, 'GOOGLE_GEMINI_HTTP_4XX');
+      assert.deepEqual(error.safeMetadata, {
+        provider: 'GOOGLE_GEMINI',
+        mode: 'developer',
+        model: 'gemini-3-flash-preview',
+        endpoint_class: 'GEMINI_DEVELOPER_GENERATE_CONTENT',
+        http_status: 400,
+      });
+      assert.doesNotMatch(JSON.stringify(error.safeMetadata), /private|body|response/i);
+      return true;
+    },
+  );
+});
+
 test('requested runtime callers route through the centralized adapter', async () => {
   const sources = await Promise.all([
     readFile(new URL('../app.js', import.meta.url), 'utf8'),

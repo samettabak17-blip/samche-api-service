@@ -20,3 +20,8 @@ test('WhatsApp model path resolves active tenant persona after human-handoff gat
   assert.match(appSource, /tenant: runtimeTenantContext,/);
 });
 
+test('WhatsApp Gemini failure telemetry is safe and identifies the provider contract without request content', () => {
+  assert.match(appSource, /WHATSAPP_GEMINI_RUNTIME_FAILURE code=\$\{safeCode\} http_status=\$\{safeStatus\} model=\$\{WHATSAPP_GEMINI_MODEL\} endpoint_class=\$\{safeEndpointClass\}/);
+  assert.doesNotMatch(appSource, /WHATSAPP_GEMINI_RUNTIME_FAILURE[^\n]*(?:prompt|systemInstruction|tenantId|credential|headers|url|message|cause|stack)/i);
+});
+
