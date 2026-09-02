@@ -16,3 +16,9 @@ test('Assistant generation audit is manual, staging-only, strict-TLS and read-on
   assert.match(script, /ROLLBACK/);
   assert.doesNotMatch(script, /\b(?:INSERT|UPDATE|DELETE|ALTER|CREATE|DROP)\b/i);
 });
+
+test('Assistant generation audit reports the processing job type capacity without content', () => {
+  assert.match(script, /JOB_TYPE_CAPACITY/);
+  assert.match(script, /information_schema\.columns/);
+  assert.match(script, /job_type_capacity/);
+});

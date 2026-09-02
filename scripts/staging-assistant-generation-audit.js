@@ -67,6 +67,14 @@ try {
         AND attribute.attnum > 0
         AND NOT attribute.attisdropped`,
   );
+  auditPhase = 'ASYNC_RECOMMENDATION_JOB_TYPE_CAPACITY';
+  const jobTypeCapacity = await client.query(
+    `SELECT character_maximum_length AS job_type_maximum_length
+       FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'knowledge_processing_jobs'
+        AND column_name = 'job_type'`,
+  );
   auditPhase = 'ASYNC_RECOMMENDATION_JOBS';
   const asyncJobs = await client.query(
     `SELECT job.id, job.status, job.attempts, job.last_error_code, job.created_at, job.updated_at,
@@ -193,6 +201,7 @@ try {
   console.log(JSON.stringify({
     profile_context: context.rows[0],
     async_recommendation_job_schema: asyncJobSchema.rows[0] ?? null,
+    job_type_capacity: jobTypeCapacity.rows[0] ?? null,
     async_recommendation_jobs: asyncJobs.rows,
     async_recommendation_enqueue_failures: asyncEnqueueFailures.rows,
     latest_run: latest,
