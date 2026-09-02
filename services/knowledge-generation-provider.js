@@ -6,7 +6,12 @@ import { createGoogleGeminiProvider } from './google-gemini-provider.js';
 const DEFAULT_TIMEOUT_MS = 20_000;
 const ASSISTANT_GENERATION_TIMEOUT_MS = 30_000;
 const ASSISTANT_RECOMMENDATION_MAX_OUTPUT_TOKENS = 1024;
-const ASSISTANT_CONFIGURATION_MAX_OUTPUT_TOKENS = 2048;
+// The staging configuration response reached Gemini's 2,048-token ceiling
+// (finishReason=MAX_TOKENS) after returning one clean, non-thought JSON part.
+// A configuration is schema-richer than a recommendation, so give this
+// background-only operation one bounded 4,096-token budget. The 90-second
+// provider budget and five-minute worker lease remain finite and compatible.
+const ASSISTANT_CONFIGURATION_MAX_OUTPUT_TOKENS = 4096;
 // Configuration generation is a worker-only, schema-rich operation. Staging
 // telemetry shows valid Gemini requests repeatedly had no first response by
 // 30 seconds, while the worker lease is five minutes. Keep a finite budget
@@ -254,7 +259,15 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
         if (response?.status) emit('http_status_received', { http_status: response.status });
         emit('fetch_fulfilled', { elapsed_ms: Date.now() - startedAt });
         emit('structured_response_shape', { response_shape: response?.response_shape ?? null });
-        text = response?.candidates?.[0]?.content?.parts?.map((part) => part?.text || '').join('');
+        if (response?.response_shape?.finish_reason === 'MAX_TOKENS') {
+          emit('structured_parse_result', { parser: { phase: 'STRUCTURED_PAYLOAD_SELECTION', classification: 'PROVIDER_MAX_OUTPUT_TOKENS' } });
+          throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_OUTPUT_TRUNCATED', 'Knowledge generation output exceeded its bounded budget');
+        }
+        if (response?.structured_payload_error) {
+          emit('structured_parse_result', { parser: { phase: 'STRUCTURED_PAYLOAD_SELECTION', classification: response.structured_payload_error } });
+          throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_RESPONSE_INVALID', 'Knowledge generation returned an ambiguous structured response');
+        }
+        text = response?.structured_text;
       } else {
         if (!env.OPENAI_API_KEY || !openaiClient?.chat?.completions?.create) {
           throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_PROVIDER_UNAVAILABLE', 'OpenAI knowledge generation is unavailable');
@@ -300,8 +313,8 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
       ? 'gemini-structured-v3:thinking-minimal:max-output-1024:timeout-30000'
       : 'openai-structured-v2:timeout-30000',
     assistantConfigurationGenerationPolicy: config.provider === 'GEMINI'
-      ? 'gemini-assistant-configuration-v3:thinking-minimal:max-output-2048:timeout-90000'
-      : 'openai-assistant-configuration-v3:timeout-90000',
+      ? 'gemini-assistant-configuration-v4:thinking-minimal:max-output-4096:timeout-90000'
+      : 'openai-assistant-configuration-v4:timeout-90000',
     businessProfileGenerationPolicy: config.provider === 'GEMINI'
       ? 'gemini-business-profile-v2:thinking-low:timeout-30000'
       : 'openai-business-profile-v2:timeout-30000',

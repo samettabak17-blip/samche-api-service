@@ -110,11 +110,39 @@ function describeResponseShape(response) {
   };
 }
 
+function stripOuterJsonFence(value) {
+  const trimmed = String(value ?? '').trim();
+  const fenced = /^```(?:json)?[\t ]*\r?\n([\s\S]*?)\r?\n?```$/i.exec(trimmed);
+  return fenced ? fenced[1].trim() : trimmed;
+}
+
+function selectStructuredPayload(response) {
+  const candidates = Array.isArray(response?.candidates) ? response.candidates : [];
+  if (candidates.length) {
+    const parts = Array.isArray(candidates[0]?.content?.parts) ? candidates[0].content.parts : [];
+    const finalTextParts = parts.filter((part) => part?.thought !== true && typeof part?.text === 'string');
+    if (finalTextParts.length === 0) return { text: null, error: 'EMPTY_FINAL_TEXT_PARTS' };
+    // Gemini may expose multiple part categories, but a SamChe structured result
+    // must be exactly one final text payload. Joining independent parts creates
+    // JSON that Gemini never returned and is unsafe.
+    if (finalTextParts.length > 1) return { text: null, error: 'MULTIPLE_FINAL_TEXT_PARTS' };
+    return { text: stripOuterJsonFence(finalTextParts[0].text), error: null };
+  }
+  if (typeof response?.text === 'string') return { text: stripOuterJsonFence(response.text), error: null };
+  return { text: null, error: 'NO_CANONICAL_STRUCTURED_PAYLOAD' };
+}
+
 function normalizeResponse(response) {
   const candidates = Array.isArray(response?.candidates) ? response.candidates : [];
   const responseShape = describeResponseShape(response);
+  const structuredPayload = selectStructuredPayload(response);
   if (candidates.length) {
-    return { ...(response?.__httpStatus ? { status: response.__httpStatus } : {}), response_shape: responseShape, candidates: candidates.map((candidate) => ({
+    return {
+      ...(response?.__httpStatus ? { status: response.__httpStatus } : {}),
+      response_shape: responseShape,
+      structured_text: structuredPayload.text,
+      structured_payload_error: structuredPayload.error,
+      candidates: candidates.map((candidate) => ({
       ...candidate,
       content: candidate?.content ? {
         ...candidate.content,
@@ -125,10 +153,13 @@ function normalizeResponse(response) {
           ? candidate.content.parts.filter((part) => part?.thought !== true).map((part) => ({ ...part }))
           : candidate.content.parts,
       } : candidate.content,
-    })) };
+      })),
+    };
   }
   const text = typeof response?.text === 'string' ? response.text : '';
-  return text ? { ...(response?.__httpStatus ? { status: response.__httpStatus } : {}), response_shape: responseShape, candidates: [{ content: { parts: [{ text }] } }] } : { response_shape: responseShape, candidates: [] };
+  return text
+    ? { ...(response?.__httpStatus ? { status: response.__httpStatus } : {}), response_shape: responseShape, structured_text: structuredPayload.text, structured_payload_error: structuredPayload.error, candidates: [{ content: { parts: [{ text }] } }] }
+    : { response_shape: responseShape, structured_text: structuredPayload.text, structured_payload_error: structuredPayload.error, candidates: [] };
 }
 
 function normalizeRequestError(error, mode, model) {

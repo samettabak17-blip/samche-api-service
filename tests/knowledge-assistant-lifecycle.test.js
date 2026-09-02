@@ -102,6 +102,8 @@ test('generates a review-only configuration from an approved recommendation', as
   assert.match(insert.sql, /RETURNING id, schema_version, configuration_data, source_profile_version_id, source_recommendation_id, status, created_at/i);
   assert.match(insert.params[2].captured_prompt, /factual profile/i);
   assert.match(insert.params[2].captured_prompt, /approved AI recommendation/i);
+  assert.match(insert.params[2].captured_prompt, /one compact JSON object only/i);
+  assert.match(insert.params[2].captured_prompt, /omit unsupported fields/i);
   const run = calls.find(({ sql }) => /INSERT INTO knowledge_generation_runs/i.test(sql));
   assert.equal(run.params[6].business_identity_id, '55555555-5555-4555-8555-555555555555');
   assert.deepEqual(run.params[6].source_scope.source_ids, ['source-meridian']);

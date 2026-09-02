@@ -180,6 +180,7 @@ export async function prepareAssistantConfigurationGeneration({ database, provid
     'Create Assistant Configuration schema_version 2 for the current tenant from the ACTIVE factual profile and APPROVED AI recommendation only.',
     'Never use SamChe or another tenant as a default. Do not import another tenant identity, service, price, geography, or behavior.',
     'The factual profile is authoritative business evidence; the approved AI recommendation is reviewed proposed behavior. Do not merge unknown recommendations into business facts.',
+    'Return one compact JSON object only. Include only schema fields supported by the supplied profile or recommendation; omit unsupported fields and keep each included value concise.',
     `ACTIVE factual profile: ${JSON.stringify(context.rows[0].profile_data)}`,
     `APPROVED AI recommendation: ${JSON.stringify(context.rows[0].recommendation_data)}`,
   ].join('\n');

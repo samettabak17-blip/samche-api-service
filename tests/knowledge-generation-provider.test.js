@@ -259,9 +259,9 @@ test('Gemini Assistant Configuration uses a bounded minimal-thinking policy with
   await provider.generateAssistantConfiguration({ prompt: 'Approved recommendation' });
 
   assert.deepEqual(requests[0].generationConfig.thinkingConfig, { thinkingLevel: 'minimal' });
-  assert.equal(requests[0].generationConfig.maxOutputTokens, 2048);
+  assert.equal(requests[0].generationConfig.maxOutputTokens, 4096);
   assert.equal(provider.configurationTimeoutMs, 90000);
-  assert.equal(provider.assistantConfigurationGenerationPolicy, 'gemini-assistant-configuration-v3:thinking-minimal:max-output-2048:timeout-90000');
+  assert.equal(provider.assistantConfigurationGenerationPolicy, 'gemini-assistant-configuration-v4:thinking-minimal:max-output-4096:timeout-90000');
 });
 
 test('Gemini strips provider thinking parts before parsing structured Assistant Configuration JSON', async () => {
@@ -286,6 +286,50 @@ test('Gemini strips provider thinking parts before parsing structured Assistant 
   const output = await provider.generateAssistantConfiguration({ prompt: 'Approved profile and recommendation' });
 
   assert.deepEqual(output, { schema_version: 2, tone: 'Professional' });
+});
+
+test('Gemini accepts multiple thought parts and one fenced final JSON payload', async () => {
+  const provider = createKnowledgeGenerationProvider({
+    env: { KNOWLEDGE_GENERATION_PROVIDER: 'GEMINI', GEMINI_API_KEY: 'test-key' },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [
+      { thought: true, text: 'internal one' },
+      { thought: true, text: 'internal two' },
+      { text: '```json\n{"schema_version":2,"tone":"Professional"}\n```' },
+    ] } }] }) }),
+  });
+  assert.deepEqual(await provider.generateAssistantConfiguration({ prompt: 'Approved profile and recommendation' }), { schema_version: 2, tone: 'Professional' });
+});
+
+test('Gemini rejects prefix/suffix text and multiple final payload parts without concatenating them', async () => {
+  const malformed = createKnowledgeGenerationProvider({
+    env: { KNOWLEDGE_GENERATION_PROVIDER: 'GEMINI', GEMINI_API_KEY: 'test-key' },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'Here is JSON: {"schema_version":2}' }] } }] }) }),
+  });
+  await assert.rejects(() => malformed.generateAssistantConfiguration({ prompt: 'Approved profile' }), (error) => error.code === 'KNOWLEDGE_GENERATION_RESPONSE_INVALID');
+
+  const multiple = createKnowledgeGenerationProvider({
+    env: { KNOWLEDGE_GENERATION_PROVIDER: 'GEMINI', GEMINI_API_KEY: 'test-key' },
+    fetchImpl: async () => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [
+      { text: '{"schema_version":2}' }, { text: '{"tone":"Professional"}' },
+    ] } }] }) }),
+  });
+  await assert.rejects(() => multiple.generateAssistantConfiguration({ prompt: 'Approved profile' }), (error) => error.code === 'KNOWLEDGE_GENERATION_RESPONSE_INVALID');
+});
+
+test('Gemini rejects empty, malformed, truncated, and schema-invalid structured configuration output', async () => {
+  const cases = [
+    { response: { candidates: [{ content: { parts: [] } }] }, code: 'KNOWLEDGE_GENERATION_RESPONSE_INVALID' },
+    { response: { candidates: [{ content: { parts: [{ text: '{not-json' }] } }] }, code: 'KNOWLEDGE_GENERATION_RESPONSE_INVALID' },
+    { response: { candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: '{"schema_version":2' }] } }] }, code: 'KNOWLEDGE_GENERATION_OUTPUT_TRUNCATED' },
+    { response: { candidates: [{ content: { parts: [{ text: '[]' }] } }] }, code: 'KNOWLEDGE_GENERATION_SCHEMA_INVALID' },
+  ];
+  for (const fixture of cases) {
+    const provider = createKnowledgeGenerationProvider({
+      env: { KNOWLEDGE_GENERATION_PROVIDER: 'GEMINI', GEMINI_API_KEY: 'test-key' },
+      fetchImpl: async () => ({ ok: true, json: async () => fixture.response }),
+    });
+    await assert.rejects(() => provider.generateAssistantConfiguration({ prompt: 'Approved profile' }), (error) => error.code === fixture.code);
+  }
 });
 
 test('Gemini emits safe structured response-shape telemetry without retaining final text', async () => {
