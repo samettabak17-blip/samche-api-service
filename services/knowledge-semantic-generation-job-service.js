@@ -49,7 +49,7 @@ export async function getImageSemanticGenerationJob({ database, tenantId, source
 }
 
 export async function recoverStaleImageSemanticGenerationJobs(database) {
-  const result = await database.query(
+  const processing = await database.query(
     `UPDATE knowledge_processing_jobs
         SET status = CASE
               WHEN COALESCE((metadata->>'stale_recovery_count')::integer, 0) >= 2 THEN 'FAILED'
@@ -74,6 +74,25 @@ export async function recoverStaleImageSemanticGenerationJobs(database) {
         AND (locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP)
       RETURNING id, status`,
   );
+  // Compatibility recovery for jobs terminally failed by the former lease
+  // policy before it recorded bounded stale-recovery metadata. This is generic
+  // and one-time: modern jobs carry stale_recovery_count and remain terminal
+  // after the bounded lease-recovery limit.
+  const legacy = await database.query(
+    `UPDATE knowledge_processing_jobs
+        SET status = 'PENDING',
+            available_at = CURRENT_TIMESTAMP,
+            last_error_code = NULL,
+            metadata = metadata || '{"legacy_lease_recovery":true}'::jsonb,
+            updated_at = CURRENT_TIMESTAMP
+      WHERE job_type = 'GENERATE_IMAGE_CANDIDATES'
+        AND status = 'FAILED'
+        AND last_error_code = 'KNOWLEDGE_SEMANTIC_LEASE_EXPIRED'
+        AND COALESCE((metadata->>'stale_recovery_count')::integer, 0) = 0
+        AND COALESCE((metadata->>'legacy_lease_recovery')::boolean, FALSE) = FALSE
+      RETURNING id, status`,
+  );
+  const result = { rows: [...(processing.rows ?? []), ...(legacy.rows ?? [])] };
   return {
     recovered: result.rows.filter((job) => job.status === 'PENDING').length,
     failed: result.rows.filter((job) => job.status === 'FAILED').length,

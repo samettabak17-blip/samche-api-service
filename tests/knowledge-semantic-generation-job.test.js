@@ -86,6 +86,7 @@ test('recovers an expired semantic PROCESSING lease before a worker claims the n
   const calls = [];
   const database = { query: async (sql, params = []) => {
     calls.push({ sql, params });
+    if (/legacy_lease_recovery/i.test(sql)) return { rowCount: 0, rows: [] };
     return { rowCount: 1, rows: [{ id: 'job-1', status: 'PENDING' }] };
   } };
 
@@ -99,6 +100,22 @@ test('recovers an expired semantic PROCESSING lease before a worker claims the n
   assert.match(calls[0].sql, /KNOWLEDGE_SEMANTIC_LEASE_EXPIRED/);
   assert.match(calls[0].sql, /stale_recovery_count/);
   assert.match(calls[1].sql, /status = 'PENDING'/);
+});
+
+test('requeues one legacy lease-expired terminal job created by the former recovery policy', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/status = 'PROCESSING'/i.test(sql)) return { rows: [] };
+    if (/status = 'FAILED'/i.test(sql)) return { rows: [{ id: 'legacy-job', status: 'PENDING' }] };
+    return { rows: [] };
+  } };
+  const recovered = await recoverStaleImageSemanticGenerationJobs(database);
+  assert.equal(recovered.recovered, 1);
+  const compatibilityRecovery = calls.find(({ sql }) => /legacy_lease_recovery/i.test(sql));
+  assert.ok(compatibilityRecovery);
+  assert.match(compatibilityRecovery.sql, /last_error_code = 'KNOWLEDGE_SEMANTIC_LEASE_EXPIRED'/);
+  assert.match(compatibilityRecovery.sql, /stale_recovery_count.*= 0/is);
 });
 
 test('semantic worker exposes only safe operational status for deployment health checks', async () => {
