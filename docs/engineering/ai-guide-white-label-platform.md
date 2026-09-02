@@ -4,7 +4,7 @@ AI Guide has one shared public shell at `/guide`. Its customer-facing identity i
 
 ## Experience configuration
 
-`guide_experience_versions` stores tenant-owned presentation data only: safe brand copy, opaque platform asset routes or intentionally validated HTTPS raster URLs, constrained color tokens, fonts, layout presets and module flags. It cannot contain provider, model, prompt, script or HTML values. The runtime behavior continues to come from the active Business Profile, active Assistant Configuration and approved knowledge.
+`guide_experience_versions` stores tenant-owned presentation data only: safe brand copy, opaque platform asset routes or intentionally retained HTTPS asset URLs, constrained color tokens, fonts, layout presets and module flags. It cannot contain provider, model, prompt, script or HTML values. The runtime behavior continues to come from the active Business Profile, active Assistant Configuration and approved knowledge.
 
 Administrators create a **DRAFT**, inspect its Dashboard preview, then explicitly **PUBLISH** it. Only one version per tenant/assistant scope is published. Publishing archives the previous version, changes the runtime cache key, and requires no frontend deployment. An earlier archived published version can be explicitly restored through **Rollback**; this does not change channel ownership, Business Profiles, Assistant Configurations, providers or models. Existing enabled Guide integrations receive a neutral, data-derived initial published version during migration.
 
