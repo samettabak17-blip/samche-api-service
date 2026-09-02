@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 
 const DEFAULT_MODE = 'developer';
 const ALLOWED_MODES = new Set(['developer', 'vertex']);
+const DEFAULT_REQUEST_TIMEOUT_MS = 20000;
 
 export class GoogleGeminiProviderError extends Error {
   constructor(code, message, options = {}) {
@@ -139,7 +140,17 @@ export function createGoogleGeminiProvider({ env = process.env, clientFactory, f
         ...(generationConfig ? { config: { ...generationConfig } } : {}),
       };
       if (systemInstruction) request.config = { ...(request.config || {}), systemInstruction };
-      if (signal) request.signal = signal;
+      if (signal) {
+        request.config = { ...(request.config || {}), abortSignal: signal };
+      } else {
+        request.config = {
+          ...(request.config || {}),
+          httpOptions: {
+            ...(request.config?.httpOptions || {}),
+            timeout: request.config?.httpOptions?.timeout ?? DEFAULT_REQUEST_TIMEOUT_MS,
+          },
+        };
+      }
       try {
         const response = await client.models.generateContent(request);
         return normalizeResponse(response);

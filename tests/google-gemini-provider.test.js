@@ -89,6 +89,87 @@ test('adapter normalizes text and multimodal requests without exposing SDK respo
   assert.equal(request.generationConfig, undefined);
 });
 
+test('adapter passes caller signal as config.abortSignal and preserves request config', async () => {
+  let request;
+  const signal = new AbortController().signal;
+  const provider = createGoogleGeminiProvider({
+    env: { GEMINI_API_KEY: 'developer-key' },
+    clientFactory: () => ({
+      models: {
+        generateContent: async (params) => {
+          request = params;
+          return fakeResponse();
+        },
+      },
+    }),
+  });
+
+  await provider.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: [{ role: 'user', parts: [{ text: 'hello' }] }],
+    generationConfig: {
+      temperature: 0,
+      safetySettings: [{ category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }],
+      httpOptions: { timeout: 60000, headers: { 'x-test': 'preserve' } },
+    },
+    systemInstruction: { parts: [{ text: 'system' }] },
+    signal,
+  });
+
+  assert.equal(request.config.abortSignal, signal);
+  assert.equal(request.config.temperature, 0);
+  assert.deepEqual(request.config.safetySettings, [{ category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' }]);
+  assert.deepEqual(request.config.httpOptions, { timeout: 60000, headers: { 'x-test': 'preserve' } });
+  assert.equal(request.signal, undefined);
+});
+
+test('adapter applies a 20-second SDK timeout when no caller signal is supplied', async () => {
+  let request;
+  const provider = createGoogleGeminiProvider({
+    env: { GEMINI_API_KEY: 'developer-key' },
+    clientFactory: () => ({
+      models: {
+        generateContent: async (params) => {
+          request = params;
+          return fakeResponse();
+        },
+      },
+    }),
+  });
+
+  await provider.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: [{ role: 'user', parts: [{ text: 'hello' }] }],
+    generationConfig: { temperature: 0 },
+  });
+
+  assert.equal(request.config.httpOptions.timeout, 20000);
+  assert.equal(request.config.abortSignal, undefined);
+});
+
+test('adapter preserves an SDK abort as GOOGLE_GEMINI_TIMEOUT', async () => {
+  const provider = createGoogleGeminiProvider({
+    env: { GEMINI_API_KEY: 'developer-key' },
+    clientFactory: () => ({
+      models: {
+        generateContent: async () => {
+          const error = new Error('request aborted');
+          error.name = 'AbortError';
+          throw error;
+        },
+      },
+    }),
+  });
+
+  await assert.rejects(
+    provider.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: [{ role: 'user', parts: [{ text: 'hello' }] }],
+    }),
+    (error) => error instanceof GoogleGeminiProviderError && error.code === 'GOOGLE_GEMINI_TIMEOUT',
+  );
+});
+
 test('requested runtime callers route through the centralized adapter', async () => {
   const sources = await Promise.all([
     readFile(new URL('../app.js', import.meta.url), 'utf8'),
