@@ -144,7 +144,7 @@ test('Recommendation validator remains fail-closed with safe contract diagnostic
   assert.deepEqual(validateAssistantRecommendationOutput({ schema_version: 2, tone: 'Professional' }), { schema_version: 2, tone: 'Professional' });
 });
 
-test('Gemini Assistant Recommendation uses bounded low thinking without changing the global timeout', async () => {
+test('Gemini Assistant Recommendation uses bounded minimal thinking and a concise output budget without changing the global timeout', async () => {
   const requests = [];
   const provider = createKnowledgeGenerationProvider({
     env: {
@@ -164,9 +164,10 @@ test('Gemini Assistant Recommendation uses bounded low thinking without changing
 
   await provider.generateAssistantRecommendation({ prompt: 'ACTIVE tenant profile' });
 
-  assert.deepEqual(requests[0].generationConfig.thinkingConfig, { thinkingLevel: 'low' });
+  assert.deepEqual(requests[0].generationConfig.thinkingConfig, { thinkingLevel: 'minimal' });
+  assert.equal(requests[0].generationConfig.maxOutputTokens, 1024);
   assert.equal(provider.timeoutMs, 20000);
-  assert.equal(provider.assistantGenerationPolicy, 'gemini-structured-v2:thinking-low:timeout-30000');
+  assert.equal(provider.assistantGenerationPolicy, 'gemini-structured-v3:thinking-minimal:max-output-1024:timeout-30000');
   assert.equal(provider.recommendationTimeoutMs, 30000);
   assert.equal(provider.configurationTimeoutMs, 30000);
 });

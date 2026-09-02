@@ -5,6 +5,7 @@ import { createGoogleGeminiProvider } from './google-gemini-provider.js';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const ASSISTANT_GENERATION_TIMEOUT_MS = 30_000;
+const ASSISTANT_RECOMMENDATION_MAX_OUTPUT_TOKENS = 1024;
 const BUSINESS_PROFILE_TIMEOUT_MS = 30_000;
 const IMAGE_SEMANTIC_TIMEOUT_MS = 60_000;
 const transportContext = new AsyncLocalStorage();
@@ -191,7 +192,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
     ? telemetryImpl
     : (event) => console.log(`KNOWLEDGE_GENERATION_PROVIDER ${JSON.stringify(event)}`);
 
-  async function generate({ prompt, fields, validate, thinkingLevel = null, timeoutMs = config.timeoutMs, runId = null, requestFingerprint = null, operation = 'KNOWLEDGE_GENERATION', telemetry: callTelemetry = null, schema = responseSchema(fields) }) {
+  async function generate({ prompt, fields, validate, thinkingLevel = null, maxOutputTokens = null, timeoutMs = config.timeoutMs, runId = null, requestFingerprint = null, operation = 'KNOWLEDGE_GENERATION', telemetry: callTelemetry = null, schema = responseSchema(fields) }) {
     if (typeof prompt !== 'string' || !prompt.trim()) {
       throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_INPUT_REQUIRED', 'Knowledge generation input is required');
     }
@@ -224,6 +225,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
             responseMimeType: 'application/json',
             responseSchema: schema,
             ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
+            ...(Number.isInteger(maxOutputTokens) && maxOutputTokens > 0 ? { maxOutputTokens } : {}),
           },
           signal: timeout.signal,
         });
@@ -270,7 +272,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
     recommendationTimeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS,
     configurationTimeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS,
     assistantGenerationPolicy: config.provider === 'GEMINI'
-      ? 'gemini-structured-v2:thinking-low:timeout-30000'
+      ? 'gemini-structured-v3:thinking-minimal:max-output-1024:timeout-30000'
       : 'openai-structured-v2:timeout-30000',
     businessProfileGenerationPolicy: config.provider === 'GEMINI'
       ? 'gemini-business-profile-v2:thinking-low:timeout-30000'
@@ -295,7 +297,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
       fields: BUSINESS_IDENTITY_ANALYSIS_FIELDS,
       validate: (value) => validateOutput(value, BUSINESS_IDENTITY_ANALYSIS_FIELDS),
     }),
-    generateAssistantRecommendation: ({ prompt, runId, requestFingerprint, telemetry: callTelemetry }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_RECOMMENDATION', telemetry: callTelemetry, schema: buildRecommendationResponseSchema() }),
+    generateAssistantRecommendation: ({ prompt, runId, requestFingerprint, telemetry: callTelemetry }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'minimal' : null, maxOutputTokens: ASSISTANT_RECOMMENDATION_MAX_OUTPUT_TOKENS, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_RECOMMENDATION', telemetry: callTelemetry, schema: buildRecommendationResponseSchema() }),
     generateAssistantConfiguration: ({ prompt, runId, requestFingerprint, telemetry: callTelemetry }) => generate({ prompt, fields: ASSISTANT_CONFIGURATION_FIELDS, validate: validateAssistantConfigurationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'low' : null, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_CONFIGURATION', telemetry: callTelemetry }),
     classifyImageKnowledgeSegments: ({ segments }) => {
       const safeSegments = Array.isArray(segments) ? segments : [];

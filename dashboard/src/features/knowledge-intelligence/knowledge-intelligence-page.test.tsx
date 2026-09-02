@@ -1276,6 +1276,40 @@ it("shows a scope-bound reused Recommendation terminal result without silent idl
   expect(mockedApi.reviewRecommendation).not.toHaveBeenCalled();
 });
 
+it("keeps recommendation generation review-only and exposes a safe retryable timeout", async () => {
+  mockedApi.listAssistants.mockResolvedValue([
+    { id: "assistant-a", tenant_id: "tenant-a", name: "Meridian Advisor" },
+  ]);
+  mockedApi.listBusinessProfiles.mockResolvedValue([
+    {
+      id: "profile-active",
+      schema_version: 2,
+      profile_data: { company_identity: "Meridian Arc Technologies LLC" },
+      status: "APPROVED",
+      active_version_id: "profile-active",
+    },
+  ]);
+  mockedApi.generateKnowledgeRecommendation.mockRejectedValue(
+    new ApiError(503, "Knowledge generation timed out", {
+      code: "KNOWLEDGE_GENERATION_TIMEOUT",
+    }),
+  );
+
+  renderPage(true, "/app/tenant-a/knowledge-base/configurations");
+  const assistant = await screen.findByRole("combobox", { name: "Assistant" });
+  await screen.findByRole("option", { name: "Meridian Advisor" });
+  fireEvent.change(assistant, { target: { value: "assistant-a" } });
+  fireEvent.change(
+    await screen.findByRole("combobox", { name: "ACTIVE Business Profile" }),
+    { target: { value: "profile-active" } },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Generate recommendation" }));
+
+  expect((await screen.findAllByText("Knowledge generation timed out")).length).toBeGreaterThan(0);
+  expect(screen.getByRole("button", { name: "Generate recommendation" })).toBeEnabled();
+  expect(mockedApi.listAssistantConfigurations).toHaveBeenCalledWith("tenant-a", "assistant-a");
+});
+
 it("shows an assistant-scoped conversation recommendation without an active Business Profile", async () => {
   mockedApi.listAssistants.mockResolvedValue([
     { id: "assistant-a", tenant_id: "tenant-a", name: "Meridian Advisor" },
