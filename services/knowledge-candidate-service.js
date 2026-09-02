@@ -435,12 +435,12 @@ export async function approveConversationKnowledgeCandidate({
       phase = 'MATERIALIZED_SOURCE_IDENTITY';
       await db(client,
         `INSERT INTO knowledge_source_business_identities (tenant_id, source_id, business_identity_id)
-           SELECT DISTINCT $1, $3, COALESCE(evidence.business_identity_id, identity_link.business_identity_id)
+           SELECT DISTINCT $1::uuid, $3::uuid, COALESCE(evidence.business_identity_id, identity_link.business_identity_id)
              FROM knowledge_candidate_image_evidence evidence
              LEFT JOIN knowledge_source_business_identities identity_link
                ON identity_link.tenant_id = evidence.tenant_id
               AND identity_link.source_id = evidence.source_id
-            WHERE evidence.tenant_id = $1 AND evidence.candidate_id = $2
+            WHERE evidence.tenant_id = $1::uuid AND evidence.candidate_id = $2::uuid
               AND COALESCE(evidence.business_identity_id, identity_link.business_identity_id) IS NOT NULL
            ON CONFLICT DO NOTHING`,
         [tenantId, candidateId, source.id],
