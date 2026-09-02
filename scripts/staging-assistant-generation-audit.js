@@ -7,6 +7,7 @@ const tenantName = String(process.env.TASK6_AUDIT_TENANT_NAME ?? '').trim();
 const profileVersionPrefix = String(process.env.TASK6_AUDIT_PROFILE_VERSION_PREFIX ?? '').trim().toLowerCase();
 const hasExactScope = Boolean(tenantId && profileVersionId);
 const hasNamedScope = Boolean(tenantName && /^[a-f0-9]{8,36}$/.test(profileVersionPrefix));
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 if ((!hasExactScope && !hasNamedScope) || !process.env.STAGING_DATABASE_URL) throw new Error('ASSISTANT_GENERATION_AUDIT_INPUT_REQUIRED');
 
 const client = new pg.Client(strictTlsConfig(process.env.STAGING_DATABASE_URL));
@@ -134,12 +135,13 @@ try {
     [scopedTenantId],
   );
   auditPhase = 'COUNTS';
+  const safeAssistantId = UUID_PATTERN.test(String(latest?.assistant_id ?? '')) ? latest.assistant_id : null;
   const counts = latest ? await client.query(
     `SELECT
        (SELECT count(*)::integer FROM knowledge_generation_runs WHERE tenant_id=$1 AND target_type='RECOMMENDATION' AND request_fingerprint=$2) AS exact_attempt_count,
        (SELECT count(*)::integer FROM assistant_knowledge_recommendations WHERE tenant_id=$1 AND assistant_id=$3) AS recommendation_count,
        (SELECT count(*)::integer FROM assistant_configuration_versions WHERE tenant_id=$1 AND assistant_id=$3) AS configuration_count`,
-    [tenantId, latest.request_fingerprint, latest.assistant_id],
+    [scopedTenantId, latest.request_fingerprint, safeAssistantId],
   ) : { rows: [{ exact_attempt_count: 0, recommendation_count: 0, configuration_count: 0 }] };
   console.log(JSON.stringify({
     profile_context: context.rows[0],
