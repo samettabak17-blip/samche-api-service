@@ -148,6 +148,29 @@ router.get('/:tenantId/knowledge-intelligence/sources', requireTenantAccess, asy
   try {
     const result = await pool.query(
       `SELECT id, title, source_type, original_filename, mime_type, size_bytes,
+              CASE WHEN source_type = 'CONVERSATION_CANDIDATE' THEN content ELSE NULL END AS canonical_fact_text,
+              CASE WHEN source_type <> 'CONVERSATION_CANDIDATE' THEN NULL
+                   WHEN EXISTS (
+                     SELECT 1 FROM knowledge_source_business_identities direct_identity
+                      WHERE direct_identity.tenant_id = knowledge_base_documents.tenant_id
+                        AND direct_identity.source_id = knowledge_base_documents.id
+                   ) OR EXISTS (
+                     SELECT 1
+                       FROM knowledge_materialized_source_provenance provenance
+                       JOIN knowledge_source_business_identities original_identity
+                         ON original_identity.tenant_id = provenance.tenant_id
+                        AND original_identity.source_id = provenance.original_source_id
+                      WHERE provenance.tenant_id = knowledge_base_documents.tenant_id
+                        AND provenance.materialized_source_id = knowledge_base_documents.id
+                   ) OR EXISTS (
+                     SELECT 1 FROM knowledge_candidate_image_evidence evidence
+                      WHERE evidence.tenant_id = knowledge_base_documents.tenant_id
+                        AND evidence.business_identity_id IS NOT NULL
+                        AND EXISTS (SELECT 1 FROM knowledge_candidates candidate
+                                      WHERE candidate.tenant_id = evidence.tenant_id
+                                        AND candidate.id = evidence.candidate_id
+                                        AND candidate.approved_source_id = knowledge_base_documents.id)
+                   ) THEN 'VERIFIED' ELSE 'INCOMPLETE' END AS provenance_status,
               processing_status, indexing_status, processing_error_code, enabled,
               extraction_hash, extraction_method,
               (SELECT extraction_version FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = knowledge_base_documents.tenant_id AND segment.source_id = knowledge_base_documents.id AND segment.is_current = TRUE ORDER BY segment.created_at DESC LIMIT 1) AS extraction_version,
@@ -175,6 +198,21 @@ router.get('/:tenantId/knowledge-intelligence/sources/:sourceId', requireTenantA
   try {
     const result = await pool.query(
       `SELECT d.id, d.title, d.source_type, d.original_filename, d.mime_type, d.size_bytes,
+              CASE WHEN d.source_type = 'CONVERSATION_CANDIDATE' THEN d.content ELSE NULL END AS canonical_fact_text,
+              CASE WHEN d.source_type <> 'CONVERSATION_CANDIDATE' THEN NULL
+                   WHEN EXISTS (SELECT 1 FROM knowledge_source_business_identities direct_identity
+                                  WHERE direct_identity.tenant_id = d.tenant_id AND direct_identity.source_id = d.id)
+                     OR EXISTS (SELECT 1 FROM knowledge_materialized_source_provenance provenance
+                                  JOIN knowledge_source_business_identities original_identity
+                                    ON original_identity.tenant_id = provenance.tenant_id
+                                   AND original_identity.source_id = provenance.original_source_id
+                                  WHERE provenance.tenant_id = d.tenant_id AND provenance.materialized_source_id = d.id)
+                     OR EXISTS (SELECT 1 FROM knowledge_candidate_image_evidence evidence
+                                  JOIN knowledge_candidates candidate
+                                    ON candidate.tenant_id = evidence.tenant_id AND candidate.id = evidence.candidate_id
+                                  WHERE evidence.tenant_id = d.tenant_id AND evidence.business_identity_id IS NOT NULL
+                                    AND candidate.approved_source_id = d.id)
+                   THEN 'VERIFIED' ELSE 'INCOMPLETE' END AS provenance_status,
               d.processing_status, d.indexing_status, d.processing_error_code, d.enabled,
               d.extraction_hash, d.extraction_method,
               (SELECT extraction_version FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = d.tenant_id AND segment.source_id = d.id AND segment.is_current = TRUE ORDER BY segment.created_at DESC LIMIT 1) AS extraction_version,

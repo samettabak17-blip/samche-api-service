@@ -1524,3 +1524,39 @@ it("shows the same channel-aware Assistant labels when assigning a source", asyn
   ).toBeVisible();
   expect(screen.getByRole("button", { name: "Assign source" })).toBeDisabled();
 });
+
+it("identifies canonical Business Profile sources by fact, source id, and provenance", async () => {
+  mockedApi.listBusinessIdentities.mockResolvedValue([{
+    id: "identity-a", display_name: "Example Events LLC", normalized_identity: "example events", status: "ACTIVE",
+  }]);
+  mockedApi.listKnowledgeSources.mockResolvedValue([
+    {
+      id: "4973d676-1111-4111-8111-111111111111", title: "Canonical image-derived business fact", source_type: "CONVERSATION_CANDIDATE",
+      canonical_fact_text: "Offers corporate events and gala dinners.", provenance_status: "VERIFIED", processing_status: "READY", indexing_status: "READY", enabled: true,
+    },
+    {
+      id: "a3902c3b-2222-4222-8222-222222222222", title: "Canonical image-derived business fact", source_type: "CONVERSATION_CANDIDATE",
+      canonical_fact_text: "Works with venues in Dubai Marina and JBR.", provenance_status: "INCOMPLETE", processing_status: "READY", indexing_status: "READY", enabled: true,
+    },
+    {
+      id: "pdf-source-3333-4333-8333-333333333333", title: "BLUE DUNE EVENT MANAGEMENT LLC.pdf", original_filename: "BLUE DUNE EVENT MANAGEMENT LLC.pdf", source_type: "DOCUMENT",
+      processing_status: "READY", indexing_status: "READY", enabled: true,
+    },
+  ]);
+
+  renderPage(true, "/app/tenant-a/knowledge-base/profile");
+  fireEvent.change(await screen.findByRole("combobox", { name: "Business Identity" }), { target: { value: "identity-a" } });
+
+  expect(await screen.findByText("Offers corporate events and gala dinners.")).toBeVisible();
+  expect(screen.getByText("Works with venues in Dubai Marina and JBR.")).toBeVisible();
+  expect(screen.getByText("Source 4973d676 · READY · Index READY")).toBeVisible();
+  expect(screen.getByText("Source a3902c3b · READY · Index READY")).toBeVisible();
+  expect(screen.getByText("Provenance verified")).toBeVisible();
+  expect(screen.getByText("Legacy / provenance incomplete")).toBeVisible();
+  expect(screen.getByText("BLUE DUNE EVENT MANAGEMENT LLC.pdf")).toBeVisible();
+
+  fireEvent.click(screen.getByRole("checkbox", { name: /Source 4973d676/ }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "BLUE DUNE EVENT MANAGEMENT LLC.pdf" }));
+  expect(screen.getByRole("checkbox", { name: /Source 4973d676/ })).toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "BLUE DUNE EVENT MANAGEMENT LLC.pdf" })).toBeChecked();
+});

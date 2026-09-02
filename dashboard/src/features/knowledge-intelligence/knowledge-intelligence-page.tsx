@@ -1124,7 +1124,9 @@ export function KnowledgeIntelligencePage() {
                   className="rounded-lg border border-line bg-elevated p-3"
                 >
                   <DashboardCheckbox
-                    aria-label={source.title}
+                    aria-label={source.source_type === "CONVERSATION_CANDIDATE"
+                      ? `${source.original_filename || source.title} · Source ${source.id.slice(0, 8)}`
+                      : (source.original_filename || source.title)}
                     checked={profileSourceIds.includes(source.id)}
                     onChange={(event) => {
                       generateProfile.reset();
@@ -1137,12 +1139,26 @@ export function KnowledgeIntelligencePage() {
                           : current.filter((id) => id !== source.id),
                       );
                     }}
-                    label={<span>
-                    <strong>{source.title}</strong>
-                    <span className="block text-xs text-stone-400">
-                      READY · Index READY
-                    </span>
-                  </span>}
+                    label={<span className="min-w-0">
+                      <strong className="block">{source.source_type === "CONVERSATION_CANDIDATE"
+                        ? source.title
+                        : (source.original_filename || source.title)}</strong>
+                      {source.source_type === "CONVERSATION_CANDIDATE" && source.canonical_fact_text && (
+                        <span className="mt-1 block text-sm text-stone-200">
+                          {source.canonical_fact_text}
+                        </span>
+                      )}
+                      <span className="mt-1 block text-xs text-stone-400">
+                        Source {source.id.slice(0, 8)} · {source.processing_status} · Index {source.indexing_status}
+                      </span>
+                      {source.source_type === "CONVERSATION_CANDIDATE" && (
+                        <span className="block text-xs text-stone-400">
+                          {source.provenance_status === "VERIFIED"
+                            ? "Provenance verified"
+                            : "Legacy / provenance incomplete"}
+                        </span>
+                      )}
+                    </span>}
                   />
                 </div>
               ))}
