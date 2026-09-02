@@ -17,6 +17,7 @@ test('resolves only the exact enabled active WhatsApp integration key used by in
     tenant_id: '11111111-1111-4111-8111-111111111111',
     channel_id: '22222222-2222-4222-8222-222222222222',
     assistant_id: '33333333-3333-4333-8333-333333333333',
+    channel_assistant_id: '33333333-3333-4333-8333-333333333333',
     channel_type: 'WHATSAPP',
     channel_status: 'active',
     assistant_status: 'active',
@@ -30,8 +31,23 @@ test('does not resolve an inactive exact WhatsApp integration', async () => {
     tenant_id: '11111111-1111-4111-8111-111111111111',
     channel_id: '22222222-2222-4222-8222-222222222222',
     assistant_id: '33333333-3333-4333-8333-333333333333',
+    channel_assistant_id: '33333333-3333-4333-8333-333333333333',
     channel_type: 'WHATSAPP',
     channel_status: 'inactive',
+    assistant_status: 'active',
+  }), '948536645017374');
+
+  assert.equal(integration, null);
+});
+
+test('fails closed when the receiving channel and WhatsApp integration name different Assistants', async () => {
+  const integration = await resolveWhatsAppIntegration(resolverClient({
+    tenant_id: '11111111-1111-4111-8111-111111111111',
+    channel_id: '22222222-2222-4222-8222-222222222222',
+    assistant_id: '33333333-3333-4333-8333-333333333333',
+    channel_assistant_id: '44444444-4444-4444-8444-444444444444',
+    channel_type: 'WHATSAPP',
+    channel_status: 'active',
     assistant_status: 'active',
   }), '948536645017374');
 

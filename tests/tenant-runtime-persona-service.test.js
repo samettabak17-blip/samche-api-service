@@ -25,6 +25,7 @@ test('resolves a non-SamChe ACTIVE tenant persona scoped by tenant and Assistant
   assert.equal(persona.companyIdentity, 'Meridian Arc Technologies LLC');
   assert.equal(persona.assistantIdentity, 'Meridian Client Advisor');
   assert.deepEqual(calls[0].params, [assistantA, tenantA]);
+  assert.match(calls[0].sql, /configuration\.assistant_id = assistant\.id/);
 });
 
 test('mapped runtime fails closed when both ACTIVE V2 artifacts are not proven', async () => {

@@ -53,7 +53,7 @@ async function notify(client, tenantId, conversationId, type) {
 
 export async function resolveWhatsAppIntegration(client, phoneNumberId) {
   const result = await client.query(
-    `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id, tc.channel_type, tc.status AS channel_status, a.status AS assistant_status, t.name AS tenant_name, a.name AS assistant_name, a.system_prompt AS assistant_system_prompt, a.whatsapp_response_templates AS assistant_whatsapp_response_templates
+    `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id, tc.assistant_id AS channel_assistant_id, tc.channel_type, tc.status AS channel_status, a.status AS assistant_status, t.name AS tenant_name, a.name AS assistant_name, a.system_prompt AS assistant_system_prompt, a.whatsapp_response_templates AS assistant_whatsapp_response_templates
        FROM channel_integrations ci
        JOIN tenant_channels tc ON tc.id = ci.channel_id AND tc.tenant_id = ci.tenant_id
        JOIN tenants t ON t.id = ci.tenant_id AND t.status = 'active'
@@ -66,7 +66,12 @@ export async function resolveWhatsAppIntegration(client, phoneNumberId) {
   );
   if (result.rowCount !== 1) return null;
   const integration = result.rows[0];
-  if (integration.channel_type !== 'WHATSAPP' || integration.channel_status !== 'active' || integration.assistant_status !== 'active') return null;
+  if (
+    integration.channel_type !== 'WHATSAPP'
+    || integration.channel_status !== 'active'
+    || integration.assistant_status !== 'active'
+    || integration.channel_assistant_id !== integration.assistant_id
+  ) return null;
   return integration;
 }
 
