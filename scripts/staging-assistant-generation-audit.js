@@ -10,11 +10,14 @@ const hasNamedScope = Boolean(tenantName && /^[a-f0-9]{8,36}$/.test(profileVersi
 if ((!hasExactScope && !hasNamedScope) || !process.env.STAGING_DATABASE_URL) throw new Error('ASSISTANT_GENERATION_AUDIT_INPUT_REQUIRED');
 
 const client = new pg.Client(strictTlsConfig(process.env.STAGING_DATABASE_URL));
+let auditPhase = 'CONNECT';
 try {
   await client.connect();
   assertVerifiedTls(client);
+  auditPhase = 'BEGIN_READ_ONLY';
   await client.query('BEGIN');
   await client.query('SET TRANSACTION READ ONLY');
+  auditPhase = 'RESOLVE_SCOPE';
   const namedScope = hasExactScope ? null : await client.query(
       `SELECT tenant.id AS tenant_id, version.id AS profile_version_id
          FROM tenants tenant
@@ -30,6 +33,7 @@ try {
     : namedScope.rows[0];
   const scopedTenantId = resolvedScope.tenant_id;
   const scopedProfileVersionId = resolvedScope.profile_version_id;
+  auditPhase = 'PROFILE_CONTEXT';
   const context = await client.query(
     `SELECT version.id AS profile_version_id, version.status AS profile_status,
             profile.active_version_id, profile.business_identity_id,
@@ -42,6 +46,7 @@ try {
     [scopedTenantId, scopedProfileVersionId],
   );
   if (context.rowCount !== 1) throw new Error('ASSISTANT_GENERATION_AUDIT_SCOPE_NOT_UNIQUE');
+  auditPhase = 'RECOMMENDATION_RUNS';
   const runs = await client.query(
     `SELECT run.id AS run_id, run.request_fingerprint, run.tenant_id,
             run.input_provenance->>'assistant_id' AS assistant_id,
@@ -66,6 +71,7 @@ try {
     [scopedTenantId, scopedProfileVersionId],
   );
   const latest = runs.rows[0] ?? null;
+  auditPhase = 'CONFIGURATION_RUNS';
   const configurationRuns = await client.query(
     `SELECT run.id AS run_id, run.request_fingerprint, run.tenant_id,
             run.input_provenance->>'assistant_id' AS assistant_id,
@@ -92,6 +98,7 @@ try {
     [scopedTenantId, scopedProfileVersionId],
   );
   const latestConfigurationRun = configurationRuns.rows[0] ?? null;
+  auditPhase = 'RUNTIME';
   const runtime = await client.query(
     `SELECT ci.tenant_id, ci.assistant_id AS whatsapp_assistant_id,
             ci.channel_id, ci.enabled AS integration_enabled,
@@ -126,6 +133,7 @@ try {
       ORDER BY ci.created_at ASC`,
     [scopedTenantId],
   );
+  auditPhase = 'COUNTS';
   const counts = latest ? await client.query(
     `SELECT
        (SELECT count(*)::integer FROM knowledge_generation_runs WHERE tenant_id=$1 AND target_type='RECOMMENDATION' AND request_fingerprint=$2) AS exact_attempt_count,
@@ -145,7 +153,8 @@ try {
   await client.query('ROLLBACK');
 } catch (error) {
   await client.query('ROLLBACK').catch(() => {});
-  console.error(/TLS/.test(String(error?.message)) ? 'TLS_VERIFICATION_FAILED' : String(error?.message ?? 'ASSISTANT_GENERATION_AUDIT_FAILED').replace(/[^A-Z0-9_]/gi, '_').slice(0, 120));
+  const safeCode = String(error?.code ?? '').replace(/[^A-Z0-9_]/gi, '_').slice(0, 32);
+  console.error(/TLS/.test(String(error?.message)) ? 'TLS_VERIFICATION_FAILED' : `ASSISTANT_GENERATION_AUDIT_FAILED phase=${auditPhase} code=${safeCode || 'UNKNOWN'}`);
   process.exitCode = 1;
 } finally {
   await client.end().catch(() => {});
