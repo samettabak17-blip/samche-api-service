@@ -47,6 +47,41 @@ try {
     [scopedTenantId, scopedProfileVersionId],
   );
   if (context.rowCount !== 1) throw new Error('ASSISTANT_GENERATION_AUDIT_SCOPE_NOT_UNIQUE');
+  auditPhase = 'ASYNC_RECOMMENDATION_JOB_SCHEMA';
+  const asyncJobSchema = await client.query(
+    `SELECT attribute.attnotnull AS source_id_required,
+            EXISTS (
+              SELECT 1 FROM pg_constraint constraint_row
+               WHERE constraint_row.conrelid = 'knowledge_processing_jobs'::regclass
+                 AND pg_get_constraintdef(constraint_row.oid) LIKE '%GENERATE_ASSISTANT_RECOMMENDATION%'
+            ) AS recommendation_job_type_supported,
+            EXISTS (
+              SELECT 1 FROM pg_indexes index_row
+               WHERE index_row.schemaname = current_schema()
+                 AND index_row.tablename = 'knowledge_processing_jobs'
+                 AND index_row.indexname = 'idx_knowledge_processing_jobs_assistant_recommendation_identity'
+            ) AS recommendation_identity_index_present
+       FROM pg_attribute attribute
+      WHERE attribute.attrelid = 'knowledge_processing_jobs'::regclass
+        AND attribute.attname = 'source_id'
+        AND attribute.attnum > 0
+        AND NOT attribute.attisdropped`,
+  );
+  auditPhase = 'ASYNC_RECOMMENDATION_JOBS';
+  const asyncJobs = await client.query(
+    `SELECT job.id, job.status, job.attempts, job.last_error_code, job.created_at, job.updated_at,
+            job.locked_at, job.locked_until,
+            job.metadata->>'business_profile_version_id' AS business_profile_version_id,
+            job.metadata->>'assistant_id' AS assistant_id,
+            job.metadata ? 'recommendation_id' AS recommendation_persisted
+       FROM knowledge_processing_jobs job
+      WHERE job.tenant_id = $1
+        AND job.job_type = 'GENERATE_ASSISTANT_RECOMMENDATION'
+        AND job.metadata->>'business_profile_version_id' = $2
+      ORDER BY job.created_at DESC
+      LIMIT 10`,
+    [scopedTenantId, scopedProfileVersionId],
+  );
   auditPhase = 'RECOMMENDATION_RUNS';
   const runs = await client.query(
     `SELECT run.id AS run_id, run.request_fingerprint, run.tenant_id,
@@ -145,6 +180,8 @@ try {
   ) : { rows: [{ exact_attempt_count: 0, recommendation_count: 0, configuration_count: 0 }] };
   console.log(JSON.stringify({
     profile_context: context.rows[0],
+    async_recommendation_job_schema: asyncJobSchema.rows[0] ?? null,
+    async_recommendation_jobs: asyncJobs.rows,
     latest_run: latest,
     latest_configuration_run: latestConfigurationRun,
     whatsapp_runtime_rows: runtime.rows,
