@@ -102,6 +102,22 @@ try {
       LIMIT 10`,
     [scopedTenantId, scopedProfileVersionId],
   );
+  auditPhase = 'RECOMMENDATION_SHAPES';
+  const auditAssistantId = asyncJobs.rows.find((job) => UUID_PATTERN.test(String(job.assistant_id ?? '')))?.assistant_id ?? null;
+  const recommendationShapes = auditAssistantId ? await client.query(
+    `SELECT recommendation.id, recommendation.assistant_id, recommendation.status,
+            jsonb_typeof(recommendation.recommendation_data) AS recommendation_data_type,
+            COALESCE((SELECT array_agg(key ORDER BY key)
+                        FROM jsonb_object_keys(COALESCE(recommendation.recommendation_data, '{}'::jsonb)) AS key), '{}') AS recommendation_data_keys,
+            jsonb_typeof(recommendation.evidence) AS evidence_type,
+            recommendation.generation_run_id
+       FROM assistant_knowledge_recommendations recommendation
+      WHERE recommendation.tenant_id = $1
+        AND recommendation.assistant_id = $2
+      ORDER BY recommendation.created_at DESC
+      LIMIT 10`,
+    [scopedTenantId, auditAssistantId],
+  ) : { rows: [] };
   auditPhase = 'RECOMMENDATION_RUNS';
   const runs = await client.query(
     `SELECT run.id AS run_id, run.request_fingerprint, run.tenant_id,
@@ -204,6 +220,7 @@ try {
     job_type_capacity: jobTypeCapacity.rows[0] ?? null,
     async_recommendation_jobs: asyncJobs.rows,
     async_recommendation_enqueue_failures: asyncEnqueueFailures.rows,
+    recommendation_shapes: recommendationShapes.rows,
     latest_run: latest,
     latest_configuration_run: latestConfigurationRun,
     whatsapp_runtime_rows: runtime.rows,
