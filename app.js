@@ -909,6 +909,7 @@ app.post("/plan", async (req, res) => {
 });
 
 app.post("/chat", async (req, res) => {
+  console.info('CHAT_REQUEST_RECEIVED');
   try {
     const { text } = req.body;
     if (typeof text !== "string") {
@@ -918,7 +919,13 @@ app.post("/chat", async (req, res) => {
     const cleanText = text.trim();
     if (!cleanText) return res.status(400).json({ error: "Message text cannot be empty." });
 
-    const publicSession = issueOrResolvePublicConversationSession(req);
+    let publicSession;
+    try {
+      publicSession = issueOrResolvePublicConversationSession(req);
+    } catch (error) {
+      if (error?.status === 503) console.error('CHAT_RESPONSE_503 stage=PUBLIC_SESSION_CONFIGURATION');
+      throw error;
+    }
     const userId = publicSession.sessionId;
     const inboxState = await persistSamcheguideInbound({
       externalSessionId: userId,
@@ -967,6 +974,7 @@ app.post("/chat", async (req, res) => {
             assistantId: inboxState.integration.assistant_id,
           });
           if (!runtimePersona.available) {
+            console.error('CHAT_RESPONSE_503 stage=TENANT_PERSONA_UNAVAILABLE');
             return res.status(503).json({
               error: "AI Guide assistant configuration is temporarily unavailable.",
               conversation_session: publicSession.token,
@@ -991,6 +999,7 @@ app.post("/chat", async (req, res) => {
           );
         } catch (error) {
           console.error('KNOWLEDGE_RUNTIME_CONTEXT_UNAVAILABLE channel=SAMCHEGUIDE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+          console.error('CHAT_RESPONSE_503 stage=RUNTIME_CONTEXT_UNAVAILABLE');
           return res.status(503).json({
             error: "AI Guide assistant configuration is temporarily unavailable.",
             conversation_session: publicSession.token,
@@ -998,10 +1007,20 @@ app.post("/chat", async (req, res) => {
         }
       }
 
-      const data = await requestGemini({
-        contents,
-        systemInstruction: { parts: [{ text: runtimeSystemInstruction }] }
-      });
+      console.info('CHAT_GEMINI_STARTED');
+      let data;
+      try {
+        data = await requestGemini({
+          contents,
+          systemInstruction: { parts: [{ text: runtimeSystemInstruction }] }
+        });
+      } catch (error) {
+        const code = typeof error?.code === 'string' && /^GOOGLE_(?:VERTEX|GEMINI)_[A-Z0-9_]+$/.test(error.code)
+          ? error.code
+          : 'GOOGLE_GEMINI_REQUEST_FAILED';
+        console.error(`CHAT_GEMINI_FAILED code=${code}`);
+        throw error;
+      }
       originalText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
       if (typeof originalText !== "string" || !originalText.trim()) {
         const error = new Error("Gemini returned no usable response.");
@@ -1032,6 +1051,7 @@ app.post("/chat", async (req, res) => {
       candidates: [{ content: { parts: [{ text: parseLinksToHTML(originalText) }] } }]
     });
   } catch (err) {
+    if (err?.status === 503) console.error('CHAT_RESPONSE_503 stage=OUTER_HANDLER_ERROR');
     console.error("Samcheguide Chat error:", err?.code || err?.name || "unknown");
     return res.status(err.status || 500).json({ error: "Could not generate chat response." });
   }
