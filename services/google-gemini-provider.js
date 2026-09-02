@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import crypto from 'node:crypto';
 
 const DEFAULT_MODE = 'developer';
 const ALLOWED_MODES = new Set(['developer', 'vertex']);
@@ -57,10 +58,63 @@ function normalizeContents(contents) {
     : contents;
 }
 
+function safeHash(value) {
+  return crypto.createHash('sha256').update(String(value)).digest('hex');
+}
+
+function looksLikeJson(value) {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  return /^[{[]/.test(trimmed);
+}
+
+function describeResponseShape(response) {
+  const candidates = Array.isArray(response?.candidates) ? response.candidates : [];
+  const partSummaries = [];
+  let finalTextPartCount = 0;
+  let jsonLookingFinalPartCount = 0;
+  let finishReason = null;
+  candidates.slice(0, 8).forEach((candidate, candidateIndex) => {
+    if (candidateIndex === 0 && typeof candidate?.finishReason === 'string') finishReason = candidate.finishReason;
+    const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+    parts.slice(0, 32).forEach((part, partIndex) => {
+      const text = typeof part?.text === 'string' ? part.text : null;
+      const thought = part?.thought === true;
+      const jsonLooking = !thought && looksLikeJson(text);
+      if (!thought && text !== null) finalTextPartCount += 1;
+      if (jsonLooking) jsonLookingFinalPartCount += 1;
+      partSummaries.push({
+        candidate_index: candidateIndex,
+        part_index: partIndex,
+        type: text !== null ? 'TEXT' : part?.inlineData ? 'INLINE_DATA' : part?.functionCall ? 'FUNCTION_CALL' : 'OTHER',
+        thought,
+        text_present: text !== null,
+        text_length: text?.length ?? 0,
+        ...(text !== null ? { text_sha256: safeHash(text) } : {}),
+        ...(typeof part?.inlineData?.mimeType === 'string' ? { mime_type: part.inlineData.mimeType } : {}),
+        json_looking: jsonLooking,
+        markdown_fence: typeof text === 'string' && /^```(?:json)?\s*/i.test(text.trim()),
+      });
+    });
+  });
+  return {
+    candidate_count: candidates.length,
+    content_part_count: partSummaries.length,
+    final_text_part_count: finalTextPartCount,
+    json_looking_final_part_count: jsonLookingFinalPartCount,
+    multiple_final_json_payload_candidates: jsonLookingFinalPartCount > 1,
+    concatenation_attempted: finalTextPartCount > 1,
+    canonical_payload_field: candidates.length ? 'CANDIDATES_PARTS' : typeof response?.text === 'string' ? 'RESPONSE_TEXT' : 'NONE',
+    ...(finishReason ? { finish_reason: finishReason } : {}),
+    part_summaries: partSummaries,
+  };
+}
+
 function normalizeResponse(response) {
   const candidates = Array.isArray(response?.candidates) ? response.candidates : [];
+  const responseShape = describeResponseShape(response);
   if (candidates.length) {
-    return { ...(response?.__httpStatus ? { status: response.__httpStatus } : {}), candidates: candidates.map((candidate) => ({
+    return { ...(response?.__httpStatus ? { status: response.__httpStatus } : {}), response_shape: responseShape, candidates: candidates.map((candidate) => ({
       ...candidate,
       content: candidate?.content ? {
         ...candidate.content,
@@ -74,7 +128,7 @@ function normalizeResponse(response) {
     })) };
   }
   const text = typeof response?.text === 'string' ? response.text : '';
-  return text ? { ...(response?.__httpStatus ? { status: response.__httpStatus } : {}), candidates: [{ content: { parts: [{ text }] } }] } : { candidates: [] };
+  return text ? { ...(response?.__httpStatus ? { status: response.__httpStatus } : {}), response_shape: responseShape, candidates: [{ content: { parts: [{ text }] } }] } : { response_shape: responseShape, candidates: [] };
 }
 
 function normalizeRequestError(error, mode, model) {

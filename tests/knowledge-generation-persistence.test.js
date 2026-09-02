@@ -122,3 +122,24 @@ test('provider transport telemetry persists only safe connection fields', async 
   assert.deepEqual(payloads[2], { response_headers_received_at: '2026-08-30T20:00:00.020Z', provider_http_status: 200 });
   assert.equal(JSON.stringify(payloads).match(/prompt|authorization|apikey|body|content/gi), null);
 });
+
+test('structured-response telemetry persists only response shape metadata', async () => {
+  const calls = [];
+  const database = { query: async (sql, params) => { calls.push({ sql, params }); return { rows: [{ id: params[0] }] }; } };
+  await recordKnowledgeGenerationProviderTelemetry({
+    database,
+    tenantId,
+    runId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    event: 'structured_response_shape',
+    responseShape: {
+      candidate_count: 1,
+      final_text_part_count: 1,
+      part_summaries: [{ candidate_index: 0, part_index: 0, type: 'TEXT', thought: false, text_present: true, text_length: 41, text_sha256: 'a'.repeat(64) }],
+      raw_response_text: 'must never persist',
+    },
+  });
+  const payload = JSON.parse(calls[0].params[2]);
+  assert.equal(payload.structured_response_shape.candidate_count, 1);
+  assert.equal(payload.structured_response_shape.part_summaries[0].text_sha256, 'a'.repeat(64));
+  assert.equal(JSON.stringify(payload).includes('must never persist'), false);
+});

@@ -170,14 +170,29 @@ export function validateAssistantConfigurationOutput(value) {
   return validateOutput(value, ASSISTANT_CONFIGURATION_FIELDS);
 }
 
-function parseJson(value) {
+function parseJson(value, onDiagnostic = null) {
+  const raw = typeof value === 'string' ? value : '';
+  const trimmedRaw = raw.trim();
+  const markdownFenceDetected = /^```(?:json)?\s*/i.test(trimmedRaw);
+  const trimmed = trimmedRaw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  const firstJson = trimmed.search(/[\[{]/);
+  const lastJson = Math.max(trimmed.lastIndexOf('}'), trimmed.lastIndexOf(']'));
+  const diagnostic = (classification) => onDiagnostic?.({
+    phase: 'JSON_PARSE', classification, markdown_fence_detected: markdownFenceDetected,
+    leading_non_json_text: firstJson > 0,
+    trailing_non_json_text: lastJson >= 0 && lastJson < trimmed.length - 1,
+    json_encoded_string_candidate: trimmed.startsWith('"'),
+  });
   if (typeof value !== 'string' || !value.trim()) {
+    diagnostic('EMPTY_FINAL_TEXT');
     throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_RESPONSE_INVALID', 'Knowledge generation returned no usable response');
   }
-  const trimmed = value.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   try {
-    return JSON.parse(trimmed);
+    const parsed = JSON.parse(trimmed);
+    diagnostic('JSON_PARSE_SUCCEEDED');
+    return parsed;
   } catch (cause) {
+    diagnostic('JSON_PARSE_FAILED');
     throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_RESPONSE_INVALID', 'Knowledge generation returned invalid JSON', { cause });
   }
 }
@@ -238,6 +253,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
         responseReceived = true;
         if (response?.status) emit('http_status_received', { http_status: response.status });
         emit('fetch_fulfilled', { elapsed_ms: Date.now() - startedAt });
+        emit('structured_response_shape', { response_shape: response?.response_shape ?? null });
         text = response?.candidates?.[0]?.content?.parts?.map((part) => part?.text || '').join('');
       } else {
         if (!env.OPENAI_API_KEY || !openaiClient?.chat?.completions?.create) {
@@ -251,11 +267,14 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
         }, { signal: timeout.signal });
         text = completion?.choices?.[0]?.message?.content;
       }
-      const output = validate(parseJson(text));
+      const output = validate(parseJson(text, (parser) => emit('structured_parse_result', { parser })));
       await flushTelemetry();
       return output;
     } catch (error) {
-      if (error instanceof KnowledgeGenerationError) throw error;
+      if (error instanceof KnowledgeGenerationError) {
+        await flushTelemetry();
+        throw error;
+      }
       if (timeout.signal.aborted || error?.name === 'AbortError') {
         emit('fetch_aborted', { classification: 'ABORT_TIMEOUT', elapsed_ms: Date.now() - startedAt, http_response_received: responseReceived });
         await flushTelemetry();

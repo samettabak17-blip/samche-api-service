@@ -8,7 +8,7 @@ const STAGES = new Set([
   'IDENTITY_ANALYSIS', 'PROFILE_GENERATION', 'PROFILE_CONTEXT',
   'RECOMMENDATION_GENERATION', 'CONFIGURATION_GENERATION', 'PERSISTENCE',
 ]);
-const PROVIDER_EVENTS = new Set(['request_started', 'http_status_received', 'fetch_fulfilled', 'fetch_aborted', 'network_error', 'transport_connect_started', 'transport_connected', 'tls_established', 'request_body_sent', 'response_headers_received', 'transport_error']);
+const PROVIDER_EVENTS = new Set(['request_started', 'http_status_received', 'fetch_fulfilled', 'fetch_aborted', 'network_error', 'transport_connect_started', 'transport_connected', 'tls_established', 'request_body_sent', 'response_headers_received', 'transport_error', 'structured_response_shape', 'structured_parse_result']);
 
 export class KnowledgeGenerationPersistenceError extends Error {
   constructor(code, message) {
@@ -39,6 +39,50 @@ function boundedInteger(value, code) {
   if (value == null) return null;
   if (!Number.isSafeInteger(value) || value < 0) throw new KnowledgeGenerationPersistenceError(code, 'Knowledge generation metric is invalid');
   return value;
+}
+
+function safeEnum(value, fallback = null) {
+  if (typeof value !== 'string' || !value.trim()) return fallback;
+  return value.trim().toUpperCase().replace(/[^A-Z0-9_/-]/g, '_').slice(0, 80) || fallback;
+}
+
+function safeResponseShape(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const partSummaries = Array.isArray(value.part_summaries) ? value.part_summaries.slice(0, 32).map((part) => ({
+    candidate_index: boundedInteger(Number(part?.candidate_index), 'KNOWLEDGE_PROVIDER_SHAPE_INVALID'),
+    part_index: boundedInteger(Number(part?.part_index), 'KNOWLEDGE_PROVIDER_SHAPE_INVALID'),
+    type: safeEnum(part?.type, 'UNKNOWN'),
+    thought: Boolean(part?.thought),
+    text_present: Boolean(part?.text_present),
+    text_length: boundedInteger(Number(part?.text_length ?? 0), 'KNOWLEDGE_PROVIDER_SHAPE_INVALID'),
+    ...(typeof part?.text_sha256 === 'string' && /^[a-f0-9]{64}$/i.test(part.text_sha256) ? { text_sha256: part.text_sha256.toLowerCase() } : {}),
+    ...(safeEnum(part?.mime_type) ? { mime_type: safeEnum(part.mime_type) } : {}),
+    json_looking: Boolean(part?.json_looking),
+    markdown_fence: Boolean(part?.markdown_fence),
+  })) : [];
+  return {
+    candidate_count: boundedInteger(Number(value.candidate_count ?? 0), 'KNOWLEDGE_PROVIDER_SHAPE_INVALID'),
+    content_part_count: boundedInteger(Number(value.content_part_count ?? partSummaries.length), 'KNOWLEDGE_PROVIDER_SHAPE_INVALID'),
+    final_text_part_count: boundedInteger(Number(value.final_text_part_count ?? 0), 'KNOWLEDGE_PROVIDER_SHAPE_INVALID'),
+    json_looking_final_part_count: boundedInteger(Number(value.json_looking_final_part_count ?? 0), 'KNOWLEDGE_PROVIDER_SHAPE_INVALID'),
+    multiple_final_json_payload_candidates: Boolean(value.multiple_final_json_payload_candidates),
+    concatenation_attempted: Boolean(value.concatenation_attempted),
+    canonical_payload_field: safeEnum(value.canonical_payload_field, 'UNKNOWN'),
+    ...(safeEnum(value.finish_reason) ? { finish_reason: safeEnum(value.finish_reason) } : {}),
+    part_summaries: partSummaries,
+  };
+}
+
+function safeParser(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return {
+    phase: safeEnum(value.phase, 'JSON_PARSE'),
+    classification: safeEnum(value.classification, 'UNKNOWN'),
+    markdown_fence_detected: Boolean(value.markdown_fence_detected),
+    leading_non_json_text: Boolean(value.leading_non_json_text),
+    trailing_non_json_text: Boolean(value.trailing_non_json_text),
+    json_encoded_string_candidate: Boolean(value.json_encoded_string_candidate),
+  };
 }
 
 function stage(value) {
@@ -119,7 +163,7 @@ export async function failKnowledgeGenerationRun({ database, tenantId, runId, er
   return result.rows[0];
 }
 
-export async function recordKnowledgeGenerationProviderTelemetry({ database, tenantId, runId, event, timestamp = new Date().toISOString(), httpStatus = null, elapsedMs = null, abortBeforeHttpResponse = null, networkErrorClass = null }) {
+export async function recordKnowledgeGenerationProviderTelemetry({ database, tenantId, runId, event, timestamp = new Date().toISOString(), httpStatus = null, elapsedMs = null, abortBeforeHttpResponse = null, networkErrorClass = null, responseShape = null, parser = null }) {
   const normalizedEvent = String(event ?? '').toLowerCase();
   if (!PROVIDER_EVENTS.has(normalizedEvent)) throw new KnowledgeGenerationPersistenceError('KNOWLEDGE_PROVIDER_EVENT_INVALID', 'Provider event is invalid');
   const payload = {};
@@ -141,6 +185,8 @@ export async function recordKnowledgeGenerationProviderTelemetry({ database, ten
     if (httpStatus !== null && httpStatus !== undefined) payload.provider_http_status = boundedInteger(Number(httpStatus), 'KNOWLEDGE_PROVIDER_STATUS_INVALID');
   }
   if (normalizedEvent === 'transport_error') payload.provider_transport_error_class = String(networkErrorClass ?? 'TRANSPORT_ERROR').slice(0, 64);
+  if (normalizedEvent === 'structured_response_shape') payload.structured_response_shape = safeResponseShape(responseShape);
+  if (normalizedEvent === 'structured_parse_result') payload.structured_parse_result = safeParser(parser);
   const result = await databaseQuery(database)(
     `UPDATE knowledge_generation_runs
         SET provider_telemetry = COALESCE(provider_telemetry, '{}'::jsonb) || $3::jsonb

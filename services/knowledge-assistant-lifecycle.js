@@ -91,9 +91,14 @@ async function generate({ database, provider, tenantId, requestedBy, targetType,
     try {
       runStage = generationStage;
       await advanceKnowledgeGenerationRun({ database: generationDatabase, tenantId, runId: run.id, stage: runStage, promptCharacterCount: prompt.length, sourceCount, elapsedMs: Date.now() - startedAt });
+      const persistProviderTelemetry = (event) => recordKnowledgeGenerationProviderTelemetry({
+        database: generationDatabase, tenantId, runId: run.id, event: event.event, timestamp: event.timestamp,
+        httpStatus: event.http_status, elapsedMs: event.elapsed_ms, abortBeforeHttpResponse: event.http_response_received === false,
+        networkErrorClass: event.classification, responseShape: event.response_shape, parser: event.parser,
+      });
       const output = targetType === 'RECOMMENDATION'
-        ? await provider.generateAssistantRecommendation({ prompt, runId: run.id, requestFingerprint: fingerprint, telemetry: (event) => recordKnowledgeGenerationProviderTelemetry({ database: generationDatabase, tenantId, runId: run.id, event: event.event, timestamp: event.timestamp, httpStatus: event.http_status, elapsedMs: event.elapsed_ms, abortBeforeHttpResponse: event.http_response_received === false, networkErrorClass: event.classification }) })
-        : await provider.generateAssistantConfiguration({ prompt, runId: run.id, requestFingerprint: fingerprint, telemetry: (event) => recordKnowledgeGenerationProviderTelemetry({ database: generationDatabase, tenantId, runId: run.id, event: event.event, timestamp: event.timestamp, httpStatus: event.http_status, elapsedMs: event.elapsed_ms, abortBeforeHttpResponse: event.http_response_received === false, networkErrorClass: event.classification }) });
+        ? await provider.generateAssistantRecommendation({ prompt, runId: run.id, requestFingerprint: fingerprint, telemetry: persistProviderTelemetry })
+        : await provider.generateAssistantConfiguration({ prompt, runId: run.id, requestFingerprint: fingerprint, telemetry: persistProviderTelemetry });
       runStage = 'PERSISTENCE';
       await advanceKnowledgeGenerationRun({ database: generationDatabase, tenantId, runId: run.id, stage: runStage, promptCharacterCount: prompt.length, sourceCount, elapsedMs: Date.now() - startedAt });
       await generationDatabase.query('BEGIN');

@@ -182,7 +182,13 @@ test('Gemini boundary telemetry records safe request and fulfilled status events
 
   await provider.generateAssistantRecommendation({ prompt: 'PRIVATE PROMPT SHOULD NOT LOG', runId: 'run-123', requestFingerprint: 'fingerprint-abcdef123456' });
 
-  assert.deepEqual(events.map((event) => event.event), ['request_started', 'http_status_received', 'fetch_fulfilled']);
+  assert.deepEqual(events.map((event) => event.event), [
+    'request_started',
+    'http_status_received',
+    'fetch_fulfilled',
+    'structured_response_shape',
+    'structured_parse_result',
+  ]);
   assert.equal(events[0].run_id, 'run-123');
   assert.equal(events[0].provider, 'GEMINI');
   assert.equal(events[0].model, 'gemini-3-flash-preview');
@@ -280,6 +286,34 @@ test('Gemini strips provider thinking parts before parsing structured Assistant 
   const output = await provider.generateAssistantConfiguration({ prompt: 'Approved profile and recommendation' });
 
   assert.deepEqual(output, { schema_version: 2, tone: 'Professional' });
+});
+
+test('Gemini emits safe structured response-shape telemetry without retaining final text', async () => {
+  const events = [];
+  const provider = createKnowledgeGenerationProvider({
+    env: { KNOWLEDGE_GENERATION_PROVIDER: 'GEMINI', GEMINI_API_KEY: 'test-key' },
+    telemetry: (event) => events.push(event),
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ candidates: [{
+        finishReason: 'STOP',
+        content: { parts: [
+          { thought: true, text: 'Private chain of thought' },
+          { text: '{"schema_version":2,"tone":"Professional"}' },
+        ] },
+      }] }),
+    }),
+  });
+
+  await provider.generateAssistantConfiguration({ prompt: 'Approved profile and recommendation' });
+
+  const shape = events.find((event) => event.event === 'structured_response_shape')?.response_shape;
+  assert.equal(shape.candidate_count, 1);
+  assert.equal(shape.part_summaries[0].thought, true);
+  assert.equal(shape.part_summaries[1].text_present, true);
+  assert.match(shape.part_summaries[1].text_sha256, /^[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(events).includes('Professional'), false);
+  assert.equal(JSON.stringify(events).includes('Private chain of thought'), false);
 });
 
 test('Business Profile uses bounded low thinking and an operation-specific timeout', async () => {
