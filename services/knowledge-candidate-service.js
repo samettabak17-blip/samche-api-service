@@ -113,6 +113,17 @@ export async function createImageKnowledgeCandidates({
       [tenantId, sourceId],
     );
     const assignedAssistantIds = (assignmentResult.rows ?? []).map((row) => row.assistant_id);
+    // A current source identity is only reusable as candidate evidence when it
+    // resolves exactly one explicitly assigned identity. Tenant scope is never
+    // an identity fallback.
+    const sourceIdentityResult = await client.query(
+      `SELECT business_identity_id FROM knowledge_source_business_identities
+        WHERE tenant_id = $1 AND source_id = $2
+        ORDER BY business_identity_id`,
+      [tenantId, sourceId],
+    );
+    const sourceIdentityIds = [...new Set((sourceIdentityResult.rows ?? []).map((row) => row.business_identity_id).filter(Boolean))];
+    const evidenceBusinessIdentityId = sourceIdentityIds.length === 1 ? sourceIdentityIds[0] : null;
     // Replace only legacy/unapproved raw image candidates for this exact extraction.
     // Approved knowledge remains immutable and is never silently regenerated.
     await client.query(
@@ -190,13 +201,15 @@ export async function createImageKnowledgeCandidates({
           `INSERT INTO knowledge_candidate_image_evidence (
              tenant_id, candidate_id, source_id, segment_id, extraction_version, extraction_hash,
              segment_order, role, role_confidence, normalized_text, evidence_kind, source_locator, semantic_category, canonical_text
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14)`,
+             , business_identity_id
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15)`,
           [tenantId, candidate.id, sourceId, segment.id, segment.extraction_version, segment.extraction_hash,
             segment.segment_order, segment.role, Number(segment.role_confidence), evidenceText,
             segment.id === business.id ? 'PRIMARY' : 'SUPPORTING_CONTEXT',
             segment.source_locator === null || segment.source_locator === undefined ? null : JSON.stringify(segment.source_locator),
             segment.id === business.id ? classification.category : null,
-            segment.id === business.id ? proposedContent : null]);
+            segment.id === business.id ? proposedContent : null,
+            evidenceBusinessIdentityId]);
       }
       results.push({ ...candidate, reused: false });
     }
@@ -356,12 +369,13 @@ export async function approveConversationKnowledgeCandidate({
 
   await db(database,
     `INSERT INTO knowledge_source_business_identities (tenant_id, source_id, business_identity_id)
-       SELECT DISTINCT $1, $3, identity_link.business_identity_id
+       SELECT DISTINCT $1, $3, COALESCE(evidence.business_identity_id, identity_link.business_identity_id)
          FROM knowledge_candidate_image_evidence evidence
-         JOIN knowledge_source_business_identities identity_link
+         LEFT JOIN knowledge_source_business_identities identity_link
            ON identity_link.tenant_id = evidence.tenant_id
           AND identity_link.source_id = evidence.source_id
         WHERE evidence.tenant_id = $1 AND evidence.candidate_id = $2
+          AND COALESCE(evidence.business_identity_id, identity_link.business_identity_id) IS NOT NULL
        ON CONFLICT DO NOTHING`,
     [tenantId, candidateId, source.id],
   );

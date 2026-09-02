@@ -13,8 +13,10 @@ import {
   dashboardButtonClass,
   DashboardButton,
   DashboardCheckbox,
+  DashboardField,
   DashboardFileInput,
   DashboardFormMessage,
+  DashboardSelect,
   DashboardTab,
 } from "../../components/ui/dashboard-control";
 import type {
@@ -293,6 +295,12 @@ export function KnowledgeIntelligencePage() {
   const [assistantId, setAssistantId] = useState("");
   const [sourceId, setSourceId] = useState("");
   const [selectedSourceId, setSelectedSourceId] = useState("");
+  const [sourceBusinessIdentityId, setSourceBusinessIdentityId] = useState("");
+  const [pendingSourceIdentityAssignment, setPendingSourceIdentityAssignment] = useState<{
+    sourceId: string;
+    identityId: string;
+    identityName: string;
+  } | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState("");
   const [imageCandidateOutcome, setImageCandidateOutcome] = useState<{
     sourceId: string;
@@ -419,7 +427,7 @@ export function KnowledgeIntelligencePage() {
   const businessIdentities = useQuery({
     queryKey: tenantKeys.businessIdentities(tenantId),
     queryFn: () => tenantApi.listBusinessIdentities(tenantId),
-    enabled: Boolean(tenantId && tab === "profiles"),
+    enabled: Boolean(tenantId && (tab === "profiles" || tab === "sources")),
   });
   const recommendations = useQuery({
     queryKey: tenantKeys.knowledgeRecommendations(tenantId, assistantId),
@@ -555,6 +563,15 @@ export function KnowledgeIntelligencePage() {
         targetAssistantId,
       ),
     onSuccess: refreshSources,
+  });
+  const assignSourceBusinessIdentity = useMutation({
+    mutationFn: ({ sourceId: targetSourceId, identityId }: { sourceId: string; identityId: string }) =>
+      tenantApi.assignKnowledgeSourceBusinessIdentity(tenantId, targetSourceId, identityId),
+    onSuccess: () => {
+      setPendingSourceIdentityAssignment(null);
+      setSourceBusinessIdentityId("");
+      refreshSources();
+    },
   });
   const reindexSource = useMutation({
     mutationFn: () =>
@@ -1501,6 +1518,7 @@ export function KnowledgeIntelligencePage() {
               unassignSource.error ??
               reindexSource.error ??
               archiveSource.error
+              ?? assignSourceBusinessIdentity.error
               ?? generateImageCandidates.error
             }
           />
@@ -1596,6 +1614,52 @@ export function KnowledgeIntelligencePage() {
                                 ? `${selectedSource.data.size_bytes} bytes`
                                 : "Text source"}
                             </p>
+                            <div className="mt-4 rounded-xl border border-line bg-elevated p-3">
+                              <DashboardField
+                                label="Business Identity"
+                                helper="Explicitly assign this source before using its business facts in a Business Profile."
+                              >
+                                <DashboardSelect
+                                  aria-label="Business Identity for this source"
+                                  value={sourceBusinessIdentityId}
+                                  onChange={(event) => setSourceBusinessIdentityId(event.target.value)}
+                                  disabled={!canManage || assignSourceBusinessIdentity.isPending}
+                                >
+                                  <option value="">
+                                    {(selectedSource.data.business_identities ?? []).length
+                                      ? `Current: ${(selectedSource.data.business_identities ?? []).map((identity) => identity.display_name).join(", ")}`
+                                      : "Not assigned"}
+                                  </option>
+                                  {(businessIdentities.data ?? []).map((identity) => (
+                                    <option key={identity.id} value={identity.id}>{identity.display_name}</option>
+                                  ))}
+                                </DashboardSelect>
+                              </DashboardField>
+                              {canManage && sourceBusinessIdentityId && (
+                                <DashboardButton
+                                  className="mt-3"
+                                  variant="outline"
+                                  onClick={() => {
+                                    const identity = (businessIdentities.data ?? []).find((item) => item.id === sourceBusinessIdentityId);
+                                    if (identity) setPendingSourceIdentityAssignment({ sourceId: selectedSource.data!.id, identityId: identity.id, identityName: identity.display_name });
+                                  }}
+                                >
+                                  {(selectedSource.data.business_identities ?? []).length ? "Change Business Identity" : "Assign Business Identity"}
+                                </DashboardButton>
+                              )}
+                              {pendingSourceIdentityAssignment?.sourceId === selectedSource.data.id && (
+                                <div role="alertdialog" aria-label="Confirm Business Identity assignment" className="mt-3 rounded-lg border border-amber-400/40 bg-amber-950/25 p-3 text-sm text-amber-100">
+                                  <p>Assign <strong>{selectedSource.data.original_filename ?? selectedSource.data.title}</strong> to <strong>{pendingSourceIdentityAssignment.identityName}</strong>?</p>
+                                  <p className="mt-1 text-xs text-amber-200">This is an explicit trusted provenance declaration. Existing approved candidate history will not be rewritten.</p>
+                                  <div className="mt-3 flex flex-wrap gap-2">
+                                    <DashboardButton variant="primary" disabled={assignSourceBusinessIdentity.isPending} onClick={() => assignSourceBusinessIdentity.mutate({ sourceId: pendingSourceIdentityAssignment.sourceId, identityId: pendingSourceIdentityAssignment.identityId })}>
+                                      {assignSourceBusinessIdentity.isPending ? "Assigning…" : "Confirm assignment"}
+                                    </DashboardButton>
+                                    <DashboardButton variant="secondary" disabled={assignSourceBusinessIdentity.isPending} onClick={() => setPendingSourceIdentityAssignment(null)}>Cancel</DashboardButton>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                             {isImageKnowledgeSource(selectedSource.data) && (
                               <div className="mt-3 rounded-lg border border-line bg-elevated p-3 text-xs text-stone-300">
                                 {selectedSource.data.processing_status === "READY" ? (

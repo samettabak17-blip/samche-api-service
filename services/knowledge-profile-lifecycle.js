@@ -43,7 +43,7 @@ async function loadBusinessProfileSourceScope({ database, tenantId, businessIden
   );
   if (!identity.rows[0]) throw new KnowledgeProfileLifecycleError('KNOWLEDGE_BUSINESS_IDENTITY_NOT_FOUND', 'Business Identity was not found');
   const sources = await database.query(
-    `SELECT source.id, source.title, source.content, source.content_hash,
+    `SELECT source.id, source.title, source.content, source.content_hash, source.source_type, source.mime_type,
             COALESCE((
               SELECT array_agg(DISTINCT identity_link.business_identity_id)
                 FROM (
@@ -61,15 +61,38 @@ async function loadBusinessProfileSourceScope({ database, tenantId, businessIden
                       ON provenance_identity.tenant_id = image_evidence.tenant_id
                      AND provenance_identity.source_id = image_evidence.source_id
                    WHERE candidate.tenant_id = source.tenant_id
+                     AND image_evidence.business_identity_id IS NULL
+                     AND (candidate.approved_source_id = source.id OR image_evidence.source_id = source.id)
+                  UNION
+                  SELECT image_evidence.business_identity_id
+                    FROM knowledge_candidates candidate
+                    JOIN knowledge_candidate_image_evidence image_evidence
+                      ON image_evidence.tenant_id = candidate.tenant_id
+                     AND image_evidence.candidate_id = candidate.id
+                   WHERE candidate.tenant_id = source.tenant_id
+                     AND image_evidence.business_identity_id IS NOT NULL
                      AND (candidate.approved_source_id = source.id OR image_evidence.source_id = source.id)
                   UNION
                   SELECT original_identity.business_identity_id
                     FROM knowledge_materialized_source_provenance provenance
+                    JOIN knowledge_candidate_image_evidence image_evidence
+                      ON image_evidence.tenant_id = provenance.tenant_id
+                     AND image_evidence.candidate_id = provenance.candidate_id
                     JOIN knowledge_source_business_identities original_identity
                       ON original_identity.tenant_id = provenance.tenant_id
                      AND original_identity.source_id = provenance.original_source_id
                    WHERE provenance.tenant_id = source.tenant_id
+                     AND image_evidence.business_identity_id IS NULL
                      AND provenance.materialized_source_id = source.id
+                  UNION
+                  SELECT image_evidence.business_identity_id
+                    FROM knowledge_materialized_source_provenance provenance
+                    JOIN knowledge_candidate_image_evidence image_evidence
+                      ON image_evidence.tenant_id = provenance.tenant_id
+                     AND image_evidence.candidate_id = provenance.candidate_id
+                   WHERE provenance.tenant_id = source.tenant_id
+                     AND provenance.materialized_source_id = source.id
+                     AND image_evidence.business_identity_id IS NOT NULL
                 ) AS identity_link
             ), ARRAY[]::uuid[]) AS trusted_identity_ids
        FROM knowledge_base_documents source
@@ -90,10 +113,23 @@ function trustedProvenance(scope, businessIdentityId) {
   const inherited = [];
   const conflicting = [];
   const unresolved = [];
+  const missingAssignments = [];
   for (const source of scope.sources) {
     const identities = uniqueTrustedIdentityIds(source);
     if (!identities.length) {
       unresolved.push(source);
+      if (source.source_type === 'CONVERSATION_CANDIDATE' || /^image\//i.test(String(source.mime_type ?? ''))) {
+        missingAssignments.push({
+          source_id: source.id,
+          source_title: source.title,
+          content_hash: source.content_hash ?? null,
+          detected_identity: 'Business Identity assignment required',
+          normalized_identity: null,
+          confidence: 0,
+          safe_evidence: 'This source has not been assigned to a Business Identity.',
+          resolution_origin: 'MISSING_SOURCE_ASSIGNMENT',
+        });
+      }
     } else if (identities.length === 1 && identities[0] === String(businessIdentityId)) {
       inherited.push({
         source_id: source.id,
@@ -118,7 +154,7 @@ function trustedProvenance(scope, businessIdentityId) {
       });
     }
   }
-  return { inherited, conflicting, unresolved };
+  return { inherited, conflicting, unresolved, missingAssignments };
 }
 
 async function resolveBusinessIdentityAnalysis({ database, provider, tenantId, businessIdentityId, scope }) {
@@ -128,6 +164,14 @@ async function resolveBusinessIdentityAnalysis({ database, provider, tenantId, b
       status: 'IDENTITY_RESOLUTION_REQUIRED',
       identities: [],
       evidence: [...provenance.inherited, ...provenance.conflicting],
+      persistable_evidence: [],
+    };
+  }
+  if (provenance.missingAssignments.length) {
+    return {
+      status: 'IDENTITY_RESOLUTION_REQUIRED',
+      identities: [],
+      evidence: [...provenance.inherited, ...provenance.missingAssignments],
       persistable_evidence: [],
     };
   }

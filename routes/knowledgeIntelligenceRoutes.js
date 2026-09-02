@@ -50,6 +50,7 @@ import { getKnowledgeOverview, KnowledgeOverviewError } from '../services/knowle
 import { createOpenAIEmbedder } from '../services/knowledge-intelligence-service.js';
 import { KnowledgeRetrievalPreviewError, previewKnowledgeRetrieval } from '../services/knowledge-retrieval-preview.js';
 import { normalizeBusinessIdentity } from '../services/business-identity-service.js';
+import { assignKnowledgeSourceBusinessIdentity, KnowledgeSourceBusinessIdentityError } from '../services/knowledge-source-business-identity-service.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -74,7 +75,7 @@ function sourceId(req, res) {
 
 function safeError(res, error) {
   const code = error?.code;
-  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof ImageKnowledgeSemanticError || error instanceof KnowledgeSemanticGenerationJobError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError || error instanceof KnowledgeGenerationError || error instanceof KnowledgeProfileLifecycleError || error instanceof KnowledgeAssistantLifecycleError || error instanceof KnowledgeOverviewError || error instanceof KnowledgeRetrievalPreviewError) {
+  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof ImageKnowledgeSemanticError || error instanceof KnowledgeSemanticGenerationJobError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError || error instanceof KnowledgeGenerationError || error instanceof KnowledgeProfileLifecycleError || error instanceof KnowledgeAssistantLifecycleError || error instanceof KnowledgeOverviewError || error instanceof KnowledgeRetrievalPreviewError || error instanceof KnowledgeSourceBusinessIdentityError) {
     const status = code === 'IDENTITY_RESOLUTION_REQUIRED' ? 409 : /NOT_FOUND|INVALID|EMPTY|UNSUPPORTED|MISMATCH|REQUIRED/.test(code) ? 400 : 503;
     return res.status(status).json({ error: error.message, code, ...(error.details ? { details: error.details } : {}) });
   }
@@ -179,7 +180,21 @@ router.get('/:tenantId/knowledge-intelligence/sources/:sourceId', requireTenantA
               (SELECT COUNT(*)::integer FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = d.tenant_id AND segment.source_id = d.id AND segment.is_current = TRUE) AS image_segment_count,
               COALESCE((SELECT json_object_agg(role, role_count) FROM (SELECT segment.role, COUNT(*)::integer AS role_count FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = d.tenant_id AND segment.source_id = d.id AND segment.is_current = TRUE GROUP BY segment.role) image_roles), '{}'::json) AS image_role_summary,
               d.created_at, d.updated_at, d.processed_at, d.indexed_at,
-              COALESCE(json_agg(a.assistant_id) FILTER (WHERE a.assistant_id IS NOT NULL), '[]'::json) AS assistant_ids
+              COALESCE(json_agg(a.assistant_id) FILTER (WHERE a.assistant_id IS NOT NULL), '[]'::json) AS assistant_ids,
+              COALESCE((
+                SELECT json_agg(json_build_object(
+                  'id', identity.id,
+                  'display_name', identity.display_name,
+                  'assignment_origin', source_identity.assignment_origin,
+                  'assigned_at', source_identity.assigned_at
+                ) ORDER BY identity.display_name)
+                  FROM knowledge_source_business_identities source_identity
+                  JOIN business_identities identity
+                    ON identity.id = source_identity.business_identity_id
+                   AND identity.tenant_id = source_identity.tenant_id
+                 WHERE source_identity.tenant_id = d.tenant_id
+                   AND source_identity.source_id = d.id
+              ), '[]'::json) AS business_identities
          FROM knowledge_base_documents d
          LEFT JOIN knowledge_source_assistants a
            ON a.tenant_id = d.tenant_id AND a.source_id = d.id
@@ -189,6 +204,27 @@ router.get('/:tenantId/knowledge-intelligence/sources/:sourceId', requireTenantA
     );
     if (!result.rowCount) return res.status(404).json({ error: 'Knowledge source not found' });
     return res.json({ source: result.rows[0] });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.put('/:tenantId/knowledge-intelligence/sources/:sourceId/business-identity', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  const id = sourceId(req, res);
+  if (!tenantId || !id) return;
+  if (req.body?.confirmed !== true) {
+    return res.status(400).json({ error: 'Confirm the Business Identity assignment before saving', code: 'KNOWLEDGE_SOURCE_IDENTITY_CONFIRMATION_REQUIRED' });
+  }
+  try {
+    const assignment = await assignKnowledgeSourceBusinessIdentity({
+      database: pool,
+      tenantId,
+      sourceId: id,
+      businessIdentityId: req.body?.business_identity_id,
+      assignedBy: req.user.user_id,
+    });
+    return res.json({ assignment });
   } catch (error) {
     return safeError(res, error);
   }

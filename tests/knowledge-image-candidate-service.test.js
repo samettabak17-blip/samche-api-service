@@ -28,13 +28,14 @@ function rows() {
   ];
 }
 
-function database({ segmentRows = rows(), existing = null, failOnEvidence = false, assistantAssignments = [], allowLegacyRegeneration = false } = {}) {
+function database({ segmentRows = rows(), existing = null, failOnEvidence = false, assistantAssignments = [], sourceBusinessIdentities = [], allowLegacyRegeneration = false } = {}) {
   const calls = [];
   const client = {
     async query(sql, params = []) {
       calls.push({ sql, params });
       if (/FROM knowledge_source_extraction_segments/i.test(sql)) return { rows: segmentRows };
       if (/FROM knowledge_source_assistants/i.test(sql)) return { rows: assistantAssignments };
+      if (/FROM knowledge_source_business_identities/i.test(sql)) return { rows: sourceBusinessIdentities.map((business_identity_id) => ({ business_identity_id })) };
       if (/SELECT (?:candidate\.)?id, (?:candidate\.)?status, (?:candidate\.)?candidate_fingerprint/i.test(sql)) return { rows: existing ? [existing] : [] };
       if (/INSERT INTO knowledge_candidates/i.test(sql)) return existing && !allowLegacyRegeneration ? { rows: [] } : { rows: [{ id: 'candidate-1', status: 'NEEDS_REVIEW', pii_redaction_status: 'REDACTED', candidate_fingerprint: params[6] }] };
       if (/INSERT INTO assistant_knowledge_recommendations/i.test(sql)) return { rows: [{ id: 'recommendation-1', status: 'NEEDS_REVIEW' }] };
@@ -62,6 +63,22 @@ test('creates a redacted NEEDS_REVIEW candidate from BUSINESS with adjacent CUST
   const sourceScope = db.calls.find(({ sql }) => /FROM knowledge_source_extraction_segments/i.test(sql));
   assert.match(sourceScope.sql, /knowledge_source_assistants/i);
   assert.equal(sourceScope.params[3], assistantId);
+});
+
+test('persists the explicit source Business Identity as immutable candidate evidence provenance', async () => {
+  const identityId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+  const db = database({ sourceBusinessIdentities: [identityId] });
+  await createImageKnowledgeCandidates({ database: db, tenantId, sourceId, extractionHash, semanticClassifier });
+  const evidence = db.calls.filter(({ sql }) => /INSERT INTO knowledge_candidate_image_evidence/i.test(sql));
+  assert.equal(evidence.length, 3);
+  assert.ok(evidence.every(({ params }) => params[14] === identityId));
+});
+
+test('does not invent evidence Business Identity when a source has no explicit or has conflicting assignments', async () => {
+  const db = database({ sourceBusinessIdentities: [] });
+  await createImageKnowledgeCandidates({ database: db, tenantId, sourceId, extractionHash, semanticClassifier });
+  const evidence = db.calls.find(({ sql }) => /INSERT INTO knowledge_candidate_image_evidence/i.test(sql));
+  assert.equal(evidence.params[14], null);
 });
 
 test('CUSTOMER and UNKNOWN segments alone do not create candidates', async () => {

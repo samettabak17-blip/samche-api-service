@@ -30,6 +30,7 @@ vi.mock("../dashboard/dashboard-api", async (importOriginal) => {
       createManualKnowledgeSource: vi.fn(),
       assignKnowledgeSource: vi.fn(),
       unassignKnowledgeSource: vi.fn(),
+      assignKnowledgeSourceBusinessIdentity: vi.fn(),
       reindexKnowledgeSource: vi.fn(),
       generateImageKnowledgeCandidates: vi.fn(),
       getImageKnowledgeGenerationJob: vi.fn(),
@@ -122,6 +123,11 @@ beforeEach(() => {
   mockedApi.listChannels.mockResolvedValue([]);
   mockedApi.listKnowledgeSources.mockResolvedValue([]);
   mockedApi.assignKnowledgeSource.mockResolvedValue(undefined);
+  mockedApi.assignKnowledgeSourceBusinessIdentity.mockResolvedValue({
+    source_id: "source-image",
+    business_identity: { id: "identity-meridian", display_name: "Meridian Arc Technologies LLC", normalized_identity: "meridian arc technologies", status: "ACTIVE" },
+    changed: true,
+  });
   mockedApi.generateImageKnowledgeCandidates.mockResolvedValue({
     candidates: [],
     reused: false,
@@ -133,6 +139,27 @@ beforeEach(() => {
   mockedApi.listBusinessProfiles.mockResolvedValue([]);
   mockedApi.listKnowledgeRecommendations.mockResolvedValue([]);
   mockedApi.listAssistantConfigurations.mockResolvedValue([]);
+});
+
+it("requires an explicit confirmation before assigning a source to a Business Identity", async () => {
+  mockedApi.listKnowledgeSources.mockResolvedValue([{
+    id: "source-image", title: "event.png", source_type: "DOCUMENT", mime_type: "image/png", processing_status: "READY", indexing_status: "DISABLED", enabled: true,
+  }]);
+  mockedApi.getKnowledgeSource.mockResolvedValue({
+    id: "source-image", title: "event.png", source_type: "DOCUMENT", original_filename: "event.png", mime_type: "image/png", processing_status: "READY", indexing_status: "DISABLED", enabled: true, assistant_ids: [], business_identities: [],
+  });
+  mockedApi.listBusinessIdentities.mockResolvedValue([{
+    id: "identity-meridian", display_name: "Meridian Arc Technologies LLC", normalized_identity: "meridian arc technologies", status: "ACTIVE",
+  }]);
+  renderPage(true, "/app/tenant-a/knowledge-base/sources");
+  fireEvent.click(await screen.findByRole("button", { name: "View event.png" }));
+  const identitySelect = await screen.findByRole("combobox", { name: "Business Identity for this source" });
+  fireEvent.change(identitySelect, { target: { value: "identity-meridian" } });
+  fireEvent.click(screen.getByRole("button", { name: "Assign Business Identity" }));
+  expect(screen.getByRole("alertdialog", { name: "Confirm Business Identity assignment" })).toBeVisible();
+  expect(mockedApi.assignKnowledgeSourceBusinessIdentity).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Confirm assignment" }));
+  await waitFor(() => expect(mockedApi.assignKnowledgeSourceBusinessIdentity).toHaveBeenCalledWith("tenant-a", "source-image", "identity-meridian"));
 });
 
 it("requires a Business Identity and explicit READY source scope before generation", async () => {

@@ -49,6 +49,22 @@ test('does not inherit a Business Identity from tenant scope when canonical prov
   assert.equal(result.evidence[0].resolution_origin, 'CONFLICTING_PROVENANCE');
 });
 
+test('reports a missing explicit source assignment for canonical image facts instead of weakening provenance with text inference', async () => {
+  const businessIdentityId = '55555555-5555-4555-8555-555555555555';
+  let providerCalls = 0;
+  const database = { query: async (sql) => {
+    if (/FROM business_identities/i.test(sql)) return { rows: [{ id: businessIdentityId, display_name: 'Meridian Arc Technologies LLC', normalized_identity: 'meridian arc technologies' }] };
+    if (/FROM knowledge_base_documents/i.test(sql)) return { rows: [{ id: '11111111-1111-4111-8111-111111111111', title: 'Canonical image fact', content: 'Corporate events are available.', content_hash: 'a'.repeat(64), source_type: 'CONVERSATION_CANDIDATE', mime_type: 'text/plain', trusted_identity_ids: [] }] };
+    throw new Error(`unexpected SQL ${sql}`);
+  } };
+  const provider = { provider: 'GEMINI', model: 'gemini-3-flash-preview', generateBusinessIdentityAnalysis: async () => { providerCalls += 1; return { detected_identity: 'Meridian Arc Technologies LLC', confidence: 1, evidence: 'text only' }; } };
+  const result = await analyzeBusinessProfileSourceScope({ database, provider, tenantId, businessIdentityId, sourceIds: ['11111111-1111-4111-8111-111111111111'] });
+  assert.equal(result.status, 'IDENTITY_RESOLUTION_REQUIRED');
+  assert.equal(providerCalls, 0);
+  assert.equal(result.evidence[0].resolution_origin, 'MISSING_SOURCE_ASSIGNMENT');
+  assert.match(result.evidence[0].safe_evidence, /has not been assigned/i);
+});
+
 test('generates a review-only Business Profile from an explicit resolved source scope with exact provenance', async () => {
   const calls = [];
   const database = { query: async (sql, params = []) => {
