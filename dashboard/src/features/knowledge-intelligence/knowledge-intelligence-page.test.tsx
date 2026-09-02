@@ -990,6 +990,32 @@ it("renders redacted image BUSINESS evidence and CUSTOMER context without treati
   expect(screen.getByRole("button", { name: "Reject candidate" })).toBeVisible();
 });
 
+it("shows the stable safe candidate-approval failure instead of a generic source-operation error", async () => {
+  mockedApi.listKnowledgeCandidates.mockResolvedValue([
+    {
+      id: "image-candidate-approval-failure",
+      candidate_type: "POLICY",
+      proposed_title: "Venue capability",
+      proposed_content: "The company works with event venues.",
+      status: "NEEDS_REVIEW",
+      pii_redaction_status: "PASSED",
+    },
+  ]);
+  mockedApi.getKnowledgeCandidateEvidence.mockResolvedValue([]);
+  mockedApi.approveKnowledgeCandidate.mockRejectedValue(
+    new ApiError(503, "Knowledge candidate approval could not be completed safely", {
+      code: "KNOWLEDGE_CANDIDATE_APPROVAL_FAILED",
+    }),
+  );
+
+  renderPage(true, "/app/tenant-a/knowledge-base/candidates");
+  fireEvent.click(await screen.findByRole("button", { name: "Review Venue capability" }));
+  fireEvent.click(screen.getByRole("button", { name: "Approve candidate" }));
+
+  expect(await screen.findByText("Knowledge candidate approval could not be completed safely")).toBeVisible();
+  expect(screen.queryByText("Knowledge source operation failed")).not.toBeInTheDocument();
+});
+
 it("renders candidate review and gap lifecycle controls", async () => {
   mockedApi.listKnowledgeCandidates.mockResolvedValue([
     {

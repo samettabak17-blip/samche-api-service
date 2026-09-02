@@ -332,64 +332,97 @@ export async function approveConversationKnowledgeCandidate({
   requireUuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
   requireUuid(candidateId, 'KNOWLEDGE_CANDIDATE_INVALID');
   requireUuid(reviewedBy, 'KNOWLEDGE_REVIEWER_INVALID');
+  try {
+    return await candidateTransaction(database, async (client) => {
+      const candidateResult = await db(client,
+        `SELECT id, assistant_id, proposed_title, proposed_content, status, pii_redaction_status, image_semantic_version
+           FROM knowledge_candidates
+          WHERE id = $1 AND tenant_id = $2
+          FOR UPDATE`,
+        [candidateId, tenantId]);
+      const candidate = candidateResult.rows[0];
+      if (!candidate) throw new KnowledgeCandidateError('KNOWLEDGE_CANDIDATE_NOT_FOUND', 'Knowledge candidate was not found');
+      if (!['NEEDS_REVIEW', 'DRAFT'].includes(candidate.status) || candidate.pii_redaction_status === 'REJECTED') {
+        throw new KnowledgeCandidateError('KNOWLEDGE_CANDIDATE_NOT_APPROVABLE', 'Knowledge candidate cannot be approved');
+      }
 
-  const candidateResult = await db(database,
-    `SELECT id, assistant_id, proposed_title, proposed_content, status, pii_redaction_status
-       FROM knowledge_candidates
-      WHERE id = $1 AND tenant_id = $2
-      FOR UPDATE`,
-    [candidateId, tenantId]);
-  const candidate = candidateResult.rows[0];
-  if (!candidate) throw new KnowledgeCandidateError('KNOWLEDGE_CANDIDATE_NOT_FOUND', 'Knowledge candidate was not found');
-  if (!['NEEDS_REVIEW', 'DRAFT'].includes(candidate.status) || candidate.pii_redaction_status === 'REJECTED') {
-    throw new KnowledgeCandidateError('KNOWLEDGE_CANDIDATE_NOT_APPROVABLE', 'Knowledge candidate cannot be approved');
+      // Fresh image-derived facts require their own trusted BUSINESS evidence
+      // chain. Customer context can remain review context, never canonical
+      // business truth; tenant membership is deliberately not an identity
+      // fallback.
+      if (candidate.image_semantic_version) {
+        const provenance = await db(client,
+          `SELECT COUNT(*) FILTER (
+                    WHERE evidence.role = 'BUSINESS' AND evidence.evidence_kind = 'PRIMARY'
+                  )::integer AS primary_business_evidence_count,
+                  COUNT(DISTINCT COALESCE(evidence.business_identity_id, identity_link.business_identity_id)) FILTER (
+                    WHERE evidence.role = 'BUSINESS'
+                      AND evidence.evidence_kind = 'PRIMARY'
+                      AND COALESCE(evidence.business_identity_id, identity_link.business_identity_id) IS NOT NULL
+                  )::integer AS trusted_identity_count
+             FROM knowledge_candidate_image_evidence evidence
+             LEFT JOIN knowledge_source_business_identities identity_link
+               ON identity_link.tenant_id = evidence.tenant_id
+              AND identity_link.source_id = evidence.source_id
+            WHERE evidence.tenant_id = $1 AND evidence.candidate_id = $2`,
+          [tenantId, candidateId],
+        );
+        const evidence = provenance.rows[0] ?? {};
+        if (Number(evidence.primary_business_evidence_count ?? 0) < 1 || Number(evidence.trusted_identity_count ?? 0) !== 1) {
+          throw new KnowledgeCandidateError('KNOWLEDGE_CANDIDATE_IMAGE_PROVENANCE_INVALID', 'Knowledge candidate does not have one trusted Business Identity evidence chain');
+        }
+      }
+
+      const source = await createManualKnowledgeSource({
+        database: client,
+        tenantId,
+        uploadedBy: reviewedBy,
+        title: candidate.proposed_title,
+        content: candidate.proposed_content,
+        assistantIds: candidate.assistant_id ? [candidate.assistant_id] : [],
+        sourceType: 'CONVERSATION_CANDIDATE',
+      });
+
+      // A materialized canonical fact inherits identity only through its own
+      // image-evidence source chain. Tenant membership alone is never authority.
+      await db(client,
+        `INSERT INTO knowledge_materialized_source_provenance
+           (tenant_id, materialized_source_id, candidate_id, original_source_id)
+           SELECT DISTINCT $1, $3, evidence.candidate_id, evidence.source_id
+             FROM knowledge_candidate_image_evidence evidence
+            WHERE evidence.tenant_id = $1 AND evidence.candidate_id = $2
+           ON CONFLICT DO NOTHING`,
+        [tenantId, candidateId, source.id],
+      );
+
+      await db(client,
+        `INSERT INTO knowledge_source_business_identities (tenant_id, source_id, business_identity_id)
+           SELECT DISTINCT $1, $3, COALESCE(evidence.business_identity_id, identity_link.business_identity_id)
+             FROM knowledge_candidate_image_evidence evidence
+             LEFT JOIN knowledge_source_business_identities identity_link
+               ON identity_link.tenant_id = evidence.tenant_id
+              AND identity_link.source_id = evidence.source_id
+            WHERE evidence.tenant_id = $1 AND evidence.candidate_id = $2
+              AND COALESCE(evidence.business_identity_id, identity_link.business_identity_id) IS NOT NULL
+           ON CONFLICT DO NOTHING`,
+        [tenantId, candidateId, source.id],
+      );
+
+      await db(client,
+        `UPDATE knowledge_candidates
+            SET status = 'APPROVED',
+                reviewed_by = $3,
+                reviewed_at = CURRENT_TIMESTAMP,
+                approved_source_id = $4,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1 AND tenant_id = $2`,
+        [candidateId, tenantId, reviewedBy, source.id]);
+      return source;
+    });
+  } catch (error) {
+    if (error instanceof KnowledgeCandidateError || error instanceof KnowledgeSourceServiceError) throw error;
+    throw new KnowledgeCandidateError('KNOWLEDGE_CANDIDATE_APPROVAL_FAILED', 'Knowledge candidate approval could not be completed safely');
   }
-
-  const source = await createManualKnowledgeSource({
-    database,
-    tenantId,
-    uploadedBy: reviewedBy,
-    title: candidate.proposed_title,
-    content: candidate.proposed_content,
-    assistantIds: candidate.assistant_id ? [candidate.assistant_id] : [],
-    sourceType: 'CONVERSATION_CANDIDATE',
-  });
-
-  // A materialized canonical fact inherits identity only through its own
-  // image-evidence source chain. Tenant membership alone is never authority.
-  await db(database,
-    `INSERT INTO knowledge_materialized_source_provenance
-       (tenant_id, materialized_source_id, candidate_id, original_source_id)
-       SELECT DISTINCT $1, $3, evidence.candidate_id, evidence.source_id
-         FROM knowledge_candidate_image_evidence evidence
-        WHERE evidence.tenant_id = $1 AND evidence.candidate_id = $2
-       ON CONFLICT DO NOTHING`,
-    [tenantId, candidateId, source.id],
-  );
-
-  await db(database,
-    `INSERT INTO knowledge_source_business_identities (tenant_id, source_id, business_identity_id)
-       SELECT DISTINCT $1, $3, COALESCE(evidence.business_identity_id, identity_link.business_identity_id)
-         FROM knowledge_candidate_image_evidence evidence
-         LEFT JOIN knowledge_source_business_identities identity_link
-           ON identity_link.tenant_id = evidence.tenant_id
-          AND identity_link.source_id = evidence.source_id
-        WHERE evidence.tenant_id = $1 AND evidence.candidate_id = $2
-          AND COALESCE(evidence.business_identity_id, identity_link.business_identity_id) IS NOT NULL
-       ON CONFLICT DO NOTHING`,
-    [tenantId, candidateId, source.id],
-  );
-
-  await db(database,
-    `UPDATE knowledge_candidates
-        SET status = 'APPROVED',
-            reviewed_by = $3,
-            reviewed_at = CURRENT_TIMESTAMP,
-            approved_source_id = $4,
-            updated_at = CURRENT_TIMESTAMP
-      WHERE id = $1 AND tenant_id = $2`,
-    [candidateId, tenantId, reviewedBy, source.id]);
-  return source;
 }
 
 export async function rejectConversationKnowledgeCandidate({ database, tenantId, candidateId, reviewedBy }) {
