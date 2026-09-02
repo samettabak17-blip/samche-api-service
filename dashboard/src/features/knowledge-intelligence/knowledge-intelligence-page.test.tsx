@@ -58,6 +58,7 @@ vi.mock("../dashboard/dashboard-api", async (importOriginal) => {
       rollbackBusinessProfile: vi.fn(),
       reviewRecommendation: vi.fn(),
       generateAssistantConfiguration: vi.fn(),
+      getAssistantConfigurationGenerationJob: vi.fn(),
       updateAssistantConfiguration: vi.fn(),
       reviewAssistantConfiguration: vi.fn(),
       activateAssistantConfiguration: vi.fn(),
@@ -1298,7 +1299,7 @@ it("keeps recommendation generation review-only and exposes a safe retryable tim
   );
   fireEvent.click(screen.getByRole("button", { name: "Generate recommendation" }));
 
-  expect(await screen.findByText("Recommendation generation could not be completed safely. You can retry.")).toBeVisible();
+  expect(await screen.findByText("Recommendation generation failed. You can retry.")).toBeVisible();
   expect(screen.getByRole("button", { name: "Generate recommendation" })).toBeEnabled();
   expect(mockedApi.listAssistantConfigurations).toHaveBeenCalledWith("tenant-a", "assistant-a");
 });
@@ -1351,14 +1352,7 @@ it("keeps the Configuration page rendered when generation returns an unusable su
       status: "APPROVED",
     },
   ]);
-  mockedApi.generateAssistantConfiguration.mockResolvedValue({
-    configuration: {
-      id: "configuration-new",
-      status: "NEEDS_REVIEW",
-    } as never,
-    reused: false,
-    run_id: "configuration-run",
-  });
+  mockedApi.generateAssistantConfiguration.mockResolvedValue({} as never);
 
   renderPage(true, "/app/tenant-a/knowledge-base/configurations");
   const assistantSelect = await screen.findByRole("combobox", { name: "Assistant" });
@@ -1367,7 +1361,7 @@ it("keeps the Configuration page rendered when generation returns an unusable su
   await waitFor(() => expect(assistantSelect).toHaveValue("assistant-a"));
   fireEvent.click(await screen.findByRole("button", { name: "Generate configuration" }));
 
-  expect(await screen.findByText("Configuration generation returned an unusable result. Refresh and retry.")).toBeVisible();
+  expect(await screen.findByText("Configuration generation returned an unusable job response. Refresh and retry.")).toBeVisible();
   expect(screen.getByRole("heading", { name: "Configurations" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "Review configuration" })).not.toBeInTheDocument();
 });
@@ -1453,16 +1447,18 @@ it("surfaces and reviews the exact generated Configuration before refetch", asyn
     },
   ]);
   mockedApi.generateAssistantConfiguration.mockResolvedValue({
-    configuration: {
-      id: "configuration-new",
-      status: "NEEDS_REVIEW",
-      configuration_data: { assistant_instructions: "Use approved facts." },
-      source_profile_version_id: "profile-active",
-      source_recommendation_id: "recommendation-approved",
-    },
+    job: { id: "configuration-job", status: "PENDING", attempts: 0 },
     reused: false,
-    run_id: "configuration-run",
   });
+  mockedApi.getAssistantConfigurationGenerationJob.mockResolvedValue({
+    id: "configuration-job", status: "READY", attempts: 1,
+    metadata: { configuration_id: "configuration-new", configuration_status: "NEEDS_REVIEW" },
+  });
+  mockedApi.listAssistantConfigurations.mockResolvedValue([{
+    id: "configuration-new", status: "NEEDS_REVIEW",
+    configuration_data: { assistant_instructions: "Use approved facts." },
+    source_profile_version_id: "profile-active", source_recommendation_id: "recommendation-approved",
+  }]);
 
   renderPage(true, "/app/tenant-a/knowledge-base/configurations");
   const assistantSelect = await screen.findByRole("combobox", { name: "Assistant" });
@@ -1471,13 +1467,11 @@ it("surfaces and reviews the exact generated Configuration before refetch", asyn
   await waitFor(() => expect(assistantSelect).toHaveValue("assistant-a"));
   fireEvent.click(await screen.findByRole("button", { name: "Generate configuration" }));
 
-  expect(await screen.findByText("Assistant Configuration generated")).toBeVisible();
-  expect(screen.getByText(/Configuration configur · NEEDS_REVIEW · NOT ACTIVE/)).toBeVisible();
+  expect(await screen.findByText("Configuration generated successfully.")).toBeVisible();
+  expect(await screen.findByText("Configuration configur")).toBeVisible();
+  expect(screen.getByText("NEEDS_REVIEW")).toBeVisible();
   expect(screen.getByRole("heading", { name: "Configurations" })).toBeVisible();
-  const reviewButton = screen.getByRole("button", { name: "Review configuration" });
-  expect(reviewButton).not.toBeDisabled();
-  fireEvent.click(reviewButton);
-  expect(screen.getByRole("region", { name: "Configuration review" })).toBeVisible();
+  expect(await screen.findByRole("button", { name: "Approve" })).toBeVisible();
   expect(mockedApi.reviewAssistantConfiguration).not.toHaveBeenCalled();
   expect(mockedApi.activateAssistantConfiguration).not.toHaveBeenCalled();
 });

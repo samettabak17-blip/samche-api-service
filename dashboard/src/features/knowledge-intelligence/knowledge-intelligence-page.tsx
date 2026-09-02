@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useReducer, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   EmptyState,
@@ -24,11 +24,15 @@ import type {
   BusinessIdentityScopeAnalysis,
   BusinessProfileGenerationResult,
   BusinessProfileVersion,
-  ConfigurationGenerationResult,
   KnowledgeRecommendation,
 } from "../../types/api";
 import { tenantApi, tenantKeys } from "../dashboard/dashboard-api";
 import { useTenant } from "../tenants/tenant-context";
+import {
+  initialRecommendationGenerationState,
+  normalizeRecommendationGenerationJob,
+  recommendationGenerationReducer,
+} from "./recommendation-generation-state";
 
 const tabs = [
   ["overview", "Overview"],
@@ -40,12 +44,25 @@ const tabs = [
   ["retrieval", "Retrieval Test"],
 ] as const;
 
+function recommendationData(row: KnowledgeRecommendation): Record<string, unknown> {
+  return row.recommendation_data && typeof row.recommendation_data === "object" && !Array.isArray(row.recommendation_data)
+    ? row.recommendation_data
+    : {};
+}
+
 function conversationRecommendationGuidance(row: KnowledgeRecommendation) {
-  const guidance = row.recommendation_data.qualification_guidance;
+  const guidance = recommendationData(row).qualification_guidance;
   if (!Array.isArray(guidance)) return [];
   return guidance.filter(
     (item): item is string => typeof item === "string" && item.trim().length > 0,
   );
+}
+
+function recommendationOriginLabel(row: KnowledgeRecommendation) {
+  if (isConversationBehaviorRecommendation(row)) return "Conversation behavior recommendation";
+  return typeof row.generation_run_id === "string" && row.generation_run_id
+    ? "Profile-derived recommendation"
+    : `Recommendation ${row.id.slice(0, 8)}`;
 }
 
 function isConversationBehaviorRecommendation(row: KnowledgeRecommendation) {
@@ -68,6 +85,12 @@ const routeForTab: Record<string, string> = {
 };
 const profileScopeKey = (businessIdentityId: string, sourceIds: string[]) =>
   JSON.stringify({ businessIdentityId, sourceIds: [...sourceIds].sort() });
+const recommendationGenerationStorageKey = (tenantId: string, assistantId: string, profileVersionId: string) =>
+  `samche:recommendation-generation:${tenantId}:${assistantId}:${profileVersionId}`;
+const configurationGenerationStorageKey = (tenantId: string, assistantId: string) =>
+  `samche:configuration-generation:${tenantId}:${assistantId}`;
+const activeRecommendationGenerationPhase = (phase: string) =>
+  phase === "ENQUEUEING" || phase === "PENDING" || phase === "PROCESSING";
 const hasRuntimeAssistantIdentity = (data: Record<string, unknown> | null | undefined) =>
   typeof data?.assistant_identity === "string" && Boolean(data.assistant_identity.trim());
 const hasRuntimeCompanyIdentity = (data: Record<string, unknown> | null | undefined) =>
@@ -331,18 +354,17 @@ export function KnowledgeIntelligencePage() {
   } | null>(null);
   const [configurationProfileVersionId, setConfigurationProfileVersionId] =
     useState("");
-  const [recommendationGenerationJobId, setRecommendationGenerationJobId] = useState<string | null>(null);
-  const [recommendationGenerationFailure, setRecommendationGenerationFailure] = useState<string | null>(null);
+  const [recommendationGeneration, dispatchRecommendationGeneration] = useReducer(
+    recommendationGenerationReducer,
+    initialRecommendationGenerationState,
+  );
   const [selectedRecommendationId, setSelectedRecommendationId] = useState<string | null>(null);
   const [imageGenerationSourceId, setImageGenerationSourceId] = useState<string | null>(null);
-  const [configurationTerminal, setConfigurationTerminal] = useState<{
-    scope: string;
-    result: ConfigurationGenerationResult;
-  } | null>(null);
-  const [configurationTerminalFailure, setConfigurationTerminalFailure] = useState<{
-    scope: string;
-    message: string;
-  } | null>(null);
+  const [configurationGeneration, dispatchConfigurationGeneration] = useReducer(
+    recommendationGenerationReducer,
+    initialRecommendationGenerationState,
+  );
+  const [configurationGenerationScope, setConfigurationGenerationScope] = useState<string | null>(null);
   const [selectedConfigurationId, setSelectedConfigurationId] = useState<string | null>(null);
   const [editor, setEditor] = useState<{
     kind: "profile" | "configuration";
@@ -351,13 +373,37 @@ export function KnowledgeIntelligencePage() {
   } | null>(null);
   const queryClient = useQueryClient();
   useEffect(() => {
-    setRecommendationGenerationJobId(null);
-    setRecommendationGenerationFailure(null);
+    dispatchRecommendationGeneration({ type: "RESET" });
+    if (!tenantId || !assistantId || !configurationProfileVersionId) return;
+    try {
+      const serialized = window.sessionStorage.getItem(
+        recommendationGenerationStorageKey(tenantId, assistantId, configurationProfileVersionId),
+      );
+      const job = normalizeRecommendationGenerationJob(serialized ? JSON.parse(serialized) : null);
+      if (job && ["PENDING", "PROCESSING"].includes(job.status)) {
+        dispatchRecommendationGeneration({ type: "ACCEPTED", job, reused: false });
+      }
+    } catch {
+      // A stale browser cache is non-authoritative and must never break the page.
+    }
     setSelectedRecommendationId(null);
-    setConfigurationTerminal(null);
-    setConfigurationTerminalFailure(null);
+    dispatchConfigurationGeneration({ type: "RESET" });
+    setConfigurationGenerationScope(null);
+    if (tenantId && assistantId) {
+      try {
+        const serialized = window.sessionStorage.getItem(configurationGenerationStorageKey(tenantId, assistantId));
+        const cached = serialized ? JSON.parse(serialized) as { job?: unknown; scope?: unknown } : null;
+        const job = normalizeRecommendationGenerationJob(cached?.job);
+        if (job && ["PENDING", "PROCESSING"].includes(job.status) && typeof cached?.scope === "string") {
+          setConfigurationGenerationScope(cached.scope);
+          dispatchConfigurationGeneration({ type: "ACCEPTED", job, reused: false, operation: "Configuration" });
+        }
+      } catch {
+        // Browser cache is advisory only; canonical job state remains on the API.
+      }
+    }
     setSelectedConfigurationId(null);
-  }, [assistantId, configurationProfileVersionId]);
+  }, [assistantId, configurationProfileVersionId, tenantId]);
   const assistants = useQuery({
     queryKey: tenantKeys.assistants(tenantId),
     queryFn: () => tenantApi.listAssistants(tenantId),
@@ -439,10 +485,22 @@ export function KnowledgeIntelligencePage() {
     enabled: Boolean(tenantId && assistantId && tab === "configurations"),
   });
   const recommendationGenerationJob = useQuery({
-    queryKey: ['tenant', tenantId, 'knowledge-intelligence', 'recommendation-generation', assistantId, recommendationGenerationJobId],
-    queryFn: () => tenantApi.getKnowledgeRecommendationGenerationJob(tenantId, assistantId, recommendationGenerationJobId!),
-    enabled: Boolean(tenantId && assistantId && recommendationGenerationJobId && tab === 'configurations'),
-    refetchInterval: (query) => ['PENDING', 'PROCESSING'].includes(query.state.data?.status ?? '') ? 2_000 : false,
+    queryKey: ['tenant', tenantId, 'knowledge-intelligence', 'recommendation-generation', assistantId, recommendationGeneration.job?.id],
+    queryFn: () => tenantApi.getKnowledgeRecommendationGenerationJob(tenantId, assistantId, recommendationGeneration.job!.id),
+    enabled: Boolean(
+      tenantId && assistantId && recommendationGeneration.job?.id && tab === 'configurations'
+        && ["PENDING", "PROCESSING"].includes(recommendationGeneration.phase),
+    ),
+    refetchInterval: activeRecommendationGenerationPhase(recommendationGeneration.phase) ? 2_000 : false,
+  });
+  const configurationGenerationJob = useQuery({
+    queryKey: ['tenant', tenantId, 'knowledge-intelligence', 'configuration-generation', assistantId, configurationGeneration.job?.id],
+    queryFn: () => tenantApi.getAssistantConfigurationGenerationJob(tenantId, assistantId, configurationGeneration.job!.id),
+    enabled: Boolean(
+      tenantId && assistantId && configurationGeneration.job?.id && tab === 'configurations'
+        && ["PENDING", "PROCESSING"].includes(configurationGeneration.phase),
+    ),
+    refetchInterval: activeRecommendationGenerationPhase(configurationGeneration.phase) ? 2_000 : false,
   });
   const generateProfile = useMutation({
     mutationFn: (scope: {
@@ -717,29 +775,49 @@ export function KnowledgeIntelligencePage() {
         assistantId,
         configurationProfileVersionId,
       ),
+    onMutate: () => dispatchRecommendationGeneration({ type: "START" }),
     onSuccess: (result) => {
-      setRecommendationGenerationFailure(null);
-      const jobId = result?.job?.id;
-      if (typeof jobId !== "string" || !jobId) {
-        setRecommendationGenerationFailure(
-          "Recommendation generation returned an unusable job response. Refresh and retry.",
-        );
+      const job = normalizeRecommendationGenerationJob(result?.job);
+      if (!job) {
+        dispatchRecommendationGeneration({ type: "INVALID_RESPONSE" });
         return;
       }
-      setRecommendationGenerationJobId(jobId);
+      dispatchRecommendationGeneration({ type: "ACCEPTED", job, reused: result?.reused === true });
+      if (tenantId && assistantId && configurationProfileVersionId) {
+        const key = recommendationGenerationStorageKey(tenantId, assistantId, configurationProfileVersionId);
+        if (["PENDING", "PROCESSING"].includes(job.status)) {
+          window.sessionStorage.setItem(key, JSON.stringify(job));
+        } else {
+          window.sessionStorage.removeItem(key);
+          void queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeRecommendations(tenantId, assistantId) });
+        }
+      }
     },
+    onError: () => dispatchRecommendationGeneration({ type: "ENQUEUE_FAILED" }),
   });
   useEffect(() => {
-    const status = recommendationGenerationJob.data?.status;
-    if (status === 'READY') {
-      setRecommendationGenerationJobId(null);
+    const job = normalizeRecommendationGenerationJob(recommendationGenerationJob.data);
+    if (!job) return;
+    dispatchRecommendationGeneration({ type: "JOB_STATUS", job });
+    if (tenantId && assistantId && configurationProfileVersionId && ["READY", "FAILED", "CANCELLED"].includes(job.status)) {
+      window.sessionStorage.removeItem(
+        recommendationGenerationStorageKey(tenantId, assistantId, configurationProfileVersionId),
+      );
+    }
+    if (job.status === "READY") {
       void queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeRecommendations(tenantId, assistantId) });
     }
-    if (status === 'FAILED' || status === 'CANCELLED') {
-      setRecommendationGenerationFailure('Recommendation generation could not be completed safely. You can retry.');
-      setRecommendationGenerationJobId(null);
+  }, [assistantId, configurationProfileVersionId, queryClient, recommendationGenerationJob.data, tenantId]);
+  useEffect(() => {
+    if (recommendationGenerationJob.isError && activeRecommendationGenerationPhase(recommendationGeneration.phase)) {
+      dispatchRecommendationGeneration({ type: "POLL_ERROR" });
+      if (tenantId && assistantId && configurationProfileVersionId) {
+        window.sessionStorage.removeItem(
+          recommendationGenerationStorageKey(tenantId, assistantId, configurationProfileVersionId),
+        );
+      }
     }
-  }, [assistantId, queryClient, recommendationGenerationJob.data?.status, tenantId]);
+  }, [assistantId, configurationProfileVersionId, recommendationGeneration.phase, recommendationGenerationJob.isError, tenantId]);
   const generateConfiguration = useMutation({
     mutationFn: (recommendationId: string) =>
       tenantApi.generateAssistantConfiguration(
@@ -747,34 +825,44 @@ export function KnowledgeIntelligencePage() {
         assistantId,
         recommendationId,
       ),
+    onMutate: (recommendationId) => {
+      setConfigurationGenerationScope(`${assistantId}:${recommendationId}`);
+      dispatchConfigurationGeneration({ type: "START", operation: "Configuration" });
+    },
     onSuccess: (result, recommendationId) => {
-      const scope = `${assistantId}:${recommendationId}`;
-      const configuration = result?.configuration;
-      if (
-        !configuration ||
-        typeof configuration.id !== "string" ||
-        typeof configuration.status !== "string" ||
-        !configuration.configuration_data ||
-        typeof configuration.configuration_data !== "object" ||
-        Array.isArray(configuration.configuration_data)
-      ) {
-        setConfigurationTerminal(null);
-        setConfigurationTerminalFailure({
-          scope,
-          message: "Configuration generation returned an unusable result. Refresh and retry.",
-        });
+      const job = normalizeRecommendationGenerationJob(result?.job);
+      if (!job) {
+        dispatchConfigurationGeneration({ type: "INVALID_RESPONSE" });
         return;
       }
-      setConfigurationTerminalFailure(null);
-      setConfigurationTerminal({ scope, result });
-      queryClient.setQueryData(
-        tenantKeys.assistantConfigurations(tenantId, assistantId),
-        (current: typeof configurations.data) =>
-          [configuration, ...(current ?? []).filter((row) => row.id !== configuration.id)],
-      );
-      void refreshConfigurations();
+      dispatchConfigurationGeneration({ type: "ACCEPTED", job, reused: result?.reused === true, operation: "Configuration" });
+      if (tenantId && assistantId) {
+        const key = configurationGenerationStorageKey(tenantId, assistantId);
+        if (["PENDING", "PROCESSING"].includes(job.status)) {
+          window.sessionStorage.setItem(key, JSON.stringify({ job, scope: `${assistantId}:${recommendationId}` }));
+        } else {
+          window.sessionStorage.removeItem(key);
+          void refreshConfigurations();
+        }
+      }
     },
+    onError: () => dispatchConfigurationGeneration({ type: "ENQUEUE_FAILED" }),
   });
+  useEffect(() => {
+    const job = normalizeRecommendationGenerationJob(configurationGenerationJob.data);
+    if (!job) return;
+    dispatchConfigurationGeneration({ type: "JOB_STATUS", job });
+    if (["READY", "FAILED", "CANCELLED"].includes(job.status) && tenantId && assistantId) {
+      window.sessionStorage.removeItem(configurationGenerationStorageKey(tenantId, assistantId));
+    }
+    if (job.status === "READY") void refreshConfigurations();
+  }, [assistantId, configurationGenerationJob.data, tenantId]);
+  useEffect(() => {
+    if (configurationGenerationJob.isError && activeRecommendationGenerationPhase(configurationGeneration.phase)) {
+      dispatchConfigurationGeneration({ type: "POLL_ERROR" });
+      if (tenantId && assistantId) window.sessionStorage.removeItem(configurationGenerationStorageKey(tenantId, assistantId));
+    }
+  }, [assistantId, configurationGeneration.phase, configurationGenerationJob.isError, tenantId]);
   const configurationAction = useMutation({
     mutationFn: ({
       id,
@@ -2248,28 +2336,38 @@ export function KnowledgeIntelligencePage() {
                 className={primaryActionClass}
                 disabled={
                   !configurationProfileVersionId ||
-                  generateRecommendation.isPending ||
-                  ['PENDING', 'PROCESSING'].includes(recommendationGenerationJob.data?.status ?? '')
+                  activeRecommendationGenerationPhase(recommendationGeneration.phase)
                 }
                 onClick={() => generateRecommendation.mutate()}
               >
-                {generateRecommendation.isPending || ['PENDING', 'PROCESSING'].includes(recommendationGenerationJob.data?.status ?? '')
-                  ? "Recommendation generation is processing…"
-                  : "Generate recommendation"}
+                {recommendationGeneration.phase === "ENQUEUEING"
+                  ? "Starting…"
+                  : ["PENDING", "PROCESSING"].includes(recommendationGeneration.phase)
+                    ? "Generating…"
+                    : "Generate recommendation"}
               </button>
             )}
-            {['PENDING', 'PROCESSING'].includes(recommendationGenerationJob.data?.status ?? '') && (
+            {recommendationGeneration.phase === "ENQUEUEING" && (
               <div className="rounded-lg border border-signal/40 bg-signal/10 p-3 text-sm text-ink" role="status">
-                Recommendation generation is processing in the background.
+                Starting recommendation generation…
               </div>
             )}
-            {recommendationGenerationFailure && (
-              <p className="text-sm text-red-300" role="alert">{recommendationGenerationFailure}</p>
+            {["PENDING", "PROCESSING"].includes(recommendationGeneration.phase) && (
+              <div className="rounded-lg border border-signal/40 bg-signal/10 p-3 text-sm text-ink" role="status">
+                {recommendationGeneration.phase === "PENDING"
+                  ? "Recommendation generation is queued."
+                  : "Recommendation generation is processing in the background."}
+              </div>
+            )}
+            {recommendationGeneration.message && (
+              <p className="text-sm text-emerald-300" role="status">{recommendationGeneration.message}</p>
+            )}
+            {recommendationGeneration.error && (
+              <p className="text-sm text-red-300" role="alert">{recommendationGeneration.error}</p>
             )}
           </div>
           <MutationFeedback
             error={
-              generateRecommendation.error ??
               recommendationAction.error ??
               generateConfiguration.error ??
               configurationAction.error ??
@@ -2300,9 +2398,7 @@ export function KnowledgeIntelligencePage() {
                       return (
                       <article id={`recommendation-${row.id}`} key={row.id} className="p-4" aria-current={selectedRecommendationId === row.id ? "true" : undefined}>
                         <strong className="text-sm">
-                          {conversationDerived
-                            ? "Conversation behavior recommendation"
-                            : `Recommendation ${row.id.slice(0, 8)}`}
+                          {recommendationOriginLabel(row)}
                         </strong>
                         <p className="mt-1 text-xs text-stone-400">
                           {row.status}
@@ -2316,7 +2412,7 @@ export function KnowledgeIntelligencePage() {
                         )}
                         {!conversationDerived && (
                           <dl className="mt-3 space-y-2 text-sm">
-                            {Object.entries(row.recommendation_data ?? {}).filter(([field]) => field !== "schema_version").map(([field, value]) => (
+                            {Object.entries(recommendationData(row)).filter(([field]) => field !== "schema_version").map(([field, value]) => (
                               <div key={field}>
                                 <dt className="text-xs font-semibold uppercase tracking-wide text-stone-400">{field.replace(/_/g, " ")}</dt>
                                 <dd className="mt-1 text-ink">{Array.isArray(value) ? value.join(", ") : typeof value === "object" && value !== null ? JSON.stringify(value) : String(value)}</dd>
@@ -2355,53 +2451,23 @@ export function KnowledgeIntelligencePage() {
                             {row.status === "APPROVED" && (
                               <button
                                 className={primaryActionClass}
+                                disabled={activeRecommendationGenerationPhase(configurationGeneration.phase)}
                                 onClick={() =>
                                   generateConfiguration.mutate(row.id)
                                 }
                               >
-                                Generate configuration
+                                {configurationGenerationScope === `${assistantId}:${row.id}` && activeRecommendationGenerationPhase(configurationGeneration.phase)
+                                  ? configurationGeneration.phase === "ENQUEUEING" ? "Starting…" : "Generating…"
+                                  : "Generate configuration"}
                               </button>
                             )}
-                            {configurationTerminal?.scope ===
-                              `${assistantId}:${row.id}` && (
+                            {configurationGenerationScope === `${assistantId}:${row.id}` && configurationGeneration.message && (
                               <div className="w-full rounded-lg border border-emerald-500/40 bg-emerald-950/30 p-3 text-sm text-ink" role="status">
-                                <strong>
-                                  {configurationTerminal.result.reused
-                                    ? "Existing exact configuration reused"
-                                    : "Assistant Configuration generated"}
-                                </strong>
-                                <p className="mt-1">
-                                  Configuration {configurationTerminal.result.configuration.id.slice(0, 8)} · {configurationTerminal.result.configuration.status} · NOT ACTIVE
-                                </p>
-                                <DashboardButton
-                                  type="button"
-                                  variant="secondary"
-                                  className="mt-2"
-                                  onClick={() => {
-                                    const id = configurationTerminal.result.configuration.id;
-                                    setSelectedConfigurationId(id);
-                                    document
-                                      .getElementById(`configuration-${id}`)
-                                      ?.scrollIntoView({ behavior: "smooth", block: "center" });
-                                  }}
-                                >
-                                  Review configuration
-                                </DashboardButton>
-                                {selectedConfigurationId === configurationTerminal.result.configuration.id && (
-                                  <section className="mt-3 rounded-lg border border-line bg-elevated/60 p-3" role="region" aria-label="Configuration review" tabIndex={-1}>
-                                    <h3 className="text-sm font-semibold">Configuration review</h3>
-                                    <PersonaFields
-                                      data={configurationTerminal.result.configuration.configuration_data}
-                                      provenance="AI RECOMMENDED"
-                                    />
-                                  </section>
-                                )}
+                                {configurationGeneration.message}
                               </div>
                             )}
-                            {configurationTerminalFailure?.scope === `${assistantId}:${row.id}` && (
-                              <div className="w-full" role="status">
-                                <MutationFeedback error={new Error(configurationTerminalFailure.message)} />
-                              </div>
+                            {configurationGenerationScope === `${assistantId}:${row.id}` && configurationGeneration.error && (
+                              <p className="w-full text-sm text-red-300" role="alert">{configurationGeneration.error}</p>
                             )}
                             {generateConfiguration.variables === row.id && (
                               <MutationFeedback error={generateConfiguration.error} />

@@ -151,16 +151,22 @@ export async function generateAssistantRecommendation({ database, provider, tena
   return { recommendation: generated.artifact, reused: generated.reused, run_id: generated.run_id };
 }
 
-export async function generateAssistantConfigurationVersion({ database, provider, tenantId, assistantId, recommendationId, requestedBy }) {
+export async function prepareAssistantConfigurationGeneration({ database, provider, tenantId, assistantId, recommendationId, requestedBy, businessProfileVersionId = null, allowInactiveProfileSnapshot = false }) {
   requireProvider(database, provider, 'generateAssistantConfiguration'); uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID'); uuid(assistantId, 'KNOWLEDGE_ASSISTANT_INVALID'); uuid(recommendationId, 'KNOWLEDGE_RECOMMENDATION_INVALID'); uuid(requestedBy, 'KNOWLEDGE_REQUESTER_INVALID');
+  if (businessProfileVersionId !== null) uuid(businessProfileVersionId, 'KNOWLEDGE_PROFILE_VERSION_INVALID');
+  const profileVersionPredicate = businessProfileVersionId === null
+    ? 'profile_version.id = profile.active_version_id'
+    : 'profile_version.id = $4';
+  const activeProfilePredicate = allowInactiveProfileSnapshot ? '' : 'AND profile.active_version_id = profile_version.id';
   const context = await database.query(
     `SELECT recommendation.recommendation_data, assistant.name AS assistant_name, profile_version.id AS profile_version_id, profile.business_identity_id,
             profile_version.source_scope, profile_version.evidence AS profile_evidence, profile_version.profile_data
        FROM assistant_knowledge_recommendations recommendation
        JOIN ai_assistants assistant ON assistant.id = recommendation.assistant_id AND assistant.tenant_id = recommendation.tenant_id
        JOIN business_profiles profile ON profile.tenant_id = assistant.tenant_id AND profile.active_version_id IS NOT NULL
-       JOIN business_profile_versions profile_version ON profile_version.id = profile.active_version_id AND profile_version.tenant_id = profile.tenant_id AND profile_version.status = 'APPROVED'
-      WHERE recommendation.id = $1 AND recommendation.tenant_id = $2 AND recommendation.assistant_id = $3 AND recommendation.status = 'APPROVED'`, [recommendationId, tenantId, assistantId]);
+       JOIN business_profile_versions profile_version ON ${profileVersionPredicate} AND profile_version.profile_id = profile.id AND profile_version.tenant_id = profile.tenant_id AND profile_version.status = 'APPROVED'
+      WHERE recommendation.id = $1 AND recommendation.tenant_id = $2 AND recommendation.assistant_id = $3 AND recommendation.status = 'APPROVED' ${activeProfilePredicate}`,
+    businessProfileVersionId === null ? [recommendationId, tenantId, assistantId] : [recommendationId, tenantId, assistantId, businessProfileVersionId]);
   if (!context.rows[0]) throw new KnowledgeAssistantLifecycleError('KNOWLEDGE_CONFIGURATION_CONTEXT_NOT_FOUND', 'An approved recommendation and active Business Profile are required');
   const provenance = { profile_version_id: context.rows[0].profile_version_id, business_identity_id: context.rows[0].business_identity_id, source_scope: context.rows[0].source_scope, recommendation_id: recommendationId, assistant_id: assistantId };
   const sourceHashes = context.rows[0].profile_evidence?.source_hashes ?? context.rows[0].profile_evidence?.sources ?? [];
@@ -173,16 +179,24 @@ export async function generateAssistantConfigurationVersion({ database, provider
     `APPROVED AI recommendation: ${JSON.stringify(context.rows[0].recommendation_data)}`,
   ].join('\n');
   const fingerprint = requestFingerprint({ tenant_id: tenantId, assistant_id: assistantId, active_profile_version_id: context.rows[0].profile_version_id, business_identity_id: provenance.business_identity_id, source_scope: provenance.source_scope, source_hashes: sourceHashes, recommendation_id: recommendationId, schema_version: SCHEMA_VERSION, configuration_runtime_contract: CONFIGURATION_RUNTIME_CONTRACT, provider: provider.provider, model: provider.model, generation_policy: provider.assistantGenerationPolicy ?? null });
-  const generated = await generate({ database, provider, tenantId, requestedBy, targetType: 'ASSISTANT_CONFIGURATION', prompt, provenance, fingerprint, generationStage: 'CONFIGURATION_GENERATION', sourceCount: provenance.source_scope?.source_ids?.length ?? 0, persist: async (generationDatabase, output, runId) => {
+  return { context: context.rows[0], prompt, provenance, fingerprint, sourceCount: provenance.source_scope?.source_ids?.length ?? 0 };
+}
+
+export async function generateAssistantConfigurationVersion({ database, provider, tenantId, assistantId, recommendationId, requestedBy, businessProfileVersionId = null, allowInactiveProfileSnapshot = false, expectedFingerprint = null }) {
+  const prepared = await prepareAssistantConfigurationGeneration({ database, provider, tenantId, assistantId, recommendationId, requestedBy, businessProfileVersionId, allowInactiveProfileSnapshot });
+  if (expectedFingerprint && expectedFingerprint !== prepared.fingerprint) {
+    throw new KnowledgeAssistantLifecycleError('KNOWLEDGE_CONFIGURATION_POLICY_CHANGED', 'Assistant Configuration generation policy changed before the job was processed');
+  }
+  const generated = await generate({ database, provider, tenantId, requestedBy, targetType: 'ASSISTANT_CONFIGURATION', prompt: prepared.prompt, provenance: prepared.provenance, fingerprint: prepared.fingerprint, generationStage: 'CONFIGURATION_GENERATION', sourceCount: prepared.sourceCount, persist: async (generationDatabase, output, runId) => {
     const configurationData = withRuntimeAssistantIdentity(output, {
-      recommendationData: context.rows[0].recommendation_data,
-      profileData: context.rows[0].profile_data,
-      assistantName: context.rows[0].assistant_name,
+      recommendationData: prepared.context.recommendation_data,
+      profileData: prepared.context.profile_data,
+      assistantName: prepared.context.assistant_name,
     });
     const result = await generationDatabase.query(`INSERT INTO assistant_configuration_versions
       (tenant_id, assistant_id, configuration_data, source_profile_version_id, source_recommendation_id, generation_run_id, schema_version, generated_by, status)
       VALUES ($1, $2, $3, $4, $5, $6, $7, 'AI', 'NEEDS_REVIEW')
-      RETURNING id, schema_version, configuration_data, source_profile_version_id, source_recommendation_id, status, created_at`, [tenantId, assistantId, configurationData, context.rows[0].profile_version_id, recommendationId, runId, 2]);
+      RETURNING id, schema_version, configuration_data, source_profile_version_id, source_recommendation_id, status, created_at`, [tenantId, assistantId, configurationData, prepared.context.profile_version_id, recommendationId, runId, 2]);
     return result.rows[0];
   } });
   return { configuration: generated.artifact, reused: generated.reused, run_id: generated.run_id };

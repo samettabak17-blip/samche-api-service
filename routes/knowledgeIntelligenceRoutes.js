@@ -33,7 +33,7 @@ import { KnowledgeGapError } from '../services/knowledge-gap-service.js';
 import { createSuggestedCandidateFromKnowledgeGap } from '../services/knowledge-gap-candidate-service.js';
 import { createKnowledgeGenerationProvider, KnowledgeGenerationError } from '../services/knowledge-generation-provider.js';
 import { ImageKnowledgeSemanticError } from '../services/image-knowledge-semantic-service.js';
-import { enqueueAssistantRecommendationGenerationJob, enqueueImageSemanticGenerationJob, getAssistantRecommendationGenerationJob, getImageSemanticGenerationJob, KnowledgeSemanticGenerationJobError, recordAssistantRecommendationEnqueueFailureDiagnostic } from '../services/knowledge-semantic-generation-job-service.js';
+import { enqueueAssistantConfigurationGenerationJob, enqueueAssistantRecommendationGenerationJob, enqueueImageSemanticGenerationJob, getAssistantConfigurationGenerationJob, getAssistantRecommendationGenerationJob, getImageSemanticGenerationJob, KnowledgeSemanticGenerationJobError, recordAssistantRecommendationEnqueueFailureDiagnostic } from '../services/knowledge-semantic-generation-job-service.js';
 import {
   analyzeBusinessProfileSourceScope,
   generateBusinessProfileVersion,
@@ -42,7 +42,7 @@ import {
   updateBusinessProfileReview,
 } from '../services/knowledge-profile-lifecycle.js';
 import {
-  generateAssistantConfigurationVersion,
+  prepareAssistantConfigurationGeneration,
   prepareAssistantRecommendationGeneration,
   KnowledgeAssistantLifecycleError,
   rejectAssistantConfigurationVersion,
@@ -805,8 +805,26 @@ router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/configura
   const tenantId = tenant(req, res); const assistantId = req.params.assistantId;
   if (!tenantId || !isValidUUID(assistantId) || !isValidUUID(req.body?.recommendation_id)) return res.status(400).json({ error: 'Invalid configuration generation request' });
   try {
-    const result = await generateAssistantConfigurationVersion({ database: pool, provider: createKnowledgeGenerationProvider(), tenantId, assistantId, recommendationId: req.body.recommendation_id, requestedBy: req.user.user_id });
-    return res.status(result.reused ? 200 : 201).json(result);
+    const provider = createKnowledgeGenerationProvider();
+    const prepared = await prepareAssistantConfigurationGeneration({
+      database: pool, provider, tenantId, assistantId, recommendationId: req.body.recommendation_id, requestedBy: req.user.user_id,
+    });
+    const job = await enqueueAssistantConfigurationGenerationJob({
+      database: pool, tenantId, assistantId, recommendationId: req.body.recommendation_id,
+      businessProfileVersionId: prepared.context.profile_version_id, requestedBy: req.user.user_id,
+      fingerprint: prepared.fingerprint, providerPolicy: provider.assistantGenerationPolicy,
+    });
+    return res.status(202).json({ job, reused: job.status === 'READY' });
+  } catch (error) { return safeError(res, error); }
+});
+
+router.get('/:tenantId/knowledge-intelligence/assistants/:assistantId/configuration-generation-jobs/:jobId', requireTenantAccess, async (req, res) => {
+  const tenantId = tenant(req, res); const assistantId = req.params.assistantId;
+  if (!tenantId || !isValidUUID(assistantId) || !isValidUUID(req.params.jobId)) return res.status(400).json({ error: 'Invalid Assistant Configuration generation job ID' });
+  try {
+    const job = await getAssistantConfigurationGenerationJob({ database: pool, tenantId, assistantId, jobId: req.params.jobId });
+    if (!job) return res.status(404).json({ error: 'Assistant Configuration generation job not found' });
+    return res.json({ job });
   } catch (error) { return safeError(res, error); }
 });
 

@@ -17,7 +17,7 @@ test('claims only one pending knowledge job with SKIP LOCKED to keep tenant proc
   assert.equal(job.id, 'job-1');
   assert.match(calls[0].sql, /FOR UPDATE SKIP LOCKED/i);
   assert.match(calls[0].sql, /status = 'PENDING'/i);
-  assert.match(calls[0].sql, /job_type\s+NOT IN\s*\('GENERATE_IMAGE_CANDIDATES',\s*'GENERATE_ASSISTANT_RECOMMENDATION'\)/i);
+  assert.match(calls[0].sql, /job_type\s+NOT IN\s*\('GENERATE_IMAGE_CANDIDATES',\s*'GENERATE_ASSISTANT_RECOMMENDATION',\s*'GENERATE_ASSISTANT_CONFIGURATION'\)/i);
 });
 
 test('reads a private object stream without coercing its binary data to text', async () => {

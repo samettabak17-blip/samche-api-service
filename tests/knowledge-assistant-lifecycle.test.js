@@ -105,6 +105,7 @@ test('generates a review-only configuration from an approved recommendation', as
   assert.equal(run.params[6].business_identity_id, '55555555-5555-4555-8555-555555555555');
   assert.deepEqual(run.params[6].source_scope.source_ids, ['source-meridian']);
   assert.match(calls.find(({ sql }) => /FROM assistant_knowledge_recommendations recommendation/i.test(sql)).sql, /profile\.active_version_id IS NOT NULL/i);
+  assert.match(calls.find(({ sql }) => /FROM assistant_knowledge_recommendations recommendation/i.test(sql)).sql, /profile_version\.profile_id = profile\.id/i);
 });
 
 test('an approved assistant-scoped behavior recommendation uses the current active profile for configuration generation', async () => {

@@ -100,9 +100,10 @@ export interface BusinessProfileVersion { id: string; schema_version?: number; b
 export interface BusinessProfileGenerationResult { profile: BusinessProfileVersion; reused: boolean; run_id: string; }
 export interface KnowledgeRecommendation {
   id: string;
-  recommendation_data: Record<string, unknown>;
-  evidence?: Array<{ semantic_category?: string }> | null;
+  recommendation_data: Record<string, unknown> | null;
+  evidence?: unknown;
   status: string;
+  generation_run_id?: string | null;
   created_at?: string;
 }
 export interface ImageSemanticGenerationJob {
@@ -117,11 +118,18 @@ export interface AssistantRecommendationGenerationJob {
   status: 'PENDING' | 'PROCESSING' | 'READY' | 'FAILED' | 'CANCELLED';
   attempts: number;
   last_error_code?: string | null;
-  metadata?: { recommendation_id?: string; recommendation_status?: string; business_profile_version_id?: string };
+  metadata?: Record<string, unknown>;
+}
+export interface AssistantConfigurationGenerationJob {
+  id: string;
+  status: 'PENDING' | 'PROCESSING' | 'READY' | 'FAILED' | 'CANCELLED';
+  attempts: number;
+  last_error_code?: string | null;
+  metadata?: Record<string, unknown>;
 }
 export interface AssistantConfigurationVersion { id: string; schema_version?: number; configuration_data: Record<string, unknown>; source_profile_version_id?: string | null; source_recommendation_id?: string | null; status: string; approved_at?: string | null; created_at?: string; }
 export interface RecommendationGenerationResult { recommendation: KnowledgeRecommendation; reused: boolean; run_id: string; }
-export interface ConfigurationGenerationResult { configuration: AssistantConfigurationVersion; reused: boolean; run_id: string; }
+export interface ConfigurationGenerationResult { job: AssistantConfigurationGenerationJob; reused: boolean; }
 export interface BusinessIdentityScopeAnalysis { status: 'RESOLVED' | 'IDENTITY_RESOLUTION_REQUIRED'; business_identity: BusinessIdentity; source_ids: string[]; identities: Array<{ detected_identity: string; normalized_identity: string; source_ids: string[] }>; evidence: Array<{ source_id: string; source_title: string; detected_identity: string; confidence: number; safe_evidence: string; resolution_origin?: string }> }
 export interface KnowledgeRetrievalPreview { query: string; matches: Array<{ chunkId: string; sourceId: string; sourceTitle: string; excerpt: string; similarity: number }>; }
 export interface TeamMember { id: string; email: string; system_role: SystemRole; tenant_role: TenantRole; created_at?: string; }
