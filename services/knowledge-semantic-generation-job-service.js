@@ -51,11 +51,23 @@ export async function getImageSemanticGenerationJob({ database, tenantId, source
 export async function recoverStaleImageSemanticGenerationJobs(database) {
   const result = await database.query(
     `UPDATE knowledge_processing_jobs
-        SET status = CASE WHEN attempts >= 3 THEN 'FAILED' ELSE 'PENDING' END,
+        SET status = CASE
+              WHEN COALESCE((metadata->>'stale_recovery_count')::integer, 0) >= 2 THEN 'FAILED'
+              ELSE 'PENDING'
+            END,
             locked_at = NULL,
             locked_until = NULL,
-            available_at = CASE WHEN attempts >= 3 THEN available_at ELSE CURRENT_TIMESTAMP END,
+            available_at = CASE
+              WHEN COALESCE((metadata->>'stale_recovery_count')::integer, 0) >= 2 THEN available_at
+              ELSE CURRENT_TIMESTAMP
+            END,
             last_error_code = 'KNOWLEDGE_SEMANTIC_LEASE_EXPIRED',
+            metadata = jsonb_set(
+              metadata,
+              '{stale_recovery_count}',
+              to_jsonb(COALESCE((metadata->>'stale_recovery_count')::integer, 0) + 1),
+              TRUE
+            ),
             updated_at = CURRENT_TIMESTAMP
       WHERE job_type = 'GENERATE_IMAGE_CANDIDATES'
         AND status = 'PROCESSING'
@@ -101,10 +113,13 @@ export async function processImageSemanticGenerationJob({ database, job, semanti
     const code = String(error?.code ?? 'KNOWLEDGE_IMAGE_GENERATION_FAILED').replace(/[^A-Z0-9_]/gi, '_').slice(0, 80);
     const retry = Number(job.attempts ?? 1) < 3;
     await database.query(
-      `UPDATE knowledge_processing_jobs SET status = $3, locked_at = NULL, locked_until = NULL,
-          available_at = CASE WHEN $3 = 'PENDING' THEN CURRENT_TIMESTAMP + INTERVAL '30 seconds' ELSE available_at END,
-          last_error_code = $4, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2`,
-      [job.id, job.tenant_id, retry ? 'PENDING' : 'FAILED', code || 'KNOWLEDGE_IMAGE_GENERATION_FAILED'],
+      retry
+        ? `UPDATE knowledge_processing_jobs SET status = 'PENDING', locked_at = NULL, locked_until = NULL,
+             available_at = CURRENT_TIMESTAMP + INTERVAL '30 seconds',
+             last_error_code = $3::varchar(80), updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2`
+        : `UPDATE knowledge_processing_jobs SET status = 'FAILED', locked_at = NULL, locked_until = NULL,
+             last_error_code = $3::varchar(80), updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2`,
+      [job.id, job.tenant_id, code || 'KNOWLEDGE_IMAGE_GENERATION_FAILED'],
     );
     throw error;
   }

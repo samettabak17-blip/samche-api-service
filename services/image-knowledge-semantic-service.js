@@ -8,6 +8,7 @@ export const SEMANTIC_CATEGORIES = new Set([
   'DURABLE_POLICY_OR_COMMITMENT_CANDIDATE',
   'UNSAFE_OR_AMBIGUOUS',
 ]);
+const MAX_SEGMENTS_PER_PROVIDER_REQUEST = 6;
 
 // Canonicalization may improve grammar, but it must never introduce a
 // commercial or legal relationship that is not present in the source text.
@@ -106,13 +107,26 @@ export function createImageKnowledgeSemanticClassifier({ provider } = {}) {
     async classify({ segments }) {
       const business = businessSegments(segments);
       if (!business.length) return [];
-      const output = await provider.classifyImageKnowledgeSegments({
-        segments: business.map((segment) => ({
-          segment_order: Number(segment.segment_order),
-          text: boundedText(redactConversationCandidate(String(segment.normalized_text ?? '')), 12000, 'IMAGE_SEMANTIC_INPUT_INVALID'),
-        })),
-      });
-      return validateImageKnowledgeSemanticOutput(output, segments);
+      const classified = [];
+      // Keep each structured provider request bounded. This is not a browser
+      // timeout workaround: the semantic job remains asynchronous, while a
+      // larger image transcript is processed in deterministic source order.
+      for (let start = 0; start < business.length; start += MAX_SEGMENTS_PER_PROVIDER_REQUEST) {
+        const batch = business.slice(start, start + MAX_SEGMENTS_PER_PROVIDER_REQUEST);
+        const output = await provider.classifyImageKnowledgeSegments({
+          segments: batch.map((segment) => ({
+            segment_order: Number(segment.segment_order),
+            text: boundedText(redactConversationCandidate(String(segment.normalized_text ?? '')), 12000, 'IMAGE_SEMANTIC_INPUT_INVALID'),
+          })),
+        });
+        classified.push(...validateImageKnowledgeSemanticOutput(output, batch));
+      }
+      return validateImageKnowledgeSemanticOutput({ classifications: classified.map((item) => ({
+        segment_order: item.segmentOrder,
+        category: item.category,
+        canonical_fact: item.canonicalText,
+        confidence: item.confidence,
+      })) }, segments);
     },
   });
 }

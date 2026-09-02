@@ -111,3 +111,29 @@ test('calls a provider-neutral classifier with redacted BUSINESS-only material',
   assert.equal(received.segments.some((item) => /person@example\.com/.test(item.text)), false);
   assert.equal(result[0].category, 'DURABLE_BUSINESS_FACT');
 });
+
+test('bounds a large image semantic request into deterministic provider-neutral batches', async () => {
+  const manyBusinessSegments = Array.from({ length: 16 }, (_, index) => ({
+    id: `business-${index}`,
+    segment_order: index,
+    role: 'BUSINESS',
+    normalized_text: `Business statement ${index}`,
+  }));
+  const batches = [];
+  const classifier = createImageKnowledgeSemanticClassifier({
+    provider: {
+      async classifyImageKnowledgeSegments({ segments: batch }) {
+        batches.push(batch);
+        return { classifications: batch.map((segment) => ({
+          segment_order: segment.segment_order,
+          category: 'TRANSIENT_CONVERSATION',
+          canonical_fact: null,
+          confidence: 0.8,
+        })) };
+      },
+    },
+  });
+  const result = await classifier.classify({ segments: manyBusinessSegments });
+  assert.equal(result.length, 16);
+  assert.deepEqual(batches.map((batch) => batch.length), [6, 6, 4]);
+});

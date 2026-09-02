@@ -62,6 +62,26 @@ test('worker persists durable candidates and assistant recommendations outside t
   assert.ok(calls.some(({ sql }) => /SET status = 'READY'/i.test(sql)));
 });
 
+test('provider or persistence failure always writes a terminal-or-retryable state without leaving PROCESSING', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    return { rows: [] };
+  } };
+  await assert.rejects(
+    () => processImageSemanticGenerationJob({
+      database,
+      job: { id: 'job-1', tenant_id: tenantId, source_id: sourceId, content_hash: extractionHash, attempts: 1 },
+      createCandidates: async () => { throw Object.assign(new Error('provider timed out'), { code: 'KNOWLEDGE_GENERATION_TIMEOUT' }); },
+    }),
+    { code: 'KNOWLEDGE_GENERATION_TIMEOUT' },
+  );
+  const transition = calls.find(({ sql }) => /UPDATE knowledge_processing_jobs SET status = 'PENDING'/i.test(sql));
+  assert.ok(transition);
+  assert.equal(transition.params[2], 'KNOWLEDGE_GENERATION_TIMEOUT');
+  assert.doesNotMatch(transition.sql, /CASE WHEN \$3/i);
+});
+
 test('recovers an expired semantic PROCESSING lease before a worker claims the next job', async () => {
   const calls = [];
   const database = { query: async (sql, params = []) => {
@@ -77,6 +97,7 @@ test('recovers an expired semantic PROCESSING lease before a worker claims the n
   assert.match(calls[0].sql, /locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP/);
   assert.match(calls[0].sql, /locked_until < CURRENT_TIMESTAMP/);
   assert.match(calls[0].sql, /KNOWLEDGE_SEMANTIC_LEASE_EXPIRED/);
+  assert.match(calls[0].sql, /stale_recovery_count/);
   assert.match(calls[1].sql, /status = 'PENDING'/);
 });
 
