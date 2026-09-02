@@ -169,7 +169,7 @@ test('Gemini Assistant Recommendation uses bounded minimal thinking and a concis
   assert.equal(provider.timeoutMs, 20000);
   assert.equal(provider.assistantGenerationPolicy, 'gemini-structured-v3:thinking-minimal:max-output-1024:timeout-30000');
   assert.equal(provider.recommendationTimeoutMs, 30000);
-  assert.equal(provider.configurationTimeoutMs, 30000);
+  assert.equal(provider.configurationTimeoutMs, 90000);
 });
 
 test('Gemini boundary telemetry records safe request and fulfilled status events', async () => {
@@ -254,7 +254,8 @@ test('Gemini Assistant Configuration uses a bounded minimal-thinking policy with
 
   assert.deepEqual(requests[0].generationConfig.thinkingConfig, { thinkingLevel: 'minimal' });
   assert.equal(requests[0].generationConfig.maxOutputTokens, 2048);
-  assert.equal(provider.assistantConfigurationGenerationPolicy, 'gemini-assistant-configuration-v2:thinking-minimal:max-output-2048:timeout-30000');
+  assert.equal(provider.configurationTimeoutMs, 90000);
+  assert.equal(provider.assistantConfigurationGenerationPolicy, 'gemini-assistant-configuration-v3:thinking-minimal:max-output-2048:timeout-90000');
 });
 
 test('Gemini strips provider thinking parts before parsing structured Assistant Configuration JSON', async () => {
