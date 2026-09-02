@@ -58,7 +58,12 @@ try {
             COUNT(image.id) FILTER (WHERE image.role = 'BUSINESS' AND image.evidence_kind = 'PRIMARY')::integer AS primary_business_evidence_count,
             COUNT(DISTINCT image.business_identity_id) FILTER (WHERE image.business_identity_id IS NOT NULL)::integer AS snapshot_identity_count,
             COUNT(DISTINCT source_identity.business_identity_id) FILTER (WHERE source_identity.business_identity_id IS NOT NULL)::integer AS original_source_identity_count,
-            COALESCE(json_agg(DISTINCT materialized.id) FILTER (WHERE materialized.id IS NOT NULL), '[]'::json) AS matching_unapproved_materialized_source_ids
+            COALESCE(json_agg(DISTINCT jsonb_build_object(
+              'id', materialized.id,
+              'source_identity_link_count', COALESCE(materialized_identity.link_count, 0),
+              'provenance_link_count', COALESCE(materialized_provenance.link_count, 0),
+              'index_job_count', COALESCE(materialized_jobs.job_count, 0)
+            )) FILTER (WHERE materialized.id IS NOT NULL), '[]'::json) AS matching_unapproved_materialized_sources
        FROM knowledge_candidates candidate
        JOIN knowledge_base_documents source
          ON source.tenant_id = candidate.tenant_id
@@ -74,6 +79,23 @@ try {
          ON materialized.tenant_id = candidate.tenant_id
         AND materialized.source_type = 'CONVERSATION_CANDIDATE'
         AND materialized.content = candidate.proposed_content
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*)::integer AS link_count
+           FROM knowledge_source_business_identities link
+          WHERE link.tenant_id = materialized.tenant_id AND link.source_id = materialized.id
+       ) materialized_identity ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*)::integer AS link_count
+           FROM knowledge_materialized_source_provenance link
+          WHERE link.tenant_id = materialized.tenant_id
+            AND link.materialized_source_id = materialized.id
+            AND link.candidate_id = candidate.id
+       ) materialized_provenance ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*)::integer AS job_count
+           FROM knowledge_processing_jobs job
+          WHERE job.tenant_id = materialized.tenant_id AND job.source_id = materialized.id
+       ) materialized_jobs ON TRUE
       WHERE candidate.tenant_id = $1
         AND candidate.status = 'NEEDS_REVIEW'
         AND candidate.proposed_title = 'Canonical image-derived business fact'
