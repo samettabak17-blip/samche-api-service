@@ -18,6 +18,7 @@ import dashboardRoutes from "./routes/dashboardRoutes.js";
 import crmRoutes from "./routes/crmRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
 import knowledgeIntelligenceRoutes from "./routes/knowledgeIntelligenceRoutes.js";
+import guideExperienceRoutes from "./routes/guideExperienceRoutes.js";
 import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus, resolveSamcheguideRuntimeIntegration } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
 import { whatsappRuntimeSessionKey } from "./services/whatsapp-runtime-session-service.js";
@@ -52,6 +53,7 @@ import { generateAssistantConfigurationVersion, generateAssistantRecommendation 
 import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from "./services/knowledge-runtime-context-service.js";
 import { buildTenantRuntimeSystemInstruction, resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
 import { resolveChannelAssistantRuntime } from "./services/assistant-runtime-resolution-service.js";
+import { resolvePublishedGuideExperience } from "./services/guide-experience-service.js";
 import { samcheguideRuntimeSessionKey } from "./services/samcheguide-runtime-session-service.js";
 import { buildTenantFollowUpRequest } from "./services/tenant-follow-up-service.js";
 import { isSameKnowledgeAuthority, resolveAssistantKnowledgeAuthority } from "./services/knowledge-authority-service.js";
@@ -138,6 +140,28 @@ app.get("/api/v1/health/db", async (req, res) => {
   }
 });
 
+// One public Guide shell is served for every tenant.  Its visual identity is
+// resolved solely from the configured Guide integration, never a browser tenant
+// identifier.  Runtime intelligence remains resolved later by /chat.
+app.get("/guide/bootstrap", async (_req, res) => {
+  try {
+    const integration = await resolveSamcheguideRuntimeIntegration({ database: pool });
+    if (!integration) return res.status(503).json({ error: 'Guide experience is temporarily unavailable.', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
+    const resolved = await resolvePublishedGuideExperience({
+      database: pool,
+      tenantId: integration.tenant_id,
+      assistantId: integration.assistant_id,
+    });
+    res.set('Cache-Control', 'no-store');
+    return res.json({ experience: resolved.experience, source: resolved.source, version: resolved.experience.version, cache_key: resolved.cache_key });
+  } catch (error) {
+    console.error('GUIDE_EXPERIENCE_BOOTSTRAP_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    return res.status(503).json({ error: 'Guide experience is temporarily unavailable.', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
+  }
+});
+
+app.use('/guide', express.static('public-guide', { index: 'index.html', etag: true, maxAge: '5m' }));
+
 // ==========================================
 // V1 ROUTES
 // ==========================================
@@ -146,6 +170,7 @@ app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/tenants", tenantRoutes);
 app.use("/api/v1/tenants", conversationRoutes);
 app.use("/api/v1/tenants", knowledgeIntelligenceRoutes);
+app.use("/api/v1/tenants", guideExperienceRoutes);
 app.use("/api/v1/tenants", dashboardRoutes);
 app.use("/api/v1/tenants", crmRoutes);
 app.use((error, req, res, next) => {

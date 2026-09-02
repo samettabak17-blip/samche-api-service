@@ -13,6 +13,7 @@ import { SettingsPage } from '../features/settings/settings-page';
 import { AssistantsPage } from '../features/assistants/assistants-page';
 import { ChannelsPage } from '../features/channels/channels-page';
 import { KnowledgeBasePage } from '../features/knowledge-base/knowledge-base-page';
+import { GuideExperiencePage } from '../features/guide-experience/guide-experience-page';
 import { LeadsPage } from '../features/leads/leads-page';
 import { PipelinePage } from '../features/pipeline/pipeline-page';
 import { KnowledgeIntelligencePage } from '../features/knowledge-intelligence/knowledge-intelligence-page';
@@ -62,6 +63,7 @@ export function AppRouter() {
       <Route path="assistants/:assistantId" element={<AssistantsPage />} />
       <Route path="channels" element={<ChannelsPage />} />
       <Route path="channels/:channelId" element={<ChannelsPage />} />
+      <Route path="guide-experience" element={<GuideExperiencePage />} />
       <Route path="knowledge-base" element={<KnowledgeBasePage />} />
       <Route path="knowledge-base/:documentId" element={<KnowledgeBasePage />} />
       <Route path="knowledge" element={<KnowledgeIntelligencePage />} />

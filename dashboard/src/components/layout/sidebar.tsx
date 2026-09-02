@@ -1,4 +1,4 @@
-import { BadgeDollarSign, BookOpenText, Bot, Cable, ChevronDown, KanbanSquare, LayoutDashboard, MessageCircle, MessagesSquare, Settings, UsersRound } from 'lucide-react';
+import { BadgeDollarSign, BookOpenText, Bot, Cable, ChevronDown, KanbanSquare, LayoutDashboard, MessageCircle, MessagesSquare, Palette, Settings, UsersRound } from 'lucide-react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import samcheLogo from '../../assets/branding/samche-company-llc-logo.png';
 import { useEffect, useState } from 'react';
@@ -14,6 +14,7 @@ const navigation = [
   { label: 'Overview', suffix: '/overview', icon: LayoutDashboard },
   { label: 'AI Assistants', suffix: '/assistants', icon: Bot },
   { label: 'Channels', suffix: '/channels', icon: Cable },
+  { label: 'Guide Experience', suffix: '/guide-experience', icon: Palette },
   { label: 'Knowledge Base', suffix: '/knowledge-base', icon: BookOpenText },
   { label: 'Knowledge Intelligence', suffix: '/knowledge', icon: BookOpenText },
   { label: 'Leads', suffix: '/leads', icon: BadgeDollarSign },
@@ -24,7 +25,7 @@ const navigation = [
 
 const groups = [
   { title: 'MAIN', labels: ['Overview'] },
-  { title: 'AI SOLUTIONS', labels: ['AI Assistants', 'Channels', 'Knowledge Intelligence', 'Knowledge Base'] },
+  { title: 'AI SOLUTIONS', labels: ['AI Assistants', 'Channels', 'Guide Experience', 'Knowledge Intelligence', 'Knowledge Base'] },
   { title: 'CUSTOMER ENGAGEMENT', labels: ['Leads', 'Pipeline'] },
   { title: 'OPERATIONS', labels: ['Team'] },
   { title: 'SETTINGS', labels: ['Settings'] },
