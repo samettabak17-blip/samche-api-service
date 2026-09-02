@@ -60,6 +60,8 @@ try {
             COUNT(DISTINCT source_identity.business_identity_id) FILTER (WHERE source_identity.business_identity_id IS NOT NULL)::integer AS original_source_identity_count,
             COALESCE(json_agg(DISTINCT jsonb_build_object(
               'id', materialized.id,
+              'status', materialized.status,
+              'enabled', materialized.enabled,
               'source_identity_link_count', COALESCE(materialized_identity.link_count, 0),
               'provenance_link_count', COALESCE(materialized_provenance.link_count, 0),
               'index_job_count', COALESCE(materialized_jobs.job_count, 0)
