@@ -1507,10 +1507,18 @@ it("reconciles a failed Configuration job into one retryable terminal state with
   fireEvent.click(await screen.findByRole("button", { name: "Generate configuration" }));
 
   expect(await screen.findByText("Configuration generation failed. You can retry.")).toBeVisible();
-  expect(screen.getByRole("button", { name: "Generate configuration" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Retry configuration generation" })).toBeEnabled();
   expect(screen.getByText("Ask for the budget.")).toBeVisible();
   expect(screen.getByRole("heading", { name: "Configurations" })).toBeVisible();
   expect(screen.queryByText("Knowledge source operation failed")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Retry configuration generation" }));
+  await waitFor(() => expect(mockedApi.generateAssistantConfiguration).toHaveBeenLastCalledWith(
+    "tenant-a",
+    "assistant-a",
+    "recommendation-approved",
+    true,
+  ));
 });
 afterEach(() => {
   cleanup();

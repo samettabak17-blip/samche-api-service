@@ -183,7 +183,7 @@ function safeAssistantConfigurationJob(job) {
   };
 }
 
-export async function enqueueAssistantConfigurationGenerationJob({ database, tenantId, assistantId, recommendationId, businessProfileVersionId, requestedBy, fingerprint, providerPolicy }) {
+export async function enqueueAssistantConfigurationGenerationJob({ database, tenantId, assistantId, recommendationId, businessProfileVersionId, requestedBy, fingerprint, providerPolicy, retryRequested = false }) {
   if (!database?.query || !UUID.test(String(tenantId)) || !UUID.test(String(assistantId))
     || !UUID.test(String(recommendationId)) || !UUID.test(String(businessProfileVersionId))
     || !UUID.test(String(requestedBy)) || !HASH.test(String(fingerprint))) {
@@ -204,13 +204,29 @@ export async function enqueueAssistantConfigurationGenerationJob({ database, ten
      ON CONFLICT (tenant_id, job_type, content_hash, embedding_model, embedding_version)
        WHERE job_type = 'GENERATE_ASSISTANT_CONFIGURATION'
      DO UPDATE SET
-       status = CASE WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') THEN knowledge_processing_jobs.status ELSE 'PENDING' END,
-       available_at = CASE WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') THEN knowledge_processing_jobs.available_at ELSE CURRENT_TIMESTAMP END,
-       last_error_code = CASE WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') THEN knowledge_processing_jobs.last_error_code ELSE NULL END,
+       status = CASE
+         WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') THEN knowledge_processing_jobs.status
+         WHEN $4::boolean THEN 'PENDING'
+         ELSE 'FAILED'
+       END,
+       attempts = CASE
+         WHEN knowledge_processing_jobs.status NOT IN ('PENDING', 'PROCESSING', 'READY') AND $4::boolean THEN 0
+         ELSE knowledge_processing_jobs.attempts
+       END,
+       available_at = CASE
+         WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') THEN knowledge_processing_jobs.available_at
+         WHEN $4::boolean THEN CURRENT_TIMESTAMP
+         ELSE knowledge_processing_jobs.available_at
+       END,
+       last_error_code = CASE
+         WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') THEN knowledge_processing_jobs.last_error_code
+         WHEN $4::boolean THEN NULL
+         ELSE knowledge_processing_jobs.last_error_code
+       END,
        metadata = knowledge_processing_jobs.metadata || EXCLUDED.metadata,
        updated_at = CURRENT_TIMESTAMP
      RETURNING id, tenant_id, job_type, status, attempts, available_at, last_error_code, metadata, created_at, updated_at`,
-    [tenantId, String(fingerprint).toLowerCase(), JSON.stringify(metadata)],
+    [tenantId, String(fingerprint).toLowerCase(), JSON.stringify(metadata), retryRequested === true],
   );
   return safeAssistantConfigurationJob(result.rows[0]);
 }
@@ -456,6 +472,13 @@ function configurationJobMetadata(job) {
   return metadata;
 }
 
+function isRetryableAssistantConfigurationGenerationError(error) {
+  // A second request cannot repair a deterministic structured-output contract,
+  // a completed provider timeout, or any validation/persistence failure. Keep
+  // retries for the single transient provider boundary exposed by the adapter.
+  return String(error?.code ?? '').toUpperCase() === 'KNOWLEDGE_GENERATION_PROVIDER_FAILED';
+}
+
 export async function processAssistantConfigurationGenerationJob({ database, job, generateConfiguration }) {
   const metadata = configurationJobMetadata(job);
   if (typeof generateConfiguration !== 'function') {
@@ -482,7 +505,7 @@ export async function processAssistantConfigurationGenerationJob({ database, job
     return { status: 'READY', configuration: result.configuration, reused: result.reused === true };
   } catch (error) {
     const code = String(error?.code ?? 'KNOWLEDGE_ASSISTANT_CONFIGURATION_FAILED').replace(/[^A-Z0-9_]/gi, '_').slice(0, 80) || 'KNOWLEDGE_ASSISTANT_CONFIGURATION_FAILED';
-    const retry = Number(job.attempts ?? 1) < 3;
+    const retry = isRetryableAssistantConfigurationGenerationError(error) && Number(job.attempts ?? 1) < 2;
     await database.query(
       retry
         ? `UPDATE knowledge_processing_jobs SET status = 'PENDING', locked_at = NULL, locked_until = NULL,

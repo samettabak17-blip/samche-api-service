@@ -29,6 +29,24 @@ test('accepts a pinned assistant configuration job without calling the provider'
   assert.equal(job.status, 'PENDING');
   assert.match(calls[0].sql, /GENERATE_ASSISTANT_CONFIGURATION/);
   assert.equal(calls[0].params.some((value) => String(value).includes(profileVersionId)), true);
+  assert.equal(calls[0].params.includes(false), true);
+  assert.match(calls[0].sql, /WHEN \$4::boolean THEN 'PENDING'/);
+});
+
+test('requires an explicit retry request before requeueing a terminal configuration job', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    return { rows: [{ id: 'job-configuration', status: 'PENDING', metadata: {} }] };
+  } };
+
+  await enqueueAssistantConfigurationGenerationJob({
+    database, tenantId, assistantId, recommendationId, businessProfileVersionId: profileVersionId,
+    requestedBy: actorId, fingerprint, providerPolicy: 'structured-policy', retryRequested: true,
+  });
+
+  assert.equal(calls[0].params.includes(true), true);
+  assert.match(calls[0].sql, /AND \$4::boolean THEN 0/);
 });
 
 test('claims configuration jobs only from the semantic worker queue', async () => {
@@ -91,16 +109,78 @@ test('configuration worker retries a provider failure without creating a partial
       },
       generateConfiguration: async () => {
         const error = new Error('provider unavailable');
-        error.code = 'PROVIDER_UNAVAILABLE';
+        error.code = 'KNOWLEDGE_GENERATION_PROVIDER_FAILED';
         throw error;
       },
     }),
-    { code: 'PROVIDER_UNAVAILABLE' },
+    { code: 'KNOWLEDGE_GENERATION_PROVIDER_FAILED' },
   );
 
   assert.equal(calls.some(({ sql }) => /SET status = 'PENDING'/i.test(sql)), true);
   assert.equal(calls.some(({ sql }) => /INSERT INTO assistant_knowledge_configurations/i.test(sql)), false);
   assert.equal(calls.some(({ sql }) => /active_configuration_version_id/i.test(sql)), false);
+});
+
+test('configuration worker fails a deterministic structured-response error without multiplying provider attempts', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    return { rows: [] };
+  } };
+
+  await assert.rejects(
+    processAssistantConfigurationGenerationJob({
+      database,
+      job: {
+        id: 'job-configuration-response-invalid', tenant_id: tenantId, attempts: 1,
+        metadata: {
+          assistant_id: assistantId, recommendation_id: recommendationId,
+          business_profile_version_id: profileVersionId, requested_by: actorId,
+          request_fingerprint: fingerprint,
+        },
+      },
+      generateConfiguration: async () => {
+        const error = new Error('provider response was not canonical JSON');
+        error.code = 'KNOWLEDGE_GENERATION_RESPONSE_INVALID';
+        throw error;
+      },
+    }),
+    { code: 'KNOWLEDGE_GENERATION_RESPONSE_INVALID' },
+  );
+
+  assert.equal(calls.some(({ sql }) => /SET status = 'FAILED'/i.test(sql)), true);
+  assert.equal(calls.some(({ sql }) => /SET status = 'PENDING'/i.test(sql)), false);
+});
+
+test('configuration worker fails a provider timeout once rather than retrying the same exhausted budget', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    return { rows: [] };
+  } };
+
+  await assert.rejects(
+    processAssistantConfigurationGenerationJob({
+      database,
+      job: {
+        id: 'job-configuration-timeout', tenant_id: tenantId, attempts: 1,
+        metadata: {
+          assistant_id: assistantId, recommendation_id: recommendationId,
+          business_profile_version_id: profileVersionId, requested_by: actorId,
+          request_fingerprint: fingerprint,
+        },
+      },
+      generateConfiguration: async () => {
+        const error = new Error('provider budget exhausted');
+        error.code = 'KNOWLEDGE_GENERATION_TIMEOUT';
+        throw error;
+      },
+    }),
+    { code: 'KNOWLEDGE_GENERATION_TIMEOUT' },
+  );
+
+  assert.equal(calls.some(({ sql }) => /SET status = 'FAILED'/i.test(sql)), true);
+  assert.equal(calls.some(({ sql }) => /SET status = 'PENDING'/i.test(sql)), false);
 });
 
 test('configuration worker reaches terminal FAILED after its bounded final provider attempt without a partial artifact', async () => {

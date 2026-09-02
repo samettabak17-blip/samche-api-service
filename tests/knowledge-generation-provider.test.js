@@ -257,6 +257,30 @@ test('Gemini Assistant Configuration uses a bounded minimal-thinking policy with
   assert.equal(provider.assistantConfigurationGenerationPolicy, 'gemini-assistant-configuration-v2:thinking-minimal:max-output-2048:timeout-30000');
 });
 
+test('Gemini strips provider thinking parts before parsing structured Assistant Configuration JSON', async () => {
+  const provider = createKnowledgeGenerationProvider({
+    env: { KNOWLEDGE_GENERATION_PROVIDER: 'GEMINI', GEMINI_API_KEY: 'test-key' },
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        candidates: [{
+          finishReason: 'STOP',
+          content: {
+            parts: [
+              { thought: true, text: 'Internal provider reasoning that is not JSON output.' },
+              { text: '{"schema_version":2,"tone":"Professional"}' },
+            ],
+          },
+        }],
+      }),
+    }),
+  });
+
+  const output = await provider.generateAssistantConfiguration({ prompt: 'Approved profile and recommendation' });
+
+  assert.deepEqual(output, { schema_version: 2, tone: 'Professional' });
+});
+
 test('Business Profile uses bounded low thinking and an operation-specific timeout', async () => {
   const requests = [];
   const provider = createKnowledgeGenerationProvider({

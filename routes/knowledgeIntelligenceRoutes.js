@@ -813,6 +813,7 @@ router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/configura
       database: pool, tenantId, assistantId, recommendationId: req.body.recommendation_id,
       businessProfileVersionId: prepared.context.profile_version_id, requestedBy: req.user.user_id,
       fingerprint: prepared.fingerprint, providerPolicy: provider.assistantConfigurationGenerationPolicy ?? provider.assistantGenerationPolicy,
+      retryRequested: req.body?.retry === true,
     });
     return res.status(202).json({ job, reused: job.status === 'READY' });
   } catch (error) { return safeError(res, error); }

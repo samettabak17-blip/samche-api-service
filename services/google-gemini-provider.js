@@ -64,7 +64,12 @@ function normalizeResponse(response) {
       ...candidate,
       content: candidate?.content ? {
         ...candidate.content,
-        parts: Array.isArray(candidate.content.parts) ? candidate.content.parts.map((part) => ({ ...part })) : candidate.content.parts,
+        // Gemini can return internal thinking parts alongside the final structured
+        // answer. They are provider-private reasoning, never part of SamChe's
+        // canonical JSON result, and would corrupt the final response if joined.
+        parts: Array.isArray(candidate.content.parts)
+          ? candidate.content.parts.filter((part) => part?.thought !== true).map((part) => ({ ...part }))
+          : candidate.content.parts,
       } : candidate.content,
     })) };
   }

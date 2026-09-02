@@ -819,17 +819,18 @@ export function KnowledgeIntelligencePage() {
     }
   }, [assistantId, configurationProfileVersionId, recommendationGeneration.phase, recommendationGenerationJob.isError, tenantId]);
   const generateConfiguration = useMutation({
-    mutationFn: (recommendationId: string) =>
+    mutationFn: ({ recommendationId, retryRequested }: { recommendationId: string; retryRequested: boolean }) =>
       tenantApi.generateAssistantConfiguration(
         tenantId,
         assistantId,
         recommendationId,
+        retryRequested,
       ),
-    onMutate: (recommendationId) => {
+    onMutate: ({ recommendationId }) => {
       setConfigurationGenerationScope(`${assistantId}:${recommendationId}`);
       dispatchConfigurationGeneration({ type: "START", operation: "Configuration" });
     },
-    onSuccess: (result, recommendationId) => {
+    onSuccess: (result, { recommendationId }) => {
       const job = normalizeRecommendationGenerationJob(result?.job);
       if (!job) {
         dispatchConfigurationGeneration({ type: "INVALID_RESPONSE" });
@@ -2453,12 +2454,19 @@ export function KnowledgeIntelligencePage() {
                                 className={primaryActionClass}
                                 disabled={activeRecommendationGenerationPhase(configurationGeneration.phase)}
                                 onClick={() =>
-                                  generateConfiguration.mutate(row.id)
+                                  generateConfiguration.mutate({
+                                    recommendationId: row.id,
+                                    retryRequested:
+                                      configurationGenerationScope === `${assistantId}:${row.id}` &&
+                                      configurationGeneration.phase === "FAILED",
+                                  })
                                 }
                               >
                                 {configurationGenerationScope === `${assistantId}:${row.id}` && activeRecommendationGenerationPhase(configurationGeneration.phase)
                                   ? configurationGeneration.phase === "ENQUEUEING" ? "Starting…" : "Generating…"
-                                  : "Generate configuration"}
+                                  : configurationGenerationScope === `${assistantId}:${row.id}` && configurationGeneration.phase === "FAILED"
+                                    ? "Retry configuration generation"
+                                    : "Generate configuration"}
                               </button>
                             )}
                             {configurationGenerationScope === `${assistantId}:${row.id}` && configurationGeneration.message && (
@@ -2469,7 +2477,7 @@ export function KnowledgeIntelligencePage() {
                             {configurationGenerationScope === `${assistantId}:${row.id}` && configurationGeneration.error && (
                               <p className="w-full text-sm text-red-300" role="alert">{configurationGeneration.error}</p>
                             )}
-                            {generateConfiguration.variables === row.id && (
+                            {generateConfiguration.variables?.recommendationId === row.id && (
                               <MutationFeedback error={generateConfiguration.error} />
                             )}
                           </div>
