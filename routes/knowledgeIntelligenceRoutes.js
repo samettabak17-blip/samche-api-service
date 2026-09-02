@@ -1,6 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import OpenAI from 'openai';
+import { randomUUID } from 'node:crypto';
 import pool from '../config/db.js';
 import { authenticateToken, requireTenantAccess, requireTenantAdmin } from '../middleware/auth.js';
 import { isValidUUID } from '../middleware/validators.js';
@@ -32,7 +33,7 @@ import { KnowledgeGapError } from '../services/knowledge-gap-service.js';
 import { createSuggestedCandidateFromKnowledgeGap } from '../services/knowledge-gap-candidate-service.js';
 import { createKnowledgeGenerationProvider, KnowledgeGenerationError } from '../services/knowledge-generation-provider.js';
 import { ImageKnowledgeSemanticError } from '../services/image-knowledge-semantic-service.js';
-import { enqueueAssistantRecommendationGenerationJob, enqueueImageSemanticGenerationJob, getAssistantRecommendationGenerationJob, getImageSemanticGenerationJob, KnowledgeSemanticGenerationJobError } from '../services/knowledge-semantic-generation-job-service.js';
+import { enqueueAssistantRecommendationGenerationJob, enqueueImageSemanticGenerationJob, getAssistantRecommendationGenerationJob, getImageSemanticGenerationJob, KnowledgeSemanticGenerationJobError, recordAssistantRecommendationEnqueueFailureDiagnostic } from '../services/knowledge-semantic-generation-job-service.js';
 import {
   analyzeBusinessProfileSourceScope,
   generateBusinessProfileVersion,
@@ -719,18 +720,44 @@ router.get('/:tenantId/knowledge-intelligence/assistants/:assistantId/recommenda
 router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/recommendations/generate', requireTenantAccess, requireTenantAdmin, async (req, res) => {
   const tenantId = tenant(req, res); const assistantId = req.params.assistantId;
   if (!tenantId || !isValidUUID(assistantId)) return res.status(400).json({ error: 'Invalid Assistant ID' });
+  const requestId = randomUUID();
+  const businessProfileVersionId = req.body?.business_profile_version_id;
+  let phase = 'PREPARE';
   try {
     const provider = createKnowledgeGenerationProvider();
     const prepared = await prepareAssistantRecommendationGeneration({
       database: pool, provider, tenantId, assistantId,
-      businessProfileVersionId: req.body?.business_profile_version_id, requestedBy: req.user.user_id,
+      businessProfileVersionId, requestedBy: req.user.user_id,
     });
+    phase = 'ENQUEUE';
     const job = await enqueueAssistantRecommendationGenerationJob({
-      database: pool, tenantId, assistantId, businessProfileVersionId: req.body?.business_profile_version_id,
+      database: pool, tenantId, assistantId, businessProfileVersionId,
       requestedBy: req.user.user_id, fingerprint: prepared.fingerprint, providerPolicy: provider.assistantGenerationPolicy,
     });
+    phase = 'RESPONSE';
     return res.status(202).json({ job, reused: job.status === 'READY' });
-  } catch (error) { return safeError(res, error); }
+  } catch (error) {
+    await recordAssistantRecommendationEnqueueFailureDiagnostic({
+      database: pool,
+      requestId,
+      tenantId,
+      assistantId,
+      businessProfileVersionId,
+      phase,
+      error,
+    }).catch(() => {});
+    if (!(error instanceof KnowledgeSemanticGenerationJobError)
+      && !(error instanceof KnowledgeAssistantLifecycleError)
+      && !(error instanceof KnowledgeProfileLifecycleError)
+      && !(error instanceof KnowledgeSourceServiceError)) {
+      return res.status(503).json({
+        error: 'Assistant Recommendation generation could not be accepted safely',
+        code: 'KNOWLEDGE_ASSISTANT_RECOMMENDATION_ENQUEUE_FAILED',
+        request_id: requestId,
+      });
+    }
+    return safeError(res, error);
+  }
 });
 
 router.get('/:tenantId/knowledge-intelligence/assistants/:assistantId/recommendation-generation-jobs/:jobId', requireTenantAccess, async (req, res) => {

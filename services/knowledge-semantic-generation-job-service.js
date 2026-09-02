@@ -2,12 +2,76 @@ import { createImageKnowledgeCandidates } from './knowledge-candidate-service.js
 
 const HASH = /^[a-f0-9]{64}$/i;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SAFE_DIAGNOSTIC_TEXT = /^[A-Za-z0-9_.-]+$/;
 
 export class KnowledgeSemanticGenerationJobError extends Error {
   constructor(code, message) {
     super(message);
     this.code = code;
   }
+}
+
+function safeDiagnosticText(value, maxLength) {
+  const normalized = String(value ?? '').trim().slice(0, maxLength);
+  return SAFE_DIAGNOSTIC_TEXT.test(normalized) ? normalized : null;
+}
+
+function safeDatabaseCode(error) {
+  const code = safeDiagnosticText(error?.code, 16);
+  return /^[0-9A-Z]{2,16}$/i.test(code ?? '') ? code : null;
+}
+
+function safeInternalErrorCode(error) {
+  return safeDiagnosticText(error?.internalCode, 80)
+    ?? (String(error?.code ?? '').startsWith('KNOWLEDGE_') ? safeDiagnosticText(error.code, 80) : null);
+}
+
+export async function recordAssistantRecommendationEnqueueFailureDiagnostic({
+  database,
+  requestId,
+  tenantId,
+  assistantId,
+  businessProfileVersionId,
+  phase,
+  error,
+}) {
+  if (!database?.query
+    || !UUID.test(String(requestId))
+    || !UUID.test(String(tenantId))
+    || !UUID.test(String(assistantId))
+    || !UUID.test(String(businessProfileVersionId))) return null;
+
+  const payload = {
+    request_id: String(requestId),
+    tenant_id: String(tenantId),
+    assistant_id: String(assistantId),
+    business_profile_version_id: String(businessProfileVersionId),
+    phase: safeDiagnosticText(phase, 48) ?? 'UNKNOWN',
+    database_code: safeDatabaseCode(error),
+    constraint_name: safeDiagnosticText(error?.constraint, 128),
+    entity_name: safeDiagnosticText(error?.table, 128),
+    internal_error_code: safeInternalErrorCode(error),
+  };
+  const result = await database.query(
+    `INSERT INTO knowledge_assistant_recommendation_enqueue_failure_diagnostics
+       (request_id, tenant_id, assistant_id, business_profile_version_id, phase,
+        database_code, constraint_name, entity_name, internal_error_code)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING id`,
+    [
+      payload.request_id,
+      payload.tenant_id,
+      payload.assistant_id,
+      payload.business_profile_version_id,
+      payload.phase,
+      payload.database_code,
+      payload.constraint_name,
+      payload.entity_name,
+      payload.internal_error_code,
+    ],
+  );
+  console.error('KNOWLEDGE_ASSISTANT_RECOMMENDATION_ENQUEUE_FAILURE', JSON.stringify(payload));
+  return result.rows?.[0] ?? null;
 }
 
 function safeAssistantRecommendationJob(job) {

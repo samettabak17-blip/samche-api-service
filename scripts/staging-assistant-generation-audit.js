@@ -82,6 +82,18 @@ try {
       LIMIT 10`,
     [scopedTenantId, scopedProfileVersionId],
   );
+  auditPhase = 'ASYNC_RECOMMENDATION_ENQUEUE_FAILURES';
+  const asyncEnqueueFailures = await client.query(
+    `SELECT request_id, tenant_id, assistant_id, business_profile_version_id,
+            phase, database_code, constraint_name, entity_name,
+            internal_error_code, created_at
+       FROM knowledge_assistant_recommendation_enqueue_failure_diagnostics
+      WHERE tenant_id = $1
+        AND business_profile_version_id = $2
+      ORDER BY created_at DESC
+      LIMIT 10`,
+    [scopedTenantId, scopedProfileVersionId],
+  );
   auditPhase = 'RECOMMENDATION_RUNS';
   const runs = await client.query(
     `SELECT run.id AS run_id, run.request_fingerprint, run.tenant_id,
@@ -182,6 +194,7 @@ try {
     profile_context: context.rows[0],
     async_recommendation_job_schema: asyncJobSchema.rows[0] ?? null,
     async_recommendation_jobs: asyncJobs.rows,
+    async_recommendation_enqueue_failures: asyncEnqueueFailures.rows,
     latest_run: latest,
     latest_configuration_run: latestConfigurationRun,
     whatsapp_runtime_rows: runtime.rows,
