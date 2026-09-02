@@ -3,6 +3,7 @@ import {
   beginKnowledgeGenerationRun,
   completeKnowledgeGenerationRun,
   failKnowledgeGenerationRun,
+  recordKnowledgeGenerationProviderTelemetry,
   KnowledgeGenerationPersistenceError,
 } from './knowledge-generation-persistence.js';
 import crypto from 'node:crypto';
@@ -231,6 +232,7 @@ function requestFingerprint({ tenantId, businessIdentityId, sources, provider })
     schema_version: BUSINESS_PROFILE_SCHEMA_VERSION,
     provider: provider.provider,
     model: provider.model,
+    generation_policy: provider.businessProfileGenerationPolicy ?? null,
   };
   return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
@@ -323,7 +325,22 @@ export async function generateBusinessProfileVersion({ database, provider, tenan
   ].join('\n\n');
     runStage = 'PROFILE_GENERATION';
     await advanceKnowledgeGenerationRun({ database: generationDatabase, tenantId, runId: run.id, stage: runStage, promptCharacterCount: prompt.length, sourceCount: baseScope.sources.length, elapsedMs: Date.now() - startedAt });
-    const profileData = await provider.generateBusinessProfile({ prompt });
+    const profileData = await provider.generateBusinessProfile({
+      prompt,
+      runId: run.id,
+      requestFingerprint: fingerprint,
+      telemetry: (event) => recordKnowledgeGenerationProviderTelemetry({
+        database: generationDatabase,
+        tenantId,
+        runId: run.id,
+        event: event.event,
+        timestamp: event.timestamp,
+        httpStatus: event.http_status,
+        elapsedMs: event.elapsed_ms,
+        abortBeforeHttpResponse: event.http_response_received === false,
+        networkErrorClass: event.classification,
+      }),
+    });
     runStage = 'PERSISTENCE';
     await advanceKnowledgeGenerationRun({ database: generationDatabase, tenantId, runId: run.id, stage: runStage, promptCharacterCount: prompt.length, sourceCount: baseScope.sources.length, elapsedMs: Date.now() - startedAt });
     await generationDatabase.query('BEGIN');

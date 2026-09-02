@@ -80,8 +80,12 @@ test('generates a review-only Business Profile from an explicit resolved source 
     return { rows: [] };
   } };
   const prompts = [];
-  const provider = { provider: 'GEMINI', model: 'gemini-3-flash-preview', generateBusinessIdentityAnalysis: async () => ({ detected_identity: 'Meridian Arc Technologies LLC', confidence: '0.99', evidence: 'Legal company name' }), generateBusinessProfile: async ({ prompt }) => {
+  const providerCalls = [];
+  const provider = { provider: 'GEMINI', model: 'gemini-3-flash-preview', businessProfileGenerationPolicy: 'gemini-business-profile-v2:thinking-low:timeout-30000', generateBusinessIdentityAnalysis: async () => ({ detected_identity: 'Meridian Arc Technologies LLC', confidence: '0.99', evidence: 'Legal company name' }), generateBusinessProfile: async ({ prompt, runId, requestFingerprint, telemetry }) => {
     prompts.push(prompt);
+    providerCalls.push({ runId, requestFingerprint });
+    await telemetry({ event: 'request_started', timestamp: '2026-09-02T00:00:00.000Z' });
+    await telemetry({ event: 'fetch_fulfilled', timestamp: '2026-09-02T00:00:01.000Z', elapsed_ms: 1000 });
     return { company_summary: 'Approved summary' };
   } };
 
@@ -104,6 +108,9 @@ test('generates a review-only Business Profile from an explicit resolved source 
   assert.equal(insert.params[5], 2);
   assert.equal(insert.params[6], 'RESOLVED');
   assert.deepEqual(insert.params[7].source_ids, sourceIds);
+  assert.equal(providerCalls[0].runId, '22222222-2222-4222-8222-222222222222');
+  assert.equal(typeof providerCalls[0].requestFingerprint, 'string');
+  assert.ok(calls.some(({ sql }) => /provider_telemetry/i.test(sql)));
 });
 
 test('returns the exact successful generation as a reused result with its run id', async () => {

@@ -95,12 +95,13 @@ function normalizeRequestError(error, mode, model) {
 function createDeveloperFetchClient({ apiKey, fetchImpl }) {
   return {
     models: {
-      async generateContent({ model, contents, config, signal }) {
+      async generateContent({ model, contents, config }) {
+        const { abortSignal, ...generationConfig } = config ?? {};
         const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-          signal,
-          body: JSON.stringify({ contents, generationConfig: config }),
+          signal: abortSignal,
+          body: JSON.stringify({ contents, generationConfig }),
         });
         const body = await response.json().catch(() => null);
         if (!response.ok) {

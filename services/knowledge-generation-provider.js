@@ -5,6 +5,7 @@ import { createGoogleGeminiProvider } from './google-gemini-provider.js';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const ASSISTANT_GENERATION_TIMEOUT_MS = 30_000;
+const BUSINESS_PROFILE_TIMEOUT_MS = 30_000;
 const IMAGE_SEMANTIC_TIMEOUT_MS = 60_000;
 const transportContext = new AsyncLocalStorage();
 let transportTelemetryInstalled = false;
@@ -264,14 +265,27 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
     provider: config.provider,
     model: config.model,
     timeoutMs: config.timeoutMs,
-    businessProfileTimeoutMs: config.timeoutMs,
+    businessProfileTimeoutMs: BUSINESS_PROFILE_TIMEOUT_MS,
     identityAnalysisTimeoutMs: config.timeoutMs,
     recommendationTimeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS,
     configurationTimeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS,
     assistantGenerationPolicy: config.provider === 'GEMINI'
       ? 'gemini-structured-v2:thinking-low:timeout-30000'
       : 'openai-structured-v2:timeout-30000',
-    generateBusinessProfile: ({ prompt }) => generate({ prompt, fields: BUSINESS_PROFILE_FIELDS, validate: validateBusinessProfileOutput }),
+    businessProfileGenerationPolicy: config.provider === 'GEMINI'
+      ? 'gemini-business-profile-v2:thinking-low:timeout-30000'
+      : 'openai-business-profile-v2:timeout-30000',
+    generateBusinessProfile: ({ prompt, runId, requestFingerprint, telemetry: callTelemetry }) => generate({
+      prompt,
+      fields: BUSINESS_PROFILE_FIELDS,
+      validate: validateBusinessProfileOutput,
+      thinkingLevel: config.provider === 'GEMINI' ? 'low' : null,
+      timeoutMs: BUSINESS_PROFILE_TIMEOUT_MS,
+      runId,
+      requestFingerprint,
+      operation: 'BUSINESS_PROFILE',
+      telemetry: callTelemetry,
+    }),
     generateBusinessIdentityAnalysis: ({ source }) => generate({
       prompt: [
         'Extract the legal or clearly presented company identity from this single tenant source.',

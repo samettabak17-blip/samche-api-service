@@ -200,10 +200,26 @@ test('Gemini boundary telemetry records abort and preserves public timeout error
     fetchImpl: (_url, request) => new Promise((resolve, reject) => request.signal.addEventListener('abort', () => { const error = new Error('aborted'); error.name = 'AbortError'; reject(error); })),
   });
 
-  await assert.rejects(() => provider.generateBusinessProfile({ prompt: 'PRIVATE PROMPT', runId: 'run-timeout' }), (error) => error.code === 'KNOWLEDGE_GENERATION_TIMEOUT');
+  await assert.rejects(() => provider.generateBusinessIdentityAnalysis({ source: { id: 'source-timeout', title: 'Private source', content: 'PRIVATE PROMPT' } }), (error) => error.code === 'KNOWLEDGE_GENERATION_TIMEOUT');
   assert.equal(events.at(-1).event, 'fetch_aborted');
   assert.equal(events.at(-1).classification, 'ABORT_TIMEOUT');
   assert.ok(Number.isInteger(events.at(-1).elapsed_ms));
+});
+
+test('Gemini developer transport does not serialize its abort signal into the provider payload', async () => {
+  let captured;
+  const provider = createKnowledgeGenerationProvider({
+    env: { GEMINI_API_KEY: 'test-key' },
+    fetchImpl: async (_url, request) => {
+      captured = { signal: request.signal, body: JSON.parse(request.body) };
+      return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"schema_version":2,"company_summary":"Tenant facts"}' }] } }] }) };
+    },
+  });
+
+  await provider.generateBusinessProfile({ prompt: 'Approved tenant knowledge' });
+
+  assert.ok(captured.signal instanceof AbortSignal);
+  assert.equal(captured.body.generationConfig.abortSignal, undefined);
 });
 
 test('Gemini boundary telemetry records network errors without provider details', async () => {
@@ -238,11 +254,22 @@ test('Gemini Assistant Configuration uses the same bounded low-thinking generati
   assert.deepEqual(requests[0].generationConfig.thinkingConfig, { thinkingLevel: 'low' });
 });
 
-test('Business Profile and identity analysis retain the global 20 second timeout policy', () => {
-  const provider = createKnowledgeGenerationProvider({ env: { GEMINI_API_KEY: 'test-key' }, fetchImpl: async () => ({ ok: true, json: async () => ({}) }) });
+test('Business Profile uses bounded low thinking and an operation-specific timeout', async () => {
+  const requests = [];
+  const provider = createKnowledgeGenerationProvider({
+    env: { GEMINI_API_KEY: 'test-key', KNOWLEDGE_GENERATION_TIMEOUT_MS: '20000' },
+    fetchImpl: async (_url, request) => {
+      requests.push(JSON.parse(request.body));
+      return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: '{"schema_version":2,"company_summary":"Tenant facts"}' }] } }] }) };
+    },
+  });
+
+  await provider.generateBusinessProfile({ prompt: 'Approved tenant knowledge' });
+
   assert.equal(provider.timeoutMs, 20000);
-  assert.equal(provider.businessProfileTimeoutMs, 20000);
+  assert.equal(provider.businessProfileTimeoutMs, 30000);
   assert.equal(provider.identityAnalysisTimeoutMs, 20000);
+  assert.deepEqual(requests[0].generationConfig.thinkingConfig, { thinkingLevel: 'low' });
 });
 
 test('provider-independent validation rejects unknown Business Profile fields', () => {
