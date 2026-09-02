@@ -86,7 +86,7 @@ test('recovers an expired semantic PROCESSING lease before a worker claims the n
   const calls = [];
   const database = { query: async (sql, params = []) => {
     calls.push({ sql, params });
-    if (/legacy_lease_recovery/i.test(sql)) return { rowCount: 0, rows: [] };
+    if (/legacy_lease_recovery|semantic_timeout_recovery/i.test(sql)) return { rowCount: 0, rows: [] };
     return { rowCount: 1, rows: [{ id: 'job-1', status: 'PENDING' }] };
   } };
 
@@ -107,7 +107,7 @@ test('requeues one legacy lease-expired terminal job created by the former recov
   const database = { query: async (sql, params = []) => {
     calls.push({ sql, params });
     if (/status = 'PROCESSING'/i.test(sql)) return { rows: [] };
-    if (/status = 'FAILED'/i.test(sql)) return { rows: [{ id: 'legacy-job', status: 'PENDING' }] };
+    if (/legacy_lease_recovery/i.test(sql)) return { rows: [{ id: 'legacy-job', status: 'PENDING' }] };
     return { rows: [] };
   } };
   const recovered = await recoverStaleImageSemanticGenerationJobs(database);
@@ -116,6 +116,22 @@ test('requeues one legacy lease-expired terminal job created by the former recov
   assert.ok(compatibilityRecovery);
   assert.match(compatibilityRecovery.sql, /last_error_code = 'KNOWLEDGE_SEMANTIC_LEASE_EXPIRED'/);
   assert.match(compatibilityRecovery.sql, /stale_recovery_count.*= 0/is);
+});
+
+test('requeues one legacy semantic provider timeout so the corrected bounded provider contract can finish it', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/status = 'PROCESSING'/i.test(sql)) return { rows: [] };
+    if (/legacy_lease_recovery/i.test(sql)) return { rows: [] };
+    if (/semantic_timeout_recovery/i.test(sql)) return { rows: [{ id: 'timeout-job', status: 'PENDING' }] };
+    return { rows: [] };
+  } };
+  const recovered = await recoverStaleImageSemanticGenerationJobs(database);
+  assert.equal(recovered.recovered, 1);
+  const compatibilityRecovery = calls.find(({ sql }) => /semantic_timeout_recovery/i.test(sql));
+  assert.match(compatibilityRecovery.sql, /last_error_code = 'KNOWLEDGE_GENERATION_TIMEOUT'/);
+  assert.match(compatibilityRecovery.sql, /embedding_model = 'IMAGE_SEMANTIC'/);
 });
 
 test('semantic worker exposes only safe operational status for deployment health checks', async () => {

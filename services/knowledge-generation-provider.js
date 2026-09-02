@@ -4,6 +4,7 @@ import { validateImageKnowledgeSemanticOutput } from './image-knowledge-semantic
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const ASSISTANT_GENERATION_TIMEOUT_MS = 30_000;
+const IMAGE_SEMANTIC_TIMEOUT_MS = 60_000;
 const transportContext = new AsyncLocalStorage();
 let transportTelemetryInstalled = false;
 
@@ -306,7 +307,9 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
         },
         schema: buildImageSemanticResponseSchema(),
         operation: 'IMAGE_SEMANTIC_CLASSIFICATION',
+        timeoutMs: Math.max(config.timeoutMs, IMAGE_SEMANTIC_TIMEOUT_MS),
       });
     },
+    imageSemanticTimeoutMs: Math.max(config.timeoutMs, IMAGE_SEMANTIC_TIMEOUT_MS),
   });
 }

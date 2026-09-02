@@ -118,6 +118,7 @@ test('Gemini image semantic boundary preserves mixed durable and behavior artifa
     'ASSISTANT_BEHAVIOR_OR_QUALIFICATION',
   ]);
   assert.equal(requests[0].generationConfig.responseSchema.properties.classifications.items.properties.category.type, 'STRING');
+  assert.equal(provider.imageSemanticTimeoutMs, 60000);
 });
 
 test('Recommendation response schema mirrors canonical validator constraints', () => {
