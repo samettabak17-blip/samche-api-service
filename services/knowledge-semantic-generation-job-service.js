@@ -109,7 +109,26 @@ export async function recoverStaleImageSemanticGenerationJobs(database) {
         AND COALESCE((metadata->>'semantic_timeout_recovery')::boolean, FALSE) = FALSE
       RETURNING id, status`,
   );
-  const result = { rows: [...(processing.rows ?? []), ...(legacy.rows ?? []), ...(semanticTimeout.rows ?? [])] };
+  // The first bounded-timeout retry still used Gemini's default reasoning
+  // mode. Requeue those legacy rows exactly once under the lower-latency
+  // structured semantic contract; normal failures remain terminal/retryable
+  // according to the worker's bounded attempt policy.
+  const semanticThinkingLow = await database.query(
+    `UPDATE knowledge_processing_jobs
+        SET status = 'PENDING',
+            available_at = CURRENT_TIMESTAMP,
+            last_error_code = NULL,
+            metadata = metadata || '{"semantic_thinking_low_recovery":true}'::jsonb,
+            updated_at = CURRENT_TIMESTAMP
+      WHERE job_type = 'GENERATE_IMAGE_CANDIDATES'
+        AND embedding_model = 'IMAGE_SEMANTIC'
+        AND status = 'FAILED'
+        AND last_error_code = 'KNOWLEDGE_GENERATION_TIMEOUT'
+        AND COALESCE((metadata->>'semantic_timeout_recovery')::boolean, FALSE) = TRUE
+        AND COALESCE((metadata->>'semantic_thinking_low_recovery')::boolean, FALSE) = FALSE
+      RETURNING id, status`,
+  );
+  const result = { rows: [...(processing.rows ?? []), ...(legacy.rows ?? []), ...(semanticTimeout.rows ?? []), ...(semanticThinkingLow.rows ?? [])] };
   return {
     recovered: result.rows.filter((job) => job.status === 'PENDING').length,
     failed: result.rows.filter((job) => job.status === 'FAILED').length,

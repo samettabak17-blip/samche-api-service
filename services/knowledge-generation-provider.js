@@ -307,6 +307,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
         },
         schema: buildImageSemanticResponseSchema(),
         operation: 'IMAGE_SEMANTIC_CLASSIFICATION',
+        thinkingLevel: config.provider === 'GEMINI' ? 'low' : null,
         timeoutMs: Math.max(config.timeoutMs, IMAGE_SEMANTIC_TIMEOUT_MS),
       });
     },

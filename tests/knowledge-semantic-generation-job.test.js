@@ -124,6 +124,7 @@ test('requeues one legacy semantic provider timeout so the corrected bounded pro
     calls.push({ sql, params });
     if (/status = 'PROCESSING'/i.test(sql)) return { rows: [] };
     if (/legacy_lease_recovery/i.test(sql)) return { rows: [] };
+    if (/semantic_thinking_low_recovery/i.test(sql)) return { rows: [] };
     if (/semantic_timeout_recovery/i.test(sql)) return { rows: [{ id: 'timeout-job', status: 'PENDING' }] };
     return { rows: [] };
   } };
@@ -132,6 +133,22 @@ test('requeues one legacy semantic provider timeout so the corrected bounded pro
   const compatibilityRecovery = calls.find(({ sql }) => /semantic_timeout_recovery/i.test(sql));
   assert.match(compatibilityRecovery.sql, /last_error_code = 'KNOWLEDGE_GENERATION_TIMEOUT'/);
   assert.match(compatibilityRecovery.sql, /embedding_model = 'IMAGE_SEMANTIC'/);
+});
+
+test('requeues one semantic timeout after the low-thinking contract is deployed', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/status = 'PROCESSING'/i.test(sql)) return { rows: [] };
+    if (/semantic_thinking_low_recovery/i.test(sql)) return { rows: [{ id: 'thinking-job', status: 'PENDING' }] };
+    if (/legacy_lease_recovery|semantic_timeout_recovery/i.test(sql)) return { rows: [] };
+    return { rows: [] };
+  } };
+  const recovered = await recoverStaleImageSemanticGenerationJobs(database);
+  assert.equal(recovered.recovered, 1);
+  const compatibilityRecovery = calls.find(({ sql }) => /semantic_thinking_low_recovery/i.test(sql));
+  assert.match(compatibilityRecovery.sql, /last_error_code = 'KNOWLEDGE_GENERATION_TIMEOUT'/);
+  assert.match(compatibilityRecovery.sql, /semantic_timeout_recovery/);
 });
 
 test('semantic worker exposes only safe operational status for deployment health checks', async () => {
