@@ -1,28 +1,22 @@
 import pool from '../config/db.js';
 import { qualifyConversation, persistLeadQualification } from './lead-qualification-service.js';
+import { createGoogleGeminiProvider } from './google-gemini-provider.js';
 
 const inFlight = new Set();
 const qualificationModel = process.env.LEAD_QUALIFICATION_MODEL || 'gemini-3-flash-preview';
+let googleProvider = null;
 
 async function invokeGeminiQualification(prompt) {
-  if (!process.env.GEMINI_API_KEY) throw new Error('LEAD_QUALIFICATION_PROVIDER_UNAVAILABLE');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20_000);
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${qualificationModel}:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0, responseMimeType: 'application/json' },
-        }),
-      }
-    );
-    const body = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(`LEAD_QUALIFICATION_PROVIDER_${response.status}`);
+    googleProvider ??= createGoogleGeminiProvider();
+    const body = await googleProvider.generateContent({
+      model: qualificationModel,
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+      signal: controller.signal,
+    });
     const text = body?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (typeof text !== 'string' || !text.trim()) throw new Error('LEAD_QUALIFICATION_PROVIDER_EMPTY');
     return JSON.parse(text);

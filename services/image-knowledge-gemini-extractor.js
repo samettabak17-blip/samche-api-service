@@ -1,4 +1,5 @@
 import { buildGeminiImagePart } from './whatsapp-multimodal-service.js';
+import { createGoogleGeminiProvider, GoogleGeminiProviderError } from './google-gemini-provider.js';
 import {
   IMAGE_KNOWLEDGE_EXTRACTION_VERSION,
   validateImageKnowledgeExtraction,
@@ -97,6 +98,7 @@ function normalizeProviderOutput(value, { sourceHash, mimeType }) {
 
 export function createGeminiImageKnowledgeExtractor({ env = process.env, fetchImpl = globalThis.fetch, timeoutMs = Number(env.IMAGE_KNOWLEDGE_EXTRACTION_TIMEOUT_MS || DEFAULT_TIMEOUT_MS) } = {}) {
   const model = String(env.IMAGE_KNOWLEDGE_GENERATION_MODEL || env.KNOWLEDGE_GENERATION_MODEL || 'gemini-3-flash-preview').trim();
+  let googleProvider = null;
   return Object.freeze({
     provider: 'GEMINI',
     model,
@@ -105,43 +107,40 @@ export function createGeminiImageKnowledgeExtractor({ env = process.env, fetchIm
       const input = validateImageKnowledgeInput({ originalname: mimeType === 'image/png' ? 'image.png' : 'image.jpg', mimetype: mimeType, buffer: bytes, size: bytes?.length });
       if (!/^[a-f0-9]{64}$/i.test(String(sourceHash ?? ''))) throw new GeminiImageKnowledgeExtractionError('IMAGE_SOURCE_HASH_INVALID', 'Image source hash is invalid');
       readBoundedImageDimensions({ mimeType: input.mimeType, bytes: input.buffer });
-      if (!env.GEMINI_API_KEY || typeof fetchImpl !== 'function') throw new GeminiImageKnowledgeExtractionError('IMAGE_PROVIDER_UNAVAILABLE', 'Gemini image extraction is unavailable');
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
-        const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
-          signal: controller.signal,
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: [
-              { text: 'Extract visible text from this image. Preserve reading order. For conversation-like content classify each segment as BUSINESS, CUSTOMER, or UNKNOWN; use UNKNOWN when role is uncertain. Return concise JSON only.' },
-              buildGeminiImagePart({ mimeType: input.mimeType, bytes: input.buffer }),
-            ] }],
-            generationConfig: {
-              temperature: 0,
-              responseMimeType: 'application/json',
-              thinkingConfig: { thinkingLevel: 'low' },
-              responseSchema: {
-                type: 'OBJECT',
-                properties: {
-                  text: { type: 'STRING' },
-                  extractionConfidence: { type: 'NUMBER' },
-                  segments: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
-                    order: { type: 'INTEGER' }, text: { type: 'STRING' }, role: { type: 'STRING' }, confidence: { type: 'NUMBER' },
-                    sourceLocator: { type: 'OBJECT', properties: { page: { type: 'NUMBER' }, x: { type: 'NUMBER' }, y: { type: 'NUMBER' }, width: { type: 'NUMBER' }, height: { type: 'NUMBER' } } },
-                  } } },
-                },
+        googleProvider ??= createGoogleGeminiProvider({ env, fetchImpl: fetchImpl === globalThis.fetch ? null : fetchImpl });
+        const response = await googleProvider.generateContent({
+          model,
+          contents: [{ role: 'user', parts: [
+            { text: 'Extract visible text from this image. Preserve reading order. For conversation-like content classify each segment as BUSINESS, CUSTOMER, or UNKNOWN; use UNKNOWN when role is uncertain. Return concise JSON only.' },
+            buildGeminiImagePart({ mimeType: input.mimeType, bytes: input.buffer }),
+          ] }],
+          generationConfig: {
+            temperature: 0,
+            responseMimeType: 'application/json',
+            thinkingConfig: { thinkingLevel: 'low' },
+            responseSchema: {
+              type: 'OBJECT',
+              properties: {
+                text: { type: 'STRING' },
+                extractionConfidence: { type: 'NUMBER' },
+                segments: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
+                  order: { type: 'INTEGER' }, text: { type: 'STRING' }, role: { type: 'STRING' }, confidence: { type: 'NUMBER' },
+                  sourceLocator: { type: 'OBJECT', properties: { page: { type: 'NUMBER' }, x: { type: 'NUMBER' }, y: { type: 'NUMBER' }, width: { type: 'NUMBER' }, height: { type: 'NUMBER' } } },
+                } } },
               },
             },
-          }),
+          },
+          signal: controller.signal,
         });
-        if (!response.ok) throw new GeminiImageKnowledgeExtractionError(response.status >= 500 ? 'IMAGE_PROVIDER_HTTP_5XX' : 'IMAGE_PROVIDER_HTTP_4XX', 'Gemini image extraction request failed');
-        let body;
-        try { body = await response.json(); } catch { throw new GeminiImageKnowledgeExtractionError('IMAGE_PROVIDER_JSON_INVALID', 'Gemini image extraction response is invalid'); }
-        return normalizeProviderOutput(parseProviderText(body), { sourceHash: String(sourceHash).toLowerCase(), mimeType: input.mimeType });
+        return normalizeProviderOutput(parseProviderText(response), { sourceHash: String(sourceHash).toLowerCase(), mimeType: input.mimeType });
       } catch (error) {
         if (error instanceof GeminiImageKnowledgeExtractionError) throw error;
+        if (error?.code === 'GOOGLE_GEMINI_API_KEY_REQUIRED' || error?.code === 'GOOGLE_CLOUD_PROJECT_REQUIRED' || error?.code === 'GOOGLE_CLOUD_LOCATION_REQUIRED') throw new GeminiImageKnowledgeExtractionError('IMAGE_PROVIDER_UNAVAILABLE', 'Gemini image extraction is unavailable', { cause: error });
+        if (error instanceof GoogleGeminiProviderError && error.code === 'GOOGLE_GEMINI_TIMEOUT') throw new GeminiImageKnowledgeExtractionError('IMAGE_PROVIDER_TIMEOUT', 'Gemini image extraction timed out', { cause: error });
+        if (error instanceof GoogleGeminiProviderError && (error.code === 'GOOGLE_GEMINI_MODEL_UNAVAILABLE' || error.code === 'GOOGLE_GEMINI_AUTH_FAILED' || error.code === 'GOOGLE_VERTEX_PERMISSION_DENIED' || error.code === 'GOOGLE_GEMINI_HTTP_4XX')) throw new GeminiImageKnowledgeExtractionError('IMAGE_PROVIDER_HTTP_4XX', 'Gemini image extraction request failed', { cause: error });
         if (controller.signal.aborted || error?.name === 'AbortError') throw new GeminiImageKnowledgeExtractionError('IMAGE_PROVIDER_TIMEOUT', 'Gemini image extraction timed out');
         throw new GeminiImageKnowledgeExtractionError('IMAGE_PROVIDER_NETWORK_ERROR', 'Gemini image extraction failed');
       } finally {

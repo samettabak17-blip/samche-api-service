@@ -45,6 +45,7 @@ import { startKnowledgeProcessingWorker } from "./services/knowledge-source-proc
 import { createGeminiImageKnowledgeExtractor } from "./services/image-knowledge-gemini-extractor.js";
 import { createImageKnowledgeSemanticClassifier } from "./services/image-knowledge-semantic-service.js";
 import { createKnowledgeGenerationProvider } from "./services/knowledge-generation-provider.js";
+import { createGoogleGeminiProvider } from "./services/google-gemini-provider.js";
 import { startImageSemanticGenerationWorker } from "./services/knowledge-semantic-generation-job-service.js";
 import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from "./services/knowledge-runtime-context-service.js";
 import { buildTenantRuntimeSystemInstruction, resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
@@ -176,15 +177,14 @@ const processedTgUpdates = new Set();
 // ============================================================================
 // 1. GENEL API YAPILANDIRMALARI
 // ============================================================================
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const SAMCHE_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`;
-const WP_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${GEMINI_API_KEY}`;
+const googleGeminiProvider = createGoogleGeminiProvider();
+const googleGeminiEnabled = process.env.GOOGLE_GENAI_MODE?.trim().toLowerCase() === 'vertex' || Boolean(process.env.GEMINI_API_KEY);
 
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 const knowledgeEmbedder = process.env.OPENAI_API_KEY ? createOpenAIEmbedder(openaiClient) : null;
-const knowledgeImageExtractor = process.env.GEMINI_API_KEY ? createGeminiImageKnowledgeExtractor() : null;
+const knowledgeImageExtractor = googleGeminiEnabled ? createGeminiImageKnowledgeExtractor() : null;
 
 function startKnowledgeWorkers() {
   if ((knowledgeEmbedder || knowledgeImageExtractor) && process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
@@ -198,7 +198,7 @@ function startKnowledgeWorkers() {
     console.info('KNOWLEDGE_PROCESSING_WORKER_DISABLED');
   }
 
-  if (process.env.GEMINI_API_KEY && process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
+  if (googleGeminiEnabled && process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
     imageSemanticGenerationWorker = startImageSemanticGenerationWorker({
       database: pool,
       semanticClassifier: createImageKnowledgeSemanticClassifier({ provider: createKnowledgeGenerationProvider() }),
@@ -222,47 +222,23 @@ const GEMINI_REQUEST_TIMEOUT_MS = 20000;
 async function requestGemini(payload) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), GEMINI_REQUEST_TIMEOUT_MS);
-
   try {
-    const response = await fetch(SAMCHE_GEMINI_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: controller.signal
+    return await googleGeminiProvider.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: payload.contents,
+      generationConfig: payload.generationConfig,
+      systemInstruction: payload.systemInstruction,
+      signal: controller.signal,
     });
-
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      const error = new Error(`Gemini request failed with status ${response.status}`);
-      error.status = 502;
-      throw error;
-    }
-
-    const responseText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (typeof responseText !== "string" || responseText.trim().length === 0) {
-      const error = new Error("Gemini returned no usable response.");
-      error.status = 502;
-      throw error;
-    }
-
-    return data;
   } catch (error) {
-    if (error.name === "AbortError") {
-      const timeoutError = new Error("Gemini request timed out.");
-      timeoutError.status = 504;
-      throw timeoutError;
-    }
-
     if (error.status) throw error;
-
     const upstreamError = new Error("Gemini request failed.");
     upstreamError.status = 502;
     throw upstreamError;
   } finally {
     clearTimeout(timeoutId);
   }
-};
+}
 
 // ============================================================================
 // 🔥 ORTAK KULLANICI KİMLİĞİ BULUCU (IP & Header) - HAFIZA İÇİN GÜÇLENDİRİLDİ
@@ -577,20 +553,14 @@ async function callWpGemini(prompt, multimodalParts = null, systemInstruction = 
       ? multimodalParts
       : (multimodalParts ? [multimodalParts] : []);
     parts.push(...contextualParts);
-    const payload = { contents: [{ parts }] };
-    if (typeof systemInstruction === 'string' && systemInstruction.trim()) {
-      payload.systemInstruction = { parts: [{ text: systemInstruction }] };
-    }
-    const response = await axios.post(
-      WP_GEMINI_URL,
-      payload,
-      { 
-        httpsAgent,
-        headers: { "Content-Type": "application/json" },
-        timeout: 60000 // 🔥 SORUN BURADAYDI: Çökme/timeout hatalarını kökten çözmek için 60 saniyeye yükseltildi!
-      }
-    );
-    return response.data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
+    const response = await googleGeminiProvider.generateContent({
+      model: 'gemini-2.5-pro',
+      contents: [{ parts }],
+      systemInstruction: typeof systemInstruction === 'string' && systemInstruction.trim()
+        ? { parts: [{ text: systemInstruction }] }
+        : undefined,
+    });
+    return response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
   } catch (err) {
     console.error("Gemini API error (WP):", err.response?.data || err.message);
     return null;

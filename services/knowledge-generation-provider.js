@@ -1,6 +1,7 @@
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { validateImageKnowledgeSemanticOutput } from './image-knowledge-semantic-service.js';
+import { createGoogleGeminiProvider } from './google-gemini-provider.js';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const ASSISTANT_GENERATION_TIMEOUT_MS = 30_000;
@@ -182,6 +183,9 @@ function timeoutSignal(timeoutMs) {
 export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl = globalThis.fetch, openaiClient = null, telemetry: telemetryImpl = null } = {}) {
   installTransportTelemetry();
   const config = getKnowledgeGenerationConfig(env);
+  const googleProvider = config.provider === 'GEMINI'
+    ? createGoogleGeminiProvider({ env, fetchImpl: fetchImpl === globalThis.fetch ? null : fetchImpl })
+    : null;
   const telemetry = typeof telemetryImpl === 'function'
     ? telemetryImpl
     : (event) => console.log(`KNOWLEDGE_GENERATION_PROVIDER ${JSON.stringify(event)}`);
@@ -210,33 +214,22 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
     try {
       let text;
       if (config.provider === 'GEMINI') {
-        if (!env.GEMINI_API_KEY || typeof fetchImpl !== 'function') {
-          throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_PROVIDER_UNAVAILABLE', 'Gemini knowledge generation is unavailable');
-        }
         emit('request_started');
-        const response = await fetchWithTransportTelemetry(
-          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(config.model)}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            signal: timeout.signal,
-            body: JSON.stringify({
-              contents: [{ role: 'user', parts: [{ text: prompt.trim() }] }],
-              generationConfig: {
-                temperature: 0,
-                responseMimeType: 'application/json',
-                responseSchema: schema,
-                ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
-              },
-            }),
+        const response = await googleProvider.generateContent({
+          model: config.model,
+          contents: [{ role: 'user', parts: [{ text: prompt.trim() }] }],
+          generationConfig: {
+            temperature: 0,
+            responseMimeType: 'application/json',
+            responseSchema: schema,
+            ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
           },
-        );
+          signal: timeout.signal,
+        });
         responseReceived = true;
-        emit('http_status_received', { http_status: response.status });
+        if (response?.status) emit('http_status_received', { http_status: response.status });
         emit('fetch_fulfilled', { elapsed_ms: Date.now() - startedAt });
-        const body = await response.json().catch(() => null);
-        if (!response.ok) throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_PROVIDER_FAILED', `Gemini knowledge generation failed with status ${response.status}`);
-        text = body?.candidates?.[0]?.content?.parts?.map((part) => part?.text || '').join('');
+        text = response?.candidates?.[0]?.content?.parts?.map((part) => part?.text || '').join('');
       } else {
         if (!env.OPENAI_API_KEY || !openaiClient?.chat?.completions?.create) {
           throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_PROVIDER_UNAVAILABLE', 'OpenAI knowledge generation is unavailable');

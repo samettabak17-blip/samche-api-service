@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.540.0",
+    "@google/genai": "^2.20.0",
     "argon2": "^0.44.0",
     "axios": "^1.6.0",
     "body-parser": "^1.20.2",
