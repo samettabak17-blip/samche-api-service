@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { approveConversationKnowledgeCandidate } from '../services/knowledge-candidate-service.js';
 
 const tenantId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -99,6 +100,12 @@ test('approval records only safe native database diagnostics after rollback', as
     constraintName: 'fk_materialized_candidate_source',
     tableName: 'knowledge_materialized_source_provenance',
   }]);
+});
+
+test('materialized provenance statement binds every UUID parameter explicitly', () => {
+  const service = fs.readFileSync(new URL('../services/knowledge-candidate-service.js', import.meta.url), 'utf8');
+  assert.match(service, /SELECT DISTINCT \$1::uuid, \$3::uuid, evidence\.candidate_id, evidence\.source_id/);
+  assert.match(service, /evidence\.tenant_id = \$1::uuid AND evidence\.candidate_id = \$2::uuid/);
 });
 
 test('already approved candidate cannot be approved again, preventing duplicate materialization', async () => {

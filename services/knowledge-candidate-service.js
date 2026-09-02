@@ -425,9 +425,9 @@ export async function approveConversationKnowledgeCandidate({
       await db(client,
         `INSERT INTO knowledge_materialized_source_provenance
            (tenant_id, materialized_source_id, candidate_id, original_source_id)
-           SELECT DISTINCT $1, $3, evidence.candidate_id, evidence.source_id
+           SELECT DISTINCT $1::uuid, $3::uuid, evidence.candidate_id, evidence.source_id
              FROM knowledge_candidate_image_evidence evidence
-            WHERE evidence.tenant_id = $1 AND evidence.candidate_id = $2
+            WHERE evidence.tenant_id = $1::uuid AND evidence.candidate_id = $2::uuid
            ON CONFLICT DO NOTHING`,
         [tenantId, candidateId, source.id],
       );
