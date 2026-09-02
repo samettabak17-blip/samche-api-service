@@ -24,6 +24,7 @@ test('activating an approved assistant configuration supersedes only the previou
   assert.ok(calls.some(({ sql }) => /status = 'SUPERSEDED'/.test(sql)));
   assert.ok(calls.some(({ sql }) => /status = 'ACTIVE'/.test(sql)));
   assert.ok(calls.some(({ sql }) => /active_configuration_version_id/.test(sql)));
+  assert.equal(calls.some(({ sql }) => /tenant_channels|channel_integrations/i.test(sql)), false);
 });
 
 test('active runtime resolution includes only the tenant active approved Business Profile version', async () => {
@@ -108,6 +109,7 @@ test('approving a profile records historical approval without activating it', as
   assert.ok(calls.some(({ sql }) => /SET status = 'APPROVED'/.test(sql)));
   assert.ok(calls.some(({ sql }) => /approved_version_id/.test(sql)));
   assert.equal(calls.some(({ sql }) => /active_version_id/.test(sql)), false);
+  assert.equal(calls.some(({ sql }) => /tenant_channels|channel_integrations/i.test(sql)), false);
   assert.match(calls.find(({ sql }) => /SELECT version\.profile_id/.test(sql)).sql, /business_identity_status/i);
 });
 

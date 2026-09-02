@@ -5,11 +5,18 @@ import {
   GoogleGeminiProviderError,
   createGoogleGeminiProvider,
   getGoogleGeminiConfig,
+  resolveGoogleGeminiRuntimeModel,
 } from '../services/google-gemini-provider.js';
 
 function fakeResponse(text = 'ok') {
   return { candidates: [{ content: { parts: [{ text }] } }] };
 }
+
+test('runtime model is resolved at the platform provider boundary, never from tenant input', () => {
+  assert.equal(resolveGoogleGeminiRuntimeModel({ GOOGLE_GEMINI_RUNTIME_MODEL: 'platform-model' }), 'platform-model');
+  assert.equal(resolveGoogleGeminiRuntimeModel({ WHATSAPP_GEMINI_MODEL: 'legacy-platform-model' }), 'legacy-platform-model');
+  assert.equal(resolveGoogleGeminiRuntimeModel({}), 'gemini-3-flash-preview');
+});
 
 test('developer mode creates a Gemini Developer API client with the API key', () => {
   let options;

@@ -21,7 +21,7 @@ export class ConversationOperationError extends Error {
   }
 }
 
-const integrationKey = 'SAMCHEGUIDE:staging';
+export const SAMCHEGUIDE_INTEGRATION_KEY = 'SAMCHEGUIDE:staging';
 
 function publicConversationKey(externalSessionId) {
   return `samcheguide:${crypto.createHash('sha256').update(String(externalSessionId)).digest('hex')}`;
@@ -47,22 +47,32 @@ async function writeAuditEvent(client, { tenantId, conversationId, actorUserId =
   );
 }
 
-async function loadSamcheguideIntegration(client) {
+async function loadSamcheguideIntegration(client, integrationKey = SAMCHEGUIDE_INTEGRATION_KEY) {
   const result = await client.query(
-    `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id, tc.channel_type, tc.status AS channel_status
+    `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id, tc.assistant_id AS channel_assistant_id,
+            tc.channel_type, tc.status AS channel_status, a.status AS assistant_status
        FROM channel_integrations ci
        JOIN tenant_channels tc ON tc.id = ci.channel_id AND tc.tenant_id = ci.tenant_id
+       JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
       WHERE ci.integration_key = $1
         AND ci.integration_type = 'SAMCHEGUIDE'
         AND ci.enabled = TRUE
-      LIMIT 1`,
+      LIMIT 2`,
     [integrationKey]
   );
-  return result.rows[0] ?? null;
+  if (result.rowCount !== 1) return null;
+  const integration = result.rows[0];
+  if (
+    integration.channel_type !== 'SAMCHEGUIDE'
+    || integration.channel_status !== 'active'
+    || integration.assistant_status !== 'active'
+    || integration.channel_assistant_id !== integration.assistant_id
+  ) return null;
+  return integration;
 }
 
-export async function resolveSamcheguideRuntimeIntegration({ database = pool } = {}) {
-  return loadSamcheguideIntegration(database);
+export async function resolveSamcheguideRuntimeIntegration({ database = pool, integrationKey = SAMCHEGUIDE_INTEGRATION_KEY } = {}) {
+  return loadSamcheguideIntegration(database, integrationKey);
 }
 
 export const INSERT_CONVERSATION_MESSAGE_SQL = `INSERT INTO conversation_messages

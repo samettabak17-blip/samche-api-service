@@ -51,6 +51,8 @@ import { startImageSemanticGenerationWorker } from "./services/knowledge-semanti
 import { generateAssistantConfigurationVersion, generateAssistantRecommendation } from "./services/knowledge-assistant-lifecycle.js";
 import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from "./services/knowledge-runtime-context-service.js";
 import { buildTenantRuntimeSystemInstruction, resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
+import { resolveChannelAssistantRuntime } from "./services/assistant-runtime-resolution-service.js";
+import { samcheguideRuntimeSessionKey } from "./services/samcheguide-runtime-session-service.js";
 import { buildTenantFollowUpRequest } from "./services/tenant-follow-up-service.js";
 import { isSameKnowledgeAuthority, resolveAssistantKnowledgeAuthority } from "./services/knowledge-authority-service.js";
 import { filterProviderMemoryByAuthority, stampProviderMemoryEntry } from "./services/channel-knowledge-authority-memory.js";
@@ -184,7 +186,6 @@ const googleGeminiEnabled = process.env.GOOGLE_GENAI_MODE?.trim().toLowerCase() 
 // The WhatsApp runtime uses the same Vertex-compatible Gemini model family as
 // the accepted Knowledge Intelligence generation paths. The environment may
 // choose another platform-approved model without exposing that choice to tenants.
-const WHATSAPP_GEMINI_MODEL = process.env.WHATSAPP_GEMINI_MODEL || 'gemini-3-flash-preview';
 
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -233,12 +234,12 @@ const parseLinksToHTML = (text) => {
 
 const GEMINI_REQUEST_TIMEOUT_MS = 20000;
 
-async function requestGemini(payload) {
+async function requestGemini(payload, runtimeModel = googleGeminiProvider.runtimeMetadata().model) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), GEMINI_REQUEST_TIMEOUT_MS);
   try {
     return await googleGeminiProvider.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: runtimeModel,
       contents: payload.contents,
       generationConfig: payload.generationConfig,
       systemInstruction: payload.systemInstruction,
@@ -565,7 +566,7 @@ function corporateFallback(lang) {
   return "لأتمكن من تقديم الإرشاد الأنسب لكم، هل يمكن توضيح طلبكم بشكل أدق؟ سيساعدني ذلك في تقديم الدعم الأمثل.";
 }
 
-async function callWpGemini(prompt, multimodalParts = null, systemInstruction = null) {
+async function callWpGemini(prompt, multimodalParts = null, systemInstruction = null, runtimeModel = googleGeminiProvider.runtimeMetadata().model) {
   try {
     const parts = [{ text: prompt }];
     const contextualParts = Array.isArray(multimodalParts)
@@ -573,7 +574,7 @@ async function callWpGemini(prompt, multimodalParts = null, systemInstruction = 
       : (multimodalParts ? [multimodalParts] : []);
     parts.push(...contextualParts);
     const response = await googleGeminiProvider.generateContent({
-      model: WHATSAPP_GEMINI_MODEL,
+      model: runtimeModel,
       contents: [{ role: 'user', parts }],
       systemInstruction: typeof systemInstruction === 'string' && systemInstruction.trim()
         ? { parts: [{ text: systemInstruction }] }
@@ -586,7 +587,7 @@ async function callWpGemini(prompt, multimodalParts = null, systemInstruction = 
     const safeEndpointClass = typeof err?.safeMetadata?.endpoint_class === 'string'
       ? err.safeMetadata.endpoint_class
       : (googleGeminiProvider.mode === 'vertex' ? 'VERTEX_GENERATE_CONTENT' : 'GEMINI_DEVELOPER_GENERATE_CONTENT');
-    console.error(`WHATSAPP_GEMINI_RUNTIME_FAILURE code=${safeCode} http_status=${safeStatus} model=${WHATSAPP_GEMINI_MODEL} endpoint_class=${safeEndpointClass}`);
+    console.error(`WHATSAPP_GEMINI_RUNTIME_FAILURE code=${safeCode} http_status=${safeStatus} model=${runtimeModel} endpoint_class=${safeEndpointClass}`);
     return null;
   }
 }
@@ -876,23 +877,22 @@ app.post("/plan", async (req, res) => {
     if (!integration || integration.channel_status !== "active") {
       return res.status(503).json({ error: "AI Guide configuration is temporarily unavailable." });
     }
-
-    const runtimePersona = await resolveTenantRuntimePersona({
-      database: pool,
-      tenantId: integration.tenant_id,
-      assistantId: integration.assistant_id,
-    });
-    if (!runtimePersona.available) {
+    let runtime;
+    try {
+      runtime = await resolveChannelAssistantRuntime({
+        database: pool,
+        embed: knowledgeEmbedder,
+        scope: integration,
+        query: cleanSector,
+        channelType: 'SAMCHEGUIDE',
+        resolvePersona: resolveTenantRuntimePersona,
+        resolveKnowledge: resolveAssistantRuntimeKnowledgeContext,
+        resolveModel: () => googleGeminiProvider.runtimeMetadata(),
+      });
+    } catch (error) {
+      console.error('GUIDE_RUNTIME_HEALTH status=' + (error?.code ?? 'GUIDE_RUNTIME_UNAVAILABLE'));
       return res.status(503).json({ error: "AI Guide assistant configuration is temporarily unavailable." });
     }
-
-    const runtimeKnowledge = await resolveAssistantRuntimeKnowledgeContext({
-      database: pool,
-      embed: knowledgeEmbedder,
-      tenantId: integration.tenant_id,
-      assistantId: integration.assistant_id,
-      query: cleanSector,
-    });
     const knowledgeAuthority = await resolveAssistantKnowledgeAuthority({
       database: pool,
       tenantId: integration.tenant_id,
@@ -900,8 +900,8 @@ app.post("/plan", async (req, res) => {
     });
     const planRequest = `Create a structured strategic plan for the customer-requested sector or objective: "${cleanSector}". Use only the ACTIVE tenant business profile, ACTIVE Assistant configuration, and approved tenant knowledge. Do not invent unsupported services, prices, procedures, approvals, jurisdictions, or claims. Reply in the language of the request.`;
     const runtimeSystemInstruction = buildTenantRuntimeSystemInstruction({
-      persona: runtimePersona,
-      knowledgeContext: runtimeKnowledge.knowledgeContext,
+      persona: runtime.persona,
+      knowledgeContext: runtime.knowledge.knowledgeContext,
       channelRules: "Return safe, readable HTML suitable for the AI Guide interface.",
     });
 
@@ -912,13 +912,19 @@ app.post("/plan", async (req, res) => {
       systemInstruction: { parts: [{ text: runtimeSystemInstruction }] }
     };
 
-    const data = await requestGemini(payload);
+    const data = await requestGemini(payload, runtime.model);
     if (data.candidates && data.candidates[0]?.content?.parts?.[0]) {
       let originalText = data.candidates[0].content.parts[0].text;
       data.candidates[0].content.parts[0].text = parseLinksToHTML(originalText);
       // 🔥 HAFIZAYA EKLE (Sayfa yenilendiğinde unutmaması için)
-      addGuideMemory(userId, "user", planRequest, knowledgeAuthority);
-      addGuideMemory(userId, "model", originalText, knowledgeAuthority);
+      const runtimeSession = samcheguideRuntimeSessionKey({
+        tenantId: integration.tenant_id,
+        assistantId: integration.assistant_id,
+        channelId: integration.channel_id,
+        sessionId: userId,
+      });
+      addGuideMemory(runtimeSession, "user", planRequest, knowledgeAuthority);
+      addGuideMemory(runtimeSession, "model", originalText, knowledgeAuthority);
     }
     return res.json(data);
   } catch (err) {
@@ -952,8 +958,15 @@ app.post("/chat", async (req, res) => {
       idempotencyKey: req.get("Idempotency-Key") || null,
     });
 
-    // An explicit staging mapping opts this request into the tenant inbox.
-    // Without one, legacy Samcheguide behavior remains unchanged.
+    // A Guide request is always bound to the configured tenant channel. It must
+    // never fall back to the legacy platform persona when the binding is absent.
+    if (!inboxState) {
+      console.error('CHAT_RESPONSE_503 stage=GUIDE_RUNTIME_UNAVAILABLE');
+      return res.status(503).json({
+        error: "AI Guide assistant configuration is temporarily unavailable.",
+        conversation_session: publicSession.token,
+      });
+    }
     if (inboxState?.duplicate) {
       return res.status(202).json({ status: "duplicate", conversation_session: publicSession.token });
     }
@@ -970,11 +983,15 @@ app.post("/chat", async (req, res) => {
     if (sgCorporateShortReplyMap[lowerCleanText]) {
       originalText = sgCorporateShortReplyMap[lowerCleanText];
     } else {
-      addGuideMemory(userId, "user", cleanText, inboxState?.knowledgeAuthority ?? null);
-      const rawHistory = guideMemoryStore[userId] || [];
-      const history = inboxState
-        ? (inboxState.knowledgeAuthority ? filterProviderMemoryByAuthority(rawHistory, inboxState.knowledgeAuthority) : [])
-        : rawHistory;
+      const runtimeSession = samcheguideRuntimeSessionKey({
+        tenantId: inboxState.integration.tenant_id,
+        assistantId: inboxState.integration.assistant_id,
+        channelId: inboxState.integration.channel_id,
+        sessionId: userId,
+      });
+      addGuideMemory(runtimeSession, "user", cleanText, inboxState.knowledgeAuthority ?? null);
+      const rawHistory = guideMemoryStore[runtimeSession] || [];
+      const history = inboxState.knowledgeAuthority ? filterProviderMemoryByAuthority(rawHistory, inboxState.knowledgeAuthority) : [];
       const contents = history.map((msg, index) => {
         if (index === history.length - 1 && msg.role === "user") {
           return {
@@ -984,47 +1001,38 @@ app.post("/chat", async (req, res) => {
         }
         return msg;
       });
-      let runtimeSystemInstruction = SAMCHEGUIDE_SYSTEM_PROMPT;
-      if (inboxState) {
-        try {
-          const runtimePersona = await resolveTenantRuntimePersona({
-            database: pool,
-            tenantId: inboxState.integration.tenant_id,
-            assistantId: inboxState.integration.assistant_id,
-          });
-          if (!runtimePersona.available) {
-            console.error('CHAT_RESPONSE_503 stage=TENANT_PERSONA_UNAVAILABLE');
-            return res.status(503).json({
-              error: "AI Guide assistant configuration is temporarily unavailable.",
-              conversation_session: publicSession.token,
-            });
-          }
-          const runtimeKnowledge = await resolveAssistantRuntimeKnowledgeContext({
-            database: pool,
-            embed: knowledgeEmbedder,
-            tenantId: inboxState.integration.tenant_id,
-            assistantId: inboxState.integration.assistant_id,
-            query: cleanText,
-          });
-          runtimeSystemInstruction = buildTenantRuntimeSystemInstruction({
-            persona: runtimePersona,
-            knowledgeContext: runtimeKnowledge.knowledgeContext,
-            channelRules: "Return safe, readable HTML suitable for the AI Guide interface. Reply in the customer's language.",
-          });
-          console.info(
-            'KNOWLEDGE_RUNTIME_CONTEXT channel=SAMCHEGUIDE active_configuration=' + (runtimeKnowledge.activeConfiguration ? '1' : '0') +
-            ' retrieved_chunks=' + runtimeKnowledge.knowledge.length +
-            ' retrieval_available=' + (runtimeKnowledge.retrievalAvailable ? '1' : '0')
-          );
-        } catch (error) {
-          console.error('KNOWLEDGE_RUNTIME_CONTEXT_UNAVAILABLE channel=SAMCHEGUIDE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
-          console.error('CHAT_RESPONSE_503 stage=RUNTIME_CONTEXT_UNAVAILABLE');
-          return res.status(503).json({
-            error: "AI Guide assistant configuration is temporarily unavailable.",
-            conversation_session: publicSession.token,
-          });
-        }
+      let runtime;
+      try {
+        runtime = await resolveChannelAssistantRuntime({
+          database: pool,
+          embed: knowledgeEmbedder,
+          scope: inboxState.integration,
+          query: cleanText,
+          channelType: 'SAMCHEGUIDE',
+          resolvePersona: resolveTenantRuntimePersona,
+          resolveKnowledge: resolveAssistantRuntimeKnowledgeContext,
+          resolveModel: () => googleGeminiProvider.runtimeMetadata(),
+        });
+      } catch (error) {
+        console.error('KNOWLEDGE_RUNTIME_CONTEXT_UNAVAILABLE channel=SAMCHEGUIDE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+        if (error?.code === 'GUIDE_RUNTIME_UNAVAILABLE') console.error('CHAT_RESPONSE_503 stage=TENANT_PERSONA_UNAVAILABLE');
+        console.error('CHAT_RESPONSE_503 stage=RUNTIME_CONTEXT_UNAVAILABLE');
+        return res.status(503).json({
+          error: "AI Guide assistant configuration is temporarily unavailable.",
+          conversation_session: publicSession.token,
+        });
       }
+      const runtimeSystemInstruction = buildTenantRuntimeSystemInstruction({
+        persona: runtime.persona,
+        knowledgeContext: runtime.knowledge.knowledgeContext,
+        channelRules: "Return safe, readable HTML suitable for the AI Guide interface. Reply in the customer's language.",
+      });
+      console.info(
+        'KNOWLEDGE_RUNTIME_CONTEXT channel=SAMCHEGUIDE active_configuration=' + (runtime.knowledge.activeConfiguration ? '1' : '0') +
+        ' retrieved_chunks=' + runtime.knowledge.knowledge.length +
+        ' retrieval_available=' + (runtime.knowledge.retrievalAvailable ? '1' : '0') +
+        ' provider_mode=' + runtime.mode + ' model=' + runtime.model
+      );
 
       console.info('CHAT_GEMINI_STARTED');
       let data;
@@ -1032,7 +1040,7 @@ app.post("/chat", async (req, res) => {
         data = await requestGemini({
           contents,
           systemInstruction: { parts: [{ text: runtimeSystemInstruction }] }
-        });
+        }, runtime.model);
       } catch (error) {
         const code = typeof error?.code === 'string' && /^GOOGLE_(?:VERTEX|GEMINI)_[A-Z0-9_]+$/.test(error.code)
           ? error.code
@@ -1064,7 +1072,13 @@ app.post("/chat", async (req, res) => {
       }
     }
 
-    addGuideMemory(userId, "model", originalText, inboxState?.knowledgeAuthority ?? null);
+    const responseRuntimeSession = samcheguideRuntimeSessionKey({
+      tenantId: inboxState.integration.tenant_id,
+      assistantId: inboxState.integration.assistant_id,
+      channelId: inboxState.integration.channel_id,
+      sessionId: userId,
+    });
+    addGuideMemory(responseRuntimeSession, "model", originalText, inboxState.knowledgeAuthority ?? null);
     return res.json({
       conversation_session: publicSession.token,
       candidates: [{ content: { parts: [{ text: parseLinksToHTML(originalText) }] } }]
@@ -1847,32 +1861,28 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       session.lang = lang;
 
       let runtimeTenantContext;
+      let runtime;
       try {
-        const runtimePersona = await resolveTenantRuntimePersona({
-          database: pool,
-          tenantId: whatsappInbox.integration.tenant_id,
-          assistantId: whatsappInbox.integration.assistant_id,
-        });
-        if (!runtimePersona.available) {
-          await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, resolveWhatsAppPersonaUnavailableResponse(tenantContext.communicationLanguage));
-          return;
-        }
-        const runtimeKnowledge = await resolveAssistantRuntimeKnowledgeContext({
+        runtime = await resolveChannelAssistantRuntime({
           database: pool,
           embed: knowledgeEmbedder,
-          tenantId: whatsappInbox.integration.tenant_id,
-          assistantId: whatsappInbox.integration.assistant_id,
+          scope: whatsappInbox.integration,
           query: text,
+          channelType: 'WHATSAPP',
+          resolvePersona: resolveTenantRuntimePersona,
+          resolveKnowledge: resolveAssistantRuntimeKnowledgeContext,
+          resolveModel: () => googleGeminiProvider.runtimeMetadata(),
         });
         runtimeTenantContext = buildWhatsAppActivePersonaTenantContext({
-          persona: runtimePersona,
-          knowledgeContext: runtimeKnowledge.knowledgeContext,
+          persona: runtime.persona,
+          knowledgeContext: runtime.knowledge.knowledgeContext,
           communicationLanguage: tenantContext.communicationLanguage,
         });
         console.info(
-          'KNOWLEDGE_RUNTIME_CONTEXT active_configuration=' + (runtimeKnowledge.activeConfiguration ? '1' : '0') +
-          ' retrieved_chunks=' + runtimeKnowledge.knowledge.length +
-          ' retrieval_available=' + (runtimeKnowledge.retrievalAvailable ? '1' : '0')
+          'KNOWLEDGE_RUNTIME_CONTEXT channel=WHATSAPP active_configuration=' + (runtime.knowledge.activeConfiguration ? '1' : '0') +
+          ' retrieved_chunks=' + runtime.knowledge.knowledge.length +
+          ' retrieval_available=' + (runtime.knowledge.retrievalAvailable ? '1' : '0') +
+          ' provider_mode=' + runtime.mode + ' model=' + runtime.model
         );
       } catch (error) {
         console.error('KNOWLEDGE_RUNTIME_CONTEXT_UNAVAILABLE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
@@ -1998,6 +2008,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         modelContext.userPrompt,
         whatsappInbox?.aiContextParts ?? (whatsappInbox?.aiContextPart ? [whatsappInbox.aiContextPart] : []),
         modelContext.systemInstruction,
+        runtime.model,
       );
       let responseLanguage = detectWhatsAppModelResponseLanguage(aiResponse);
       const expectedLanguage = tenantContext.communicationLanguage;
@@ -2012,6 +2023,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           modelContext.userPrompt + '\n\nLANGUAGE_COMPLIANCE_RETRY: The prior response violated the required output language. Respond only in ' + expectedLanguage + ' while preserving the same tenant business policy and answer.',
           whatsappInbox?.aiContextParts ?? (whatsappInbox?.aiContextPart ? [whatsappInbox.aiContextPart] : []),
           modelContext.systemInstruction,
+          runtime.model,
         );
         responseLanguage = detectWhatsAppModelResponseLanguage(aiResponse);
         console.info('LANGUAGE_COMPLIANCE_RETRY triggered=1 required=' + expectedLanguage + ' first_response=' + firstResponseLanguage + ' retry_response=' + responseLanguage);

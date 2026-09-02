@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 const DEFAULT_MODE = 'developer';
 const ALLOWED_MODES = new Set(['developer', 'vertex']);
 const DEFAULT_REQUEST_TIMEOUT_MS = 20000;
+const DEFAULT_RUNTIME_MODEL = 'gemini-3-flash-preview';
 
 export class GoogleGeminiProviderError extends Error {
   constructor(code, message, options = {}) {
@@ -40,6 +41,12 @@ export function getGoogleGeminiConfig(env = process.env) {
     location: requiredString(env.GOOGLE_CLOUD_LOCATION),
     apiKey: requiredString(env.GEMINI_API_KEY),
   });
+}
+
+export function resolveGoogleGeminiRuntimeModel(env = process.env) {
+  return requiredString(env.GOOGLE_GEMINI_RUNTIME_MODEL)
+    || requiredString(env.WHATSAPP_GEMINI_MODEL)
+    || DEFAULT_RUNTIME_MODEL;
 }
 
 function normalizePart(part) {
@@ -236,6 +243,14 @@ export function createGoogleGeminiProvider({ env = process.env, clientFactory, f
 
   return Object.freeze({
     mode: config.mode,
+    runtimeMetadata() {
+      return Object.freeze({
+        provider: 'GOOGLE_GEMINI',
+        mode: config.mode,
+        model: resolveGoogleGeminiRuntimeModel(env),
+        endpoint_class: config.mode === 'vertex' ? 'VERTEX_GENERATE_CONTENT' : 'GEMINI_DEVELOPER_GENERATE_CONTENT',
+      });
+    },
     async generateContent({ model, contents, generationConfig = undefined, systemInstruction = undefined, signal = undefined }) {
       const request = {
         model,
