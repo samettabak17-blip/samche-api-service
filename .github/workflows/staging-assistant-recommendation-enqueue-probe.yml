@@ -1,0 +1,53 @@
+name: Staging Assistant Recommendation Enqueue Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      tenant_id:
+        description: Exact non-secret tenant UUID
+        required: true
+        type: string
+      assistant_id:
+        description: Exact non-secret assistant UUID
+        required: true
+        type: string
+      profile_version_id:
+        description: Exact non-secret approved profile version UUID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 2
+    steps:
+      - name: Invoke the normal tenant-admin recommendation endpoint once
+        env:
+          API: https://samche-api-staging.onrender.com
+          TOKEN: ${{ secrets.STAGING_ADMIN_TOKEN }}
+          TENANT_ID: ${{ inputs.tenant_id }}
+          ASSISTANT_ID: ${{ inputs.assistant_id }}
+          PROFILE_VERSION_ID: ${{ inputs.profile_version_id }}
+        run: |
+          node <<'NODE'
+          const endpoint = `${process.env.API}/api/v1/tenants/${process.env.TENANT_ID}/knowledge-intelligence/assistants/${process.env.ASSISTANT_ID}/recommendations/generate`;
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { authorization: `Bearer ${process.env.TOKEN}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ business_profile_version_id: process.env.PROFILE_VERSION_ID }),
+          });
+          const body = await response.json().catch(() => ({}));
+          console.log(JSON.stringify({
+            http_status: response.status,
+            safe_error_code: typeof body.code === 'string' ? body.code : null,
+            safe_error: typeof body.error === 'string' ? body.error.slice(0, 160) : null,
+            job_id: typeof body.job?.id === 'string' ? body.job.id : null,
+            job_status: typeof body.job?.status === 'string' ? body.job.status : null,
+          }));
+          if (response.status !== 202) process.exitCode = 1;
+          NODE
