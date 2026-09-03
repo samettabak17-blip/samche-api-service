@@ -30,7 +30,12 @@ export function configuredGuideDomainIngressTarget(environment = process.env) {
 }
 
 export function configuredManagedGuideDomainSuffix(environment = process.env) {
-  const suffix = environment.GUIDE_MANAGED_DOMAIN_SUFFIX || 'guide.samchecompany.com';
+  // The platform may override this value per deployment. The safe default
+  // keeps non-production managed hosts out of the production guide namespace.
+  const suffix = environment.GUIDE_MANAGED_DOMAIN_SUFFIX
+    || ((environment.NODE_ENV || environment.APP_ENV) === 'production'
+      ? 'guide.samchecompany.com'
+      : 'guide.staging.samchecompany.com');
   return normalizeGuideHostname(suffix);
 }
 

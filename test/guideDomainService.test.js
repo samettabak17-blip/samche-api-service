@@ -22,7 +22,8 @@ test('normalizes a public guide hostname without accepting URL, port, wildcard, 
 });
 
 test('managed Guide slugs resolve to the platform namespace and reject takeover-shaped input', () => {
-  assert.equal(managedGuideHostnameFromSlug('Blue-Dune'), 'blue-dune.guide.samchecompany.com');
+  assert.equal(managedGuideHostnameFromSlug('Blue-Dune', { NODE_ENV: 'production' }), 'blue-dune.guide.samchecompany.com');
+  assert.equal(managedGuideHostnameFromSlug('Blue-Dune', { NODE_ENV: 'staging' }), 'blue-dune.guide.staging.samchecompany.com');
   assert.throws(() => managedGuideHostnameFromSlug('blue.dune'), (error) => error.code === 'GUIDE_DOMAIN_INVALID_SLUG');
   assert.equal(managedGuideHostnameFromSlug('clinic', { GUIDE_MANAGED_DOMAIN_SUFFIX: 'guide.example.test' }), 'clinic.guide.example.test');
 });
