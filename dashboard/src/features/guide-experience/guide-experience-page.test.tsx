@@ -90,4 +90,11 @@ it('keeps a generated sector-aware Draft selected when the versions query refres
   expect(screen.getByRole('checkbox', { name: 'Enable AI Assistant' })).toBeChecked();
 });
 
+it('does not mislabel a non-intelligence recommendation failure as missing active tenant intelligence', async () => {
+  api.createRecommendedGuideExperienceDraft.mockRejectedValue(new ApiError(400, 'Guide experience is unavailable.', { code: 'GUIDE_EXPERIENCE_INVALID' }));
+  renderPage();
+  fireEvent.click(await screen.findByRole('button', { name: 'Generate recommended draft' }));
+  expect(await screen.findByText('A recommendation draft could not be generated safely. Review the Guide Experience details and try again.')).toBeVisible();
+});
+
 afterEach(() => { cleanup(); vi.clearAllMocks(); });

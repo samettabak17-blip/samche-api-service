@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildGuideExperienceRecommendation, classifyGuideSector } from '../services/guide-experience-recommendation-service.js';
+import { buildGuideExperienceRecommendation, classifyGuideSector, generateGuideExperienceRecommendation } from '../services/guide-experience-recommendation-service.js';
 import { GuideExperienceError, normalizeGuideExperience } from '../services/guide-experience-service.js';
 import { deriveAccessibleGuideTheme } from '../services/guide-theme-service.js';
 import { normalizeGuideSessionContext } from '../services/guide-session-context-service.js';
@@ -45,6 +45,15 @@ test('approved deterministic pricing requires an explicit tenant-approved pricin
 test('legacy valid non-zero deterministic pricing remains renderable without mutating its stored version', () => {
   const legacy = normalizeGuideExperience({ interactive_tool: { fields: [{ id: 'guests', label: 'Guests', input_type: 'NUMBER' }], calculation: { base_amount: 100, terms: [{ field_id: 'guests', kind: 'NUMBER_MULTIPLIER', multiplier: 10 }] } } });
   assert.equal(legacy.interactive_tool.pricing_mode, 'APPROVED_PRICING');
+});
+
+test('active tenant intelligence can generate a recommendation from a serialized legacy published Experience', async () => {
+  const legacyPublished = normalizeGuideExperience({ interactive_tool: { fields: [{ id: 'guests', label: 'Guests', input_type: 'NUMBER' }], calculation: { base_amount: 100, terms: [{ field_id: 'guests', kind: 'NUMBER_MULTIPLIER', multiplier: 10 }] } } });
+  const database = { query: async () => ({ rows: [{ id: '55555555-5555-4555-8555-555555555555', configuration_data: { assistant_identity: 'Event Assistant' }, assistant_metadata_name: 'Event Assistant', active_business_profile_version_id: '44444444-4444-4444-8444-444444444444', active_business_profile: { company_identity: 'Example Events', services: ['event planning'] }, profile_schema_version: 2, configuration_schema_version: 2 }] }) };
+  const result = await generateGuideExperienceRecommendation({ database, tenantId: '11111111-1111-4111-8111-111111111111', assistantId: '22222222-2222-4222-8222-222222222222', currentExperience: legacyPublished });
+  assert.equal(result.recommendation.classification.sector, 'EVENT_MANAGEMENT');
+  assert.equal(result.experience.layout.preset, 'SERVICE');
+  assert.equal(result.experience.interactive_tool.pricing_mode, 'QUOTE_REQUIRED');
 });
 
 test('recommended event context remains validated and tenant identifiers are not client fields', () => {

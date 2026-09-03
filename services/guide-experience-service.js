@@ -160,7 +160,7 @@ function normalizeRoadmap(value) {
   };
 }
 
-function normalizeInteractiveTool(value) {
+function normalizeInteractiveTool(value, { allowSerializedLegacyPricing = false } = {}) {
   const tool = value === undefined || value === null ? neutral.interactive_tool : object(value, 'interactive_tool');
   const fields = normalizeFields(tool.fields ?? neutral.interactive_tool.fields, 'interactive_tool.fields', { allowText: false });
   const calculation = object(tool.calculation ?? neutral.interactive_tool.calculation, 'interactive_tool.calculation');
@@ -187,7 +187,8 @@ function normalizeInteractiveTool(value) {
   const legacyPricingMode = tool.pricing_mode === undefined || tool.pricing_mode === null;
   const pricingMode = legacyPricingMode && hasLegacyApprovedAmounts ? 'APPROVED_PRICING' : bounded(tool.pricing_mode, PRICING_MODES, 'interactive_tool.pricing_mode', 'QUOTE_REQUIRED');
   const approvedPricingSource = text(tool.approved_pricing_source, 'interactive_tool.approved_pricing_source', 160, '');
-  if (pricingMode === 'APPROVED_PRICING' && !legacyPricingMode && !approvedPricingSource) throw new GuideExperienceError('GUIDE_EXPERIENCE_INVALID', 'interactive_tool.approved_pricing_source is required.');
+  const serializedLegacyPricing = allowSerializedLegacyPricing && pricingMode === 'APPROVED_PRICING' && !approvedPricingSource && hasLegacyApprovedAmounts;
+  if (pricingMode === 'APPROVED_PRICING' && !legacyPricingMode && !serializedLegacyPricing && !approvedPricingSource) throw new GuideExperienceError('GUIDE_EXPERIENCE_INVALID', 'interactive_tool.approved_pricing_source is required.');
   return {
     enabled: bool(tool.enabled, true),
     title: text(tool.title, 'interactive_tool.title', 120, neutral.interactive_tool.title),
@@ -202,7 +203,7 @@ function normalizeInteractiveTool(value) {
   };
 }
 
-export function normalizeGuideExperience(input = {}) {
+export function normalizeGuideExperience(input = {}, { allowSerializedLegacyPricing = false } = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new GuideExperienceError('GUIDE_EXPERIENCE_INVALID');
   const theme = input.theme && typeof input.theme === 'object' && !Array.isArray(input.theme) ? input.theme : {};
   const layout = input.layout && typeof input.layout === 'object' && !Array.isArray(input.layout) ? input.layout : {};
@@ -214,7 +215,7 @@ export function normalizeGuideExperience(input = {}) {
     if (forbidden in input || forbidden in theme || forbidden in layout || forbidden in modules) throw new GuideExperienceError('GUIDE_EXPERIENCE_INVALID');
   }
   const roadmap = normalizeRoadmap(input.roadmap);
-  const interactiveTool = normalizeInteractiveTool(input.interactive_tool);
+  const interactiveTool = normalizeInteractiveTool(input.interactive_tool, { allowSerializedLegacyPricing });
   const isLegacyModuleContract = input.roadmap === undefined && input.interactive_tool === undefined;
   return {
     brand_name: text(input.brand_name, 'brand_name', 120, neutral.brand_name),

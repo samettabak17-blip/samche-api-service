@@ -77,6 +77,14 @@ const guideDomainFailureMessage = (error: unknown, fallback: string) => {
     ? "Platform domain ingress is not available yet. Contact a platform owner."
     : fallback;
 };
+const guideRecommendationFailureMessage = (error: unknown) => {
+  const code = error instanceof ApiError && error.body && typeof error.body === "object" && "code" in error.body
+    ? (error.body as { code?: unknown }).code
+    : null;
+  return code === "GUIDE_RECOMMENDATION_CONTEXT_UNAVAILABLE"
+    ? "A recommendation requires an ACTIVE Business Profile and ACTIVE Assistant Configuration for this assistant."
+    : "A recommendation draft could not be generated safely. Review the Guide Experience details and try again.";
+};
 function ExperiencePreview({
   experience,
 }: {
@@ -251,7 +259,7 @@ export function GuideExperiencePage() {
   const generateRecommendation = useMutation({
     mutationFn: () => tenantApi.createRecommendedGuideExperienceDraft(tenantId, assistantId),
     onSuccess: ({ version, recommendation }) => { setEditingDraftId(version.id); setDraft(clone(version.experience)); invalidate(); setFeedback(`Recommended ${recommendation.classification.sector.replace(/_/g, ' ').toLowerCase()} Guide saved as private draft v${version.version}. Review before publishing.`); },
-    onError: () => setFeedback("A recommendation could not be generated because active tenant intelligence is unavailable."),
+    onError: (error) => setFeedback(guideRecommendationFailureMessage(error)),
   });
   const recommendTheme = useMutation({
     mutationFn: () => tenantApi.recommendGuideTheme(tenantId, assistantId, logoCandidates),
