@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { GuideExperiencePage } from './guide-experience-page';
 import { tenantApi } from '../dashboard/dashboard-api';
 import { useTenant } from '../tenants/tenant-context';
+import { ApiError } from '../../lib/api-client';
 
 vi.mock('../dashboard/dashboard-api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../dashboard/dashboard-api')>();
@@ -39,6 +40,14 @@ it('creates a domain only with an assistant-owned SAMCHEGUIDE channel', async ()
   fireEvent.click(screen.getByRole('button', { name: 'Add custom domain' }));
   await waitFor(() => expect(api.createGuideDomain).toHaveBeenCalledWith('tenant-a', 'assistant-a', { hostname: 'guide.customer.example', channel_id: 'channel-a' }));
   expect(screen.queryByRole('combobox', { name: /provider|model|vertex/i })).not.toBeInTheDocument();
+});
+
+it('shows a bounded platform-ingress message rather than a misleading tenant action error', async () => {
+  api.createGuideDomain.mockRejectedValue(new ApiError(503, 'Guide domain is unavailable.', { code: 'GUIDE_DOMAIN_INGRESS_UNAVAILABLE' }));
+  renderPage();
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Guide hostname' }), { target: { value: 'guide.customer.example' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add custom domain' }));
+  expect(await screen.findByText('Platform domain ingress is not available yet. Contact a platform owner.')).toBeVisible();
 });
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });

@@ -4,12 +4,19 @@ import { DashboardButton, DashboardCheckbox, DashboardField, DashboardFileInput,
 import { ConfirmationDialog } from '../../components/ui/confirmation-dialog';
 import { EmptyState, SkeletonBlock } from '../../components/ui/async-state';
 import { MutationFeedback } from '../../components/ui/mutation-feedback';
+import { ApiError } from '../../lib/api-client';
 import { tenantApi } from '../dashboard/dashboard-api';
 import { useTenant } from '../tenants/tenant-context';
 import type { GuideDomain, GuideExperienceData, GuideExperienceVersion } from '../../types/api';
 
 const defaults: GuideExperienceData = { brand_name: 'AI Guide', assistant_display_name: 'AI Guide', assistant_status_label: 'Online', welcome_title: 'How can we help?', welcome_message: 'Ask a question to get started.', input_placeholder: 'Type your message', launcher_label: 'Send', empty_state_copy: 'Start a conversation when you are ready.', logo_url: null, avatar_url: null, favicon_url: null, theme: { primary_color: '#1F4B99', accent_color: '#4F7FD8', background_color: '#F7F8FA', foreground_color: '#18212F', surface_color: '#FFFFFF', border_color: '#D9E0EA', font_family: 'SYSTEM', corner_radius: 'MEDIUM', density: 'COMFORTABLE' }, layout: { preset: 'PROFESSIONAL', launcher_style: 'PILL', header_style: 'STANDARD', panel_style: 'CARD' }, modules: { chat: true, guide: true, calculator: false, ctas: true } };
 const clone = (value: GuideExperienceData) => structuredClone(value);
+const guideDomainFailureMessage = (error: unknown, fallback: string) => {
+  const code = error instanceof ApiError && error.body && typeof error.body === 'object' && 'code' in error.body ? (error.body as { code?: unknown }).code : null;
+  return typeof code === 'string' && code.startsWith('GUIDE_DOMAIN_INGRESS_')
+    ? 'Platform domain ingress is not available yet. Contact a platform owner.'
+    : fallback;
+};
 
 function ExperiencePreview({ experience }: { experience: GuideExperienceData }) {
   const { theme } = experience;
@@ -36,9 +43,9 @@ export function GuideExperiencePage() {
   const publish = useMutation({ mutationFn: (id: string) => tenantApi.publishGuideExperience(tenantId, assistantId, id), onSuccess: (version) => { invalidate(); setFeedback(`Guide experience v${version.version} is now published.`); }, onError: () => setFeedback('Guide experience could not be published safely.') });
   const rollback = useMutation({ mutationFn: (id: string) => tenantApi.rollbackGuideExperience(tenantId, assistantId, id), onSuccess: (version) => { setRollbackTarget(null); invalidate(); setFeedback(`Guide experience rolled back to v${version.version}.`); }, onError: () => setFeedback('Guide experience could not be rolled back safely.') });
   const assetUpload = useMutation({ mutationFn: ({ kind, file }: { kind: 'LOGO' | 'AVATAR'; file: File }) => tenantApi.uploadGuideExperienceAsset(tenantId, assistantId, kind, file), onSuccess: (asset, variables) => { setDraft((current) => ({ ...current, [variables.kind === 'LOGO' ? 'logo_url' : 'avatar_url']: asset.public_url })); setFeedback(`${variables.kind === 'LOGO' ? 'Logo' : 'Avatar'} uploaded. Save a draft to preview it privately.`); }, onError: () => setFeedback('Branding asset could not be uploaded safely.') });
-  const createDomain = useMutation({ mutationFn: () => tenantApi.createGuideDomain(tenantId, assistantId, { hostname, channel_id: channelId }), onSuccess: (domain) => { setHostname(''); invalidateDomains(); setFeedback(`Domain ${domain.hostname} added. Set the displayed DNS CNAME, then verify it.`); }, onError: () => setFeedback('Guide domain could not be added safely.') });
-  const verifyDomain = useMutation({ mutationFn: (id: string) => tenantApi.verifyGuideDomain(tenantId, assistantId, id), onSuccess: (domain) => { invalidateDomains(); setFeedback(domain.status === 'ACTIVE' ? `Domain ${domain.hostname} is active.` : `DNS is correct. ${domain.hostname} is waiting for ingress verification.`); }, onError: () => setFeedback('Guide domain DNS verification failed. Check the CNAME and retry.') });
-  const archiveDomain = useMutation({ mutationFn: (id: string) => tenantApi.archiveGuideDomain(tenantId, assistantId, id), onSuccess: (domain) => { setArchiveDomainTarget(null); invalidateDomains(); setFeedback(`Domain ${domain.hostname} was archived.`); }, onError: () => setFeedback('Guide domain could not be archived safely.') });
+  const createDomain = useMutation({ mutationFn: () => tenantApi.createGuideDomain(tenantId, assistantId, { hostname, channel_id: channelId }), onSuccess: (domain) => { setHostname(''); invalidateDomains(); setFeedback(`Domain ${domain.hostname} added. Set the displayed DNS CNAME, then verify it.`); }, onError: (error) => setFeedback(guideDomainFailureMessage(error, 'Guide domain could not be added safely.')) });
+  const verifyDomain = useMutation({ mutationFn: (id: string) => tenantApi.verifyGuideDomain(tenantId, assistantId, id), onSuccess: (domain) => { invalidateDomains(); setFeedback(domain.status === 'ACTIVE' ? `Domain ${domain.hostname} is active.` : `DNS is correct. ${domain.hostname} is waiting for ingress verification.`); }, onError: (error) => setFeedback(guideDomainFailureMessage(error, 'Guide domain DNS verification failed. Check the CNAME and retry.')) });
+  const archiveDomain = useMutation({ mutationFn: (id: string) => tenantApi.archiveGuideDomain(tenantId, assistantId, id), onSuccess: (domain) => { setArchiveDomainTarget(null); invalidateDomains(); setFeedback(`Domain ${domain.hostname} was archived.`); }, onError: (error) => setFeedback(guideDomainFailureMessage(error, 'Guide domain could not be archived safely.')) });
   const drafts = useMemo(() => versions.data?.filter((item) => item.status === 'DRAFT') ?? [], [versions.data]); const archived = useMemo(() => versions.data?.filter((item) => item.status === 'ARCHIVED') ?? [], [versions.data]);
   const update = (key: 'brand_name' | 'assistant_display_name' | 'welcome_title' | 'welcome_message', value: string) => setDraft((current) => ({ ...current, [key]: value }));
   if (!canManage) return <EmptyState title="Guide Experience is read-only" description="A tenant administrator manages customer-facing Guide branding." />;
