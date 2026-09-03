@@ -47,3 +47,19 @@ test('private preview uses an opaque token with the shared bootstrap and chat ru
   assert.match(source, /X-Samcheguide-Preview/);
   assert.match(source, /preview:/);
 });
+
+test('Guide handoff renders a generic structured context summary and persists it without a provider call', () => {
+  assert.match(source, /guide-context-summary/);
+  assert.match(source, /renderGuideContextSummary/);
+  assert.match(source, /\/guide\/session-context/);
+  assert.match(source, /Discuss this plan with the assistant/);
+});
+
+test('Guide runtime uses concise module labels and premium readable interaction primitives', () => {
+  const css = fs.readFileSync(new URL('../public-guide/guide.css', import.meta.url), 'utf8');
+  assert.match(source, /navigation_label/);
+  assert.match(css, /--guide-muted/);
+  assert.match(css, /guide-context-summary/);
+  assert.match(css, /guide-navigation__item:not\(\.is-active\)/);
+  assert.match(css, /min-height:2\.85rem/);
+});

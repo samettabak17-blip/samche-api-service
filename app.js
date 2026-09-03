@@ -162,23 +162,37 @@ function guideSessionScope(scope) {
   return { domainId: scope.domain_id, tenantId: scope.tenant_id, assistantId: scope.assistant_id, channelId: scope.channel_id };
 }
 
+// Preview tickets are only a selector for an already-authorized private draft.
+// Hostname ownership remains the authority for tenant and assistant scope.
+async function resolveGuideExperienceForScope({ integration, previewToken }) {
+  if (!previewToken) {
+    return resolvePublishedGuideExperience({ database: pool, tenantId: integration.tenant_id, assistantId: integration.assistant_id });
+  }
+
+  const claims = verifyGuidePreviewToken(String(previewToken));
+  if (claims.tenant_id !== integration.tenant_id || claims.assistant_id !== integration.assistant_id) {
+    throw new GuidePreviewError('GUIDE_PREVIEW_SCOPE_MISMATCH');
+  }
+  const draft = await pool.query(
+    `SELECT id, tenant_id, assistant_id, version, status, experience, created_at, published_at
+       FROM guide_experience_versions
+      WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3 AND status='DRAFT'`,
+    [claims.version_id, integration.tenant_id, integration.assistant_id],
+  );
+  if (!draft.rowCount) throw new GuidePreviewError('GUIDE_PREVIEW_DRAFT_NOT_FOUND');
+  const row = draft.rows[0];
+  return {
+    source: 'PRIVATE_PREVIEW',
+    experience: { ...row.experience, version: row.version },
+    cache_key: `guide-experience-preview:${integration.tenant_id}:${integration.assistant_id}:${row.version}`,
+  };
+}
+
 app.get("/guide/bootstrap", async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(503).json({ error: 'Guide experience is temporarily unavailable.', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
-    let resolved;
-    const previewToken = req.query?.preview;
-    if (previewToken) {
-      const claims = verifyGuidePreviewToken(String(previewToken));
-      if (claims.tenant_id !== integration.tenant_id || claims.assistant_id !== integration.assistant_id) throw new GuidePreviewError('GUIDE_PREVIEW_SCOPE_MISMATCH');
-      const draft = await pool.query(`SELECT id, tenant_id, assistant_id, version, status, experience, created_at, published_at FROM guide_experience_versions WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3 AND status='DRAFT'`, [claims.version_id, integration.tenant_id, integration.assistant_id]);
-      if (!draft.rowCount) throw new GuidePreviewError('GUIDE_PREVIEW_DRAFT_NOT_FOUND');
-      const row = draft.rows[0];
-      const experience = { ...row.experience, version: row.version };
-      resolved = { source: 'PRIVATE_PREVIEW', experience, cache_key: `guide-experience-preview:${integration.tenant_id}:${integration.assistant_id}:${row.version}` };
-    } else {
-      resolved = await resolvePublishedGuideExperience({ database: pool, tenantId: integration.tenant_id, assistantId: integration.assistant_id });
-    }
+    const resolved = await resolveGuideExperienceForScope({ integration, previewToken: req.query?.preview });
     res.set('Cache-Control', 'no-store');
     return res.json({ experience: resolved.experience, source: resolved.source, version: resolved.experience.version, cache_key: resolved.cache_key, guide_v1: { renderer: 'GUIDE_V1', modules: resolved.experience.modules, session_context: true, sector_configured: Boolean(resolved.experience.classification?.sector), roadmap_initialized: Boolean(resolved.experience.roadmap?.steps?.length), tool_initialized: Boolean(resolved.experience.interactive_tool?.fields?.length), assistant_initialized: Boolean(resolved.experience.modules?.chat), theme_initialized: Boolean(resolved.experience.theme?.primary_color) } });
   } catch (error) {
@@ -1048,6 +1062,35 @@ app.post("/plan", async (req, res) => {
   }
 });
 
+// This endpoint deliberately persists validated Guide state without invoking an
+// AI provider. It makes an explicit module handoff durable before a visitor
+// chooses to send a message, while the host-bound scope stays server-owned.
+app.post("/guide/session-context", async (req, res) => {
+  try {
+    const integration = await resolveGuideRuntimeScope(req);
+    if (!integration) return res.status(404).json({ error: 'Guide session is unavailable.' });
+
+    const publicSession = issueOrResolvePublicConversationSession(req, integration);
+    const resolved = await resolveGuideExperienceForScope({
+      integration,
+      previewToken: req.get('X-Samcheguide-Preview'),
+    });
+    saveGuideSessionContext({
+      scope: integration,
+      sessionId: publicSession.sessionId,
+      experience: resolved.experience,
+      context: req.body?.guide_context,
+    });
+    return res.json({ conversation_session: publicSession.token, context_saved: true });
+  } catch (error) {
+    if (error instanceof GuideSessionContextError) {
+      return res.status(400).json({ error: 'Guide session context is invalid.', code: error.code });
+    }
+    console.error('GUIDE_SESSION_HANDOFF_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    return res.status(503).json({ error: 'Guide session is temporarily unavailable.' });
+  }
+});
+
 app.post("/chat", async (req, res) => {
   console.info('CHAT_REQUEST_RECEIVED');
   try {
@@ -1077,16 +1120,10 @@ app.post("/chat", async (req, res) => {
     let publishedExperience;
     let guideSessionContext = null;
     try {
-      const previewToken = req.get('X-Samcheguide-Preview');
-      if (previewToken) {
-        const claims = verifyGuidePreviewToken(previewToken);
-        if (claims.tenant_id !== guideRuntimeIntegration.tenant_id || claims.assistant_id !== guideRuntimeIntegration.assistant_id) throw new GuidePreviewError('GUIDE_PREVIEW_SCOPE_MISMATCH');
-        const draft = await pool.query(`SELECT id, version, status, experience FROM guide_experience_versions WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3 AND status='DRAFT'`, [claims.version_id, guideRuntimeIntegration.tenant_id, guideRuntimeIntegration.assistant_id]);
-        if (!draft.rowCount) throw new GuidePreviewError('GUIDE_PREVIEW_DRAFT_NOT_FOUND');
-        publishedExperience = { source: 'PRIVATE_PREVIEW', experience: { ...draft.rows[0].experience, version: draft.rows[0].version } };
-      } else {
-        publishedExperience = await resolvePublishedGuideExperience({ database: pool, tenantId: guideRuntimeIntegration.tenant_id, assistantId: guideRuntimeIntegration.assistant_id });
-      }
+      publishedExperience = await resolveGuideExperienceForScope({
+        integration: guideRuntimeIntegration,
+        previewToken: req.get('X-Samcheguide-Preview'),
+      });
       guideSessionContext = guideContextRequest === undefined
         ? loadGuideSessionContext({ scope: guideRuntimeIntegration, sessionId: userId, experience: publishedExperience.experience })
         : saveGuideSessionContext({ scope: guideRuntimeIntegration, sessionId: userId, experience: publishedExperience.experience, context: guideContextRequest });
