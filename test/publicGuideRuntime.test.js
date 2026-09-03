@@ -74,9 +74,23 @@ test('Roadmap review has an explicit deterministic state and a structured assist
 });
 
 test('Guide renders only the current Experience assets and keeps a missing avatar slot empty', () => {
-  assert.match(source, /if \(!value\) \{ image\.hidden = true; return; \}/);
+  assert.match(source, /if \(!value\) return;/);
   assert.match(source, /experience\.avatar_url/);
+  assert.match(source, /if \(experience\.avatar_url\)/);
   assert.doesNotMatch(source, /historical.*avatar|previous.*avatar/i);
+});
+
+test('Guide exposes one localized Thinking indicator rather than two ellipsis systems', () => {
+  const css = fs.readFileSync(new URL('../public-guide/guide.css', import.meta.url), 'utf8');
+  assert.match(source, /Düşünüyorum' : 'Thinking'/);
+  assert.doesNotMatch(source, /Düşünüyorum…|Thinking…/);
+  assert.match(css, /\.guide-thinking::after\{content:'\.\.\.'/);
+});
+
+test('Guide review uses stable field ids and focuses the actual missing field', () => {
+  assert.match(source, /data-guide-field-id/);
+  assert.match(source, /\[data-guide-field-id="\$\{invalid\.id\}"\]/);
+  assert.match(source, /missingControl\?\.focus/);
 });
 
 test('Guide theme consumes explicit accessible tokens without filtering logo pixels', () => {

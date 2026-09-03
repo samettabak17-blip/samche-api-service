@@ -84,6 +84,12 @@ button.bg-ink:hover { background: #b81920; }
   .dashboard-error { color: #ffe0e2; }
   .dashboard-success { color: #d5ffe8; }
   .dashboard-info { color: #d8f0ff; }
+  .dashboard-workflow { display: grid; gap: 1rem; min-width: 0; }
+  .dashboard-workflow__steps { display: flex; gap: .5rem; overflow-x: auto; padding-bottom: .25rem; scrollbar-width: thin; }
+  .dashboard-workflow__steps > button { flex: 0 0 auto; }
+  .dashboard-workflow__body { min-width: 0; }
+  .dashboard-workflow__actions { position: sticky; bottom: .75rem; z-index: 10; display: flex; flex-wrap: wrap; justify-content: space-between; gap: .75rem; padding: .75rem; border: 1px solid rgba(75,100,132,.5); border-radius: .9rem; background: rgba(9,17,27,.94); box-shadow: 0 10px 28px rgba(0,0,0,.28); backdrop-filter: blur(12px); }
+  @media (max-width: 640px) { .dashboard-workflow__actions { bottom: .25rem; } }
   .topbar-action { white-space: nowrap; flex-shrink: 0; }
   .topbar-range-control { color: #f4f7fb; border-color: rgba(212, 33, 41, 0.62); background: rgba(17, 24, 36, 0.78); }
   .topbar-notification-control { color: #f4f7fb; border: 1px solid rgba(212, 33, 41, 0.62); background: rgba(17, 24, 36, 0.78); }

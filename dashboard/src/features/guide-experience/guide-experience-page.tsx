@@ -12,6 +12,7 @@ import {
 import { ConfirmationDialog } from "../../components/ui/confirmation-dialog";
 import { EmptyState, SkeletonBlock } from "../../components/ui/async-state";
 import { MutationFeedback } from "../../components/ui/mutation-feedback";
+import { DashboardWorkflow } from "../../components/ui/dashboard-workflow";
 import { ApiError } from "../../lib/api-client";
 import { tenantApi } from "../dashboard/dashboard-api";
 import { useTenant } from "../tenants/tenant-context";
@@ -180,6 +181,7 @@ export function GuideExperiencePage() {
   const tenantId = selectedTenant?.id ?? "";
   const client = useQueryClient();
   const [assistantId, setAssistantId] = useState("");
+  const [activeStep, setActiveStep] = useState("identity");
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [draft, setDraft] = useState<GuideExperienceData>(clone(defaults));
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -473,14 +475,29 @@ export function GuideExperiencePage() {
         </p>
       </section>
       </header>
-      <div className="grid gap-6 xl:grid-cols-[1.15fr_.85fr]">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,.62fr)]">
         <form
-          className="panel space-y-5 p-5"
+          className="panel min-w-0 p-5"
           onSubmit={(event) => {
             event.preventDefault();
             save.mutate();
           }}
         >
+          <DashboardWorkflow
+            activeStep={activeStep}
+            onStepChange={setActiveStep}
+            steps={[
+              { id: "identity", label: "Identity" },
+              { id: "branding", label: "Branding" },
+              { id: "roadmap", label: "Roadmap" },
+              { id: "tool", label: "Planning" },
+              { id: "assistant", label: "Assistant" },
+              { id: "preview", label: "Preview" },
+              { id: "domains", label: "Domains" },
+            ]}
+            actions={<DashboardButton type="submit" variant="secondary" disabled={!assistantId || save.isPending}>{save.isPending ? "Saving…" : "Save draft"}</DashboardButton>}
+          >
+          {activeStep === "identity" && <>
           <DashboardField label="Assistant">
             <DashboardSelect
               aria-label="Guide assistant"
@@ -537,7 +554,8 @@ export function GuideExperiencePage() {
               <DashboardTextarea value={draft.hero.message} onChange={(event) => setDraft((current) => ({ ...current, hero: { ...current.hero, message: event.target.value } }))} />
             </DashboardField>
           </section>
-          <section className="space-y-4 rounded-xl border border-line p-4" aria-label="Roadmap configuration">
+          </>}
+          {activeStep === "roadmap" && <section className="space-y-4 rounded-xl border border-line p-4" aria-label="Roadmap configuration">
             <div className="flex items-center justify-between gap-3"><p className="dashboard-section-label">Roadmap</p><DashboardCheckbox label="Enabled" checked={draft.modules.guide} onChange={(event) => setDraft((current) => ({ ...current, modules: { ...current.modules, guide: event.target.checked }, roadmap: { ...current.roadmap, enabled: event.target.checked } }))} /></div>
             <DashboardField label="Roadmap title"><DashboardInput value={draft.roadmap.title} onChange={(event) => setDraft((current) => ({ ...current, roadmap: { ...current.roadmap, title: event.target.value } }))} /></DashboardField>
             <DashboardField label="Roadmap description"><DashboardTextarea value={draft.roadmap.description} onChange={(event) => setDraft((current) => ({ ...current, roadmap: { ...current.roadmap, description: event.target.value } }))} /></DashboardField>
@@ -550,8 +568,8 @@ export function GuideExperiencePage() {
               <DashboardButton type="button" variant="outline" disabled={draft.roadmap.steps.length >= 12} onClick={() => setDraft((current) => ({ ...current, roadmap: { ...current.roadmap, steps: [...current.roadmap.steps, newRoadmapStep()] } }))}>Add roadmap step</DashboardButton>
               {draft.roadmap.steps.map((step, index) => step.input_type === "SELECT" ? <DashboardField key={`${step.id}-options`} label={`Options for ${step.label}`} helper="Comma-separated labels"><DashboardInput value={step.options.map((option) => option.label).join(", ")} onChange={(event) => updateRoadmapStep(index, { options: optionsFromLabels(event.target.value) })} placeholder="Corporate event, Gala dinner" /></DashboardField> : null)}
             </div>
-          </section>
-          <section className="space-y-4 rounded-xl border border-line p-4" aria-label="Interactive Tool configuration">
+          </section>}
+          {activeStep === "tool" && <section className="space-y-4 rounded-xl border border-line p-4" aria-label="Interactive Tool configuration">
             <div className="flex items-center justify-between gap-3"><p className="dashboard-section-label">Interactive Tool / Calculator</p><DashboardCheckbox label="Enabled" checked={draft.modules.calculator} onChange={(event) => setDraft((current) => ({ ...current, modules: { ...current.modules, calculator: event.target.checked }, interactive_tool: { ...current.interactive_tool, enabled: event.target.checked } }))} /></div>
             <div className="grid gap-4 sm:grid-cols-2"><DashboardField label="Tool title"><DashboardInput value={draft.interactive_tool.title} onChange={(event) => setDraft((current) => ({ ...current, interactive_tool: { ...current.interactive_tool, title: event.target.value } }))} /></DashboardField><DashboardField label="Currency (optional)"><DashboardInput value={draft.interactive_tool.currency} placeholder="AED" onChange={(event) => setDraft((current) => ({ ...current, interactive_tool: { ...current.interactive_tool, currency: event.target.value.toUpperCase() } }))} /></DashboardField></div>
             <DashboardField label="Pricing mode" helper="Only approved, deterministic pricing rules may show a monetary estimate."><DashboardSelect value={draft.interactive_tool.pricing_mode ?? "QUOTE_REQUIRED"} onChange={(event) => setDraft((current) => ({ ...current, interactive_tool: { ...current.interactive_tool, pricing_mode: event.target.value as "APPROVED_PRICING" | "QUOTE_REQUIRED" } }))}><option value="QUOTE_REQUIRED">Scope summary — quotation required</option><option value="APPROVED_PRICING">Approved deterministic pricing</option></DashboardSelect></DashboardField>
@@ -559,12 +577,13 @@ export function GuideExperiencePage() {
             <DashboardField label="Tool description"><DashboardTextarea value={draft.interactive_tool.description} onChange={(event) => setDraft((current) => ({ ...current, interactive_tool: { ...current.interactive_tool, description: event.target.value } }))} /></DashboardField>
             {draft.interactive_tool.pricing_mode === "APPROVED_PRICING" ? <DashboardField label="Base estimate"><DashboardInput type="number" value={String(draft.interactive_tool.calculation.base_amount)} onChange={(event) => setDraft((current) => ({ ...current, interactive_tool: { ...current.interactive_tool, calculation: { ...current.interactive_tool.calculation, base_amount: Number(event.target.value || 0) } } }))} /></DashboardField> : null}
             <div className="space-y-3">{draft.interactive_tool.fields.map((field, index) => <div key={field.id} className="grid gap-2 rounded-lg border border-line p-3 sm:grid-cols-[1fr_10rem_auto]"><DashboardInput aria-label={`Tool field ${index + 1} label`} value={field.label} onChange={(event) => updateToolField(index, { label: event.target.value })} /><DashboardSelect aria-label={`Tool field ${index + 1} type`} value={field.input_type} onChange={(event) => updateToolField(index, { input_type: event.target.value as GuideExperienceField['input_type'], options: event.target.value === 'SELECT' ? [{ value: 'option_1', label: 'Option 1' }] : [] })}><option value="NUMBER">Number</option><option value="SELECT">Options</option><option value="BOOLEAN">Yes / No</option></DashboardSelect><DashboardButton type="button" variant="outline" disabled={draft.interactive_tool.fields.length <= 1} onClick={() => setDraft((current) => ({ ...current, interactive_tool: { ...current.interactive_tool, fields: current.interactive_tool.fields.filter((_, itemIndex) => itemIndex !== index), calculation: { ...current.interactive_tool.calculation, terms: current.interactive_tool.calculation.terms.filter((term) => term.field_id !== field.id) } } }))}>Remove</DashboardButton></div>)}<DashboardButton type="button" variant="outline" disabled={draft.interactive_tool.fields.length >= 12} onClick={() => setDraft((current) => ({ ...current, interactive_tool: { ...current.interactive_tool, fields: [...current.interactive_tool.fields, newToolField()] } }))}>Add tool field</DashboardButton>{draft.interactive_tool.fields.map((field, index) => field.input_type === "SELECT" ? <DashboardField key={`${field.id}-options`} label={`Options for ${field.label}`} helper="Comma-separated labels"><DashboardInput value={field.options.map((option) => option.label).join(", ")} onChange={(event) => updateToolField(index, { options: optionsFromLabels(event.target.value) })} placeholder="Basic, Premium" /></DashboardField> : field.input_type === "NUMBER" && draft.interactive_tool.pricing_mode === "APPROVED_PRICING" ? <DashboardField key={`${field.id}-multiplier`} label={`Estimate per ${field.label}`} helper="Safe deterministic numeric multiplier"><DashboardInput type="number" value={String(draft.interactive_tool.calculation.terms.find((term) => term.field_id === field.id && term.kind === "NUMBER_MULTIPLIER")?.multiplier ?? 0)} onChange={(event) => setToolMultiplier(field.id, Number(event.target.value || 0))} /></DashboardField> : null)}</div>
-          </section>
-          <section className="space-y-3 rounded-xl border border-line p-4" aria-label="AI Assistant configuration">
+          </section>}
+          {activeStep === "assistant" && <section className="space-y-3 rounded-xl border border-line p-4" aria-label="AI Assistant configuration">
             <p className="dashboard-section-label">AI Assistant</p>
             <DashboardCheckbox label="Enable AI Assistant" checked={draft.modules.chat} onChange={(event) => setDraft((current) => ({ ...current, modules: { ...current.modules, chat: event.target.checked } }))} />
             <p className="text-xs text-stone-400">The assistant uses the platform-selected runtime together with the active Business Profile, Assistant Configuration and approved tenant knowledge. Provider and model selection are not customer controls.</p>
-          </section>
+          </section>}
+          {activeStep === "branding" && <>
           <div className="grid gap-4 sm:grid-cols-2">
             <DashboardField
               label="Brand logo"
@@ -573,6 +592,7 @@ export function GuideExperiencePage() {
               <DashboardFileInput
                 accept="image/png,image/jpeg,image/webp"
                 chooseLabel="Upload logo"
+                selectedFileName={draft.logo_url ? "Current logo configured" : null}
                 disabled={!assistantId || assetUpload.isPending}
                 onChange={(event) => {
                   const file = event.target.files?.[0];
@@ -587,6 +607,7 @@ export function GuideExperiencePage() {
               <DashboardFileInput
                 accept="image/png,image/jpeg,image/webp"
                 chooseLabel="Upload avatar"
+                selectedFileName={draft.avatar_url ? "Current avatar configured" : null}
                 disabled={!assistantId || assetUpload.isPending}
                 onChange={(event) => {
                   const file = event.target.files?.[0];
@@ -594,6 +615,7 @@ export function GuideExperiencePage() {
                 }}
               />
               <div className="mt-2">
+                <p className="mb-2 text-xs text-stone-300">{draft.avatar_url ? "An explicit avatar is configured for this Draft." : "No avatar is configured for this Draft; preview renders no avatar slot."}</p>
                 <DashboardButton type="button" variant="outline" disabled={!draft.avatar_url} onClick={() => setDraft((current) => ({ ...current, avatar_url: null }))}>Remove current avatar</DashboardButton>
               </div>
             </DashboardField>
@@ -648,11 +670,13 @@ export function GuideExperiencePage() {
               </DashboardSelect>
             </DashboardField>
           </div>
+          <DashboardButton type="button" variant="outline" disabled={!assistantId || !draft.logo_url || recommendTheme.isPending} onClick={() => { void analyzeConfiguredLogo().then((candidates) => recommendTheme.mutate(candidates)).catch(() => setFeedback("A theme recommendation could not be generated safely from this logo.")); }}>{recommendTheme.isPending ? "Analyzing…" : "Apply logo theme"}</DashboardButton>
+          </>}
+          {activeStep === "preview" && <>
           <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line p-4" aria-label="Guide recommendations">
             <div><p className="dashboard-section-label">Tenant-aware recommendations</p><p className="text-xs text-stone-400">Uses the active Business Profile and Assistant Configuration. It creates a private Draft only; publishing remains explicit.</p></div>
             <div className="flex flex-wrap gap-2">
               <DashboardButton type="button" variant="outline" disabled={!assistantId || generateRecommendation.isPending} onClick={() => generateRecommendation.mutate()}>{generateRecommendation.isPending ? "Generating…" : "Generate recommended draft"}</DashboardButton>
-              <DashboardButton type="button" variant="outline" disabled={!assistantId || !draft.logo_url || recommendTheme.isPending} onClick={() => { void analyzeConfiguredLogo().then((candidates) => recommendTheme.mutate(candidates)).catch(() => setFeedback("A theme recommendation could not be generated safely from this logo.")); }}>{recommendTheme.isPending ? "Analyzing…" : "Apply logo theme"}</DashboardButton>
             </div>
           </section>
           <DashboardCheckbox
@@ -665,14 +689,9 @@ export function GuideExperiencePage() {
               }))
             }
           />
+          </>}
+          {activeStep === "domains" && <section className="space-y-3 rounded-xl border border-line p-4"><p className="dashboard-section-label">Draft versions</p>
           <div className="flex flex-wrap gap-3">
-            <DashboardButton
-              type="submit"
-              variant="secondary"
-              disabled={!assistantId || save.isPending}
-            >
-              {save.isPending ? "Saving…" : "Save draft"}
-            </DashboardButton>
             {drafts.map((item) => (
               <span key={item.id} className="inline-flex gap-2">
                 <DashboardButton type="button" variant={editingDraftId === item.id ? "selected" : "outline"} onClick={() => { setEditingDraftId(item.id); setDraft(clone(item.experience)); }}>Edit draft v{item.version}</DashboardButton>
@@ -681,6 +700,7 @@ export function GuideExperiencePage() {
               </span>
             ))}
           </div>
+          </section>}
           {feedback ? (
             <MutationFeedback
               error={
@@ -689,6 +709,7 @@ export function GuideExperiencePage() {
               success={feedback.includes("could not") ? undefined : feedback}
             />
           ) : null}
+          </DashboardWorkflow>
         </form>
         <aside className="space-y-4">
           <p className="dashboard-section-label">Private draft preview</p>

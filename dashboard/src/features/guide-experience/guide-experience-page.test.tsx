@@ -16,6 +16,7 @@ vi.mock('../tenants/tenant-context', async (importOriginal) => ({ ...(await impo
 const api = vi.mocked(tenantApi);
 const tenant = vi.mocked(useTenant);
 const renderPage = () => render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><GuideExperiencePage /></QueryClientProvider>);
+const openStep = async (label: string) => fireEvent.click(await screen.findByRole('button', { name: new RegExp(`\\. ${label}$`) }));
 
 beforeEach(() => {
   tenant.mockReturnValue({ tenants: [], selectedTenant: { id: 'tenant-a', name: 'Tenant A', status: 'active' }, tenantRole: 'ADMIN', canManage: true, isLoading: false, error: null, selectTenant: vi.fn(), adoptTenant: vi.fn(), createTenant: vi.fn(), isOwner: false });
@@ -65,9 +66,11 @@ it('defaults to a SamChe-managed domain and submits a slug without customer DNS 
 
 it('offers a configuration-driven three-module Guide editor without provider controls', async () => {
   renderPage();
+  await openStep('Roadmap');
   expect((await screen.findAllByText('Roadmap')).length).toBeGreaterThan(0);
-  expect(screen.getByText('Interactive Tool / Calculator')).toBeVisible();
   expect(screen.getByRole('button', { name: 'Add roadmap step' })).toBeVisible();
+  await openStep('Planning');
+  expect(screen.getByText('Interactive Tool / Calculator')).toBeVisible();
   expect(screen.getByRole('button', { name: 'Add tool field' })).toBeVisible();
   expect(screen.getByRole('combobox', { name: 'Pricing mode' })).toHaveValue('QUOTE_REQUIRED');
   expect(screen.getAllByText('AI Assistant').length).toBeGreaterThan(0);
@@ -82,12 +85,15 @@ it('offers an authorized real-runtime preview action for a private draft', async
   const popup = { closed: false, location: { href: 'about:blank' } } as unknown as Window;
   const open = vi.spyOn(window, 'open').mockReturnValue(popup);
   renderPage();
+  await openStep('Domains');
   fireEvent.click(await screen.findByRole('button', { name: 'Preview draft v10' }));
   await waitFor(() => expect(api.previewGuideExperience).toHaveBeenCalledWith('tenant-a', 'assistant-a', 'draft-v10'));
   await waitFor(() => expect(popup.location.href).toBe('https://guide.tenant.example/?preview=opaque'));
   expect(open).toHaveBeenCalledTimes(1);
   expect(open).toHaveBeenCalledWith('about:blank', '_blank');
+  await openStep('Branding');
   expect(screen.getByRole('combobox', { name: 'Layout preset' })).toHaveValue('SERVICE');
+  await openStep('Roadmap');
   expect(screen.getByDisplayValue('Roadmap')).toBeVisible();
   expect(api.publishGuideExperience).not.toHaveBeenCalled();
   open.mockRestore();
@@ -100,10 +106,13 @@ it('closes a failed preview placeholder without publishing or replacing the sele
   const popup = { closed: false, close: vi.fn(), location: { href: 'about:blank' } } as unknown as Window;
   const open = vi.spyOn(window, 'open').mockReturnValue(popup);
   renderPage();
+  await openStep('Domains');
   fireEvent.click(await screen.findByRole('button', { name: 'Preview draft v10' }));
   expect(await screen.findByText('Private preview could not be opened. Please try again.')).toBeVisible();
   expect(popup.close).toHaveBeenCalledOnce();
+  await openStep('Roadmap');
   expect(screen.getByDisplayValue('Event Planning Roadmap')).toBeVisible();
+  await openStep('Planning');
   expect(screen.getByDisplayValue('Event Budget Estimator')).toBeVisible();
   expect(api.publishGuideExperience).not.toHaveBeenCalled();
   open.mockRestore();
@@ -117,17 +126,23 @@ it('keeps a generated sector-aware Draft selected when the versions query refres
   api.listGuideExperiences.mockImplementation(() => Promise.resolve(values));
   api.createRecommendedGuideExperienceDraft.mockImplementation(async () => { values = [recommended, published]; return { version: recommended, recommendation: { classification: { sector: 'EVENT_MANAGEMENT', capabilities: [], source: 'APPROVED_TENANT_INTELLIGENCE' }, facts_used: { active_profile: true, active_configuration: true } } } as never; });
   renderPage();
+  await openStep('Preview');
   fireEvent.click(await screen.findByRole('button', { name: 'Generate recommended draft' }));
+  await openStep('Roadmap');
   expect(await screen.findByDisplayValue('Event Planning Roadmap')).toBeVisible();
+  await openStep('Planning');
   expect(screen.getByDisplayValue('Event Budget Estimator')).toBeVisible();
   expect(screen.getByRole('combobox', { name: 'Pricing mode' })).toHaveValue('QUOTE_REQUIRED');
+  await openStep('Branding');
   expect(screen.getByRole('combobox', { name: 'Layout preset' })).toHaveValue('SERVICE');
+  await openStep('Assistant');
   expect(screen.getByRole('checkbox', { name: 'Enable AI Assistant' })).toBeChecked();
 });
 
 it('does not mislabel a non-intelligence recommendation failure as missing active tenant intelligence', async () => {
   api.createRecommendedGuideExperienceDraft.mockRejectedValue(new ApiError(400, 'Guide experience is unavailable.', { code: 'GUIDE_EXPERIENCE_INVALID' }));
   renderPage();
+  await openStep('Preview');
   fireEvent.click(await screen.findByRole('button', { name: 'Generate recommended draft' }));
   expect(await screen.findByText('A recommendation draft could not be generated safely. Review the Guide Experience details and try again.')).toBeVisible();
 });
@@ -137,12 +152,15 @@ it('allows an existing current logo to be analyzed without replacing its asset',
   api.listGuideExperiences.mockResolvedValue([draft]);
   api.listGuideDomains.mockResolvedValue([{ id: 'domain-a', tenant_id: 'tenant-a', assistant_id: 'assistant-a', channel_id: 'channel-a', hostname: 'guide.tenant.example', domain_mode: 'CUSTOM', status: 'ACTIVE', verification_record_type: 'CNAME', verification_target: 'ingress.example' }]);
   renderPage();
+  await openStep('Domains');
   fireEvent.click(await screen.findByRole('button', { name: 'Edit draft v10' }));
+  await openStep('Branding');
   await waitFor(() => expect(screen.getByRole('button', { name: 'Apply logo theme' })).toBeEnabled());
 });
 
 it('offers an explicit draft-only way to remove an inherited avatar', async () => {
   renderPage();
+  await openStep('Branding');
   expect(await screen.findByRole('button', { name: 'Remove current avatar' })).toBeVisible();
 });
 
@@ -151,7 +169,9 @@ it('updates the selected private Draft rather than creating another version when
   api.listGuideExperiences.mockResolvedValue([draft]);
   api.updateGuideExperienceDraft.mockResolvedValue({ ...draft, experience: { ...draft.experience, avatar_url: null } });
   renderPage();
+  await openStep('Domains');
   fireEvent.click(await screen.findByRole('button', { name: 'Edit draft v10' }));
+  await openStep('Branding');
   fireEvent.click(await screen.findByRole('button', { name: 'Remove current avatar' }));
   fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
   await waitFor(() => expect(api.updateGuideExperienceDraft).toHaveBeenCalledWith('tenant-a', 'assistant-a', 'draft-v10', expect.objectContaining({ avatar_url: null })));

@@ -54,7 +54,7 @@ import { generateAssistantConfigurationVersion, generateAssistantRecommendation 
 import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from "./services/knowledge-runtime-context-service.js";
 import { buildTenantRuntimeSystemInstruction, resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
 import { resolveChannelAssistantRuntime } from "./services/assistant-runtime-resolution-service.js";
-import { resolvePublishedGuideExperience } from "./services/guide-experience-service.js";
+import { normalizeGuideExperience, resolvePublishedGuideExperience } from "./services/guide-experience-service.js";
 import { configuredManagedGuideDomainSuffix, resolveGuideRuntimeScopeFromRequest } from './services/guide-domain-service.js';
 import { getPublicGuideExperienceAsset } from "./services/guide-experience-asset-service.js";
 import { samcheguideRuntimeSessionKey } from "./services/samcheguide-runtime-session-service.js";
@@ -184,7 +184,9 @@ async function resolveGuideExperienceForScope({ integration, previewToken }) {
   const row = draft.rows[0];
   return {
     source: 'PRIVATE_PREVIEW',
-    experience: { ...row.experience, version: row.version },
+    // Preview is the same renderer contract as public Guide. Normalizing here
+    // prevents legacy/raw row shape from inventing presentation fallbacks.
+    experience: { ...normalizeGuideExperience(row.experience, { allowSerializedLegacyPricing: true }), version: row.version },
     cache_key: `guide-experience-preview:${integration.tenant_id}:${integration.assistant_id}:${row.version}`,
   };
 }
