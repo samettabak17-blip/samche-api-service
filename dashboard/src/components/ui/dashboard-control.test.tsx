@@ -76,8 +76,8 @@ describe('Dashboard controls', () => {
     render(<DashboardCheckbox label="Meridian DOCX" checked onChange={() => undefined} />);
     const checkbox = screen.getByRole('checkbox', { name: 'Meridian DOCX' });
     expect(checkbox).toBeChecked();
-    expect(checkbox.className).toContain('appearance-none');
-    expect(checkbox.className).toContain('checked:bg-signal');
+    expect(checkbox.className).not.toContain('appearance-none');
+    expect(checkbox.className).toContain('accent-signal');
     expect(checkbox.className).toContain('focus-visible:ring-2');
   });
 
