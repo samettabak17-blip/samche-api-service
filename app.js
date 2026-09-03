@@ -202,7 +202,14 @@ app.use('/guide', async (req, res, next) => {
   const integration = await resolveGuideRuntimeScope(req);
   if (!integration) return res.sendStatus(404);
   return next();
-}, express.static('public-guide', { index: 'index.html', etag: true, maxAge: '5m' }));
+}, express.static('public-guide', {
+  index: 'index.html',
+  etag: true,
+  // Guide presentation is tenant data and must reflect publish/rollback
+  // immediately; never let a stale shell or runtime bundle mask bootstrap.
+  maxAge: 0,
+  setHeaders: (res) => res.set('Cache-Control', 'no-store'),
+}));
 
 // ==========================================
 // V1 ROUTES
