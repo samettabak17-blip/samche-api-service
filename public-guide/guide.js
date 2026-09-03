@@ -1,6 +1,14 @@
-let session = sessionStorage.getItem('samcheguide-session') || '';
+let session = '';
+try { session = window.sessionStorage?.getItem('samcheguide-session') || ''; } catch { session = ''; }
 
 const root = document.querySelector('#guide-root');
+let guideInitialized = false;
+const showGuideError = () => {
+  if (guideInitialized || !root) return;
+  guideInitialized = true;
+  root.innerHTML = '<p class="guide-error">Guide experience is temporarily unavailable.</p>';
+};
+const initializationTimeout = window.setTimeout(showGuideError, 10000);
 const text = (value) => String(value ?? '');
 const html = (strings, ...values) => strings.reduce((result, part, index) => result + part + (index < values.length ? values[index] : ''), '');
 
@@ -10,6 +18,7 @@ function setAsset(element, value, alt) {
 }
 
 export function applyExperience(experience) {
+  if (!root || !experience || typeof experience !== 'object') throw new Error('invalid guide experience');
   const theme = experience.theme || {};
   const styles = document.documentElement.style;
   styles.setProperty('--guide-primary', theme.primary_color || '#1F4B99');
@@ -31,9 +40,11 @@ export function applyExperience(experience) {
   root.querySelector('.guide-form input').placeholder = text(experience.input_placeholder || 'Type your message');
   root.querySelector('.guide-form button').textContent = text(experience.launcher_label || 'Send');
   root.querySelector('.guide-form').addEventListener('submit', submitMessage);
+  guideInitialized = true;
+  window.clearTimeout(initializationTimeout);
 }
 
 function addMessage(value, kind) { const item = document.createElement('p'); item.className = `guide-message guide-message--${kind}`; item.textContent = value; root.querySelector('.guide-messages').append(item); item.scrollIntoView({ block: 'end' }); }
-async function submitMessage(event) { event.preventDefault(); const input = event.currentTarget.querySelector('input'); const value = input.value.trim(); if (!value) return; input.value = ''; addMessage(value, 'user'); const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(session ? { 'X-Samcheguide-Session': session } : {}) }, body: JSON.stringify({ text: value }) }); const payload = await response.json(); if (payload.conversation_session) { session = payload.conversation_session; sessionStorage.setItem('samcheguide-session', session); } const reply = payload?.candidates?.[0]?.content?.parts?.[0]?.text; addMessage(response.ok && reply ? reply.replace(/<[^>]+>/g, '') : 'The guide is temporarily unavailable. Please try again.', 'assistant'); }
+async function submitMessage(event) { event.preventDefault(); const input = event.currentTarget.querySelector('input'); const value = input.value.trim(); if (!value) return; input.value = ''; addMessage(value, 'user'); const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(session ? { 'X-Samcheguide-Session': session } : {}) }, body: JSON.stringify({ text: value }) }); const payload = await response.json(); if (payload.conversation_session) { session = payload.conversation_session; try { window.sessionStorage?.setItem('samcheguide-session', session); } catch {} } const reply = payload?.candidates?.[0]?.content?.parts?.[0]?.text; addMessage(response.ok && reply ? reply.replace(/<[^>]+>/g, '') : 'The guide is temporarily unavailable. Please try again.', 'assistant'); }
 
-fetch('/guide/bootstrap', { cache: 'no-store' }).then(async (response) => { if (!response.ok) throw new Error('unavailable'); return response.json(); }).then((payload) => applyExperience(payload.experience)).catch(() => { root.innerHTML = '<p class="guide-error">Guide experience is temporarily unavailable.</p>'; });
+fetch('/guide/bootstrap', { cache: 'no-store' }).then(async (response) => { if (!response.ok) throw new Error('unavailable'); return response.json(); }).then((payload) => applyExperience(payload?.experience)).catch(showGuideError);
