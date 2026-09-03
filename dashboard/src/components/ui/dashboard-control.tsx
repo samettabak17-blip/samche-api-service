@@ -57,7 +57,7 @@ export function DashboardTab({ to, active = false, disabled = false, children }:
 
 export function DashboardCheckbox({ label, className = '', ...props }: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & { label: ReactNode }) {
   return <label className="inline-flex cursor-pointer items-start gap-3 text-sm text-stone-200 has-[:disabled]:cursor-not-allowed has-[:disabled]:text-stone-400">
-    <input type="checkbox" className={`mt-0.5 h-5 w-5 shrink-0 appearance-none rounded-md border border-[#43546a] bg-[#0b1624] transition checked:border-signal checked:bg-signal checked:bg-[linear-gradient(135deg,transparent_42%,white_42%,white_52%,transparent_52%),linear-gradient(45deg,transparent_53%,white_53%,white_63%,transparent_63%)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:border-[#43546a] disabled:bg-[#101925] ${className}`} {...props} />
+    <input type="checkbox" className={`mt-0.5 h-5 w-5 shrink-0 rounded-md border border-[#43546a] bg-[#0b1624] accent-signal transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:border-[#43546a] disabled:bg-[#101925] ${className}`} {...props} />
     <span>{label}</span>
   </label>;
 }

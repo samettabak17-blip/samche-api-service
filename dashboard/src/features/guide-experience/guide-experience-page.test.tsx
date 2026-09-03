@@ -5,10 +5,11 @@ import { GuideExperiencePage } from './guide-experience-page';
 import { tenantApi } from '../dashboard/dashboard-api';
 import { useTenant } from '../tenants/tenant-context';
 import { ApiError } from '../../lib/api-client';
+import type { GuideExperienceData, GuideExperienceVersion } from '../../types/api';
 
 vi.mock('../dashboard/dashboard-api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../dashboard/dashboard-api')>();
-  return { ...actual, tenantApi: { ...actual.tenantApi, listAssistants: vi.fn(), listChannels: vi.fn(), listGuideExperiences: vi.fn(), listGuideDomains: vi.fn(), getGuidePublicationDiagnostics: vi.fn(), createGuideDomain: vi.fn(), verifyGuideDomain: vi.fn(), archiveGuideDomain: vi.fn(), createGuideExperienceDraft: vi.fn(), publishGuideExperience: vi.fn(), rollbackGuideExperience: vi.fn(), uploadGuideExperienceAsset: vi.fn() } };
+  return { ...actual, tenantApi: { ...actual.tenantApi, listAssistants: vi.fn(), listChannels: vi.fn(), listGuideExperiences: vi.fn(), listGuideDomains: vi.fn(), getGuidePublicationDiagnostics: vi.fn(), createGuideDomain: vi.fn(), verifyGuideDomain: vi.fn(), archiveGuideDomain: vi.fn(), createGuideExperienceDraft: vi.fn(), createRecommendedGuideExperienceDraft: vi.fn(), recommendGuideTheme: vi.fn(), publishGuideExperience: vi.fn(), rollbackGuideExperience: vi.fn(), uploadGuideExperienceAsset: vi.fn() } };
 });
 vi.mock('../tenants/tenant-context', async (importOriginal) => ({ ...(await importOriginal<typeof import('../tenants/tenant-context')>()), useTenant: vi.fn() }));
 
@@ -70,6 +71,20 @@ it('offers a configuration-driven three-module Guide editor without provider con
   expect(screen.getByRole('button', { name: 'Add tool field' })).toBeVisible();
   expect(screen.getAllByText('AI Assistant').length).toBeGreaterThan(0);
   expect(screen.queryByRole('combobox', { name: /provider|model|vertex/i })).not.toBeInTheDocument();
+});
+
+it('keeps a generated sector-aware Draft selected when the versions query refreshes with a published version', async () => {
+  const generic: GuideExperienceData = { brand_name: 'Tenant', assistant_display_name: 'Assistant', assistant_status_label: 'Online', welcome_title: 'Welcome', welcome_message: 'Generic', input_placeholder: 'Type', launcher_label: 'Send', empty_state_copy: 'Ask', logo_url: null, avatar_url: null, favicon_url: null, theme: { primary_color: '#111111', accent_color: '#222222', background_color: '#333333', foreground_color: '#FFFFFF', surface_color: '#444444', border_color: '#555555', font_family: 'SYSTEM', corner_radius: 'MEDIUM', density: 'COMFORTABLE' }, layout: { preset: 'COMMERCE', launcher_style: 'PILL', header_style: 'STANDARD', panel_style: 'CARD' }, modules: { chat: true, guide: true, calculator: true, ctas: true }, hero: { title: 'Welcome', message: 'Generic', cta_label: '' }, roadmap: { enabled: true, title: 'Your roadmap', description: 'Generic', steps: [{ id: 'goal', label: 'What would you like to achieve?', description: '', input_type: 'TEXT', required: true, options: [], min: null, max: null, unit: '' }] }, interactive_tool: { enabled: true, title: 'Planning snapshot', description: 'Generic', currency: '', result_label: 'Snapshot', fields: [{ id: 'budget', label: 'Indicative budget', description: '', input_type: 'NUMBER', required: false, options: [], min: 0, max: 1000, unit: '' }], calculation: { base_amount: 0, terms: [] } } };
+  const published: GuideExperienceVersion = { id: 'published-v7', tenant_id: 'tenant-a', assistant_id: 'assistant-a', version: 7, status: 'PUBLISHED', experience: generic };
+  const recommended: GuideExperienceVersion = { ...published, id: 'draft-v8', version: 8, status: 'DRAFT', experience: { ...generic, welcome_title: 'Plan your event with confidence', roadmap: { ...generic.roadmap, title: 'Event Planning Roadmap', steps: [{ id: 'event_type', label: 'What type of event are you planning?', description: '', input_type: 'SELECT', required: true, options: [{ value: 'corporate', label: 'Corporate Event' }], min: null, max: null, unit: '' }, { id: 'guest_count', label: 'How many guests are you expecting?', description: '', input_type: 'NUMBER', required: true, options: [], min: 1, max: 100000, unit: 'guests' }] }, interactive_tool: { ...generic.interactive_tool, title: 'Event Budget Estimator' }, modules: { ...generic.modules, chat: true } } };
+  let values = [published];
+  api.listGuideExperiences.mockImplementation(() => Promise.resolve(values));
+  api.createRecommendedGuideExperienceDraft.mockImplementation(async () => { values = [recommended, published]; return { version: recommended, recommendation: { classification: { sector: 'EVENT_MANAGEMENT', capabilities: [], source: 'APPROVED_TENANT_INTELLIGENCE' }, facts_used: { active_profile: true, active_configuration: true } } } as never; });
+  renderPage();
+  fireEvent.click(await screen.findByRole('button', { name: 'Generate recommended draft' }));
+  expect(await screen.findByDisplayValue('Event Planning Roadmap')).toBeVisible();
+  expect(screen.getByDisplayValue('Event Budget Estimator')).toBeVisible();
+  expect(screen.getByRole('checkbox', { name: 'Enable AI Assistant' })).toBeChecked();
 });
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });

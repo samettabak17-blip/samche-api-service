@@ -164,6 +164,7 @@ export function GuideExperiencePage() {
   const tenantId = selectedTenant?.id ?? "";
   const client = useQueryClient();
   const [assistantId, setAssistantId] = useState("");
+  const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
   const [draft, setDraft] = useState<GuideExperienceData>(clone(defaults));
   const [feedback, setFeedback] = useState<string | null>(null);
   const [rollbackTarget, setRollbackTarget] =
@@ -218,9 +219,12 @@ export function GuideExperiencePage() {
     if (!channelId && guideChannels[0]) setChannelId(guideChannels[0].id);
   }, [channelId, guideChannels]);
   useEffect(() => {
-    const active = versions.data?.find((item) => item.status === "PUBLISHED");
-    if (active) setDraft(clone(active.experience));
-  }, [versions.data]);
+    const selected = editingDraftId
+      ? versions.data?.find((item) => item.id === editingDraftId && item.status === "DRAFT")
+      : versions.data?.find((item) => item.status === "PUBLISHED");
+    if (selected) setDraft(clone(selected.experience));
+  }, [versions.data, editingDraftId]);
+  useEffect(() => { setEditingDraftId(null); }, [assistantId]);
   const invalidate = () =>
     void client.invalidateQueries({
       queryKey: ["tenant", tenantId, "guide-experience", assistantId],
@@ -237,6 +241,7 @@ export function GuideExperiencePage() {
     mutationFn: () =>
       tenantApi.createGuideExperienceDraft(tenantId, assistantId, draft),
     onSuccess: (version) => {
+      setEditingDraftId(version.id);
       invalidate();
       invalidatePublicationDiagnostics();
       setFeedback(`Draft v${version.version} saved. Preview remains private.`);
@@ -245,7 +250,7 @@ export function GuideExperiencePage() {
   });
   const generateRecommendation = useMutation({
     mutationFn: () => tenantApi.createRecommendedGuideExperienceDraft(tenantId, assistantId),
-    onSuccess: ({ version, recommendation }) => { setDraft(clone(version.experience)); invalidate(); setFeedback(`Recommended ${recommendation.classification.sector.replace(/_/g, ' ').toLowerCase()} Guide saved as private draft v${version.version}. Review before publishing.`); },
+    onSuccess: ({ version, recommendation }) => { setEditingDraftId(version.id); setDraft(clone(version.experience)); invalidate(); setFeedback(`Recommended ${recommendation.classification.sector.replace(/_/g, ' ').toLowerCase()} Guide saved as private draft v${version.version}. Review before publishing.`); },
     onError: () => setFeedback("A recommendation could not be generated because active tenant intelligence is unavailable."),
   });
   const recommendTheme = useMutation({
@@ -618,15 +623,10 @@ export function GuideExperiencePage() {
               {save.isPending ? "Saving…" : "Save draft"}
             </DashboardButton>
             {drafts.map((item) => (
-              <DashboardButton
-                key={item.id}
-                type="button"
-                variant="primary"
-                disabled={publish.isPending}
-                onClick={() => publish.mutate(item.id)}
-              >
-                Publish draft v{item.version}
-              </DashboardButton>
+              <span key={item.id} className="inline-flex gap-2">
+                <DashboardButton type="button" variant={editingDraftId === item.id ? "selected" : "outline"} onClick={() => { setEditingDraftId(item.id); setDraft(clone(item.experience)); }}>Edit draft v{item.version}</DashboardButton>
+                <DashboardButton type="button" variant="primary" disabled={publish.isPending} onClick={() => publish.mutate(item.id)}>Publish draft v{item.version}</DashboardButton>
+              </span>
             ))}
           </div>
           {feedback ? (
