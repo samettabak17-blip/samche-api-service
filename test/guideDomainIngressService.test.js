@@ -49,6 +49,14 @@ test('the ingress status lookup uses the service-wide list contract and selects 
   assert.equal(result.verified, true);
 });
 
+test('the ingress status accepts Render pagination envelopes containing customDomain records', async () => {
+  const result = await resolveGuideDomainIngressStatus({
+    hostname: 'guide.customer.example', environment,
+    fetchImpl: async () => response(200, { 0: { cursor: null, customDomain: { name: 'guide.customer.example', verificationStatus: 'verified' } } }),
+  });
+  assert.equal(result.verified, true);
+});
+
 test('the ingress verification operation is bounded and fails safe without a configured platform credential', async () => {
   await assert.rejects(
     verifyGuideDomainIngress({ hostname: 'guide.customer.example', environment: {}, fetchImpl: async () => response(202, {}) }),

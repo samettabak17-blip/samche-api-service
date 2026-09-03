@@ -69,7 +69,10 @@ export async function verifyGuideDomainIngress({ hostname, environment = process
 }
 
 function selectRenderCustomDomain(payload, hostname) {
-  const entries = Array.isArray(payload) ? payload : (payload?.items ?? payload?.data ?? payload?.customDomains ?? []);
+  const candidates = Array.isArray(payload)
+    ? payload
+    : (payload?.items ?? payload?.data ?? payload?.customDomains ?? (payload?.customDomain ? [payload] : Object.values(payload ?? {})));
+  const entries = candidates.flatMap((entry) => entry?.customDomain ? [entry.customDomain] : [entry]);
   return entries.find((entry) => String(entry?.name ?? '').toLowerCase() === hostname) ?? null;
 }
 
