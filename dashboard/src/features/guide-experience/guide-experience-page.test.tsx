@@ -9,7 +9,7 @@ import type { GuideExperienceData, GuideExperienceVersion } from '../../types/ap
 
 vi.mock('../dashboard/dashboard-api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../dashboard/dashboard-api')>();
-  return { ...actual, tenantApi: { ...actual.tenantApi, listAssistants: vi.fn(), listChannels: vi.fn(), listGuideExperiences: vi.fn(), listGuideDomains: vi.fn(), getGuidePublicationDiagnostics: vi.fn(), createGuideDomain: vi.fn(), verifyGuideDomain: vi.fn(), archiveGuideDomain: vi.fn(), createGuideExperienceDraft: vi.fn(), createRecommendedGuideExperienceDraft: vi.fn(), recommendGuideTheme: vi.fn(), publishGuideExperience: vi.fn(), previewGuideExperience: vi.fn(), rollbackGuideExperience: vi.fn(), uploadGuideExperienceAsset: vi.fn() } };
+  return { ...actual, tenantApi: { ...actual.tenantApi, listAssistants: vi.fn(), listChannels: vi.fn(), listGuideExperiences: vi.fn(), listGuideDomains: vi.fn(), getGuidePublicationDiagnostics: vi.fn(), createGuideDomain: vi.fn(), verifyGuideDomain: vi.fn(), archiveGuideDomain: vi.fn(), createGuideExperienceDraft: vi.fn(), updateGuideExperienceDraft: vi.fn(), createRecommendedGuideExperienceDraft: vi.fn(), recommendGuideTheme: vi.fn(), publishGuideExperience: vi.fn(), previewGuideExperience: vi.fn(), rollbackGuideExperience: vi.fn(), uploadGuideExperienceAsset: vi.fn() } };
 });
 vi.mock('../tenants/tenant-context', async (importOriginal) => ({ ...(await importOriginal<typeof import('../tenants/tenant-context')>()), useTenant: vi.fn() }));
 
@@ -130,6 +130,32 @@ it('does not mislabel a non-intelligence recommendation failure as missing activ
   renderPage();
   fireEvent.click(await screen.findByRole('button', { name: 'Generate recommended draft' }));
   expect(await screen.findByText('A recommendation draft could not be generated safely. Review the Guide Experience details and try again.')).toBeVisible();
+});
+
+it('allows an existing current logo to be analyzed without replacing its asset', async () => {
+  const draft: GuideExperienceVersion = { id: 'draft-v10', tenant_id: 'tenant-a', assistant_id: 'assistant-a', version: 10, status: 'DRAFT', experience: { brand_name: 'Tenant', assistant_display_name: 'Assistant', assistant_status_label: 'Online', welcome_title: 'Welcome', welcome_message: 'Hello', input_placeholder: 'Type', launcher_label: 'Send', empty_state_copy: 'Ask', logo_url: '/guide/assets/11111111-1111-4111-8111-111111111111', avatar_url: null, favicon_url: null, theme: { primary_color: '#111111', accent_color: '#C8A44B', background_color: '#111111', foreground_color: '#FFFFFF', surface_color: '#222222', border_color: '#555555', font_family: 'SYSTEM', corner_radius: 'MEDIUM', density: 'COMFORTABLE' }, layout: { preset: 'SERVICE', launcher_style: 'PILL', header_style: 'STANDARD', panel_style: 'CARD' }, modules: { chat: true, guide: true, calculator: true, ctas: true }, hero: { title: 'Welcome', message: 'Hello', cta_label: '' }, roadmap: { enabled: true, title: 'Roadmap', description: '', steps: [] }, interactive_tool: { enabled: true, title: 'Tool', description: '', currency: '', pricing_mode: 'QUOTE_REQUIRED', approved_pricing_source: '', result_label: 'Scope', fields: [], calculation: { base_amount: 0, terms: [] } } } };
+  api.listGuideExperiences.mockResolvedValue([draft]);
+  api.listGuideDomains.mockResolvedValue([{ id: 'domain-a', tenant_id: 'tenant-a', assistant_id: 'assistant-a', channel_id: 'channel-a', hostname: 'guide.tenant.example', domain_mode: 'CUSTOM', status: 'ACTIVE', verification_record_type: 'CNAME', verification_target: 'ingress.example' }]);
+  renderPage();
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit draft v10' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Apply logo theme' })).toBeEnabled());
+});
+
+it('offers an explicit draft-only way to remove an inherited avatar', async () => {
+  renderPage();
+  expect(await screen.findByRole('button', { name: 'Remove current avatar' })).toBeVisible();
+});
+
+it('updates the selected private Draft rather than creating another version when an authorized editor removes an avatar', async () => {
+  const draft: GuideExperienceVersion = { id: 'draft-v10', tenant_id: 'tenant-a', assistant_id: 'assistant-a', version: 10, status: 'DRAFT', experience: { brand_name: 'Tenant', assistant_display_name: 'Assistant', assistant_status_label: 'Online', welcome_title: 'Welcome', welcome_message: 'Hello', input_placeholder: 'Type', launcher_label: 'Send', empty_state_copy: 'Ask', logo_url: '/guide/assets/11111111-1111-4111-8111-111111111111', avatar_url: '/guide/assets/22222222-2222-4222-8222-222222222222', favicon_url: null, theme: { primary_color: '#111111', accent_color: '#C8A44B', background_color: '#111111', foreground_color: '#FFFFFF', surface_color: '#222222', border_color: '#555555', font_family: 'SYSTEM', corner_radius: 'MEDIUM', density: 'COMFORTABLE' }, layout: { preset: 'SERVICE', launcher_style: 'PILL', header_style: 'STANDARD', panel_style: 'CARD' }, modules: { chat: true, guide: true, calculator: true, ctas: true }, hero: { title: 'Welcome', message: 'Hello', cta_label: '' }, roadmap: { enabled: true, title: 'Roadmap', description: '', steps: [] }, interactive_tool: { enabled: true, title: 'Tool', description: '', currency: '', pricing_mode: 'QUOTE_REQUIRED', approved_pricing_source: '', result_label: 'Scope', fields: [], calculation: { base_amount: 0, terms: [] } } } };
+  api.listGuideExperiences.mockResolvedValue([draft]);
+  api.updateGuideExperienceDraft.mockResolvedValue({ ...draft, experience: { ...draft.experience, avatar_url: null } });
+  renderPage();
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit draft v10' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Remove current avatar' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+  await waitFor(() => expect(api.updateGuideExperienceDraft).toHaveBeenCalledWith('tenant-a', 'assistant-a', 'draft-v10', expect.objectContaining({ avatar_url: null })));
+  expect(api.createGuideExperienceDraft).not.toHaveBeenCalled();
 });
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });

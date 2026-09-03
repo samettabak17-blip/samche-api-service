@@ -9,6 +9,9 @@ const INPUT_TYPES = new Set(['TEXT', 'NUMBER', 'SELECT', 'BOOLEAN']);
 const TERM_KINDS = new Set(['NUMBER_MULTIPLIER', 'SELECT_AMOUNT', 'BOOLEAN_AMOUNT']);
 const PRICING_MODES = new Set(['APPROVED_PRICING', 'QUOTE_REQUIRED']);
 const FIELD_ID = /^[a-z][a-z0-9_]{0,39}$/;
+const rgb = (hex) => [1, 3, 5].map((index) => Number.parseInt(hex.slice(index, index + 2), 16));
+const luminance = (hex) => rgb(hex).map((value) => value / 255).map((value) => value <= .03928 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+const contrast = (a, b) => { const [high, low] = [luminance(a), luminance(b)].sort((left, right) => right - left); return (high + .05) / (low + .05); };
 
 export class GuideExperienceError extends Error {
   constructor(code, message = 'Guide experience is unavailable.') {
@@ -236,6 +239,8 @@ export function normalizeGuideExperience(input = {}, { allowSerializedLegacyPric
       foreground_color: color(theme.foreground_color, 'foreground_color', neutral.theme.foreground_color),
       surface_color: color(theme.surface_color, 'surface_color', neutral.theme.surface_color),
       border_color: color(theme.border_color, 'border_color', neutral.theme.border_color),
+      button_foreground: color(theme.button_foreground, 'button_foreground', contrast(color(theme.primary_color, 'primary_color', neutral.theme.primary_color), '#FFFFFF') >= 4.5 ? '#FFFFFF' : '#101828'),
+      mode: bounded(theme.mode, new Set(['DARK', 'LIGHT']), 'mode', 'LIGHT'),
       font_family: bounded(theme.font_family, FONTS, 'font_family', neutral.theme.font_family),
       corner_radius: bounded(theme.corner_radius, new Set(['SMALL', 'MEDIUM', 'LARGE']), 'corner_radius', neutral.theme.corner_radius),
       density: bounded(theme.density, new Set(['COMPACT', 'COMFORTABLE']), 'density', neutral.theme.density),

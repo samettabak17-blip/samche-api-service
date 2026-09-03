@@ -76,3 +76,25 @@ test('derives an accessible palette and corrects low-contrast logo candidates', 
   assert.ok(palette.contrast.surface >= 4.5);
   assert.throws(() => deriveAccessibleGuideTheme({ candidates: Array(65).fill('#112233') }));
 });
+
+test('recommendations preserve a current logo but never inherit a historical assistant avatar', () => {
+  const current = normalizeGuideExperience({
+    logo_url: '/guide/assets/11111111-1111-4111-8111-111111111111',
+    avatar_url: '/guide/assets/22222222-2222-4222-8222-222222222222',
+  });
+  const result = buildGuideExperienceRecommendation({ activeProfile: { offering: 'event planning' }, activeConfiguration: { assistant_identity: 'Advisor' }, currentExperience: current });
+  assert.equal(result.experience.logo_url, current.logo_url);
+  assert.equal(result.experience.avatar_url, null);
+});
+
+test('theme recommendations preserve brand candidates and choose accessible dark or light tokens deterministically', () => {
+  const darkCandidates = ['#090909', '#090909', '#090909', '#C8A44B', '#C8A44B'];
+  const dark = deriveAccessibleGuideTheme({ candidates: darkCandidates });
+  const light = deriveAccessibleGuideTheme({ candidates: ['#F9FAFB', '#F9FAFB', '#1D6EC8', '#1D6EC8'] });
+  assert.deepEqual(darkCandidates, ['#090909', '#090909', '#090909', '#C8A44B', '#C8A44B']);
+  assert.equal(dark.mode, 'DARK');
+  assert.equal(light.mode, 'LIGHT');
+  assert.ok(dark.contrast.surface >= 4.5);
+  assert.ok(light.contrast.surface >= 4.5);
+  assert.ok(dark.contrast.button >= 4.5);
+});

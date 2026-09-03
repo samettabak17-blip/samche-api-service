@@ -107,7 +107,10 @@ export function buildGuideExperienceRecommendation({ activeProfile, activeConfig
   const recommended = sector === 'EVENT_MANAGEMENT' ? eventGuide() : genericGuide(sector);
   const current = currentExperience ? normalizeGuideExperience(currentExperience, { allowSerializedLegacyPricing: true }) : neutralGuideExperience();
   const profileName = typeof activeProfile?.company_identity === 'string' ? activeProfile.company_identity : null;
-  const experience = normalizeGuideExperience({ ...current, brand_name: profileName || current.brand_name, assistant_display_name: activeConfiguration?.assistant_identity || assistantName || current.assistant_display_name, welcome_title: recommended.hero.title, welcome_message: recommended.hero.message, hero: recommended.hero, layout: { ...current.layout, preset: layoutPresetForSector(sector) }, roadmap: recommended.roadmap, interactive_tool: recommended.interactive_tool, assistant_copy: recommended.assistant_copy, classification: recommended.classification });
+  // A recommendation may retain the current brand logo as an explicit draft
+  // asset, but it never clones an old Experience avatar into a new draft.
+  // Avatar selection is an explicit current-version decision.
+  const experience = normalizeGuideExperience({ ...current, logo_url: current.logo_url, avatar_url: null, brand_name: profileName || current.brand_name, assistant_display_name: activeConfiguration?.assistant_identity || assistantName || current.assistant_display_name, welcome_title: recommended.hero.title, welcome_message: recommended.hero.message, hero: recommended.hero, layout: { ...current.layout, preset: layoutPresetForSector(sector) }, roadmap: recommended.roadmap, interactive_tool: recommended.interactive_tool, assistant_copy: recommended.assistant_copy, classification: recommended.classification });
   return { experience, recommendation: { classification: recommended.classification, facts_used: { active_profile: Boolean(activeProfile), active_configuration: Boolean(activeConfiguration) } } };
 }
 

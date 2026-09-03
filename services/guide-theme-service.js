@@ -9,16 +9,21 @@ function contrast(a, b) { const [high, low] = [luminance(a), luminance(b)].sort(
 function saturation(color) { const values = rgb(color).map((value) => value / 255); return Math.max(...values) - Math.min(...values); }
 function mix(a, b, ratio) { const left = rgb(a); const right = rgb(b); return hex(left.map((value, index) => value * (1 - ratio) + right[index] * ratio)); }
 function normalizeCandidate(value) { return typeof value === 'string' && COLOR.test(value.toUpperCase()) ? value.toUpperCase() : null; }
+function foregroundFor(background) { return contrast(background, '#FFFFFF') >= 4.5 ? '#FFFFFF' : '#101828'; }
 
 export function deriveAccessibleGuideTheme({ candidates = [] } = {}) {
   if (!Array.isArray(candidates) || candidates.length > 64) throw new GuideThemeError('GUIDE_THEME_CANDIDATES_INVALID');
-  const colors = [...new Set(candidates.map(normalizeCandidate).filter(Boolean))];
+  const sampled = candidates.map(normalizeCandidate).filter(Boolean);
+  const colors = [...new Set(sampled)];
   const meaningful = colors.filter((color) => saturation(color) >= .18 && luminance(color) > .03 && luminance(color) < .95);
-  const primary = meaningful.sort((a, b) => saturation(b) - saturation(a) || contrast(b, '#FFFFFF') - contrast(a, '#FFFFFF'))[0] ?? '#1F4B99';
+  const darkSamples = sampled.filter((color) => luminance(color) < .16).length;
+  const lightSamples = sampled.filter((color) => luminance(color) > .78).length;
+  const mode = darkSamples >= 2 && darkSamples > lightSamples ? 'DARK' : 'LIGHT';
+  const primary = meaningful.sort((a, b) => saturation(b) - saturation(a) || contrast(b, '#FFFFFF') - contrast(a, '#FFFFFF'))[0] ?? (mode === 'DARK' ? '#B9903D' : '#1F4B99');
   const accent = meaningful.find((color) => color !== primary && contrast(color, primary) >= 1.25) ?? mix(primary, '#FFFFFF', .22);
-  const foreground = contrast(primary, '#FFFFFF') >= 4.5 ? '#FFFFFF' : '#101828';
-  const background = luminance(primary) < .45 ? mix(primary, '#0B1020', .82) : '#F7F8FA';
-  const surface = luminance(background) < .25 ? mix(background, '#FFFFFF', .08) : '#FFFFFF';
-  const surfaceForeground = contrast(surface, '#101828') >= 4.5 ? '#101828' : '#FFFFFF';
-  return { primary_color: primary, accent_color: accent, background_color: background, foreground_color: surfaceForeground, surface_color: surface, border_color: mix(surface, primary, .28), foreground_on_primary: foreground, foreground_on_accent: contrast(accent, '#FFFFFF') >= 4.5 ? '#FFFFFF' : '#101828', contrast: { primary: Number(contrast(primary, foreground).toFixed(2)), accent: Number(contrast(accent, contrast(accent, '#FFFFFF') >= 4.5 ? '#FFFFFF' : '#101828').toFixed(2)), surface: Number(contrast(surface, surfaceForeground).toFixed(2)) } };
+  const background = mode === 'DARK' ? '#090A0C' : '#F7F8FA';
+  const surface = mode === 'DARK' ? '#171719' : '#FFFFFF';
+  const surfaceForeground = foregroundFor(surface);
+  const buttonForeground = foregroundFor(primary);
+  return { mode, primary_color: primary, accent_color: accent, background_color: background, foreground_color: surfaceForeground, surface_color: surface, border_color: mix(surface, primary, mode === 'DARK' ? .42 : .28), button_foreground: buttonForeground, foreground_on_primary: buttonForeground, foreground_on_accent: foregroundFor(accent), contrast: { primary: Number(contrast(primary, buttonForeground).toFixed(2)), accent: Number(contrast(accent, foregroundFor(accent)).toFixed(2)), surface: Number(contrast(surface, surfaceForeground).toFixed(2)), button: Number(contrast(primary, buttonForeground).toFixed(2)) } };
 }

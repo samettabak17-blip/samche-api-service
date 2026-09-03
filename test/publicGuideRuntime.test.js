@@ -63,3 +63,25 @@ test('Guide runtime uses concise module labels and premium readable interaction 
   assert.match(css, /guide-navigation__item:not\(\.is-active\)/);
   assert.match(css, /min-height:2\.85rem/);
 });
+
+test('Roadmap review has an explicit deterministic state and a structured assistant handoff prefill', () => {
+  assert.match(source, /roadmap_reviewed/);
+  assert.match(source, /validateRoadmapForReview/);
+  assert.match(source, /renderRoadmapReview/);
+  assert.match(source, /buildAssistantPrefill/);
+  assert.match(source, /assistant_draft_origin/);
+  assert.match(source, /Discuss this plan with the assistant/);
+});
+
+test('Guide renders only the current Experience assets and keeps a missing avatar slot empty', () => {
+  assert.match(source, /if \(!value\) \{ image\.hidden = true; return; \}/);
+  assert.match(source, /experience\.avatar_url/);
+  assert.doesNotMatch(source, /historical.*avatar|previous.*avatar/i);
+});
+
+test('Guide theme consumes explicit accessible tokens without filtering logo pixels', () => {
+  const css = fs.readFileSync(new URL('../public-guide/guide.css', import.meta.url), 'utf8');
+  assert.match(source, /--guide-button-foreground/);
+  assert.doesNotMatch(css, /\.guide-logo[^}]*filter\s*:/i);
+  assert.doesNotMatch(css, /mix-blend-mode/i);
+});

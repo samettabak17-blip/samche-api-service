@@ -60,7 +60,7 @@ const clone = (value: GuideExperienceData) => structuredClone(value);
 const newRoadmapStep = (): GuideExperienceField => ({ id: `step_${Date.now()}`, label: "New roadmap step", description: "", input_type: "TEXT", required: false, options: [], min: null, max: null, unit: "" });
 const newToolField = (): GuideExperienceField => ({ id: `field_${Date.now()}`, label: "New tool field", description: "", input_type: "NUMBER", required: false, options: [], min: 0, max: 100000000, unit: "" });
 const optionsFromLabels = (value: string) => value.split(',').map((label) => label.trim()).filter(Boolean).slice(0, 20).map((label, index) => ({ value: `option_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'value'}_${index + 1}`.slice(0, 40), label }));
-const extractLogoCandidates = async (file: File): Promise<string[]> => new Promise((resolve) => {
+const extractLogoCandidates = async (file: Blob): Promise<string[]> => new Promise((resolve) => {
   const image = new Image(); const url = URL.createObjectURL(file);
   image.onload = () => { const canvas = document.createElement('canvas'); const side = 48; canvas.width = side; canvas.height = side; const context = canvas.getContext('2d', { willReadFrequently: true }); if (!context) { URL.revokeObjectURL(url); resolve([]); return; } context.drawImage(image, 0, 0, side, side); const data = context.getImageData(0, 0, side, side).data; const values: string[] = []; for (let index = 0; index < data.length; index += 16) { if (data[index + 3] < 180) continue; values.push(`#${[data[index], data[index + 1], data[index + 2]].map((item) => item.toString(16).padStart(2, '0')).join('').toUpperCase()}`); } URL.revokeObjectURL(url); resolve(values.slice(0, 64)); };
   image.onerror = () => { URL.revokeObjectURL(url); resolve([]); }; image.src = url;
@@ -247,7 +247,9 @@ export function GuideExperiencePage() {
     });
   const save = useMutation({
     mutationFn: () =>
-      tenantApi.createGuideExperienceDraft(tenantId, assistantId, draft),
+      editingDraftId
+        ? tenantApi.updateGuideExperienceDraft(tenantId, assistantId, editingDraftId, draft)
+        : tenantApi.createGuideExperienceDraft(tenantId, assistantId, draft),
     onSuccess: (version) => {
       setEditingDraftId(version.id);
       invalidate();
@@ -262,10 +264,22 @@ export function GuideExperiencePage() {
     onError: (error) => setFeedback(guideRecommendationFailureMessage(error)),
   });
   const recommendTheme = useMutation({
-    mutationFn: () => tenantApi.recommendGuideTheme(tenantId, assistantId, logoCandidates),
+    mutationFn: (candidates: string[]) => tenantApi.recommendGuideTheme(tenantId, assistantId, candidates),
     onSuccess: (theme) => { setDraft((current) => ({ ...current, theme: { ...current.theme, ...theme } })); setFeedback("Recommended accessible logo palette applied to this unsaved draft. Review and save when ready."); },
     onError: () => setFeedback("A theme recommendation could not be generated safely from this logo."),
   });
+  const analyzeConfiguredLogo = async () => {
+    if (logoCandidates.length) return logoCandidates;
+    const activeDomain = domains.data?.find((domain) => domain.status === "ACTIVE");
+    if (!draft.logo_url || !activeDomain) throw new Error("configured logo is unavailable");
+    const url = new URL(draft.logo_url, `https://${activeDomain.hostname}`).toString();
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error("configured logo is unavailable");
+    const candidates = await extractLogoCandidates(await response.blob());
+    if (!candidates.length) throw new Error("configured logo is unavailable");
+    setLogoCandidates(candidates);
+    return candidates;
+  };
   const publish = useMutation({
     mutationFn: (id: string) =>
       tenantApi.publishGuideExperience(tenantId, assistantId, id),
@@ -571,6 +585,9 @@ export function GuideExperiencePage() {
                   if (file) assetUpload.mutate({ kind: "AVATAR", file });
                 }}
               />
+              <div className="mt-2">
+                <DashboardButton type="button" variant="outline" disabled={!draft.avatar_url} onClick={() => setDraft((current) => ({ ...current, avatar_url: null }))}>Remove current avatar</DashboardButton>
+              </div>
             </DashboardField>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -627,7 +644,7 @@ export function GuideExperiencePage() {
             <div><p className="dashboard-section-label">Tenant-aware recommendations</p><p className="text-xs text-stone-400">Uses the active Business Profile and Assistant Configuration. It creates a private Draft only; publishing remains explicit.</p></div>
             <div className="flex flex-wrap gap-2">
               <DashboardButton type="button" variant="outline" disabled={!assistantId || generateRecommendation.isPending} onClick={() => generateRecommendation.mutate()}>{generateRecommendation.isPending ? "Generating…" : "Generate recommended draft"}</DashboardButton>
-              <DashboardButton type="button" variant="outline" disabled={!assistantId || !logoCandidates.length || recommendTheme.isPending} onClick={() => recommendTheme.mutate()}>{recommendTheme.isPending ? "Analyzing…" : "Apply logo theme"}</DashboardButton>
+              <DashboardButton type="button" variant="outline" disabled={!assistantId || !draft.logo_url || recommendTheme.isPending} onClick={() => { void analyzeConfiguredLogo().then((candidates) => recommendTheme.mutate(candidates)).catch(() => setFeedback("A theme recommendation could not be generated safely from this logo.")); }}>{recommendTheme.isPending ? "Analyzing…" : "Apply logo theme"}</DashboardButton>
             </div>
           </section>
           <DashboardCheckbox
