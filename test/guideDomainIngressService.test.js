@@ -39,6 +39,16 @@ test('the ingress status must report verified before the application can activat
   assert.equal(verified.verified, true);
 });
 
+test('the ingress status lookup uses the service-wide list contract and selects the exact hostname', async () => {
+  let requestedUrl = '';
+  const result = await resolveGuideDomainIngressStatus({
+    hostname: 'guide.customer.example', environment,
+    fetchImpl: async (url) => { requestedUrl = url; return response(200, { items: [{ name: 'other.example', verificationStatus: 'verified' }, { name: 'guide.customer.example', verificationStatus: 'verified' }] }); },
+  });
+  assert.match(requestedUrl, /custom-domains\?limit=100$/);
+  assert.equal(result.verified, true);
+});
+
 test('the ingress verification operation is bounded and fails safe without a configured platform credential', async () => {
   await assert.rejects(
     verifyGuideDomainIngress({ hostname: 'guide.customer.example', environment: {}, fetchImpl: async () => response(202, {}) }),

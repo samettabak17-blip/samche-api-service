@@ -79,7 +79,11 @@ export async function resolveGuideDomainIngressStatus({ hostname, environment = 
   const response = await renderRequest({
     fetchImpl,
     apiKey,
-    path: `/services/${encodeURIComponent(serviceId)}/custom-domains?name=${encodeURIComponent(normalized)}`,
+    // Render's `name` filter is an array query parameter.  Listing the
+    // service domains and selecting the exact normalized hostname keeps this
+    // adapter compatible across API versions while preserving tenant-side
+    // hostname scoping in the SamChe domain table.
+    path: `/services/${encodeURIComponent(serviceId)}/custom-domains?limit=100`,
     method: 'GET',
   });
   if (response.status !== 200) throw new GuideDomainError(safeIngressFailure(response.status));
