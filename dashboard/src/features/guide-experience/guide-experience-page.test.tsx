@@ -79,11 +79,33 @@ it('offers an authorized real-runtime preview action for a private draft', async
   api.listGuideExperiences.mockResolvedValue([draft]);
   api.listGuideDomains.mockResolvedValue([{ id: 'domain-a', tenant_id: 'tenant-a', assistant_id: 'assistant-a', channel_id: 'channel-a', hostname: 'guide.tenant.example', domain_mode: 'CUSTOM', status: 'ACTIVE', verification_record_type: 'CNAME', verification_target: 'ingress.example' }]);
   api.previewGuideExperience.mockResolvedValue({ preview_path: '/?preview=opaque', hostname: 'guide.tenant.example', expires_in_seconds: 600 });
-  const open = vi.spyOn(window, 'open').mockReturnValue({ closed: false, location: { href: '' } } as unknown as Window);
+  const popup = { closed: false, location: { href: 'about:blank' } } as unknown as Window;
+  const open = vi.spyOn(window, 'open').mockReturnValue(popup);
   renderPage();
   fireEvent.click(await screen.findByRole('button', { name: 'Preview draft v10' }));
   await waitFor(() => expect(api.previewGuideExperience).toHaveBeenCalledWith('tenant-a', 'assistant-a', 'draft-v10'));
-  expect(open).toHaveBeenCalledWith('about:blank', '_blank', 'noopener,noreferrer');
+  await waitFor(() => expect(popup.location.href).toBe('https://guide.tenant.example/?preview=opaque'));
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(open).toHaveBeenCalledWith('about:blank', '_blank');
+  expect(screen.getByRole('combobox', { name: 'Layout preset' })).toHaveValue('SERVICE');
+  expect(screen.getByDisplayValue('Roadmap')).toBeVisible();
+  expect(api.publishGuideExperience).not.toHaveBeenCalled();
+  open.mockRestore();
+});
+
+it('closes a failed preview placeholder without publishing or replacing the selected draft', async () => {
+  const draft: GuideExperienceVersion = { id: 'draft-v10', tenant_id: 'tenant-a', assistant_id: 'assistant-a', version: 10, status: 'DRAFT', experience: { brand_name: 'Tenant', assistant_display_name: 'Assistant', assistant_status_label: 'Online', welcome_title: 'Event planning', welcome_message: 'Tell us about your event.', input_placeholder: 'Type', launcher_label: 'Send', empty_state_copy: 'Ask', logo_url: null, avatar_url: null, favicon_url: null, theme: { primary_color: '#111111', accent_color: '#222222', background_color: '#333333', foreground_color: '#FFFFFF', surface_color: '#444444', border_color: '#555555', font_family: 'SYSTEM', corner_radius: 'MEDIUM', density: 'COMFORTABLE' }, layout: { preset: 'SERVICE', launcher_style: 'PILL', header_style: 'STANDARD', panel_style: 'CARD' }, modules: { chat: true, guide: true, calculator: true, ctas: true }, hero: { title: 'Event planning', message: 'Tell us about your event.', cta_label: '' }, roadmap: { enabled: true, title: 'Event Planning Roadmap', description: '', steps: [] }, interactive_tool: { enabled: true, title: 'Event Budget Estimator', description: '', currency: '', pricing_mode: 'QUOTE_REQUIRED', approved_pricing_source: '', result_label: 'Scope', fields: [], calculation: { base_amount: 0, terms: [] } } } };
+  api.listGuideExperiences.mockResolvedValue([draft]);
+  api.previewGuideExperience.mockRejectedValue(new Error('ticket unavailable'));
+  const popup = { closed: false, close: vi.fn(), location: { href: 'about:blank' } } as unknown as Window;
+  const open = vi.spyOn(window, 'open').mockReturnValue(popup);
+  renderPage();
+  fireEvent.click(await screen.findByRole('button', { name: 'Preview draft v10' }));
+  expect(await screen.findByText('Private preview could not be opened. Please try again.')).toBeVisible();
+  expect(popup.close).toHaveBeenCalledOnce();
+  expect(screen.getByDisplayValue('Event Planning Roadmap')).toBeVisible();
+  expect(screen.getByDisplayValue('Event Budget Estimator')).toBeVisible();
+  expect(api.publishGuideExperience).not.toHaveBeenCalled();
   open.mockRestore();
 });
 

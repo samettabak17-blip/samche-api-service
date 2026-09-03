@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   DashboardButton,
@@ -184,7 +184,7 @@ export function GuideExperiencePage() {
   const [logoCandidates, setLogoCandidates] = useState<string[]>([]);
   const [archiveDomainTarget, setArchiveDomainTarget] =
     useState<GuideDomain | null>(null);
-  const [previewWindow, setPreviewWindow] = useState<Window | null>(null);
+  const previewWindowRef = useRef<Window | null>(null);
   const assistants = useQuery({
     queryKey: ["tenant", tenantId, "assistants"],
     queryFn: () => tenantApi.listAssistants(tenantId),
@@ -233,7 +233,6 @@ export function GuideExperiencePage() {
       : versions.data?.find((item) => item.status === "PUBLISHED");
     if (selected) setDraft(clone(selected.experience));
   }, [versions.data, editingDraftId]);
-  useEffect(() => { setEditingDraftId(null); }, [assistantId]);
   const invalidate = () =>
     void client.invalidateQueries({
       queryKey: ["tenant", tenantId, "guide-experience", assistantId],
@@ -281,12 +280,16 @@ export function GuideExperiencePage() {
     mutationFn: (id: string) => tenantApi.previewGuideExperience(tenantId, assistantId, id),
     onSuccess: (result) => {
       const url = `https://${result.hostname}${result.preview_path}`;
-      if (previewWindow && !previewWindow.closed) previewWindow.location.href = url;
-      else window.open(url, "_blank", "noopener,noreferrer");
-      setPreviewWindow(null);
+      const popup = previewWindowRef.current;
+      previewWindowRef.current = null;
+      if (!popup || popup.closed) {
+        setFeedback("Private preview could not be opened. Please try again.");
+        return;
+      }
+      popup.location.href = url;
       setFeedback(`Private draft preview opened. It expires in ${Math.round(result.expires_in_seconds / 60)} minutes.`);
     },
-    onError: () => { if (previewWindow && !previewWindow.closed) previewWindow.close(); setPreviewWindow(null); setFeedback("Private draft preview could not be opened safely."); },
+    onError: () => { const popup = previewWindowRef.current; previewWindowRef.current = null; if (popup && !popup.closed) popup.close(); setFeedback("Private preview could not be opened. Please try again."); },
   });
   const rollback = useMutation({
     mutationFn: (id: string) =>
@@ -462,6 +465,7 @@ export function GuideExperiencePage() {
               value={assistantId}
               onChange={(event) => {
                 setAssistantId(event.target.value);
+                setEditingDraftId(null);
                 setChannelId("");
               }}
             >
@@ -647,7 +651,7 @@ export function GuideExperiencePage() {
             {drafts.map((item) => (
               <span key={item.id} className="inline-flex gap-2">
                 <DashboardButton type="button" variant={editingDraftId === item.id ? "selected" : "outline"} onClick={() => { setEditingDraftId(item.id); setDraft(clone(item.experience)); }}>Edit draft v{item.version}</DashboardButton>
-                <DashboardButton type="button" variant="outline" disabled={preview.isPending} onClick={() => { const popup = window.open("about:blank", "_blank", "noopener,noreferrer"); setPreviewWindow(popup); preview.mutate(item.id); }}>Preview draft v{item.version}</DashboardButton>
+                <DashboardButton type="button" variant="outline" disabled={preview.isPending} onClick={() => { if (editingDraftId !== item.id) { setEditingDraftId(item.id); setDraft(clone(item.experience)); } setFeedback(null); const popup = window.open("about:blank", "_blank"); if (!popup) { setFeedback("Private preview could not be opened. Please allow popups and try again."); return; } try { popup.opener = null; } catch {} previewWindowRef.current = popup; preview.mutate(item.id); }}>Preview draft v{item.version}</DashboardButton>
                 <DashboardButton type="button" variant="primary" disabled={publish.isPending} onClick={() => publish.mutate(item.id)}>Publish draft v{item.version}</DashboardButton>
               </span>
             ))}
