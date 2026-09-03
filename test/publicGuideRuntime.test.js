@@ -60,8 +60,8 @@ test('Guide runtime uses concise module labels and premium readable interaction 
   assert.match(source, /navigation_label/);
   assert.match(css, /--guide-muted/);
   assert.match(css, /guide-context-summary/);
-  assert.match(css, /guide-navigation__item:not\(\.is-active\)/);
-  assert.match(css, /min-height:2\.85rem/);
+  assert.match(css, /guide-navigation__item\.is-active/);
+  assert.match(css, /width:min\(100%,35rem\)/);
 });
 
 test('Roadmap review has an explicit deterministic state and a structured assistant handoff prefill', () => {
@@ -84,7 +84,8 @@ test('Guide exposes one localized Thinking indicator rather than two ellipsis sy
   const css = fs.readFileSync(new URL('../public-guide/guide.css', import.meta.url), 'utf8');
   assert.match(source, /Düşünüyorum' : 'Thinking'/);
   assert.doesNotMatch(source, /Düşünüyorum…|Thinking…/);
-  assert.match(css, /\.guide-thinking::after\{content:'\.\.\.'/);
+  assert.match(css, /\.guide-thinking::after\{[^}]*content:'\.\.\.'/);
+  assert.equal((css.match(/\.guide-thinking::after\{/g) ?? []).length, 1, 'one canonical Thinking selector');
 });
 
 test('Guide review uses stable field ids and focuses the actual missing field', () => {
