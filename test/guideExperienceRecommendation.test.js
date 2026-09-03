@@ -23,6 +23,30 @@ test('different approved sectors receive materially different declarative Guide 
   assert.notEqual(property.experience.interactive_tool.title, events.experience.interactive_tool.title);
 });
 
+test('event and professional recommendations choose non-commerce layouts while ecommerce remains commerce', () => {
+  const event = buildGuideExperienceRecommendation({ activeProfile: { offering: 'conference and event production' }, activeConfiguration: { assistant_identity: 'Advisor' }, currentExperience: { layout: { preset: 'COMMERCE' } } });
+  const commerce = buildGuideExperienceRecommendation({ activeProfile: { offering: 'ecommerce shopping catalog' }, activeConfiguration: { assistant_identity: 'Advisor' } });
+  assert.notEqual(event.experience.layout.preset, 'COMMERCE');
+  assert.equal(commerce.experience.layout.preset, 'COMMERCE');
+});
+
+test('event recommendation without approved pricing is quotation-required rather than a zero currency estimate', () => {
+  const experience = buildGuideExperienceRecommendation({ activeProfile: { offering: 'event management and catering' }, activeConfiguration: { assistant_identity: 'Advisor' } }).experience;
+  assert.equal(experience.interactive_tool.pricing_mode, 'QUOTE_REQUIRED');
+  assert.equal(experience.interactive_tool.approved_pricing_source, '');
+});
+
+test('approved deterministic pricing requires an explicit tenant-approved pricing source', () => {
+  assert.throws(() => normalizeGuideExperience({ interactive_tool: { pricing_mode: 'APPROVED_PRICING', fields: [{ id: 'guests', label: 'Guests', input_type: 'NUMBER' }], calculation: { base_amount: 0, terms: [] } } }), GuideExperienceError);
+  const approved = normalizeGuideExperience({ interactive_tool: { pricing_mode: 'APPROVED_PRICING', approved_pricing_source: 'Approved rate card', fields: [{ id: 'guests', label: 'Guests', input_type: 'NUMBER' }], calculation: { base_amount: 0, terms: [] } } });
+  assert.equal(approved.interactive_tool.pricing_mode, 'APPROVED_PRICING');
+});
+
+test('legacy valid non-zero deterministic pricing remains renderable without mutating its stored version', () => {
+  const legacy = normalizeGuideExperience({ interactive_tool: { fields: [{ id: 'guests', label: 'Guests', input_type: 'NUMBER' }], calculation: { base_amount: 100, terms: [{ field_id: 'guests', kind: 'NUMBER_MULTIPLIER', multiplier: 10 }] } } });
+  assert.equal(legacy.interactive_tool.pricing_mode, 'APPROVED_PRICING');
+});
+
 test('recommended event context remains validated and tenant identifiers are not client fields', () => {
   const experience = buildGuideExperienceRecommendation({ activeProfile: { offering: 'event management' }, activeConfiguration: { assistant_identity: 'Advisor' } }).experience;
   const context = normalizeGuideSessionContext({ experience, context: { roadmap: { event_type: 'option_corporate_event_1', guest_count: 200 }, tool: { guest_count: 200, catering: true } } });

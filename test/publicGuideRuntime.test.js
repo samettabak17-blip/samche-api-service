@@ -35,3 +35,8 @@ test('public Guide renderer supports sector-aware summaries, deterministic break
   assert.match(source, /guide_context/);
   assert.doesNotMatch(source, /eval\s*\(/);
 });
+
+test('public Guide renders a scope summary instead of a zero monetary estimate when pricing is not approved', () => {
+  assert.match(source, /tool\.pricing_mode === 'APPROVED_PRICING'/);
+  assert.match(source, /commercial review\. Final pricing and quotation require confirmation/);
+});

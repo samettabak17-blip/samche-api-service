@@ -7,6 +7,7 @@ const FONTS = new Set(['SYSTEM', 'INTER', 'MANROPE', 'SERIF']);
 const LAUNCHERS = new Set(['PILL', 'CIRCLE', 'PANEL']);
 const INPUT_TYPES = new Set(['TEXT', 'NUMBER', 'SELECT', 'BOOLEAN']);
 const TERM_KINDS = new Set(['NUMBER_MULTIPLIER', 'SELECT_AMOUNT', 'BOOLEAN_AMOUNT']);
+const PRICING_MODES = new Set(['APPROVED_PRICING', 'QUOTE_REQUIRED']);
 const FIELD_ID = /^[a-z][a-z0-9_]{0,39}$/;
 
 export class GuideExperienceError extends Error {
@@ -45,6 +46,8 @@ const neutral = Object.freeze({
     title: 'Planning snapshot',
     description: 'Capture your indicative budget to share with the assistant.',
     currency: '',
+    pricing_mode: 'QUOTE_REQUIRED',
+    approved_pricing_source: '',
     result_label: 'Your planning snapshot',
     fields: [{ id: 'budget', label: 'Indicative budget', description: '', input_type: 'NUMBER', required: false, options: [], min: 0, max: 100000000, unit: '' }],
     calculation: { base_amount: 0, terms: [{ field_id: 'budget', kind: 'NUMBER_MULTIPLIER', multiplier: 1 }] },
@@ -179,11 +182,19 @@ function normalizeInteractiveTool(value) {
     return { field_id: fieldId, kind, label, amounts: normalizedAmounts };
   });
   if (terms.some((term) => term.multiplier === null || term.amount === null)) throw new GuideExperienceError('GUIDE_EXPERIENCE_INVALID');
+  const hasLegacyApprovedAmounts = calculation.base_amount !== undefined && calculation.base_amount !== null && Number(calculation.base_amount) !== 0
+    || terms.some((term) => term.multiplier !== undefined && term.multiplier !== 0 || term.amount !== undefined && term.amount !== 0 || term.amounts && Object.values(term.amounts).some((amount) => amount !== 0));
+  const legacyPricingMode = tool.pricing_mode === undefined || tool.pricing_mode === null;
+  const pricingMode = legacyPricingMode && hasLegacyApprovedAmounts ? 'APPROVED_PRICING' : bounded(tool.pricing_mode, PRICING_MODES, 'interactive_tool.pricing_mode', 'QUOTE_REQUIRED');
+  const approvedPricingSource = text(tool.approved_pricing_source, 'interactive_tool.approved_pricing_source', 160, '');
+  if (pricingMode === 'APPROVED_PRICING' && !legacyPricingMode && !approvedPricingSource) throw new GuideExperienceError('GUIDE_EXPERIENCE_INVALID', 'interactive_tool.approved_pricing_source is required.');
   return {
     enabled: bool(tool.enabled, true),
     title: text(tool.title, 'interactive_tool.title', 120, neutral.interactive_tool.title),
     description: text(tool.description, 'interactive_tool.description', 360, neutral.interactive_tool.description),
     currency: text(tool.currency, 'interactive_tool.currency', 12, ''),
+    pricing_mode: pricingMode,
+    approved_pricing_source: approvedPricingSource,
     result_label: text(tool.result_label, 'interactive_tool.result_label', 120, neutral.interactive_tool.result_label),
     result_breakdown_label: text(tool.result_breakdown_label, 'interactive_tool.result_breakdown_label', 120, 'Category'),
     fields,

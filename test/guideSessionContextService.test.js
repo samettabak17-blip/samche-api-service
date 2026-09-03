@@ -8,7 +8,7 @@ const experience = normalizeGuideExperience({
     { id: 'event_type', label: 'Event type', input_type: 'SELECT', options: [{ value: 'corporate', label: 'Corporate event' }] },
     { id: 'attendees', label: 'Guests', input_type: 'NUMBER', min: 1, max: 1000 },
   ] },
-  interactive_tool: { enabled: true, currency: 'AED', fields: [
+  interactive_tool: { enabled: true, currency: 'AED', pricing_mode: 'APPROVED_PRICING', approved_pricing_source: 'Approved tenant rate card', fields: [
     { id: 'attendees', label: 'Guests', input_type: 'NUMBER', min: 1, max: 1000 },
     { id: 'venue', label: 'Venue', input_type: 'SELECT', options: [{ value: 'hotel', label: 'Hotel' }] },
   ], calculation: { base_amount: 100, terms: [
@@ -37,6 +37,24 @@ test('rejects tenant-spoofed fields, invalid option values, and unbounded text f
   ]) {
     assert.throws(() => normalizeGuideSessionContext({ experience, context: invalid }), { code: 'GUIDE_SESSION_CONTEXT_INVALID' });
   }
+});
+
+test('quotation-required tools retain validated scope without inventing a zero-value estimate', () => {
+  const quoteExperience = normalizeGuideExperience({
+    interactive_tool: {
+      enabled: true,
+      currency: 'AED',
+      pricing_mode: 'QUOTE_REQUIRED',
+      result_label: 'Event planning scope',
+      fields: [{ id: 'guests', label: 'Guests', input_type: 'NUMBER', min: 1, max: 1000 }],
+      calculation: { base_amount: 0, terms: [{ field_id: 'guests', kind: 'NUMBER_MULTIPLIER', multiplier: 0 }] },
+    },
+  });
+  const context = normalizeGuideSessionContext({ experience: quoteExperience, context: { tool: { guests: 200 } } });
+  assert.equal(context.tool_result.pricing_mode, 'QUOTE_REQUIRED');
+  assert.equal(context.tool_result.amount, null);
+  assert.match(buildGuideSessionContextSummary({ experience: quoteExperience, context }), /commercial pricing requires review/i);
+  assert.doesNotMatch(buildGuideSessionContextSummary({ experience: quoteExperience, context }), /0 AED/);
 });
 
 test('partitions stored Guide context by tenant, assistant, channel, session, and Experience version', () => {

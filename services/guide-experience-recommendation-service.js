@@ -35,6 +35,21 @@ export function classifyGuideSector({ profile = {}, configuration = {} } = {}) {
 const field = (id, label, input_type, options = [], extras = {}) => ({ id, label, description: '', input_type, required: true, options, min: null, max: null, unit: '', ...extras });
 const options = (...labels) => labels.map((label, index) => ({ value: `option_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'value'}_${index + 1}`, label }));
 
+function layoutPresetForSector(sector) {
+  const presets = {
+    EVENT_MANAGEMENT: 'SERVICE',
+    PROFESSIONAL_SERVICES: 'PROFESSIONAL',
+    REAL_ESTATE: 'PREMIUM',
+    COMPANY_FORMATION: 'SERVICE',
+    HEALTHCARE: 'SERVICE',
+    AUTOMOTIVE: 'SERVICE',
+    TOURISM: 'PREMIUM',
+    ECOMMERCE: 'COMMERCE',
+    GENERAL_SERVICE: 'PROFESSIONAL',
+  };
+  return presets[sector] ?? 'PROFESSIONAL';
+}
+
 function eventGuide() {
   const services = options('Venue sourcing', 'Stage / AV / production', 'Decoration', 'Catering', 'Photography / video', 'Hostesses / staffing', 'Entertainment', 'Full event management');
   return {
@@ -49,7 +64,7 @@ function eventGuide() {
       field('budget_range', 'What is your indicative budget range?', 'SELECT', options('Under 25,000', '25,000–50,000', '50,000–100,000', '100,000–250,000', '250,000+')),
       field('special_requirements', 'Any special requirements?', 'TEXT', [], { required: false }),
     ] },
-    interactive_tool: { enabled: true, title: 'Event Budget Estimator', description: 'Build an indicative event-planning estimate. Final scope and commercial quotation require review.', currency: 'AED', result_label: 'Event Planning Estimate', result_breakdown_label: 'Category', fields: [
+    interactive_tool: { enabled: true, title: 'Event Budget Estimator', description: 'Capture your event scope for a commercial review. Final pricing and quotation require review.', currency: 'AED', pricing_mode: 'QUOTE_REQUIRED', approved_pricing_source: '', result_label: 'Event Planning Scope', result_breakdown_label: 'Category', fields: [
       field('guest_count', 'Guest count', 'NUMBER', [], { min: 1, max: 100000, unit: 'guests' }),
       field('venue', 'Venue requirement', 'SELECT', options('Not selected', 'Hotel ballroom', 'Dedicated venue', 'Outdoor venue')),
       field('catering', 'Catering required', 'BOOLEAN'),
@@ -82,7 +97,7 @@ function genericGuide(sector) {
     classification: { sector, capabilities: ['guided-discovery', 'planning-estimator', 'sector-advisor'], source: 'APPROVED_TENANT_INTELLIGENCE' },
     hero: { title: labels[0], message: 'Share a few details to receive a useful planning brief.', cta_label: 'Get started' },
     roadmap: { enabled: true, title: labels[0], description: 'Answer a few questions to shape your next steps.', summary_label: 'Your planning summary', steps: [field('objective', 'What would you like to achieve?', 'TEXT'), field('budget', 'What is your indicative budget?', 'NUMBER', [], { required: false, min: 0, max: 100000000 }), field('timeline', 'When would you like to proceed?', 'TEXT', [], { required: false })] },
-    interactive_tool: { enabled: true, title: labels[1], description: 'Capture planning inputs for an indicative summary.', currency: '', result_label: 'Indicative planning estimate', result_breakdown_label: 'Planning factor', fields: [field('budget', 'Indicative budget', 'NUMBER', [], { required: false, min: 0, max: 100000000 })], calculation: { base_amount: 0, terms: [{ field_id: 'budget', kind: 'NUMBER_MULTIPLIER', multiplier: 1, label: 'Indicative budget' }] } },
+    interactive_tool: { enabled: true, title: labels[1], description: 'Capture planning inputs to prepare the next step. Commercial pricing is confirmed after review.', currency: '', pricing_mode: 'QUOTE_REQUIRED', approved_pricing_source: '', result_label: 'Planning scope', result_breakdown_label: 'Planning factor', fields: [field('budget', 'Indicative budget', 'NUMBER', [], { required: false, min: 0, max: 100000000 })], calculation: { base_amount: 0, terms: [{ field_id: 'budget', kind: 'NUMBER_MULTIPLIER', multiplier: 1, label: 'Indicative budget' }] } },
     assistant_copy: { intro: `Tell us what you need, or continue from your ${labels[0]}.`, contextual_intro: 'Your planning details are available. I can help refine the next steps.' },
   };
 }
@@ -92,7 +107,7 @@ export function buildGuideExperienceRecommendation({ activeProfile, activeConfig
   const recommended = sector === 'EVENT_MANAGEMENT' ? eventGuide() : genericGuide(sector);
   const current = currentExperience ? normalizeGuideExperience(currentExperience) : neutralGuideExperience();
   const profileName = typeof activeProfile?.company_identity === 'string' ? activeProfile.company_identity : null;
-  const experience = normalizeGuideExperience({ ...current, brand_name: profileName || current.brand_name, assistant_display_name: activeConfiguration?.assistant_identity || assistantName || current.assistant_display_name, welcome_title: recommended.hero.title, welcome_message: recommended.hero.message, hero: recommended.hero, roadmap: recommended.roadmap, interactive_tool: recommended.interactive_tool, assistant_copy: recommended.assistant_copy, classification: recommended.classification });
+  const experience = normalizeGuideExperience({ ...current, brand_name: profileName || current.brand_name, assistant_display_name: activeConfiguration?.assistant_identity || assistantName || current.assistant_display_name, welcome_title: recommended.hero.title, welcome_message: recommended.hero.message, hero: recommended.hero, layout: { ...current.layout, preset: layoutPresetForSector(sector) }, roadmap: recommended.roadmap, interactive_tool: recommended.interactive_tool, assistant_copy: recommended.assistant_copy, classification: recommended.classification });
   return { experience, recommendation: { classification: recommended.classification, facts_used: { active_profile: Boolean(activeProfile), active_configuration: Boolean(activeConfiguration) } } };
 }
 
