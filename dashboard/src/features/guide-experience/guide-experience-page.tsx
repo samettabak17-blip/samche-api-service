@@ -85,6 +85,14 @@ const guideRecommendationFailureMessage = (error: unknown) => {
     ? "A recommendation requires an ACTIVE Business Profile and ACTIVE Assistant Configuration for this assistant."
     : "A recommendation draft could not be generated safely. Review the Guide Experience details and try again.";
 };
+const guideDraftSaveFailureMessage = (error: unknown) => {
+  const code = error instanceof ApiError && error.body && typeof error.body === "object" && "code" in error.body
+    ? (error.body as { code?: unknown }).code
+    : null;
+  if (code === "GUIDE_EXPERIENCE_INVALID") return "Draft contains an invalid Guide setting. Review the highlighted configuration and try again.";
+  if (code === "GUIDE_EXPERIENCE_DRAFT_NOT_FOUND") return "This Draft is no longer editable. Refresh the version list and select the current Draft.";
+  return "Draft could not be saved safely.";
+};
 function ExperiencePreview({
   experience,
 }: {
@@ -256,7 +264,7 @@ export function GuideExperiencePage() {
       invalidatePublicationDiagnostics();
       setFeedback(`Draft v${version.version} saved. Preview remains private.`);
     },
-    onError: () => setFeedback("Draft could not be saved safely."),
+    onError: (error) => setFeedback(guideDraftSaveFailureMessage(error)),
   });
   const generateRecommendation = useMutation({
     mutationFn: () => tenantApi.createRecommendedGuideExperienceDraft(tenantId, assistantId),

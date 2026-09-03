@@ -21,3 +21,10 @@ export function selectConversationPresentation({ channel, providerStreams }) {
     supports_structured_cards: capabilities.supports_structured_cards,
   };
 }
+
+const WEB_TIMING = Object.freeze({ progressive_display: true, chunk_words: 5, base_delay_ms: 92, sentence_pause_ms: 260, section_pause_ms: 360, thinking_minimum_ms: 420 });
+const MESSAGE_TIMING = Object.freeze({ progressive_display: false, chunk_words: 0, base_delay_ms: 0, sentence_pause_ms: 0, section_pause_ms: 0, thinking_minimum_ms: 0 });
+
+export function conversationPresentationTiming(channel) {
+  return channelPresentationCapabilities(channel).supports_streaming_display ? WEB_TIMING : MESSAGE_TIMING;
+}

@@ -104,6 +104,20 @@ test('Guide safely formats progressive content, resumes opaque sessions, and sho
   assert.match(source, /event\.actions/);
   assert.match(source, /Continue your conversation/);
   assert.match(source, /localStorage/);
+  assert.match(source, /\/chat\/history/);
   assert.match(source, /\/guide\/session-context/);
   assert.doesNotMatch(source, /innerHTML\s*=/);
+});
+
+test('Guide uses compact reusable pacing and consistent keyboard submission semantics', () => {
+  assert.match(source, /PRESENTATION_TIMING/);
+  assert.match(source, /sentence_pause_ms/);
+  assert.match(source, /bindEnterToSubmit/);
+  assert.match(source, /event\.shiftKey \|\| event\.isComposing/);
+  assert.match(source, /guide-roadmap-composer/);
+});
+
+test('Roadmap actions keep refinement in the conversation instead of routing it to another module', () => {
+  assert.match(source, /refine\|roadmap\|plan/i);
+  assert.match(source, /guide-roadmap-composer'\)\?\.focus/);
 });
