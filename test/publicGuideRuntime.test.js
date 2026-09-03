@@ -27,3 +27,11 @@ test('public Guide V1 renders Roadmap, Interactive Tool, and AI Assistant from t
   assert.match(source, /renderInteractiveTool/);
   assert.match(source, /renderAssistant/);
 });
+
+test('public Guide renderer supports sector-aware summaries, deterministic breakdown tables, and tenant-safe assistant context', () => {
+  assert.match(source, /visibleFields/);
+  assert.match(source, /guide-tool-breakdown/);
+  assert.match(source, /assistant_copy/);
+  assert.match(source, /guide_context/);
+  assert.doesNotMatch(source, /eval\s*\(/);
+});

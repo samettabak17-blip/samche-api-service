@@ -53,13 +53,17 @@ function validateValues(fields, values) {
 
 export function calculateGuideToolResult({ tool, values }) {
   let amount = tool.calculation.base_amount;
+  const breakdown = [];
   for (const term of tool.calculation.terms) {
     const value = values[term.field_id];
-    if (term.kind === 'NUMBER_MULTIPLIER' && typeof value === 'number') amount += value * term.multiplier;
-    if (term.kind === 'BOOLEAN_AMOUNT' && value === true) amount += term.amount;
-    if (term.kind === 'SELECT_AMOUNT' && typeof value === 'string') amount += term.amounts[value] ?? 0;
+    let itemAmount = 0;
+    if (term.kind === 'NUMBER_MULTIPLIER' && typeof value === 'number') itemAmount = value * term.multiplier;
+    if (term.kind === 'BOOLEAN_AMOUNT' && value === true) itemAmount = term.amount;
+    if (term.kind === 'SELECT_AMOUNT' && typeof value === 'string') itemAmount = term.amounts[value] ?? 0;
+    amount += itemAmount;
+    if (itemAmount || value !== undefined) breakdown.push({ label: term.label ?? term.field_id, amount: Number(itemAmount.toFixed(2)) });
   }
-  return { amount: Number(amount.toFixed(2)), currency: tool.currency, label: tool.result_label };
+  return { amount: Number(amount.toFixed(2)), currency: tool.currency, label: tool.result_label, breakdown };
 }
 
 export function normalizeGuideSessionContext({ experience, context }) {
@@ -68,7 +72,8 @@ export function normalizeGuideSessionContext({ experience, context }) {
   for (const forbidden of ['tenant_id', 'assistant_id', 'channel_id', 'experience_id', 'version', 'result', 'calculation']) {
     if (forbidden in context) throw new GuideSessionContextError();
   }
-  const activeModule = context.active_module === undefined ? 'ASSISTANT' : String(context.active_module).toUpperCase();
+  const requestedModule = context.active_module === undefined ? 'AI_ASSISTANT' : String(context.active_module).toUpperCase();
+  const activeModule = requestedModule === 'INTERACTIVE_TOOL' ? 'TOOL' : requestedModule === 'AI_ASSISTANT' ? 'ASSISTANT' : requestedModule;
   if (!['ROADMAP', 'TOOL', 'ASSISTANT'].includes(activeModule)) throw new GuideSessionContextError();
   const roadmap = validateValues(experience.roadmap.steps, context.roadmap);
   const tool = validateValues(experience.interactive_tool.fields, context.tool);
@@ -96,6 +101,7 @@ export function buildGuideSessionContextSummary({ experience, context }) {
   if (tool.length && Number.isFinite(context.tool_result.amount)) {
     const amount = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(context.tool_result.amount);
     sections.push(`${context.tool_result.label}: ${amount}${context.tool_result.currency ? ` ${context.tool_result.currency}` : ''} (indicative calculation only)`);
+    if (context.tool_result.breakdown?.length) sections.push(`Indicative tool breakdown: ${context.tool_result.breakdown.map((item) => `${item.label}: ${item.amount}`).join('; ')}`);
   }
   return sections.join('\n');
 }

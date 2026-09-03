@@ -59,7 +59,12 @@ const defaults: GuideExperienceData = {
 const clone = (value: GuideExperienceData) => structuredClone(value);
 const newRoadmapStep = (): GuideExperienceField => ({ id: `step_${Date.now()}`, label: "New roadmap step", description: "", input_type: "TEXT", required: false, options: [], min: null, max: null, unit: "" });
 const newToolField = (): GuideExperienceField => ({ id: `field_${Date.now()}`, label: "New tool field", description: "", input_type: "NUMBER", required: false, options: [], min: 0, max: 100000000, unit: "" });
-const optionsFromLabels = (value: string) => value.split(',').map((label) => label.trim()).filter(Boolean).slice(0, 20).map((label, index) => ({ value: `${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'option'}_${index + 1}`.slice(0, 40), label }));
+const optionsFromLabels = (value: string) => value.split(',').map((label) => label.trim()).filter(Boolean).slice(0, 20).map((label, index) => ({ value: `option_${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'value'}_${index + 1}`.slice(0, 40), label }));
+const extractLogoCandidates = async (file: File): Promise<string[]> => new Promise((resolve) => {
+  const image = new Image(); const url = URL.createObjectURL(file);
+  image.onload = () => { const canvas = document.createElement('canvas'); const side = 48; canvas.width = side; canvas.height = side; const context = canvas.getContext('2d', { willReadFrequently: true }); if (!context) { URL.revokeObjectURL(url); resolve([]); return; } context.drawImage(image, 0, 0, side, side); const data = context.getImageData(0, 0, side, side).data; const values: string[] = []; for (let index = 0; index < data.length; index += 16) { if (data[index + 3] < 180) continue; values.push(`#${[data[index], data[index + 1], data[index + 2]].map((item) => item.toString(16).padStart(2, '0')).join('').toUpperCase()}`); } URL.revokeObjectURL(url); resolve(values.slice(0, 64)); };
+  image.onerror = () => { URL.revokeObjectURL(url); resolve([]); }; image.src = url;
+});
 const guideDomainFailureMessage = (error: unknown, fallback: string) => {
   const code =
     error instanceof ApiError &&
@@ -167,6 +172,7 @@ export function GuideExperiencePage() {
   const [managedSlug, setManagedSlug] = useState("");
   const [domainMode, setDomainMode] = useState<"MANAGED" | "CUSTOM">("MANAGED");
   const [channelId, setChannelId] = useState("");
+  const [logoCandidates, setLogoCandidates] = useState<string[]>([]);
   const [archiveDomainTarget, setArchiveDomainTarget] =
     useState<GuideDomain | null>(null);
   const assistants = useQuery({
@@ -236,6 +242,16 @@ export function GuideExperiencePage() {
       setFeedback(`Draft v${version.version} saved. Preview remains private.`);
     },
     onError: () => setFeedback("Draft could not be saved safely."),
+  });
+  const generateRecommendation = useMutation({
+    mutationFn: () => tenantApi.createRecommendedGuideExperienceDraft(tenantId, assistantId),
+    onSuccess: ({ version, recommendation }) => { setDraft(clone(version.experience)); invalidate(); setFeedback(`Recommended ${recommendation.classification.sector.replace(/_/g, ' ').toLowerCase()} Guide saved as private draft v${version.version}. Review before publishing.`); },
+    onError: () => setFeedback("A recommendation could not be generated because active tenant intelligence is unavailable."),
+  });
+  const recommendTheme = useMutation({
+    mutationFn: () => tenantApi.recommendGuideTheme(tenantId, assistantId, logoCandidates),
+    onSuccess: (theme) => { setDraft((current) => ({ ...current, theme: { ...current.theme, ...theme } })); setFeedback("Recommended accessible logo palette applied to this unsaved draft. Review and save when ready."); },
+    onError: () => setFeedback("A theme recommendation could not be generated safely from this logo."),
   });
   const publish = useMutation({
     mutationFn: (id: string) =>
@@ -507,7 +523,7 @@ export function GuideExperiencePage() {
                 disabled={!assistantId || assetUpload.isPending}
                 onChange={(event) => {
                   const file = event.target.files?.[0];
-                  if (file) assetUpload.mutate({ kind: "LOGO", file });
+                  if (file) { void extractLogoCandidates(file).then(setLogoCandidates); assetUpload.mutate({ kind: "LOGO", file }); }
                 }}
               />
             </DashboardField>
@@ -576,6 +592,13 @@ export function GuideExperiencePage() {
               </DashboardSelect>
             </DashboardField>
           </div>
+          <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line p-4" aria-label="Guide recommendations">
+            <div><p className="dashboard-section-label">Tenant-aware recommendations</p><p className="text-xs text-stone-400">Uses the active Business Profile and Assistant Configuration. It creates a private Draft only; publishing remains explicit.</p></div>
+            <div className="flex flex-wrap gap-2">
+              <DashboardButton type="button" variant="outline" disabled={!assistantId || generateRecommendation.isPending} onClick={() => generateRecommendation.mutate()}>{generateRecommendation.isPending ? "Generating…" : "Generate recommended draft"}</DashboardButton>
+              <DashboardButton type="button" variant="outline" disabled={!assistantId || !logoCandidates.length || recommendTheme.isPending} onClick={() => recommendTheme.mutate()}>{recommendTheme.isPending ? "Analyzing…" : "Apply logo theme"}</DashboardButton>
+            </div>
+          </section>
           <DashboardCheckbox
             label="Show optional calculator module"
             checked={draft.modules.calculator}

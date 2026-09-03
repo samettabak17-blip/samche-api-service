@@ -114,6 +114,11 @@ function normalizeOptions(value, key) {
   });
 }
 
+function normalizeVisibility(value, key) {
+  object(value, key);
+  return { field_id: identifier(value.field_id, `${key}.field_id`), equals: identifier(value.equals, `${key}.equals`) };
+}
+
 function normalizeFields(value, key, { allowText = true } = {}) {
   if (!Array.isArray(value) || !value.length || value.length > 12) throw new GuideExperienceError('GUIDE_EXPERIENCE_INVALID', `${key} is invalid.`);
   const ids = new Set();
@@ -130,9 +135,13 @@ function normalizeFields(value, key, { allowText = true } = {}) {
       min: number(field.min, `${key}.min`, { fallback: null, min: -100000000, max: 100000000 }),
       max: number(field.max, `${key}.max`, { fallback: null, min: -100000000, max: 100000000 }),
       unit: text(field.unit, `${key}.unit`, 32, ''),
+      visible_when: field.visible_when === undefined || field.visible_when === null ? null : normalizeVisibility(field.visible_when, `${key}.visible_when`),
     };
     if (ids.has(item.id) || (item.input_type === 'SELECT' && !item.options.length) || (item.input_type !== 'SELECT' && item.options.length) || (item.min !== null && item.max !== null && item.min > item.max)) throw new GuideExperienceError('GUIDE_EXPERIENCE_INVALID', `${key} is invalid.`);
     ids.add(item.id);
+    return item;
+  }).map((item, _index, all) => {
+    if (item.visible_when && !all.some((candidate) => candidate.id === item.visible_when.field_id && candidate.input_type === 'SELECT' && candidate.options.some((option) => option.value === item.visible_when.equals))) throw new GuideExperienceError('GUIDE_EXPERIENCE_INVALID', `${key}.visible_when is invalid.`);
     return item;
   });
 }
@@ -143,6 +152,7 @@ function normalizeRoadmap(value) {
     enabled: bool(roadmap.enabled, true),
     title: text(roadmap.title, 'roadmap.title', 120, neutral.roadmap.title),
     description: text(roadmap.description, 'roadmap.description', 360, neutral.roadmap.description),
+    summary_label: text(roadmap.summary_label, 'roadmap.summary_label', 120, 'Planning summary'),
     steps: normalizeFields(roadmap.steps ?? neutral.roadmap.steps, 'roadmap.steps'),
   };
 }
@@ -160,12 +170,13 @@ function normalizeInteractiveTool(value) {
     const kind = bounded(term.kind, TERM_KINDS, 'interactive_tool.calculation.terms.kind', 'NUMBER_MULTIPLIER');
     const field = fieldById.get(fieldId);
     if (!field || (kind === 'NUMBER_MULTIPLIER' && field.input_type !== 'NUMBER') || (kind === 'SELECT_AMOUNT' && field.input_type !== 'SELECT') || (kind === 'BOOLEAN_AMOUNT' && field.input_type !== 'BOOLEAN')) throw new GuideExperienceError('GUIDE_EXPERIENCE_INVALID');
-    if (kind === 'NUMBER_MULTIPLIER') return { field_id: fieldId, kind, multiplier: number(term.multiplier, 'interactive_tool.calculation.terms.multiplier', { fallback: null }) };
-    if (kind === 'BOOLEAN_AMOUNT') return { field_id: fieldId, kind, amount: number(term.amount, 'interactive_tool.calculation.terms.amount', { fallback: null }) };
+    const label = text(term.label, 'interactive_tool.calculation.terms.label', 120, field.label);
+    if (kind === 'NUMBER_MULTIPLIER') return { field_id: fieldId, kind, label, multiplier: number(term.multiplier, 'interactive_tool.calculation.terms.multiplier', { fallback: null }) };
+    if (kind === 'BOOLEAN_AMOUNT') return { field_id: fieldId, kind, label, amount: number(term.amount, 'interactive_tool.calculation.terms.amount', { fallback: null }) };
     const amounts = object(term.amounts, 'interactive_tool.calculation.terms.amounts');
     const normalizedAmounts = {};
     for (const option of field.options) normalizedAmounts[option.value] = number(amounts[option.value], 'interactive_tool.calculation.terms.amounts', { fallback: 0 });
-    return { field_id: fieldId, kind, amounts: normalizedAmounts };
+    return { field_id: fieldId, kind, label, amounts: normalizedAmounts };
   });
   if (terms.some((term) => term.multiplier === null || term.amount === null)) throw new GuideExperienceError('GUIDE_EXPERIENCE_INVALID');
   return {
@@ -174,6 +185,7 @@ function normalizeInteractiveTool(value) {
     description: text(tool.description, 'interactive_tool.description', 360, neutral.interactive_tool.description),
     currency: text(tool.currency, 'interactive_tool.currency', 12, ''),
     result_label: text(tool.result_label, 'interactive_tool.result_label', 120, neutral.interactive_tool.result_label),
+    result_breakdown_label: text(tool.result_breakdown_label, 'interactive_tool.result_breakdown_label', 120, 'Category'),
     fields,
     calculation: { base_amount: number(calculation.base_amount, 'interactive_tool.calculation.base_amount', { fallback: 0 }), terms },
   };
@@ -185,6 +197,8 @@ export function normalizeGuideExperience(input = {}) {
   const layout = input.layout && typeof input.layout === 'object' && !Array.isArray(input.layout) ? input.layout : {};
   const modules = input.modules && typeof input.modules === 'object' && !Array.isArray(input.modules) ? input.modules : {};
   const hero = input.hero === undefined || input.hero === null ? {} : object(input.hero, 'hero');
+  const assistantCopy = input.assistant_copy === undefined || input.assistant_copy === null ? {} : object(input.assistant_copy, 'assistant_copy');
+  const classification = input.classification === undefined || input.classification === null ? {} : object(input.classification, 'classification');
   for (const forbidden of ['provider', 'model', 'thinking_level', 'system_prompt', 'html', 'javascript', 'script', 'expression']) {
     if (forbidden in input || forbidden in theme || forbidden in layout || forbidden in modules) throw new GuideExperienceError('GUIDE_EXPERIENCE_INVALID');
   }
@@ -230,6 +244,15 @@ export function normalizeGuideExperience(input = {}) {
       title: text(hero.title, 'hero.title', 160, text(input.welcome_title, 'welcome_title', 160, neutral.hero.title)),
       message: text(hero.message, 'hero.message', 800, text(input.welcome_message, 'welcome_message', 800, neutral.hero.message)),
       cta_label: text(hero.cta_label, 'hero.cta_label', 80, ''),
+    },
+    assistant_copy: {
+      intro: text(assistantCopy.intro, 'assistant_copy.intro', 360, ''),
+      contextual_intro: text(assistantCopy.contextual_intro, 'assistant_copy.contextual_intro', 360, ''),
+    },
+    classification: {
+      sector: text(classification.sector, 'classification.sector', 80, 'GENERAL_SERVICE'),
+      capabilities: Array.isArray(classification.capabilities) ? classification.capabilities.map((item) => text(item, 'classification.capabilities', 80)).slice(0, 12) : [],
+      source: text(classification.source, 'classification.source', 80, 'MANUAL'),
     },
     roadmap,
     interactive_tool: interactiveTool,

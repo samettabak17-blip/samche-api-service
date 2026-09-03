@@ -171,7 +171,7 @@ app.get("/guide/bootstrap", async (req, res) => {
       assistantId: integration.assistant_id,
     });
     res.set('Cache-Control', 'no-store');
-    return res.json({ experience: resolved.experience, source: resolved.source, version: resolved.experience.version, cache_key: resolved.cache_key, guide_v1: { renderer: 'GUIDE_V1', modules: resolved.experience.modules, session_context: true } });
+    return res.json({ experience: resolved.experience, source: resolved.source, version: resolved.experience.version, cache_key: resolved.cache_key, guide_v1: { renderer: 'GUIDE_V1', modules: resolved.experience.modules, session_context: true, sector_configured: Boolean(resolved.experience.classification?.sector), roadmap_initialized: Boolean(resolved.experience.roadmap?.steps?.length), tool_initialized: Boolean(resolved.experience.interactive_tool?.fields?.length), assistant_initialized: Boolean(resolved.experience.modules?.chat), theme_initialized: Boolean(resolved.experience.theme?.primary_color) } });
   } catch (error) {
     console.error('GUIDE_EXPERIENCE_BOOTSTRAP_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return res.status(503).json({ error: 'Guide experience is temporarily unavailable.', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
@@ -183,7 +183,7 @@ app.get('/guide/health', async (req, res) => {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ status: 'UNAVAILABLE', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
     const resolved = await resolvePublishedGuideExperience({ database: pool, tenantId: integration.tenant_id, assistantId: integration.assistant_id });
-    return res.json({ status: 'READY', renderer: 'GUIDE_V1', experience_version: resolved.experience.version, modules: resolved.experience.modules, session_context: true });
+    return res.json({ status: 'READY', renderer: 'GUIDE_V1', experience_version: resolved.experience.version, modules: resolved.experience.modules, session_context: true, sector_configured: Boolean(resolved.experience.classification?.sector), roadmap_initialized: Boolean(resolved.experience.roadmap?.steps?.length), tool_initialized: Boolean(resolved.experience.interactive_tool?.fields?.length), assistant_initialized: Boolean(resolved.experience.modules?.chat), theme_initialized: Boolean(resolved.experience.theme?.primary_color) });
   } catch (error) {
     console.error('GUIDE_PUBLIC_HEALTH_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return res.status(503).json({ status: 'UNAVAILABLE', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });

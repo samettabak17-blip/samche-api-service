@@ -5,7 +5,9 @@ import { authenticateToken, requireTenantAccess, requireTenantAdmin } from '../m
 import { isValidUUID } from '../middleware/validators.js';
 import { createConversationResourceStorage } from '../services/conversation-resource-storage.js';
 import { GuideExperienceAssetError, storeGuideExperienceAsset } from '../services/guide-experience-asset-service.js';
-import { GuideExperienceError, createGuideExperienceDraft, inspectGuideExperiencePublication, listGuideExperienceVersions, publishGuideExperience, rollbackGuideExperience, updateGuideExperienceDraft } from '../services/guide-experience-service.js';
+import { GuideExperienceError, createGuideExperienceDraft, inspectGuideExperiencePublication, listGuideExperienceVersions, publishGuideExperience, resolvePublishedGuideExperience, rollbackGuideExperience, updateGuideExperienceDraft } from '../services/guide-experience-service.js';
+import { GuideRecommendationError, generateGuideExperienceRecommendation } from '../services/guide-experience-recommendation-service.js';
+import { GuideThemeError, deriveAccessibleGuideTheme } from '../services/guide-theme-service.js';
 import { resolveCname } from 'node:dns/promises';
 import { GuideDomainError, activateGuideDomain, archiveGuideDomain, configuredGuideDomainIngressTarget, configuredManagedGuideDomainSuffix, createGuideDomain, listGuideDomains, managedGuideHostnameFromSlug, verifyGuideDomainDns } from '../services/guide-domain-service.js';
 import { archiveGuideDomainIngress, provisionGuideDomainIngress, resolveGuideDomainIngressStatus, verifyGuideDomainIngress } from '../services/guide-domain-ingress-service.js';
@@ -47,6 +49,8 @@ function sendError(res, error) {
   }
   if (error instanceof GuideExperienceAssetError) return res.status(/UNSUPPORTED|MISMATCH|INVALID|REQUIRED|KIND/.test(error.code) ? 400 : (/SIZE/.test(error.code) ? 413 : 503)).json({ error: error.message, code: error.code });
   if (error instanceof GuideExperienceError) return res.status(/NOT_FOUND|MISMATCH|INVALID/.test(error.code) ? 400 : 409).json({ error: error.message, code: error.code });
+  if (error instanceof GuideRecommendationError) return res.status(409).json({ error: 'Active tenant intelligence is required before generating a Guide recommendation.', code: error.code });
+  if (error instanceof GuideThemeError) return res.status(400).json({ error: 'Guide theme candidates are invalid.', code: error.code });
   console.error('Guide experience operation failed:', error?.code ?? error?.name ?? 'UNKNOWN');
   return res.status(503).json({ error: 'Guide experience is temporarily unavailable.' });
 }
@@ -74,6 +78,23 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/assets', requi
 router.post('/:tenantId/guide-experiences/assistants/:assistantId/drafts', requireTenantAccess, requireTenantAdmin, async (req, res) => {
   const scope = validScope(req, res); if (!scope) return;
   try { await verifyAssistant(scope); const version = await createGuideExperienceDraft({ database: pool, ...scope, actorUserId: req.user.user_id, experience: req.body?.experience }); return res.status(201).json({ version }); }
+  catch (error) { return sendError(res, error); }
+});
+
+router.post('/:tenantId/guide-experiences/assistants/:assistantId/recommendations/draft', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const scope = validScope(req, res); if (!scope) return;
+  try {
+    await verifyAssistant(scope);
+    const published = await resolvePublishedGuideExperience({ database: pool, ...scope });
+    const recommendation = await generateGuideExperienceRecommendation({ database: pool, ...scope, currentExperience: published.experience });
+    const version = await createGuideExperienceDraft({ database: pool, ...scope, actorUserId: req.user.user_id, experience: recommendation.experience });
+    return res.status(201).json({ version, recommendation: recommendation.recommendation });
+  } catch (error) { return sendError(res, error); }
+});
+
+router.post('/:tenantId/guide-experiences/assistants/:assistantId/theme-recommendation', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const scope = validScope(req, res); if (!scope) return;
+  try { await verifyAssistant(scope); return res.json({ theme: deriveAccessibleGuideTheme({ candidates: req.body?.candidates }) }); }
   catch (error) { return sendError(res, error); }
 });
 
