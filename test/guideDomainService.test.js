@@ -8,6 +8,7 @@ import {
   archiveGuideDomain,
   activateGuideDomain,
   verifyGuideDomainDns,
+  managedGuideHostnameFromSlug,
 } from '../services/guide-domain-service.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
@@ -18,6 +19,12 @@ test('normalizes a public guide hostname without accepting URL, port, wildcard, 
   for (const invalid of ['https://bluedune.example.test', 'bluedune.example.test:443', '*.example.test', '127.0.0.1', '']) {
     assert.throws(() => normalizeGuideHostname(invalid), (error) => error instanceof GuideDomainError && error.code === 'GUIDE_DOMAIN_INVALID_HOSTNAME');
   }
+});
+
+test('managed Guide slugs resolve to the platform namespace and reject takeover-shaped input', () => {
+  assert.equal(managedGuideHostnameFromSlug('Blue-Dune'), 'blue-dune.guide.samchecompany.com');
+  assert.throws(() => managedGuideHostnameFromSlug('blue.dune'), (error) => error.code === 'GUIDE_DOMAIN_INVALID_SLUG');
+  assert.equal(managedGuideHostnameFromSlug('clinic', { GUIDE_MANAGED_DOMAIN_SUFFIX: 'guide.example.test' }), 'clinic.guide.example.test');
 });
 
 test('resolves only an active hostname whose channel, tenant, and assistant ownership agree', async () => {

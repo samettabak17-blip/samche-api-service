@@ -29,6 +29,18 @@ export function configuredGuideDomainIngressTarget(environment = process.env) {
   return normalizeGuideHostname(target);
 }
 
+export function configuredManagedGuideDomainSuffix(environment = process.env) {
+  const suffix = environment.GUIDE_MANAGED_DOMAIN_SUFFIX || 'guide.samchecompany.com';
+  return normalizeGuideHostname(suffix);
+}
+
+export function managedGuideHostnameFromSlug(slug, environment = process.env) {
+  if (typeof slug !== 'string' || !/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(slug.trim().toLowerCase())) {
+    throw new GuideDomainError('GUIDE_DOMAIN_INVALID_SLUG');
+  }
+  return `${slug.trim().toLowerCase()}.${configuredManagedGuideDomainSuffix(environment)}`;
+}
+
 function integrationIsHealthy(row) {
   return row
     && row.channel_type === 'SAMCHEGUIDE'
@@ -87,6 +99,7 @@ function serialize(row) {
     verified_at: row.verified_at,
     activated_at: row.activated_at,
     archived_at: row.archived_at,
+    domain_mode: row.domain_mode ?? 'CUSTOM',
     created_at: row.created_at,
   };
 }
@@ -94,6 +107,7 @@ function serialize(row) {
 export async function listGuideDomains({ database, tenantId, assistantId }) {
   const result = await database.query(
     `SELECT id, tenant_id, assistant_id, channel_id, hostname, status, verification_record_type,
+            domain_mode,
             verification_target, verified_at, activated_at, archived_at, created_at
        FROM guide_domains WHERE tenant_id=$1 AND assistant_id=$2 ORDER BY created_at DESC`,
     [tenantId, assistantId],
@@ -101,14 +115,15 @@ export async function listGuideDomains({ database, tenantId, assistantId }) {
   return result.rows.map(serialize);
 }
 
-export async function createGuideDomain({ client, tenantId, assistantId, channelId, hostname, actorUserId, ingressTarget }) {
+export async function createGuideDomain({ client, tenantId, assistantId, channelId, hostname, actorUserId, ingressTarget, domainMode = 'CUSTOM' }) {
+  if (!['MANAGED', 'CUSTOM'].includes(domainMode)) throw new GuideDomainError('GUIDE_DOMAIN_MODE_INVALID');
   const normalized = normalizeGuideHostname(hostname);
   const target = normalizeGuideHostname(ingressTarget);
   const created = await client.query(
-    `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, status, verification_record_type, verification_target, created_by)
-     VALUES ($1,$2,$3,$4,'PENDING','CNAME',$5,$6)
-     RETURNING id, tenant_id, assistant_id, channel_id, hostname, status, verification_record_type, verification_target, verified_at, activated_at, archived_at, created_at`,
-    [tenantId, assistantId, channelId, normalized, target, actorUserId],
+    `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, created_by)
+     VALUES ($1,$2,$3,$4,'PENDING',$5,'CNAME',$6,$7)
+     RETURNING id, tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, archived_at, created_at`,
+    [tenantId, assistantId, channelId, normalized, domainMode, target, actorUserId],
   );
   if (created.rowCount !== 1) throw new GuideDomainError('GUIDE_DOMAIN_CREATE_FAILED');
   await client.query(
@@ -123,7 +138,7 @@ export async function archiveGuideDomain({ client, tenantId, assistantId, domain
   const archived = await client.query(
     `UPDATE guide_domains SET status='ARCHIVED', archived_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP, updated_by=$4
       WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3 AND status IN ('PENDING','VERIFIED','FAILED','ACTIVE')
-      RETURNING id, tenant_id, assistant_id, channel_id, hostname, status, verification_record_type, verification_target, verified_at, activated_at, archived_at, created_at`,
+      RETURNING id, tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, archived_at, created_at`,
     [domainId, tenantId, assistantId, actorUserId],
   );
   if (!archived.rowCount) throw new GuideDomainError('GUIDE_DOMAIN_NOT_FOUND');
@@ -139,7 +154,7 @@ export async function activateGuideDomain({ client, tenantId, assistantId, domai
   const verified = await client.query(
     `UPDATE guide_domains SET status='ACTIVE', activated_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP, updated_by=$4
       WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3 AND status='VERIFIED'
-      RETURNING id, tenant_id, assistant_id, channel_id, hostname, status, verification_record_type, verification_target, verified_at, activated_at, archived_at, created_at`,
+      RETURNING id, tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, archived_at, created_at`,
     [domainId, tenantId, assistantId, actorUserId],
   );
   if (!verified.rowCount) throw new GuideDomainError('GUIDE_DOMAIN_NOT_VERIFIED');
@@ -172,7 +187,8 @@ export async function verifyGuideDomainDns({ client, tenantId, assistantId, doma
   if (!dnsTargetMatches(records, domain.verification_target)) {
     const failed = await client.query(
       `UPDATE guide_domains SET status='FAILED', verification_metadata=jsonb_build_object('reason','DNS_TARGET_MISMATCH'), updated_at=CURRENT_TIMESTAMP, updated_by=$4
-        WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3`,
+        WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3
+        RETURNING id, tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, archived_at, created_at`,
       [domainId, tenantId, assistantId, actorUserId],
     );
     await client.query(
@@ -183,9 +199,10 @@ export async function verifyGuideDomainDns({ client, tenantId, assistantId, doma
     return serialize(failed.rows[0]);
   }
   const verified = await client.query(
-    `UPDATE guide_domains SET status='VERIFIED', verified_at=CURRENT_TIMESTAMP,
+      `UPDATE guide_domains SET status='VERIFIED', verified_at=CURRENT_TIMESTAMP,
        verification_metadata=jsonb_build_object('reason','DNS_TARGET_MATCHED'), updated_at=CURRENT_TIMESTAMP, updated_by=$4
-      WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3`,
+      WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3
+      RETURNING id, tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, archived_at, created_at`,
     [domainId, tenantId, assistantId, actorUserId],
   );
   await client.query(

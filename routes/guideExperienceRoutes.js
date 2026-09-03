@@ -7,7 +7,7 @@ import { createConversationResourceStorage } from '../services/conversation-reso
 import { GuideExperienceAssetError, storeGuideExperienceAsset } from '../services/guide-experience-asset-service.js';
 import { GuideExperienceError, createGuideExperienceDraft, listGuideExperienceVersions, publishGuideExperience, rollbackGuideExperience, updateGuideExperienceDraft } from '../services/guide-experience-service.js';
 import { resolveCname } from 'node:dns/promises';
-import { GuideDomainError, activateGuideDomain, archiveGuideDomain, configuredGuideDomainIngressTarget, createGuideDomain, listGuideDomains, verifyGuideDomainDns } from '../services/guide-domain-service.js';
+import { GuideDomainError, activateGuideDomain, archiveGuideDomain, configuredGuideDomainIngressTarget, createGuideDomain, listGuideDomains, managedGuideHostnameFromSlug, verifyGuideDomainDns } from '../services/guide-domain-service.js';
 import { archiveGuideDomainIngress, provisionGuideDomainIngress, resolveGuideDomainIngressStatus, verifyGuideDomainIngress } from '../services/guide-domain-ingress-service.js';
 
 const router = express.Router();
@@ -119,9 +119,11 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/domains', requ
   try {
     await verifyAssistant(scope);
     await verifyGuideChannel({ ...scope, channelId: req.body?.channel_id });
-    provisioned = await provisionGuideDomainIngress({ hostname: req.body?.hostname });
+    const domainMode = req.body?.domain_mode === 'MANAGED' ? 'MANAGED' : 'CUSTOM';
+    const hostname = domainMode === 'MANAGED' ? managedGuideHostnameFromSlug(req.body?.slug) : req.body?.hostname;
+    provisioned = await provisionGuideDomainIngress({ hostname });
     await client.query('BEGIN');
-    const domain = await createGuideDomain({ client, ...scope, channelId: req.body.channel_id, hostname: req.body?.hostname, actorUserId: req.user.user_id, ingressTarget: configuredGuideDomainIngressTarget() });
+    const domain = await createGuideDomain({ client, ...scope, channelId: req.body.channel_id, hostname, domainMode, actorUserId: req.user.user_id, ingressTarget: configuredGuideDomainIngressTarget() });
     await client.query('COMMIT');
     return res.status(201).json({ domain, dns: { type: domain.verification_record_type, host: domain.hostname, target: domain.verification_target } });
   } catch (error) {
