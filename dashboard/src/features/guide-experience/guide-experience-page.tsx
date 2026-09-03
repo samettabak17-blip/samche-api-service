@@ -358,10 +358,18 @@ export function GuideExperiencePage() {
       <header>
         <p className="eyebrow">AI Guide</p>
         <h1 className="page-title mt-2">Guide Experience</h1>
-        <p className="mt-2 text-sm text-stone-400">
-          Visual identity and public copy only. Provider, model and runtime
-          behavior stay platform controlled.
+      <p className="mt-2 text-sm text-stone-400">
+        Visual identity and public copy only. Provider, model and runtime
+        behavior stay platform controlled.
+      </p>
+      <section className="panel mt-4 space-y-2 p-4" aria-label="Publication diagnostics summary">
+        <p className="dashboard-section-label">Publication diagnostics</p>
+        <p className="text-sm text-stone-300">
+          {publicationDiagnostics.data
+            ? `Current public version: ${publicationDiagnostics.data.public_bootstrap_version ?? "None"} · ${publicationDiagnostics.data.consistency}`
+            : "Loading publication state…"}
         </p>
+      </section>
       </header>
       <div className="grid gap-6 xl:grid-cols-[1.15fr_.85fr]">
         <form

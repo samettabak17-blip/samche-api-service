@@ -6,6 +6,7 @@ import {
   resolvePublishedGuideExperience,
   guideExperienceCacheKey,
   rollbackGuideExperience,
+  inspectGuideExperiencePublication,
 } from '../services/guide-experience-service.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
@@ -65,6 +66,18 @@ test('cache keys are partitioned by tenant assistant and published experience ve
   const otherTenant = guideExperienceCacheKey({ tenantId: '33333333-3333-4333-8333-333333333333', assistantId, version: 1 });
   assert.notEqual(first, second);
   assert.notEqual(first, otherTenant);
+});
+
+test('publication diagnostics exposes safe metadata and detects multiple published versions', async () => {
+  const database = { async query() { return { rows: [
+    { id: 'v5', tenant_id: tenantId, assistant_id: assistantId, version: 5, status: 'PUBLISHED', created_at: '2026-01-02', published_at: '2026-01-03', updated_at: '2026-01-03' },
+    { id: 'v4', tenant_id: tenantId, assistant_id: assistantId, version: 4, status: 'PUBLISHED', created_at: '2026-01-01', published_at: '2026-01-01', updated_at: '2026-01-01' },
+  ] }; } };
+  const result = await inspectGuideExperiencePublication({ database, tenantId, assistantId });
+  assert.equal(result.consistency, 'MULTIPLE_PUBLISHED');
+  assert.equal(result.current_published.version, 5);
+  assert.equal(result.public_bootstrap_version, 5);
+  assert.equal('experience' in result.versions[0], false);
 });
 
 test('explicit rollback promotes only the selected archived version and records an audit event', async () => {
