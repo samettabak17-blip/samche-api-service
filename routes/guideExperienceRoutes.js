@@ -7,7 +7,7 @@ import { createConversationResourceStorage } from '../services/conversation-reso
 import { GuideExperienceAssetError, storeGuideExperienceAsset } from '../services/guide-experience-asset-service.js';
 import { GuideExperienceError, createGuideExperienceDraft, listGuideExperienceVersions, publishGuideExperience, rollbackGuideExperience, updateGuideExperienceDraft } from '../services/guide-experience-service.js';
 import { resolveCname } from 'node:dns/promises';
-import { GuideDomainError, activateGuideDomain, archiveGuideDomain, configuredGuideDomainIngressTarget, createGuideDomain, listGuideDomains, managedGuideHostnameFromSlug, verifyGuideDomainDns } from '../services/guide-domain-service.js';
+import { GuideDomainError, activateGuideDomain, archiveGuideDomain, configuredGuideDomainIngressTarget, configuredManagedGuideDomainSuffix, createGuideDomain, listGuideDomains, managedGuideHostnameFromSlug, verifyGuideDomainDns } from '../services/guide-domain-service.js';
 import { archiveGuideDomainIngress, provisionGuideDomainIngress, resolveGuideDomainIngressStatus, verifyGuideDomainIngress } from '../services/guide-domain-ingress-service.js';
 
 const router = express.Router();
@@ -108,7 +108,7 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/versions/:vers
 
 router.get('/:tenantId/guide-experiences/assistants/:assistantId/domains', requireTenantAccess, async (req, res) => {
   const scope = validScope(req, res); if (!scope) return;
-  try { await verifyAssistant(scope); return res.json({ domains: await listGuideDomains({ database: pool, ...scope }) }); }
+  try { await verifyAssistant(scope); return res.json({ domains: await listGuideDomains({ database: pool, ...scope }), managed_domain_suffix: configuredManagedGuideDomainSuffix() }); }
   catch (error) { return sendError(res, error); }
 });
 
