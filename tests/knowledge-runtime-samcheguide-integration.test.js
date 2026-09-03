@@ -20,7 +20,7 @@ test('AI Guide plan resolves mapped ACTIVE tenant persona instead of defaulting 
   const planStart = appSource.indexOf('app.post("/plan"');
   const chatStart = appSource.indexOf('app.post("/chat"', planStart);
   const planSource = appSource.slice(planStart, chatStart);
-  assert.match(planSource, /resolveSamcheguideRuntimeIntegration/);
+  assert.match(planSource, /resolveGuideRuntimeScope\(req\)/);
   assert.match(planSource, /resolveTenantRuntimePersona/);
   assert.match(planSource, /buildTenantRuntimeSystemInstruction/);
   assert.doesNotMatch(planSource, /structured, strategic UAE business setup proposal|SAMCHEGUIDE_SYSTEM_PROMPT/);

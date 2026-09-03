@@ -239,7 +239,7 @@ test('/chat emits safe stage diagnostics without changing its response paths', a
   const appSource = await readFile(new URL('../app.js', import.meta.url), 'utf8');
   const chatSource = appSource.slice(appSource.indexOf('app.post("/chat"'));
   const requestReceived = chatSource.indexOf('CHAT_REQUEST_RECEIVED');
-  const sessionResolution = chatSource.indexOf('issueOrResolvePublicConversationSession(req)');
+  const sessionResolution = chatSource.indexOf('issueOrResolvePublicConversationSession(req, guideRuntimeIntegration)');
   const geminiStarted = chatSource.indexOf('CHAT_GEMINI_STARTED');
   const geminiInvocation = chatSource.indexOf('requestGemini({', geminiStarted);
   const geminiFailed = chatSource.indexOf('CHAT_GEMINI_FAILED code=');

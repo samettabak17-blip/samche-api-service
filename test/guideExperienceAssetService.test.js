@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   GuideExperienceAssetError,
   buildGuideExperienceAssetStorageKey,
+  getPublicGuideExperienceAsset,
   validateGuideExperienceAssetUpload,
 } from '../services/guide-experience-asset-service.js';
 
@@ -17,6 +18,19 @@ test('Guide experience asset upload accepts only safe verified raster images', (
   const upload = validateGuideExperienceAssetUpload({ buffer: png, size: png.length, mimetype: 'image/png', originalname: 'brand.png' });
   assert.deepEqual(upload, { buffer: png, mimeType: 'image/png', extension: 'png', sizeBytes: png.length });
   assert.equal(buildGuideExperienceAssetStorageKey(scope), `guide-experience/${scope.tenantId}/${scope.assistantId}/${scope.assetId}.png`);
+});
+
+test('public Guide asset lookup is constrained to the resolved tenant and assistant scope', async () => {
+  const database = {
+    async query(sql, parameters) {
+      assert.match(sql, /tenant_id=\$2/i);
+      assert.match(sql, /assistant_id=\$3/i);
+      assert.deepEqual(parameters, [scope.assetId, scope.tenantId, scope.assistantId]);
+      return { rowCount: 0, rows: [] };
+    },
+  };
+  const asset = await getPublicGuideExperienceAsset({ database, assetId: scope.assetId, tenantId: scope.tenantId, assistantId: scope.assistantId });
+  assert.equal(asset, null);
 });
 
 test('Guide experience asset upload rejects SVG, mismatched MIME and oversized files', () => {

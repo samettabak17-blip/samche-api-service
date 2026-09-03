@@ -6,6 +6,9 @@ import { isValidUUID } from '../middleware/validators.js';
 import { createConversationResourceStorage } from '../services/conversation-resource-storage.js';
 import { GuideExperienceAssetError, storeGuideExperienceAsset } from '../services/guide-experience-asset-service.js';
 import { GuideExperienceError, createGuideExperienceDraft, listGuideExperienceVersions, publishGuideExperience, rollbackGuideExperience, updateGuideExperienceDraft } from '../services/guide-experience-service.js';
+import { resolveCname } from 'node:dns/promises';
+import { GuideDomainError, activateGuideDomain, archiveGuideDomain, configuredGuideDomainIngressTarget, createGuideDomain, listGuideDomains, verifyGuideDomainDns } from '../services/guide-domain-service.js';
+import { archiveGuideDomainIngress, provisionGuideDomainIngress, resolveGuideDomainIngressStatus, verifyGuideDomainIngress } from '../services/guide-domain-ingress-service.js';
 
 const router = express.Router();
 router.use(authenticateToken);
@@ -24,7 +27,24 @@ async function verifyAssistant({ tenantId, assistantId }) {
   if (!result.rowCount) throw new GuideExperienceError('GUIDE_EXPERIENCE_SCOPE_MISMATCH');
 }
 
+async function verifyGuideChannel({ tenantId, assistantId, channelId }) {
+  if (!isValidUUID(channelId)) throw new GuideDomainError('GUIDE_DOMAIN_CHANNEL_INVALID');
+  const result = await pool.query(
+    `SELECT tc.id FROM tenant_channels tc
+      JOIN channel_integrations ci ON ci.channel_id=tc.id AND ci.tenant_id=tc.tenant_id
+        AND ci.assistant_id=tc.assistant_id AND ci.integration_type='SAMCHEGUIDE' AND ci.enabled=TRUE
+      WHERE tc.id=$1 AND tc.tenant_id=$2 AND tc.assistant_id=$3 AND tc.channel_type='SAMCHEGUIDE' AND tc.status='active'`,
+    [channelId, tenantId, assistantId],
+  );
+  if (!result.rowCount) throw new GuideDomainError('GUIDE_DOMAIN_SCOPE_MISMATCH');
+}
+
 function sendError(res, error) {
+  if (error?.code === '23505') return res.status(409).json({ error: 'This hostname is already bound to a Guide.', code: 'GUIDE_DOMAIN_HOSTNAME_EXISTS' });
+  if (error instanceof GuideDomainError) {
+    const status = /INVALID|NOT_FOUND|MISMATCH|CHANNEL/.test(error.code) ? 400 : (/INGRESS|VERIFICATION/.test(error.code) ? 503 : 409);
+    return res.status(status).json({ error: error.message, code: error.code });
+  }
   if (error instanceof GuideExperienceAssetError) return res.status(/UNSUPPORTED|MISMATCH|INVALID|REQUIRED|KIND/.test(error.code) ? 400 : (/SIZE/.test(error.code) ? 413 : 503)).json({ error: error.message, code: error.code });
   if (error instanceof GuideExperienceError) return res.status(/NOT_FOUND|MISMATCH|INVALID/.test(error.code) ? 400 : 409).json({ error: error.message, code: error.code });
   console.error('Guide experience operation failed:', error?.code ?? error?.name ?? 'UNKNOWN');
@@ -82,6 +102,68 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/versions/:vers
     await verifyAssistant(scope); await client.query('BEGIN');
     const version = await rollbackGuideExperience({ client, ...scope, versionId: req.params.versionId, actorUserId: req.user.user_id });
     await client.query('COMMIT'); return res.json({ version, cache_key: `guide-experience:${scope.tenantId}:${scope.assistantId}:${version.version}` });
+  } catch (error) { await client.query('ROLLBACK').catch(() => {}); return sendError(res, error); }
+  finally { client.release(); }
+});
+
+router.get('/:tenantId/guide-experiences/assistants/:assistantId/domains', requireTenantAccess, async (req, res) => {
+  const scope = validScope(req, res); if (!scope) return;
+  try { await verifyAssistant(scope); return res.json({ domains: await listGuideDomains({ database: pool, ...scope }) }); }
+  catch (error) { return sendError(res, error); }
+});
+
+router.post('/:tenantId/guide-experiences/assistants/:assistantId/domains', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const scope = validScope(req, res); if (!scope) return;
+  const client = await pool.connect();
+  let provisioned = null;
+  try {
+    await verifyAssistant(scope);
+    await verifyGuideChannel({ ...scope, channelId: req.body?.channel_id });
+    provisioned = await provisionGuideDomainIngress({ hostname: req.body?.hostname });
+    await client.query('BEGIN');
+    const domain = await createGuideDomain({ client, ...scope, channelId: req.body.channel_id, hostname: req.body?.hostname, actorUserId: req.user.user_id, ingressTarget: configuredGuideDomainIngressTarget() });
+    await client.query('COMMIT');
+    return res.status(201).json({ domain, dns: { type: domain.verification_record_type, host: domain.hostname, target: domain.verification_target } });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (provisioned?.state === 'REGISTERED') await archiveGuideDomainIngress({ hostname: provisioned.hostname }).catch(() => {});
+    return sendError(res, error);
+  }
+  finally { client.release(); }
+});
+
+router.post('/:tenantId/guide-experiences/assistants/:assistantId/domains/:domainId/verify', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const scope = validScope(req, res); if (!scope || !isValidUUID(req.params.domainId)) return res.status(400).json({ error: 'Guide domain is invalid.' });
+  const client = await pool.connect();
+  try {
+    await verifyAssistant(scope); await client.query('BEGIN');
+    const domain = await verifyGuideDomainDns({ client, ...scope, domainId: req.params.domainId, actorUserId: req.user.user_id, resolveCname });
+    if (domain.status === 'FAILED') {
+      await client.query('COMMIT');
+      return res.status(422).json({ error: 'Guide domain DNS verification failed.', code: 'GUIDE_DOMAIN_VERIFICATION_FAILED', domain });
+    }
+    await verifyGuideDomainIngress({ hostname: domain.hostname });
+    const ingress = await resolveGuideDomainIngressStatus({ hostname: domain.hostname });
+    const resolved = ingress.verified
+      ? await activateGuideDomain({ client, ...scope, domainId: req.params.domainId, actorUserId: req.user.user_id })
+      : domain;
+    await client.query('COMMIT');
+    if (resolved.status === 'VERIFIED') return res.status(202).json({ domain: resolved, verification: 'PENDING_INGRESS' });
+    return res.json({ domain: resolved });
+  } catch (error) { await client.query('ROLLBACK').catch(() => {}); return sendError(res, error); }
+  finally { client.release(); }
+});
+
+router.delete('/:tenantId/guide-experiences/assistants/:assistantId/domains/:domainId', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const scope = validScope(req, res); if (!scope || !isValidUUID(req.params.domainId)) return res.status(400).json({ error: 'Guide domain is invalid.' });
+  const client = await pool.connect();
+  try {
+    await verifyAssistant(scope); await client.query('BEGIN');
+    const selected = await client.query(`SELECT hostname FROM guide_domains WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3 FOR UPDATE`, [req.params.domainId, scope.tenantId, scope.assistantId]);
+    if (!selected.rowCount) throw new GuideDomainError('GUIDE_DOMAIN_NOT_FOUND');
+    await archiveGuideDomainIngress({ hostname: selected.rows[0].hostname });
+    const domain = await archiveGuideDomain({ client, ...scope, domainId: req.params.domainId, actorUserId: req.user.user_id });
+    await client.query('COMMIT'); return res.json({ domain });
   } catch (error) { await client.query('ROLLBACK').catch(() => {}); return sendError(res, error); }
   finally { client.release(); }
 });

@@ -1,6 +1,6 @@
 # AI Guide White-Label Platform
 
-AI Guide has one shared public shell at `/guide`. Its customer-facing identity is resolved from the configured `SAMCHEGUIDE` channel integration, then the tenant and assistant that own that channel. A browser never selects a tenant ID.
+AI Guide has one shared public shell. Its customer-facing identity is resolved from the incoming hostname through the active `guide_domains` binding, then the bound Guide channel, tenant and assistant. A browser never selects a tenant or assistant ID; query parameters, local storage and browser-provided identity are not routing inputs.
 
 ## Experience configuration
 
@@ -14,6 +14,10 @@ Logo and assistant-avatar uploads use the existing private object-storage abstra
 
 ## Safety and onboarding
 
-Attach a Guide channel/integration to the tenant's assistant during onboarding. Profile or configuration activation must never remap that channel. The public bootstrap and the chat runtime fail closed when channel, tenant, assistant, profile or configuration ownership does not agree. If no published experience exists, the public shell uses neutral `AI Guide` copy and never falls back to another tenant or SamChe branding.
+Attach a Guide channel/integration to the tenant's assistant during onboarding, then create a hostname binding under **Guide Experience → Domains**. The binding is durable infrastructure identity: Profile, Configuration, Experience publish and Experience rollback never remap it. A hostname moves through `PENDING → VERIFIED → ACTIVE` after its CNAME targets the platform-configured Guide ingress; it can later be explicitly archived. Hostnames are normalized and globally unique.
+
+The public bootstrap, public asset route, session token and chat runtime all use that same resolved domain scope. The session token is bound to domain, tenant, assistant and channel, and active assets are filtered by that exact tenant/assistant scope. Unknown, inactive, archived or ownership-inconsistent hostnames fail closed; they never fall back to SamChe or another tenant. A published Experience still resolves dynamically, so a Dashboard publish or explicit restore changes the public Guide without a frontend deployment.
+
+The platform ingress target is deployment configuration (`GUIDE_DOMAIN_INGRESS_TARGET`), not tenant configuration. In a Render deployment, the SamChe-owned ingress adapter registers the hostname against the shared web service through the platform's service credentials, and verification succeeds only when both DNS and Render report the hostname ready. Customer onboarding needs only the hostname binding and the displayed DNS CNAME; it never requires a source-code, provider/model, Render environment, or tenant-ID edit. Customer-owned domains use the same binding model as SamChe-hosted subdomains.
 
 Platform owners can administer a selected tenant; CUSTOMER tenant ADMINs can administer only their tenant. AGENT users remain read-only. Provider/model selection is not part of the experience API or Dashboard UI.

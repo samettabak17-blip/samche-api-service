@@ -75,6 +75,17 @@ export async function resolveSamcheguideRuntimeIntegration({ database = pool, in
   return loadSamcheguideIntegration(database, integrationKey);
 }
 
+function resolvedGuideIntegration(integration) {
+  if (!integration) return null;
+  if (
+    integration.channel_type !== 'SAMCHEGUIDE'
+    || integration.channel_status !== 'active'
+    || integration.assistant_status !== 'active'
+    || integration.channel_assistant_id !== integration.assistant_id
+  ) return null;
+  return integration;
+}
+
 export const INSERT_CONVERSATION_MESSAGE_SQL = `INSERT INTO conversation_messages
   (tenant_id, conversation_id, sender_type, content, actor_user_id, idempotency_key, external_message_id, delivery_status, delivery_status_updated_at)
  VALUES ($1, $2, $3, $4, $5, $6, $7, $8::varchar(20), CASE WHEN $8::varchar(20) IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END)
@@ -92,10 +103,10 @@ async function insertMessage(client, { tenantId, conversationId, senderType, con
 }
 
 
-export async function getSamcheguidePublicFeed({ externalSessionId }) {
+export async function getSamcheguidePublicFeed({ externalSessionId, integration: suppliedIntegration = null }) {
   const client = await pool.connect();
   try {
-    const integration = await loadSamcheguideIntegration(client);
+    const integration = suppliedIntegration === null ? await loadSamcheguideIntegration(client) : resolvedGuideIntegration(suppliedIntegration);
     if (!integration || integration.channel_status !== 'active') return null;
     const result = await client.query(
       `SELECT c.id AS conversation_id, m.id, m.sender_type, m.content, m.created_at
@@ -116,8 +127,8 @@ export async function getSamcheguidePublicFeed({ externalSessionId }) {
   }
 }
 
-export async function getSamcheguidePublicHistory({ externalSessionId }) {
-  const feed = await getSamcheguidePublicFeed({ externalSessionId });
+export async function getSamcheguidePublicHistory({ externalSessionId, integration = null }) {
+  const feed = await getSamcheguidePublicFeed({ externalSessionId, integration });
   if (!feed) return null;
   return feed.messages.map((message) => ({
     role: message.sender_type === 'CUSTOMER' ? 'user' : 'model',
@@ -125,11 +136,11 @@ export async function getSamcheguidePublicHistory({ externalSessionId }) {
   }));
 }
 
-export async function persistSamcheguideInbound({ externalSessionId, content, idempotencyKey = null }) {
+export async function persistSamcheguideInbound({ externalSessionId, content, idempotencyKey = null, integration: suppliedIntegration = null }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const integration = await loadSamcheguideIntegration(client);
+    const integration = suppliedIntegration === null ? await loadSamcheguideIntegration(client) : resolvedGuideIntegration(suppliedIntegration);
     if (!integration || integration.channel_status !== 'active') {
       await client.query('COMMIT');
       return null;

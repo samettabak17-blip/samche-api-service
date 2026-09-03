@@ -18,14 +18,28 @@ export function configuredPublicConversationSessionSecret() {
   return process.env.SAMCHEGUIDE_PUBLIC_SESSION_SECRET || '';
 }
 
-export function issuePublicConversationSession({ secret, now = Math.floor(Date.now() / 1000), ttlSeconds = 86400 }) {
+function normalizeScope(scope) {
+  if (!scope) return null;
+  const fields = ['domainId', 'tenantId', 'assistantId', 'channelId'];
+  if (!fields.every((field) => typeof scope[field] === 'string' && scope[field].trim())) {
+    throw new PublicConversationSessionError('PUBLIC_SESSION_SCOPE_INVALID');
+  }
+  return Object.fromEntries(fields.map((field) => [field, scope[field]]));
+}
+
+function sameScope(left, right) {
+  return Boolean(left && right) && ['domainId', 'tenantId', 'assistantId', 'channelId'].every((field) => left[field] === right[field]);
+}
+
+export function issuePublicConversationSession({ secret, now = Math.floor(Date.now() / 1000), ttlSeconds = 86400, scope = null }) {
   if (!secret) throw new PublicConversationSessionError('PUBLIC_SESSION_CONFIGURATION');
   const sessionId = crypto.randomUUID();
-  const payload = encode(JSON.stringify({ v: 1, sid: sessionId, iat: now, exp: now + ttlSeconds }));
+  const normalizedScope = normalizeScope(scope);
+  const payload = encode(JSON.stringify({ v: normalizedScope ? 2 : 1, sid: sessionId, iat: now, exp: now + ttlSeconds, ...(normalizedScope ? { scope: normalizedScope } : {}) }));
   return { sessionId, token: `${payload}.${sign(payload, secret)}` };
 }
 
-export function verifyPublicConversationSession(token, { secret, now = Math.floor(Date.now() / 1000) }) {
+export function verifyPublicConversationSession(token, { secret, now = Math.floor(Date.now() / 1000), expectedScope = null }) {
   if (typeof token !== 'string' || !secret) throw new PublicConversationSessionError('PUBLIC_SESSION_INVALID');
   const [payload, received, ...rest] = token.split('.');
   if (!payload || !received || rest.length) throw new PublicConversationSessionError('PUBLIC_SESSION_INVALID');
@@ -35,9 +49,13 @@ export function verifyPublicConversationSession(token, { secret, now = Math.floo
   }
   let claims;
   try { claims = JSON.parse(decode(payload)); } catch { throw new PublicConversationSessionError('PUBLIC_SESSION_INVALID'); }
-  if (claims?.v !== 1 || typeof claims.sid !== 'string' || !claims.sid || !Number.isInteger(claims.exp)) {
+  if (![1, 2].includes(claims?.v) || typeof claims.sid !== 'string' || !claims.sid || !Number.isInteger(claims.exp)) {
     throw new PublicConversationSessionError('PUBLIC_SESSION_INVALID');
   }
   if (claims.exp < now) throw new PublicConversationSessionError('PUBLIC_SESSION_EXPIRED');
+  const normalizedExpectedScope = normalizeScope(expectedScope);
+  if (normalizedExpectedScope && (claims.v !== 2 || !sameScope(claims.scope, normalizedExpectedScope))) {
+    throw new PublicConversationSessionError('PUBLIC_SESSION_SCOPE_MISMATCH');
+  }
   return { sessionId: claims.sid };
 }

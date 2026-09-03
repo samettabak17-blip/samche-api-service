@@ -66,12 +66,13 @@ export async function storeGuideExperienceAsset({ database, storage, tenantId, a
   }
 }
 
-export async function getPublicGuideExperienceAsset({ database, assetId }) {
+export async function getPublicGuideExperienceAsset({ database, assetId, tenantId, assistantId }) {
+  if (!tenantId || !assistantId) return null;
   const result = await database.query(
     `SELECT id, tenant_id, assistant_id, storage_key, mime_type, size_bytes
        FROM guide_experience_assets
-      WHERE id=$1 AND status='ACTIVE'`,
-    [assetId],
+      WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3 AND status='ACTIVE'`,
+    [assetId, tenantId, assistantId],
   );
   return result.rows[0] ?? null;
 }

@@ -10,6 +10,7 @@ import axios from "axios";
 import dotenv from "dotenv";
 import OpenAI from "openai";
 import cron from "node-cron";
+import path from 'node:path';
 import { deliverWhatsAppText, whatsappHttpsAgent } from "./services/whatsapp-delivery-service.js";
 import { verifyWhatsAppSignature } from "./middleware/whatsappSignature.js";
 import authRoutes from "./routes/authRoutes.js";
@@ -19,7 +20,7 @@ import crmRoutes from "./routes/crmRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
 import knowledgeIntelligenceRoutes from "./routes/knowledgeIntelligenceRoutes.js";
 import guideExperienceRoutes from "./routes/guideExperienceRoutes.js";
-import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus, resolveSamcheguideRuntimeIntegration } from "./services/live-inbox-service.js";
+import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
 import { whatsappRuntimeSessionKey } from "./services/whatsapp-runtime-session-service.js";
 import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from "./services/human-support-service.js";
@@ -54,6 +55,7 @@ import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext
 import { buildTenantRuntimeSystemInstruction, resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
 import { resolveChannelAssistantRuntime } from "./services/assistant-runtime-resolution-service.js";
 import { resolvePublishedGuideExperience } from "./services/guide-experience-service.js";
+import { resolveGuideRuntimeScopeFromRequest } from './services/guide-domain-service.js';
 import { getPublicGuideExperienceAsset } from "./services/guide-experience-asset-service.js";
 import { samcheguideRuntimeSessionKey } from "./services/samcheguide-runtime-session-service.js";
 import { buildTenantFollowUpRequest } from "./services/tenant-follow-up-service.js";
@@ -144,9 +146,17 @@ app.get("/api/v1/health/db", async (req, res) => {
 // One public Guide shell is served for every tenant.  Its visual identity is
 // resolved solely from the configured Guide integration, never a browser tenant
 // identifier.  Runtime intelligence remains resolved later by /chat.
-app.get("/guide/bootstrap", async (_req, res) => {
+async function resolveGuideRuntimeScope(req) {
+  return resolveGuideRuntimeScopeFromRequest({ database: pool, req });
+}
+
+function guideSessionScope(scope) {
+  return { domainId: scope.domain_id, tenantId: scope.tenant_id, assistantId: scope.assistant_id, channelId: scope.channel_id };
+}
+
+app.get("/guide/bootstrap", async (req, res) => {
   try {
-    const integration = await resolveSamcheguideRuntimeIntegration({ database: pool });
+    const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(503).json({ error: 'Guide experience is temporarily unavailable.', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
     const resolved = await resolvePublishedGuideExperience({
       database: pool,
@@ -161,10 +171,19 @@ app.get("/guide/bootstrap", async (_req, res) => {
   }
 });
 
+app.get('/', async (req, res, next) => {
+  const integration = await resolveGuideRuntimeScope(req);
+  if (!integration) return next();
+  res.set('Cache-Control', 'no-store');
+  return res.sendFile(path.resolve('public-guide', 'index.html'));
+});
+
 app.get('/guide/assets/:assetId', async (req, res) => {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(req.params.assetId))) return res.sendStatus(404);
   try {
-    const asset = await getPublicGuideExperienceAsset({ database: pool, assetId: req.params.assetId });
+    const integration = await resolveGuideRuntimeScope(req);
+    if (!integration) return res.sendStatus(404);
+    const asset = await getPublicGuideExperienceAsset({ database: pool, assetId: req.params.assetId, tenantId: integration.tenant_id, assistantId: integration.assistant_id });
     if (!asset) return res.sendStatus(404);
     const stream = await createConversationResourceStorage().get({ key: asset.storage_key });
     res.set({ 'Content-Type': asset.mime_type, 'Content-Length': String(asset.size_bytes), 'Cache-Control': 'public, max-age=300', 'X-Content-Type-Options': 'nosniff' });
@@ -176,7 +195,13 @@ app.get('/guide/assets/:assetId', async (req, res) => {
   }
 });
 
-app.use('/guide', express.static('public-guide', { index: 'index.html', etag: true, maxAge: '5m' }));
+// The shared static shell contains no tenant data, but it is still a public
+// Guide route: do not serve it from an unknown or archived hostname.
+app.use('/guide', async (req, res, next) => {
+  const integration = await resolveGuideRuntimeScope(req);
+  if (!integration) return res.sendStatus(404);
+  return next();
+}, express.static('public-guide', { index: 'index.html', etag: true, maxAge: '5m' }));
 
 // ==========================================
 // V1 ROUTES
@@ -840,7 +865,7 @@ function getFollowUpMessage(lang, topic, stage) {
 // ----------------------------------------------------------------------------
 // A) SAMCHEGUIDE BOT (GEMINI) - /plan, /chat ve /chat/history
 // ----------------------------------------------------------------------------
-function resolvePublicConversationSession(req) {
+function resolvePublicConversationSession(req, scope) {
   const secret = configuredPublicConversationSessionSecret();
   if (!secret) {
     const error = new PublicConversationSessionError('PUBLIC_SESSION_CONFIGURATION');
@@ -854,29 +879,31 @@ function resolvePublicConversationSession(req) {
     throw error;
   }
   try {
-    return { token, ...verifyPublicConversationSession(token, { secret }) };
+    return { token, ...verifyPublicConversationSession(token, { secret, expectedScope: guideSessionScope(scope) }) };
   } catch (error) {
     error.status = 401;
     throw error;
   }
 }
 
-function issueOrResolvePublicConversationSession(req) {
+function issueOrResolvePublicConversationSession(req, scope) {
   const token = req.get('X-Samcheguide-Session');
-  if (token) return resolvePublicConversationSession(req);
+  if (token) return resolvePublicConversationSession(req, scope);
   const secret = configuredPublicConversationSessionSecret();
   if (!secret) {
     const error = new PublicConversationSessionError('PUBLIC_SESSION_CONFIGURATION');
     error.status = 503;
     throw error;
   }
-  return issuePublicConversationSession({ secret });
+  return issuePublicConversationSession({ secret, scope: guideSessionScope(scope) });
 }
 
 app.get("/chat/history", async (req, res) => {
   try {
-    const session = resolvePublicConversationSession(req);
-    const feed = await getSamcheguidePublicFeed({ externalSessionId: session.sessionId });
+    const integration = await resolveGuideRuntimeScope(req);
+    if (!integration) return res.status(404).json({ error: "Conversation is unavailable." });
+    const session = resolvePublicConversationSession(req, integration);
+    const feed = await getSamcheguidePublicFeed({ externalSessionId: session.sessionId, integration });
     if (!feed) return res.status(404).json({ error: "Conversation is unavailable." });
     return res.json({ messages: feed.messages });
   } catch (error) {
@@ -886,8 +913,10 @@ app.get("/chat/history", async (req, res) => {
 
 app.get("/chat/live", async (req, res) => {
   try {
-    const session = resolvePublicConversationSession(req);
-    const feed = await getSamcheguidePublicFeed({ externalSessionId: session.sessionId });
+    const integration = await resolveGuideRuntimeScope(req);
+    if (!integration) return res.status(404).json({ error: "Conversation is unavailable." });
+    const session = resolvePublicConversationSession(req, integration);
+    const feed = await getSamcheguidePublicFeed({ externalSessionId: session.sessionId, integration });
     if (!feed?.conversationId) return res.status(404).json({ error: "Conversation is unavailable." });
 
     res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
@@ -912,12 +941,12 @@ app.post("/plan", async (req, res) => {
 
     const cleanSector = sector.trim();
     if (!cleanSector) return res.status(400).json({ error: "Sector value cannot be empty." });
-    const publicSession = issueOrResolvePublicConversationSession(req);
-    const userId = publicSession.sessionId;
-    const integration = await resolveSamcheguideRuntimeIntegration({ database: pool });
+    const integration = await resolveGuideRuntimeScope(req);
     if (!integration || integration.channel_status !== "active") {
       return res.status(503).json({ error: "AI Guide configuration is temporarily unavailable." });
     }
+    const publicSession = issueOrResolvePublicConversationSession(req, integration);
+    const userId = publicSession.sessionId;
     let runtime;
     try {
       runtime = await resolveChannelAssistantRuntime({
@@ -986,8 +1015,15 @@ app.post("/chat", async (req, res) => {
     if (!cleanText) return res.status(400).json({ error: "Message text cannot be empty." });
 
     let publicSession;
+    let guideRuntimeIntegration;
     try {
-      publicSession = issueOrResolvePublicConversationSession(req);
+      guideRuntimeIntegration = await resolveGuideRuntimeScope(req);
+      if (!guideRuntimeIntegration) {
+        return res.status(503).json({
+          error: "AI Guide assistant configuration is temporarily unavailable.",
+        });
+      }
+      publicSession = issueOrResolvePublicConversationSession(req, guideRuntimeIntegration);
     } catch (error) {
       if (error?.status === 503) console.error('CHAT_RESPONSE_503 stage=PUBLIC_SESSION_CONFIGURATION');
       throw error;
@@ -997,6 +1033,7 @@ app.post("/chat", async (req, res) => {
       externalSessionId: userId,
       content: cleanText,
       idempotencyKey: req.get("Idempotency-Key") || null,
+      integration: guideRuntimeIntegration,
     });
 
     // A Guide request is always bound to the configured tenant channel. It must
