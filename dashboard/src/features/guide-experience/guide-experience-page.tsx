@@ -176,6 +176,11 @@ export function GuideExperiencePage() {
     queryFn: () => tenantApi.listGuideExperiences(tenantId, assistantId),
     enabled: Boolean(tenantId && assistantId),
   });
+  const publicationDiagnostics = useQuery({
+    queryKey: ["tenant", tenantId, "guide-publication-diagnostics", assistantId],
+    queryFn: () => tenantApi.getGuidePublicationDiagnostics(tenantId, assistantId),
+    enabled: Boolean(tenantId && assistantId),
+  });
   const domains = useQuery({
     queryKey: ["tenant", tenantId, "guide-domains", assistantId],
     queryFn: () => tenantApi.listGuideDomains(tenantId, assistantId),
@@ -202,6 +207,10 @@ export function GuideExperiencePage() {
     void client.invalidateQueries({
       queryKey: ["tenant", tenantId, "guide-experience", assistantId],
     });
+  const invalidatePublicationDiagnostics = () =>
+    void client.invalidateQueries({
+      queryKey: ["tenant", tenantId, "guide-publication-diagnostics", assistantId],
+    });
   const invalidateDomains = () =>
     void client.invalidateQueries({
       queryKey: ["tenant", tenantId, "guide-domains", assistantId],
@@ -211,6 +220,7 @@ export function GuideExperiencePage() {
       tenantApi.createGuideExperienceDraft(tenantId, assistantId, draft),
     onSuccess: (version) => {
       invalidate();
+      invalidatePublicationDiagnostics();
       setFeedback(`Draft v${version.version} saved. Preview remains private.`);
     },
     onError: () => setFeedback("Draft could not be saved safely."),
@@ -231,6 +241,7 @@ export function GuideExperiencePage() {
     onSuccess: (version) => {
       setRollbackTarget(null);
       invalidate();
+      invalidatePublicationDiagnostics();
       setFeedback(`Guide experience rolled back to v${version.version}.`);
     },
     onError: () =>
@@ -556,6 +567,18 @@ export function GuideExperiencePage() {
                 No earlier published versions yet.
               </p>
             )}
+          </section>
+          <section className="panel space-y-3 p-4" aria-label="Publication diagnostics">
+            <p className="dashboard-section-label">Publication diagnostics</p>
+            {publicationDiagnostics.data ? (
+              <>
+                <p className="text-sm text-stone-300">Consistency: {publicationDiagnostics.data.consistency}</p>
+                <p className="text-sm text-stone-300">Current public version: {publicationDiagnostics.data.public_bootstrap_version ?? "None"}</p>
+                <div className="space-y-1 text-xs text-stone-400">
+                  {publicationDiagnostics.data.versions.map((version) => <p key={version.id}>v{version.version} · {version.status} · {version.published_at ?? "not published"}</p>)}
+                </div>
+              </>
+            ) : <p className="text-sm text-stone-400">Publication state is unavailable.</p>}
           </section>
           <section className="panel space-y-3 p-4">
             <p className="dashboard-section-label">Domains</p>

@@ -143,6 +143,34 @@ export async function listGuideExperienceVersions({ database, tenantId, assistan
   return result.rows.map(serialize);
 }
 
+export async function inspectGuideExperiencePublication({ database, tenantId, assistantId }) {
+  const result = await database.query(
+    `SELECT id, tenant_id, assistant_id, version, status, created_at, published_at, updated_at
+       FROM guide_experience_versions
+      WHERE tenant_id=$1 AND assistant_id=$2
+      ORDER BY version DESC`,
+    [tenantId, assistantId],
+  );
+  const versions = result.rows.map((row) => ({
+    id: row.id, tenant_id: row.tenant_id, assistant_id: row.assistant_id,
+    version: row.version, status: row.status, created_at: row.created_at,
+    published_at: row.published_at, updated_at: row.updated_at,
+  }));
+  const published = versions.filter((row) => row.status === 'PUBLISHED');
+  const canonical = published.slice().sort((a, b) => b.version - a.version)[0] ?? null;
+  const consistency = published.length === 0
+    ? 'NO_CURRENT_PUBLISHED'
+    : published.length > 1
+      ? 'MULTIPLE_PUBLISHED'
+      : 'HEALTHY';
+  return {
+    versions,
+    current_published: canonical,
+    public_bootstrap_version: canonical?.version ?? null,
+    consistency,
+  };
+}
+
 export async function createGuideExperienceDraft({ database, tenantId, assistantId, actorUserId, experience }) {
   const normalized = normalizeGuideExperience(experience);
   const result = await database.query(

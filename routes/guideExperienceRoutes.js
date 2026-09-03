@@ -5,7 +5,7 @@ import { authenticateToken, requireTenantAccess, requireTenantAdmin } from '../m
 import { isValidUUID } from '../middleware/validators.js';
 import { createConversationResourceStorage } from '../services/conversation-resource-storage.js';
 import { GuideExperienceAssetError, storeGuideExperienceAsset } from '../services/guide-experience-asset-service.js';
-import { GuideExperienceError, createGuideExperienceDraft, listGuideExperienceVersions, publishGuideExperience, rollbackGuideExperience, updateGuideExperienceDraft } from '../services/guide-experience-service.js';
+import { GuideExperienceError, createGuideExperienceDraft, inspectGuideExperiencePublication, listGuideExperienceVersions, publishGuideExperience, rollbackGuideExperience, updateGuideExperienceDraft } from '../services/guide-experience-service.js';
 import { resolveCname } from 'node:dns/promises';
 import { GuideDomainError, activateGuideDomain, archiveGuideDomain, configuredGuideDomainIngressTarget, configuredManagedGuideDomainSuffix, createGuideDomain, listGuideDomains, managedGuideHostnameFromSlug, verifyGuideDomainDns } from '../services/guide-domain-service.js';
 import { archiveGuideDomainIngress, provisionGuideDomainIngress, resolveGuideDomainIngressStatus, verifyGuideDomainIngress } from '../services/guide-domain-ingress-service.js';
@@ -109,6 +109,12 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/versions/:vers
 router.get('/:tenantId/guide-experiences/assistants/:assistantId/domains', requireTenantAccess, async (req, res) => {
   const scope = validScope(req, res); if (!scope) return;
   try { await verifyAssistant(scope); return res.json({ domains: await listGuideDomains({ database: pool, ...scope }), managed_domain_suffix: configuredManagedGuideDomainSuffix() }); }
+  catch (error) { return sendError(res, error); }
+});
+
+router.get('/:tenantId/guide-experiences/assistants/:assistantId/publication-diagnostics', requireTenantAccess, async (req, res) => {
+  const scope = validScope(req, res); if (!scope) return;
+  try { await verifyAssistant(scope); return res.json(await inspectGuideExperiencePublication({ database: pool, ...scope })); }
   catch (error) { return sendError(res, error); }
 });
 

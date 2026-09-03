@@ -8,7 +8,7 @@ import { ApiError } from '../../lib/api-client';
 
 vi.mock('../dashboard/dashboard-api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../dashboard/dashboard-api')>();
-  return { ...actual, tenantApi: { ...actual.tenantApi, listAssistants: vi.fn(), listChannels: vi.fn(), listGuideExperiences: vi.fn(), listGuideDomains: vi.fn(), createGuideDomain: vi.fn(), verifyGuideDomain: vi.fn(), archiveGuideDomain: vi.fn(), createGuideExperienceDraft: vi.fn(), publishGuideExperience: vi.fn(), rollbackGuideExperience: vi.fn(), uploadGuideExperienceAsset: vi.fn() } };
+  return { ...actual, tenantApi: { ...actual.tenantApi, listAssistants: vi.fn(), listChannels: vi.fn(), listGuideExperiences: vi.fn(), listGuideDomains: vi.fn(), getGuidePublicationDiagnostics: vi.fn(), createGuideDomain: vi.fn(), verifyGuideDomain: vi.fn(), archiveGuideDomain: vi.fn(), createGuideExperienceDraft: vi.fn(), publishGuideExperience: vi.fn(), rollbackGuideExperience: vi.fn(), uploadGuideExperienceAsset: vi.fn() } };
 });
 vi.mock('../tenants/tenant-context', async (importOriginal) => ({ ...(await importOriginal<typeof import('../tenants/tenant-context')>()), useTenant: vi.fn() }));
 
@@ -21,6 +21,7 @@ beforeEach(() => {
   api.listAssistants.mockResolvedValue([{ id: 'assistant-a', tenant_id: 'tenant-a', name: 'Guide Assistant', status: 'active' }]);
   api.listChannels.mockResolvedValue([{ id: 'channel-a', tenant_id: 'tenant-a', assistant_id: 'assistant-a', channel_type: 'SAMCHEGUIDE', display_name: 'Public Guide', status: 'active' }]);
   api.listGuideExperiences.mockResolvedValue([]);
+  api.getGuidePublicationDiagnostics.mockResolvedValue({ consistency: 'NO_CURRENT_PUBLISHED', current_published: null, public_bootstrap_version: null, versions: [] });
   api.listGuideDomains.mockResolvedValue([{ id: 'domain-a', tenant_id: 'tenant-a', assistant_id: 'assistant-a', channel_id: 'channel-a', hostname: 'guide.tenant.example', domain_mode: 'CUSTOM', status: 'PENDING', verification_record_type: 'CNAME', verification_target: 'ingress.example' }]);
 });
 
