@@ -121,7 +121,9 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/domains', requ
     await verifyGuideChannel({ ...scope, channelId: req.body?.channel_id });
     const domainMode = req.body?.domain_mode === 'MANAGED' ? 'MANAGED' : 'CUSTOM';
     const hostname = domainMode === 'MANAGED' ? managedGuideHostnameFromSlug(req.body?.slug) : req.body?.hostname;
-    provisioned = await provisionGuideDomainIngress({ hostname });
+    // Managed hosts ride the shared wildcard ingress; only customer-owned
+    // domains require an individual Render registration and DNS challenge.
+    provisioned = domainMode === 'CUSTOM' ? await provisionGuideDomainIngress({ hostname }) : { state: 'WILDCARD', hostname };
     await client.query('BEGIN');
     const domain = await createGuideDomain({ client, ...scope, channelId: req.body.channel_id, hostname, domainMode, actorUserId: req.user.user_id, ingressTarget: configuredGuideDomainIngressTarget() });
     await client.query('COMMIT');
