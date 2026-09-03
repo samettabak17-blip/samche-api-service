@@ -29,6 +29,57 @@ test('normalizes a bounded tenant guide experience without provider or executabl
   assert.equal('provider' in experience, false);
 });
 
+test('normalizes a data-driven Roadmap and deterministic Interactive Tool without executable rules', () => {
+  const experience = normalizeGuideExperience({
+    roadmap: {
+      enabled: true,
+      title: 'Event planning roadmap',
+      steps: [
+        { id: 'event_type', label: 'Event type', input_type: 'SELECT', required: true, options: [{ value: 'corporate', label: 'Corporate event' }] },
+        { id: 'attendees', label: 'Expected attendees', input_type: 'NUMBER', min: 1, max: 5000, unit: 'guests' },
+      ],
+    },
+    interactive_tool: {
+      enabled: true,
+      title: 'Event budget estimator',
+      currency: 'AED',
+      fields: [
+        { id: 'attendees', label: 'Guests', input_type: 'NUMBER', min: 1, max: 5000 },
+        { id: 'venue', label: 'Venue', input_type: 'SELECT', options: [{ value: 'hotel', label: 'Hotel ballroom' }] },
+        { id: 'catering', label: 'Catering required', input_type: 'BOOLEAN' },
+      ],
+      calculation: {
+        base_amount: 1000,
+        terms: [
+          { field_id: 'attendees', kind: 'NUMBER_MULTIPLIER', multiplier: 125 },
+          { field_id: 'venue', kind: 'SELECT_AMOUNT', amounts: { hotel: 5000 } },
+          { field_id: 'catering', kind: 'BOOLEAN_AMOUNT', amount: 2500 },
+        ],
+      },
+    },
+  });
+  assert.equal(experience.roadmap.steps[0].id, 'event_type');
+  assert.equal(experience.interactive_tool.calculation.terms[0].multiplier, 125);
+  assert.equal(experience.modules.calculator, true);
+});
+
+test('rejects executable or malformed Interactive Tool calculation configuration', () => {
+  for (const invalid of [
+    { interactive_tool: { enabled: true, fields: [], calculation: { expression: 'eval(userInput)' } } },
+    { interactive_tool: { enabled: true, fields: [{ id: 'cost', label: 'Cost', input_type: 'NUMBER' }], calculation: { base_amount: 0, terms: [{ field_id: 'cost', kind: 'NUMBER_MULTIPLIER', multiplier: 'window.alert(1)' }] } } },
+    { roadmap: { enabled: true, steps: [{ id: '../scope', label: 'Bad', input_type: 'TEXT' }] } },
+  ]) {
+    assert.throws(() => normalizeGuideExperience(invalid), (error) => error instanceof GuideExperienceError && error.code === 'GUIDE_EXPERIENCE_INVALID');
+  }
+});
+
+test('gives legacy published experiences safe three-module defaults', () => {
+  const experience = normalizeGuideExperience({ brand_name: 'Legacy guide' });
+  assert.equal(experience.roadmap.enabled, true);
+  assert.equal(experience.interactive_tool.enabled, true);
+  assert.equal(experience.modules.chat, true);
+});
+
 test('rejects unsafe assets, script-like copy, and arbitrary theme values', () => {
   for (const invalid of [
     { logo_url: 'data:image/png;base64,abc' },

@@ -66,6 +66,7 @@ import { resolvePublicWebChatIntegration } from "./services/public-web-chat-inte
 import { createCustomerInvitationOutboxStartup } from './services/customer-invitation-outbox-bootstrap.js';
 import { isAllowedGuideCorsOrigin } from './services/guide-public-cors-service.js';
 import { isSharedPublicGuideAssetPath } from './services/guide-public-asset-route-service.js';
+import { GuideSessionContextError, buildGuideSessionContextSummary, loadGuideSessionContext, saveGuideSessionContext } from './services/guide-session-context-service.js';
 
 dotenv.config();
 
@@ -170,10 +171,22 @@ app.get("/guide/bootstrap", async (req, res) => {
       assistantId: integration.assistant_id,
     });
     res.set('Cache-Control', 'no-store');
-    return res.json({ experience: resolved.experience, source: resolved.source, version: resolved.experience.version, cache_key: resolved.cache_key });
+    return res.json({ experience: resolved.experience, source: resolved.source, version: resolved.experience.version, cache_key: resolved.cache_key, guide_v1: { renderer: 'GUIDE_V1', modules: resolved.experience.modules, session_context: true } });
   } catch (error) {
     console.error('GUIDE_EXPERIENCE_BOOTSTRAP_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return res.status(503).json({ error: 'Guide experience is temporarily unavailable.', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
+  }
+});
+
+app.get('/guide/health', async (req, res) => {
+  try {
+    const integration = await resolveGuideRuntimeScope(req);
+    if (!integration) return res.status(404).json({ status: 'UNAVAILABLE', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
+    const resolved = await resolvePublishedGuideExperience({ database: pool, tenantId: integration.tenant_id, assistantId: integration.assistant_id });
+    return res.json({ status: 'READY', renderer: 'GUIDE_V1', experience_version: resolved.experience.version, modules: resolved.experience.modules, session_context: true });
+  } catch (error) {
+    console.error('GUIDE_PUBLIC_HEALTH_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    return res.status(503).json({ status: 'UNAVAILABLE', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
   }
 });
 
@@ -1029,13 +1042,13 @@ app.post("/plan", async (req, res) => {
 app.post("/chat", async (req, res) => {
   console.info('CHAT_REQUEST_RECEIVED');
   try {
-    const { text } = req.body;
+    const { text, guide_context: guideContextRequest } = req.body;
     if (typeof text !== "string") {
       return res.status(400).json({ error: "Message text must be a non-empty string." });
     }
 
     const cleanText = text.trim();
-    if (!cleanText) return res.status(400).json({ error: "Message text cannot be empty." });
+    if (!cleanText || cleanText.length > 2000) return res.status(400).json({ error: "Message text must be a non-empty string." });
 
     let publicSession;
     let guideRuntimeIntegration;
@@ -1052,6 +1065,18 @@ app.post("/chat", async (req, res) => {
       throw error;
     }
     const userId = publicSession.sessionId;
+    let publishedExperience;
+    let guideSessionContext = null;
+    try {
+      publishedExperience = await resolvePublishedGuideExperience({ database: pool, tenantId: guideRuntimeIntegration.tenant_id, assistantId: guideRuntimeIntegration.assistant_id });
+      guideSessionContext = guideContextRequest === undefined
+        ? loadGuideSessionContext({ scope: guideRuntimeIntegration, sessionId: userId, experience: publishedExperience.experience })
+        : saveGuideSessionContext({ scope: guideRuntimeIntegration, sessionId: userId, experience: publishedExperience.experience, context: guideContextRequest });
+    } catch (error) {
+      if (error instanceof GuideSessionContextError) return res.status(400).json({ error: 'Guide session context is invalid.', code: error.code, conversation_session: publicSession.token });
+      console.error('GUIDE_SESSION_CONTEXT_UNAVAILABLE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+      return res.status(503).json({ error: 'AI Guide session is temporarily unavailable.', conversation_session: publicSession.token });
+    }
     const inboxState = await persistSamcheguideInbound({
       externalSessionId: userId,
       content: cleanText,
@@ -1123,10 +1148,11 @@ app.post("/chat", async (req, res) => {
           conversation_session: publicSession.token,
         });
       }
+      const guideContextSummary = guideSessionContext ? buildGuideSessionContextSummary({ experience: publishedExperience.experience, context: guideSessionContext }) : '';
       const runtimeSystemInstruction = buildTenantRuntimeSystemInstruction({
         persona: runtime.persona,
         knowledgeContext: runtime.knowledge.knowledgeContext,
-        channelRules: "Return safe, readable HTML suitable for the AI Guide interface. Reply in the customer's language.",
+        channelRules: "Return safe, readable HTML suitable for the AI Guide interface. Reply in the customer's language." + (guideContextSummary ? `\n\nServer-validated Guide session context:\n${guideContextSummary}` : ''),
       });
       console.info(
         'KNOWLEDGE_RUNTIME_CONTEXT channel=SAMCHEGUIDE active_configuration=' + (runtime.knowledge.activeConfiguration ? '1' : '0') +

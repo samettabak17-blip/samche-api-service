@@ -62,4 +62,14 @@ it('defaults to a SamChe-managed domain and submits a slug without customer DNS 
   await waitFor(() => expect(api.createGuideDomain).toHaveBeenCalledWith('tenant-a', 'assistant-a', { domain_mode: 'MANAGED', slug: 'tenant-a', channel_id: 'channel-a' }));
 });
 
+it('offers a configuration-driven three-module Guide editor without provider controls', async () => {
+  renderPage();
+  expect((await screen.findAllByText('Roadmap')).length).toBeGreaterThan(0);
+  expect(screen.getByText('Interactive Tool / Calculator')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Add roadmap step' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Add tool field' })).toBeVisible();
+  expect(screen.getAllByText('AI Assistant').length).toBeGreaterThan(0);
+  expect(screen.queryByRole('combobox', { name: /provider|model|vertex/i })).not.toBeInTheDocument();
+});
+
 afterEach(() => { cleanup(); vi.clearAllMocks(); });

@@ -18,6 +18,7 @@ import { useTenant } from "../tenants/tenant-context";
 import type {
   GuideDomain,
   GuideExperienceData,
+  GuideExperienceField,
   GuideExperienceVersion,
 } from "../../types/api";
 
@@ -50,9 +51,15 @@ const defaults: GuideExperienceData = {
     header_style: "STANDARD",
     panel_style: "CARD",
   },
-  modules: { chat: true, guide: true, calculator: false, ctas: true },
+  modules: { chat: true, guide: true, calculator: true, ctas: true },
+  hero: { title: "How can we help?", message: "Choose a path or ask a question to get started.", cta_label: "" },
+  roadmap: { enabled: true, title: "Your roadmap", description: "Share a few details and we will help shape the next step.", steps: [{ id: "goal", label: "What would you like to achieve?", description: "", input_type: "TEXT", required: true, options: [], min: null, max: null, unit: "" }] },
+  interactive_tool: { enabled: true, title: "Planning snapshot", description: "Capture your indicative budget to share with the assistant.", currency: "", result_label: "Your planning snapshot", fields: [{ id: "budget", label: "Indicative budget", description: "", input_type: "NUMBER", required: false, options: [], min: 0, max: 100000000, unit: "" }], calculation: { base_amount: 0, terms: [{ field_id: "budget", kind: "NUMBER_MULTIPLIER", multiplier: 1 }] } },
 };
 const clone = (value: GuideExperienceData) => structuredClone(value);
+const newRoadmapStep = (): GuideExperienceField => ({ id: `step_${Date.now()}`, label: "New roadmap step", description: "", input_type: "TEXT", required: false, options: [], min: null, max: null, unit: "" });
+const newToolField = (): GuideExperienceField => ({ id: `field_${Date.now()}`, label: "New tool field", description: "", input_type: "NUMBER", required: false, options: [], min: 0, max: 100000000, unit: "" });
+const optionsFromLabels = (value: string) => value.split(',').map((label) => label.trim()).filter(Boolean).slice(0, 20).map((label, index) => ({ value: `${label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'option'}_${index + 1}`.slice(0, 40), label }));
 const guideDomainFailureMessage = (error: unknown, fallback: string) => {
   const code =
     error instanceof ApiError &&
@@ -122,6 +129,11 @@ function ExperiencePreview({
         ) : null}
         <h2 className="text-xl font-semibold">{experience.welcome_title}</h2>
         <p className="text-sm leading-6">{experience.welcome_message}</p>
+        <div className="grid grid-cols-3 gap-2 text-center text-xs font-semibold">
+          {experience.modules.guide ? <span className="rounded-lg border p-2" style={{ borderColor: theme.border_color }}>Roadmap</span> : null}
+          {experience.modules.calculator ? <span className="rounded-lg border p-2" style={{ borderColor: theme.border_color }}>Interactive Tool</span> : null}
+          {experience.modules.chat ? <span className="rounded-lg border p-2" style={{ borderColor: theme.border_color }}>AI Assistant</span> : null}
+        </div>
         <p
           className="rounded-xl border p-3 text-sm"
           style={{
@@ -129,7 +141,7 @@ function ExperiencePreview({
             background: theme.surface_color,
           }}
         >
-          {experience.empty_state_copy}
+          {experience.roadmap.title} · {experience.interactive_tool.title}
         </p>
         <button
           type="button"
@@ -345,6 +357,30 @@ export function GuideExperiencePage() {
       | "welcome_message",
     value: string,
   ) => setDraft((current) => ({ ...current, [key]: value }));
+  const updateRoadmapStep = (index: number, patch: Partial<GuideExperienceField>) =>
+    setDraft((current) => ({
+      ...current,
+      roadmap: { ...current.roadmap, steps: current.roadmap.steps.map((step, itemIndex) => itemIndex === index ? { ...step, ...patch } : step) },
+    }));
+  const updateToolField = (index: number, patch: Partial<GuideExperienceField>) =>
+    setDraft((current) => ({
+      ...current,
+      interactive_tool: { ...current.interactive_tool, fields: current.interactive_tool.fields.map((field, itemIndex) => itemIndex === index ? { ...field, ...patch } : field) },
+    }));
+  const setToolMultiplier = (fieldId: string, multiplier: number) =>
+    setDraft((current) => ({
+      ...current,
+      interactive_tool: {
+        ...current.interactive_tool,
+        calculation: {
+          ...current.interactive_tool.calculation,
+          terms: [
+            ...current.interactive_tool.calculation.terms.filter((term) => term.field_id !== fieldId),
+            { field_id: fieldId, kind: 'NUMBER_MULTIPLIER', multiplier },
+          ],
+        },
+      },
+    }));
   if (!canManage)
     return (
       <EmptyState
@@ -359,8 +395,8 @@ export function GuideExperiencePage() {
         <p className="eyebrow">AI Guide</p>
         <h1 className="page-title mt-2">Guide Experience</h1>
       <p className="mt-2 text-sm text-stone-400">
-        Visual identity and public copy only. Provider, model and runtime
-        behavior stay platform controlled.
+        Configure customer-facing branding, Roadmap and Interactive Tool.
+        Provider, model and runtime behavior stay platform controlled.
       </p>
       <section className="panel mt-4 space-y-2 p-4" aria-label="Publication diagnostics summary">
         <p className="dashboard-section-label">Publication diagnostics</p>
@@ -425,6 +461,41 @@ export function GuideExperiencePage() {
               }
             />
           </DashboardField>
+          <section className="space-y-4 rounded-xl border border-line p-4" aria-label="Guide hero configuration">
+            <p className="dashboard-section-label">Hero</p>
+            <DashboardField label="Hero title">
+              <DashboardInput value={draft.hero.title} onChange={(event) => setDraft((current) => ({ ...current, hero: { ...current.hero, title: event.target.value } }))} />
+            </DashboardField>
+            <DashboardField label="Hero message">
+              <DashboardTextarea value={draft.hero.message} onChange={(event) => setDraft((current) => ({ ...current, hero: { ...current.hero, message: event.target.value } }))} />
+            </DashboardField>
+          </section>
+          <section className="space-y-4 rounded-xl border border-line p-4" aria-label="Roadmap configuration">
+            <div className="flex items-center justify-between gap-3"><p className="dashboard-section-label">Roadmap</p><DashboardCheckbox label="Enabled" checked={draft.modules.guide} onChange={(event) => setDraft((current) => ({ ...current, modules: { ...current.modules, guide: event.target.checked }, roadmap: { ...current.roadmap, enabled: event.target.checked } }))} /></div>
+            <DashboardField label="Roadmap title"><DashboardInput value={draft.roadmap.title} onChange={(event) => setDraft((current) => ({ ...current, roadmap: { ...current.roadmap, title: event.target.value } }))} /></DashboardField>
+            <DashboardField label="Roadmap description"><DashboardTextarea value={draft.roadmap.description} onChange={(event) => setDraft((current) => ({ ...current, roadmap: { ...current.roadmap, description: event.target.value } }))} /></DashboardField>
+            <div className="space-y-3">
+              {draft.roadmap.steps.map((step, index) => <div key={step.id} className="grid gap-2 rounded-lg border border-line p-3 sm:grid-cols-[1fr_10rem_auto]">
+                <DashboardInput aria-label={`Roadmap step ${index + 1} label`} value={step.label} onChange={(event) => updateRoadmapStep(index, { label: event.target.value })} />
+                <DashboardSelect aria-label={`Roadmap step ${index + 1} type`} value={step.input_type} onChange={(event) => updateRoadmapStep(index, { input_type: event.target.value as GuideExperienceField['input_type'], options: event.target.value === 'SELECT' ? [{ value: 'option_1', label: 'Option 1' }] : [] })}><option value="TEXT">Free text</option><option value="NUMBER">Number</option><option value="SELECT">Options</option><option value="BOOLEAN">Yes / No</option></DashboardSelect>
+                <DashboardButton type="button" variant="outline" disabled={draft.roadmap.steps.length <= 1} onClick={() => setDraft((current) => ({ ...current, roadmap: { ...current.roadmap, steps: current.roadmap.steps.filter((_, itemIndex) => itemIndex !== index) } }))}>Remove</DashboardButton>
+              </div>)}
+              <DashboardButton type="button" variant="outline" disabled={draft.roadmap.steps.length >= 12} onClick={() => setDraft((current) => ({ ...current, roadmap: { ...current.roadmap, steps: [...current.roadmap.steps, newRoadmapStep()] } }))}>Add roadmap step</DashboardButton>
+              {draft.roadmap.steps.map((step, index) => step.input_type === "SELECT" ? <DashboardField key={`${step.id}-options`} label={`Options for ${step.label}`} helper="Comma-separated labels"><DashboardInput value={step.options.map((option) => option.label).join(", ")} onChange={(event) => updateRoadmapStep(index, { options: optionsFromLabels(event.target.value) })} placeholder="Corporate event, Gala dinner" /></DashboardField> : null)}
+            </div>
+          </section>
+          <section className="space-y-4 rounded-xl border border-line p-4" aria-label="Interactive Tool configuration">
+            <div className="flex items-center justify-between gap-3"><p className="dashboard-section-label">Interactive Tool / Calculator</p><DashboardCheckbox label="Enabled" checked={draft.modules.calculator} onChange={(event) => setDraft((current) => ({ ...current, modules: { ...current.modules, calculator: event.target.checked }, interactive_tool: { ...current.interactive_tool, enabled: event.target.checked } }))} /></div>
+            <div className="grid gap-4 sm:grid-cols-2"><DashboardField label="Tool title"><DashboardInput value={draft.interactive_tool.title} onChange={(event) => setDraft((current) => ({ ...current, interactive_tool: { ...current.interactive_tool, title: event.target.value } }))} /></DashboardField><DashboardField label="Currency (optional)"><DashboardInput value={draft.interactive_tool.currency} placeholder="AED" onChange={(event) => setDraft((current) => ({ ...current, interactive_tool: { ...current.interactive_tool, currency: event.target.value.toUpperCase() } }))} /></DashboardField></div>
+            <DashboardField label="Tool description"><DashboardTextarea value={draft.interactive_tool.description} onChange={(event) => setDraft((current) => ({ ...current, interactive_tool: { ...current.interactive_tool, description: event.target.value } }))} /></DashboardField>
+            <DashboardField label="Base estimate"><DashboardInput type="number" value={String(draft.interactive_tool.calculation.base_amount)} onChange={(event) => setDraft((current) => ({ ...current, interactive_tool: { ...current.interactive_tool, calculation: { ...current.interactive_tool.calculation, base_amount: Number(event.target.value || 0) } } }))} /></DashboardField>
+            <div className="space-y-3">{draft.interactive_tool.fields.map((field, index) => <div key={field.id} className="grid gap-2 rounded-lg border border-line p-3 sm:grid-cols-[1fr_10rem_auto]"><DashboardInput aria-label={`Tool field ${index + 1} label`} value={field.label} onChange={(event) => updateToolField(index, { label: event.target.value })} /><DashboardSelect aria-label={`Tool field ${index + 1} type`} value={field.input_type} onChange={(event) => updateToolField(index, { input_type: event.target.value as GuideExperienceField['input_type'], options: event.target.value === 'SELECT' ? [{ value: 'option_1', label: 'Option 1' }] : [] })}><option value="NUMBER">Number</option><option value="SELECT">Options</option><option value="BOOLEAN">Yes / No</option></DashboardSelect><DashboardButton type="button" variant="outline" disabled={draft.interactive_tool.fields.length <= 1} onClick={() => setDraft((current) => ({ ...current, interactive_tool: { ...current.interactive_tool, fields: current.interactive_tool.fields.filter((_, itemIndex) => itemIndex !== index), calculation: { ...current.interactive_tool.calculation, terms: current.interactive_tool.calculation.terms.filter((term) => term.field_id !== field.id) } } }))}>Remove</DashboardButton></div>)}<DashboardButton type="button" variant="outline" disabled={draft.interactive_tool.fields.length >= 12} onClick={() => setDraft((current) => ({ ...current, interactive_tool: { ...current.interactive_tool, fields: [...current.interactive_tool.fields, newToolField()] } }))}>Add tool field</DashboardButton>{draft.interactive_tool.fields.map((field, index) => field.input_type === "SELECT" ? <DashboardField key={`${field.id}-options`} label={`Options for ${field.label}`} helper="Comma-separated labels"><DashboardInput value={field.options.map((option) => option.label).join(", ")} onChange={(event) => updateToolField(index, { options: optionsFromLabels(event.target.value) })} placeholder="Basic, Premium" /></DashboardField> : field.input_type === "NUMBER" ? <DashboardField key={`${field.id}-multiplier`} label={`Estimate per ${field.label}`} helper="Safe deterministic numeric multiplier"><DashboardInput type="number" value={String(draft.interactive_tool.calculation.terms.find((term) => term.field_id === field.id && term.kind === "NUMBER_MULTIPLIER")?.multiplier ?? 0)} onChange={(event) => setToolMultiplier(field.id, Number(event.target.value || 0))} /></DashboardField> : null)}</div>
+          </section>
+          <section className="space-y-3 rounded-xl border border-line p-4" aria-label="AI Assistant configuration">
+            <p className="dashboard-section-label">AI Assistant</p>
+            <DashboardCheckbox label="Enable AI Assistant" checked={draft.modules.chat} onChange={(event) => setDraft((current) => ({ ...current, modules: { ...current.modules, chat: event.target.checked } }))} />
+            <p className="text-xs text-stone-400">The assistant uses the platform-selected runtime together with the active Business Profile, Assistant Configuration and approved tenant knowledge. Provider and model selection are not customer controls.</p>
+          </section>
           <div className="grid gap-4 sm:grid-cols-2">
             <DashboardField
               label="Brand logo"

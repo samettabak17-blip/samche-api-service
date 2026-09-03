@@ -3,48 +3,81 @@ try { session = window.sessionStorage?.getItem('samcheguide-session') || ''; } c
 
 const root = document.querySelector('#guide-root');
 let guideInitialized = false;
+let experience = null;
+let guideState = null;
+let messages = [];
+
+const MODULES = Object.freeze({ ROADMAP: 'ROADMAP', INTERACTIVE_TOOL: 'INTERACTIVE_TOOL', AI_ASSISTANT: 'AI_ASSISTANT' });
+const text = (value, fallback = '') => typeof value === 'string' ? value : fallback;
+const element = (tag, className, content) => { const node = document.createElement(tag); if (className) node.className = className; if (content !== undefined) node.textContent = String(content); return node; };
+const clear = (node) => node.replaceChildren();
+const safeNumber = (value) => typeof value === 'number' && Number.isFinite(value) ? value : 0;
+
 const showGuideError = () => {
   if (guideInitialized || !root) return;
   guideInitialized = true;
-  root.innerHTML = '<p class="guide-error">Guide experience is temporarily unavailable.</p>';
+  root.replaceChildren(element('main', 'guide-safe-error', 'Guide experience is temporarily unavailable. Please refresh or try again shortly.'));
 };
 const initializationTimeout = window.setTimeout(showGuideError, 10000);
-const text = (value) => String(value ?? '');
-const html = (strings, ...values) => strings.reduce((result, part, index) => result + part + (index < values.length ? values[index] : ''), '');
 
-function setAsset(element, value, alt) {
-  if (!value) { element.hidden = true; return; }
-  element.src = value; element.alt = alt; element.hidden = false;
+function stateStorageKey() { return `samcheguide-v1-state:${experience?.version ?? 'unknown'}`; }
+function firstAvailableModule() { if (experience?.modules?.guide) return MODULES.ROADMAP; if (experience?.modules?.calculator) return MODULES.INTERACTIVE_TOOL; return MODULES.AI_ASSISTANT; }
+function loadState() {
+  const fallback = { active_module: firstAvailableModule(), roadmap: {}, tool: {}, roadmap_step: 0 };
+  try {
+    const saved = JSON.parse(window.sessionStorage?.getItem(stateStorageKey()) || '{}');
+    if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return fallback;
+    return { active_module: Object.values(MODULES).includes(saved.active_module) ? saved.active_module : fallback.active_module, roadmap: saved.roadmap && typeof saved.roadmap === 'object' && !Array.isArray(saved.roadmap) ? saved.roadmap : {}, tool: saved.tool && typeof saved.tool === 'object' && !Array.isArray(saved.tool) ? saved.tool : {}, roadmap_step: Number.isInteger(saved.roadmap_step) && saved.roadmap_step >= 0 ? saved.roadmap_step : 0 };
+  } catch { return fallback; }
+}
+function persistState() { try { window.sessionStorage?.setItem(stateStorageKey(), JSON.stringify(guideState)); } catch {} }
+function guideContext() { return { active_module: guideState.active_module, roadmap: guideState.roadmap, tool: guideState.tool }; }
+
+function setAsset(image, value, alt) { if (!value) { image.hidden = true; return; } image.src = value; image.alt = alt; image.hidden = false; image.addEventListener('error', () => { image.hidden = true; }, { once: true }); }
+function moduleLabel(type) { if (type === MODULES.ROADMAP) return text(experience.roadmap?.title, 'Roadmap'); if (type === MODULES.INTERACTIVE_TOOL) return text(experience.interactive_tool?.title, 'Interactive tool'); return text(experience.assistant_display_name, 'AI Assistant'); }
+function moduleIcon(type) { return type === MODULES.ROADMAP ? '◫' : type === MODULES.INTERACTIVE_TOOL ? '◈' : '✦'; }
+function enabledModules() { return [experience.modules?.guide && MODULES.ROADMAP, experience.modules?.calculator && MODULES.INTERACTIVE_TOOL, experience.modules?.chat && MODULES.AI_ASSISTANT].filter(Boolean); }
+
+function inputForField(field, values, onChange) {
+  const wrapper = element('label', 'guide-field'); wrapper.append(element('span', 'guide-field__label', field.label)); if (field.description) wrapper.append(element('span', 'guide-field__hint', field.description));
+  let control;
+  if (field.input_type === 'SELECT') { control = document.createElement('select'); control.append(new Option(`Select ${field.label}`, '')); for (const option of field.options || []) control.append(new Option(option.label, option.value)); control.value = text(values[field.id]); }
+  else if (field.input_type === 'BOOLEAN') { control = document.createElement('input'); control.type = 'checkbox'; control.checked = values[field.id] === true; wrapper.classList.add('guide-field--boolean'); }
+  else { control = document.createElement('input'); control.type = field.input_type === 'NUMBER' ? 'number' : 'text'; if (field.input_type === 'NUMBER') { if (field.min !== null) control.min = String(field.min); if (field.max !== null) control.max = String(field.max); control.step = 'any'; } control.maxLength = field.input_type === 'TEXT' ? 240 : 40; control.value = values[field.id] ?? ''; control.placeholder = field.unit ? `${field.label} (${field.unit})` : field.label; }
+  control.required = field.required === true;
+  control.addEventListener('change', () => { const value = field.input_type === 'BOOLEAN' ? control.checked : field.input_type === 'NUMBER' ? (control.value === '' ? undefined : Number(control.value)) : control.value; if (value === undefined || value === '') delete values[field.id]; else values[field.id] = value; onChange(); });
+  wrapper.append(control); return wrapper;
+}
+function roadmapValueValid(field, value) { if (!field.required && (value === undefined || value === null || value === '')) return true; if (field.input_type === 'NUMBER') return typeof value === 'number' && Number.isFinite(value) && (field.min === null || value >= field.min) && (field.max === null || value <= field.max); if (field.input_type === 'SELECT') return field.options.some((option) => option.value === value); if (field.input_type === 'BOOLEAN') return typeof value === 'boolean'; return typeof value === 'string' && value.trim().length > 0 && value.length <= 240; }
+function displayFieldValue(field, value) { if (field.input_type === 'SELECT') return field.options.find((option) => option.value === value)?.label || value; if (field.input_type === 'BOOLEAN') return value ? 'Yes' : 'No'; return String(value); }
+
+function renderRoadmap(container) {
+  const roadmap = experience.roadmap || { steps: [] }; const steps = roadmap.steps || []; const current = Math.min(Math.max(guideState.roadmap_step, 0), Math.max(steps.length - 1, 0)); guideState.roadmap_step = current;
+  container.append(element('p', 'guide-module__eyebrow', 'ROADMAP'), element('h2', 'guide-module__title', roadmap.title || 'Your roadmap')); if (roadmap.description) container.append(element('p', 'guide-module__description', roadmap.description));
+  const progress = element('div', 'guide-progress'); progress.setAttribute('role', 'progressbar'); progress.setAttribute('aria-valuemin', '0'); progress.setAttribute('aria-valuemax', String(steps.length)); progress.setAttribute('aria-valuenow', String(current + 1)); const bar = element('span', 'guide-progress__bar'); bar.style.width = `${steps.length ? ((current + 1) / steps.length) * 100 : 100}%`; progress.append(bar); container.append(progress);
+  if (!steps.length) { container.append(element('p', 'guide-empty-state', 'This roadmap is not available yet.')); return; }
+  const step = steps[current]; container.append(element('p', 'guide-step-count', `Step ${current + 1} of ${steps.length}`)); const form = element('form', 'guide-step-card'); form.noValidate = true; form.append(inputForField(step, guideState.roadmap, () => { persistState(); renderActiveModule(); })); const validation = element('p', 'guide-validation', ''); validation.hidden = true; form.append(validation);
+  const actions = element('div', 'guide-actions'); const back = element('button', 'guide-button guide-button--secondary', 'Back'); back.type = 'button'; back.disabled = current === 0; back.addEventListener('click', () => { guideState.roadmap_step = Math.max(0, current - 1); persistState(); renderActiveModule(); }); const next = element('button', 'guide-button', current === steps.length - 1 ? 'Review roadmap' : 'Next'); next.type = 'submit'; form.addEventListener('submit', (event) => { event.preventDefault(); if (!roadmapValueValid(step, guideState.roadmap[step.id])) { validation.textContent = `Please complete ${step.label}.`; validation.hidden = false; return; } validation.hidden = true; if (current < steps.length - 1) guideState.roadmap_step = current + 1; persistState(); renderActiveModule(); }); actions.append(back, next); form.append(actions); container.append(form);
+  if (current === steps.length - 1 && Object.keys(guideState.roadmap).length) { const summary = element('section', 'guide-summary'); summary.append(element('h3', '', 'Planning summary')); for (const item of steps) if (guideState.roadmap[item.id] !== undefined) summary.append(element('p', '', `${item.label}: ${displayFieldValue(item, guideState.roadmap[item.id])}`)); const ask = element('button', 'guide-button', 'Discuss this with the assistant'); ask.type = 'button'; ask.addEventListener('click', () => { guideState.active_module = MODULES.AI_ASSISTANT; persistState(); renderActiveModule(); }); summary.append(ask); container.append(summary); }
 }
 
-export function applyExperience(experience) {
-  if (!root || !experience || typeof experience !== 'object') throw new Error('invalid guide experience');
-  const theme = experience.theme || {};
-  const styles = document.documentElement.style;
-  styles.setProperty('--guide-primary', theme.primary_color || '#1F4B99');
-  styles.setProperty('--guide-accent', theme.accent_color || '#4F7FD8');
-  styles.setProperty('--guide-background', theme.background_color || '#F7F8FA');
-  styles.setProperty('--guide-foreground', theme.foreground_color || '#18212F');
-  styles.setProperty('--guide-surface', theme.surface_color || '#FFFFFF');
-  styles.setProperty('--guide-border', theme.border_color || '#D9E0EA');
-  styles.setProperty('--guide-radius', theme.corner_radius === 'LARGE' ? '1.25rem' : theme.corner_radius === 'SMALL' ? '.5rem' : '.85rem');
-  document.title = text(experience.brand_name || 'AI Guide');
-  root.innerHTML = html`<section class="guide-shell"><section class="guide-panel" aria-label="${text(experience.brand_name || 'AI Guide')}"><header class="guide-header"><img class="guide-logo" hidden /><img class="guide-avatar" hidden /><div><p class="guide-name"></p><p class="guide-status"></p></div></header><section class="guide-copy"><h1></h1><p></p></section><section class="guide-messages" aria-live="polite"><p class="guide-empty"></p></section><form class="guide-form"><input aria-label="Message" required maxlength="2000" /><button type="submit"></button></form></section></section>`;
-  const logo = root.querySelector('.guide-logo'); const avatar = root.querySelector('.guide-avatar');
-  setAsset(logo, experience.logo_url, `${text(experience.brand_name)} logo`); setAsset(avatar, experience.avatar_url, `${text(experience.assistant_display_name)} avatar`);
-  root.querySelector('.guide-name').textContent = text(experience.assistant_display_name || experience.brand_name || 'AI Guide');
-  root.querySelector('.guide-status').textContent = text(experience.assistant_status_label || 'Online');
-  root.querySelector('.guide-copy h1').textContent = text(experience.welcome_title || 'How can we help?');
-  root.querySelector('.guide-copy p').textContent = text(experience.welcome_message || 'Ask a question to get started.');
-  root.querySelector('.guide-empty').textContent = text(experience.empty_state_copy || 'Start a conversation when you are ready.');
-  root.querySelector('.guide-form input').placeholder = text(experience.input_placeholder || 'Type your message');
-  root.querySelector('.guide-form button').textContent = text(experience.launcher_label || 'Send');
-  root.querySelector('.guide-form').addEventListener('submit', submitMessage);
-  guideInitialized = true;
-  window.clearTimeout(initializationTimeout);
-}
+function calculateTool() { const tool = experience.interactive_tool; let amount = safeNumber(tool.calculation?.base_amount); for (const term of tool.calculation?.terms || []) { const value = guideState.tool[term.field_id]; if (term.kind === 'NUMBER_MULTIPLIER' && typeof value === 'number') amount += value * safeNumber(term.multiplier); else if (term.kind === 'BOOLEAN_AMOUNT' && value === true) amount += safeNumber(term.amount); else if (term.kind === 'SELECT_AMOUNT' && typeof value === 'string') amount += safeNumber(term.amounts?.[value]); } return Number(amount.toFixed(2)); }
+function renderInteractiveTool(container) { const tool = experience.interactive_tool || { fields: [], calculation: { terms: [] } }; container.append(element('p', 'guide-module__eyebrow', 'INTERACTIVE TOOL'), element('h2', 'guide-module__title', tool.title || 'Interactive tool')); if (tool.description) container.append(element('p', 'guide-module__description', tool.description)); const form = element('form', 'guide-tool-form'); form.noValidate = true; for (const field of tool.fields || []) form.append(inputForField(field, guideState.tool, () => { persistState(); renderActiveModule(); })); const result = element('section', 'guide-tool-result'); result.append(element('p', 'guide-tool-result__label', tool.result_label || 'Planning snapshot')); const amount = calculateTool(); result.append(element('strong', 'guide-tool-result__amount', `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(amount)}${tool.currency ? ` ${tool.currency}` : ''}`), element('p', 'guide-tool-result__notice', 'Indicative estimate only. Final scope and pricing are confirmed after review.')); form.append(result); const assistant = element('button', 'guide-button', 'Ask the assistant about this'); assistant.type = 'button'; assistant.addEventListener('click', () => { guideState.active_module = MODULES.AI_ASSISTANT; persistState(); renderActiveModule(); }); form.append(assistant); container.append(form); }
 
-function addMessage(value, kind) { const item = document.createElement('p'); item.className = `guide-message guide-message--${kind}`; item.textContent = value; root.querySelector('.guide-messages').append(item); item.scrollIntoView({ block: 'end' }); }
-async function submitMessage(event) { event.preventDefault(); const input = event.currentTarget.querySelector('input'); const value = input.value.trim(); if (!value) return; input.value = ''; addMessage(value, 'user'); const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(session ? { 'X-Samcheguide-Session': session } : {}) }, body: JSON.stringify({ text: value }) }); const payload = await response.json(); if (payload.conversation_session) { session = payload.conversation_session; try { window.sessionStorage?.setItem('samcheguide-session', session); } catch {} } const reply = payload?.candidates?.[0]?.content?.parts?.[0]?.text; addMessage(response.ok && reply ? reply.replace(/<[^>]+>/g, '') : 'The guide is temporarily unavailable. Please try again.', 'assistant'); }
+function addMessage(value, kind) { messages.push({ value: text(value), kind }); const board = root.querySelector('.guide-chat-messages'); if (!board) return; const item = element('p', `guide-message guide-message--${kind}`, value); board.append(item); item.scrollIntoView({ block: 'end' }); }
+async function submitMessage(event) { event.preventDefault(); const input = event.currentTarget.querySelector('textarea'); const value = input.value.trim(); if (!value) return; input.value = ''; addMessage(value, 'user'); const submit = event.currentTarget.querySelector('button[type="submit"]'); submit.disabled = true; try { const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(session ? { 'X-Samcheguide-Session': session } : {}) }, body: JSON.stringify({ text: value, guide_context: guideContext() }) }); const payload = await response.json(); if (payload.conversation_session) { session = payload.conversation_session; try { window.sessionStorage?.setItem('samcheguide-session', session); } catch {} } const reply = payload?.candidates?.[0]?.content?.parts?.[0]?.text; addMessage(response.ok && reply ? reply.replace(/<[^>]+>/g, '') : 'The guide is temporarily unavailable. Please try again.', 'assistant'); } catch { addMessage('The guide is temporarily unavailable. Please try again.', 'assistant'); } finally { submit.disabled = false; input.focus(); } }
+function renderAssistant(container) { container.append(element('p', 'guide-module__eyebrow', 'AI ASSISTANT'), element('h2', 'guide-module__title', experience.assistant_display_name || 'AI Assistant'), element('p', 'guide-module__description', experience.empty_state_copy || 'Ask a question or continue from your roadmap and tool selections.')); const chat = element('section', 'guide-chat'); const board = element('section', 'guide-chat-messages'); board.setAttribute('aria-live', 'polite'); if (!messages.length) board.append(element('p', 'guide-empty-state', experience.welcome_message || 'How can we help?')); for (const message of messages) board.append(element('p', `guide-message guide-message--${message.kind}`, message.value)); chat.append(board); const form = element('form', 'guide-chat-form'); const input = document.createElement('textarea'); input.rows = 2; input.maxLength = 2000; input.required = true; input.placeholder = experience.input_placeholder || 'Type your message'; input.setAttribute('aria-label', 'Message'); const button = element('button', 'guide-button guide-chat-form__send', experience.launcher_label || 'Send'); button.type = 'submit'; form.append(input, button); form.addEventListener('submit', submitMessage); chat.append(form); container.append(chat); }
+
+function renderActiveModule() { const outlet = root.querySelector('.guide-module'); if (!outlet) return; clear(outlet); if (guideState.active_module === MODULES.ROADMAP) renderRoadmap(outlet); else if (guideState.active_module === MODULES.INTERACTIVE_TOOL) renderInteractiveTool(outlet); else renderAssistant(outlet); for (const button of root.querySelectorAll('[data-guide-module]')) { const active = button.dataset.guideModule === guideState.active_module; button.classList.toggle('is-active', active); button.setAttribute('aria-current', active ? 'page' : 'false'); } }
+
+export function applyExperience(value) {
+  if (!root || !value || typeof value !== 'object') throw new Error('invalid guide experience');
+  experience = value; guideState = loadState(); if (!enabledModules().includes(guideState.active_module)) guideState.active_module = firstAvailableModule();
+  const theme = experience.theme || {}; const styles = document.documentElement.style; styles.setProperty('--guide-primary', theme.primary_color || '#1F4B99'); styles.setProperty('--guide-accent', theme.accent_color || '#4F7FD8'); styles.setProperty('--guide-background', theme.background_color || '#0E1522'); styles.setProperty('--guide-foreground', theme.foreground_color || '#F8FAFC'); styles.setProperty('--guide-surface', theme.surface_color || '#18212F'); styles.setProperty('--guide-border', theme.border_color || '#334155'); styles.setProperty('--guide-radius', theme.corner_radius === 'LARGE' ? '1.4rem' : theme.corner_radius === 'SMALL' ? '.65rem' : '1rem'); document.title = text(experience.brand_name, 'AI Guide');
+  const shell = element('main', 'guide-shell'); const canvas = element('section', 'guide-canvas'); canvas.setAttribute('aria-label', text(experience.brand_name, 'AI Guide'));
+  const header = element('header', 'guide-header'); const identity = element('div', 'guide-identity'); const logo = document.createElement('img'); logo.className = 'guide-logo'; logo.hidden = true; setAsset(logo, experience.logo_url, `${text(experience.brand_name)} logo`); identity.append(logo); const names = element('div', 'guide-names'); names.append(element('p', 'guide-brand-name', experience.brand_name || 'AI Guide'), element('p', 'guide-status', experience.assistant_status_label || 'Online')); identity.append(names); header.append(identity); const avatar = document.createElement('img'); avatar.className = 'guide-avatar'; avatar.hidden = true; setAsset(avatar, experience.avatar_url, `${text(experience.assistant_display_name)} avatar`); header.append(avatar); canvas.append(header);
+  const hero = element('section', 'guide-hero'); hero.append(element('p', 'guide-hero__eyebrow', 'AI GUIDE'), element('h1', 'guide-hero__title', experience.hero?.title || experience.welcome_title || 'How can we help?'), element('p', 'guide-hero__message', experience.hero?.message || experience.welcome_message || 'Choose a path or ask a question to get started.')); canvas.append(hero); const outlet = element('section', 'guide-module'); canvas.append(outlet);
+  const navigation = element('nav', 'guide-navigation'); navigation.setAttribute('aria-label', 'Guide experiences'); for (const module of enabledModules()) { const button = element('button', 'guide-navigation__item'); button.type = 'button'; button.dataset.guideModule = module; button.append(element('span', 'guide-navigation__icon', moduleIcon(module)), element('span', 'guide-navigation__label', moduleLabel(module))); button.addEventListener('click', () => { guideState.active_module = module; persistState(); renderActiveModule(); }); navigation.append(button); } canvas.append(navigation); shell.append(canvas); root.replaceChildren(shell); guideInitialized = true; window.clearTimeout(initializationTimeout); renderActiveModule();
+}
 
 fetch('/guide/bootstrap', { cache: 'no-store' }).then(async (response) => { if (!response.ok) throw new Error('unavailable'); return response.json(); }).then((payload) => applyExperience(payload?.experience)).catch(showGuideError);
