@@ -41,10 +41,9 @@ export function configuredManagedGuideDomainSuffix(environment = process.env) {
     environment.RENDER_EXTERNAL_HOSTNAME,
   ].map((value) => String(value ?? '').toLowerCase());
   const staging = environmentMarkers.some((value) => value === 'staging' || value.includes('staging'));
-  const suffix = staging && configured === 'guide.samchecompany.com'
-    ? 'guide.staging.samchecompany.com'
-    : configured
-    || ((environment.NODE_ENV || environment.APP_ENV) === 'production'
+  const suffix = staging
+    ? (configured === 'guide.samchecompany.com' || !configured ? 'guide.staging.samchecompany.com' : configured)
+    : configured || ((environment.NODE_ENV || environment.APP_ENV) === 'production'
       ? 'guide.samchecompany.com'
       : 'guide.staging.samchecompany.com');
   return normalizeGuideHostname(suffix);
