@@ -55,7 +55,7 @@ import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext
 import { buildTenantRuntimeSystemInstruction, resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
 import { resolveChannelAssistantRuntime } from "./services/assistant-runtime-resolution-service.js";
 import { resolvePublishedGuideExperience } from "./services/guide-experience-service.js";
-import { resolveGuideRuntimeScopeFromRequest } from './services/guide-domain-service.js';
+import { configuredManagedGuideDomainSuffix, resolveGuideRuntimeScopeFromRequest } from './services/guide-domain-service.js';
 import { getPublicGuideExperienceAsset } from "./services/guide-experience-asset-service.js";
 import { samcheguideRuntimeSessionKey } from "./services/samcheguide-runtime-session-service.js";
 import { buildTenantFollowUpRequest } from "./services/tenant-follow-up-service.js";
@@ -115,6 +115,7 @@ app.get("/api/v1/health", (req, res) => {
     status: "ok",
     timestamp: new Date().toISOString(),
     revision: process.env.RENDER_GIT_COMMIT ?? process.env.GIT_COMMIT_SHA ?? null,
+    managed_guide_domain_suffix: configuredManagedGuideDomainSuffix(),
     onboarding_outbox_worker: customerInvitationOutboxStartup?.status() ?? 'NOT_STARTED',
     semantic_generation_worker: imageSemanticGenerationWorker?.status?.() ?? { state: 'NOT_STARTED' },
   });

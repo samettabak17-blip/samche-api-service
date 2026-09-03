@@ -33,8 +33,14 @@ export function configuredManagedGuideDomainSuffix(environment = process.env) {
   // The platform may override this value per deployment. The safe default
   // keeps non-production managed hosts out of the production guide namespace.
   const configured = environment.GUIDE_MANAGED_DOMAIN_SUFFIX;
-  const staging = [environment.RENDER_GIT_BRANCH, environment.APP_ENV, environment.NODE_ENV]
-    .some((value) => String(value ?? '').toLowerCase() === 'staging');
+  const environmentMarkers = [
+    environment.RENDER_GIT_BRANCH,
+    environment.APP_ENV,
+    environment.NODE_ENV,
+    environment.RENDER_SERVICE_NAME,
+    environment.RENDER_EXTERNAL_HOSTNAME,
+  ].map((value) => String(value ?? '').toLowerCase());
+  const staging = environmentMarkers.some((value) => value === 'staging' || value.includes('staging'));
   const suffix = staging && configured === 'guide.samchecompany.com'
     ? 'guide.staging.samchecompany.com'
     : configured
