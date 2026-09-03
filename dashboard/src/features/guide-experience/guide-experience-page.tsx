@@ -184,6 +184,7 @@ export function GuideExperiencePage() {
   const [logoCandidates, setLogoCandidates] = useState<string[]>([]);
   const [archiveDomainTarget, setArchiveDomainTarget] =
     useState<GuideDomain | null>(null);
+  const [previewWindow, setPreviewWindow] = useState<Window | null>(null);
   const assistants = useQuery({
     queryKey: ["tenant", tenantId, "assistants"],
     queryFn: () => tenantApi.listAssistants(tenantId),
@@ -275,6 +276,17 @@ export function GuideExperiencePage() {
     },
     onError: () =>
       setFeedback("Guide experience could not be published safely."),
+  });
+  const preview = useMutation({
+    mutationFn: (id: string) => tenantApi.previewGuideExperience(tenantId, assistantId, id),
+    onSuccess: (result) => {
+      const url = `https://${result.hostname}${result.preview_path}`;
+      if (previewWindow && !previewWindow.closed) previewWindow.location.href = url;
+      else window.open(url, "_blank", "noopener,noreferrer");
+      setPreviewWindow(null);
+      setFeedback(`Private draft preview opened. It expires in ${Math.round(result.expires_in_seconds / 60)} minutes.`);
+    },
+    onError: () => { if (previewWindow && !previewWindow.closed) previewWindow.close(); setPreviewWindow(null); setFeedback("Private draft preview could not be opened safely."); },
   });
   const rollback = useMutation({
     mutationFn: (id: string) =>
@@ -635,6 +647,7 @@ export function GuideExperiencePage() {
             {drafts.map((item) => (
               <span key={item.id} className="inline-flex gap-2">
                 <DashboardButton type="button" variant={editingDraftId === item.id ? "selected" : "outline"} onClick={() => { setEditingDraftId(item.id); setDraft(clone(item.experience)); }}>Edit draft v{item.version}</DashboardButton>
+                <DashboardButton type="button" variant="outline" disabled={preview.isPending} onClick={() => { const popup = window.open("about:blank", "_blank", "noopener,noreferrer"); setPreviewWindow(popup); preview.mutate(item.id); }}>Preview draft v{item.version}</DashboardButton>
                 <DashboardButton type="button" variant="primary" disabled={publish.isPending} onClick={() => publish.mutate(item.id)}>Publish draft v{item.version}</DashboardButton>
               </span>
             ))}

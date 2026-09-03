@@ -9,7 +9,7 @@ import type { GuideExperienceData, GuideExperienceVersion } from '../../types/ap
 
 vi.mock('../dashboard/dashboard-api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../dashboard/dashboard-api')>();
-  return { ...actual, tenantApi: { ...actual.tenantApi, listAssistants: vi.fn(), listChannels: vi.fn(), listGuideExperiences: vi.fn(), listGuideDomains: vi.fn(), getGuidePublicationDiagnostics: vi.fn(), createGuideDomain: vi.fn(), verifyGuideDomain: vi.fn(), archiveGuideDomain: vi.fn(), createGuideExperienceDraft: vi.fn(), createRecommendedGuideExperienceDraft: vi.fn(), recommendGuideTheme: vi.fn(), publishGuideExperience: vi.fn(), rollbackGuideExperience: vi.fn(), uploadGuideExperienceAsset: vi.fn() } };
+  return { ...actual, tenantApi: { ...actual.tenantApi, listAssistants: vi.fn(), listChannels: vi.fn(), listGuideExperiences: vi.fn(), listGuideDomains: vi.fn(), getGuidePublicationDiagnostics: vi.fn(), createGuideDomain: vi.fn(), verifyGuideDomain: vi.fn(), archiveGuideDomain: vi.fn(), createGuideExperienceDraft: vi.fn(), createRecommendedGuideExperienceDraft: vi.fn(), recommendGuideTheme: vi.fn(), publishGuideExperience: vi.fn(), previewGuideExperience: vi.fn(), rollbackGuideExperience: vi.fn(), uploadGuideExperienceAsset: vi.fn() } };
 });
 vi.mock('../tenants/tenant-context', async (importOriginal) => ({ ...(await importOriginal<typeof import('../tenants/tenant-context')>()), useTenant: vi.fn() }));
 
@@ -72,6 +72,19 @@ it('offers a configuration-driven three-module Guide editor without provider con
   expect(screen.getByRole('combobox', { name: 'Pricing mode' })).toHaveValue('QUOTE_REQUIRED');
   expect(screen.getAllByText('AI Assistant').length).toBeGreaterThan(0);
   expect(screen.queryByRole('combobox', { name: /provider|model|vertex/i })).not.toBeInTheDocument();
+});
+
+it('offers an authorized real-runtime preview action for a private draft', async () => {
+  const draft: GuideExperienceVersion = { id: 'draft-v10', tenant_id: 'tenant-a', assistant_id: 'assistant-a', version: 10, status: 'DRAFT', experience: { brand_name: 'Tenant', assistant_display_name: 'Assistant', assistant_status_label: 'Online', welcome_title: 'Welcome', welcome_message: 'Hello', input_placeholder: 'Type', launcher_label: 'Send', empty_state_copy: 'Ask', logo_url: null, avatar_url: null, favicon_url: null, theme: { primary_color: '#111111', accent_color: '#222222', background_color: '#333333', foreground_color: '#FFFFFF', surface_color: '#444444', border_color: '#555555', font_family: 'SYSTEM', corner_radius: 'MEDIUM', density: 'COMFORTABLE' }, layout: { preset: 'SERVICE', launcher_style: 'PILL', header_style: 'STANDARD', panel_style: 'CARD' }, modules: { chat: true, guide: true, calculator: true, ctas: true }, hero: { title: 'Welcome', message: 'Hello', cta_label: '' }, roadmap: { enabled: true, title: 'Roadmap', description: '', steps: [] }, interactive_tool: { enabled: true, title: 'Tool', description: '', currency: '', pricing_mode: 'QUOTE_REQUIRED', approved_pricing_source: '', result_label: 'Scope', fields: [], calculation: { base_amount: 0, terms: [] } } } };
+  api.listGuideExperiences.mockResolvedValue([draft]);
+  api.listGuideDomains.mockResolvedValue([{ id: 'domain-a', tenant_id: 'tenant-a', assistant_id: 'assistant-a', channel_id: 'channel-a', hostname: 'guide.tenant.example', domain_mode: 'CUSTOM', status: 'ACTIVE', verification_record_type: 'CNAME', verification_target: 'ingress.example' }]);
+  api.previewGuideExperience.mockResolvedValue({ preview_path: '/?preview=opaque', hostname: 'guide.tenant.example', expires_in_seconds: 600 });
+  const open = vi.spyOn(window, 'open').mockReturnValue({ closed: false, location: { href: '' } } as unknown as Window);
+  renderPage();
+  fireEvent.click(await screen.findByRole('button', { name: 'Preview draft v10' }));
+  await waitFor(() => expect(api.previewGuideExperience).toHaveBeenCalledWith('tenant-a', 'assistant-a', 'draft-v10'));
+  expect(open).toHaveBeenCalledWith('about:blank', '_blank', 'noopener,noreferrer');
+  open.mockRestore();
 });
 
 it('keeps a generated sector-aware Draft selected when the versions query refreshes with a published version', async () => {

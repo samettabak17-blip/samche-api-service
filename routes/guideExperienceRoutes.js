@@ -11,6 +11,7 @@ import { GuideThemeError, deriveAccessibleGuideTheme } from '../services/guide-t
 import { resolveCname } from 'node:dns/promises';
 import { GuideDomainError, activateGuideDomain, archiveGuideDomain, configuredGuideDomainIngressTarget, configuredManagedGuideDomainSuffix, createGuideDomain, listGuideDomains, managedGuideHostnameFromSlug, verifyGuideDomainDns } from '../services/guide-domain-service.js';
 import { archiveGuideDomainIngress, provisionGuideDomainIngress, resolveGuideDomainIngressStatus, verifyGuideDomainIngress } from '../services/guide-domain-ingress-service.js';
+import { issueGuidePreviewToken } from '../services/guide-preview-service.js';
 
 const router = express.Router();
 router.use(authenticateToken);
@@ -113,6 +114,20 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/drafts/:versio
     await client.query('COMMIT'); return res.json({ version, cache_key: `guide-experience:${scope.tenantId}:${scope.assistantId}:${version.version}` });
   } catch (error) { await client.query('ROLLBACK').catch(() => {}); return sendError(res, error); }
   finally { client.release(); }
+});
+
+router.post('/:tenantId/guide-experiences/assistants/:assistantId/drafts/:versionId/preview', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const scope = validScope(req, res); if (!scope || !isValidUUID(req.params.versionId)) return res.status(400).json({ error: 'Guide experience version is invalid.' });
+  try {
+    await verifyAssistant(scope);
+    const draft = await pool.query(`SELECT id, status FROM guide_experience_versions WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3`, [req.params.versionId, scope.tenantId, scope.assistantId]);
+    if (!draft.rowCount || draft.rows[0].status !== 'DRAFT') return res.status(409).json({ error: 'Only a private draft can be previewed.', code: 'GUIDE_PREVIEW_DRAFT_REQUIRED' });
+    const domains = await listGuideDomains({ database: pool, ...scope });
+    const activeDomain = domains.find((domain) => domain.status === 'ACTIVE');
+    if (!activeDomain) return res.status(409).json({ error: 'An active Guide domain is required for private preview.', code: 'GUIDE_PREVIEW_DOMAIN_REQUIRED' });
+    const token = issueGuidePreviewToken({ tenantId: scope.tenantId, assistantId: scope.assistantId, versionId: req.params.versionId, actorUserId: req.user.user_id });
+    return res.json({ preview_path: `/?preview=${encodeURIComponent(token)}`, hostname: activeDomain.hostname, expires_in_seconds: 600 });
+  } catch (error) { return sendError(res, error); }
 });
 
 router.post('/:tenantId/guide-experiences/assistants/:assistantId/versions/:versionId/rollback', requireTenantAccess, requireTenantAdmin, async (req, res) => {

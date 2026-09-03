@@ -40,3 +40,10 @@ test('public Guide renders a scope summary instead of a zero monetary estimate w
   assert.match(source, /tool\.pricing_mode === 'APPROVED_PRICING'/);
   assert.match(source, /commercial review\. Final pricing and quotation require confirmation/);
 });
+
+test('private preview uses an opaque token with the shared bootstrap and chat runtime', () => {
+  assert.match(source, /URLSearchParams\(window\.location\.search\)/);
+  assert.match(source, /\/guide\/bootstrap\$\{previewToken/);
+  assert.match(source, /X-Samcheguide-Preview/);
+  assert.match(source, /preview:/);
+});

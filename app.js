@@ -67,6 +67,7 @@ import { createCustomerInvitationOutboxStartup } from './services/customer-invit
 import { isAllowedGuideCorsOrigin } from './services/guide-public-cors-service.js';
 import { isSharedPublicGuideAssetPath } from './services/guide-public-asset-route-service.js';
 import { GuideSessionContextError, buildGuideSessionContextSummary, loadGuideSessionContext, saveGuideSessionContext } from './services/guide-session-context-service.js';
+import { verifyGuidePreviewToken, GuidePreviewError } from './services/guide-preview-service.js';
 
 dotenv.config();
 
@@ -165,11 +166,19 @@ app.get("/guide/bootstrap", async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(503).json({ error: 'Guide experience is temporarily unavailable.', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
-    const resolved = await resolvePublishedGuideExperience({
-      database: pool,
-      tenantId: integration.tenant_id,
-      assistantId: integration.assistant_id,
-    });
+    let resolved;
+    const previewToken = req.query?.preview;
+    if (previewToken) {
+      const claims = verifyGuidePreviewToken(String(previewToken));
+      if (claims.tenant_id !== integration.tenant_id || claims.assistant_id !== integration.assistant_id) throw new GuidePreviewError('GUIDE_PREVIEW_SCOPE_MISMATCH');
+      const draft = await pool.query(`SELECT id, tenant_id, assistant_id, version, status, experience, created_at, published_at FROM guide_experience_versions WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3 AND status='DRAFT'`, [claims.version_id, integration.tenant_id, integration.assistant_id]);
+      if (!draft.rowCount) throw new GuidePreviewError('GUIDE_PREVIEW_DRAFT_NOT_FOUND');
+      const row = draft.rows[0];
+      const experience = { ...row.experience, version: row.version };
+      resolved = { source: 'PRIVATE_PREVIEW', experience, cache_key: `guide-experience-preview:${integration.tenant_id}:${integration.assistant_id}:${row.version}` };
+    } else {
+      resolved = await resolvePublishedGuideExperience({ database: pool, tenantId: integration.tenant_id, assistantId: integration.assistant_id });
+    }
     res.set('Cache-Control', 'no-store');
     return res.json({ experience: resolved.experience, source: resolved.source, version: resolved.experience.version, cache_key: resolved.cache_key, guide_v1: { renderer: 'GUIDE_V1', modules: resolved.experience.modules, session_context: true, sector_configured: Boolean(resolved.experience.classification?.sector), roadmap_initialized: Boolean(resolved.experience.roadmap?.steps?.length), tool_initialized: Boolean(resolved.experience.interactive_tool?.fields?.length), assistant_initialized: Boolean(resolved.experience.modules?.chat), theme_initialized: Boolean(resolved.experience.theme?.primary_color) } });
   } catch (error) {
@@ -1068,7 +1077,16 @@ app.post("/chat", async (req, res) => {
     let publishedExperience;
     let guideSessionContext = null;
     try {
-      publishedExperience = await resolvePublishedGuideExperience({ database: pool, tenantId: guideRuntimeIntegration.tenant_id, assistantId: guideRuntimeIntegration.assistant_id });
+      const previewToken = req.get('X-Samcheguide-Preview');
+      if (previewToken) {
+        const claims = verifyGuidePreviewToken(previewToken);
+        if (claims.tenant_id !== guideRuntimeIntegration.tenant_id || claims.assistant_id !== guideRuntimeIntegration.assistant_id) throw new GuidePreviewError('GUIDE_PREVIEW_SCOPE_MISMATCH');
+        const draft = await pool.query(`SELECT id, version, status, experience FROM guide_experience_versions WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3 AND status='DRAFT'`, [claims.version_id, guideRuntimeIntegration.tenant_id, guideRuntimeIntegration.assistant_id]);
+        if (!draft.rowCount) throw new GuidePreviewError('GUIDE_PREVIEW_DRAFT_NOT_FOUND');
+        publishedExperience = { source: 'PRIVATE_PREVIEW', experience: { ...draft.rows[0].experience, version: draft.rows[0].version } };
+      } else {
+        publishedExperience = await resolvePublishedGuideExperience({ database: pool, tenantId: guideRuntimeIntegration.tenant_id, assistantId: guideRuntimeIntegration.assistant_id });
+      }
       guideSessionContext = guideContextRequest === undefined
         ? loadGuideSessionContext({ scope: guideRuntimeIntegration, sessionId: userId, experience: publishedExperience.experience })
         : saveGuideSessionContext({ scope: guideRuntimeIntegration, sessionId: userId, experience: publishedExperience.experience, context: guideContextRequest });
