@@ -64,6 +64,8 @@ import { filterProviderMemoryByAuthority, stampProviderMemoryEntry } from "./ser
 import { configuredPublicWebChatSessionSecret, issuePublicWebChatSession, PublicWebChatSessionError, verifyPublicWebChatSession } from "./services/public-web-chat-session.js";
 import { resolvePublicWebChatIntegration } from "./services/public-web-chat-integration-service.js";
 import { createCustomerInvitationOutboxStartup } from './services/customer-invitation-outbox-bootstrap.js';
+import { isAllowedGuideCorsOrigin } from './services/guide-public-cors-service.js';
+import { isSharedPublicGuideAssetPath } from './services/guide-public-asset-route-service.js';
 
 dotenv.config();
 
@@ -89,15 +91,18 @@ const allowedCorsOrigins = [
   .map((origin) => origin?.trim())
   .filter(Boolean);
 
-app.use(cors({
+app.use((req, res, next) => cors({
   origin(origin, callback) {
-    if (!origin || allowedCorsOrigins.includes(origin)) {
-      return callback(null, true);
-    }
+    if (isAllowedGuideCorsOrigin({
+      origin,
+      requestHost: req.get('host'),
+      forwardedProtocol: req.get('x-forwarded-proto'),
+      allowedOrigins: allowedCorsOrigins,
+    })) return callback(null, true);
 
     return callback(new Error('Origin is not allowed by CORS'));
   },
-}));
+})(req, res, next));
 app.use(express.json({
   verify: (req, res, buffer) => {
     if (req.originalUrl?.split("?")[0] === "/webhook") {
@@ -196,20 +201,30 @@ app.get('/guide/assets/:assetId', async (req, res) => {
   }
 });
 
-// The shared static shell contains no tenant data, but it is still a public
-// Guide route: do not serve it from an unknown or archived hostname.
-app.use('/guide', async (req, res, next) => {
-  const integration = await resolveGuideRuntimeScope(req);
-  if (!integration) return res.sendStatus(404);
-  return next();
-}, express.static('public-guide', {
+const sharedGuideStatic = express.static('public-guide', {
   index: 'index.html',
   etag: true,
   // Guide presentation is tenant data and must reflect publish/rollback
   // immediately; never let a stale shell or runtime bundle mask bootstrap.
   maxAge: 0,
   setHeaders: (res) => res.set('Cache-Control', 'no-store'),
-}));
+});
+
+// The JavaScript and CSS shell are shared application code, not tenant data.
+// Serve only these explicit paths without a database/domain lookup so a
+// transient scope lookup cannot prevent the client from starting.
+app.use('/guide', (req, res, next) => {
+  if (!isSharedPublicGuideAssetPath(req.path)) return next();
+  return sharedGuideStatic(req, res, next);
+});
+
+// The shell document and every tenant-owned runtime/data route remain bound to
+// an exact active hostname; shared network ingress is never tenant authority.
+app.use('/guide', async (req, res, next) => {
+  const integration = await resolveGuideRuntimeScope(req);
+  if (!integration) return res.sendStatus(404);
+  return next();
+}, sharedGuideStatic);
 
 // ==========================================
 // V1 ROUTES
