@@ -68,6 +68,7 @@ import { isAllowedGuideCorsOrigin } from './services/guide-public-cors-service.j
 import { isSharedPublicGuideAssetPath } from './services/guide-public-asset-route-service.js';
 import { GuideSessionContextError, buildGuideSessionContextSummary, loadGuideSessionContext, saveGuideSessionContext } from './services/guide-session-context-service.js';
 import { verifyGuidePreviewToken, GuidePreviewError } from './services/guide-preview-service.js';
+import { canonicalGuideResponseEvents, GuideConversationError, issueGuideResumeSession, loadGuideResumeState, normalizeGuideConversationRequest, resolveGuideResumeSession, saveGuideResumeState } from './services/guide-conversation-service.js';
 
 dotenv.config();
 
@@ -924,44 +925,25 @@ function getFollowUpMessage(lang, topic, stage) {
 // ----------------------------------------------------------------------------
 // A) SAMCHEGUIDE BOT (GEMINI) - /plan, /chat ve /chat/history
 // ----------------------------------------------------------------------------
-function resolvePublicConversationSession(req, scope) {
-  const secret = configuredPublicConversationSessionSecret();
-  if (!secret) {
-    const error = new PublicConversationSessionError('PUBLIC_SESSION_CONFIGURATION');
-    error.status = 503;
-    throw error;
-  }
+async function resolvePublicConversationSession(req, scope, resolvedExperience) {
   const token = req.get('X-Samcheguide-Session');
-  if (!token) {
-    const error = new PublicConversationSessionError('PUBLIC_SESSION_REQUIRED');
-    error.status = 401;
-    throw error;
-  }
-  try {
-    return { token, ...verifyPublicConversationSession(token, { secret, expectedScope: guideSessionScope(scope) }) };
-  } catch (error) {
-    error.status = 401;
-    throw error;
-  }
+  if (!token) return null;
+  return resolveGuideResumeSession({ database: pool, token, scope, experienceVersion: resolvedExperience.experience.version, previewMode: Boolean(req.get('X-Samcheguide-Preview')) });
 }
 
-function issueOrResolvePublicConversationSession(req, scope) {
-  const token = req.get('X-Samcheguide-Session');
-  if (token) return resolvePublicConversationSession(req, scope);
-  const secret = configuredPublicConversationSessionSecret();
-  if (!secret) {
-    const error = new PublicConversationSessionError('PUBLIC_SESSION_CONFIGURATION');
-    error.status = 503;
-    throw error;
-  }
-  return issuePublicConversationSession({ secret, scope: guideSessionScope(scope) });
+async function issueOrResolvePublicConversationSession(req, scope, resolvedExperience) {
+  const current = await resolvePublicConversationSession(req, scope, resolvedExperience);
+  if (current) return current;
+  return issueGuideResumeSession({ database: pool, scope, experienceVersion: resolvedExperience.experience.version, previewMode: Boolean(req.get('X-Samcheguide-Preview')) });
 }
 
 app.get("/chat/history", async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ error: "Conversation is unavailable." });
-    const session = resolvePublicConversationSession(req, integration);
+    const resolved = await resolveGuideExperienceForScope({ integration, previewToken: req.get('X-Samcheguide-Preview') });
+    const session = await resolvePublicConversationSession(req, integration, resolved);
+    if (!session) return res.status(401).json({ error: "Conversation session is invalid." });
     const feed = await getSamcheguidePublicFeed({ externalSessionId: session.sessionId, integration });
     if (!feed) return res.status(404).json({ error: "Conversation is unavailable." });
     return res.json({ messages: feed.messages });
@@ -974,7 +956,9 @@ app.get("/chat/live", async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ error: "Conversation is unavailable." });
-    const session = resolvePublicConversationSession(req, integration);
+    const resolved = await resolveGuideExperienceForScope({ integration, previewToken: req.get('X-Samcheguide-Preview') });
+    const session = await resolvePublicConversationSession(req, integration, resolved);
+    if (!session) return res.status(401).json({ error: "Conversation session is invalid." });
     const feed = await getSamcheguidePublicFeed({ externalSessionId: session.sessionId, integration });
     if (!feed?.conversationId) return res.status(404).json({ error: "Conversation is unavailable." });
 
@@ -1004,7 +988,8 @@ app.post("/plan", async (req, res) => {
     if (!integration || integration.channel_status !== "active") {
       return res.status(503).json({ error: "AI Guide configuration is temporarily unavailable." });
     }
-    const publicSession = issueOrResolvePublicConversationSession(req, integration);
+    const resolvedExperience = await resolveGuideExperienceForScope({ integration, previewToken: req.get('X-Samcheguide-Preview') });
+    const publicSession = await issueOrResolvePublicConversationSession(req, integration, resolvedExperience);
     const userId = publicSession.sessionId;
     let runtime;
     try {
@@ -1069,24 +1054,39 @@ app.post("/guide/session-context", async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ error: 'Guide session is unavailable.' });
-
-    const publicSession = issueOrResolvePublicConversationSession(req, integration);
     const resolved = await resolveGuideExperienceForScope({
       integration,
       previewToken: req.get('X-Samcheguide-Preview'),
     });
-    saveGuideSessionContext({
+    const publicSession = await issueOrResolvePublicConversationSession(req, integration, resolved);
+    const context = saveGuideSessionContext({
       scope: integration,
       sessionId: publicSession.sessionId,
       experience: resolved.experience,
       context: req.body?.guide_context,
     });
+    await saveGuideResumeState({ database: pool, token: publicSession.token, scope: integration, experienceVersion: resolved.experience.version, previewMode: Boolean(req.get('X-Samcheguide-Preview')), state: { context } });
     return res.json({ conversation_session: publicSession.token, context_saved: true });
   } catch (error) {
     if (error instanceof GuideSessionContextError) {
       return res.status(400).json({ error: 'Guide session context is invalid.', code: error.code });
     }
     console.error('GUIDE_SESSION_HANDOFF_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    return res.status(503).json({ error: 'Guide session is temporarily unavailable.' });
+  }
+});
+
+app.get("/guide/session-context", async (req, res) => {
+  try {
+    const integration = await resolveGuideRuntimeScope(req);
+    if (!integration) return res.status(404).json({ error: 'Guide session is unavailable.' });
+    const resolved = await resolveGuideExperienceForScope({ integration, previewToken: req.get('X-Samcheguide-Preview') });
+    const publicSession = await resolvePublicConversationSession(req, integration, resolved);
+    if (!publicSession) return res.status(401).json({ error: 'Guide session is invalid.' });
+    const state = await loadGuideResumeState({ database: pool, token: publicSession.token, scope: integration, experienceVersion: resolved.experience.version, previewMode: Boolean(req.get('X-Samcheguide-Preview')) });
+    return res.json({ conversation_session: publicSession.token, guide_context: state?.context ?? null });
+  } catch (error) {
+    console.error('GUIDE_SESSION_RESUME_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return res.status(503).json({ error: 'Guide session is temporarily unavailable.' });
   }
 });
@@ -1101,9 +1101,13 @@ app.post("/chat", async (req, res) => {
 
     const cleanText = text.trim();
     if (!cleanText || cleanText.length > 2000) return res.status(400).json({ error: "Message text must be a non-empty string." });
+    let guideConversation;
+    try { guideConversation = normalizeGuideConversationRequest({ module: req.body?.guide_module || 'ASSISTANT', text: cleanText }); }
+    catch (error) { return res.status(400).json({ error: 'Guide request is invalid.' }); }
 
     let publicSession;
     let guideRuntimeIntegration;
+    let publishedExperience;
     try {
       guideRuntimeIntegration = await resolveGuideRuntimeScope(req);
       if (!guideRuntimeIntegration) {
@@ -1111,22 +1115,27 @@ app.post("/chat", async (req, res) => {
           error: "AI Guide assistant configuration is temporarily unavailable.",
         });
       }
-      publicSession = issueOrResolvePublicConversationSession(req, guideRuntimeIntegration);
+      publishedExperience = await resolveGuideExperienceForScope({
+        integration: guideRuntimeIntegration,
+        previewToken: req.get('X-Samcheguide-Preview'),
+      });
+      publicSession = await issueOrResolvePublicConversationSession(req, guideRuntimeIntegration, publishedExperience);
     } catch (error) {
       if (error?.status === 503) console.error('CHAT_RESPONSE_503 stage=PUBLIC_SESSION_CONFIGURATION');
       throw error;
     }
     const userId = publicSession.sessionId;
-    let publishedExperience;
     let guideSessionContext = null;
     try {
-      publishedExperience = await resolveGuideExperienceForScope({
-        integration: guideRuntimeIntegration,
-        previewToken: req.get('X-Samcheguide-Preview'),
-      });
+      const persistedGuideState = guideContextRequest === undefined
+        ? await loadGuideResumeState({ database: pool, token: publicSession.token, scope: guideRuntimeIntegration, experienceVersion: publishedExperience.experience.version, previewMode: Boolean(req.get('X-Samcheguide-Preview')) })
+        : null;
       guideSessionContext = guideContextRequest === undefined
-        ? loadGuideSessionContext({ scope: guideRuntimeIntegration, sessionId: userId, experience: publishedExperience.experience })
+        ? persistedGuideState?.context ?? loadGuideSessionContext({ scope: guideRuntimeIntegration, sessionId: userId, experience: publishedExperience.experience })
         : saveGuideSessionContext({ scope: guideRuntimeIntegration, sessionId: userId, experience: publishedExperience.experience, context: guideContextRequest });
+      if (guideSessionContext && guideContextRequest !== undefined) {
+        await saveGuideResumeState({ database: pool, token: publicSession.token, scope: guideRuntimeIntegration, experienceVersion: publishedExperience.experience.version, previewMode: Boolean(req.get('X-Samcheguide-Preview')), state: { context: guideSessionContext } });
+      }
     } catch (error) {
       if (error instanceof GuideSessionContextError) return res.status(400).json({ error: 'Guide session context is invalid.', code: error.code, conversation_session: publicSession.token });
       console.error('GUIDE_SESSION_CONTEXT_UNAVAILABLE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
@@ -1207,7 +1216,7 @@ app.post("/chat", async (req, res) => {
       const runtimeSystemInstruction = buildTenantRuntimeSystemInstruction({
         persona: runtime.persona,
         knowledgeContext: runtime.knowledge.knowledgeContext,
-        channelRules: "Return safe, readable HTML suitable for the AI Guide interface. Reply in the customer's language." + (guideContextSummary ? `\n\nServer-validated Guide session context:\n${guideContextSummary}` : ''),
+        channelRules: `Return concise plain text for a ${guideConversation.module === 'ROADMAP' ? 'conversational roadmap' : 'conversational assistant'}. Use Markdown headings and bullet lists only when useful. Do not return HTML, scripts, pricing not present in approved knowledge, or provider details. Reply in the customer's language.` + (guideContextSummary ? `\n\nServer-validated Guide session context:\n${guideContextSummary}` : ''),
       });
       console.info(
         'KNOWLEDGE_RUNTIME_CONTEXT channel=SAMCHEGUIDE active_configuration=' + (runtime.knowledge.activeConfiguration ? '1' : '0') +
@@ -1263,9 +1272,11 @@ app.post("/chat", async (req, res) => {
     addGuideMemory(responseRuntimeSession, "model", originalText, inboxState.knowledgeAuthority ?? null);
     return res.json({
       conversation_session: publicSession.token,
-      candidates: [{ content: { parts: [{ text: parseLinksToHTML(originalText) }] } }]
+      candidates: [{ content: { parts: [{ text: originalText }] } }],
+      guide_events: canonicalGuideResponseEvents(originalText, { nextActions: guideConversation.module === 'ROADMAP' ? ['Refine this plan', 'Build planning scope', 'Ask the assistant'] : [] }),
     });
   } catch (err) {
+    if (err instanceof GuideConversationError) return res.status(400).json({ error: 'Guide request is invalid.' });
     if (err?.status === 503) console.error('CHAT_RESPONSE_503 stage=OUTER_HANDLER_ERROR');
     console.error("Samcheguide Chat error:", err?.code || err?.name || "unknown");
     return res.status(err.status || 500).json({ error: "Could not generate chat response." });

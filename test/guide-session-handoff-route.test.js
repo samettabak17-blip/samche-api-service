@@ -14,3 +14,13 @@ test('Guide session handoff saves only server-scoped context without invoking th
   assert.match(route, /issueOrResolvePublicConversationSession/);
   assert.doesNotMatch(route, /requestGemini|resolveChannelAssistantRuntime/);
 });
+
+test('Guide runtime routes use opaque scoped resume sessions and canonical response events', () => {
+  assert.match(source, /issueGuideResumeSession/);
+  assert.match(source, /resolveGuideResumeSession/);
+  assert.match(source, /canonicalGuideResponseEvents/);
+  assert.match(source, /guide_events/);
+  assert.match(source, /\/guide\/session-context/);
+  assert.doesNotMatch(source, /X-Samcheguide-Session.*sessionStorage/);
+  assert.ok(source.indexOf('let publishedExperience;') < source.indexOf('publishedExperience = await resolveGuideExperienceForScope'));
+});

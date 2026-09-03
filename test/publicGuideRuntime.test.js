@@ -85,3 +85,25 @@ test('Guide theme consumes explicit accessible tokens without filtering logo pix
   assert.doesNotMatch(css, /\.guide-logo[^}]*filter\s*:/i);
   assert.doesNotMatch(css, /mix-blend-mode/i);
 });
+
+test('conversational Roadmap is primary and shares visible progressive response semantics with Assistant', () => {
+  assert.match(source, /renderConversationalRoadmap/);
+  assert.match(source, /suggestedRoadmapIntents/);
+  assert.match(source, /guide-thinking/);
+  assert.match(source, /playGuideResponseEvents/);
+  assert.match(source, /TEXT_DELTA/);
+  assert.match(source, /prefers-reduced-motion/);
+  assert.match(source, /guide_module/);
+  assert.match(source, /guide-roadmap-composer/);
+});
+
+test('Guide safely formats progressive content, resumes opaque sessions, and shows a conversation reminder', () => {
+  assert.match(source, /guide-response__section/);
+  assert.match(source, /guide-response__list/);
+  assert.match(source, /event\.text \|\| event\.title/);
+  assert.match(source, /event\.actions/);
+  assert.match(source, /Continue your conversation/);
+  assert.match(source, /localStorage/);
+  assert.match(source, /\/guide\/session-context/);
+  assert.doesNotMatch(source, /innerHTML\s*=/);
+});
