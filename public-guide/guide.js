@@ -30,17 +30,81 @@ const initializationTimeout = window.setTimeout(showGuideError, 10000);
 function stateStorageKey() { return `samcheguide-v1-state:${previewToken ? 'preview:' + previewToken.slice(-16) : 'public'}:${experience?.version ?? 'unknown'}`; }
 function firstAvailableModule() { if (experience?.modules?.guide) return MODULES.ROADMAP; if (experience?.modules?.calculator) return MODULES.INTERACTIVE_TOOL; return MODULES.AI_ASSISTANT; }
 function loadState() {
-  const fallback = { active_module: firstAvailableModule(), roadmap: {}, tool: {}, roadmap_step: 0, roadmap_reviewed: false, roadmap_validation_error: '', assistant_draft: '', assistant_draft_origin: 'NONE' };
+  const fallback = { active_module: firstAvailableModule(), roadmap: {}, tool: {}, roadmap_step: 0, roadmap_reviewed: false, roadmap_validation_error: '', assistant_draft: '', assistant_draft_origin: 'NONE', roadmap_category: '', roadmap_goal: '', roadmap_result: null, roadmap_messages: [], shared_context: {} };
   try {
     const saved = JSON.parse(window.sessionStorage?.getItem(stateStorageKey()) || '{}');
     if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return fallback;
-    return { active_module: Object.values(MODULES).includes(saved.active_module) ? saved.active_module : fallback.active_module, roadmap: saved.roadmap && typeof saved.roadmap === 'object' && !Array.isArray(saved.roadmap) ? saved.roadmap : {}, tool: saved.tool && typeof saved.tool === 'object' && !Array.isArray(saved.tool) ? saved.tool : {}, roadmap_step: Number.isInteger(saved.roadmap_step) && saved.roadmap_step >= 0 ? saved.roadmap_step : 0, roadmap_reviewed: saved.roadmap_reviewed === true, roadmap_validation_error: typeof saved.roadmap_validation_error === 'string' ? saved.roadmap_validation_error.slice(0, 180) : '', assistant_draft: typeof saved.assistant_draft === 'string' ? saved.assistant_draft.slice(0, 2000) : '', assistant_draft_origin: saved.assistant_draft_origin === 'HANDOFF' || saved.assistant_draft_origin === 'USER' ? saved.assistant_draft_origin : 'NONE' };
+    return {
+      active_module: Object.values(MODULES).includes(saved.active_module) ? saved.active_module : fallback.active_module,
+      roadmap: saved.roadmap && typeof saved.roadmap === 'object' && !Array.isArray(saved.roadmap) ? saved.roadmap : {},
+      tool: saved.tool && typeof saved.tool === 'object' && !Array.isArray(saved.tool) ? saved.tool : {},
+      roadmap_step: Number.isInteger(saved.roadmap_step) && saved.roadmap_step >= 0 ? saved.roadmap_step : 0,
+      roadmap_reviewed: saved.roadmap_reviewed === true,
+      roadmap_validation_error: typeof saved.roadmap_validation_error === 'string' ? saved.roadmap_validation_error.slice(0, 180) : '',
+      assistant_draft: typeof saved.assistant_draft === 'string' ? saved.assistant_draft.slice(0, 2000) : '',
+      assistant_draft_origin: saved.assistant_draft_origin === 'HANDOFF' || saved.assistant_draft_origin === 'USER' ? saved.assistant_draft_origin : 'NONE',
+      roadmap_category: typeof saved.roadmap_category === 'string' ? saved.roadmap_category : '',
+      roadmap_goal: typeof saved.roadmap_goal === 'string' ? saved.roadmap_goal : '',
+      roadmap_result: saved.roadmap_result || null,
+      roadmap_messages: Array.isArray(saved.roadmap_messages) ? saved.roadmap_messages : [],
+      shared_context: saved.shared_context && typeof saved.shared_context === 'object' ? saved.shared_context : {},
+    };
   } catch { return fallback; }
 }
 function persistState() { try { window.sessionStorage?.setItem(stateStorageKey(), JSON.stringify(guideState)); } catch {} }
 function guideContext() { return { active_module: guideState.active_module, roadmap: guideState.roadmap, tool: guideState.tool }; }
 function saveSession(token) { if (!token) return; session = token; try { window.localStorage?.setItem(resumeStorageKey, session); } catch {} }
-async function resumeGuideSession() { if (!session || !experience) return; const headers = { 'X-Samcheguide-Session': session, ...(previewToken ? { 'X-Samcheguide-Preview': previewToken } : {}) }; try { const response = await fetch('/guide/session-context', { headers }); const payload = await response.json().catch(() => ({})); if (response.ok && payload.guide_context) { const saved = payload.guide_context; if (saved.roadmap && typeof saved.roadmap === 'object') guideState.roadmap = saved.roadmap; if (saved.tool && typeof saved.tool === 'object') guideState.tool = saved.tool; if (Object.values(MODULES).includes(saved.active_module)) guideState.active_module = saved.active_module; } const history = await fetch('/chat/history', { headers }).then((result) => result.ok ? result.json() : null).catch(() => null); if (Array.isArray(history?.messages)) messages = history.messages.filter((message) => typeof message?.content === 'string').map((message) => ({ value: message.content, kind: message.sender_type === 'CUSTOMER' ? 'user' : 'assistant' })); preservedAssistantChat = null; persistState(); renderActiveModule(); } catch {} }
+async function resumeGuideSession() {
+  if (!session || !experience) return;
+  const headers = { 'X-Samcheguide-Session': session, ...(previewToken ? { 'X-Samcheguide-Preview': previewToken } : {}) };
+  try {
+    const response = await fetch('/guide/session-context', { headers });
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok) {
+      if (payload.guide_session_state && typeof payload.guide_session_state === 'object') {
+        const fullState = payload.guide_session_state;
+        if (fullState.roadmapState && typeof fullState.roadmapState === 'object') {
+          const rm = fullState.roadmapState;
+          if (typeof rm.category === 'string' && rm.category) guideState.roadmap_category = rm.category;
+          if (typeof rm.initialGoal === 'string' && rm.initialGoal) guideState.roadmap_goal = rm.initialGoal;
+          if (rm.generatedAnalysis) guideState.roadmap_result = rm.generatedAnalysis;
+          if (rm.structuredInputs && typeof rm.structuredInputs === 'object') guideState.roadmap = { ...guideState.roadmap, ...rm.structuredInputs };
+          if (Array.isArray(rm.messages)) {
+            guideState.roadmap_messages = rm.messages.map((m) => ({
+              role: m.role === 'user' ? 'user' : 'assistant',
+              content: text(m.content || m.text || ''),
+            }));
+          }
+        }
+        if (fullState.sharedContext && typeof fullState.sharedContext === 'object') {
+          guideState.shared_context = { ...guideState.shared_context, ...fullState.sharedContext };
+        }
+        if (fullState.planningState && typeof fullState.planningState === 'object') {
+          guideState.tool = { ...guideState.tool, ...fullState.planningState };
+        }
+        if (Object.values(MODULES).includes(fullState.active_module)) {
+          guideState.active_module = fullState.active_module;
+        }
+      }
+      if (payload.guide_context) {
+        const saved = payload.guide_context;
+        if (saved.roadmap && typeof saved.roadmap === 'object') guideState.roadmap = { ...guideState.roadmap, ...saved.roadmap };
+        if (saved.tool && typeof saved.tool === 'object') guideState.tool = { ...guideState.tool, ...saved.tool };
+        if (Object.values(MODULES).includes(saved.active_module)) guideState.active_module = saved.active_module;
+      }
+    }
+    const history = await fetch('/chat/history', { headers }).then((result) => result.ok ? result.json() : null).catch(() => null);
+    if (Array.isArray(history?.messages)) {
+      messages = history.messages
+        .filter((message) => typeof message?.content === 'string')
+        .map((message) => ({ value: message.content, kind: message.sender_type === 'CUSTOMER' ? 'user' : 'assistant' }));
+    }
+    preservedAssistantChat = null;
+    preservedRoadmapBoard = null;
+    persistState();
+    renderActiveModule();
+  } catch {}
+}
 
 function setAsset(image, value, alt) { if (!value) return; image.src = value; image.alt = alt; image.hidden = false; image.addEventListener('error', () => { image.remove(); }, { once: true }); }
 function moduleLabel(type) { if (type === MODULES.ROADMAP) return text(experience.roadmap?.navigation_label, 'Roadmap'); if (type === MODULES.INTERACTIVE_TOOL) return text(experience.interactive_tool?.navigation_label, 'Planning'); return text(experience.assistant_copy?.navigation_label, 'Assistant'); }
@@ -81,23 +145,181 @@ async function playGuideResponseEvents(board, events) {
     if (event.type === 'TEXT_DELTA') { const paragraph = element('p', 'guide-response__text'); board.append(paragraph); await progressiveText(paragraph, event.text); }
   }
 }
-async function submitGuideRequest({ value, module, board, input, submit }) {
+async function submitGuideRequest({ value, module, board, input, submit, onResponse }) {
   const thinking = addThinking(board); const startedAt = Date.now(); submit.disabled = true;
   try {
-    const response = await fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(session ? { 'X-Samcheguide-Session': session } : {}), ...(previewToken ? { 'X-Samcheguide-Preview': previewToken } : {}) }, body: JSON.stringify({ text: value, guide_module: module, guide_context: guideContext() }) });
-    const payload = await response.json().catch(() => ({})); saveSession(payload.conversation_session); const remainingThinking = PRESENTATION_TIMING.thinking_minimum_ms - (Date.now() - startedAt); if (responseDelay(remainingThinking) > 0) await new Promise((resolve) => window.setTimeout(resolve, responseDelay(remainingThinking))); thinking.remove();
-    if (!response.ok || !Array.isArray(payload.guide_events)) throw new Error('unavailable');
+    const response = await fetch("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(session ? { "X-Samcheguide-Session": session } : {}), ...(previewToken ? { "X-Samcheguide-Preview": previewToken } : {}) },
+      body: JSON.stringify({
+        text: value,
+        guide_module: module,
+        guide_context: guideContext(),
+        guide_session_state: guideSessionPayloadState(),
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    saveSession(payload.conversation_session);
+    const remainingThinking = PRESENTATION_TIMING.thinking_minimum_ms - (Date.now() - startedAt);
+    if (responseDelay(remainingThinking) > 0) await new Promise((resolve) => window.setTimeout(resolve, responseDelay(remainingThinking)));
+    thinking.remove();
+    if (!response.ok || !Array.isArray(payload.guide_events)) throw new Error("unavailable");
     await playGuideResponseEvents(board, payload.guide_events);
-  } catch { thinking.remove(); board.append(element('p', 'guide-validation', 'The guide is temporarily unavailable. Please try again.')); }
-  finally { submit.disabled = false; input?.focus(); }
+    if (typeof onResponse === "function") onResponse(payload);
+  } catch {
+    thinking.remove();
+    board.append(element("p", "guide-validation", "The guide is temporarily unavailable. Please try again."));
+  } finally {
+    submit.disabled = false;
+    input?.focus();
+  }
 }
 function renderConversationalRoadmap(container) {
-  const roadmap = experience.roadmap || { steps: [] }; container.append(element('p', 'guide-module__eyebrow', 'ROADMAP'), element('h2', 'guide-module__title', roadmap.title || 'Your roadmap')); if (roadmap.description) container.append(element('p', 'guide-module__description', roadmap.description));
-  if (!preservedRoadmapBoard) { preservedRoadmapBoard = element('section', 'guide-conversation-board'); preservedRoadmapBoard.setAttribute('aria-live', 'polite'); preservedRoadmapBoard.append(element('p', 'guide-empty-state', 'Tell us what you want to plan. We will shape a clear next-step roadmap with you.')); }
-  const board = preservedRoadmapBoard;
-  const intents = element('div', 'guide-intent-list'); for (const intent of suggestedRoadmapIntents(roadmap)) { const chip = element('button', 'guide-intent', intent); chip.type = 'button'; chip.addEventListener('click', () => { const input = container.querySelector('.guide-roadmap-composer'); input.value = intent; input.focus(); }); intents.append(chip); } container.append(board, intents);
-  const form = element('form', 'guide-chat-form guide-roadmap-form'); const input = document.createElement('textarea'); input.className = 'guide-roadmap-composer'; input.rows = 2; input.maxLength = 2000; input.placeholder = 'Describe your goal or choose a suggestion'; input.setAttribute('aria-label', 'Describe your planning goal'); const submit = element('button', 'guide-button guide-chat-form__send', 'Analyze'); submit.type = 'submit'; form.append(input, submit); bindEnterToSubmit(input, form); form.addEventListener('submit', async (event) => { event.preventDefault(); if (form.dataset.submitting) return; const value = input.value.trim(); if (!value) return; form.dataset.submitting = 'true'; board.append(element('p', 'guide-message guide-message--user', value)); input.value = ''; try { await submitGuideRequest({ value, module: 'ROADMAP', board, input, submit }); } finally { delete form.dataset.submitting; } }); container.append(form);
-  const details = element('details', 'guide-structured-details'); details.append(element('summary', '', 'Add or review planning details')); const formFields = element('div', 'guide-step-card'); for (const field of visibleFields(roadmap.steps, guideState.roadmap)) formFields.append(inputForField(field, guideState.roadmap, () => { guideState.roadmap_validation_error = ''; persistState(); queueGuideContextSync(); })); const review = element('button', 'guide-button guide-button--secondary', 'Review roadmap'); review.type = 'button'; review.addEventListener('click', () => { const invalid = validateRoadmapForReview(visibleFields(roadmap.steps, guideState.roadmap)); if (invalid) { guideState.roadmap_validation_error = `Please complete ${invalid.label}.`; const existing = formFields.querySelector('.guide-validation'); existing?.remove(); formFields.append(element('p', 'guide-validation', guideState.roadmap_validation_error)); details.open = true; const missingControl = formFields.querySelector(`[data-guide-field-id="${invalid.id}"]`); missingControl?.focus({ preventScroll: true }); missingControl?.scrollIntoView({ block: 'center', behavior: 'smooth' }); return; } guideState.roadmap_reviewed = true; persistState(); queueGuideContextSync(); renderActiveModule(); }); formFields.append(review); details.append(formFields); container.append(details);
+  const roadmap = experience.roadmap || { steps: [] };
+  container.append(element("p", "guide-module__eyebrow", "ROADMAP"), element("h2", "guide-module__title", roadmap.title || "Your roadmap"));
+  if (roadmap.description) container.append(element("p", "guide-module__description", roadmap.description));
+
+  const categoryContainer = element("div", "guide-intent-list");
+  categoryContainer.setAttribute("aria-label", "Roadmap categories");
+  for (const intent of suggestedRoadmapIntents(roadmap)) {
+    const chip = element("button", "guide-intent" + (guideState.roadmap_category === intent ? " is-selected" : ""), intent);
+    chip.type = "button";
+    chip.dataset.intentValue = intent;
+    chip.addEventListener("click", () => {
+      guideState.roadmap_category = intent;
+      guideState.shared_context = { ...(guideState.shared_context || {}), category: intent };
+      persistState();
+      queueGuideContextSync();
+      const allChips = categoryContainer.querySelectorAll(".guide-intent");
+      allChips.forEach((c) => c.classList.toggle("is-selected", c.dataset.intentValue === intent));
+      const input = container.querySelector(".guide-roadmap-composer");
+      if (input && !input.value) {
+        input.value = intent;
+        input.focus();
+      }
+    });
+    categoryContainer.append(chip);
+  }
+  container.append(categoryContainer);
+
+  const details = element("details", "guide-structured-details");
+  details.append(element("summary", "", "Add or review planning details"));
+  const formFields = element("div", "guide-step-card");
+  for (const field of visibleFields(roadmap.steps, guideState.roadmap)) {
+    formFields.append(inputForField(field, guideState.roadmap, () => {
+      guideState.roadmap_validation_error = "";
+      persistState();
+      queueGuideContextSync();
+    }));
+  }
+  const review = element("button", "guide-button guide-button--secondary", "Review roadmap");
+  review.type = "button";
+  review.addEventListener("click", () => {
+    const invalid = validateRoadmapForReview(visibleFields(roadmap.steps, guideState.roadmap));
+    if (invalid) {
+      guideState.roadmap_validation_error = "Please complete " + invalid.label + ".";
+      const existing = formFields.querySelector(".guide-validation");
+      existing?.remove();
+      formFields.append(element("p", "guide-validation", guideState.roadmap_validation_error));
+      details.open = true;
+      const missingControl = formFields.querySelector(`[data-guide-field-id="${invalid.id}"]`);
+      missingControl?.focus({ preventScroll: true });
+      missingControl?.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
+    guideState.roadmap_reviewed = true;
+    persistState();
+    queueGuideContextSync();
+    renderActiveModule();
+  });
+  formFields.append(review);
+  details.append(formFields);
+  container.append(details);
+
+  const resultBoard = element("section", "guide-conversation-board guide-roadmap-board");
+  resultBoard.setAttribute("aria-live", "polite");
+
+  if (guideState.roadmap_result) {
+    const resultCard = element("section", "guide-roadmap-result");
+    resultCard.append(element("h3", "guide-roadmap-result__title", "Generated Roadmap Strategy"));
+    const analysisText = typeof guideState.roadmap_result === "string"
+      ? guideState.roadmap_result
+      : (guideState.roadmap_result.content || guideState.roadmap_result.strategy || JSON.stringify(guideState.roadmap_result));
+    resultCard.append(element("p", "guide-response__text", analysisText));
+    resultBoard.append(resultCard);
+  } else if (!guideState.roadmap_messages.length) {
+    resultBoard.append(element("p", "guide-empty-state", "Tell us what you want to plan. We will shape a clear next-step roadmap with you."));
+  }
+
+  for (const msg of guideState.roadmap_messages) {
+    const kind = msg.role === "user" ? "user" : "assistant";
+    resultBoard.append(element("p", "guide-message guide-message--" + kind, msg.content));
+  }
+  container.append(resultBoard);
+
+  const form = element("form", "guide-chat-form guide-roadmap-form");
+  const input = document.createElement("textarea");
+  input.className = "guide-roadmap-composer";
+  input.rows = 2;
+  input.maxLength = 2000;
+  input.placeholder = guideState.roadmap_result
+    ? "Ask a follow-up about this roadmap..."
+    : "Describe your goal or choose a suggestion";
+  input.setAttribute("aria-label", guideState.roadmap_result ? "Ask a roadmap follow-up" : "Describe your planning goal");
+  if (!guideState.roadmap_result && guideState.roadmap_goal) {
+    input.value = guideState.roadmap_goal;
+  }
+  const submit = element("button", "guide-button guide-chat-form__send", guideState.roadmap_result ? "Send" : "Analyze");
+  submit.type = "submit";
+  form.append(input, submit);
+  bindEnterToSubmit(input, form);
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (form.dataset.submitting) return;
+    const value = input.value.trim();
+    if (!value) return;
+    form.dataset.submitting = "true";
+
+    const isInitialAnalyze = !guideState.roadmap_result;
+    if (isInitialAnalyze) {
+      guideState.roadmap_goal = value;
+      guideState.shared_context = { ...(guideState.shared_context || {}), goal: value };
+    }
+
+    guideState.roadmap_messages.push({ role: "user", content: value });
+    persistState();
+
+    const empty = resultBoard.querySelector(".guide-empty-state");
+    empty?.remove();
+    resultBoard.append(element("p", "guide-message guide-message--user", value));
+    input.value = "";
+
+    try {
+      await submitGuideRequest({
+        value,
+        module: "ROADMAP",
+        board: resultBoard,
+        input,
+        submit,
+        onResponse: (payload) => {
+          const aiResponseText = payload.candidates?.[0]?.content?.parts?.[0]?.text
+            || (payload.guide_events || []).filter((e) => e.type === "TEXT_DELTA").map((e) => e.text).join(" ")
+            || "Analysis generated.";
+          if (isInitialAnalyze) {
+            guideState.roadmap_result = aiResponseText;
+          }
+          guideState.roadmap_messages.push({ role: "assistant", content: aiResponseText });
+          persistState();
+          queueGuideContextSync();
+        },
+      });
+    } finally {
+      delete form.dataset.submitting;
+    }
+  });
+
+  container.append(form);
 }
 function renderRoadmap(container) { const roadmap = experience.roadmap || { steps: [] }; if (guideState.roadmap_reviewed) { container.append(element('p', 'guide-module__eyebrow', 'ROADMAP'), element('h2', 'guide-module__title', roadmap.title || 'Your roadmap')); renderRoadmapReview(container, roadmap, visibleFields(roadmap.steps, guideState.roadmap)); return; } renderConversationalRoadmap(container); }
 
@@ -148,8 +370,126 @@ function renderAssistant(container) { const hasContext = Object.keys(guideState.
   const board = preservedAssistantChat; chat.append(board); const form = element('form', 'guide-chat-form'); const input = document.createElement('textarea'); input.rows = 3; input.maxLength = 2000; input.required = true; input.value = guideState.assistant_draft; input.placeholder = experience.input_placeholder || 'Type your message'; input.setAttribute('aria-label', 'Message'); input.addEventListener('input', () => { guideState.assistant_draft = input.value.slice(0, 2000); guideState.assistant_draft_origin = 'USER'; persistState(); }); const button = element('button', 'guide-button guide-chat-form__send', experience.launcher_label || 'Send'); button.type = 'submit'; form.append(input, button); bindEnterToSubmit(input, form); form.addEventListener('submit', submitMessage); chat.append(form); container.append(chat); }
 
 function renderConversationReminder(container) { if (!messages.some((message) => message.kind === 'assistant')) return; container.append(element('p', 'guide-conversation-reminder', 'Continue your conversation whenever you are ready.')); }
+let assistantReminderTimeout = null;
+let assistantReminderCycle = 'idle';
+
+function reminderDismissalStorageKey() {
+  return `samcheguide-reminder-dismissed:${previewToken ? 'preview:' + previewToken.slice(-16) : 'public'}:${experience?.version ?? 'unknown'}`;
+}
+
+function isAssistantReminderDismissed() {
+  try { return window.sessionStorage?.getItem(reminderDismissalStorageKey()) === 'true'; } catch { return false; }
+}
+
+function dismissAssistantReminder() {
+  try { window.sessionStorage?.setItem(reminderDismissalStorageKey(), 'true'); } catch {}
+  clearAssistantReminderTimer();
+  removeAssistantReminderBubble();
+}
+
+function clearAssistantReminderTimer() {
+  if (assistantReminderTimeout) {
+    window.clearTimeout(assistantReminderTimeout);
+    assistantReminderTimeout = null;
+  }
+}
+
+function hasAssistantConversationStarted() {
+  return messages.some((message) => message.kind === 'user' && text(message.value).trim().length > 0);
+}
+
+function removeAssistantReminderBubble() {
+  const existing = root ? root.querySelector('.guide-assistant-reminder') : document.querySelector('.guide-assistant-reminder');
+  if (existing) existing.remove();
+}
+
+function createAssistantReminderBubble(messageText) {
+  removeAssistantReminderBubble();
+  const canvas = root ? root.querySelector('.guide-canvas') : document.querySelector('.guide-canvas');
+  if (!canvas) return null;
+
+  const bubble = element('div', 'guide-assistant-reminder');
+  bubble.setAttribute('role', 'status');
+
+  const actionButton = element('button', 'guide-assistant-reminder__button');
+  actionButton.type = 'button';
+  actionButton.append(element('span', 'guide-assistant-reminder__text', messageText));
+  actionButton.addEventListener('click', () => {
+    guideState.active_module = MODULES.AI_ASSISTANT;
+    persistState();
+    renderActiveModule();
+  });
+
+  const closeButton = element('button', 'guide-assistant-reminder__close', '×');
+  closeButton.type = 'button';
+  closeButton.setAttribute('aria-label', 'Dismiss Assistant reminder');
+  closeButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    dismissAssistantReminder();
+  });
+
+  bubble.append(actionButton, closeButton);
+  canvas.append(bubble);
+  return bubble;
+}
+
+function scheduleAssistantReminderCycle(step) {
+  clearAssistantReminderTimer();
+  if (isAssistantReminderDismissed() || guideState?.active_module === MODULES.AI_ASSISTANT) {
+    assistantReminderCycle = 'idle';
+    removeAssistantReminderBubble();
+    return;
+  }
+  const hasAssistantNav = enabledModules().includes(MODULES.AI_ASSISTANT);
+  if (!hasAssistantNav) {
+    assistantReminderCycle = 'idle';
+    removeAssistantReminderBubble();
+    return;
+  }
+
+  const reminderText = hasAssistantConversationStarted()
+    ? 'Continue your Assistant conversation'
+    : 'Ask the Assistant';
+
+  if (step === 'show') {
+    assistantReminderCycle = 'visible';
+    createAssistantReminderBubble(reminderText);
+    assistantReminderTimeout = window.setTimeout(() => {
+      scheduleAssistantReminderCycle('hide');
+    }, 5000);
+  } else {
+    assistantReminderCycle = 'hidden';
+    removeAssistantReminderBubble();
+    assistantReminderTimeout = window.setTimeout(() => {
+      scheduleAssistantReminderCycle('show');
+    }, 5000);
+  }
+}
+
+function syncAssistantReminder() {
+  if (isAssistantReminderDismissed() || guideState?.active_module === MODULES.AI_ASSISTANT || !enabledModules().includes(MODULES.AI_ASSISTANT)) {
+    clearAssistantReminderTimer();
+    removeAssistantReminderBubble();
+    assistantReminderCycle = 'idle';
+    return;
+  }
+  if (assistantReminderCycle === 'idle') {
+    scheduleAssistantReminderCycle('show');
+  } else if (assistantReminderCycle === 'visible') {
+    const reminderText = hasAssistantConversationStarted()
+      ? 'Continue your Assistant conversation'
+      : 'Ask the Assistant';
+    const textNode = root ? root.querySelector('.guide-assistant-reminder__text') : document.querySelector('.guide-assistant-reminder__text');
+    if (textNode) {
+      textNode.textContent = reminderText;
+    } else {
+      createAssistantReminderBubble(reminderText);
+    }
+  }
+}
+
 let __moduleLayersCreated = false;
-function renderActiveModule() { const outlet = root.querySelector('.guide-module'); if (!outlet) return; if (!__moduleLayersCreated) { outlet.append(element('div', 'guide-module-layer guide-module-layer--roadmap'), element('div', 'guide-module-layer guide-module-layer--tool'), element('div', 'guide-module-layer guide-module-layer--assistant')); __moduleLayersCreated = true; } const layerRoadmap = outlet.querySelector('.guide-module-layer--roadmap'); const layerTool = outlet.querySelector('.guide-module-layer--tool'); const layerAssistant = outlet.querySelector('.guide-module-layer--assistant'); layerRoadmap.hidden = guideState.active_module !== MODULES.ROADMAP; layerTool.hidden = guideState.active_module !== MODULES.INTERACTIVE_TOOL; layerAssistant.hidden = guideState.active_module !== MODULES.AI_ASSISTANT; if (guideState.active_module === MODULES.ROADMAP) { clear(layerRoadmap); renderRoadmap(layerRoadmap); } else if (guideState.active_module === MODULES.INTERACTIVE_TOOL) { clear(layerTool); renderInteractiveTool(layerTool); } else { clear(layerAssistant); renderAssistant(layerAssistant); renderConversationReminder(layerAssistant); } for (const button of root.querySelectorAll('[data-guide-module]')) { const active = button.dataset.guideModule === guideState.active_module; button.classList.toggle('is-active', active); button.setAttribute('aria-current', active ? 'page' : 'false'); } }
+function renderActiveModule() { const outlet = root.querySelector('.guide-module'); if (!outlet) return; if (!__moduleLayersCreated) { outlet.append(element('div', 'guide-module-layer guide-module-layer--roadmap'), element('div', 'guide-module-layer guide-module-layer--tool'), element('div', 'guide-module-layer guide-module-layer--assistant')); __moduleLayersCreated = true; } const layerRoadmap = outlet.querySelector('.guide-module-layer--roadmap'); const layerTool = outlet.querySelector('.guide-module-layer--tool'); const layerAssistant = outlet.querySelector('.guide-module-layer--assistant'); layerRoadmap.hidden = guideState.active_module !== MODULES.ROADMAP; layerTool.hidden = guideState.active_module !== MODULES.INTERACTIVE_TOOL; layerAssistant.hidden = guideState.active_module !== MODULES.AI_ASSISTANT; if (guideState.active_module === MODULES.ROADMAP) { clear(layerRoadmap); renderRoadmap(layerRoadmap); } else if (guideState.active_module === MODULES.INTERACTIVE_TOOL) { clear(layerTool); renderInteractiveTool(layerTool); } else { clear(layerAssistant); renderAssistant(layerAssistant); renderConversationReminder(layerAssistant); } for (const button of root.querySelectorAll('[data-guide-module]')) { const active = button.dataset.guideModule === guideState.active_module; button.classList.toggle('is-active', active); button.setAttribute('aria-current', active ? 'page' : 'false'); } syncAssistantReminder(); }
 
 export function applyExperience(value) {
   if (!root || !value || typeof value !== 'object') throw new Error('invalid guide experience');

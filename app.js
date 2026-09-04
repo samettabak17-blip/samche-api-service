@@ -132,7 +132,7 @@ app.get("/api/v1/health", (req, res) => {
 app.get("/api/v1/health/db", async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT 
+      SELECT
         NOW() AS server_time,
         current_database() AS database_name
     `);
@@ -421,11 +421,26 @@ async function getTopicSummary(session, text) {
 const guideMemoryStore = {};
 const MAX_GUIDE_MEMORY = 10;
 
-function addGuideMemory(userId, role, text, knowledgeAuthority = null) {
-  if (!guideMemoryStore[userId]) guideMemoryStore[userId] = [];
-  guideMemoryStore[userId].push(stampProviderMemoryEntry({ role, parts: [{ text }] }, knowledgeAuthority));
-  if (guideMemoryStore[userId].length > MAX_GUIDE_MEMORY) {
-    guideMemoryStore[userId].splice(0, guideMemoryStore[userId].length - MAX_GUIDE_MEMORY);
+function addGuideMemory(sessionKey, moduleOrRole, roleOrText, textOrAuth = null, auth = null) {
+  if (!guideMemoryStore[sessionKey]) guideMemoryStore[sessionKey] = {};
+  let targetModule = 'AI_ASSISTANT';
+  let role = 'user';
+  let text = '';
+  let knowledgeAuthority = null;
+  if (auth !== null || (textOrAuth !== null && typeof roleOrText === 'string' && ['user','model','assistant'].includes(roleOrText))) {
+    targetModule = moduleOrRole;
+    role = roleOrText === 'assistant' ? 'model' : roleOrText;
+    text = textOrAuth;
+    knowledgeAuthority = auth;
+  } else {
+    role = moduleOrRole === 'assistant' ? 'model' : moduleOrRole;
+    text = roleOrText;
+    knowledgeAuthority = textOrAuth;
+  }
+  if (!guideMemoryStore[sessionKey][targetModule]) guideMemoryStore[sessionKey][targetModule] = [];
+  guideMemoryStore[sessionKey][targetModule].push(stampProviderMemoryEntry({ role, parts: [{ text: text || '' }] }, knowledgeAuthority));
+  if (guideMemoryStore[sessionKey][targetModule].length > MAX_GUIDE_MEMORY) {
+    guideMemoryStore[sessionKey][targetModule].splice(0, guideMemoryStore[sessionKey][targetModule].length - MAX_GUIDE_MEMORY);
   }
 }
 
@@ -473,7 +488,7 @@ CRITICAL LANGUAGE RULE (DYNAMIC MULTI-LANGUAGE):
 STRICT HTML & LINK FORMATTING RULES (CRITICAL):
 - You are operating on a web interface that renders raw HTML. You MUST format your entire response using HTML tags. Standard Markdown (like \n, **, or []) will NOT work and will break the UI.
 - NEVER use raw URLs or Markdown links. ALWAYS use HTML anchor tags so links are clickable. Format: <a href="URL" target="_blank">Text to Display</a>
-- BULLET POINTS: You MUST strictly use HTML "<ul>" and "<li>" tags for any list. 
+- BULLET POINTS: You MUST strictly use HTML "<ul>" and "<li>" tags for any list.
 - NEVER use "<br>" tags for lists, and NEVER use Markdown bullets like "•", "*", or "-".
 - Example List Format:
   <ul>
@@ -511,8 +526,8 @@ DETAILED PROTOCOL & RULES:
 9. Freelance vize sorulursa Umm Al Quwain bölgesinde 16,800 AED olduğunu belirt.
 
 UAE BUSINESS SETUP KNOWLEDGE BASE & JURISDICTION RULES:
-1. MAINLAND (DET): Mandatory Ejari. 
-2. FREE ZONES: Virtual Office allowed. Corporate Tax registration is mandatory (fee: 1,300 AED). 
+1. MAINLAND (DET): Mandatory Ejari.
+2. FREE ZONES: Virtual Office allowed. Corporate Tax registration is mandatory (fee: 1,300 AED).
    - Meydan Free Zone: Premium. Gold Trading costs 40,000 AED total.
    - Dubai South: Aviation, Logistics, Software.
    - Sharjah (SPCFZ / IFZA): E-Commerce, Web Design.
@@ -773,7 +788,7 @@ function detectLanguage(text) {
   const tr = /[ığüşöçİĞÜŞÖÇ]/i;
   if (ar.test(text)) return "ar";
   if (tr.test(text)) return "tr";
-  return "en"; 
+  return "en";
 }
 
 function getPingMessage(lang, topic) {
@@ -1086,7 +1101,7 @@ app.get("/guide/session-context", async (req, res) => {
     const publicSession = await resolvePublicConversationSession(req, integration, resolved);
     if (!publicSession) return res.status(401).json({ error: 'Guide session is invalid.' });
     const state = await loadGuideResumeState({ database: pool, token: publicSession.token, scope: integration, experienceVersion: resolved.experience.version, previewMode: Boolean(req.get('X-Samcheguide-Preview')) });
-    return res.json({ conversation_session: publicSession.token, guide_context: state?.context ?? null });
+    return res.json({ conversation_session: publicSession.token, guide_session_state: state ?? null });
   } catch (error) {
     console.error('GUIDE_SESSION_RESUME_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return res.status(503).json({ error: 'Guide session is temporarily unavailable.' });
@@ -1096,7 +1111,7 @@ app.get("/guide/session-context", async (req, res) => {
 app.post("/chat", async (req, res) => {
   console.info('CHAT_REQUEST_RECEIVED');
   try {
-    const { text, guide_context: guideContextRequest } = req.body;
+    const { text, guide_module: clientModule, guide_session_state: clientGuideSessionState } = req.body;
     if (typeof text !== "string") {
       return res.status(400).json({ error: "Message text must be a non-empty string." });
     }
@@ -1127,22 +1142,71 @@ app.post("/chat", async (req, res) => {
       throw error;
     }
     const userId = publicSession.sessionId;
-    let guideSessionContext = null;
-    try {
-      const persistedGuideState = guideContextRequest === undefined
-        ? await loadGuideResumeState({ database: pool, token: publicSession.token, scope: guideRuntimeIntegration, experienceVersion: publishedExperience.experience.version, previewMode: Boolean(req.get('X-Samcheguide-Preview')) })
-        : null;
-      guideSessionContext = guideContextRequest === undefined
-        ? persistedGuideState?.context ?? loadGuideSessionContext({ scope: guideRuntimeIntegration, sessionId: userId, experience: publishedExperience.experience })
-        : saveGuideSessionContext({ scope: guideRuntimeIntegration, sessionId: userId, experience: publishedExperience.experience, context: guideContextRequest });
-      if (guideSessionContext && guideContextRequest !== undefined) {
-        await saveGuideResumeState({ database: pool, token: publicSession.token, scope: guideRuntimeIntegration, experienceVersion: publishedExperience.experience.version, previewMode: Boolean(req.get('X-Samcheguide-Preview')), state: { context: guideSessionContext } });
-      }
-    } catch (error) {
-      if (error instanceof GuideSessionContextError) return res.status(400).json({ error: 'Guide session context is invalid.', code: error.code, conversation_session: publicSession.token });
-      console.error('GUIDE_SESSION_CONTEXT_UNAVAILABLE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
-      return res.status(503).json({ error: 'AI Guide session is temporarily unavailable.', conversation_session: publicSession.token });
+    // --- Start: Load and Initialize Full Guide Session State ---
+    let persistedGuideState = await loadGuideResumeState({ database: pool, token: publicSession.token, scope: guideRuntimeIntegration, experienceVersion: publishedExperience.experience.version, previewMode: Boolean(req.get('X-Samcheguide-Preview')) });
+
+    // Initialize default guideSessionState if not fully present
+    const defaultGuideSessionState = {
+      active_module: clientModule || 'AI_ASSISTANT',
+      sharedContext: {},
+      roadmapState: { messages: [] },
+      planningState: {}, // Assuming planningState is mostly key-value pairs
+      assistantConversation: { messages: [] },
+      reminderDismissedState: {},
+    };
+
+    let guideSessionState = {
+      ...defaultGuideSessionState,
+      ...persistedGuideState, // Merge persisted state over defaults
+    };
+
+    // If client sends a full state, it implies a client-side update (e.g. from UI form)
+    // Merge relevant parts from client, but ensure messages are backend authoritative and append.
+    if (clientGuideSessionState && typeof clientGuideSessionState === 'object') {
+        guideSessionState = {
+            ...guideSessionState,
+            // Allow client to update active_module and shared context directly
+            active_module: clientGuideSessionState.active_module || guideSessionState.active_module,
+            sharedContext: {
+                ...guideSessionState.sharedContext,
+                ...(clientGuideSessionState.sharedContext || {}),
+            },
+            // Planning state can be updated directly by client as it's form-based
+            planningState: {
+                ...guideSessionState.planningState,
+                ...(clientGuideSessionState.planningState || {}),
+            },
+            // Roadmap state (excluding messages) can be updated by client
+            roadmapState: {
+                ...guideSessionState.roadmapState,
+                ...(clientGuideSessionState.roadmapState || {}),
+                messages: guideSessionState.roadmapState.messages // Keep backend messages, client new message appended below
+            },
+            // Assistant conversation (excluding messages) can be updated by client
+            assistantConversation: {
+                ...guideSessionState.assistantConversation,
+                ...(clientGuideSessionState.assistantConversation || {}),
+                messages: guideSessionState.assistantConversation.messages // Keep backend messages, client new message appended below
+            },
+            // Reminder state can be updated by client
+            reminderDismissedState: {
+                ...guideSessionState.reminderDismissedState,
+                ...(clientGuideSessionState.reminderDismissedState || {}),
+            }
+        };
     }
+
+    // Add user message to the correct conversation thread
+    const userMessage = { role: 'user', content: cleanText, timestamp: Date.now() };
+    if (guideConversation.module === 'ROADMAP') {
+        guideSessionState.roadmapState.messages.push(userMessage);
+    } else if (guideConversation.module === 'AI_ASSISTANT') {
+        guideSessionState.assistantConversation.messages.push(userMessage);
+    }
+    // INTERACTIVE_TOOL (Planning) is not a chat module in this context
+
+    // --- End: Load and Initialize Full Guide Session State ---
+
     const inboxState = await persistSamcheguideInbound({
       externalSessionId: userId,
       content: cleanText,
@@ -1150,78 +1214,72 @@ app.post("/chat", async (req, res) => {
       integration: guideRuntimeIntegration,
     });
 
-    // A Guide request is always bound to the configured tenant channel. It must
-    // never fall back to the legacy platform persona when the binding is absent.
-    if (!inboxState) {
-      console.error('CHAT_RESPONSE_503 stage=GUIDE_RUNTIME_UNAVAILABLE');
+    // --- Start: Refactor guideMemoryStore for module-specific memory ---
+    const sessionKey = samcheguideRuntimeSessionKey({
+        tenantId: guideRuntimeIntegration.tenant_id,
+        assistantId: guideRuntimeIntegration.assistant_id,
+        channelId: guideRuntimeIntegration.channel_id,
+        sessionId: userId,
+    });
+
+    // Add user message to the correct memory store (for AI context)
+    // First, initialize if not present.
+    if (!guideMemoryStore[sessionKey]) {
+      guideMemoryStore[sessionKey] = {};
+    }
+    if (!guideMemoryStore[sessionKey][guideConversation.module]) {
+      guideMemoryStore[sessionKey][guideConversation.module] = [];
+    }
+
+    addGuideMemory(sessionKey, guideConversation.module, "user", cleanText, inboxState.knowledgeAuthority ?? null);
+
+    // Retrieve conversation history for the AI provider from the specific module's memory
+    const rawMessages = (guideMemoryStore[sessionKey]?.[guideConversation.module] || []).map((message) => ({ role: message.role, content: message.content }));
+    const conversationHistory = rawMessages.filter((entry) => entry.role === 'user' || entry.role === 'assistant')
+      .map((entry) => ({ role: entry.role === 'user' ? 'user' : 'model', parts: [{ text: entry.content }] }));
+
+    // Construct system instruction based on shared context and other relevant states
+    const guideContextSummary = buildGuideSessionContextSummary({
+      scope: guideRuntimeIntegration,
+      sessionId: userId,
+      experience: publishedExperience.experience,
+      context: { // Combine shared context and relevant module data for AI context
+        ...guideSessionState.sharedContext,
+        roadmap: guideSessionState.roadmapState, // Provide full roadmap state to AI
+        planning: guideSessionState.planningState, // Provide full planning state to AI
+      }
+    });
+
+    const runtime = await resolveAssistantRuntimeKnowledgeContext({
+      database: pool,
+      tenantId: guideRuntimeIntegration.tenant_id,
+      assistantId: guideRuntimeIntegration.assistant_id,
+      channelId: guideRuntimeIntegration.channel_id,
+      conversationHistory: conversationHistory, // Pass module-specific history
+      systemInstruction: buildTenantRuntimeSystemInstruction({
+        persona: publishedExperience.experience,
+        knowledgeContext: guideContextSummary,
+        channelRules: "Return safe, readable HTML suitable for the AI Guide interface."
+      }),
+      knowledgeAuthority: inboxState.knowledgeAuthority ?? null,
+    });
+
+    if (!runtime) {
+      console.error('CHAT_RESPONSE_503 stage=RUNTIME_CONTEXT_UNAVAILABLE');
       return res.status(503).json({
         error: "AI Guide assistant configuration is temporarily unavailable.",
         conversation_session: publicSession.token,
       });
     }
-    if (inboxState?.duplicate) {
-      return res.status(202).json({ status: "duplicate", conversation_session: publicSession.token });
-    }
-    if (inboxState && !inboxState.shouldInvokeAi) {
-      return res.status(202).json({
-        status: inboxState.conversation.handling_mode === "PAUSED" ? "paused" : "human_handling",
-        conversation_session: publicSession.token,
-      });
-    }
 
-    const lowerCleanText = cleanText.toLowerCase();
+    const contents = [...conversationHistory, { role: 'user', parts: [{ text: cleanText }] }];
+
     let originalText;
-
-    if (sgCorporateShortReplyMap[lowerCleanText]) {
-      originalText = sgCorporateShortReplyMap[lowerCleanText];
+    if (runtime.useProvidedResponse) {
+      originalText = runtime.response;
     } else {
-      const runtimeSession = samcheguideRuntimeSessionKey({
-        tenantId: inboxState.integration.tenant_id,
-        assistantId: inboxState.integration.assistant_id,
-        channelId: inboxState.integration.channel_id,
-        sessionId: userId,
-      });
-      addGuideMemory(runtimeSession, "user", cleanText, inboxState.knowledgeAuthority ?? null);
-      const rawHistory = guideMemoryStore[runtimeSession] || [];
-      const history = inboxState.knowledgeAuthority ? filterProviderMemoryByAuthority(rawHistory, inboxState.knowledgeAuthority) : [];
-      const contents = history.map((msg, index) => {
-        if (index === history.length - 1 && msg.role === "user") {
-          return {
-            role: "user",
-            parts: [{ text: `User message: "${cleanText}"\nNote: Reply directly without introductory greetings. Automatically detect the user's language and respond in THAT SAME language.` }]
-          };
-        }
-        return msg;
-      });
-      let runtime;
-      try {
-        runtime = await resolveChannelAssistantRuntime({
-          database: pool,
-          embed: knowledgeEmbedder,
-          scope: inboxState.integration,
-          query: cleanText,
-          channelType: 'SAMCHEGUIDE',
-          resolvePersona: resolveTenantRuntimePersona,
-          resolveKnowledge: resolveAssistantRuntimeKnowledgeContext,
-          resolveModel: () => googleGeminiProvider.runtimeMetadata(),
-        });
-      } catch (error) {
-        console.error('KNOWLEDGE_RUNTIME_CONTEXT_UNAVAILABLE channel=SAMCHEGUIDE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
-        if (error?.code === 'GUIDE_RUNTIME_UNAVAILABLE') console.error('CHAT_RESPONSE_503 stage=TENANT_PERSONA_UNAVAILABLE');
-        console.error('CHAT_RESPONSE_503 stage=RUNTIME_CONTEXT_UNAVAILABLE');
-        return res.status(503).json({
-          error: "AI Guide assistant configuration is temporarily unavailable.",
-          conversation_session: publicSession.token,
-        });
-      }
-      const guideContextSummary = guideSessionContext ? buildGuideSessionContextSummary({ experience: publishedExperience.experience, context: guideSessionContext }) : '';
-      const runtimeSystemInstruction = buildTenantRuntimeSystemInstruction({
-        persona: runtime.persona,
-        knowledgeContext: runtime.knowledge.knowledgeContext,
-        channelRules: `Return concise plain text for a ${guideConversation.module === 'ROADMAP' ? 'conversational roadmap' : 'conversational assistant'}. Use Markdown headings and bullet lists only when useful. Do not return HTML, scripts, pricing not present in approved knowledge, or provider details. Reply in the customer's language.` + (guideContextSummary ? `\n\nServer-validated Guide session context:\n${guideContextSummary}` : ''),
-      });
       console.info(
-        'KNOWLEDGE_RUNTIME_CONTEXT channel=SAMCHEGUIDE active_configuration=' + (runtime.knowledge.activeConfiguration ? '1' : '0') +
+        'CHAT_GEMINI_RUNTIME_CONTEXT channel=SAMCHEGUIDE active_configuration=' + (runtime.knowledge.activeConfiguration ? '1' : '0') +
         ' retrieved_chunks=' + runtime.knowledge.knowledge.length +
         ' retrieval_available=' + (runtime.knowledge.retrievalAvailable ? '1' : '0') +
         ' provider_mode=' + runtime.mode + ' model=' + runtime.model
@@ -1232,7 +1290,7 @@ app.post("/chat", async (req, res) => {
       try {
         data = await requestGemini({
           contents,
-          systemInstruction: { parts: [{ text: runtimeSystemInstruction }] }
+          systemInstruction: { parts: [{ text: runtime.systemInstruction }] }
         }, runtime.model);
       } catch (error) {
         const code = typeof error?.code === 'string' && /^GOOGLE_(?:VERTEX|GEMINI)_[A-Z0-9_]+$/.test(error.code)
@@ -1265,17 +1323,35 @@ app.post("/chat", async (req, res) => {
       }
     }
 
-    const responseRuntimeSession = samcheguideRuntimeSessionKey({
-      tenantId: inboxState.integration.tenant_id,
-      assistantId: inboxState.integration.assistant_id,
-      channelId: inboxState.integration.channel_id,
-      sessionId: userId,
+    // Add AI message to the correct conversation thread
+    const aiMessage = { role: 'assistant', content: originalText, timestamp: Date.now() };
+    if (guideConversation.module === 'ROADMAP') {
+        guideSessionState.roadmapState.messages.push(aiMessage);
+        // Potentially update roadmapState.generatedAnalysis or other structured data here
+        // based on the AI's response if it's a structured analysis.
+        // For now, it's just a message.
+    } else if (guideConversation.module === 'AI_ASSISTANT') {
+        guideSessionState.assistantConversation.messages.push(aiMessage);
+    }
+
+    addGuideMemory(sessionKey, guideConversation.module, "model", originalText, inboxState.knowledgeAuthority ?? null);
+
+    // --- Start: Save Full Guide Session State ---
+    await saveGuideResumeState({
+      database: pool,
+      token: publicSession.token,
+      scope: guideRuntimeIntegration,
+      experienceVersion: publishedExperience.experience.version,
+      previewMode: Boolean(req.get('X-Samcheguide-Preview')),
+      state: guideSessionState // Save the entire updated state
     });
-    addGuideMemory(responseRuntimeSession, "model", originalText, inboxState.knowledgeAuthority ?? null);
+    // --- End: Save Full Guide Session State ---
+
     return res.json({
       conversation_session: publicSession.token,
       candidates: [{ content: { parts: [{ text: originalText }] } }],
       guide_events: canonicalGuideResponseEvents(originalText, { nextActions: guideConversation.module === 'ROADMAP' ? ['Refine this plan', 'Build planning scope', 'Ask the assistant'] : [] }),
+      guide_session_state: guideSessionState // Return the updated state to the client
     });
   } catch (err) {
     if (err instanceof GuideConversationError) return res.status(400).json({ error: 'Guide request is invalid.' });
@@ -1284,6 +1360,8 @@ app.post("/chat", async (req, res) => {
     return res.status(err.status || 500).json({ error: "Could not generate chat response." });
   }
 });
+
+
 
 // ----------------------------------------------------------------------------
 // B) WEB CHATBOT (OPENAI) - /api/chat ve /api/chat/history
@@ -1401,45 +1479,45 @@ app.post("/api/chat", async (req, res) => {
     const messages = [
       {
         role: "system",
-        content: `You are the corporate artificial intelligence consultant of SamChe Company LLC.  
+        content: `You are the corporate artificial intelligence consultant of SamChe Company LLC.
 Your mission is to provide professional, strategic, analytical and guiding answers with a premium consultancy tone.
 
-You ALWAYS position SamChe Company as the provider of the solution the user is asking about.  
-You NEVER give generic answers.  
-You NEVER use Gemini’s ready-made templates, procedural texts, government processes, or classical explanations.  
-You DO NOT create your own templates.  
+You ALWAYS position SamChe Company as the provider of the solution the user is asking about.
+You NEVER give generic answers.
+You NEVER use Gemini’s ready-made templates, procedural texts, government processes, or classical explanations.
+You DO NOT create your own templates.
 You ONLY give answers that comply with the rules defined in this prompt.
 
-Your primary goal is SALES CONVERSION — but with QUALIFICATION.  
-You do NOT send every user to WhatsApp immediately.  
+Your primary goal is SALES CONVERSION — but with QUALIFICATION.
+You do NOT send every user to WhatsApp immediately.
 First, you MUST collect necessary information from the user (e.g., how many visas they need, which sector they are in). Ask these details or answer their specific questions.
 
 For every question the user asks — whether it is about:
-- private AI systems  
-- custom AI development  
-- WhatsApp or website chatbots  
-- AI automation  
-- AI‑driven social media growth  
-- digital transformation  
-- UAE company formation  
-- choosing business activities  
-- scaling a business in the UAE  
+- private AI systems
+- custom AI development
+- WhatsApp or website chatbots
+- AI automation
+- AI‑driven social media growth
+- digital transformation
+- UAE company formation
+- choosing business activities
+- scaling a business in the UAE
 
 You ALWAYS respond using this structure:
 
-1. Acknowledge their need clearly  
-2. Explain that SamChe Company provides exactly this service  
-3. Highlight why SamChe is the best choice (expertise, speed, precision, UAE specialization, AI mastery)  
+1. Acknowledge their need clearly
+2. Explain that SamChe Company provides exactly this service
+3. Highlight why SamChe is the best choice (expertise, speed, precision, UAE specialization, AI mastery)
 4. Give a clear next step:
    - If the user shows low or unclear intent, or asks unnecessary questions and keeps the system busy → direct them to the CONTACT FORM (Form Links). Do not send them to WhatsApp.
    - If the user shows strong, serious intent AND you have gathered their information (sector, visa count, etc.) → direct them to WhatsApp LIVE REPRESENTATIVE with a topic-specific corporate transfer message.
 
 QUALIFYING QUESTIONS you may ask include:
-- “What stage are you currently in”  
-- “Are you looking to start immediately or exploring options”  
-- “What is your expected timeline”  
-- “Do you already have a budget range in mind”  
-- “Is this for a new project or an existing business”  
+- “What stage are you currently in”
+- “Are you looking to start immediately or exploring options”
+- “What is your expected timeline”
+- “Do you already have a budget range in mind”
+- “Is this for a new project or an existing business”
 
 When directing a serious user to WhatsApp, you MUST generate a short, professional, corporate transfer message summarizing their request (including their sector, visa count, and gathered details) and provide the appropriate WhatsApp number based on language rules.
 
@@ -1455,14 +1533,14 @@ Form Links (for low-intent users or busywork):
 - Other Languages: <a href="https://samchecompany.com/business-consultation-in-dubai" target="_blank">Consultation Request Form</a>
 
 Your tone must always be:
-- premium  
-- confident  
-- expert  
-- persuasive  
-- sales‑oriented  
+- premium
+- confident
+- expert
+- persuasive
+- sales‑oriented
 - selective (you do NOT chase low‑intent users)
 
-Your goal is simple:  
+Your goal is simple:
 Turn every question into a clear, confident, premium SamChe Company sales answer — while filtering out low‑intent users to forms and escalating only qualified, serious leads to WhatsApp with a professional summary message.
 
 
@@ -1596,7 +1674,7 @@ CONTACT INFORMATION RULES:
 • FIRST provide detailed, deep and explanatory information answers.
 • NEVER ask users for contact information.
 • NEVER automatically add contact information to any answer.
-• NEVER provide links in markdown format, only write them as plain text. 
+• NEVER provide links in markdown format, only write them as plain text.
 • NEVER use expressions like “Our consultant will contact you shortly”. WHILE DIRECTING THE CUSTOMER TO A LIVE CONSULTANT, YOU MUST PROVIDE CONTACT INFORMATION.
 
 
@@ -1829,20 +1907,20 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       }
 
       const message = change.messages?.[0];
-      if (!message) return; 
+      if (!message) return;
 
       // --------------------------------------
       // WHATSAPP RETRY (TEKRAR) KORUMASI
       // --------------------------------------
       const wpMessageId = message.id;
-      if (wpMessageId && processedWpMessages.has(wpMessageId)) return; 
+      if (wpMessageId && processedWpMessages.has(wpMessageId)) return;
       if (wpMessageId) {
         processedWpMessages.add(wpMessageId);
-        setTimeout(() => processedWpMessages.delete(wpMessageId), 2 * 60 * 1000); 
+        setTimeout(() => processedWpMessages.delete(wpMessageId), 2 * 60 * 1000);
       }
 
       const from = message.from;
-      if (!from) return; 
+      if (!from) return;
 
       const cleanFrom = from.replace("+", "");
       // phoneNumberId was resolved from the same webhook change above.
@@ -1997,19 +2075,19 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           manualTakeover: false, lastUserText: ""
         };
       }
-      
+
       const session = wpSessions[runtimeSessionKey];
       session.tenantId = whatsappInbox.integration.tenant_id;
       session.assistantId = whatsappInbox.integration.assistant_id;
       const lower = text.toLowerCase();
 
       const now = Date.now();
-      
+
       // 🔥 SPAM FİLTRESİ HATA ÇÖZÜMÜ: SADECE BOT MODUNDAYKEN SPAM FİLTRESİ ÇALIŞIR
       if (!session.humanOverride && session.lastUserText === text && (now - session.lastMessageTime) < 30000) {
-        return; 
+        return;
       }
-      
+
       session.lastUserText = text;
       session.lastMessageTime = now;
 
@@ -2164,7 +2242,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       if (!session.topics) session.topics = [];
       if (topic !== "other" && !session.topics.includes(topic)) session.topics.push(topic);
       session.intentScore = calculateIntentScore(text, session.intentScore || 0);
-      
+
       if (lower.includes("yapay zeka") || lower.includes("ai ") || lower.includes("bot") || lower.includes("otomasyon")) {
         if (!session.topics.includes("Yapay Zeka / Chatbot")) session.topics.push("Yapay Zeka / Chatbot");
       }
@@ -2172,7 +2250,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       const historyText = session.history.map((m) => `${m.role === "user" ? "User" : "Model"}: ${m.text}`).join("\n");
 
       // --------------------------------------
-      // BÜYÜK DİL PROMPTLARI 
+      // BÜYÜK DİL PROMPTLARI
       // --------------------------------------
       let modelContext;
       try {
@@ -2232,7 +2310,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       logWhatsAppTiming('model_response_complete');
       if (!aiResponse) {
         await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, corporateFallback(session.lang || "en"));
-        return; 
+        return;
       }
 
       const lowerAi = aiResponse.toLowerCase();
@@ -2259,11 +2337,11 @@ app.post("/telegram-webhook", (req, res) => {
     try {
       const updateId = req.body?.update_id;
       if (updateId && processedTgUpdates.has(updateId)) {
-        return; 
+        return;
       }
       if (updateId) {
         processedTgUpdates.add(updateId);
-        setTimeout(() => processedTgUpdates.delete(updateId), 10 * 60 * 1000); 
+        setTimeout(() => processedTgUpdates.delete(updateId), 10 * 60 * 1000);
       }
 
       const msg = req.body.message;
@@ -2275,7 +2353,7 @@ app.post("/telegram-webhook", (req, res) => {
       if (!text.startsWith("/w ") && !text.startsWith("/end ")) {
         return;
       }
-      
+
       if (process.env.TELEGRAM_CHAT_ID && chatId !== process.env.TELEGRAM_CHAT_ID) {
         return;
       }
@@ -2319,13 +2397,13 @@ app.post("/telegram-webhook", (req, res) => {
         session.warning5MinSent = false;
         session.lastUserText = ""; // KİLİTLENMEYİ ÖNLER
 
-        try { 
-          await sendMessage(cleanTo, message); 
+        try {
+          await sendMessage(cleanTo, message);
           sendMessageToTelegram(`Gönderildi → WhatsApp +${cleanTo}:\n${message}\n\nSohbeti bitirmek için kopyala:\n\`/end +${cleanTo}\``).catch(()=>{});
         } catch(e) {
           sendMessageToTelegram(`Mesaj iletilemedi! Lütfen tekrar deneyin.`).catch(()=>{});
         }
-        
+
         return;
       }
 
@@ -2401,7 +2479,7 @@ cron.schedule("* * * * *", async () => {
         if (!s.lastMessageTime || isNaN(s.lastMessageTime)) s.lastMessageTime = Date.now();
         if (!s.followUpStage || isNaN(s.followUpStage)) s.followUpStage = 0;
         if (!s.pingSentOnce) s.pingSentOnce = false;
-        
+
         if (s.warning5MinSent === undefined) s.warning5MinSent = false;
 
         const diffMinutesLast = (now - s.lastMessageTime) / (1000 * 60);
@@ -2412,28 +2490,28 @@ cron.schedule("* * * * *", async () => {
         const lang = typeof s.lang === "string" ? s.lang : "en";
 
         if (s.humanOverride) {
-          if (s.manualTakeover) continue; 
+          if (s.manualTakeover) continue;
 
           if (diffMinutesLast >= 10) {
             s.humanOverride = false;
             s.warning5MinSent = false;
             s.lastUserText = ""; // KİLİTLENMEYİ ÖNLER
-            
+
             const autoCloseMsg = `🔒 Bu sohbet oturumu sona ermiştir.\n\nBaşka sorularınız varsa veya ek yardıma ihtiyacınız olursa, lütfen istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin. Canlı Destek Ekibimiz size yardımcı olmaktan mutluluk duyacaktır.`;
-            
+
             try { await sendMessage(user, autoCloseMsg); } catch(e){}
             try { await sendMessageToTelegram(`Zaman Aşımı: Canlı destek kapatıldı → +${user}`); } catch(e){}
 
           } else if (diffMinutesLast >= 5 && !s.warning5MinSent) {
             s.warning5MinSent = true;
-            
+
             const warningMsg = `⚠️Lütfen dikkat, bu sohbet oturumu 5 dakika sonra sona erecektir.\nEkibimizden yanıt beklerken oturumu aktif tutmak için bu sohbette mesaj gönderebilirsiniz.\n\nOturumunuz sona ererse, istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin; daha fazla sorunuzda size yardımcı olmaktan memnuniyet duyarız.`;
-            
+
             try { await sendMessage(user, warningMsg); } catch(e){}
           } else if (diffMinutesLast < 5 && s.warning5MinSent) {
             s.warning5MinSent = false;
           }
-          continue; 
+          continue;
         }
 
         if (diffMinutesLast >= 10 && !s.pingSentOnce) {
@@ -2450,31 +2528,31 @@ cron.schedule("* * * * *", async () => {
         if (s.followUpStage === 0 && diffHoursLast >= 3) {
           const msg = await generateTenantFollowUpMessage({ session: s, stage: "3h" });
           if (msg) { try { await sendMessage(user, msg); } catch {} }
-          s.followUpStage = 1; 
+          s.followUpStage = 1;
           continue;
         }
         if (s.followUpStage === 1 && diffHoursLast >= 24) {
           const msg = await generateTenantFollowUpMessage({ session: s, stage: "24h" });
           if (msg) { try { await sendMessage(user, msg); } catch {} }
-          s.followUpStage = 2; 
+          s.followUpStage = 2;
           continue;
         }
         if (s.followUpStage === 2 && diffHoursLast >= 48) {
           const msg = await generateTenantFollowUpMessage({ session: s, stage: "48h" });
           if (msg) { try { await sendMessage(user, msg); } catch {} }
-          s.followUpStage = 3; 
+          s.followUpStage = 3;
           continue;
         }
         if (s.followUpStage === 3 && diffHoursLast >= 72) {
           const msg = await generateTenantFollowUpMessage({ session: s, stage: "72h" });
           if (msg) { try { await sendMessage(user, msg); } catch {} }
-          s.followUpStage = 4; 
+          s.followUpStage = 4;
           continue;
         }
         if (s.followUpStage === 4 && diffHoursLast >= 168) {
           const msg = await generateTenantFollowUpMessage({ session: s, stage: "7d" });
           if (msg) { try { await sendMessage(user, msg); } catch {} }
-          s.followUpStage = 5; 
+          s.followUpStage = 5;
           continue;
         }
       } catch (err) {

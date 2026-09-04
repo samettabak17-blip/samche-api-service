@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 const MAX_TEXT = 2000;
 const MAX_ACTIONS = 6;
 const SESSION_TTL_MS = Math.min(Math.max(Number(process.env.GUIDE_SESSION_RETENTION_HOURS || 72) * 60 * 60 * 1000, 60 * 60 * 1000), 30 * 24 * 60 * 60 * 1000);
-const MODULES = new Set(['ROADMAP', 'ASSISTANT']);
+const MODULES = new Set(['ROADMAP', 'INTERACTIVE_TOOL', 'AI_ASSISTANT']);
 const UNSAFE = /<\s*\/?(?:script|style|iframe|object|embed)|on\w+\s*=/i;
 
 export class GuideConversationError extends Error {
@@ -104,4 +104,66 @@ export async function loadGuideResumeState({ database, token, scope, experienceV
     [hash(token), scope.tenant_id, scope.assistant_id, scope.channel_id, scope.domain_id, experienceVersion, Boolean(previewMode)],
   );
   return result.rowCount ? (result.rows[0].state || {}) : null;
+}
+
+// State section constants and helpers for roadmap, planning, shared context, and assistant
+export const GUIDE_STATE_KEYS = Object.freeze({
+  ROADMAP: 'roadmapState',
+  PLANNING: 'planningState',
+  ASSISTANT: 'assistantConversation',
+  SHARED_CONTEXT: 'sharedContext',
+});
+
+export function getRoadmapState(sessionState) {
+  return sessionState?.roadmapState || { messages: [] };
+}
+
+export function setRoadmapState(sessionState, roadmap) {
+  return { ...sessionState, roadmapState: { ...(sessionState?.roadmapState || {}), ...roadmap } };
+}
+
+export function addRoadmapMessage(sessionState, message) {
+  const current = sessionState?.roadmapState?.messages || [];
+  return {
+    ...sessionState,
+    roadmapState: {
+      ...(sessionState?.roadmapState || {}),
+      messages: [...current, message],
+    },
+  };
+}
+
+export function getAssistantState(sessionState) {
+  return sessionState?.assistantConversation || { messages: [] };
+}
+
+export function setAssistantState(sessionState, assistant) {
+  return { ...sessionState, assistantConversation: { ...(sessionState?.assistantConversation || {}), ...assistant } };
+}
+
+export function addAssistantMessage(sessionState, message) {
+  const current = sessionState?.assistantConversation?.messages || [];
+  return {
+    ...sessionState,
+    assistantConversation: {
+      ...(sessionState?.assistantConversation || {}),
+      messages: [...current, message],
+    },
+  };
+}
+
+export function getPlanningState(sessionState) {
+  return sessionState?.planningState || {};
+}
+
+export function setPlanningState(sessionState, planning) {
+  return { ...sessionState, planningState: { ...(sessionState?.planningState || {}), ...planning } };
+}
+
+export function getSharedGuideContext(sessionState) {
+  return sessionState?.sharedContext || {};
+}
+
+export function setSharedGuideContext(sessionState, context) {
+  return { ...sessionState, sharedContext: { ...(sessionState?.sharedContext || {}), ...context } };
 }
