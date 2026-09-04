@@ -365,7 +365,34 @@ async function handoffToAssistant() {
   if (guideState.active_module === MODULES.AI_ASSISTANT) { renderActiveModule(); window.requestAnimationFrame(() => root.querySelector('.guide-chat-form textarea')?.focus()); }
 }
 function addMessage(value, kind) { messages.push({ value: text(value), kind }); const board = preservedAssistantChat || root.querySelector('.guide-chat-messages'); if (!board) return; const item = element('p', `guide-message guide-message--${kind}`, value); board.append(item); item.scrollIntoView({ block: 'end' }); }
-async function submitMessage(event) { event.preventDefault(); const input = event.currentTarget.querySelector('textarea'); const value = input.value.trim(); if (!value) return; guideState.assistant_draft = ''; guideState.assistant_draft_origin = 'NONE'; persistState(); input.value = ''; const board = preservedAssistantChat || root.querySelector('.guide-chat-messages'); board.append(element('p', 'guide-message guide-message--user', value)); await submitGuideRequest({ value, module: 'ASSISTANT', board, input, submit: event.currentTarget.querySelector('button[type="submit"]') }); }
+async function submitMessage(event) {
+  event.preventDefault();
+  const input = event.currentTarget.querySelector('textarea');
+  const value = input.value.trim();
+  if (!value) return;
+  guideState.assistant_draft = '';
+  guideState.assistant_draft_origin = 'NONE';
+  persistState();
+  input.value = '';
+  const board = preservedAssistantChat || root.querySelector('.guide-chat-messages');
+  board.append(element('p', 'guide-message guide-message--user', value));
+  await submitGuideRequest({
+    value,
+    module: MODULES.AI_ASSISTANT,
+    board,
+    input,
+    submit: event.currentTarget.querySelector('button[type="submit"]'),
+    onResponse: (payload) => {
+      const aiResponseText = payload.candidates?.[0]?.content?.parts?.[0]?.text
+        || (payload.guide_events || []).filter((e) => e.type === "TEXT_DELTA").map((e) => e.text).join(" ");
+      messages.push({ value, kind: 'user' });
+      if (aiResponseText) {
+        messages.push({ value: aiResponseText, kind: 'assistant' });
+      }
+      syncAssistantReminder();
+    }
+  });
+}
 function renderAssistant(container) { const hasContext = Object.keys(guideState.roadmap).length || Object.keys(guideState.tool).length; const intro = hasContext ? experience.assistant_copy?.contextual_intro : experience.assistant_copy?.intro; container.append(element('p', 'guide-module__eyebrow', 'AI ASSISTANT'), element('h2', 'guide-module__title', experience.assistant_display_name || 'AI Assistant'), element('p', 'guide-module__description', intro || experience.empty_state_copy || 'Ask a question or continue from your roadmap and tool selections.')); const summary = renderGuideContextSummary(); if (summary) container.append(summary); const chat = element('section', 'guide-chat'); if (!preservedAssistantChat) { preservedAssistantChat = element('section', 'guide-chat-messages'); preservedAssistantChat.setAttribute('aria-live', 'polite'); if (!messages.length) { const empty = element('section', 'guide-empty-state'); empty.append(element('strong', '', hasContext ? 'Your details are ready to discuss.' : 'Start with a question, roadmap, or planning tool.'), element('p', '', hasContext ? 'Review the prepared message, edit it if needed, then send it when ready.' : (intro || experience.welcome_message || 'Tell us what you would like to plan.'))); preservedAssistantChat.append(empty); } for (const message of messages) preservedAssistantChat.append(element('p', `guide-message guide-message--${message.kind}`, message.value)); }
   const board = preservedAssistantChat; chat.append(board); const form = element('form', 'guide-chat-form'); const input = document.createElement('textarea'); input.rows = 3; input.maxLength = 2000; input.required = true; input.value = guideState.assistant_draft; input.placeholder = experience.input_placeholder || 'Type your message'; input.setAttribute('aria-label', 'Message'); input.addEventListener('input', () => { guideState.assistant_draft = input.value.slice(0, 2000); guideState.assistant_draft_origin = 'USER'; persistState(); }); const button = element('button', 'guide-button guide-chat-form__send', experience.launcher_label || 'Send'); button.type = 'submit'; form.append(input, button); bindEnterToSubmit(input, form); form.addEventListener('submit', submitMessage); chat.append(form); container.append(chat); }
 
@@ -405,8 +432,9 @@ function removeAssistantReminderBubble() {
 
 function createAssistantReminderBubble(messageText) {
   removeAssistantReminderBubble();
-  const canvas = root ? root.querySelector('.guide-canvas') : document.querySelector('.guide-canvas');
-  if (!canvas) return null;
+  const assistantSlot = root ? root.querySelector('.guide-navigation__slot[data-guide-slot="AI_ASSISTANT"]') : document.querySelector('.guide-navigation__slot[data-guide-slot="AI_ASSISTANT"]');
+  const targetParent = assistantSlot || (root ? root.querySelector('.guide-navigation') : document.querySelector('.guide-navigation'));
+  if (!targetParent) return null;
 
   const bubble = element('div', 'guide-assistant-reminder');
   bubble.setAttribute('role', 'status');
@@ -429,7 +457,7 @@ function createAssistantReminderBubble(messageText) {
   });
 
   bubble.append(actionButton, closeButton);
-  canvas.append(bubble);
+  targetParent.prepend(bubble);
   return bubble;
 }
 
@@ -498,7 +526,24 @@ export function applyExperience(value) {
   const shell = element('main', 'guide-shell'); const canvas = element('section', 'guide-canvas'); canvas.setAttribute('aria-label', text(experience.brand_name, 'AI Guide'));
   const header = element('header', 'guide-header'); const identity = element('div', 'guide-identity'); if (experience.logo_url) { const logo = document.createElement('img'); logo.className = 'guide-logo'; setAsset(logo, experience.logo_url, `${text(experience.brand_name)} logo`); identity.append(logo); } const names = element('div', 'guide-names'); names.append(element('p', 'guide-brand-name', experience.brand_name || 'AI Guide'), element('p', 'guide-status', experience.assistant_status_label || 'Online')); identity.append(names); header.append(identity); if (experience.avatar_url) { const avatar = document.createElement('img'); avatar.className = 'guide-avatar'; setAsset(avatar, experience.avatar_url, `${text(experience.assistant_display_name)} avatar`); header.append(avatar); } canvas.append(header);
   const hero = element('section', 'guide-hero'); hero.append(element('p', 'guide-hero__eyebrow', 'AI GUIDE'), element('h1', 'guide-hero__title', experience.hero?.title || experience.welcome_title || 'How can we help?'), element('p', 'guide-hero__message', experience.hero?.message || experience.welcome_message || 'Choose a path or ask a question to get started.')); canvas.append(hero); const outlet = element('section', 'guide-module'); canvas.append(outlet);
-  const navigation = element('nav', 'guide-navigation'); navigation.setAttribute('aria-label', 'Guide experiences'); for (const module of enabledModules()) { const button = element('button', 'guide-navigation__item'); button.type = 'button'; button.dataset.guideModule = module; button.append(element('span', 'guide-navigation__icon', moduleIcon(module)), element('span', 'guide-navigation__label', moduleLabel(module))); button.addEventListener('click', () => { guideState.active_module = module; persistState(); renderActiveModule(); }); navigation.append(button); } canvas.append(navigation); shell.append(canvas); root.replaceChildren(shell); guideInitialized = true; window.clearTimeout(initializationTimeout); renderActiveModule(); resumeGuideSession();
+  const navigation = element('nav', 'guide-navigation');
+  navigation.setAttribute('aria-label', 'Guide experiences');
+  for (const module of enabledModules()) {
+    const slot = element('div', 'guide-navigation__slot');
+    slot.dataset.guideSlot = module;
+    const button = element('button', 'guide-navigation__item');
+    button.type = 'button';
+    button.dataset.guideModule = module;
+    button.append(element('span', 'guide-navigation__icon', moduleIcon(module)), element('span', 'guide-navigation__label', moduleLabel(module)));
+    button.addEventListener('click', () => {
+      guideState.active_module = module;
+      persistState();
+      renderActiveModule();
+    });
+    slot.append(button);
+    navigation.append(slot);
+  }
+  canvas.append(navigation); shell.append(canvas); root.replaceChildren(shell); guideInitialized = true; window.clearTimeout(initializationTimeout); renderActiveModule(); resumeGuideSession();
 }
 
 fetch(`/guide/bootstrap${previewToken ? `?preview=${encodeURIComponent(previewToken)}` : ''}`, { cache: 'no-store' }).then(async (response) => { if (!response.ok) throw new Error('unavailable'); return response.json(); }).then((payload) => applyExperience(payload?.experience)).catch(showGuideError);

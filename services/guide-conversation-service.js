@@ -18,7 +18,8 @@ const clean = (value, max = MAX_TEXT) => {
 };
 
 export function normalizeGuideConversationRequest({ module, text }) {
-  const normalizedModule = String(module || '').trim().toUpperCase();
+  let normalizedModule = String(module || '').trim().toUpperCase();
+  if (normalizedModule === 'ASSISTANT') normalizedModule = 'AI_ASSISTANT';
   if (!MODULES.has(normalizedModule)) throw new GuideConversationError();
   return { module: normalizedModule, text: clean(text) };
 }

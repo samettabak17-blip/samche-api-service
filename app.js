@@ -1119,7 +1119,7 @@ app.post("/chat", async (req, res) => {
     const cleanText = text.trim();
     if (!cleanText || cleanText.length > 2000) return res.status(400).json({ error: "Message text must be a non-empty string." });
     let guideConversation;
-    try { guideConversation = normalizeGuideConversationRequest({ module: req.body?.guide_module || 'ASSISTANT', text: cleanText }); }
+    try { guideConversation = normalizeGuideConversationRequest({ module: req.body?.guide_module || 'AI_ASSISTANT', text: cleanText }); }
     catch (error) { return res.status(400).json({ error: 'Guide request is invalid.' }); }
 
     let publicSession;

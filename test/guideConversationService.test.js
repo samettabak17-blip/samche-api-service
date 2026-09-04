@@ -25,6 +25,8 @@ test('rejects unsafe or provider-shaped Guide events and bounds roadmap conversa
   assert.throws(() => normalizeGuideConversationRequest({ module: 'ROADMAP', text: 'x'.repeat(2001) }), GuideConversationError);
   assert.throws(() => normalizeGuideConversationRequest({ module: 'VERTEX_STREAM', text: 'hello' }), GuideConversationError);
   assert.deepEqual(normalizeGuideConversationRequest({ module: 'ROADMAP', text: ' Plan a launch ' }), { module: 'ROADMAP', text: 'Plan a launch' });
+  assert.deepEqual(normalizeGuideConversationRequest({ module: 'ASSISTANT', text: ' Can you help? ' }), { module: 'AI_ASSISTANT', text: 'Can you help?' });
+  assert.deepEqual(normalizeGuideConversationRequest({ module: 'AI_ASSISTANT', text: ' Can you help? ' }), { module: 'AI_ASSISTANT', text: 'Can you help?' });
 });
 
 test('issues opaque durable resume tokens and rejects a cross-tenant resolution', async () => {

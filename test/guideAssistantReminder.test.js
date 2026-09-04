@@ -101,5 +101,6 @@ test('17. Visual styles for tooltip bubble, pointer tail, and responsive layout 
   assert.match(cssSource, /\.guide-assistant-reminder__button/);
   assert.match(cssSource, /\.guide-assistant-reminder__close/);
   assert.match(cssSource, /position:absolute/);
-  assert.match(cssSource, /bottom:62px/);
+  assert.match(cssSource, /bottom:calc\(100%/);
+  assert.match(cssSource, /transform:translateX\(-50%\)/);
 });
