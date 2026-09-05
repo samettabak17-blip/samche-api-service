@@ -1,0 +1,25 @@
+# SamChe Platform Backend & Dashboard
+
+The canonical SamChe Strict Execution / Non-Regression Contract is in the
+repository-root `AGENTS.md`. Read and follow it before inspecting or changing
+the repository. Do not duplicate that contract here.
+
+Repository-specific context:
+
+- Default working branch for current development is `staging`.
+- Reuse existing engineering guidance instead of rediscovering architecture.
+
+Reference these existing sources when relevant. Read only the specific
+guidance needed for the requested task; do not automatically read all of it:
+
+- `.agent/budget-policy.md`
+- `.agent/prompts/`
+- `docs/engineering/`
+
+Cost-control reminders:
+
+- Minimize Vertex token usage.
+- Prefer targeted file reads.
+- Avoid `node_modules` and generated files.
+- Keep reports concise.
+- Stop once acceptance criteria are met.
