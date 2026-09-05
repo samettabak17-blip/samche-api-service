@@ -14,12 +14,57 @@ const PLATFORM_HUMAN_SUPPORT_TEMPLATES = Object.freeze({
   human_support: {
     general_topic: { tr: 'Genel destek', en: 'General support', ar: 'الدعم العام' },
     transfer: {
-      tr: 'Canlı temsilci ile görüşme ilgili talebinizi aldım. {{topicSummary}} konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\n\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\n\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.\n\n🔒 Bu sohbet oturumu sona ermiştir.\n\nBaşka sorularınız varsa veya ek yardıma ihtiyacınız olursa, lütfen istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin. Canlı Destek Ekibimiz size yardımcı olmaktan mutluluk duyacaktır.',
-      en: 'I have received your request to speak with a live representative. Regarding {{topicSummary}}, I am transferring you to our live customer representative to provide the most accurate support.\n\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\n\nPlease stay on hold while we connect you ⌛️.\n\n🔒 This chat session has ended.\n\nIf you have further questions or need additional assistance, please feel free to reach out again anytime. Our Live Support Team will be happy to assist you.',
-      ar: 'لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص {{topicSummary}}، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\n\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\n\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.\n\n🔒 انتهت جلسة الدردشة هذه.\n\nإذا كانت لديك أسئلة أخرى أو احتجت إلى مساعدة إضافية، فلا تتردد في الاتصال بنا مرة أخرى في أي وقت. سيسعد فريق الدعم المباشر لدينا بمساعدتك.',
+      tr: 'Canlı temsilci ile görüşme ilgili talebinizi aldım. {{topicSummary}} konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\n\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\n\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.',
+      en: 'I have received your request to speak with a live representative. Regarding {{topicSummary}}, I am transferring you to our live customer representative to provide the most accurate support.\n\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\n\nPlease stay on hold while we connect you ⌛️.',
+      ar: 'لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص {{topicSummary}}، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\n\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\n\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.',
+    },
+    warning_5m: {
+      tr: '⚠️Lütfen dikkat, bu sohbet oturumu 5 dakika sonra sona erecektir.\n\nEkibimizden yanıt beklerken oturumu aktif tutmak için bu sohbette mesaj gönderebilirsiniz.\n\nOturumunuz sona ererse, istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin; daha fazla sorunuzda size yardımcı olmaktan memnuniyet duyarız.',
+      en: '⚠️ Please note that this chat session will end in 5 minutes.\n\nWhile waiting for our team, you may send a message in this chat to keep the session active.\n\nIf your session ends, you are welcome to contact us again at any time; we will be happy to help with further questions.',
+      ar: '⚠️ يرجى الانتباه، ستنتهي جلسة الدردشة هذه بعد 5 دقائق.\n\nأثناء انتظار رد فريقنا، يمكنك إرسال رسالة في هذه الدردشة للحفاظ على الجلسة نشطة.\n\nإذا انتهت جلستك، يمكنك التواصل معنا مرة أخرى في أي وقت، ويسعدنا مساعدتك في أي أسئلة إضافية.',
+    },
+    manual_takeover: {
+      tr: 'DİKKAT⚠️ Canlı temsilcimiz bu konuşmayı devralmıştır. Lütfen sohbete bağlanana kadar beklemede kalın ⌛️\n\n⚠️Canlı temsilci bu konuşmayı sonlandırmadığı sürece yapay zeka danışmanı devre dışıdır.🔒',
+      en: 'ATTENTION ⚠️ Our live representative has taken over this conversation. Please remain on hold until connected ⌛️\n\n⚠️ The AI assistant remains disabled until the live representative ends this conversation. 🔒',
+      ar: 'تنبيه ⚠️ تولى ممثلنا المباشر هذه المحادثة. يرجى البقاء في الانتظار حتى يتم الاتصال ⌛️\n\n⚠️ سيظل مساعد الذكاء الاصطناعي معطلاً حتى ينهي الممثل المباشر هذه المحادثة. 🔒',
+    },
+    return_to_ai: {
+      tr: '🔒 Bu sohbet oturumu sona ermiştir.\n\nBaşka sorularınız varsa veya ek yardıma ihtiyacınız olursa, lütfen istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin. Canlı Destek Ekibimiz size yardımcı olmaktan mutluluk duyacaktır.',
+      en: '🔒 This chat session has ended.\n\nIf you have further questions or need additional assistance, please feel free to contact us again at any time. Our Live Support Team will be happy to help.',
+      ar: '🔒 انتهت جلسة الدردشة هذه.\n\nإذا كانت لديك أسئلة أخرى أو احتجت إلى مساعدة إضافية، فلا تتردد في التواصل معنا مرة أخرى في أي وقت. سيسعد فريق الدعم المباشر لدينا بمساعدتك.',
     },
   },
 });
+
+const LIFECYCLE_TEMPLATE_KEYS = Object.freeze({
+  human_support_request: ['human_support_request', 'transfer'],
+  human_session_warning: ['human_session_warning', 'warning_5m'],
+  human_takeover: ['human_takeover', 'manual_takeover'],
+  return_to_ai: ['return_to_ai'],
+});
+
+function canonicalLanguage(language) {
+  return ['tr', 'en', 'ar'].includes(language) ? language : 'en';
+}
+
+function lifecycleTemplate(templates, event, language) {
+  const requestedLanguage = canonicalLanguage(language);
+  const humanSupport = templates?.human_support;
+  for (const key of LIFECYCLE_TEMPLATE_KEYS[event] ?? []) {
+    const localized = humanSupport?.[key];
+    const content = textAt(localized, requestedLanguage) ?? textAt(localized, 'en');
+    if (content) return content;
+  }
+  return null;
+}
+
+function lifecycleMessage({ activeTemplates, legacyTemplates, language, event, topic }) {
+  const template = lifecycleTemplate(activeTemplates, event, language)
+    ?? lifecycleTemplate(legacyTemplates, event, language)
+    ?? lifecycleTemplate(PLATFORM_HUMAN_SUPPORT_TEMPLATES, event, language);
+  if (!template) return null;
+  return template.replaceAll('{{topicSummary}}', typeof topic === 'string' && topic.trim() ? topic.trim().slice(0, 255) : '');
+}
 
 // This is the exact short-lived platform fallback introduced by migration 062.
 // It is intentionally recognized as inherited policy, not tenant-authored copy.
@@ -96,9 +141,16 @@ export function resolveWhatsAppHumanSupportPolicy({ activeTemplates = null, lega
   const legacyPolicy = policyFromTemplates(legacyTemplates, language, 'LEGACY_COMPATIBILITY');
   // The migration fallback is not tenant-authored wording regardless of which
   // compatibility boundary supplied it. Keep only established tenant policy.
-  return (activePolicy && !isInheritedGenericHandoff(activeTemplates) ? activePolicy : null)
+  const resolved = (activePolicy && !isInheritedGenericHandoff(activeTemplates) ? activePolicy : null)
     ?? (legacyPolicy && !isInheritedGenericHandoff(legacyTemplates) ? legacyPolicy : null)
     ?? policyFromTemplates(PLATFORM_HUMAN_SUPPORT_TEMPLATES, language, 'PLATFORM_DEFAULT');
+  if (!resolved) return null;
+  return {
+    ...resolved,
+    lifecycleMessage(event, topic = resolved.defaultTopic) {
+      return lifecycleMessage({ activeTemplates, legacyTemplates, language, event, topic });
+    },
+  };
 }
 
 function topicText(value) {

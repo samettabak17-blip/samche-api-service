@@ -69,6 +69,19 @@ export async function requestCustomerHumanSupport({
       [tenantId, conversationId, acknowledgement]
     );
     await audit(client, { tenantId, conversationId, eventType: 'HANDOFF_REQUESTED' });
+    // Durable domain event for the notification/escalation worker. Transport
+    // adapters consume this event asynchronously; they never gate the handoff.
+    await audit(client, { tenantId, conversationId, eventType: 'HUMAN_SUPPORT_REQUESTED' });
+    await client.query(
+      `INSERT INTO human_support_escalations
+         (tenant_id, conversation_id, policy_id, status, current_level, next_due_at, idempotency_key)
+       VALUES ($1, $2,
+         (SELECT id FROM human_support_escalation_policies
+           WHERE tenant_id = $1 AND event_type = 'HUMAN_SUPPORT_REQUESTED' AND enabled = TRUE LIMIT 1),
+         'PENDING', 0, CURRENT_TIMESTAMP, $3)
+       ON CONFLICT (tenant_id, conversation_id, idempotency_key) DO NOTHING`,
+      [tenantId, conversationId, `human-support-requested:${conversationId}`],
+    );
     await notify(client, tenantId, conversationId, 'HUMAN_SUPPORT_REQUESTED');
     await client.query('COMMIT');
     console.info('HUMAN_SUPPORT_REQUEST persisted=1 attention=REQUESTED tenant=' + String(tenantId).slice(0, 8));
@@ -166,4 +179,42 @@ export async function claimDueCustomerSupportLifecycle({ database = null, now = 
     await client.query('ROLLBACK').catch(() => {});
     throw error;
   } finally { client.release(); }
+}
+
+export async function claimDueHumanSupportEscalations({ database = null, now = new Date() } = {}) {
+  const client = await (database ?? await defaultDatabase()).connect();
+  try {
+    await client.query('BEGIN');
+    const due = await client.query(
+      `SELECT e.id AS escalation_id, e.tenant_id, e.conversation_id, e.current_level,
+              l.level_order, l.recipient_rule, l.acknowledgement_timeout_seconds
+         FROM human_support_escalations e
+         JOIN human_support_escalation_levels l
+           ON l.tenant_id = e.tenant_id AND l.policy_id = e.policy_id
+          AND l.level_order = e.current_level + 1
+        WHERE e.status IN ('PENDING', 'ACTIVE') AND e.next_due_at <= $1
+        ORDER BY e.next_due_at ASC FOR UPDATE OF e SKIP LOCKED`, [now]
+    );
+    const actions = [];
+    for (const row of due.rows) {
+      const key = `human-support-escalation:${row.escalation_id}:${row.level_order}`;
+      const inserted = await client.query(
+        `INSERT INTO human_support_notification_outbox
+          (tenant_id, escalation_id, conversation_id, level_order, idempotency_key, status)
+         VALUES ($1, $2, $3, $4, $5, 'PENDING')
+         ON CONFLICT (tenant_id, idempotency_key) DO NOTHING RETURNING id`,
+        [row.tenant_id, row.escalation_id, row.conversation_id, row.level_order, key]
+      );
+      if (!inserted.rowCount) continue;
+      await client.query(
+        `UPDATE human_support_escalations SET status = 'ACTIVE', current_level = $1,
+          next_due_at = $2 + make_interval(secs => $3), updated_at = $2 WHERE id = $4 AND tenant_id = $5`,
+        [row.level_order, now, row.acknowledgement_timeout_seconds, row.escalation_id, row.tenant_id]
+      );
+      actions.push({ tenantId: row.tenant_id, conversationId: row.conversation_id, escalationId: row.escalation_id, level: row.level_order, recipientRule: row.recipient_rule });
+    }
+    await client.query('COMMIT');
+    return actions;
+  } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
+  finally { client.release(); }
 }

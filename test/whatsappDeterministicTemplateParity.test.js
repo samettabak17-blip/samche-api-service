@@ -28,3 +28,11 @@ test('general support fallback is localized rather than leaking Turkish into Eng
   assert.doesNotMatch(templates.human_support.transfer.en.replace('{{topicSummary}}', templates.human_support.general_topic.en), /Genel Destek/);
   assert.doesNotMatch(templates.human_support.transfer.ar.replace('{{topicSummary}}', templates.human_support.general_topic.ar), /Genel Destek/);
 });
+
+test('human-support lifecycle defaults are white-label for every supported locale', () => {
+  for (const key of ['manual_takeover', 'warning_5m', 'timeout_close', 'return_to_ai', 'transfer']) {
+    for (const language of languages) {
+      assert.doesNotMatch(templates.human_support[key][language], /SamChe/i, `${key}.${language}`);
+    }
+  }
+});

@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTenantFollowUpRequest, resolveTenantFollowUpPolicy } from '../services/tenant-follow-up-service.js';
-import { readFileSync } from 'node:fs';
 
 const persona = {
   available: true,
@@ -35,11 +34,4 @@ test('generated follow-up request is tenant-scoped and contains no SamChe or Dub
 
 test('human takeover suppresses tenant follow-up generation', () => {
   assert.deepEqual(buildTenantFollowUpRequest({ persona, stage: '3h', humanHandling: true }), { available: false, code: 'HUMAN_HANDLING' });
-});
-
-test('cron orchestrates tenant-aware generation and does not select legacy SamChe wording', () => {
-  const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
-  const cron = app.slice(app.indexOf('cron.schedule("* * * * *"'), app.indexOf('// ============================================================================\n// 7. SUNUCU'));
-  assert.match(cron, /generateTenantFollowUpMessage/);
-  assert.doesNotMatch(cron, /getPingMessage\(|getFollowUpMessage\(/);
 });

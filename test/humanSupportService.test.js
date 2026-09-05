@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { claimDueCustomerSupportLifecycle, listHumanAttentionSummary, requestCustomerHumanSupport } from '../services/human-support-service.js';
+import { claimDueCustomerSupportLifecycle, claimDueHumanSupportEscalations, listHumanAttentionSummary, requestCustomerHumanSupport } from '../services/human-support-service.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
 const conversationId = '22222222-2222-4222-8222-222222222222';
@@ -40,6 +40,13 @@ test('customer-requested support persists one unresolved attention state and sup
   const attentionEvent = fixture.calls.find(({ sql }) => sql.includes('SELECT pg_notify'));
   assert.equal(attentionEvent?.params?.[0], 'samche_live_events');
   assert.equal(JSON.parse(attentionEvent?.params?.[1] ?? '{}').type, 'HUMAN_SUPPORT_REQUESTED');
+
+  const lifecycleEvent = fixture.calls.find(({ sql, params }) =>
+    sql.includes('INSERT INTO conversation_audit_events') && params?.[2] === 'HUMAN_SUPPORT_REQUESTED'
+  );
+  assert.ok(lifecycleEvent, 'the durable canonical escalation event is recorded in the same transaction');
+  assert.ok(fixture.calls.some(({ sql }) => sql.includes('INSERT INTO human_support_escalations')),
+    'the request creates a durable tenant-scoped escalation instance');
 });
 
 test('repeated customer support request does not duplicate attention or lifecycle messages', async () => {
@@ -132,4 +139,27 @@ test('app-shaped scheduler call accepts its production dependency object and sca
   const fixture = lifecycleDatabase({ attention: 'REQUESTED', lastActivityAt: new Date(now.getTime() - (5 * 60 * 1000 + 1)) });
   const actions = await claimDueCustomerSupportLifecycle({ database: fixture.database, now });
   assert.equal(actions[0]?.type, 'WARNING_5M');
+});
+
+test('due escalation levels are claimed once from tenant-scoped persisted policy data', async () => {
+  const calls = [];
+  const database = { async connect() { return { async query(sql, params = []) {
+    calls.push({ sql, params });
+    if (sql.includes('FROM human_support_escalations')) return { rows: [{ escalation_id: 'esc-a', tenant_id: tenantId, conversation_id: conversationId, current_level: 0, level_order: 1, recipient_rule: 'ASSIGNED_AGENT', acknowledgement_timeout_seconds: 300 }] };
+    if (sql.includes('INSERT INTO human_support_notification_outbox')) return { rowCount: 1, rows: [] };
+    return { rows: [] };
+  }, release() {} }; } };
+  const claimed = await claimDueHumanSupportEscalations({ database, now: new Date('2026-09-05T12:00:00Z') });
+  assert.equal(claimed.length, 1);
+  assert.equal(claimed[0].tenantId, tenantId);
+  assert.ok(calls.some(({ sql }) => sql.includes('FOR UPDATE OF e SKIP LOCKED')));
+  assert.ok(calls.some(({ sql }) => sql.includes('INSERT INTO human_support_notification_outbox')));
+});
+
+test('support request binds only its tenant active escalation policy', async () => {
+  const fixture = database();
+  await requestCustomerHumanSupport({ tenantId, conversationId, acknowledgement: 'transfer', database: fixture.database });
+  const escalation = fixture.calls.find(({ sql }) => sql.includes('INSERT INTO human_support_escalations'));
+  assert.match(escalation?.sql ?? '', /SELECT id FROM human_support_escalation_policies/);
+  assert.deepEqual(escalation?.params?.slice(0, 2), [tenantId, conversationId]);
 });

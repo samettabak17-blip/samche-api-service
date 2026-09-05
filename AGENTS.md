@@ -101,3 +101,27 @@ provider configuration, security architecture changes, broad architecture
 changes, customer-specific hardcoding risk, an unclear root cause after
 verification, repeated verification failure, or any request to inspect or
 modify files outside the authorized scope.
+
+## 9. Canonical tenant behavior and messaging
+
+- A tenant inherits the canonical platform behavior engine; tenant data and
+  explicitly supported configuration may specialize behavior but must never
+  fork, remove, or bypass shared capabilities. Provisioning and idempotent,
+  non-destructive backfill must preserve this for new and existing tenants.
+- Fixed platform lifecycle messages are database-backed, localized,
+  deterministic templates shared across channels. They do not use an LLM or
+  runtime translation. Contextual AI follow-up is a separate capability: its
+  copy is generated from the resolved tenant, conversation, language, and
+  grounded business context, then persisted and delivered idempotently.
+- Customer-facing behavior is always white-label and tenant-driven. Never add
+  customer-specific code, identifiers, prompts, branches, or platform-brand
+  leakage for another represented tenant.
+- Human-support ownership, fallback, scheduled follow-up, WhatsApp, Web Chat,
+  AI Guide, Live Inbox, takeover, and return-to-AI are shared cross-channel
+  regression contracts. Future work must not silently change their semantics,
+  tenant isolation, historical compatibility, or canonical lifecycle policy.
+- Durable jobs, escalation instances, notification outbox rows, and persisted
+  messages are the authority; process memory is never an authority. Telegram
+  is not an active runtime dependency, and wpSessions is not a source of truth.
+- Background employee-phone delivery requires a configured external transport;
+  do not simulate it or add provider credentials without explicit approval.

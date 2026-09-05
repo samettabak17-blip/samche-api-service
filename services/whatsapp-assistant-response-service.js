@@ -9,6 +9,7 @@ export async function persistAndDeliverWhatsAppAssistant({
   conversationId,
   handlingVersion,
   knowledgeAuthority,
+  idempotencyKey = null,
   recipient,
   content,
   persistAssistantResponse,
@@ -22,6 +23,7 @@ export async function persistAndDeliverWhatsAppAssistant({
     content,
     handlingVersion,
     ...(knowledgeAuthority ? { knowledgeAuthority } : {}),
+    ...(idempotencyKey ? { idempotencyKey } : {}),
   });
   if (!persisted?.delivered) return { delivered: false, message: persisted?.message ?? null };
 

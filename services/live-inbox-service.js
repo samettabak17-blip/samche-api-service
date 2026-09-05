@@ -6,7 +6,6 @@ import { deliverWhatsAppText, deliverWhatsAppMedia, WhatsAppDeliveryError } from
 import { whatsappIntegrationKey } from './whatsapp-multimodal-service.js';
 import { ensureConversationCrmIdentity } from './crm-lead-service.js';
 import { queueLeadQualification } from './lead-qualification-runner.js';
-import { notifyLegacyTelegramSupportClosed } from './telegram-live-support-status.js';
 import { createConversationResource } from './conversation-resource-service.js';
 import { createConversationResourceStorage } from './conversation-resource-storage.js';
 import { buildConversationStorageKey, ConversationResourceValidationError, validateConversationUpload } from './conversation-resource-validation.js';
@@ -390,6 +389,15 @@ export async function operateConversation({ tenantId, conversationId, actor, act
         [actorUserId, conversationId, tenantId]
       );
       const takenOver = { ...updated.rows[0], channel_type: conversation.channel_type, external_channel_id: conversation.external_channel_id };
+      await client.query(
+        `UPDATE human_support_escalations SET status = 'COMPLETED', claimed_at = CURRENT_TIMESTAMP,
+          completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+         WHERE tenant_id = $1 AND conversation_id = $2 AND status IN ('PENDING', 'ACTIVE')`, [tenantId, conversationId]
+      );
+      await client.query(
+        `UPDATE human_support_notification_outbox SET status = 'CANCELLED'
+         WHERE tenant_id = $1 AND conversation_id = $2 AND status = 'PENDING'`, [tenantId, conversationId]
+      );
       console.info('TAKEOVER_STAGE stage=ASSIGNED tenant=' + String(tenantId).slice(0, 8));
       // The customer-request transfer has already been delivered. Only a voluntary
       // manual takeover receives the separate deterministic manual-takeover notice.
@@ -443,6 +451,14 @@ export async function operateConversation({ tenantId, conversationId, actor, act
         [conversationId, tenantId]
       );
       const returned = { ...updated.rows[0], channel_type: conversation.channel_type, external_channel_id: conversation.external_channel_id };
+      await client.query(
+        `UPDATE human_support_escalations SET status = 'COMPLETED', completed_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP WHERE tenant_id = $1 AND conversation_id = $2 AND status IN ('PENDING', 'ACTIVE')`, [tenantId, conversationId]
+      );
+      await client.query(
+        `UPDATE human_support_notification_outbox SET status = 'CANCELLED'
+         WHERE tenant_id = $1 AND conversation_id = $2 AND status = 'PENDING'`, [tenantId, conversationId]
+      );
       if (returned.channel_type === 'WHATSAPP') {
         const content = await loadWhatsAppHumanSupportNotice(client, returned, 'return_to_ai');
         const integration = await loadWhatsAppAgentDelivery(client, returned);
@@ -464,9 +480,6 @@ export async function operateConversation({ tenantId, conversationId, actor, act
       await writeAuditEvent(client, { tenantId, conversationId, actorUserId, eventType: 'RETURN_TO_AI' });
       await notify(client, tenantId, conversationId, 'RETURN_TO_AI');
       await client.query('COMMIT');
-      if (conversation.handling_mode === 'HUMAN' && returned.channel_type === 'WHATSAPP') {
-        void notifyLegacyTelegramSupportClosed({ customerExternalId: returned.customer_external_id });
-      }
       return returned;
     }
 

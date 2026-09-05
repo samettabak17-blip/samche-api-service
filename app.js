@@ -1,6 +1,6 @@
 // ============================================================================
 // SAMCHE COMPANY LLC - BİRLEŞTİRİLMİŞ API SERVİSİ
-// (WhatsApp Bot + Web Chatbot + Samcheguide Bot + Telegram + Cron)
+// (WhatsApp Bot + Web Chatbot + Samcheguide Bot + durable workers)
 // ============================================================================
 
 import express from "express";
@@ -22,8 +22,10 @@ import knowledgeIntelligenceRoutes from "./routes/knowledgeIntelligenceRoutes.js
 import guideExperienceRoutes from "./routes/guideExperienceRoutes.js";
 import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
-import { whatsappRuntimeSessionKey } from "./services/whatsapp-runtime-session-service.js";
-import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from "./services/human-support-service.js";
+import { claimDueCustomerSupportLifecycle, claimDueHumanSupportEscalations, requestCustomerHumanSupport } from "./services/human-support-service.js";
+import { processHumanSupportNotificationOutbox } from './services/human-support-notification-outbox-service.js';
+import { resolveHumanSupportRecipients } from './services/human-support-recipient-service.js';
+import { processDueContextualFollowUps, scheduleContextualFollowUp } from './services/durable-follow-up-service.js';
 import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
 import { describeWhatsAppHumanSupportPolicySources, resolveWhatsAppHumanSupportPolicy, summarizeWhatsAppHumanSupportTopic } from './services/whatsapp-human-support-policy-service.js';
 import { persistAndDeliverWhatsAppAssistant } from "./services/whatsapp-assistant-response-service.js";
@@ -59,7 +61,7 @@ import { normalizeGuideExperience, resolvePublishedGuideExperience } from "./ser
 import { configuredManagedGuideDomainSuffix, repairEligibleGuideDomains, resolveGuideRuntimeScopeFromRequest } from './services/guide-domain-service.js';
 import { getPublicGuideExperienceAsset } from "./services/guide-experience-asset-service.js";
 import { samcheguideRuntimeSessionKey } from "./services/samcheguide-runtime-session-service.js";
-import { buildTenantFollowUpRequest } from "./services/tenant-follow-up-service.js";
+import { buildTenantFollowUpRequest, resolveTenantFollowUpPolicy } from "./services/tenant-follow-up-service.js";
 import { isSameKnowledgeAuthority, resolveAssistantKnowledgeAuthority } from "./services/knowledge-authority-service.js";
 import { filterProviderMemoryByAuthority, stampProviderMemoryEntry } from "./services/channel-knowledge-authority-memory.js";
 import { configuredPublicWebChatSessionSecret, issuePublicWebChatSession, PublicWebChatSessionError, verifyPublicWebChatSession } from "./services/public-web-chat-session.js";
@@ -345,7 +347,6 @@ const httpsAgent = whatsappHttpsAgent;
 // 🔥 TEKRARLANAN MESAJLARI ENGELLEME (RETRY KORUMASI) HAFIZALARI
 // ============================================================================
 const processedWpMessages = new Set();
-const processedTgUpdates = new Set();
 
 // ============================================================================
 // 1. GENEL API YAPILANDIRMALARI
@@ -595,7 +596,6 @@ Form Links (Use ONLY when an official proposal is requested):
 // ============================================================================
 // WHATSAPP İÇİN KISA CEVAPLAR VE SABİT METİNLER
 // ============================================================================
-const wpSessions = {};
 
 const wpCorporateShortReplyMap = {
   "1": { tr: "Size nasıl yardımcı olabilirim?", en: "How may I assist you?", ar: "كيف يمكنني مساعدتك؟" },
@@ -639,7 +639,7 @@ const contactText = {
 };
 
 // ============================================================================
-// YARDIMCI FONKSİYONLAR (WHATSAPP & TELEGRAM)
+// YARDIMCI FONKSİYONLAR (WHATSAPP)
 // ============================================================================
 function safeWhatsAppStorageFailureLog(error) {
   const diagnostic = getSafeStorageFailureDiagnostic(error);
@@ -699,20 +699,95 @@ async function persistAndSendWhatsAppAssistant(whatsappInbox, recipient, content
   });
 }
 
-async function sendMessageToTelegram(text) {
-  try {
-    if (!text) return;
-    const chatId = process.env.TELEGRAM_CHAT_ID?.trim();
-    const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
-    if (!chatId || !token) {
-      console.error('[TELEGRAM ERROR]: notification configuration is unavailable');
-      return;
-    }
-    const url = `https://api.telegram.org/bot${token}/sendMessage`;
-    axios.post(url, { chat_id: chatId, text: text }, { httpsAgent, timeout: 20000 }).catch(() => {});
-  } catch (err) {
-    console.error("[TELEGRAM ERROR]:", err.message);
+const FOLLOW_UP_STAGES = Object.freeze([
+  ['3h', 3 * 60 * 60 * 1000],
+  ['24h', 24 * 60 * 60 * 1000],
+  ['48h', 48 * 60 * 60 * 1000],
+  ['72h', 72 * 60 * 60 * 1000],
+  ['7d', 7 * 24 * 60 * 60 * 1000],
+]);
+
+async function scheduleTenantContextualFollowUps({ whatsappInbox, persona }) {
+  if (!persona?.available) return;
+  const scheduledAt = Date.now();
+  for (const [stage, delay] of FOLLOW_UP_STAGES) {
+    if (!resolveTenantFollowUpPolicy({ persona, stage }).enabled) continue;
+    await scheduleContextualFollowUp({
+      database: pool,
+      tenantId: whatsappInbox.integration.tenant_id,
+      conversationId: whatsappInbox.conversation.id,
+      assistantId: whatsappInbox.integration.assistant_id,
+      channelId: whatsappInbox.integration.channel_id,
+      stage,
+      dueAt: new Date(scheduledAt + delay),
+      idempotencyKey: `contextual-follow-up:${whatsappInbox.conversation.id}:${whatsappInbox.customerMessage.id}:${stage}`,
+    });
   }
+}
+
+async function resolveContextualFollowUpWorkerContext(job) {
+  const conversationResult = await pool.query(
+    `SELECT c.id, c.tenant_id, c.customer_external_id, c.handling_version, c.communication_language,
+            c.status, c.handling_mode, c.human_attention_state,
+            tc.channel_type, tc.status AS channel_status
+       FROM conversations c
+       JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
+      WHERE c.id = $1 AND c.tenant_id = $2 AND c.channel_id = $3`,
+    [job.conversation_id, job.tenant_id, job.channel_id],
+  );
+  const conversation = conversationResult.rows[0];
+  if (!conversation || conversation.status !== 'open' || conversation.handling_mode !== 'AI'
+    || ['REQUESTED', 'ACKNOWLEDGED'].includes(conversation.human_attention_state)
+    || conversation.channel_type !== 'WHATSAPP' || conversation.channel_status !== 'active'
+    || !conversation.customer_external_id) return null;
+
+  const persona = await resolveTenantRuntimePersona({
+    database: pool, tenantId: job.tenant_id, assistantId: job.assistant_id,
+  });
+  const language = ['tr', 'ar', 'en'].includes(conversation.communication_language)
+    ? conversation.communication_language : 'en';
+  const history = await pool.query(
+    `SELECT sender_type, content FROM conversation_messages
+      WHERE tenant_id = $1 AND conversation_id = $2
+      ORDER BY created_at DESC, id DESC LIMIT 12`,
+    [job.tenant_id, job.conversation_id],
+  );
+  const conversationContext = history.rows.reverse()
+    .map((message) => `${message.sender_type}: ${String(message.content ?? '')}`).join('\n');
+  const prompt = buildTenantFollowUpRequest({ persona, stage: job.stage, language, conversationContext });
+  if (typeof prompt !== 'string' || !prompt.trim()) return null;
+  return { conversation, language, prompt };
+}
+
+async function processContextualFollowUpJobs() {
+  return processDueContextualFollowUps({
+    database: pool,
+    resolveContext: resolveContextualFollowUpWorkerContext,
+    generate: async ({ prompt }) => callWpGemini(prompt, null, null),
+    persistCanonical: async ({ job, context, content, idempotencyKey }) => {
+      const persisted = await persistAssistantResponseIfCurrent({
+        tenantId: job.tenant_id,
+        conversationId: job.conversation_id,
+        content,
+        handlingVersion: context.conversation.handling_version,
+        idempotencyKey,
+      });
+      return persisted?.message ?? null;
+    },
+    deliver: async ({ context, message, content }) => {
+      if (message.external_message_id) return { delivered: true };
+      const delivery = await deliverWhatsAppAssistantText(context.conversation.customer_external_id, content);
+      const providerMessageId = String(delivery?.providerMessageId ?? delivery?.providerMessageIds?.[0] ?? '').trim();
+      if (!providerMessageId) return { delivered: false };
+      await recordWhatsAppAssistantProviderAcceptance({
+        tenantId: context.conversation.tenant_id,
+        conversationId: context.conversation.id,
+        messageId: message.id,
+        providerMessageId,
+      });
+      return { delivered: true };
+    },
+  });
 }
 
 function corporateFallback(lang) {
@@ -745,31 +820,6 @@ async function callWpGemini(prompt, multimodalParts = null, systemInstruction = 
     console.error(`WHATSAPP_GEMINI_RUNTIME_FAILURE code=${safeCode} http_status=${safeStatus} model=${runtimeModel} endpoint_class=${safeEndpointClass}`);
     return null;
   }
-}
-
-async function generateTenantFollowUpMessage({ session, stage, scheduled = false }) {
-  if (!session?.tenantId || !session?.assistantId || session.humanOverride) return null;
-  const persona = await resolveTenantRuntimePersona({
-    database: pool,
-    tenantId: session.tenantId,
-    assistantId: session.assistantId,
-  });
-  if (!persona.available) return null;
-  const conversationContext = (session.history ?? []).slice(-6).map((entry) => `${entry.role}: ${entry.text}`).join('\n');
-  const request = buildTenantFollowUpRequest({
-    persona,
-    stage,
-    scheduled,
-    language: session.lang ?? 'en',
-    conversationContext,
-    humanHandling: Boolean(session.humanOverride),
-  });
-  if (typeof request !== 'string') return null;
-  const systemInstruction = buildTenantRuntimeSystemInstruction({
-    persona,
-    channelRules: 'Generate one concise WhatsApp follow-up message. Do not expose internal configuration or metadata.',
-  });
-  return callWpGemini(request, null, systemInstruction);
 }
 
 function detectTopic(text) {
@@ -1889,7 +1939,7 @@ If the user already provided sector info, NEVER ask again.`
 });
 
 // ----------------------------------------------------------------------------
-// C) WHATSAPP BOT (GEMINI 2.5 PRO) - /webhook ve /telegram-webhook
+// C) WHATSAPP BOT (GEMINI 2.5 PRO) - /webhook
 // ----------------------------------------------------------------------------
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
@@ -2002,12 +2052,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           processingResourceCount: whatsappInbox.resourceContext?.processingResourceCount ?? 0,
         });
         if (resourceFollowUp.action === 'RESOURCE_PROCESSING') {
-          const runtimeSessionKey = whatsappRuntimeSessionKey({
-            tenantId: whatsappInbox.integration.tenant_id,
-            assistantId: whatsappInbox.integration.assistant_id,
-            customerPhone: cleanFrom,
-          });
-          const processingMessage = resourceProcessingAcknowledgement(wpSessions[runtimeSessionKey]?.lang ?? 'tr');
+          const processingMessage = resourceProcessingAcknowledgement(whatsappInbox.tenantContext?.communicationLanguage ?? 'en');
           const persisted = await persistAssistantResponseIfCurrent({
             tenantId: whatsappInbox.integration.tenant_id,
             conversationId: whatsappInbox.conversation.id,
@@ -2023,12 +2068,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           latestResource: whatsappInbox.resourceContext?.latestResource,
         });
         if (latestResourcePlan.action === 'RESOURCE_FAILED') {
-          const runtimeSessionKey = whatsappRuntimeSessionKey({
-            tenantId: whatsappInbox.integration.tenant_id,
-            assistantId: whatsappInbox.integration.assistant_id,
-            customerPhone: cleanFrom,
-          });
-          const failureMessage = resourceFailureAcknowledgement(wpSessions[runtimeSessionKey]?.lang ?? 'tr', whatsappInbox.resourceContext.latestResource.media_category);
+          const failureMessage = resourceFailureAcknowledgement(whatsappInbox.tenantContext?.communicationLanguage ?? 'en', whatsappInbox.resourceContext.latestResource.media_category);
           const persisted = await persistAssistantResponseIfCurrent({ tenantId: whatsappInbox.integration.tenant_id, conversationId: whatsappInbox.conversation.id, content: failureMessage, handlingVersion: whatsappInbox.handlingVersion, knowledgeAuthority: whatsappInbox.knowledgeAuthority });
           if (persisted.delivered) await sendMessage(cleanFrom, failureMessage);
           return;
@@ -2063,9 +2103,6 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         return;
       }
 
-      // 🔥 TELEGRAMA BİLDİRİM FORWARD ET (Ateşle ve Unut)
-      sendMessageToTelegram(`WhatsApp → +${cleanFrom}: ${text}`).catch(() => {});
-
       // 🔥 MAVİ TIK (OKUNDU) ONAYI (Ateşle ve Unut)
       if (wpMessageId) {
         axios.post(
@@ -2075,65 +2112,10 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         ).catch(() => {});
       }
 
-      // --------------------------------------
-      // SESSION OLUŞTURMA VE BAŞLANGIÇ
-      // --------------------------------------
-      const runtimeSessionKey = whatsappRuntimeSessionKey({
-        tenantId: whatsappInbox.integration.tenant_id,
-        assistantId: whatsappInbox.integration.assistant_id,
-        customerPhone: cleanFrom,
-      });
-      if (!wpSessions[runtimeSessionKey]) {
-        wpSessions[runtimeSessionKey] = {
-          lang: null, history: [], lastMessageTime: Date.now(), followUpStage: 0,
-          intentScore: 0, topics: [],
-          profile: { name: null, country: null, budget: null, interest: null },
-          firstMessageTime: Date.now(), pingSentOnce: false, humanOverride: false,
-          manualTakeover: false, lastUserText: ""
-        };
-      }
-
-      const session = wpSessions[runtimeSessionKey];
-      session.tenantId = whatsappInbox.integration.tenant_id;
-      session.assistantId = whatsappInbox.integration.assistant_id;
-      const lower = text.toLowerCase();
-
-      const now = Date.now();
-
-      // 🔥 SPAM FİLTRESİ HATA ÇÖZÜMÜ: SADECE BOT MODUNDAYKEN SPAM FİLTRESİ ÇALIŞIR
-      if (!session.humanOverride && session.lastUserText === text && (now - session.lastMessageTime) < 30000) {
-        return;
-      }
-
-      session.lastUserText = text;
-      session.lastMessageTime = now;
-
-      // ====================================================================
-      // 🔥 CANLI DESTEK AÇIKSA BOT BURADA DURUR VE SADECE DİNLER 🔥
-      // ====================================================================
-      if (session.humanOverride) {
-        // Müşteri canlı desteği sonlandırmak isterse:
-        if (lower === "/end" || lower === "/bot" || lower === "bot" || lower === "kapat") {
-          session.humanOverride = false;
-          session.manualTakeover = false;
-          session.lastUserText = ""; // KİLİTLENMEYİ ÖNLER
-          let closeMsg = `🔒 Canlı destek oturumu sona ermiştir.\n\nYapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına 'canlı destek' yazmanız yeterlidir.\nEkibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.`;
-          if (session.lang === "en") closeMsg = `🔒 This chat session has ended.\n\nYou may continue chatting with our AI assistant, or type 'live support' anytime to reconnect. Our team will be happy to assist you anytime.`;
-          if (session.lang === "ar") closeMsg = `🔒 انتهت جلسة الدردشة هذه.\n\nيمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي أو كتابة 'دعم مباشر' للاتصال بممثل.`;
-          sendMessage(cleanFrom, closeMsg).catch(()=>{});
-          sendMessageToTelegram(`Canlı destek kapatıldı → +${cleanFrom}`).catch(()=>{});
-          return;
-        }
-
-        return; // Botu susturuyoruz. İletim zaten yukarıda Telegram'a yapıldı.
-      }
-
       // Gelen içerik desteklenmiyorsa
       const isInvalid = ((!text || text === "") && !mediaDescriptor) || message.type === "video" || message.type === "sticker";
       if (isInvalid) {
-        if (!session.humanOverride) {
-          await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, "Gönderdiğiniz içeriği işleyemiyorum. Lütfen mesajınızı yazılı olarak iletin.");
-        }
+        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, "Gönderdiğiniz içeriği işleyemiyorum. Lütfen mesajınızı yazılı olarak iletin.");
         return;
       }
 
@@ -2148,7 +2130,6 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       const lang = ['tr', 'en', 'ar'].includes(tenantContext.communicationLanguage)
         ? tenantContext.communicationLanguage
         : 'en';
-      session.lang = lang;
 
       // Human support is an ownership transition, not an AI response. Resolve
       // it before persona, retrieval or provider work so an AI outage cannot
@@ -2205,7 +2186,6 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         });
         if (!handoff.duplicate) {
           await sendMessage(cleanFrom, acknowledgement);
-          sendMessageToTelegram(`🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``).catch(() => {});
         }
         return;
       }
@@ -2234,6 +2214,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           ' retrieval_available=' + (runtime.knowledge.retrievalAvailable ? '1' : '0') +
           ' provider_mode=' + runtime.mode + ' model=' + runtime.model
         );
+        await scheduleTenantContextualFollowUps({ whatsappInbox, persona: runtime.persona });
       } catch (error) {
         console.error('KNOWLEDGE_RUNTIME_CONTEXT_UNAVAILABLE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
         await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, resolveWhatsAppPersonaUnavailableResponse(tenantContext.communicationLanguage));
@@ -2263,32 +2244,6 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, deterministicSocialResponse.content);
         return;
       }
-
-      // --------------------------------------
-      // FOLLOW-UP RESETLERİ
-      // --------------------------------------
-      session.followUpStage = 0;
-      session.pingSentOnce = false;
-
-      // --------------------------------------
-      // KISA CEVAPLAR
-      // --------------------------------------
-      // --------------------------------------
-      // TARİHÇE VE SKOR
-      // --------------------------------------
-      session.history.push({ role: "user", text });
-      if (session.history.length > 10) session.history.shift();
-
-      const topic = detectTopic(text);
-      if (!session.topics) session.topics = [];
-      if (topic !== "other" && !session.topics.includes(topic)) session.topics.push(topic);
-      session.intentScore = calculateIntentScore(text, session.intentScore || 0);
-
-      if (lower.includes("yapay zeka") || lower.includes("ai ") || lower.includes("bot") || lower.includes("otomasyon")) {
-        if (!session.topics.includes("Yapay Zeka / Chatbot")) session.topics.push("Yapay Zeka / Chatbot");
-      }
-
-      const historyText = session.history.map((m) => `${m.role === "user" ? "User" : "Model"}: ${m.text}`).join("\n");
 
       // --------------------------------------
       // BÜYÜK DİL PROMPTLARI
@@ -2329,7 +2284,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       console.info('WHATSAPP_LANGUAGE_TRACE previous=' + (whatsappInbox.languageTrace?.previous ?? 'und') +
         ' detected=' + (whatsappInbox.languageTrace?.detected ?? 'und') +
         ' resolved=' + expectedLanguage + ' persisted=' + (whatsappInbox.languageTrace?.persisted ?? expectedLanguage) +
-        ' context=' + expectedLanguage + ' response_lock=' + expectedLanguage + ' session=' + (session.lang ?? 'und') +
+        ' context=' + expectedLanguage + ' response_lock=' + expectedLanguage +
         ' model_response_detected=' + responseLanguage);
       if (aiResponse && isWhatsAppResponseLanguageMismatch({ expectedLanguage, responseContent: aiResponse })) {
         const firstResponseLanguage = responseLanguage;
@@ -2350,7 +2305,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
 
       logWhatsAppTiming('model_response_complete');
       if (!aiResponse) {
-        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, corporateFallback(session.lang || "en"));
+        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, corporateFallback(expectedLanguage));
         return;
       }
 
@@ -2359,7 +2314,6 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       // Model text is conversational only. A human-support transition may
       // originate from the customer request above, never from model wording.
       await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, aiResponse);
-      session.history.push({ role: "assistant", text: aiResponse });
       return;
 
     } catch (error) {
@@ -2367,122 +2321,6 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
     }
   })();
 }); // WHATSAPP WEBHOOK KAPANIŞI
-
-// ============================================================================
-// TELEGRAM WEBHOOK — NORMAL MESAJ + CANLI DESTEK
-// ============================================================================
-app.post("/telegram-webhook", (req, res) => {
-  res.status(200).send("OK");
-
-  (async () => {
-    try {
-      const updateId = req.body?.update_id;
-      if (updateId && processedTgUpdates.has(updateId)) {
-        return;
-      }
-      if (updateId) {
-        processedTgUpdates.add(updateId);
-        setTimeout(() => processedTgUpdates.delete(updateId), 10 * 60 * 1000);
-      }
-
-      const msg = req.body.message;
-      if (!msg || !msg.text) return;
-
-      const chatId = msg.chat.id.toString();
-      const text = msg.text.trim();
-
-      if (!text.startsWith("/w ") && !text.startsWith("/end ")) {
-        return;
-      }
-
-      if (process.env.TELEGRAM_CHAT_ID && chatId !== process.env.TELEGRAM_CHAT_ID) {
-        return;
-      }
-
-      // ------------------------------------------------------
-      // 3) /w KOMUTU → CANLI DESTEK BAŞLAT / MESAJ GÖNDER
-      // ------------------------------------------------------
-      if (text.startsWith("/w ")) {
-        const parts = text.split(" ");
-        const to = parts[1];
-        const cleanTo = to?.replace("+", "");
-        const message = parts.slice(2).join(" ");
-
-        if (!cleanTo || !message) {
-          sendMessageToTelegram("Format yanlış. Örnek:\n/w +905551112233 Merhaba").catch(()=>{});
-          return;
-        }
-
-        if (!wpSessions[cleanTo]) {
-          wpSessions[cleanTo] = {
-            lang: "tr", history: [], lastMessageTime: Date.now(), followUpStage: 0,
-            intentScore: 0, topics: [], profile: { name: null, country: null, budget: null, interest: null },
-            firstMessageTime: Date.now(), pingSentOnce: false, humanOverride: false,
-            manualTakeover: false, lastUserText: ""
-          };
-        }
-        const session = wpSessions[cleanTo];
-
-        if (!session.humanOverride) {
-          session.humanOverride = true;
-          session.manualTakeover = true;
-
-          let takeoverMsg = `DİKKAT⚠️ Canlı temsilcimiz bu konuşmayı devralmıştır. Lütfen sohbete bağlanana kadar beklemede kalın ⌛️ \n\n ⚠️Canlı temsilci bu konuşmayı sonlandırmadığı sürece yapay zeka danışmanı devre dışıdır.🔒`;
-          if (session.lang === "en") takeoverMsg = `Our live representative has taken over the conversation. Please stay on hold...\n\nAs SamChe AI, the AI is deactivated until the live representative ends your conversation.`;
-          if (session.lang === "ar") takeoverMsg = `تولى ممثلنا المباشر المحادثة. يرجى البقاء على الخط...\n\nبصفتي SamChe AI، تم إلغاء تنشيط الذكاء الاصطناعي حتى ينهي الممثل المباشر محادثتك.`;
-
-          try { await sendMessage(cleanTo, takeoverMsg); } catch(e) {}
-        }
-
-        session.lastMessageTime = Date.now();
-        session.warning5MinSent = false;
-        session.lastUserText = ""; // KİLİTLENMEYİ ÖNLER
-
-        try {
-          await sendMessage(cleanTo, message);
-          sendMessageToTelegram(`Gönderildi → WhatsApp +${cleanTo}:\n${message}\n\nSohbeti bitirmek için kopyala:\n\`/end +${cleanTo}\``).catch(()=>{});
-        } catch(e) {
-          sendMessageToTelegram(`Mesaj iletilemedi! Lütfen tekrar deneyin.`).catch(()=>{});
-        }
-
-        return;
-      }
-
-      // ------------------------------------------------------
-      // 4) /end KOMUTU → CANLI DESTEK KAPAT
-      // ------------------------------------------------------
-      if (text.startsWith("/end ")) {
-        const parts = text.split(" ");
-        const to = parts[1];
-        const cleanTo = to?.replace("+", "");
-
-        if (!cleanTo) {
-          sendMessageToTelegram("Format yanlış. Örnek:\n/end +905551112233").catch(()=>{});
-          return;
-        }
-
-        if (!wpSessions[cleanTo]) wpSessions[cleanTo] = {};
-
-        wpSessions[cleanTo].humanOverride = false;
-        wpSessions[cleanTo].manualTakeover = false;
-        wpSessions[cleanTo].warning5MinSent = false;
-        wpSessions[cleanTo].lastUserText = ""; // KİLİTLENMEYİ ÖNLER
-
-        let closeMessage = "🔒 Bu sohbet oturumu sona ermiştir.\n\nBaşka sorularınız varsa veya ek yardıma ihtiyacınız olursa, lütfen istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin. Canlı Destek Ekibimiz size yardımcı olmaktan mutluluk duyacaktır.";
-        if (wpSessions[cleanTo]?.lang === "en") closeMessage = "🔒 This chat session has ended.\n\nIf you have further questions or need additional assistance, please feel free to reach out again anytime. Our Live Support Team will be happy to assist you.";
-        if (wpSessions[cleanTo]?.lang === "ar") closeMessage = "🔒 انتهت جلسة الدردشة هذه.\n\nإذا كانت لديك أسئلة أخرى أو احتجت إلى مساعدة إضافية، فلا تتردد في الاتصال بنا مرة أخرى في أي وقت. سيسعد فريق الدعم المباشر لدينا بمساعدتك.";
-
-        try { await sendMessage(cleanTo, closeMessage); } catch (e) {}
-        sendMessageToTelegram(`Canlı destek kapatıldı → +${cleanTo}`).catch(()=>{});
-
-        return;
-      }
-
-    } catch (err) {
-      console.error("Telegram webhook error:", err);
-    }
-  })();
-});
 
 // ============================================================================
 // 6. CRON JOB (WHATSAPP FOLLOW-UP)
@@ -2499,106 +2337,30 @@ cron.schedule("* * * * *", async () => {
         } catch {
           console.error('HUMAN_SUPPORT_' + action.type + ' status=FAILED tenant=' + String(action.tenantId).slice(0, 8));
         }
-        if (action.type === 'TIMEOUT_CLOSE') {
-          sendMessageToTelegram(`Zaman Aşımı: Canlı destek kapatıldı → +${action.recipient}`).catch(() => {});
-        }
       }
     } catch (error) {
       console.error('HUMAN_SUPPORT_LIFECYCLE_CRON status=FAIL reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
       lifecycleActions = [];
     }
-    const now = Date.now();
-    if (!wpSessions || typeof wpSessions !== "object") return;
-    const users = Object.keys(wpSessions);
-    if (!users.length) return;
-
-    for (const user of users) {
-      try {
-        const s = wpSessions[user];
-        if (!s || typeof s !== "object") continue;
-
-        if (!s.lastMessageTime || isNaN(s.lastMessageTime)) s.lastMessageTime = Date.now();
-        if (!s.followUpStage || isNaN(s.followUpStage)) s.followUpStage = 0;
-        if (!s.pingSentOnce) s.pingSentOnce = false;
-
-        if (s.warning5MinSent === undefined) s.warning5MinSent = false;
-
-        const diffMinutesLast = (now - s.lastMessageTime) / (1000 * 60);
-        const diffHoursLast = (now - s.lastMessageTime) / (1000 * 60 * 60);
-
-        const topics = Array.isArray(s.topics) ? s.topics : [];
-        const lastTopic = topics.length ? topics[topics.length - 1] : "general";
-        const lang = typeof s.lang === "string" ? s.lang : "en";
-
-        if (s.humanOverride) {
-          if (s.manualTakeover) continue;
-
-          if (diffMinutesLast >= 10) {
-            s.humanOverride = false;
-            s.warning5MinSent = false;
-            s.lastUserText = ""; // KİLİTLENMEYİ ÖNLER
-
-            const autoCloseMsg = `🔒 Bu sohbet oturumu sona ermiştir.\n\nBaşka sorularınız varsa veya ek yardıma ihtiyacınız olursa, lütfen istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin. Canlı Destek Ekibimiz size yardımcı olmaktan mutluluk duyacaktır.`;
-
-            try { await sendMessage(user, autoCloseMsg); } catch(e){}
-            try { await sendMessageToTelegram(`Zaman Aşımı: Canlı destek kapatıldı → +${user}`); } catch(e){}
-
-          } else if (diffMinutesLast >= 5 && !s.warning5MinSent) {
-            s.warning5MinSent = true;
-
-            const warningMsg = `⚠️Lütfen dikkat, bu sohbet oturumu 5 dakika sonra sona erecektir.\nEkibimizden yanıt beklerken oturumu aktif tutmak için bu sohbette mesaj gönderebilirsiniz.\n\nOturumunuz sona ererse, istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin; daha fazla sorunuzda size yardımcı olmaktan memnuniyet duyarız.`;
-
-            try { await sendMessage(user, warningMsg); } catch(e){}
-          } else if (diffMinutesLast < 5 && s.warning5MinSent) {
-            s.warning5MinSent = false;
-          }
-          continue;
-        }
-
-        if (diffMinutesLast >= 10 && !s.pingSentOnce) {
-          const pingMessage = await generateTenantFollowUpMessage({ session: s, stage: "10m" });
-          if (pingMessage) {
-            try { await sendMessage(user, pingMessage); } catch (e) {}
-          }
-          s.pingSentOnce = true;
-          continue;
-        }
-
-        if (diffMinutesLast < 10 && s.pingSentOnce) s.pingSentOnce = false;
-
-        if (s.followUpStage === 0 && diffHoursLast >= 3) {
-          const msg = await generateTenantFollowUpMessage({ session: s, stage: "3h" });
-          if (msg) { try { await sendMessage(user, msg); } catch {} }
-          s.followUpStage = 1;
-          continue;
-        }
-        if (s.followUpStage === 1 && diffHoursLast >= 24) {
-          const msg = await generateTenantFollowUpMessage({ session: s, stage: "24h" });
-          if (msg) { try { await sendMessage(user, msg); } catch {} }
-          s.followUpStage = 2;
-          continue;
-        }
-        if (s.followUpStage === 2 && diffHoursLast >= 48) {
-          const msg = await generateTenantFollowUpMessage({ session: s, stage: "48h" });
-          if (msg) { try { await sendMessage(user, msg); } catch {} }
-          s.followUpStage = 3;
-          continue;
-        }
-        if (s.followUpStage === 3 && diffHoursLast >= 72) {
-          const msg = await generateTenantFollowUpMessage({ session: s, stage: "72h" });
-          if (msg) { try { await sendMessage(user, msg); } catch {} }
-          s.followUpStage = 4;
-          continue;
-        }
-        if (s.followUpStage === 4 && diffHoursLast >= 168) {
-          const msg = await generateTenantFollowUpMessage({ session: s, stage: "7d" });
-          if (msg) { try { await sendMessage(user, msg); } catch {} }
-          s.followUpStage = 5;
-          continue;
-        }
-      } catch (err) {
-        console.error("[CRON] User loop error:", err);
-      }
+    try {
+      await claimDueHumanSupportEscalations({ database: pool });
+      await processHumanSupportNotificationOutbox({
+        database: pool,
+        resolveRecipients: (input) => resolveHumanSupportRecipients({ database: pool, ...input }),
+        deliver: async ({ recipients, tenantId }) => {
+          // The durable, provider-neutral boundary is ready. A real closed-browser
+          // phone transport requires a tenant-approved external provider setup.
+          console.warn('HUMAN_SUPPORT_NOTIFICATION_TRANSPORT_UNCONFIGURED tenant=' + String(tenantId).slice(0, 8) + ' recipients=' + recipients.length);
+          return { retryable: true };
+        },
+      });
+    } catch (error) {
+      console.error('HUMAN_SUPPORT_NOTIFICATION_WORKER status=FAIL reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    }
+    try {
+      await processContextualFollowUpJobs();
+    } catch (error) {
+      console.error('CONTEXTUAL_FOLLOW_UP_WORKER status=FAIL reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     }
   } catch (err) {
     console.error("[CRON] Genel hata:", err);

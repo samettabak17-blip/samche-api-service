@@ -96,8 +96,22 @@ test('uses the generic platform handoff policy when an enabled integration has n
   assert.match(policy.acknowledgement('şirket kuruluşu'), /şirket kuruluşu konusuyla ilgili/);
   assert.match(policy.acknowledgement('şirket kuruluşu'), /Talebiniz işlem sırasına alınacak/);
   assert.match(policy.acknowledgement('şirket kuruluşu'), /beklemede kalın/);
-  assert.match(policy.acknowledgement('şirket kuruluşu'), /Bu sohbet oturumu sona ermiştir/);
+  assert.doesNotMatch(policy.acknowledgement('şirket kuruluşu'), /Bu sohbet oturumu sona ermiştir/);
   assert.doesNotMatch(policy.acknowledgement('Genel destek'), /SamChe/i);
+});
+
+test('platform lifecycle messages are separate deterministic localized events with English fallback', () => {
+  const tr = resolveWhatsAppHumanSupportPolicy({ activeTemplates: null, legacyTemplates: null, language: 'tr' });
+  const ar = resolveWhatsAppHumanSupportPolicy({ activeTemplates: null, legacyTemplates: null, language: 'ar' });
+  const unsupported = resolveWhatsAppHumanSupportPolicy({ activeTemplates: null, legacyTemplates: null, language: 'de' });
+
+  assert.match(tr.lifecycleMessage('human_support_request', 'Nişan organizasyonu'), /Nişan organizasyonu konusuyla ilgili/);
+  assert.doesNotMatch(tr.lifecycleMessage('human_support_request', 'Nişan organizasyonu'), /Bu sohbet oturumu sona ermiştir/);
+  assert.match(tr.lifecycleMessage('human_session_warning'), /5 dakika sonra sona erecektir/);
+  assert.match(tr.lifecycleMessage('human_takeover'), /konuşmayı devralmıştır/);
+  assert.match(tr.lifecycleMessage('return_to_ai'), /Bu sohbet oturumu sona ermiştir/);
+  assert.match(ar.lifecycleMessage('human_takeover'), /الدردشة|المحادثة/);
+  assert.match(unsupported.lifecycleMessage('return_to_ai'), /chat session has ended/i);
 });
 
 test('uses the most recent known customer topic when the human request itself has no topic', () => {

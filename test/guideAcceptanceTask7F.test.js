@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 import {
   GuideConversationError,
+  appendGuideModuleMessage,
   canonicalGuideResponseEvents,
   normalizeGuideConversationRequest,
   issueGuideResumeSession,
@@ -98,8 +99,10 @@ test('18. Existing Assistant history remains intact when navigating', () => {
 
 test('19. Roadmap history remains independent from Assistant history', () => {
   assert.match(jsSource, /guideState\.roadmap_messages/);
-  assert.match(appSource, /guideSessionState\.roadmapState\.messages\.push/);
-  assert.match(appSource, /guideSessionState\.assistantConversation\.messages\.push/);
+  const roadmap = appendGuideModuleMessage({}, 'ROADMAP', { role: 'user', content: 'Roadmap question' });
+  const state = appendGuideModuleMessage(roadmap, 'AI_ASSISTANT', { role: 'user', content: 'Assistant question' });
+  assert.deepEqual(state.roadmapState.messages, [{ role: 'user', content: 'Roadmap question' }]);
+  assert.deepEqual(state.assistantConversation.messages, [{ role: 'user', content: 'Assistant question' }]);
 });
 
 test('20. Planning state remains preserved during Assistant interaction', () => {
@@ -118,10 +121,12 @@ test('21. Roadmap request uses correct /chat route, normalized body, and session
 });
 
 test('22-23. Successful runtime conversation history formats cleanly without consecutive user turns or undefined text', () => {
-  assert.match(appSource, /addGuideMemory\(sessionKey, guideConversation\.module, "user", cleanText/);
-  assert.match(appSource, /content:\s*text\s*\|\|\s*'',\s*parts:\s*\[\{\s*text:\s*text\s*\|\|\s*''\s*\}\]/);
-  assert.match(appSource, /conversationHistory\s*=\s*authorityMemory/);
-  assert.match(appSource, /const contents = \[\.\.\.conversationHistory, \{ role: 'user', parts: \[\{ text: cleanText \}\] \}\];/);
+  const events = canonicalGuideResponseEvents('## Next steps\n- Confirm venue\n- Confirm guests');
+  const state = appendGuideModuleMessage({}, 'ROADMAP', { role: 'user', content: 'Plan an event' });
+  const completed = appendGuideModuleMessage(state, 'ROADMAP', { role: 'assistant', content: events.map((event) => event.text ?? event.title ?? event.items?.join(', ') ?? '').join(' ') });
+  assert.equal(completed.roadmapState.messages.length, 2);
+  assert.deepEqual(completed.roadmapState.messages.map((message) => message.role), ['user', 'assistant']);
+  assert.ok(completed.roadmapState.messages.every((message) => typeof message.content === 'string' && message.content.length > 0));
 });
 
 test('24. Server/provider failure still surfaces safe error handling without crashing', () => {
