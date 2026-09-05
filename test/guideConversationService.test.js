@@ -23,6 +23,17 @@ test('maps provider-neutral text into safe canonical progressive Guide events', 
   assert.doesNotMatch(JSON.stringify(events), /##|<script|\*\*/i);
 });
 
+test('preserves a persisted long provider response as bounded canonical Guide events', () => {
+  const response = `## Detailed roadmap\n\n${'A complete planning recommendation. '.repeat(80)}`;
+  const events = canonicalGuideResponseEvents(response);
+  const deliveredText = events
+    .filter((event) => event.type === 'TEXT_DELTA')
+    .map((event) => event.text)
+    .join(' ');
+  assert.match(deliveredText, /complete planning recommendation/);
+  assert.ok(events.filter((event) => event.type === 'TEXT_DELTA').every((event) => event.text.length <= 800));
+});
+
 test('rejects unsafe or provider-shaped Guide events and bounds roadmap conversation input', () => {
   assert.throws(() => canonicalGuideResponseEvents('<script>alert(1)</script>'), GuideConversationError);
   assert.throws(() => normalizeGuideConversationRequest({ module: 'ROADMAP', text: 'x'.repeat(2001) }), GuideConversationError);

@@ -66,3 +66,9 @@ test('12. duplicate Analyze/follow-up submission is guarded where applicable', (
   assert.match(source, /if \(form\.dataset\.submitting\) return/);
   assert.match(source, /dataset\.submitting/);
 });
+
+test('13. a failed Guide delivery retries with the same idempotency key', () => {
+  assert.match(source, /Idempotency-Key/);
+  assert.match(source, /pendingIdempotencyKey/);
+  assert.match(source, /onFailure/);
+});

@@ -19,6 +19,15 @@ const PLATFORM_HUMAN_SUPPORT_TEMPLATES = Object.freeze({
   },
 });
 
+function isPlatformDefaultHandoff(templates) {
+  const candidate = templates?.human_support;
+  const platform = PLATFORM_HUMAN_SUPPORT_TEMPLATES.human_support;
+  return ['tr', 'en', 'ar'].every((language) =>
+    textAt(candidate?.general_topic, language) === platform.general_topic[language]
+    && textAt(candidate?.transfer, language) === platform.transfer[language]
+  );
+}
+
 function configuredLanguages(generalTopic, transfer, preferredLanguage) {
   const shared = Object.keys(generalTopic || {}).filter((language) => textAt(generalTopic, language) && textAt(transfer, language));
   return [...new Set([preferredLanguage, 'en', 'tr', 'ar', ...shared])];
@@ -70,8 +79,11 @@ export function describeWhatsAppHumanSupportPolicySources({ activeTemplates = nu
 // remains a scoped, read-only compatibility source until backfill completes.
 export function resolveWhatsAppHumanSupportPolicy({ activeTemplates = null, legacyTemplates = null, language = 'en' } = {}) {
   if (activeTemplates?.human_support?.enabled === false || legacyTemplates?.human_support?.enabled === false) return null;
-  return policyFromTemplates(activeTemplates, language, 'ACTIVE_CONFIGURATION')
-    ?? policyFromTemplates(legacyTemplates, language, 'LEGACY_COMPATIBILITY')
+  const activePolicy = policyFromTemplates(activeTemplates, language, 'ACTIVE_CONFIGURATION');
+  const legacyPolicy = policyFromTemplates(legacyTemplates, language, 'LEGACY_COMPATIBILITY');
+  // An inherited platform fallback is not an explicit tenant override. Keep a
+  // tenant's established wording when both records are present.
+  return (activePolicy && !(legacyPolicy && isPlatformDefaultHandoff(activeTemplates)) ? activePolicy : legacyPolicy)
     ?? policyFromTemplates(PLATFORM_HUMAN_SUPPORT_TEMPLATES, language, 'PLATFORM_DEFAULT');
 }
 

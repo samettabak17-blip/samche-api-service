@@ -23,6 +23,22 @@ test('keeps an existing tenant handoff available when an active channel template
   assert.equal(policy.acknowledgement('Konu'), 'Konu için bir temsilci yardımcı olacak.');
 });
 
+test('keeps a valid historical acknowledgement ahead of an inherited generic active fallback', () => {
+  const inheritedFallback = {
+    human_support: {
+      general_topic: { tr: 'Genel destek', en: 'General support', ar: 'الدعم العام' },
+      transfer: {
+        tr: 'Canlı destek talebinizi aldık. {{topicSummary}} konusunda bir ekip üyesi yardımcı olacaktır.',
+        en: 'We have received your human-support request. A team member will assist you with {{topicSummary}}.',
+        ar: 'تلقينا طلبك للدعم البشري. سيساعدك أحد أعضاء الفريق بخصوص {{topicSummary}}.',
+      },
+    },
+  };
+  const policy = resolveWhatsAppHumanSupportPolicy({ activeTemplates: inheritedFallback, legacyTemplates: legacy, language: 'tr' });
+  assert.equal(policy.source, 'LEGACY_COMPATIBILITY');
+  assert.equal(policy.acknowledgement('Konu'), 'Konu için bir temsilci yardımcı olacak.');
+});
+
 test('uses one configured legacy language when the preferred language is absent', () => {
   const turkishOnlyLegacy = {
     human_support: {

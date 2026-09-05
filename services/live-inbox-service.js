@@ -229,7 +229,7 @@ export async function persistSamcheguideInbound({ externalSessionId, content, id
   }
 }
 
-export async function persistAssistantResponseIfCurrent({ tenantId, conversationId, content, handlingVersion, knowledgeAuthority = null, database = pool }) {
+export async function persistAssistantResponseIfCurrent({ tenantId, conversationId, content, handlingVersion, knowledgeAuthority = null, idempotencyKey = null, database = pool }) {
   const client = await database.connect();
   let operatorSendStage = 'BEGIN_TRANSACTION';
   const traceStage = (stage) => {
@@ -262,7 +262,18 @@ export async function persistAssistantResponseIfCurrent({ tenantId, conversation
       conversationId,
       senderType: 'ASSISTANT',
       content,
+      idempotencyKey,
     });
+    if (!message && idempotencyKey) {
+      const existing = await client.query(
+        `SELECT * FROM conversation_messages
+          WHERE tenant_id = $1 AND conversation_id = $2 AND sender_type = 'ASSISTANT' AND idempotency_key = $3
+          LIMIT 1`,
+        [tenantId, conversationId, idempotencyKey]
+      );
+      await client.query('COMMIT');
+      return { delivered: true, duplicate: true, message: existing.rows[0] ?? null };
+    }
     traceStage('ASSISTANT_PERSIST_SUCCEEDED');
     await client.query(
       'UPDATE conversations SET last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2',

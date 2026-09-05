@@ -163,12 +163,12 @@ async function playGuideResponseEvents(board, events) {
     if (event.type === 'TEXT_DELTA') { const paragraph = element('p', 'guide-response__text'); board.append(paragraph); await progressiveText(paragraph, event.text); }
   }
 }
-async function submitGuideRequest({ value, module, board, input, submit, onResponse }) {
+async function submitGuideRequest({ value, module, board, input, submit, idempotencyKey, onResponse, onFailure }) {
   const thinking = addThinking(board); const startedAt = Date.now(); submit.disabled = true;
   try {
     const response = await fetch("/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...(session ? { "X-Samcheguide-Session": session } : {}), ...(previewToken ? { "X-Samcheguide-Preview": previewToken } : {}) },
+      headers: { "Content-Type": "application/json", ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}), ...(session ? { "X-Samcheguide-Session": session } : {}), ...(previewToken ? { "X-Samcheguide-Preview": previewToken } : {}) },
       body: JSON.stringify({
         text: value,
         guide_module: module,
@@ -186,6 +186,7 @@ async function submitGuideRequest({ value, module, board, input, submit, onRespo
     if (typeof onResponse === "function") onResponse(payload);
   } catch {
     thinking.remove();
+    if (typeof onFailure === "function") onFailure();
     board.append(element("p", "guide-validation", "The guide is temporarily unavailable. Please try again."));
   } finally {
     submit.disabled = false;
@@ -292,6 +293,7 @@ function renderConversationalRoadmap(container) {
   form.append(input, submit);
   bindEnterToSubmit(input, form);
 
+  let pendingIdempotencyKey = null;
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (form.dataset.submitting) return;
@@ -307,7 +309,8 @@ function renderConversationalRoadmap(container) {
 
     const empty = resultBoard.querySelector(".guide-empty-state");
     empty?.remove();
-    resultBoard.append(element("p", "guide-message guide-message--user", value));
+    const submittedMessage = element("p", "guide-message guide-message--user", value);
+    resultBoard.append(submittedMessage);
     input.value = "";
 
     try {
@@ -317,7 +320,9 @@ function renderConversationalRoadmap(container) {
         board: resultBoard,
         input,
         submit,
+        idempotencyKey: pendingIdempotencyKey ||= crypto.randomUUID(),
         onResponse: (payload) => {
+          pendingIdempotencyKey = null;
           const aiResponseText = payload.candidates?.[0]?.content?.parts?.[0]?.text
             || (payload.guide_events || []).filter((e) => e.type === "TEXT_DELTA").map((e) => e.text).join(" ")
             || "Analysis generated.";
@@ -329,6 +334,7 @@ function renderConversationalRoadmap(container) {
           persistState();
           queueGuideContextSync();
         },
+        onFailure: () => { submittedMessage.remove(); input.value = value; },
       });
     } finally {
       delete form.dataset.submitting;
@@ -536,7 +542,10 @@ async function submitMessage(event) {
   const board = preservedAssistantChat || root.querySelector('.guide-chat-messages');
   const empty = board?.querySelector('.guide-empty-state');
   empty?.remove();
-  board.append(element('p', 'guide-message guide-message--user', value));
+  const submittedMessage = element('p', 'guide-message guide-message--user', value);
+  board.append(submittedMessage);
+  const pendingIdempotencyKey = form.dataset.pendingIdempotencyKey || crypto.randomUUID();
+  form.dataset.pendingIdempotencyKey = pendingIdempotencyKey;
   try {
     await submitGuideRequest({
       value,
@@ -544,7 +553,9 @@ async function submitMessage(event) {
       board,
       input,
       submit: form.querySelector('button[type="submit"]'),
+      idempotencyKey: pendingIdempotencyKey,
       onResponse: (payload) => {
+        delete form.dataset.pendingIdempotencyKey;
         const aiResponseText = payload.candidates?.[0]?.content?.parts?.[0]?.text
           || (payload.guide_events || []).filter((e) => e.type === "TEXT_DELTA").map((e) => e.text).join(" ");
         messages.push({ value, kind: 'user' });
@@ -552,7 +563,8 @@ async function submitMessage(event) {
           messages.push({ value: aiResponseText, kind: 'assistant' });
         }
         syncAssistantReminder();
-      }
+      },
+      onFailure: () => { submittedMessage.remove(); input.value = value; },
     });
   } finally {
     delete form.dataset.submitting;

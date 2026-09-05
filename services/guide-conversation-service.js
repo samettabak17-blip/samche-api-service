@@ -51,20 +51,56 @@ export function appendGuideModuleMessage(state, module, message) {
 }
 
 function safeInline(value) {
-  return clean(value, 800).replace(/\*{1,3}|`|^\s*#{1,6}\s*/g, '').replace(/\s+/g, ' ').trim();
+  return clean(value, Number.MAX_SAFE_INTEGER).replace(/\*{1,3}|`|^\s*#{1,6}\s*/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function boundedTextSegments(value, limit = 800) {
+  const source = String(value ?? '');
+  if (!source) return [];
+  const segments = [];
+  let current = '';
+  for (const word of source.split(/\s+/)) {
+    if (!word) continue;
+    if (word.length > limit) {
+      if (current) segments.push(current);
+      for (let index = 0; index < word.length; index += limit) segments.push(word.slice(index, index + limit));
+      current = '';
+      continue;
+    }
+    const next = current ? `${current} ${word}` : word;
+    if (next.length > limit) {
+      segments.push(current);
+      current = word;
+    } else {
+      current = next;
+    }
+  }
+  if (current) segments.push(current);
+  return segments;
 }
 
 export function canonicalGuideResponseEvents(content, { nextActions = [] } = {}) {
-  const source = clean(content);
+  const source = clean(content, Number.MAX_SAFE_INTEGER);
   const events = [{ type: 'MESSAGE_START' }, { type: 'THINKING' }];
   const lines = source.split('\n').map((line) => line.trim()).filter(Boolean);
   let paragraph = [];
-  const flush = () => { if (paragraph.length) { events.push({ type: 'TEXT_DELTA', text: safeInline(paragraph.join(' ')) }); paragraph = []; } };
+  const flush = () => {
+    if (paragraph.length) {
+      for (const text of boundedTextSegments(safeInline(paragraph.join(' ')))) events.push({ type: 'TEXT_DELTA', text });
+      paragraph = [];
+    }
+  };
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     const heading = line.match(/^#{1,6}\s+(.+)$/);
     const bullet = line.match(/^(?:[-*]|\d+[.)])\s+(.+)$/);
-    if (heading) { flush(); events.push({ type: 'SECTION', title: safeInline(heading[1]) }); continue; }
+    if (heading) {
+      flush();
+      const titleSegments = boundedTextSegments(safeInline(heading[1]));
+      if (titleSegments.length === 1) events.push({ type: 'SECTION', title: titleSegments[0] });
+      else for (const text of titleSegments) events.push({ type: 'TEXT_DELTA', text });
+      continue;
+    }
     if (bullet) {
       flush();
       const items = [safeInline(bullet[1])];
@@ -72,7 +108,7 @@ export function canonicalGuideResponseEvents(content, { nextActions = [] } = {})
         index += 1;
         items.push(safeInline(lines[index].replace(/^(?:[-*]|\d+[.)])\s+/, '')));
       }
-      events.push({ type: 'LIST', items });
+      events.push({ type: 'LIST', items: items.flatMap((item) => boundedTextSegments(item)) });
       continue;
     }
     paragraph.push(line);

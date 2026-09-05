@@ -1318,6 +1318,7 @@ app.post("/chat", async (req, res) => {
         content: originalText,
         handlingVersion: inboxState.handlingVersion,
         knowledgeAuthority: inboxState.knowledgeAuthority,
+        idempotencyKey: req.get("Idempotency-Key") ? `samcheguide-assistant:${req.get("Idempotency-Key")}` : null,
       });
       if (!persisted.delivered) {
         return res.status(202).json({
@@ -1325,6 +1326,7 @@ app.post("/chat", async (req, res) => {
           conversation_session: publicSession.token,
         });
       }
+      if (persisted.message?.content) originalText = persisted.message.content;
     }
 
     // Add AI message to the correct conversation thread
