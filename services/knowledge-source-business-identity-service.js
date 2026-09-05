@@ -73,6 +73,29 @@ export async function assignKnowledgeSourceBusinessIdentity({ database, tenantId
           WHERE tenant_id = $1 AND source_id = $2 AND business_identity_id IS NULL`,
         [tenantId, sourceId, previousIds[0]],
       );
+    } else if (previousIds.length === 0) {
+      // If an image candidate was generated before its first explicit identity
+      // assignment, bind only its unapproved PRIMARY BUSINESS evidence to the
+      // newly confirmed identity. Customer context and approved history remain
+      // untouched; tenant membership is never an identity fallback.
+      await client.query(
+        `UPDATE knowledge_candidate_image_evidence evidence
+            SET business_identity_id = $3
+          WHERE evidence.tenant_id = $1
+            AND evidence.source_id = $2
+            AND evidence.business_identity_id IS NULL
+            AND evidence.role = 'BUSINESS'
+            AND evidence.evidence_kind = 'PRIMARY'
+            AND EXISTS (
+              SELECT 1
+                FROM knowledge_candidates candidate
+               WHERE candidate.tenant_id = evidence.tenant_id
+                 AND candidate.id = evidence.candidate_id
+                 AND candidate.status IN ('DRAFT', 'NEEDS_REVIEW')
+                 AND candidate.image_semantic_version IS NOT NULL
+            )`,
+        [tenantId, sourceId, businessIdentityId],
+      );
     }
     await client.query(
       `DELETE FROM knowledge_source_business_identities
