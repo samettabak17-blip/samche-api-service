@@ -67,7 +67,7 @@ import { resolvePublicWebChatIntegration } from "./services/public-web-chat-inte
 import { createCustomerInvitationOutboxStartup } from './services/customer-invitation-outbox-bootstrap.js';
 import { isAllowedGuideCorsOrigin } from './services/guide-public-cors-service.js';
 import { isSharedPublicGuideAssetPath } from './services/guide-public-asset-route-service.js';
-import { GuideSessionContextError, buildGuideSessionContextSummary, calculateGuideToolResult, loadGuideSessionContext, saveGuideSessionContext } from './services/guide-session-context-service.js';
+import { GuideSessionContextError, buildGuideSessionContextSummary, calculateGuideToolResult, guideSessionStatePatch, loadGuideSessionContext, saveGuideSessionContext } from './services/guide-session-context-service.js';
 import { verifyGuidePreviewToken, GuidePreviewError } from './services/guide-preview-service.js';
 import { canonicalGuideResponseEvents, GuideConversationError, issueGuideResumeSession, loadGuideResumeState, normalizeGuideConversationRequest, patchGuideResumeState, resolveGuideResumeSession, resolveGuideResumeSessionByToken, saveGuideResumeState } from './services/guide-conversation-service.js';
 
@@ -1092,13 +1092,20 @@ app.post("/guide/session-context", async (req, res) => {
       experience: resolved.experience,
       context: req.body?.guide_context,
     });
+    const previousState = await loadGuideResumeState({
+      database: pool,
+      token: publicSession.token,
+      scope: integration,
+      experienceVersion: resolved.experience.version,
+      previewMode: previewModeForExperience(resolved),
+    }) || {};
     await patchGuideResumeState({
       database: pool,
       token: publicSession.token,
       scope: integration,
       experienceVersion: resolved.experience.version,
       previewMode: previewModeForExperience(resolved),
-      patch: { context },
+      patch: guideSessionStatePatch(context, previousState),
     });
     return res.json({ conversation_session: publicSession.token, context_saved: true });
   } catch (error) {
@@ -1210,9 +1217,12 @@ app.post("/chat", async (req, res) => {
       .filter((entry) => entry.parts[0].text);
 
     // Extract structured Roadmap values (excluding messages / thread state)
-    const { messages: _roadmapMessages, ...structuredRoadmapValues } = (guideSessionState.roadmapState && typeof guideSessionState.roadmapState === 'object')
+    const { messages: _roadmapMessages, structuredInputs, generatedAnalysis, initialGoal, ...structuredRoadmapValues } = (guideSessionState.roadmapState && typeof guideSessionState.roadmapState === 'object')
       ? guideSessionState.roadmapState
       : {};
+    const canonicalRoadmapValues = structuredInputs && typeof structuredInputs === 'object' && !Array.isArray(structuredInputs)
+      ? structuredInputs
+      : structuredRoadmapValues;
 
     const structuredPlanningValues = (guideSessionState.planningState && typeof guideSessionState.planningState === 'object')
       ? { ...guideSessionState.planningState }
@@ -1237,7 +1247,9 @@ app.post("/chat", async (req, res) => {
       experience: publishedExperience.experience,
       context: {
         sharedContext: guideSessionState.sharedContext || {},
-        roadmap: structuredRoadmapValues,
+        roadmap: canonicalRoadmapValues,
+        roadmap_goal: initialGoal,
+        roadmap_result: typeof generatedAnalysis === 'string' ? generatedAnalysis : '',
         tool: structuredPlanningValues,
         ...(toolResult ? { tool_result: toolResult } : {}),
       }
@@ -1323,9 +1335,8 @@ app.post("/chat", async (req, res) => {
     const aiMessage = { role: 'assistant', content: originalText, timestamp: Date.now() };
     if (guideConversation.module === 'ROADMAP') {
         guideSessionState.roadmapState.messages.push(aiMessage);
-        // Potentially update roadmapState.generatedAnalysis or other structured data here
-        // based on the AI's response if it's a structured analysis.
-        // For now, it's just a message.
+        guideSessionState.roadmapState.initialGoal ||= cleanText;
+        guideSessionState.roadmapState.generatedAnalysis = originalText;
     } else if (guideConversation.module === 'AI_ASSISTANT') {
         guideSessionState.assistantConversation.messages.push(aiMessage);
     }

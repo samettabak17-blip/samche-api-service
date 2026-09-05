@@ -23,6 +23,33 @@ test('keeps an existing tenant handoff available when an active channel template
   assert.equal(policy.acknowledgement('Konu'), 'Konu için bir temsilci yardımcı olacak.');
 });
 
+test('uses one configured legacy language when the preferred language is absent', () => {
+  const turkishOnlyLegacy = {
+    human_support: {
+      general_topic: { tr: 'Genel destek' },
+      transfer: { tr: '{{topicSummary}} için bir temsilci yardımcı olacak.' },
+    },
+  };
+  const policy = resolveWhatsAppHumanSupportPolicy({ activeTemplates: null, legacyTemplates: turkishOnlyLegacy, language: 'en' });
+  assert.equal(policy.source, 'LEGACY_COMPATIBILITY');
+  assert.equal(policy.language, 'tr');
+  assert.equal(policy.acknowledgement('Konu'), 'Konu için bir temsilci yardımcı olacak.');
+});
+
 test('fails closed for incomplete policy instead of inventing tenant wording', () => {
   assert.equal(resolveWhatsAppHumanSupportPolicy({ activeTemplates: { human_support: { transfer: { en: 'x' } } }, legacyTemplates: null, language: 'en' }), null);
+});
+
+test('an explicit ACTIVE human-support disable remains authoritative over legacy compatibility data', () => {
+  const legacy = {
+    human_support: {
+      general_topic: { tr: 'Destek talebi' },
+      transfer: { tr: 'Ekibimiz {{topicSummary}} için sizinle ilgilenecek.' },
+    },
+  };
+  assert.equal(resolveWhatsAppHumanSupportPolicy({
+    activeTemplates: { human_support: { enabled: false } },
+    legacyTemplates: legacy,
+    language: 'tr',
+  }), null);
 });

@@ -1,29 +1,39 @@
-function localized(value, language) {
-  if (!value || typeof value !== 'object') return null;
-  const preferred = typeof value[language] === 'string' ? value[language].trim() : '';
-  const fallback = typeof value.en === 'string' ? value.en.trim() : '';
-  return preferred || fallback || null;
+function textAt(value, language) {
+  const candidate = value && typeof value === 'object' && typeof value[language] === 'string'
+    ? value[language].trim()
+    : '';
+  return candidate || null;
+}
+
+function configuredLanguages(generalTopic, transfer, preferredLanguage) {
+  const shared = Object.keys(generalTopic || {}).filter((language) => textAt(generalTopic, language) && textAt(transfer, language));
+  return [...new Set([preferredLanguage, 'en', 'tr', 'ar', ...shared])];
 }
 
 function policyFromTemplates(templates, language, source) {
   const humanSupport = templates?.human_support;
   if (humanSupport?.enabled === false) return null;
-  const defaultTopic = localized(humanSupport?.general_topic, language);
-  const transfer = localized(humanSupport?.transfer, language);
-  if (!defaultTopic || !transfer || !transfer.includes('{{topicSummary}}')) return null;
-  return {
-    source,
-    defaultTopic,
-    acknowledgement(topicSummary) {
-      const topic = typeof topicSummary === 'string' && topicSummary.trim() ? topicSummary.trim().slice(0, 255) : defaultTopic;
-      return transfer.replaceAll('{{topicSummary}}', topic);
-    },
-  };
+  for (const configuredLanguage of configuredLanguages(humanSupport?.general_topic, humanSupport?.transfer, language)) {
+    const defaultTopic = textAt(humanSupport?.general_topic, configuredLanguage);
+    const transfer = textAt(humanSupport?.transfer, configuredLanguage);
+    if (!defaultTopic || !transfer || !transfer.includes('{{topicSummary}}')) continue;
+    return {
+      source,
+      language: configuredLanguage,
+      defaultTopic,
+      acknowledgement(topicSummary) {
+        const topic = typeof topicSummary === 'string' && topicSummary.trim() ? topicSummary.trim().slice(0, 255) : defaultTopic;
+        return transfer.replaceAll('{{topicSummary}}', topic);
+      },
+    };
+  }
+  return null;
 }
 
 // ACTIVE tenant configuration is authoritative.  The legacy assistant column
 // remains a scoped, read-only compatibility source until backfill completes.
 export function resolveWhatsAppHumanSupportPolicy({ activeTemplates = null, legacyTemplates = null, language = 'en' } = {}) {
+  if (activeTemplates?.human_support?.enabled === false) return null;
   return policyFromTemplates(activeTemplates, language, 'ACTIVE_CONFIGURATION')
     ?? policyFromTemplates(legacyTemplates, language, 'LEGACY_COMPATIBILITY');
 }

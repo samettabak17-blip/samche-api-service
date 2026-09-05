@@ -502,10 +502,16 @@ function queueGuideContextSync() { window.clearTimeout(contextSyncTimer); contex
 async function handoffToAssistant() {
   guideState.assistant_draft = buildPlanningNaturalDraft(experience.interactive_tool?.fields || [], guideState.tool);
   guideState.assistant_draft_origin = 'HANDOFF';
+  contextSyncState = 'saving';
+  try {
+    await persistGuideContext();
+    contextSyncState = 'saved';
+  } catch {
+    contextSyncState = 'error';
+  }
   guideState.active_module = MODULES.AI_ASSISTANT;
   persistState();
   renderActiveModule();
-  queueGuideContextSync();
   window.requestAnimationFrame(() => {
     const textarea = root.querySelector('.guide-chat-form textarea');
     if (textarea) {

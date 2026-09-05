@@ -125,7 +125,7 @@ function mergeCanonicalState(current, patch) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new GuideConversationError('GUIDE_SESSION_STATE_INVALID');
   const next = { ...base };
   for (const [key, value] of Object.entries(patch)) {
-    if (!['active_module', 'sharedContext', 'roadmapState', 'planningState', 'assistantConversation', 'reminderDismissedState', 'context'].includes(key)) {
+    if (!['active_module', 'sharedContext', 'roadmapState', 'planningState', 'assistantConversation', 'reminderDismissedState', 'tool_result'].includes(key)) {
       throw new GuideConversationError('GUIDE_SESSION_STATE_INVALID');
     }
     if (key === 'active_module') {

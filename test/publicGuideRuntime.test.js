@@ -58,6 +58,7 @@ test('Guide handoff renders a generic structured context summary and persists it
   assert.match(source, /renderGuideContextSummary/);
   assert.match(source, /\/guide\/session-context/);
   assert.match(source, /Discuss this plan with the assistant/);
+  assert.match(source, /async function handoffToAssistant\(\)[\s\S]*await persistGuideContext\(\)[\s\S]*guideState\.active_module = MODULES\.AI_ASSISTANT/);
 });
 
 test('Guide runtime uses concise module labels and premium readable interaction primitives', () => {
