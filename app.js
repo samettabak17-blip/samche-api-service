@@ -1284,22 +1284,20 @@ app.post("/chat", async (req, res) => {
       }
     });
 
-    const runtime = await resolveAssistantRuntimeKnowledgeContext({
-      database: pool,
-      tenantId: guideRuntimeIntegration.tenant_id,
-      assistantId: guideRuntimeIntegration.assistant_id,
-      channelId: guideRuntimeIntegration.channel_id,
-      conversationHistory: conversationHistory, // Pass module-specific history
-      systemInstruction: buildTenantRuntimeSystemInstruction({
-        persona: publishedExperience.experience,
-        knowledgeContext: guideContextSummary,
-        channelRules: "Return safe, readable HTML suitable for the AI Guide interface."
-      }),
-      knowledgeAuthority: inboxState.knowledgeAuthority ?? null,
-    });
-
-    if (!runtime) {
-      console.error('CHAT_RESPONSE_503 stage=RUNTIME_CONTEXT_UNAVAILABLE');
+    let runtime;
+    try {
+      runtime = await resolveChannelAssistantRuntime({
+        database: pool,
+        embed: knowledgeEmbedder,
+        scope: guideRuntimeIntegration,
+        query: cleanText,
+        channelType: 'SAMCHEGUIDE',
+        resolvePersona: resolveTenantRuntimePersona,
+        resolveKnowledge: resolveAssistantRuntimeKnowledgeContext,
+        resolveModel: () => googleGeminiProvider.runtimeMetadata(),
+      });
+    } catch (error) {
+      console.error('CHAT_RESPONSE_503 stage=RUNTIME_CONTEXT_UNAVAILABLE code=' + (error?.code ?? 'UNKNOWN'));
       return res.status(503).json({
         error: "AI Guide assistant configuration is temporarily unavailable.",
         conversation_session: publicSession.token,
@@ -1307,6 +1305,11 @@ app.post("/chat", async (req, res) => {
     }
 
     const contents = [...conversationHistory, { role: 'user', parts: [{ text: cleanText }] }];
+    const runtimeSystemInstruction = buildTenantRuntimeSystemInstruction({
+      persona: runtime.persona,
+      knowledgeContext: [guideContextSummary, runtime.knowledge.knowledgeContext].filter(Boolean).join('\n\n'),
+      channelRules: "Return safe, readable HTML suitable for the AI Guide interface."
+    });
 
     let originalText;
     if (runtime.useProvidedResponse) {
@@ -1324,7 +1327,7 @@ app.post("/chat", async (req, res) => {
       try {
         data = await requestGemini({
           contents,
-          systemInstruction: { parts: [{ text: runtime.systemInstruction }] }
+          systemInstruction: { parts: [{ text: runtimeSystemInstruction }] }
         }, runtime.model);
       } catch (error) {
         const code = typeof error?.code === 'string' && /^GOOGLE_(?:VERTEX|GEMINI)_[A-Z0-9_]+$/.test(error.code)
