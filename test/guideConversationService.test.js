@@ -6,6 +6,8 @@ import {
   issueGuideResumeSession,
   loadGuideResumeState,
   normalizeGuideConversationRequest,
+  patchGuideResumeState,
+  resolveGuideResumeSessionByToken,
   resolveGuideResumeSession,
   saveGuideResumeState,
 } from '../services/guide-conversation-service.js';
@@ -45,6 +47,47 @@ test('issues opaque durable resume tokens and rejects a cross-tenant resolution'
   const resolved = await resolveGuideResumeSession({ database, token: issued.token, scope, experienceVersion: 10, previewMode: true, now: 1001 });
   assert.equal(resolved.sessionId, issued.sessionId);
   assert.equal(await resolveGuideResumeSession({ database, token: issued.token, scope: { ...scope, tenant_id: 'tenant-b' }, experienceVersion: 10, previewMode: true, now: 1001 }), null);
+});
+
+test('resolves an established private session by its opaque token without requiring the expired bootstrap ticket', async () => {
+  const rows = new Map();
+  const database = { query: async (sql, values) => {
+    if (sql.includes('INSERT INTO guide_public_sessions')) {
+      rows.set(values[0], { token_hash: values[0], session_id: values[1], tenant_id: values[2], assistant_id: values[3], channel_id: values[4], domain_id: values[5], experience_version: values[6], preview_mode: values[7], expires_at: values[8] });
+      return { rowCount: 1, rows: [] };
+    }
+    if (sql.includes('SELECT session_id, experience_version') && sql.includes('preview_mode')) {
+      const row = rows.get(values[0]);
+      const matches = row && row.tenant_id === values[1] && row.assistant_id === values[2] && row.channel_id === values[3] && row.domain_id === values[4];
+      return { rowCount: matches ? 1 : 0, rows: matches ? [row] : [] };
+    }
+    return { rowCount: 1, rows: [] };
+  } };
+  const issued = await issueGuideResumeSession({ database, scope, experienceVersion: 10, previewMode: true, now: 1000 });
+  const resumed = await resolveGuideResumeSessionByToken({ database, token: issued.token, scope, now: 1001 });
+  assert.equal(resumed.sessionId, issued.sessionId);
+  assert.equal(resumed.previewMode, true);
+  assert.equal(resumed.experienceVersion, 10);
+  assert.equal(await resolveGuideResumeSessionByToken({ database, token: issued.token, scope: { ...scope, tenant_id: 'tenant-b' }, now: 1001 }), null);
+});
+
+test('patching Guide state preserves unrelated canonical modules', async () => {
+  const row = {
+    token_hash: 'stored', session_id: 'session-a', tenant_id: scope.tenant_id, assistant_id: scope.assistant_id, channel_id: scope.channel_id,
+    domain_id: scope.domain_id, experience_version: 10, preview_mode: true, expires_at: new Date(Date.now() + 60_000),
+    state: { roadmapState: { structuredInputs: { guests: 20 }, messages: [{ role: 'assistant', content: 'Roadmap' }] }, planningState: { venue: 'hotel' }, assistantConversation: { messages: [{ role: 'assistant', content: 'Assistant' }] }, sharedContext: { goal: 'launch' } },
+  };
+  const database = { query: async (sql, values) => {
+    if (sql.includes('SELECT state FROM guide_public_sessions')) return { rowCount: 1, rows: [row] };
+    if (sql.includes('SELECT session_id, expires_at')) return { rowCount: 1, rows: [row] };
+    if (sql.includes('SET state=')) { row.state = JSON.parse(values[1]); return { rowCount: 1, rows: [] }; }
+    return { rowCount: 1, rows: [] };
+  } };
+  const patched = await patchGuideResumeState({ database, token: 'a'.repeat(32), scope, experienceVersion: 10, previewMode: true, patch: { planningState: { catering: true } } });
+  assert.deepEqual(patched.roadmapState, row.state.roadmapState);
+  assert.deepEqual(patched.assistantConversation, row.state.assistantConversation);
+  assert.deepEqual(patched.sharedContext, row.state.sharedContext);
+  assert.deepEqual(patched.planningState, { venue: 'hotel', catering: true });
 });
 
 test('persists only server-scoped Guide state behind the opaque resume token', async () => {

@@ -43,9 +43,14 @@ test('public Guide renders a scope summary instead of a zero monetary estimate w
 
 test('private preview uses an opaque token with the shared bootstrap and chat runtime', () => {
   assert.match(source, /URLSearchParams\(window\.location\.search\)/);
-  assert.match(source, /\/guide\/bootstrap\$\{previewToken/);
+  assert.match(source, /\/guide\/bootstrap/);
   assert.match(source, /X-Samcheguide-Preview/);
   assert.match(source, /preview:/);
+});
+
+test('bootstrap resumes an established opaque session before relying on a preview ticket', () => {
+  const bootstrap = source.slice(source.indexOf("fetch('/guide/bootstrap'"));
+  assert.match(bootstrap, /X-Samcheguide-Session/);
 });
 
 test('Guide handoff renders a generic structured context summary and persists it without a provider call', () => {

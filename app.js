@@ -25,6 +25,7 @@ import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.j
 import { whatsappRuntimeSessionKey } from "./services/whatsapp-runtime-session-service.js";
 import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from "./services/human-support-service.js";
 import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
+import { resolveWhatsAppHumanSupportPolicy, summarizeWhatsAppHumanSupportTopic } from './services/whatsapp-human-support-policy-service.js';
 import { persistAndDeliverWhatsAppAssistant } from "./services/whatsapp-assistant-response-service.js";
 import { buildWhatsAppActivePersonaTenantContext, buildWhatsAppTenantModelContext, classifyWhatsAppCurrentCustomerIntent, detectWhatsAppModelResponseLanguage, isWhatsAppResponseLanguageMismatch, resolveWhatsAppPersonaUnavailableResponse, WhatsAppTenantContextError } from "./services/whatsapp-tenant-context-service.js";
 import { inferWhatsAppDeterministicInboundLanguage, planWhatsAppDeterministicSocialResponse, resolveWhatsAppDeterministicTemplateLanguage } from "./services/whatsapp-deterministic-social-response-service.js";
@@ -68,7 +69,7 @@ import { isAllowedGuideCorsOrigin } from './services/guide-public-cors-service.j
 import { isSharedPublicGuideAssetPath } from './services/guide-public-asset-route-service.js';
 import { GuideSessionContextError, buildGuideSessionContextSummary, calculateGuideToolResult, loadGuideSessionContext, saveGuideSessionContext } from './services/guide-session-context-service.js';
 import { verifyGuidePreviewToken, GuidePreviewError } from './services/guide-preview-service.js';
-import { canonicalGuideResponseEvents, GuideConversationError, issueGuideResumeSession, loadGuideResumeState, normalizeGuideConversationRequest, resolveGuideResumeSession, saveGuideResumeState } from './services/guide-conversation-service.js';
+import { canonicalGuideResponseEvents, GuideConversationError, issueGuideResumeSession, loadGuideResumeState, normalizeGuideConversationRequest, patchGuideResumeState, resolveGuideResumeSession, resolveGuideResumeSessionByToken, saveGuideResumeState } from './services/guide-conversation-service.js';
 
 dotenv.config();
 
@@ -184,6 +185,7 @@ async function resolveGuideExperienceForScope({ integration, previewToken }) {
   const row = draft.rows[0];
   return {
     source: 'PRIVATE_PREVIEW',
+    experienceVersionId: row.id,
     // Preview is the same renderer contract as public Guide. Normalizing here
     // prevents legacy/raw row shape from inventing presentation fallbacks.
     experience: { ...normalizeGuideExperience(row.experience, { allowSerializedLegacyPricing: true }), version: row.version },
@@ -191,13 +193,52 @@ async function resolveGuideExperienceForScope({ integration, previewToken }) {
   };
 }
 
+function previewModeForExperience(resolvedExperience) {
+  return resolvedExperience?.source === 'PRIVATE_PREVIEW';
+}
+
+async function resolveGuideExperienceForRequest({ req, integration }) {
+  const sessionToken = req.get('X-Samcheguide-Session');
+  const durableSession = await resolveGuideResumeSessionByToken({ database: pool, token: sessionToken, scope: integration });
+  if (!durableSession) {
+    return { resolved: await resolveGuideExperienceForScope({ integration, previewToken: req.get('X-Samcheguide-Preview') || req.query?.preview }), durableSession: null };
+  }
+
+  if (durableSession.previewMode) {
+    const draft = await pool.query(
+      `SELECT id, tenant_id, assistant_id, version, status, experience, created_at, published_at
+         FROM guide_experience_versions
+        WHERE tenant_id=$1 AND assistant_id=$2 AND version=$3
+          AND ($4::uuid IS NULL OR id=$4) AND status='DRAFT'
+        LIMIT 1`,
+      [integration.tenant_id, integration.assistant_id, durableSession.experienceVersion, durableSession.experienceVersionId],
+    );
+    if (!draft.rowCount) throw new GuidePreviewError('GUIDE_PREVIEW_DRAFT_NOT_FOUND');
+    const row = draft.rows[0];
+    return {
+      durableSession,
+      resolved: {
+        source: 'PRIVATE_PREVIEW',
+        experienceVersionId: row.id,
+        experience: { ...normalizeGuideExperience(row.experience, { allowSerializedLegacyPricing: true }), version: row.version },
+        cache_key: `guide-experience-preview:${integration.tenant_id}:${integration.assistant_id}:${row.version}`,
+      },
+    };
+  }
+
+  const resolved = await resolvePublishedGuideExperience({ database: pool, tenantId: integration.tenant_id, assistantId: integration.assistant_id });
+  if (resolved.experience.version !== durableSession.experienceVersion || (durableSession.experienceVersionId && resolved.version?.id !== durableSession.experienceVersionId)) throw new GuideConversationError('GUIDE_SESSION_EXPERIENCE_REVOKED');
+  return { resolved, durableSession };
+}
+
 app.get("/guide/bootstrap", async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(503).json({ error: 'Guide experience is temporarily unavailable.', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
-    const resolved = await resolveGuideExperienceForScope({ integration, previewToken: req.query?.preview });
+    const { resolved } = await resolveGuideExperienceForRequest({ req, integration });
+    const session = await issueOrResolvePublicConversationSession(req, integration, resolved);
     res.set('Cache-Control', 'no-store');
-    return res.json({ experience: resolved.experience, source: resolved.source, version: resolved.experience.version, cache_key: resolved.cache_key, guide_v1: { renderer: 'GUIDE_V1', modules: resolved.experience.modules, session_context: true, sector_configured: Boolean(resolved.experience.classification?.sector), roadmap_initialized: Boolean(resolved.experience.roadmap?.steps?.length), tool_initialized: Boolean(resolved.experience.interactive_tool?.fields?.length), assistant_initialized: Boolean(resolved.experience.modules?.chat), theme_initialized: Boolean(resolved.experience.theme?.primary_color) } });
+    return res.json({ experience: resolved.experience, source: resolved.source, version: resolved.experience.version, cache_key: resolved.cache_key, conversation_session: session.token, guide_v1: { renderer: 'GUIDE_V1', modules: resolved.experience.modules, session_context: true, sector_configured: Boolean(resolved.experience.classification?.sector), roadmap_initialized: Boolean(resolved.experience.roadmap?.steps?.length), tool_initialized: Boolean(resolved.experience.interactive_tool?.fields?.length), assistant_initialized: Boolean(resolved.experience.modules?.chat), theme_initialized: Boolean(resolved.experience.theme?.primary_color) } });
   } catch (error) {
     console.error('GUIDE_EXPERIENCE_BOOTSTRAP_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return res.status(503).json({ error: 'Guide experience is temporarily unavailable.', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
@@ -412,35 +453,6 @@ async function getTopicSummary(session, text) {
   } catch (e) {
     console.error("Özetleme hatası:", e);
     return "Genel Destek";
-  }
-}
-
-// ============================================================================
-// 2. SAMCHEGUIDE BOTU VERİLERİ VE HAFIZASI
-// ============================================================================
-const guideMemoryStore = {};
-const MAX_GUIDE_MEMORY = 10;
-
-function addGuideMemory(sessionKey, moduleOrRole, roleOrText, textOrAuth = null, auth = null) {
-  if (!guideMemoryStore[sessionKey]) guideMemoryStore[sessionKey] = {};
-  let targetModule = 'AI_ASSISTANT';
-  let role = 'user';
-  let text = '';
-  let knowledgeAuthority = null;
-  if (auth !== null || (textOrAuth !== null && typeof roleOrText === 'string' && ['user','model','assistant'].includes(roleOrText))) {
-    targetModule = moduleOrRole;
-    role = roleOrText === 'assistant' ? 'model' : roleOrText;
-    text = textOrAuth;
-    knowledgeAuthority = auth;
-  } else {
-    role = moduleOrRole === 'assistant' ? 'model' : moduleOrRole;
-    text = roleOrText;
-    knowledgeAuthority = textOrAuth;
-  }
-  if (!guideMemoryStore[sessionKey][targetModule]) guideMemoryStore[sessionKey][targetModule] = [];
-  guideMemoryStore[sessionKey][targetModule].push(stampProviderMemoryEntry({ role, content: text || '', parts: [{ text: text || '' }] }, knowledgeAuthority));
-  if (guideMemoryStore[sessionKey][targetModule].length > MAX_GUIDE_MEMORY) {
-    guideMemoryStore[sessionKey][targetModule].splice(0, guideMemoryStore[sessionKey][targetModule].length - MAX_GUIDE_MEMORY);
   }
 }
 
@@ -945,20 +957,20 @@ function getFollowUpMessage(lang, topic, stage) {
 async function resolvePublicConversationSession(req, scope, resolvedExperience) {
   const token = req.get('X-Samcheguide-Session');
   if (!token) return null;
-  return resolveGuideResumeSession({ database: pool, token, scope, experienceVersion: resolvedExperience.experience.version, previewMode: Boolean(req.get('X-Samcheguide-Preview')) });
+  return resolveGuideResumeSession({ database: pool, token, scope, experienceVersion: resolvedExperience.experience.version, previewMode: previewModeForExperience(resolvedExperience) });
 }
 
 async function issueOrResolvePublicConversationSession(req, scope, resolvedExperience) {
   const current = await resolvePublicConversationSession(req, scope, resolvedExperience);
   if (current) return current;
-  return issueGuideResumeSession({ database: pool, scope, experienceVersion: resolvedExperience.experience.version, previewMode: Boolean(req.get('X-Samcheguide-Preview')) });
+  return issueGuideResumeSession({ database: pool, scope, experienceVersion: resolvedExperience.experience.version, experienceVersionId: resolvedExperience.experienceVersionId ?? resolvedExperience.version?.id ?? null, previewMode: previewModeForExperience(resolvedExperience) });
 }
 
 app.get("/chat/history", async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ error: "Conversation is unavailable." });
-    const resolved = await resolveGuideExperienceForScope({ integration, previewToken: req.get('X-Samcheguide-Preview') });
+    const { resolved } = await resolveGuideExperienceForRequest({ req, integration });
     const session = await resolvePublicConversationSession(req, integration, resolved);
     if (!session) return res.status(401).json({ error: "Conversation session is invalid." });
     const feed = await getSamcheguidePublicFeed({ externalSessionId: session.sessionId, integration });
@@ -973,7 +985,7 @@ app.get("/chat/live", async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ error: "Conversation is unavailable." });
-    const resolved = await resolveGuideExperienceForScope({ integration, previewToken: req.get('X-Samcheguide-Preview') });
+    const { resolved } = await resolveGuideExperienceForRequest({ req, integration });
     const session = await resolvePublicConversationSession(req, integration, resolved);
     if (!session) return res.status(401).json({ error: "Conversation session is invalid." });
     const feed = await getSamcheguidePublicFeed({ externalSessionId: session.sessionId, integration });
@@ -1005,7 +1017,7 @@ app.post("/plan", async (req, res) => {
     if (!integration || integration.channel_status !== "active") {
       return res.status(503).json({ error: "AI Guide configuration is temporarily unavailable." });
     }
-    const resolvedExperience = await resolveGuideExperienceForScope({ integration, previewToken: req.get('X-Samcheguide-Preview') });
+    const { resolved: resolvedExperience } = await resolveGuideExperienceForRequest({ req, integration });
     const publicSession = await issueOrResolvePublicConversationSession(req, integration, resolvedExperience);
     const userId = publicSession.sessionId;
     let runtime;
@@ -1047,15 +1059,16 @@ app.post("/plan", async (req, res) => {
     if (data.candidates && data.candidates[0]?.content?.parts?.[0]) {
       let originalText = data.candidates[0].content.parts[0].text;
       data.candidates[0].content.parts[0].text = parseLinksToHTML(originalText);
-      // 🔥 HAFIZAYA EKLE (Sayfa yenilendiğinde unutmaması için)
-      const runtimeSession = samcheguideRuntimeSessionKey({
-        tenantId: integration.tenant_id,
-        assistantId: integration.assistant_id,
-        channelId: integration.channel_id,
-        sessionId: userId,
+      const previous = await loadGuideResumeState({ database: pool, token: publicSession.token, scope: integration, experienceVersion: resolvedExperience.experience.version, previewMode: previewModeForExperience(resolvedExperience) }) || {};
+      const messages = Array.isArray(previous?.roadmapState?.messages) ? previous.roadmapState.messages : [];
+      await patchGuideResumeState({
+        database: pool,
+        token: publicSession.token,
+        scope: integration,
+        experienceVersion: resolvedExperience.experience.version,
+        previewMode: previewModeForExperience(resolvedExperience),
+        patch: { roadmapState: { generatedAnalysis: originalText, messages: [...messages, { role: 'user', content: cleanSector }, { role: 'assistant', content: originalText }] } },
       });
-      addGuideMemory(runtimeSession, "user", planRequest, knowledgeAuthority);
-      addGuideMemory(runtimeSession, "model", originalText, knowledgeAuthority);
     }
     return res.json(data);
   } catch (err) {
@@ -1071,10 +1084,7 @@ app.post("/guide/session-context", async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ error: 'Guide session is unavailable.' });
-    const resolved = await resolveGuideExperienceForScope({
-      integration,
-      previewToken: req.get('X-Samcheguide-Preview'),
-    });
+    const { resolved } = await resolveGuideExperienceForRequest({ req, integration });
     const publicSession = await issueOrResolvePublicConversationSession(req, integration, resolved);
     const context = saveGuideSessionContext({
       scope: integration,
@@ -1082,7 +1092,14 @@ app.post("/guide/session-context", async (req, res) => {
       experience: resolved.experience,
       context: req.body?.guide_context,
     });
-    await saveGuideResumeState({ database: pool, token: publicSession.token, scope: integration, experienceVersion: resolved.experience.version, previewMode: Boolean(req.get('X-Samcheguide-Preview')), state: { context } });
+    await patchGuideResumeState({
+      database: pool,
+      token: publicSession.token,
+      scope: integration,
+      experienceVersion: resolved.experience.version,
+      previewMode: previewModeForExperience(resolved),
+      patch: { context },
+    });
     return res.json({ conversation_session: publicSession.token, context_saved: true });
   } catch (error) {
     if (error instanceof GuideSessionContextError) {
@@ -1097,10 +1114,10 @@ app.get("/guide/session-context", async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ error: 'Guide session is unavailable.' });
-    const resolved = await resolveGuideExperienceForScope({ integration, previewToken: req.get('X-Samcheguide-Preview') });
+    const { resolved } = await resolveGuideExperienceForRequest({ req, integration });
     const publicSession = await resolvePublicConversationSession(req, integration, resolved);
     if (!publicSession) return res.status(401).json({ error: 'Guide session is invalid.' });
-    const state = await loadGuideResumeState({ database: pool, token: publicSession.token, scope: integration, experienceVersion: resolved.experience.version, previewMode: Boolean(req.get('X-Samcheguide-Preview')) });
+    const state = await loadGuideResumeState({ database: pool, token: publicSession.token, scope: integration, experienceVersion: resolved.experience.version, previewMode: previewModeForExperience(resolved) });
     return res.json({ conversation_session: publicSession.token, guide_session_state: state ?? null });
   } catch (error) {
     console.error('GUIDE_SESSION_RESUME_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
@@ -1133,10 +1150,7 @@ app.post("/chat", async (req, res) => {
           error: "AI Guide assistant configuration is temporarily unavailable.",
         });
       }
-      publishedExperience = await resolveGuideExperienceForScope({
-        integration: guideRuntimeIntegration,
-        previewToken: req.get('X-Samcheguide-Preview'),
-      });
+      ({ resolved: publishedExperience } = await resolveGuideExperienceForRequest({ req, integration: guideRuntimeIntegration }));
       publicSession = await issueOrResolvePublicConversationSession(req, guideRuntimeIntegration, publishedExperience);
     } catch (error) {
       if (error?.status === 503) console.error('CHAT_RESPONSE_503 stage=PUBLIC_SESSION_CONFIGURATION');
@@ -1144,7 +1158,7 @@ app.post("/chat", async (req, res) => {
     }
     const userId = publicSession.sessionId;
     // --- Start: Load and Initialize Full Guide Session State ---
-    let persistedGuideState = await loadGuideResumeState({ database: pool, token: publicSession.token, scope: guideRuntimeIntegration, experienceVersion: publishedExperience.experience.version, previewMode: Boolean(req.get('X-Samcheguide-Preview')) });
+    let persistedGuideState = await loadGuideResumeState({ database: pool, token: publicSession.token, scope: guideRuntimeIntegration, experienceVersion: publishedExperience.experience.version, previewMode: previewModeForExperience(publishedExperience) });
 
     // Initialize default guideSessionState if not fully present
     const defaultGuideSessionState = {
@@ -1161,41 +1175,10 @@ app.post("/chat", async (req, res) => {
       ...persistedGuideState, // Merge persisted state over defaults
     };
 
-    // If client sends a full state, it implies a client-side update (e.g. from UI form)
-    // Merge relevant parts from client, but ensure messages are backend authoritative and append.
-    if (clientGuideSessionState && typeof clientGuideSessionState === 'object') {
-        guideSessionState = {
-            ...guideSessionState,
-            // Allow client to update active_module and shared context directly
-            active_module: clientGuideSessionState.active_module || guideSessionState.active_module,
-            sharedContext: {
-                ...guideSessionState.sharedContext,
-                ...(clientGuideSessionState.sharedContext || {}),
-            },
-            // Planning state can be updated directly by client as it's form-based
-            planningState: {
-                ...guideSessionState.planningState,
-                ...(clientGuideSessionState.planningState || {}),
-            },
-            // Roadmap state (excluding messages) can be updated by client
-            roadmapState: {
-                ...guideSessionState.roadmapState,
-                ...(clientGuideSessionState.roadmapState || {}),
-                messages: guideSessionState.roadmapState.messages // Keep backend messages, client new message appended below
-            },
-            // Assistant conversation (excluding messages) can be updated by client
-            assistantConversation: {
-                ...guideSessionState.assistantConversation,
-                ...(clientGuideSessionState.assistantConversation || {}),
-                messages: guideSessionState.assistantConversation.messages // Keep backend messages, client new message appended below
-            },
-            // Reminder state can be updated by client
-            reminderDismissedState: {
-                ...guideSessionState.reminderDismissedState,
-                ...(clientGuideSessionState.reminderDismissedState || {}),
-            }
-        };
-    }
+    // Structured state reaches this route only after /guide/session-context
+    // validates it against the server-owned Experience. Conversation requests
+    // never merge arbitrary browser state into the canonical session.
+    void clientGuideSessionState;
 
     // Add user message to the correct conversation thread
     const userMessage = { role: 'user', content: cleanText, timestamp: Date.now() };
@@ -1215,40 +1198,16 @@ app.post("/chat", async (req, res) => {
       integration: guideRuntimeIntegration,
     });
 
-    // --- Start: Refactor guideMemoryStore for module-specific memory ---
-    const sessionKey = samcheguideRuntimeSessionKey({
-        tenantId: guideRuntimeIntegration.tenant_id,
-        assistantId: guideRuntimeIntegration.assistant_id,
-        channelId: guideRuntimeIntegration.channel_id,
-        sessionId: userId,
-    });
-
-    // Initialize memory store if not present
-    if (!guideMemoryStore[sessionKey]) {
-      guideMemoryStore[sessionKey] = {};
-    }
-    if (!guideMemoryStore[sessionKey][guideConversation.module]) {
-      guideMemoryStore[sessionKey][guideConversation.module] = [];
-    }
-
-    // Retrieve prior conversation history for the AI provider from the specific module's memory
-    const rawMemory = guideMemoryStore[sessionKey][guideConversation.module] || [];
-    const authorityMemory = inboxState?.knowledgeAuthority
-      ? filterProviderMemoryByAuthority(rawMemory, inboxState.knowledgeAuthority)
-      : rawMemory;
-
-    const conversationHistory = authorityMemory
-      .filter((entry) => entry.role === 'user' || entry.role === 'assistant' || entry.role === 'model')
-      .map((entry) => ({
-        role: entry.role === 'assistant' || entry.role === 'model' ? 'model' : 'user',
-        parts: Array.isArray(entry.parts) && entry.parts.length > 0 && typeof entry.parts[0]?.text === 'string'
-          ? [{ text: String(entry.parts[0].text) }]
-          : [{ text: typeof entry.content === 'string' ? entry.content : String(entry.text || '') }],
-      }))
-      .filter((entry) => entry.parts[0].text.trim().length > 0);
-
-    // Record the current user message in module memory
-    addGuideMemory(sessionKey, guideConversation.module, "user", cleanText, inboxState.knowledgeAuthority ?? null);
+    const moduleThread = guideConversation.module === 'ROADMAP'
+      ? guideSessionState.roadmapState.messages
+      : guideConversation.module === 'AI_ASSISTANT'
+        ? guideSessionState.assistantConversation.messages
+        : [];
+    const conversationHistory = moduleThread
+      .filter((entry) => entry?.role === 'user' || entry?.role === 'assistant')
+      .slice(-10)
+      .map((entry) => ({ role: entry.role === 'assistant' ? 'model' : 'user', parts: [{ text: String(entry.content || '').trim() }] }))
+      .filter((entry) => entry.parts[0].text);
 
     // Extract structured Roadmap values (excluding messages / thread state)
     const { messages: _roadmapMessages, ...structuredRoadmapValues } = (guideSessionState.roadmapState && typeof guideSessionState.roadmapState === 'object')
@@ -1304,7 +1263,7 @@ app.post("/chat", async (req, res) => {
       });
     }
 
-    const contents = [...conversationHistory, { role: 'user', parts: [{ text: cleanText }] }];
+    const contents = conversationHistory.length ? conversationHistory : [{ role: 'user', parts: [{ text: cleanText }] }];
     const runtimeSystemInstruction = buildTenantRuntimeSystemInstruction({
       persona: runtime.persona,
       knowledgeContext: [guideContextSummary, runtime.knowledge.knowledgeContext].filter(Boolean).join('\n\n'),
@@ -1371,15 +1330,13 @@ app.post("/chat", async (req, res) => {
         guideSessionState.assistantConversation.messages.push(aiMessage);
     }
 
-    addGuideMemory(sessionKey, guideConversation.module, "model", originalText, inboxState.knowledgeAuthority ?? null);
-
     // --- Start: Save Full Guide Session State ---
     await saveGuideResumeState({
       database: pool,
       token: publicSession.token,
       scope: guideRuntimeIntegration,
       experienceVersion: publishedExperience.experience.version,
-      previewMode: Boolean(req.get('X-Samcheguide-Preview')),
+      previewMode: previewModeForExperience(publishedExperience),
       state: guideSessionState // Save the entire updated state
     });
     // --- End: Save Full Guide Session State ---
@@ -2176,6 +2133,50 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         : 'en';
       session.lang = lang;
 
+      // Human support is an ownership transition, not an AI response. Resolve
+      // it before persona, retrieval or provider work so an AI outage cannot
+      // prevent a customer reaching the tenant's Live Inbox.
+      const humanSupportRequest = parseCustomerHumanSupportRequest(text);
+      if (humanSupportRequest.requested) {
+        let activeTemplates = null;
+        try {
+          const persona = await resolveTenantRuntimePersona({
+            database: pool,
+            tenantId: whatsappInbox.integration.tenant_id,
+            assistantId: whatsappInbox.integration.assistant_id,
+          });
+          activeTemplates = persona?.available
+            ? persona.configuration?.channel_adaptations?.whatsapp?.deterministic_templates ?? null
+            : null;
+        } catch {
+          activeTemplates = null;
+        }
+        const handoffPolicy = resolveWhatsAppHumanSupportPolicy({
+          activeTemplates,
+          legacyTemplates: tenantContext.deterministicTemplates,
+          language: lang,
+        });
+        if (!handoffPolicy) {
+          console.error('WHATSAPP_HUMAN_SUPPORT_POLICY_UNAVAILABLE');
+          return;
+        }
+        const topicSummary = humanSupportRequest.hasMeaningfulContext
+          ? summarizeWhatsAppHumanSupportTopic({ text, fallback: handoffPolicy.defaultTopic })
+          : handoffPolicy.defaultTopic;
+        const acknowledgement = handoffPolicy.acknowledgement(topicSummary);
+        const handoff = await requestCustomerHumanSupport({
+          tenantId: whatsappInbox.integration.tenant_id,
+          conversationId: whatsappInbox.conversation.id,
+          acknowledgement,
+          topicSummary,
+        });
+        if (!handoff.duplicate) {
+          await sendMessage(cleanFrom, acknowledgement);
+          sendMessageToTelegram(`🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``).catch(() => {});
+        }
+        return;
+      }
+
       let runtimeTenantContext;
       let runtime;
       try {
@@ -2235,42 +2236,6 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       // --------------------------------------
       session.followUpStage = 0;
       session.pingSentOnce = false;
-
-      // --------------------------------------
-      // CUSTOMER-REQUESTED HUMAN SUPPORT
-      // The explicit customer request is handled before normal model routing.
-      // A bare request stays zero-token; meaningful context permits exactly
-      // one legacy topic-summary call.
-      // --------------------------------------
-      const humanSupportRequest = parseCustomerHumanSupportRequest(text);
-      if (humanSupportRequest.requested) {
-        const supportTemplates = tenantContext?.deterministicTemplates?.human_support;
-        const topicSummary = humanSupportRequest.hasMeaningfulContext
-          ? await getTopicSummary(session, text)
-          : supportTemplates?.general_topic?.[lang];
-        const transferTemplates = supportTemplates?.transfer;
-        const transfer = transferTemplates?.[lang] ?? transferTemplates?.tr;
-        if (!transfer) {
-          console.error('WHATSAPP_HUMAN_SUPPORT_TEMPLATE_UNAVAILABLE');
-          return;
-        }
-        if (typeof topicSummary !== 'string' || !topicSummary.trim()) {
-          console.error('WHATSAPP_HUMAN_SUPPORT_TEMPLATE_UNAVAILABLE');
-          return;
-        }
-        const acknowledgement = transfer.replace(/{{topicSummary}}/g, topicSummary);
-        const handoff = await requestCustomerHumanSupport({
-          tenantId: whatsappInbox.integration.tenant_id,
-          conversationId: whatsappInbox.conversation.id,
-          acknowledgement,
-          topicSummary,
-        });
-        if (!handoff.duplicate) {
-          await sendMessage(cleanFrom, acknowledgement);
-          sendMessageToTelegram(`🚨 CANLI TEMSİLCİ TALEBİ!\n📞 Numara: +${cleanFrom}\n💬 Konu: ${topicSummary}\n\nCevap göndermek için tek tıkla kopyala:\n\`/w +${cleanFrom} \``).catch(() => {});
-        }
-        return;
-      }
 
       // --------------------------------------
       // KISA CEVAPLAR
@@ -2641,4 +2606,3 @@ async function startServer() {
 }
 
 startServer();
-

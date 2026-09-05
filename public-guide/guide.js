@@ -95,6 +95,11 @@ async function resumeGuideSession() {
         if (fullState.planningState && typeof fullState.planningState === 'object') {
           guideState.tool = { ...guideState.tool, ...fullState.planningState };
         }
+        if (fullState.assistantConversation && Array.isArray(fullState.assistantConversation.messages)) {
+          messages = fullState.assistantConversation.messages
+            .filter((message) => typeof message?.content === 'string')
+            .map((message) => ({ value: message.content, kind: message.role === 'user' ? 'user' : 'assistant' }));
+        }
         if (Object.values(MODULES).includes(fullState.active_module)) {
           guideState.active_module = fullState.active_module;
         }
@@ -106,7 +111,7 @@ async function resumeGuideSession() {
         if (Object.values(MODULES).includes(saved.active_module)) guideState.active_module = saved.active_module;
       }
     }
-    const history = await fetch('/chat/history', { headers }).then((result) => result.ok ? result.json() : null).catch(() => null);
+    const history = messages.length ? null : await fetch('/chat/history', { headers }).then((result) => result.ok ? result.json() : null).catch(() => null);
     if (Array.isArray(history?.messages)) {
       messages = history.messages
         .filter((message) => typeof message?.content === 'string')
@@ -744,4 +749,7 @@ export function applyExperience(value) {
   canvas.append(navigation); shell.append(canvas); root.replaceChildren(shell); guideInitialized = true; window.clearTimeout(initializationTimeout); renderActiveModule(); resumeGuideSession();
 }
 
-fetch('/guide/bootstrap' + (previewToken ? `?preview=${encodeURIComponent(previewToken)}` : ''), { cache: 'no-store' }).then(async (response) => { if (!response.ok) throw new Error('unavailable'); return response.json(); }).then((payload) => applyExperience(payload?.experience)).catch(showGuideError);
+fetch('/guide/bootstrap' + (previewToken ? `?preview=${encodeURIComponent(previewToken)}` : ''), {
+  cache: 'no-store',
+  headers: session ? { 'X-Samcheguide-Session': session } : {},
+}).then(async (response) => { if (!response.ok) throw new Error('unavailable'); return response.json(); }).then((payload) => { saveSession(payload?.conversation_session); applyExperience(payload?.experience); }).catch(showGuideError);

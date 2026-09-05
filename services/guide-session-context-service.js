@@ -1,9 +1,5 @@
-import { samcheguideRuntimeSessionKey } from './samcheguide-runtime-session-service.js';
-
 const MAX_CONTEXT_FIELDS = 12;
 const MAX_TEXT_LENGTH = 240;
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const states = new Map();
 
 export class GuideSessionContextError extends Error {
   constructor(code = 'GUIDE_SESSION_CONTEXT_INVALID') {
@@ -141,21 +137,13 @@ export function buildGuideSessionContextSummary({ experience, context }) {
   return sections.join('\n');
 }
 
-function prune(now) {
-  for (const [key, state] of states) if (state.expires_at <= now) states.delete(key);
+export function saveGuideSessionContext({ experience, context }) {
+  return normalizeGuideSessionContext({ experience, context });
 }
 
-export function saveGuideSessionContext({ scope, sessionId, experience, context, now = Date.now() }) {
-  prune(now);
-  const normalized = normalizeGuideSessionContext({ experience, context });
-  const key = samcheguideRuntimeSessionKey({ tenantId: scope.tenant_id, assistantId: scope.assistant_id, channelId: scope.channel_id, sessionId: `${sessionId}:${experience.version}` });
-  const state = { context: normalized, updated_at: new Date(now).toISOString(), expires_at: now + SESSION_TTL_MS };
-  states.set(key, state);
-  return state.context;
-}
-
-export function loadGuideSessionContext({ scope, sessionId, experience, now = Date.now() }) {
-  prune(now);
-  const key = samcheguideRuntimeSessionKey({ tenantId: scope.tenant_id, assistantId: scope.assistant_id, channelId: scope.channel_id, sessionId: `${sessionId}:${experience.version}` });
-  return states.get(key)?.context ?? null;
+// Kept as a compatibility export while persistence is exclusively owned by
+// guide_public_sessions. A request process must never become the source of
+// truth for customer Guide context.
+export function loadGuideSessionContext() {
+  return null;
 }

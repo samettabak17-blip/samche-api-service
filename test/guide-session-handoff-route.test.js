@@ -22,5 +22,6 @@ test('Guide runtime routes use opaque scoped resume sessions and canonical respo
   assert.match(source, /guide_events/);
   assert.match(source, /\/guide\/session-context/);
   assert.doesNotMatch(source, /X-Samcheguide-Session.*sessionStorage/);
-  assert.ok(source.indexOf('let publishedExperience;') < source.indexOf('publishedExperience = await resolveGuideExperienceForScope'));
+  assert.match(source, /resolveGuideExperienceForRequest/);
+  assert.match(source, /resolveGuideResumeSessionByToken/);
 });

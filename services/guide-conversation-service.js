@@ -62,13 +62,13 @@ const hash = (token) => crypto.createHash('sha256').update(token).digest('hex');
 const opaqueToken = () => crypto.randomBytes(32).toString('base64url');
 const validScope = (scope) => ['domain_id', 'tenant_id', 'assistant_id', 'channel_id'].every((key) => typeof scope?.[key] === 'string' && scope[key]);
 
-export async function issueGuideResumeSession({ database, scope, experienceVersion, previewMode, now = Date.now() }) {
+export async function issueGuideResumeSession({ database, scope, experienceVersion, experienceVersionId = null, previewMode, now = Date.now() }) {
   if (!database || !validScope(scope) || !Number.isInteger(experienceVersion)) throw new GuideConversationError('GUIDE_SESSION_INVALID');
   const token = opaqueToken(); const sessionId = crypto.randomUUID(); const expiresAt = new Date(now + SESSION_TTL_MS);
   await database.query(
-    `INSERT INTO guide_public_sessions (token_hash, session_id, tenant_id, assistant_id, channel_id, domain_id, experience_version, preview_mode, expires_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-    [hash(token), sessionId, scope.tenant_id, scope.assistant_id, scope.channel_id, scope.domain_id, experienceVersion, Boolean(previewMode), expiresAt],
+    `INSERT INTO guide_public_sessions (token_hash, session_id, tenant_id, assistant_id, channel_id, domain_id, experience_version, preview_mode, expires_at, experience_version_id, authorization_source, session_status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'ACTIVE')`,
+    [hash(token), sessionId, scope.tenant_id, scope.assistant_id, scope.channel_id, scope.domain_id, experienceVersion, Boolean(previewMode), expiresAt, experienceVersionId, previewMode ? 'PRIVATE_PREVIEW' : 'PUBLIC'],
   );
   return { token, sessionId, expiresAt: expiresAt.toISOString() };
 }
@@ -78,13 +78,38 @@ export async function resolveGuideResumeSession({ database, token, scope, experi
   const result = await database.query(
     `SELECT session_id, expires_at FROM guide_public_sessions
       WHERE token_hash=$1 AND tenant_id=$2 AND assistant_id=$3 AND channel_id=$4 AND domain_id=$5
-        AND experience_version=$6 AND preview_mode=$7 AND expires_at > $8
+        AND experience_version=$6 AND preview_mode=$7 AND session_status='ACTIVE' AND expires_at > $8
       LIMIT 1`,
     [hash(token), scope.tenant_id, scope.assistant_id, scope.channel_id, scope.domain_id, experienceVersion, Boolean(previewMode), new Date(now)],
   );
   if (!result.rowCount) return null;
   await database.query('UPDATE guide_public_sessions SET last_seen_at=CURRENT_TIMESTAMP WHERE token_hash=$1', [hash(token)]);
   return { token, sessionId: result.rows[0].session_id, expiresAt: new Date(result.rows[0].expires_at).toISOString() };
+}
+
+// A successfully bootstrapped preview is represented by the opaque, hashed
+// session token from this point forward.  Its short-lived preview ticket is
+// deliberately not re-used as durable conversation identity.
+export async function resolveGuideResumeSessionByToken({ database, token, scope, now = Date.now() }) {
+  if (!database || typeof token !== 'string' || token.length < 32 || !validScope(scope)) return null;
+  const result = await database.query(
+    `SELECT session_id, experience_version, experience_version_id, preview_mode, expires_at FROM guide_public_sessions
+      WHERE token_hash=$1 AND tenant_id=$2 AND assistant_id=$3 AND channel_id=$4 AND domain_id=$5
+        AND session_status='ACTIVE' AND expires_at > $6
+      LIMIT 1`,
+    [hash(token), scope.tenant_id, scope.assistant_id, scope.channel_id, scope.domain_id, new Date(now)],
+  );
+  if (!result.rowCount) return null;
+  await database.query('UPDATE guide_public_sessions SET last_seen_at=CURRENT_TIMESTAMP WHERE token_hash=$1', [hash(token)]);
+  const row = result.rows[0];
+  return {
+    token,
+    sessionId: row.session_id,
+    experienceVersion: Number(row.experience_version),
+    experienceVersionId: row.experience_version_id ?? null,
+    previewMode: row.preview_mode === true,
+    expiresAt: new Date(row.expires_at).toISOString(),
+  };
 }
 
 export async function saveGuideResumeState({ database, token, scope, experienceVersion, previewMode, state }) {
@@ -95,12 +120,39 @@ export async function saveGuideResumeState({ database, token, scope, experienceV
   return state;
 }
 
+function mergeCanonicalState(current, patch) {
+  const base = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new GuideConversationError('GUIDE_SESSION_STATE_INVALID');
+  const next = { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    if (!['active_module', 'sharedContext', 'roadmapState', 'planningState', 'assistantConversation', 'reminderDismissedState', 'context'].includes(key)) {
+      throw new GuideConversationError('GUIDE_SESSION_STATE_INVALID');
+    }
+    if (key === 'active_module') {
+      if (typeof value !== 'string' || !MODULES.has(value)) throw new GuideConversationError('GUIDE_SESSION_STATE_INVALID');
+      next[key] = value;
+      continue;
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new GuideConversationError('GUIDE_SESSION_STATE_INVALID');
+    next[key] = { ...(base[key] && typeof base[key] === 'object' && !Array.isArray(base[key]) ? base[key] : {}), ...value };
+  }
+  return next;
+}
+
+export async function patchGuideResumeState({ database, token, scope, experienceVersion, previewMode, patch }) {
+  const current = await loadGuideResumeState({ database, token, scope, experienceVersion, previewMode });
+  if (current === null) throw new GuideConversationError('GUIDE_SESSION_NOT_FOUND');
+  const state = mergeCanonicalState(current, patch);
+  await saveGuideResumeState({ database, token, scope, experienceVersion, previewMode, state });
+  return state;
+}
+
 export async function loadGuideResumeState({ database, token, scope, experienceVersion, previewMode }) {
   if (!database || typeof token !== 'string' || !validScope(scope) || !Number.isInteger(experienceVersion)) return null;
   const result = await database.query(
     `SELECT state FROM guide_public_sessions
       WHERE token_hash=$1 AND tenant_id=$2 AND assistant_id=$3 AND channel_id=$4 AND domain_id=$5
-        AND experience_version=$6 AND preview_mode=$7 AND expires_at > CURRENT_TIMESTAMP
+        AND experience_version=$6 AND preview_mode=$7 AND session_status='ACTIVE' AND expires_at > CURRENT_TIMESTAMP
       LIMIT 1`,
     [hash(token), scope.tenant_id, scope.assistant_id, scope.channel_id, scope.domain_id, experienceVersion, Boolean(previewMode)],
   );

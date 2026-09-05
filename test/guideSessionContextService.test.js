@@ -58,12 +58,11 @@ test('quotation-required tools retain validated scope without inventing a zero-v
   assert.doesNotMatch(buildGuideSessionContextSummary({ experience: quoteExperience, context }), /0 AED/);
 });
 
-test('partitions stored Guide context by tenant, assistant, channel, session, and Experience version', () => {
+test('context normalization never treats process memory as durable Guide storage', () => {
   const scope = { tenant_id: 'tenant-a', assistant_id: 'assistant-a', channel_id: 'channel-a' };
-  saveGuideSessionContext({ scope, sessionId: 'session-1', experience: { ...experience, version: 4 }, context: { roadmap: { attendees: 20 } }, now: 1 });
-  assert.equal(loadGuideSessionContext({ scope, sessionId: 'session-1', experience: { ...experience, version: 4 }, now: 2 }).roadmap.attendees, 20);
-  assert.equal(loadGuideSessionContext({ scope: { ...scope, tenant_id: 'tenant-b' }, sessionId: 'session-1', experience: { ...experience, version: 4 }, now: 2 }), null);
-  assert.equal(loadGuideSessionContext({ scope, sessionId: 'session-1', experience: { ...experience, version: 5 }, now: 2 }), null);
+  const normalized = saveGuideSessionContext({ scope, sessionId: 'session-1', experience: { ...experience, version: 4 }, context: { roadmap: { attendees: 20 } }, now: 1 });
+  assert.equal(normalized.roadmap.attendees, 20);
+  assert.equal(loadGuideSessionContext({ scope, sessionId: 'session-1', experience: { ...experience, version: 4 }, now: 2 }), null);
 });
 test('buildGuideSessionContextSummary safely handles Roadmap state containing messages array without throwing', () => {
   const summary = buildGuideSessionContextSummary({

@@ -1,4 +1,6 @@
-import pool from '../config/db.js';
+async function defaultDatabase() {
+  return (await import('../config/db.js')).default;
+}
 
 export class HumanSupportError extends Error {
   constructor(status, code) {
@@ -24,9 +26,9 @@ async function audit(client, { tenantId, conversationId, eventType, metadata = {
 }
 
 export async function requestCustomerHumanSupport({
-  tenantId, conversationId, acknowledgement, topicSummary = null, database = pool,
+  tenantId, conversationId, acknowledgement, topicSummary = null, database = null,
 }) {
-  const client = await database.connect();
+  const client = await (database ?? await defaultDatabase()).connect();
   try {
     await client.query('BEGIN');
     const locked = await client.query(
@@ -80,8 +82,8 @@ export async function requestCustomerHumanSupport({
   }
 }
 
-export async function listHumanAttentionSummary({ tenantId, database = pool }) {
-  const result = await database.query(
+export async function listHumanAttentionSummary({ tenantId, database = null }) {
+  const result = await (database ?? await defaultDatabase()).query(
     `SELECT COUNT(*)::integer AS unresolved_count
        FROM conversations
       WHERE tenant_id = $1
@@ -96,8 +98,8 @@ export async function listHumanAttentionSummary({ tenantId, database = pool }) {
 }
 
 
-export async function claimDueCustomerSupportLifecycle({ database = pool, now = new Date() } = {}) {
-  const client = await database.connect();
+export async function claimDueCustomerSupportLifecycle({ database = null, now = new Date() } = {}) {
+  const client = await (database ?? await defaultDatabase()).connect();
   try {
     await client.query('BEGIN');
     const due = await client.query(
