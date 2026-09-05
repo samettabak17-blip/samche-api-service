@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildGuideSessionContextSummary, loadGuideSessionContext, normalizeGuideSessionContext, saveGuideSessionContext } from '../services/guide-session-context-service.js';
+import fs from 'node:fs';
+import { buildGuideSessionContextSummary, calculateGuideToolResult, loadGuideSessionContext, normalizeGuideSessionContext, saveGuideSessionContext } from '../services/guide-session-context-service.js';
 import { normalizeGuideExperience } from '../services/guide-experience-service.js';
 
 const experience = normalizeGuideExperience({
@@ -63,4 +64,80 @@ test('partitions stored Guide context by tenant, assistant, channel, session, an
   assert.equal(loadGuideSessionContext({ scope, sessionId: 'session-1', experience: { ...experience, version: 4 }, now: 2 }).roadmap.attendees, 20);
   assert.equal(loadGuideSessionContext({ scope: { ...scope, tenant_id: 'tenant-b' }, sessionId: 'session-1', experience: { ...experience, version: 4 }, now: 2 }), null);
   assert.equal(loadGuideSessionContext({ scope, sessionId: 'session-1', experience: { ...experience, version: 5 }, now: 2 }), null);
+});
+test('buildGuideSessionContextSummary safely handles Roadmap state containing messages array without throwing', () => {
+  const summary = buildGuideSessionContextSummary({
+    experience,
+    context: {
+      roadmap: {
+        messages: [{ role: 'user', content: 'What is the schedule?' }],
+        event_type: 'corporate',
+        attendees: 150,
+      },
+      tool: {
+        attendees: 150,
+      },
+    },
+  });
+  assert.match(summary, /Event type: Corporate event/);
+  assert.match(summary, /Guests: 150/);
+  assert.doesNotMatch(summary, /messages/i);
+  assert.doesNotMatch(summary, /What is the schedule/i);
+});
+
+test('buildGuideSessionContextSummary safely ignores unknown Roadmap and Tool keys and handles missing tool context', () => {
+  const summaryWithoutTool = buildGuideSessionContextSummary({
+    experience,
+    context: {
+      roadmap: {
+        event_type: 'corporate',
+        unknown_roadmap_field: 'arbitrary_value',
+        messages: [{ role: 'assistant', content: 'Hello' }],
+      },
+    },
+  });
+  assert.match(summaryWithoutTool, /Event type: Corporate event/);
+  assert.doesNotMatch(summaryWithoutTool, /unknown_roadmap_field/);
+  assert.doesNotMatch(summaryWithoutTool, /Interactive tool inputs/);
+
+  const summaryWithUnknownToolKeys = buildGuideSessionContextSummary({
+    experience,
+    context: {
+      roadmap: { event_type: 'corporate' },
+      tool: { venue: 'hotel', unknown_planning_prop: 'val', metadata: { foo: 'bar' } },
+    },
+  });
+  assert.match(summaryWithUnknownToolKeys, /Venue: Hotel/);
+  assert.doesNotMatch(summaryWithUnknownToolKeys, /unknown_planning_prop/);
+  assert.doesNotMatch(summaryWithUnknownToolKeys, /metadata/);
+});
+
+test('buildGuideSessionContextSummary correctly summarizes planning structured values under tool key', () => {
+  const toolResult = calculateGuideToolResult({
+    tool: experience.interactive_tool,
+    values: { attendees: 100, venue: 'hotel' },
+  });
+  const summary = buildGuideSessionContextSummary({
+    experience,
+    context: {
+      tool: { attendees: 100, venue: 'hotel' },
+      tool_result: toolResult,
+    },
+  });
+  assert.match(summary, /Interactive tool inputs.*Guests: 100.*Venue: Hotel/);
+  assert.match(summary, /3,100 AED/);
+});
+
+test('app.js extracts canonical structured context and isolates conversation messages from field map', () => {
+  const appSource = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  const chatRoute = appSource.slice(appSource.indexOf('app.post("/chat"'));
+
+  // Proves messages are extracted/excluded from structured roadmap values
+  assert.match(chatRoute, /const\s*\{\s*messages:\s*_roadmapMessages,\s*\.\.\.structuredRoadmapValues\s*\}\s*=/);
+  // Proves canonical roadmap and tool keys are passed into buildGuideSessionContextSummary
+  assert.match(chatRoute, /buildGuideSessionContextSummary\(\{[\s\S]*roadmap:\s*structuredRoadmapValues,[\s\S]*tool:\s*structuredPlanningValues,/);
+  // Proves safe error logging diagnostic with code, message, and location
+  assert.match(chatRoute, /console\.error\(`Samcheguide Chat error: name=\$\{safeName\}/);
+  // Proves no tenant or customer specific names are hardcoded
+  assert.doesNotMatch(chatRoute, /blue dune|bluedune/i);
 });

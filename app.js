@@ -66,7 +66,7 @@ import { resolvePublicWebChatIntegration } from "./services/public-web-chat-inte
 import { createCustomerInvitationOutboxStartup } from './services/customer-invitation-outbox-bootstrap.js';
 import { isAllowedGuideCorsOrigin } from './services/guide-public-cors-service.js';
 import { isSharedPublicGuideAssetPath } from './services/guide-public-asset-route-service.js';
-import { GuideSessionContextError, buildGuideSessionContextSummary, loadGuideSessionContext, saveGuideSessionContext } from './services/guide-session-context-service.js';
+import { GuideSessionContextError, buildGuideSessionContextSummary, calculateGuideToolResult, loadGuideSessionContext, saveGuideSessionContext } from './services/guide-session-context-service.js';
 import { verifyGuidePreviewToken, GuidePreviewError } from './services/guide-preview-service.js';
 import { canonicalGuideResponseEvents, GuideConversationError, issueGuideResumeSession, loadGuideResumeState, normalizeGuideConversationRequest, resolveGuideResumeSession, saveGuideResumeState } from './services/guide-conversation-service.js';
 
@@ -1250,15 +1250,37 @@ app.post("/chat", async (req, res) => {
     // Record the current user message in module memory
     addGuideMemory(sessionKey, guideConversation.module, "user", cleanText, inboxState.knowledgeAuthority ?? null);
 
-    // Construct system instruction based on shared context and other relevant states
+    // Extract structured Roadmap values (excluding messages / thread state)
+    const { messages: _roadmapMessages, ...structuredRoadmapValues } = (guideSessionState.roadmapState && typeof guideSessionState.roadmapState === 'object')
+      ? guideSessionState.roadmapState
+      : {};
+
+    const structuredPlanningValues = (guideSessionState.planningState && typeof guideSessionState.planningState === 'object')
+      ? { ...guideSessionState.planningState }
+      : {};
+
+    let toolResult = guideSessionState.tool_result;
+    if (!toolResult && publishedExperience.experience?.interactive_tool) {
+      try {
+        toolResult = calculateGuideToolResult({
+          tool: publishedExperience.experience.interactive_tool,
+          values: structuredPlanningValues,
+        });
+      } catch {
+        toolResult = null;
+      }
+    }
+
+    // Construct system instruction based on canonical structured context
     const guideContextSummary = buildGuideSessionContextSummary({
       scope: guideRuntimeIntegration,
       sessionId: userId,
       experience: publishedExperience.experience,
-      context: { // Combine shared context and relevant module data for AI context
-        ...guideSessionState.sharedContext,
-        roadmap: guideSessionState.roadmapState, // Provide full roadmap state to AI
-        planning: guideSessionState.planningState, // Provide full planning state to AI
+      context: {
+        sharedContext: guideSessionState.sharedContext || {},
+        roadmap: structuredRoadmapValues,
+        tool: structuredPlanningValues,
+        ...(toolResult ? { tool_result: toolResult } : {}),
       }
     });
 
@@ -1368,7 +1390,13 @@ app.post("/chat", async (req, res) => {
   } catch (err) {
     if (err instanceof GuideConversationError) return res.status(400).json({ error: 'Guide request is invalid.' });
     if (err?.status === 503) console.error('CHAT_RESPONSE_503 stage=OUTER_HANDLER_ERROR');
-    console.error("Samcheguide Chat error:", err?.code || err?.name || "unknown");
+    const safeName = typeof err?.name === 'string' ? err.name : 'Error';
+    const safeCode = typeof err?.code === 'string' ? err.code : '';
+    const safeMessage = typeof err?.message === 'string' ? err.message : '';
+    const safeStack = typeof err?.stack === 'string'
+      ? err.stack.split('\n').slice(0, 3).map((line) => line.trim()).join(' | ')
+      : '';
+    console.error(`Samcheguide Chat error: name=${safeName}${safeCode ? ` code=${safeCode}` : ''}${safeMessage ? ` message=${safeMessage}` : ''}${safeStack ? ` location=${safeStack}` : ''}`);
     return res.status(err.status || 500).json({ error: "Could not generate chat response." });
   }
 });
