@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { describeWhatsAppHumanSupportPolicySources, resolveWhatsAppHumanSupportPolicy } from '../services/whatsapp-human-support-policy-service.js';
+import { describeWhatsAppHumanSupportPolicySources, resolveWhatsAppHumanSupportPolicy, summarizeWhatsAppHumanSupportTopic } from '../services/whatsapp-human-support-policy-service.js';
 
 const legacy = {
   human_support: {
@@ -37,6 +37,22 @@ test('keeps a valid historical acknowledgement ahead of an inherited generic act
   const policy = resolveWhatsAppHumanSupportPolicy({ activeTemplates: inheritedFallback, legacyTemplates: legacy, language: 'tr' });
   assert.equal(policy.source, 'LEGACY_COMPATIBILITY');
   assert.equal(policy.acknowledgement('Konu'), 'Konu için bir temsilci yardımcı olacak.');
+});
+
+test('does not select the introduced generic fallback when it arrives through the legacy compatibility source', () => {
+  const inheritedFallback = {
+    human_support: {
+      general_topic: { tr: 'Genel destek', en: 'General support', ar: 'الدعم العام' },
+      transfer: {
+        tr: 'Canlı destek talebinizi aldık. {{topicSummary}} konusunda bir ekip üyesi yardımcı olacaktır.',
+        en: 'We have received your human-support request. A team member will assist you with {{topicSummary}}.',
+        ar: 'تلقينا طلبك للدعم البشري. سيساعدك أحد أعضاء الفريق بخصوص {{topicSummary}}.',
+      },
+    },
+  };
+  const policy = resolveWhatsAppHumanSupportPolicy({ activeTemplates: null, legacyTemplates: inheritedFallback, language: 'tr' });
+  assert.equal(policy.source, 'PLATFORM_DEFAULT');
+  assert.match(policy.acknowledgement('şirket kuruluşu'), /Talebiniz işlem sırasına alınacak/);
 });
 
 test('uses one configured legacy language when the preferred language is absent', () => {
@@ -76,8 +92,31 @@ test('uses the generic platform handoff policy when an enabled integration has n
   const policy = resolveWhatsAppHumanSupportPolicy({ activeTemplates: null, legacyTemplates: null, language: 'tr' });
   assert.equal(policy.source, 'PLATFORM_DEFAULT');
   assert.equal(policy.language, 'tr');
-  assert.match(policy.acknowledgement('Genel destek'), /Genel destek/);
+  assert.match(policy.acknowledgement('şirket kuruluşu'), /Canlı temsilci ile görüşme ilgili talebinizi aldım/);
+  assert.match(policy.acknowledgement('şirket kuruluşu'), /şirket kuruluşu konusuyla ilgili/);
+  assert.match(policy.acknowledgement('şirket kuruluşu'), /Talebiniz işlem sırasına alınacak/);
+  assert.match(policy.acknowledgement('şirket kuruluşu'), /beklemede kalın/);
+  assert.match(policy.acknowledgement('şirket kuruluşu'), /Bu sohbet oturumu sona ermiştir/);
   assert.doesNotMatch(policy.acknowledgement('Genel destek'), /SamChe/i);
+});
+
+test('uses the most recent known customer topic when the human request itself has no topic', () => {
+  const topic = summarizeWhatsAppHumanSupportTopic({
+    text: 'canlı destek istiyorum',
+    conversationHistory: [
+      { sender_type: 'CUSTOMER', content: 'Şirket kuruluşu hakkında bilgi almak istiyorum.' },
+      { sender_type: 'ASSISTANT', content: 'Size yardımcı olabilirim.' },
+      { sender_type: 'CUSTOMER', content: 'canlı destek istiyorum' },
+    ],
+    fallback: 'Genel destek',
+  });
+  assert.equal(topic, 'Şirket kuruluşu hakkında bilgi almak istiyorum.');
+});
+
+test('uses the safe configured fallback without inventing a topic when no customer topic exists', () => {
+  assert.equal(summarizeWhatsAppHumanSupportTopic({
+    text: 'canlı destek istiyorum', conversationHistory: [], fallback: 'Genel destek',
+  }), 'Genel destek');
 });
 
 test('reports only safe policy-source availability metadata', () => {

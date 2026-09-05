@@ -1,3 +1,5 @@
+import { parseCustomerHumanSupportRequest } from './human-support-intent.js';
+
 function textAt(value, language) {
   const candidate = value && typeof value === 'object' && typeof value[language] === 'string'
     ? value[language].trim()
@@ -5,23 +7,34 @@ function textAt(value, language) {
   return candidate || null;
 }
 
-// Platform-owned neutral wording used only when an enabled WhatsApp
+// Platform-owned deterministic wording used only when an enabled WhatsApp
 // integration has no historical policy record. It carries no tenant identity,
 // commercial claim, or provider-specific behavior.
 const PLATFORM_HUMAN_SUPPORT_TEMPLATES = Object.freeze({
   human_support: {
     general_topic: { tr: 'Genel destek', en: 'General support', ar: 'الدعم العام' },
     transfer: {
-      tr: 'Canlı destek talebinizi aldık. {{topicSummary}} konusunda bir ekip üyesi yardımcı olacaktır.',
-      en: 'We have received your human-support request. A team member will assist you with {{topicSummary}}.',
-      ar: 'تلقينا طلبك للدعم البشري. سيساعدك أحد أعضاء الفريق بخصوص {{topicSummary}}.',
+      tr: 'Canlı temsilci ile görüşme ilgili talebinizi aldım. {{topicSummary}} konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\n\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\n\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.\n\n🔒 Bu sohbet oturumu sona ermiştir.\n\nBaşka sorularınız varsa veya ek yardıma ihtiyacınız olursa, lütfen istediğiniz zaman tekrar bizimle iletişime geçmekten çekinmeyin. Canlı Destek Ekibimiz size yardımcı olmaktan mutluluk duyacaktır.',
+      en: 'I have received your request to speak with a live representative. Regarding {{topicSummary}}, I am transferring you to our live customer representative to provide the most accurate support.\n\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\n\nPlease stay on hold while we connect you ⌛️.\n\n🔒 This chat session has ended.\n\nIf you have further questions or need additional assistance, please feel free to reach out again anytime. Our Live Support Team will be happy to assist you.',
+      ar: 'لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص {{topicSummary}}، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\n\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\n\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.\n\n🔒 انتهت جلسة الدردشة هذه.\n\nإذا كانت لديك أسئلة أخرى أو احتجت إلى مساعدة إضافية، فلا تتردد في الاتصال بنا مرة أخرى في أي وقت. سيسعد فريق الدعم المباشر لدينا بمساعدتك.',
     },
   },
 });
 
-function isPlatformDefaultHandoff(templates) {
+// This is the exact short-lived platform fallback introduced by migration 062.
+// It is intentionally recognized as inherited policy, not tenant-authored copy.
+const INHERITED_GENERIC_HANDOFF = Object.freeze({
+  general_topic: { tr: 'Genel destek', en: 'General support', ar: 'الدعم العام' },
+  transfer: {
+    tr: 'Canlı destek talebinizi aldık. {{topicSummary}} konusunda bir ekip üyesi yardımcı olacaktır.',
+    en: 'We have received your human-support request. A team member will assist you with {{topicSummary}}.',
+    ar: 'تلقينا طلبك للدعم البشري. سيساعدك أحد أعضاء الفريق بخصوص {{topicSummary}}.',
+  },
+});
+
+function isInheritedGenericHandoff(templates) {
   const candidate = templates?.human_support;
-  const platform = PLATFORM_HUMAN_SUPPORT_TEMPLATES.human_support;
+  const platform = INHERITED_GENERIC_HANDOFF;
   return ['tr', 'en', 'ar'].every((language) =>
     textAt(candidate?.general_topic, language) === platform.general_topic[language]
     && textAt(candidate?.transfer, language) === platform.transfer[language]
@@ -81,14 +94,25 @@ export function resolveWhatsAppHumanSupportPolicy({ activeTemplates = null, lega
   if (activeTemplates?.human_support?.enabled === false || legacyTemplates?.human_support?.enabled === false) return null;
   const activePolicy = policyFromTemplates(activeTemplates, language, 'ACTIVE_CONFIGURATION');
   const legacyPolicy = policyFromTemplates(legacyTemplates, language, 'LEGACY_COMPATIBILITY');
-  // An inherited platform fallback is not an explicit tenant override. Keep a
-  // tenant's established wording when both records are present.
-  return (activePolicy && !(legacyPolicy && isPlatformDefaultHandoff(activeTemplates)) ? activePolicy : legacyPolicy)
+  // The migration fallback is not tenant-authored wording regardless of which
+  // compatibility boundary supplied it. Keep only established tenant policy.
+  return (activePolicy && !isInheritedGenericHandoff(activeTemplates) ? activePolicy : null)
+    ?? (legacyPolicy && !isInheritedGenericHandoff(legacyTemplates) ? legacyPolicy : null)
     ?? policyFromTemplates(PLATFORM_HUMAN_SUPPORT_TEMPLATES, language, 'PLATFORM_DEFAULT');
 }
 
-export function summarizeWhatsAppHumanSupportTopic({ text, fallback }) {
-  const value = String(text ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!value) return fallback;
-  return value.slice(0, 255);
+function topicText(value) {
+  return String(value ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 255);
+}
+
+export function summarizeWhatsAppHumanSupportTopic({ text, conversationHistory = [], fallback }) {
+  const current = topicText(text);
+  const request = parseCustomerHumanSupportRequest(current);
+  if (current && (!request.requested || request.hasMeaningfulContext)) return current;
+  for (const message of [...conversationHistory].reverse()) {
+    if (!['CUSTOMER', 'USER'].includes(String(message?.sender_type ?? message?.role ?? '').toUpperCase())) continue;
+    const candidate = topicText(message?.content ?? message?.text);
+    if (candidate && !parseCustomerHumanSupportRequest(candidate).requested) return candidate;
+  }
+  return topicText(fallback) || null;
 }

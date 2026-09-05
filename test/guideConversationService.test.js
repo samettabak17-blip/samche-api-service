@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   appendGuideModuleMessage,
+  canonicalGuideResponseText,
   GuideConversationError,
   canonicalGuideResponseEvents,
   issueGuideResumeSession,
@@ -23,6 +24,21 @@ test('maps provider-neutral text into safe canonical progressive Guide events', 
   assert.doesNotMatch(JSON.stringify(events), /##|<script|\*\*/i);
 });
 
+test('normalizes provider HTML roadmap content into canonical safe sections and lists', () => {
+  const events = canonicalGuideResponseEvents('<h2>Yol haritası</h2><p>İlk adımı belirleyin.</p><ul><li><strong>Hedefi</strong> doğrulayın</li><li>Seçenekleri değerlendirin</li></ul>');
+  assert.deepEqual(events.map((event) => event.type), ['MESSAGE_START', 'THINKING', 'SECTION', 'TEXT_DELTA', 'LIST', 'MESSAGE_COMPLETE']);
+  assert.equal(events[2].title, 'Yol haritası');
+  assert.equal(events[3].text, 'İlk adımı belirleyin.');
+  assert.deepEqual(events[4].items, ['Hedefi doğrulayın', 'Seçenekleri değerlendirin']);
+  assert.doesNotMatch(JSON.stringify(events), /<\/?(?:ul|li|strong|h2|p)>/i);
+});
+
+test('derives persisted Guide text only from canonical visible response events', () => {
+  const text = canonicalGuideResponseText('<h2>Yol haritası</h2><ul><li><strong>Hedefi</strong> doğrulayın</li></ul>');
+  assert.equal(text, 'Yol haritası\n- Hedefi doğrulayın');
+  assert.doesNotMatch(text, /<\/?(?:ul|li|strong|h2)>/i);
+});
+
 test('preserves a persisted long provider response as bounded canonical Guide events', () => {
   const response = `## Detailed roadmap\n\n${'A complete planning recommendation. '.repeat(80)}`;
   const events = canonicalGuideResponseEvents(response);
@@ -36,6 +52,7 @@ test('preserves a persisted long provider response as bounded canonical Guide ev
 
 test('rejects unsafe or provider-shaped Guide events and bounds roadmap conversation input', () => {
   assert.throws(() => canonicalGuideResponseEvents('<script>alert(1)</script>'), GuideConversationError);
+  assert.throws(() => canonicalGuideResponseEvents('<img src=x onerror=alert(1)>'), GuideConversationError);
   assert.throws(() => normalizeGuideConversationRequest({ module: 'ROADMAP', text: 'x'.repeat(2001) }), GuideConversationError);
   assert.throws(() => normalizeGuideConversationRequest({ module: 'VERTEX_STREAM', text: 'hello' }), GuideConversationError);
   assert.deepEqual(normalizeGuideConversationRequest({ module: 'ROADMAP', text: ' Plan a launch ' }), { module: 'ROADMAP', text: 'Plan a launch' });

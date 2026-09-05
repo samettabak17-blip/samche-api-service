@@ -20,6 +20,7 @@ test('Guide runtime routes use opaque scoped resume sessions and canonical respo
   assert.match(source, /issueGuideResumeSession/);
   assert.match(source, /resolveGuideResumeSession/);
   assert.match(source, /canonicalGuideResponseEvents/);
+  assert.match(source, /canonicalGuideResponseText/);
   assert.match(source, /guide_events/);
   assert.match(source, /\/guide\/session-context/);
   assert.doesNotMatch(source, /X-Samcheguide-Session.*sessionStorage/);

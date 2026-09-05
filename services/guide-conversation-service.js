@@ -4,7 +4,7 @@ const MAX_TEXT = 2000;
 const MAX_ACTIONS = 6;
 const SESSION_TTL_MS = Math.min(Math.max(Number(process.env.GUIDE_SESSION_RETENTION_HOURS || 72) * 60 * 60 * 1000, 60 * 60 * 1000), 30 * 24 * 60 * 60 * 1000);
 const MODULES = new Set(['ROADMAP', 'INTERACTIVE_TOOL', 'AI_ASSISTANT']);
-const UNSAFE = /<\s*\/?(?:script|style|iframe|object|embed)|on\w+\s*=/i;
+const UNSAFE = /<\s*\/?(?:script|style|iframe|object|embed|link|meta|base)|<[^>]*\b(?:on\w+|style|srcdoc)\s*=|<[^>]*\b(?:href|src)\s*=\s*["']?\s*(?:javascript|data):/i;
 
 export class GuideConversationError extends Error {
   constructor(code = 'GUIDE_CONVERSATION_INVALID') { super('Guide conversation is unavailable.'); this.code = code; }
@@ -54,6 +54,24 @@ function safeInline(value) {
   return clean(value, Number.MAX_SAFE_INTEGER).replace(/\*{1,3}|`|^\s*#{1,6}\s*/g, '').replace(/\s+/g, ' ').trim();
 }
 
+function normalizeProviderRichText(value) {
+  return value
+    .replace(/<h[1-6]\b[^>]*>/gi, '\n## ')
+    .replace(/<\/h[1-6]\s*>/gi, '\n')
+    .replace(/<(?:p|div|section|article|blockquote)\b[^>]*>/gi, '\n')
+    .replace(/<\/(?:p|div|section|article|blockquote)\s*>/gi, '\n')
+    .replace(/<\/?(?:ul|ol)\b[^>]*>/gi, '\n')
+    .replace(/<li\b[^>]*>/gi, '\n- ')
+    .replace(/<\/li\s*>/gi, '\n')
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/?(?:strong|b|em|i|span|code)\b[^>]*>/gi, '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>');
+}
+
 function boundedTextSegments(value, limit = 800) {
   const source = String(value ?? '');
   if (!source) return [];
@@ -80,7 +98,7 @@ function boundedTextSegments(value, limit = 800) {
 }
 
 export function canonicalGuideResponseEvents(content, { nextActions = [] } = {}) {
-  const source = clean(content, Number.MAX_SAFE_INTEGER);
+  const source = normalizeProviderRichText(clean(content, Number.MAX_SAFE_INTEGER));
   const events = [{ type: 'MESSAGE_START' }, { type: 'THINKING' }];
   const lines = source.split('\n').map((line) => line.trim()).filter(Boolean);
   let paragraph = [];
@@ -118,6 +136,18 @@ export function canonicalGuideResponseEvents(content, { nextActions = [] } = {})
   if (actions.length) events.push({ type: 'ACTION', actions });
   events.push({ type: 'MESSAGE_COMPLETE' });
   return events;
+}
+
+export function canonicalGuideResponseText(content) {
+  return canonicalGuideResponseEvents(content)
+    .flatMap((event) => {
+      if (event.type === 'SECTION') return [event.title];
+      if (event.type === 'TEXT_DELTA') return [event.text];
+      if (event.type === 'LIST') return event.items.map((item) => `- ${item}`);
+      return [];
+    })
+    .filter(Boolean)
+    .join('\n');
 }
 
 const hash = (token) => crypto.createHash('sha256').update(token).digest('hex');

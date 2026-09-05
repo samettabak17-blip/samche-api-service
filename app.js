@@ -69,7 +69,7 @@ import { isAllowedGuideCorsOrigin } from './services/guide-public-cors-service.j
 import { isSharedPublicGuideAssetPath } from './services/guide-public-asset-route-service.js';
 import { GuideSessionContextError, buildGuideSessionContextSummary, calculateGuideToolResult, guideSessionStatePatch, loadGuideSessionContext, saveGuideSessionContext } from './services/guide-session-context-service.js';
 import { verifyGuidePreviewToken, GuidePreviewError } from './services/guide-preview-service.js';
-import { appendGuideModuleMessage, canonicalGuideResponseEvents, GuideConversationError, issueGuideResumeSession, loadGuideResumeState, normalizeGuideConversationRequest, patchGuideResumeState, resolveGuideResumeSession, resolveGuideResumeSessionByToken, saveGuideResumeState } from './services/guide-conversation-service.js';
+import { appendGuideModuleMessage, canonicalGuideResponseEvents, canonicalGuideResponseText, GuideConversationError, issueGuideResumeSession, loadGuideResumeState, normalizeGuideConversationRequest, patchGuideResumeState, resolveGuideResumeSession, resolveGuideResumeSessionByToken, saveGuideResumeState } from './services/guide-conversation-service.js';
 
 dotenv.config();
 
@@ -1057,8 +1057,11 @@ app.post("/plan", async (req, res) => {
 
     const data = await requestGemini(payload, runtime.model);
     if (data.candidates && data.candidates[0]?.content?.parts?.[0]) {
-      let originalText = data.candidates[0].content.parts[0].text;
-      data.candidates[0].content.parts[0].text = parseLinksToHTML(originalText);
+      const originalText = data.candidates[0].content.parts[0].text;
+      const guideEvents = canonicalGuideResponseEvents(originalText);
+      const canonicalText = canonicalGuideResponseText(originalText);
+      data.candidates[0].content.parts[0].text = canonicalText;
+      data.guide_events = guideEvents;
       const previous = await loadGuideResumeState({ database: pool, token: publicSession.token, scope: integration, experienceVersion: resolvedExperience.experience.version, previewMode: previewModeForExperience(resolvedExperience) }) || {};
       const messages = Array.isArray(previous?.roadmapState?.messages) ? previous.roadmapState.messages : [];
       await patchGuideResumeState({
@@ -1067,7 +1070,7 @@ app.post("/plan", async (req, res) => {
         scope: integration,
         experienceVersion: resolvedExperience.experience.version,
         previewMode: previewModeForExperience(resolvedExperience),
-        patch: { roadmapState: { generatedAnalysis: originalText, messages: [...messages, { role: 'user', content: cleanSector }, { role: 'assistant', content: originalText }] } },
+        patch: { roadmapState: { generatedAnalysis: canonicalText, messages: [...messages, { role: 'user', content: cleanSector }, { role: 'assistant', content: canonicalText }] } },
       });
     }
     return res.json(data);
@@ -1311,6 +1314,11 @@ app.post("/chat", async (req, res) => {
       }
     }
 
+    const guideEvents = canonicalGuideResponseEvents(originalText, {
+      nextActions: guideConversation.module === 'ROADMAP' ? ['Refine this plan', 'Build planning scope', 'Ask the assistant'] : [],
+    });
+    originalText = canonicalGuideResponseText(originalText);
+
     if (inboxState) {
       const persisted = await persistAssistantResponseIfCurrent({
         tenantId: inboxState.integration.tenant_id,
@@ -1353,7 +1361,7 @@ app.post("/chat", async (req, res) => {
     return res.json({
       conversation_session: publicSession.token,
       candidates: [{ content: { parts: [{ text: originalText }] } }],
-      guide_events: canonicalGuideResponseEvents(originalText, { nextActions: guideConversation.module === 'ROADMAP' ? ['Refine this plan', 'Build planning scope', 'Ask the assistant'] : [] }),
+      guide_events: guideEvents,
       guide_session_state: guideSessionState // Return the updated state to the client
     });
   } catch (err) {
@@ -2183,9 +2191,11 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           console.info('WHATSAPP_HUMAN_SUPPORT_POLICY_SOURCE source=PLATFORM_DEFAULT active_usable=' + Number(handoffPolicySources.active_usable) +
             ' legacy_usable=' + Number(handoffPolicySources.legacy_usable));
         }
-        const topicSummary = humanSupportRequest.hasMeaningfulContext
-          ? summarizeWhatsAppHumanSupportTopic({ text, fallback: handoffPolicy.defaultTopic })
-          : handoffPolicy.defaultTopic;
+        const topicSummary = summarizeWhatsAppHumanSupportTopic({
+          text,
+          conversationHistory: whatsappInbox.conversationHistory,
+          fallback: handoffPolicy.defaultTopic,
+        });
         const acknowledgement = handoffPolicy.acknowledgement(topicSummary);
         const handoff = await requestCustomerHumanSupport({
           tenantId: whatsappInbox.integration.tenant_id,
