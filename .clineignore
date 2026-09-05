@@ -1,0 +1,13 @@
+node_modules/
+.agent/runs/
+.agent/reports/
+.aider*
+coverage/
+dist/
+build/
+*.log
+.env
+.env.*
+.tmp/
+temp/
+tmp/

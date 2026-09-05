@@ -156,3 +156,12 @@ modify files outside the authorized scope.
   may repair only unapproved historical candidates when one explicit source
   identity is proven; CUSTOMER evidence is never business truth, missing or
   conflicting identities fail closed, and APPROVED history is immutable.
+
+- Once SamChe supports a Knowledge source type, all downstream consumers must
+  derive readiness, identity validity, provenance validity, indexing readiness,
+  Business Profile eligibility and candidate approval eligibility from shared
+  canonical backend/domain authority. A source must never be GREEN in one
+  subsystem but unusable in another due only to tenant age, source age,
+  migration timing, assignment timing, generation timing or coding-agent
+  changes. Every root-caused defect class fixed in human acceptance must become
+  permanent regression coverage.
