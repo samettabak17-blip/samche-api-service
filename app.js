@@ -25,7 +25,7 @@ import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.j
 import { whatsappRuntimeSessionKey } from "./services/whatsapp-runtime-session-service.js";
 import { claimDueCustomerSupportLifecycle, requestCustomerHumanSupport } from "./services/human-support-service.js";
 import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
-import { resolveWhatsAppHumanSupportPolicy, summarizeWhatsAppHumanSupportTopic } from './services/whatsapp-human-support-policy-service.js';
+import { describeWhatsAppHumanSupportPolicySources, resolveWhatsAppHumanSupportPolicy, summarizeWhatsAppHumanSupportTopic } from './services/whatsapp-human-support-policy-service.js';
 import { persistAndDeliverWhatsAppAssistant } from "./services/whatsapp-assistant-response-service.js";
 import { buildWhatsAppActivePersonaTenantContext, buildWhatsAppTenantModelContext, classifyWhatsAppCurrentCustomerIntent, detectWhatsAppModelResponseLanguage, isWhatsAppResponseLanguageMismatch, resolveWhatsAppPersonaUnavailableResponse, WhatsAppTenantContextError } from "./services/whatsapp-tenant-context-service.js";
 import { inferWhatsAppDeterministicInboundLanguage, planWhatsAppDeterministicSocialResponse, resolveWhatsAppDeterministicTemplateLanguage } from "./services/whatsapp-deterministic-social-response-service.js";
@@ -69,7 +69,7 @@ import { isAllowedGuideCorsOrigin } from './services/guide-public-cors-service.j
 import { isSharedPublicGuideAssetPath } from './services/guide-public-asset-route-service.js';
 import { GuideSessionContextError, buildGuideSessionContextSummary, calculateGuideToolResult, guideSessionStatePatch, loadGuideSessionContext, saveGuideSessionContext } from './services/guide-session-context-service.js';
 import { verifyGuidePreviewToken, GuidePreviewError } from './services/guide-preview-service.js';
-import { canonicalGuideResponseEvents, GuideConversationError, issueGuideResumeSession, loadGuideResumeState, normalizeGuideConversationRequest, patchGuideResumeState, resolveGuideResumeSession, resolveGuideResumeSessionByToken, saveGuideResumeState } from './services/guide-conversation-service.js';
+import { appendGuideModuleMessage, canonicalGuideResponseEvents, GuideConversationError, issueGuideResumeSession, loadGuideResumeState, normalizeGuideConversationRequest, patchGuideResumeState, resolveGuideResumeSession, resolveGuideResumeSessionByToken, saveGuideResumeState } from './services/guide-conversation-service.js';
 
 dotenv.config();
 
@@ -1189,11 +1189,7 @@ app.post("/chat", async (req, res) => {
 
     // Add user message to the correct conversation thread
     const userMessage = { role: 'user', content: cleanText, timestamp: Date.now() };
-    if (guideConversation.module === 'ROADMAP') {
-        guideSessionState.roadmapState.messages.push(userMessage);
-    } else if (guideConversation.module === 'AI_ASSISTANT') {
-        guideSessionState.assistantConversation.messages.push(userMessage);
-    }
+    guideSessionState = appendGuideModuleMessage(guideSessionState, guideConversation.module, userMessage);
     // INTERACTIVE_TOOL (Planning) is not a chat module in this context
 
     // --- End: Load and Initialize Full Guide Session State ---
@@ -1334,11 +1330,11 @@ app.post("/chat", async (req, res) => {
     // Add AI message to the correct conversation thread
     const aiMessage = { role: 'assistant', content: originalText, timestamp: Date.now() };
     if (guideConversation.module === 'ROADMAP') {
-        guideSessionState.roadmapState.messages.push(aiMessage);
+        guideSessionState = appendGuideModuleMessage(guideSessionState, 'ROADMAP', aiMessage);
         guideSessionState.roadmapState.initialGoal ||= cleanText;
         guideSessionState.roadmapState.generatedAnalysis = originalText;
     } else if (guideConversation.module === 'AI_ASSISTANT') {
-        guideSessionState.assistantConversation.messages.push(aiMessage);
+        guideSessionState = appendGuideModuleMessage(guideSessionState, 'AI_ASSISTANT', aiMessage);
     }
 
     // --- Start: Save Full Guide Session State ---
@@ -2162,14 +2158,28 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         } catch {
           activeTemplates = null;
         }
+        const handoffPolicySources = describeWhatsAppHumanSupportPolicySources({
+          activeTemplates,
+          legacyTemplates: tenantContext.deterministicTemplates,
+          language: lang,
+        });
         const handoffPolicy = resolveWhatsAppHumanSupportPolicy({
           activeTemplates,
           legacyTemplates: tenantContext.deterministicTemplates,
           language: lang,
         });
         if (!handoffPolicy) {
-          console.error('WHATSAPP_HUMAN_SUPPORT_POLICY_UNAVAILABLE');
+          console.error('WHATSAPP_HUMAN_SUPPORT_POLICY_UNAVAILABLE active_present=' + Number(handoffPolicySources.active_present) +
+            ' active_disabled=' + Number(handoffPolicySources.active_explicitly_disabled) +
+            ' active_usable=' + Number(handoffPolicySources.active_usable) +
+            ' legacy_present=' + Number(handoffPolicySources.legacy_present) +
+            ' legacy_disabled=' + Number(handoffPolicySources.legacy_explicitly_disabled) +
+            ' legacy_usable=' + Number(handoffPolicySources.legacy_usable));
           return;
+        }
+        if (handoffPolicy.source === 'PLATFORM_DEFAULT') {
+          console.info('WHATSAPP_HUMAN_SUPPORT_POLICY_SOURCE source=PLATFORM_DEFAULT active_usable=' + Number(handoffPolicySources.active_usable) +
+            ' legacy_usable=' + Number(handoffPolicySources.legacy_usable));
         }
         const topicSummary = humanSupportRequest.hasMeaningfulContext
           ? summarizeWhatsAppHumanSupportTopic({ text, fallback: handoffPolicy.defaultTopic })

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseCustomerHumanSupportRequest } from '../services/human-support-intent.js';
+import { readFileSync } from 'node:fs';
 
 test('bare customer support request has no meaningful topic and needs no topic-summary model call', () => {
   assert.deepEqual(parseCustomerHumanSupportRequest('canlı destek'), {
@@ -41,4 +42,19 @@ test('recognizes semantic Turkish and English requests for a human operator', ()
   assert.equal(parseCustomerHumanSupportRequest('temsilciye bağlanmak istiyorum').requested, true);
   assert.equal(parseCustomerHumanSupportRequest('müşteri hizmetleri').requested, true);
   assert.equal(parseCustomerHumanSupportRequest('customer support').requested, true);
+});
+
+test('WhatsApp human handoff precedes provider work and optional side effects cannot block it', () => {
+  const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  const handoffStart = app.indexOf('const humanSupportRequest = parseCustomerHumanSupportRequest(text);');
+  const providerStart = app.indexOf('runtime = await resolveChannelAssistantRuntime({', handoffStart);
+  const handoff = app.slice(handoffStart, providerStart);
+  assert.ok(handoffStart >= 0 && providerStart > handoffStart);
+  assert.match(handoff, /catch\s*\{\s*activeTemplates = null;/);
+  assert.match(handoff, /requestCustomerHumanSupport/);
+  assert.match(handoff, /await sendMessage\(cleanFrom, acknowledgement\)/);
+  assert.match(handoff, /sendMessageToTelegram\([\s\S]*?\)\.catch\(\(\) => \{\}\)/);
+
+  const runner = readFileSync(new URL('../services/lead-qualification-runner.js', import.meta.url), 'utf8');
+  assert.match(runner, /queueMicrotask\(\(\) => \{[\s\S]*?void runLeadQualification[\s\S]*?\.catch/);
 });

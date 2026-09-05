@@ -146,6 +146,17 @@ test('canonical handoff patch preserves the Roadmap thread while exposing valida
   assert.deepEqual(patch.sharedContext, { existing: 'preserved', roadmap: { event_type: 'corporate' }, planning: { attendees: 120 } });
 });
 
+test('canonical handoff patch initializes the Roadmap thread for a newly persisted session', () => {
+  const patch = guideSessionStatePatch({
+    active_module: 'ROADMAP',
+    roadmap: { event_type: 'corporate' },
+    tool: {},
+    tool_result: { pricing_mode: 'QUOTE_REQUIRED', amount: null },
+  });
+  assert.deepEqual(patch.roadmapState.messages, []);
+  assert.deepEqual(patch.roadmapState.structuredInputs, { event_type: 'corporate' });
+});
+
 test('Assistant context summary includes the persisted Roadmap result without copying the Roadmap thread', () => {
   const summary = buildGuideSessionContextSummary({
     experience,
@@ -167,6 +178,8 @@ test('app.js extracts canonical structured context and isolates conversation mes
 
   // Proves messages are extracted/excluded from structured roadmap values
   assert.match(chatRoute, /const\s*\{\s*messages:\s*_roadmapMessages,\s*structuredInputs,\s*generatedAnalysis,\s*initialGoal,\s*\.\.\.structuredRoadmapValues\s*\}\s*=/);
+  assert.match(chatRoute, /appendGuideModuleMessage\(guideSessionState, guideConversation\.module, userMessage\)/);
+  assert.doesNotMatch(chatRoute, /roadmapState\.messages\.push\(userMessage\)/);
   // Proves canonical roadmap and tool keys are passed into buildGuideSessionContextSummary
   assert.match(chatRoute, /buildGuideSessionContextSummary\(\{[\s\S]*roadmap:\s*canonicalRoadmapValues,[\s\S]*roadmap_result:\s*typeof generatedAnalysis === 'string' \? generatedAnalysis : '',[\s\S]*tool:\s*structuredPlanningValues,/);
   // Proves safe error logging diagnostic with code, message, and location

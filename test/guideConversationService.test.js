@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  appendGuideModuleMessage,
   GuideConversationError,
   canonicalGuideResponseEvents,
   issueGuideResumeSession,
@@ -88,6 +89,20 @@ test('patching Guide state preserves unrelated canonical modules', async () => {
   assert.deepEqual(patched.assistantConversation, row.state.assistantConversation);
   assert.deepEqual(patched.sharedContext, row.state.sharedContext);
   assert.deepEqual(patched.planningState, { venue: 'hotel', catering: true });
+});
+
+test('normalizes legacy module records before appending Roadmap and Assistant messages', () => {
+  const legacyState = {
+    roadmapState: { structuredInputs: { guests: 150 } },
+    assistantConversation: {},
+    planningState: { venue: 'hotel' },
+  };
+  const roadmap = appendGuideModuleMessage(legacyState, 'ROADMAP', { role: 'user', content: 'Create a roadmap' });
+  assert.deepEqual(roadmap.roadmapState.messages, [{ role: 'user', content: 'Create a roadmap' }]);
+  assert.deepEqual(roadmap.roadmapState.structuredInputs, { guests: 150 });
+  const assistant = appendGuideModuleMessage(roadmap, 'AI_ASSISTANT', { role: 'user', content: 'Refine the plan' });
+  assert.deepEqual(assistant.assistantConversation.messages, [{ role: 'user', content: 'Refine the plan' }]);
+  assert.deepEqual(assistant.planningState, { venue: 'hotel' });
 });
 
 test('persists only server-scoped Guide state behind the opaque resume token', async () => {

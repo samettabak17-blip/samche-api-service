@@ -160,7 +160,11 @@ export function guideSessionStatePatch(context, previousState = {}) {
       : 'ROADMAP';
   return {
     active_module: activeModule,
-    roadmapState: { ...previousRoadmap, structuredInputs: { ...(previousRoadmap.structuredInputs || {}), ...context.roadmap } },
+    roadmapState: {
+      ...previousRoadmap,
+      messages: Array.isArray(previousRoadmap.messages) ? previousRoadmap.messages : [],
+      structuredInputs: { ...(previousRoadmap.structuredInputs || {}), ...context.roadmap },
+    },
     planningState: { ...previousPlanning, ...context.tool },
     sharedContext: { ...previousShared, roadmap: { ...(previousShared.roadmap || {}), ...context.roadmap }, planning: { ...(previousShared.planning || {}), ...context.tool } },
     tool_result: context.tool_result,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveWhatsAppHumanSupportPolicy } from '../services/whatsapp-human-support-policy-service.js';
+import { describeWhatsAppHumanSupportPolicySources, resolveWhatsAppHumanSupportPolicy } from '../services/whatsapp-human-support-policy-service.js';
 
 const legacy = {
   human_support: {
@@ -36,8 +36,10 @@ test('uses one configured legacy language when the preferred language is absent'
   assert.equal(policy.acknowledgement('Konu'), 'Konu için bir temsilci yardımcı olacak.');
 });
 
-test('fails closed for incomplete policy instead of inventing tenant wording', () => {
-  assert.equal(resolveWhatsAppHumanSupportPolicy({ activeTemplates: { human_support: { transfer: { en: 'x' } } }, legacyTemplates: null, language: 'en' }), null);
+test('uses the neutral platform policy when a legacy policy is incomplete', () => {
+  const policy = resolveWhatsAppHumanSupportPolicy({ activeTemplates: { human_support: { transfer: { en: 'x' } } }, legacyTemplates: null, language: 'en' });
+  assert.equal(policy.source, 'PLATFORM_DEFAULT');
+  assert.doesNotMatch(policy.acknowledgement('support'), /SamChe/i);
 });
 
 test('an explicit ACTIVE human-support disable remains authoritative over legacy compatibility data', () => {
@@ -52,4 +54,23 @@ test('an explicit ACTIVE human-support disable remains authoritative over legacy
     legacyTemplates: legacy,
     language: 'tr',
   }), null);
+});
+
+test('uses the generic platform handoff policy when an enabled integration has no historical policy record', () => {
+  const policy = resolveWhatsAppHumanSupportPolicy({ activeTemplates: null, legacyTemplates: null, language: 'tr' });
+  assert.equal(policy.source, 'PLATFORM_DEFAULT');
+  assert.equal(policy.language, 'tr');
+  assert.match(policy.acknowledgement('Genel destek'), /Genel destek/);
+  assert.doesNotMatch(policy.acknowledgement('Genel destek'), /SamChe/i);
+});
+
+test('reports only safe policy-source availability metadata', () => {
+  assert.deepEqual(describeWhatsAppHumanSupportPolicySources({ activeTemplates: null, legacyTemplates: legacy, language: 'tr' }), {
+    active_present: false,
+    active_explicitly_disabled: false,
+    active_usable: false,
+    legacy_present: true,
+    legacy_explicitly_disabled: false,
+    legacy_usable: true,
+  });
 });

@@ -24,6 +24,32 @@ export function normalizeGuideConversationRequest({ module, text }) {
   return { module: normalizedModule, text: clean(text) };
 }
 
+function normalizedThread(value) {
+  const thread = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return { ...thread, messages: Array.isArray(thread.messages) ? thread.messages : [] };
+}
+
+// Historical sessions may predate a module thread. Normalize only the
+// canonical collection shape, retaining every other persisted field.
+export function normalizeGuideConversationState(state) {
+  const source = state && typeof state === 'object' && !Array.isArray(state) ? state : {};
+  return {
+    ...source,
+    roadmapState: normalizedThread(source.roadmapState),
+    assistantConversation: normalizedThread(source.assistantConversation),
+  };
+}
+
+export function appendGuideModuleMessage(state, module, message) {
+  const normalized = normalizeGuideConversationState(state);
+  const key = module === 'ROADMAP' ? 'roadmapState' : module === 'AI_ASSISTANT' ? 'assistantConversation' : null;
+  if (!key) return normalized;
+  return {
+    ...normalized,
+    [key]: { ...normalized[key], messages: [...normalized[key].messages, message] },
+  };
+}
+
 function safeInline(value) {
   return clean(value, 800).replace(/\*{1,3}|`|^\s*#{1,6}\s*/g, '').replace(/\s+/g, ' ').trim();
 }

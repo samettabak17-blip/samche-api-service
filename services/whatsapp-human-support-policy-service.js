@@ -5,6 +5,20 @@ function textAt(value, language) {
   return candidate || null;
 }
 
+// Platform-owned neutral wording used only when an enabled WhatsApp
+// integration has no historical policy record. It carries no tenant identity,
+// commercial claim, or provider-specific behavior.
+const PLATFORM_HUMAN_SUPPORT_TEMPLATES = Object.freeze({
+  human_support: {
+    general_topic: { tr: 'Genel destek', en: 'General support', ar: 'الدعم العام' },
+    transfer: {
+      tr: 'Canlı destek talebinizi aldık. {{topicSummary}} konusunda bir ekip üyesi yardımcı olacaktır.',
+      en: 'We have received your human-support request. A team member will assist you with {{topicSummary}}.',
+      ar: 'تلقينا طلبك للدعم البشري. سيساعدك أحد أعضاء الفريق بخصوص {{topicSummary}}.',
+    },
+  },
+});
+
 function configuredLanguages(generalTopic, transfer, preferredLanguage) {
   const shared = Object.keys(generalTopic || {}).filter((language) => textAt(generalTopic, language) && textAt(transfer, language));
   return [...new Set([preferredLanguage, 'en', 'tr', 'ar', ...shared])];
@@ -30,12 +44,35 @@ function policyFromTemplates(templates, language, source) {
   return null;
 }
 
+function sourceAvailability(templates, language) {
+  const humanSupport = templates?.human_support;
+  return {
+    present: Boolean(humanSupport && typeof humanSupport === 'object'),
+    explicitlyDisabled: humanSupport?.enabled === false,
+    usable: Boolean(policyFromTemplates(templates, language, 'DIAGNOSTIC')),
+  };
+}
+
+export function describeWhatsAppHumanSupportPolicySources({ activeTemplates = null, legacyTemplates = null, language = 'en' } = {}) {
+  const active = sourceAvailability(activeTemplates, language);
+  const legacy = sourceAvailability(legacyTemplates, language);
+  return {
+    active_present: active.present,
+    active_explicitly_disabled: active.explicitlyDisabled,
+    active_usable: active.usable,
+    legacy_present: legacy.present,
+    legacy_explicitly_disabled: legacy.explicitlyDisabled,
+    legacy_usable: legacy.usable,
+  };
+}
+
 // ACTIVE tenant configuration is authoritative.  The legacy assistant column
 // remains a scoped, read-only compatibility source until backfill completes.
 export function resolveWhatsAppHumanSupportPolicy({ activeTemplates = null, legacyTemplates = null, language = 'en' } = {}) {
-  if (activeTemplates?.human_support?.enabled === false) return null;
+  if (activeTemplates?.human_support?.enabled === false || legacyTemplates?.human_support?.enabled === false) return null;
   return policyFromTemplates(activeTemplates, language, 'ACTIVE_CONFIGURATION')
-    ?? policyFromTemplates(legacyTemplates, language, 'LEGACY_COMPATIBILITY');
+    ?? policyFromTemplates(legacyTemplates, language, 'LEGACY_COMPATIBILITY')
+    ?? policyFromTemplates(PLATFORM_HUMAN_SUPPORT_TEMPLATES, language, 'PLATFORM_DEFAULT');
 }
 
 export function summarizeWhatsAppHumanSupportTopic({ text, fallback }) {
