@@ -734,6 +734,22 @@ export function KnowledgeIntelligencePage() {
     enabled: Boolean(tenantId && generationSourceId),
     refetchInterval: (query) => ['PENDING', 'PROCESSING'].includes(query.state.data?.status ?? '') ? 2_000 : false,
   });
+  const imageGenerationActive = ['PENDING', 'PROCESSING'].includes(imageGeneration.data?.status ?? '');
+  const imageGenerationStatusUnavailable = imageGeneration.isError || imageGeneration.isRefetchError;
+  const imageGenerationSubmissionBlocked = generateImageCandidates.isPending || imageGenerationActive || imageGenerationStatusUnavailable;
+  const imageGenerationStatusMessage = imageGenerationStatusUnavailable
+    ? 'Candidate generation status could not be refreshed. The durable job may still be running.'
+    : imageGeneration.data?.status === 'READY'
+      ? 'Candidate generation completed.'
+      : imageGeneration.data?.status === 'FAILED'
+        ? 'Candidate generation failed. You can safely retry.'
+        : imageGeneration.data?.status === 'CANCELLED'
+          ? 'Candidate generation was cancelled. You can safely start it again.'
+          : imageGeneration.data?.status === 'PENDING' && imageGeneration.data.attempts > 0 && imageGeneration.data.last_error_code
+            ? 'Candidate generation retry is queued after a temporary provider failure.'
+            : imageGeneration.data?.status === 'PENDING'
+              ? 'Candidate generation is queued.'
+              : 'Candidate generation is processing in the background.';
   useEffect(() => {
     const status = imageGeneration.data?.status;
     if (status === 'READY' || status === 'FAILED') {
@@ -1891,20 +1907,21 @@ export function KnowledgeIntelligencePage() {
                                             extractionHash: selectedSource.data!.extraction_hash,
                                           })
                                         }
-                                        disabled={generateImageCandidates.isPending || ['PENDING', 'PROCESSING'].includes(imageGeneration.data?.status ?? '')}
+                                        disabled={imageGenerationSubmissionBlocked}
                                       >
-                                        {generateImageCandidates.isPending || ['PENDING', 'PROCESSING'].includes(imageGeneration.data?.status ?? '')
+                                        {generateImageCandidates.isPending || (imageGenerationActive && !imageGenerationStatusUnavailable)
                                           ? "Generation in progress…"
-                                          : "Generate candidates"}
+                                          : imageGenerationStatusUnavailable
+                                            ? "Generation status unavailable"
+                                            : "Generate candidates"}
                                       </DashboardButton>
-                                      {generationSourceId === selectedSource.data!.id && imageGeneration.data && (
-                                        <DashboardFormMessage tone={imageGeneration.data.status === 'FAILED' ? 'error' : imageGeneration.data.status === 'READY' ? 'success' : 'info'}>
-                                          {imageGeneration.data.status === 'READY'
-                                            ? 'Candidate generation completed.'
-                                            : imageGeneration.data.status === 'FAILED'
-                                              ? 'Candidate generation failed. You can safely retry.'
-                                              : 'Candidate generation is processing in the background.'}
-                                          {imageGeneration.data.status === 'READY' && imageGeneration.data.metadata?.warnings?.map((warning) => <span key={warning} className="mt-1 block text-amber-200">{warning}</span>)}
+                                      {generationSourceId === selectedSource.data!.id && (imageGeneration.data || imageGenerationStatusUnavailable) && (
+                                        <DashboardFormMessage tone={imageGenerationStatusUnavailable || ['FAILED', 'CANCELLED'].includes(imageGeneration.data?.status ?? '') ? 'error' : imageGeneration.data?.status === 'READY' ? 'success' : 'info'}>
+                                          <span>{imageGenerationStatusMessage}</span>
+                                          {imageGeneration.data?.status === 'READY' && imageGeneration.data.metadata?.warnings?.map((warning) => <span key={warning} className="mt-1 block text-amber-200">{warning}</span>)}
+                                          <DashboardButton type="button" variant="secondary" className="mt-2" disabled={imageGeneration.isFetching} onClick={() => void imageGeneration.refetch()}>
+                                            {imageGeneration.isFetching ? 'Checking status…' : 'Durumu tekrar kontrol et'}
+                                          </DashboardButton>
                                         </DashboardFormMessage>
                                       )}
                                       </>

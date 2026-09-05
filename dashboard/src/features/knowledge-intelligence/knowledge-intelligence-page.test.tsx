@@ -956,6 +956,47 @@ it("reconstructs a completed image generation job when a source detail is revisi
   expect(screen.getByRole("button", { name: "Generate candidates" })).not.toBeDisabled();
 });
 
+it("recovers a timed-out image generation from durable status without enqueueing duplicates", async () => {
+  mockedApi.listKnowledgeSources.mockResolvedValue([{ id: "image-source-a", title: "WhatsApp screenshot", source_type: "IMAGE", mime_type: "image/png", processing_status: "READY", indexing_status: "DISABLED", enabled: true }]);
+  mockedApi.getKnowledgeSource.mockResolvedValue({ id: "image-source-a", title: "WhatsApp screenshot", source_type: "IMAGE", mime_type: "image/png", processing_status: "READY", indexing_status: "DISABLED", enabled: true, extraction_hash: "d".repeat(64), assistant_ids: [] });
+  let ready = false;
+  mockedApi.listKnowledgeCandidates.mockImplementation(async () => ready ? [{
+    id: "persisted-image-candidate",
+    candidate_type: "POLICY",
+    proposed_title: "Persisted image fact",
+    proposed_content: "This candidate came from the durable generation result.",
+    status: "NEEDS_REVIEW",
+    pii_redaction_status: "PASSED",
+  }] : []);
+  mockedApi.getImageKnowledgeGenerationJob
+    .mockResolvedValueOnce({ id: "job-1", status: "PENDING", attempts: 1, last_error_code: "KNOWLEDGE_GENERATION_TIMEOUT" })
+    .mockRejectedValueOnce(new ApiError(503, "Generation status is temporarily unavailable"))
+    .mockImplementation(async () => {
+      ready = true;
+      return { id: "job-1", status: "READY", attempts: 2, last_error_code: null, metadata: { candidate_count: 1, behavior_recommendation_count: 0 } };
+    });
+
+  renderPage(true, "/app/tenant-a/knowledge-base/sources");
+  fireEvent.click(await screen.findByRole("button", { name: "View WhatsApp screenshot" }));
+
+  expect(await screen.findByText("Candidate generation retry is queued after a temporary provider failure.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Generation in progress…" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Durumu tekrar kontrol et" }));
+  expect(await screen.findByText("Candidate generation status could not be refreshed. The durable job may still be running.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Generation status unavailable" })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Durumu tekrar kontrol et" }));
+  expect(await screen.findByText("Candidate generation completed.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Generate candidates" })).not.toBeDisabled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Durumu tekrar kontrol et" }));
+  await waitFor(() => expect(mockedApi.getImageKnowledgeGenerationJob).toHaveBeenCalledTimes(4));
+  fireEvent.click(screen.getByRole("link", { name: "Candidates" }));
+  expect(await screen.findByText("Persisted image fact")).toBeVisible();
+  expect(mockedApi.generateImageKnowledgeCandidates).not.toHaveBeenCalled();
+  expect(screen.getAllByText("Persisted image fact")).toHaveLength(1);
+});
+
 it("does not show a stale source success banner alongside a failed image candidate request", async () => {
   mockedApi.listAssistants.mockResolvedValue([
     { id: "assistant-a", tenant_id: "tenant-a", name: "Blue Dune AI Assistant" },
