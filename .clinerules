@@ -9,6 +9,23 @@ Repository-specific context:
 - Default working branch for current development is `staging`.
 - Reuse existing engineering guidance instead of rediscovering architecture.
 
+Mandatory entry contract:
+
+1. Read `AGENTS.md` before modifying the repository; it and machine-enforced
+   repository contracts are authoritative.
+2. Preserve the cumulative SamChe Platform Contract and every previously GREEN
+   shared behavior as a non-regression contract.
+3. New tenant does not mean new implementation; canonical provisioning must
+   provide shared platform capabilities.
+4. Never add customer-specific application logic or manually patch a tenant to
+   compensate for missing platform behavior.
+5. Extend, never replace or narrow, the cumulative Fresh Tenant Golden Path for
+   every tenant-affecting platform task.
+6. Run all applicable release gates before claiming completion.
+7. Report `TASK_COMPLETE = NO` if a previously GREEN capability regresses, a
+   fresh tenant differs solely because it was created later, or tenant-specific
+   source changes are required.
+
 Reference these existing sources when relevant. Read only the specific
 guidance needed for the requested task; do not automatically read all of it:
 

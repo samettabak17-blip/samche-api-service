@@ -272,6 +272,22 @@ async function existingSuccessfulProfile({ database, tenantId, fingerprint }) {
   return result.rows[0] ?? null;
 }
 
+export async function prepareBusinessProfileGeneration({ database, provider, tenantId, requestedBy, businessIdentityId, sourceIds }) {
+  uuid(requestedBy, 'KNOWLEDGE_REQUESTER_INVALID');
+  if (typeof provider?.generateBusinessProfile !== 'function' || !provider.provider || !provider.model) {
+    throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_GENERATION_UNAVAILABLE', 'Business Profile generation is unavailable');
+  }
+  const scope = await loadBusinessProfileSourceScope({ database, tenantId, businessIdentityId, sourceIds });
+  return {
+    tenant_id: tenantId,
+    business_identity_id: businessIdentityId,
+    source_ids: [...sourceIds],
+    requested_by: requestedBy,
+    fingerprint: requestFingerprint({ tenantId, businessIdentityId, sources: scope.sources, provider }),
+    provider_policy: provider.businessProfileGenerationPolicy ?? `${provider.provider}:${provider.model}`,
+  };
+}
+
 export async function analyzeBusinessProfileSourceScope({ database, provider, tenantId, businessIdentityId, sourceIds }) {
   if (typeof provider?.generateBusinessIdentityAnalysis !== 'function') throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_GENERATION_UNAVAILABLE', 'Business Profile generation is unavailable');
   const scope = await loadBusinessProfileSourceScope({ database, tenantId, businessIdentityId, sourceIds });
@@ -281,11 +297,14 @@ export async function analyzeBusinessProfileSourceScope({ database, provider, te
   return { status, business_identity: scope.business_identity, source_ids: sourceIds, identities: analysis.identities, evidence: analysis.evidence, sources: scope.sources };
 }
 
-export async function generateBusinessProfileVersion({ database, provider, tenantId, requestedBy, businessIdentityId, sourceIds }) {
+export async function generateBusinessProfileVersion({ database, provider, tenantId, requestedBy, businessIdentityId, sourceIds, expectedFingerprint = null }) {
   uuid(requestedBy, 'KNOWLEDGE_REQUESTER_INVALID');
   if (typeof provider?.generateBusinessProfile !== 'function') throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_GENERATION_UNAVAILABLE', 'Business Profile generation is unavailable');
   const baseScope = await loadBusinessProfileSourceScope({ database, tenantId, businessIdentityId, sourceIds });
   const fingerprint = requestFingerprint({ tenantId, businessIdentityId, sources: baseScope.sources, provider });
+  if (expectedFingerprint && expectedFingerprint !== fingerprint) {
+    throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_JOB_STALE', 'Business Profile generation inputs changed before processing');
+  }
   return withGenerationFingerprintLock(database, fingerprint, async (generationDatabase) => {
     const successful = await existingSuccessfulProfile({ database: generationDatabase, tenantId, fingerprint });
     if (successful) {

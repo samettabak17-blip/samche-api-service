@@ -1,10 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { analyzeBusinessProfileSourceScope, generateBusinessProfileVersion, rejectBusinessProfileVersion, updateBusinessProfileReview } from '../services/knowledge-profile-lifecycle.js';
+import { analyzeBusinessProfileSourceScope, generateBusinessProfileVersion, prepareBusinessProfileGeneration, rejectBusinessProfileVersion, updateBusinessProfileReview } from '../services/knowledge-profile-lifecycle.js';
 
 const tenantId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const actorId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+test('prepares a durable profile request fingerprint without invoking either provider operation', async () => {
+  const businessIdentityId = '55555555-5555-4555-8555-555555555555';
+  const sourceId = '11111111-1111-4111-8111-111111111111';
+  const database = { async query(sql) {
+    if (/FROM business_identities/i.test(sql)) return { rows: [{ id: businessIdentityId, display_name: 'Synthetic Company', normalized_identity: 'synthetic' }] };
+    if (/FROM knowledge_base_documents/i.test(sql)) return { rows: [{ id: sourceId, title: 'Company facts', content: 'Synthetic Company provides maintenance.', content_hash: 'a'.repeat(64), trusted_identity_ids: [businessIdentityId] }] };
+    throw new Error(`unexpected SQL ${sql}`);
+  } };
+  const provider = {
+    provider: 'GEMINI',
+    model: 'gemini-3-flash-preview',
+    businessProfileGenerationPolicy: 'provider-neutral-v1',
+    generateBusinessIdentityAnalysis: async () => assert.fail('prepare must not invoke identity provider'),
+    generateBusinessProfile: async () => assert.fail('prepare must not invoke profile provider'),
+  };
+  const prepared = await prepareBusinessProfileGeneration({ database, provider, tenantId, requestedBy: actorId, businessIdentityId, sourceIds: [sourceId] });
+  assert.match(prepared.fingerprint, /^[a-f0-9]{64}$/);
+  assert.equal(prepared.provider_policy, 'provider-neutral-v1');
+  assert.deepEqual(prepared.source_ids, [sourceId]);
+});
 
 test('identity provenance follows approved candidate evidence when the original source is selected', async () => {
   const source = await readFile(new URL('../services/knowledge-profile-lifecycle.js', import.meta.url), 'utf8');

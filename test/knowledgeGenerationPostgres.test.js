@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import pg from 'pg';
+import { resolvePostgresSsl } from '../config/postgres-ssl.js';
 import { generateBusinessProfileVersion } from '../services/knowledge-profile-lifecycle.js';
 
 const { Pool } = pg;
@@ -10,13 +11,13 @@ const HASH_A = 'a'.repeat(64);
 function database() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error('DATABASE_URL is required; this PostgreSQL contract must not be skipped');
-  return new Pool({ connectionString, ssl: process.env.DATABASE_SSL === 'false' ? false : undefined });
+  return new Pool({ connectionString, ssl: resolvePostgresSsl({ connectionString }) });
 }
 
 async function fixture(pool, suffix = randomUUID()) {
   const tenantId = randomUUID(); const userId = randomUUID(); const identityId = randomUUID(); const sourceId = randomUUID();
-  await pool.query(`INSERT INTO tenants (id, name) VALUES ($1, $2)`, [tenantId, `Generation test ${suffix}`]);
-  await pool.query(`INSERT INTO users (id, email, password_hash, system_role) VALUES ($1, $2, 'test-only', 'CUSTOMER')`, [userId, `generation-${suffix}@example.test`]);
+  await pool.query(`INSERT INTO tenants (id, name, plan_code) VALUES ($1, $2, 'STARTER')`, [tenantId, `Generation test ${suffix}`]);
+  await pool.query(`INSERT INTO users (id, email, email_normalized, password_hash, system_role) VALUES ($1, $2, $2, 'test-only', 'CUSTOMER')`, [userId, `generation-${suffix}@example.test`]);
   await pool.query(`INSERT INTO business_identities (id, tenant_id, display_name, normalized_identity) VALUES ($1,$2,'Scope Test LLC','scope test')`, [identityId, tenantId]);
   await pool.query(`INSERT INTO knowledge_base_documents (id, tenant_id, title, content, status, content_hash, processing_status, indexing_status, enabled)
     VALUES ($1,$2,'Scope document','Scope Test LLC provides approved support services.','active',$3,'READY','READY',TRUE)`, [sourceId, tenantId, HASH_A]);

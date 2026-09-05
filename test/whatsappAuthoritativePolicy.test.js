@@ -4,7 +4,8 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { buildWhatsAppTenantModelContext, canonicalizeSamcheWhatsAppPolicyNewlines, WhatsAppTenantContextError } from '../services/whatsapp-tenant-context-service.js';
 
-const masterPolicy = readFileSync(new URL('../policies/samche-whatsapp-master-business-policy.tr.txt', import.meta.url), 'utf8');
+const masterPolicyRaw = readFileSync(new URL('../policies/samche-whatsapp-master-business-policy.tr.txt', import.meta.url), 'utf8');
+const masterPolicy = canonicalizeSamcheWhatsAppPolicyNewlines(masterPolicyRaw);
 const expectedPolicySha256 = 'c72bc5787e31ee788431fcb7b73a6f1f72fb3471c3910a00e87005d389edaf58';
 
 function tenant(systemPrompt = masterPolicy) {
@@ -16,7 +17,7 @@ function tenant(systemPrompt = masterPolicy) {
   };
 }
 
-test('preserves the recovered SamChe master policy byte-for-byte and beyond 6000 characters', () => {
+test('preserves the recovered canonical SamChe master policy byte-for-byte and beyond 6000 characters', () => {
   assert.equal(createHash('sha256').update(masterPolicy, 'utf8').digest('hex'), expectedPolicySha256);
   assert.ok(masterPolicy.length > 6000);
 

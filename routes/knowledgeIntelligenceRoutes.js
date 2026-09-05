@@ -33,11 +33,11 @@ import { KnowledgeGapError } from '../services/knowledge-gap-service.js';
 import { createSuggestedCandidateFromKnowledgeGap } from '../services/knowledge-gap-candidate-service.js';
 import { createKnowledgeGenerationProvider, KnowledgeGenerationError } from '../services/knowledge-generation-provider.js';
 import { ImageKnowledgeSemanticError } from '../services/image-knowledge-semantic-service.js';
-import { enqueueAssistantConfigurationGenerationJob, enqueueAssistantRecommendationGenerationJob, enqueueImageSemanticGenerationJob, getAssistantConfigurationGenerationJob, getAssistantRecommendationGenerationJob, getImageSemanticGenerationJob, KnowledgeSemanticGenerationJobError, recordAssistantRecommendationEnqueueFailureDiagnostic } from '../services/knowledge-semantic-generation-job-service.js';
+import { enqueueAssistantConfigurationGenerationJob, enqueueAssistantRecommendationGenerationJob, enqueueBusinessProfileGenerationJob, enqueueImageSemanticGenerationJob, getAssistantConfigurationGenerationJob, getAssistantRecommendationGenerationJob, getBusinessProfileGenerationJob, getImageSemanticGenerationJob, KnowledgeSemanticGenerationJobError, recordAssistantRecommendationEnqueueFailureDiagnostic } from '../services/knowledge-semantic-generation-job-service.js';
 import {
   analyzeBusinessProfileSourceScope,
-  generateBusinessProfileVersion,
   KnowledgeProfileLifecycleError,
+  prepareBusinessProfileGeneration,
   rejectBusinessProfileVersion,
   updateBusinessProfileReview,
 } from '../services/knowledge-profile-lifecycle.js';
@@ -53,6 +53,7 @@ import { createOpenAIEmbedder } from '../services/knowledge-intelligence-service
 import { KnowledgeRetrievalPreviewError, previewKnowledgeRetrieval } from '../services/knowledge-retrieval-preview.js';
 import { normalizeBusinessIdentity } from '../services/business-identity-service.js';
 import { assignKnowledgeSourceBusinessIdentity, KnowledgeSourceBusinessIdentityError } from '../services/knowledge-source-business-identity-service.js';
+import { presentKnowledgeSourceWithProfileEligibility } from '../services/knowledge-source-profile-eligibility.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -172,7 +173,7 @@ router.get('/:tenantId/knowledge-intelligence/sources', requireTenantAccess, asy
                                         AND candidate.id = evidence.candidate_id
                                         AND candidate.approved_source_id = knowledge_base_documents.id)
                    ) THEN 'VERIFIED' ELSE 'INCOMPLETE' END AS provenance_status,
-              processing_status, indexing_status, processing_error_code, enabled,
+              processing_status, indexing_status, processing_error_code, enabled, status, content_hash,
               extraction_hash, extraction_method,
               (SELECT extraction_version FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = knowledge_base_documents.tenant_id AND segment.source_id = knowledge_base_documents.id AND segment.is_current = TRUE ORDER BY segment.created_at DESC LIMIT 1) AS extraction_version,
               (SELECT COUNT(*)::integer FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = knowledge_base_documents.tenant_id AND segment.source_id = knowledge_base_documents.id AND segment.is_current = TRUE) AS image_segment_count,
@@ -185,7 +186,7 @@ router.get('/:tenantId/knowledge-intelligence/sources', requireTenantAccess, asy
         LIMIT 100`,
       [tenantId, requestedStatus || null]
     );
-    return res.json({ sources: result.rows });
+    return res.json({ sources: result.rows.map(presentKnowledgeSourceWithProfileEligibility) });
   } catch (error) {
     return safeError(res, error);
   }
@@ -214,7 +215,7 @@ router.get('/:tenantId/knowledge-intelligence/sources/:sourceId', requireTenantA
                                   WHERE evidence.tenant_id = d.tenant_id AND evidence.business_identity_id IS NOT NULL
                                     AND candidate.approved_source_id = d.id)
                    THEN 'VERIFIED' ELSE 'INCOMPLETE' END AS provenance_status,
-              d.processing_status, d.indexing_status, d.processing_error_code, d.enabled,
+              d.processing_status, d.indexing_status, d.processing_error_code, d.enabled, d.status, d.content_hash,
               d.extraction_hash, d.extraction_method,
               (SELECT extraction_version FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = d.tenant_id AND segment.source_id = d.id AND segment.is_current = TRUE ORDER BY segment.created_at DESC LIMIT 1) AS extraction_version,
               (SELECT COUNT(*)::integer FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = d.tenant_id AND segment.source_id = d.id AND segment.is_current = TRUE) AS image_segment_count,
@@ -243,7 +244,7 @@ router.get('/:tenantId/knowledge-intelligence/sources/:sourceId', requireTenantA
       [id, tenantId]
     );
     if (!result.rowCount) return res.status(404).json({ error: 'Knowledge source not found' });
-    return res.json({ source: result.rows[0] });
+    return res.json({ source: presentKnowledgeSourceWithProfileEligibility(result.rows[0]) });
   } catch (error) {
     return safeError(res, error);
   }
@@ -638,15 +639,36 @@ router.post('/:tenantId/knowledge-intelligence/profiles/generate', requireTenant
   const tenantId = tenant(req, res);
   if (!tenantId) return;
   try {
-    const result = await generateBusinessProfileVersion({
-      database: pool,
-      provider: createKnowledgeGenerationProvider(),
+    const provider = createKnowledgeGenerationProvider();
+    const prepared = await prepareBusinessProfileGeneration({
+      database: pool, provider,
       tenantId,
       requestedBy: req.user.user_id,
       businessIdentityId: req.body?.business_identity_id,
       sourceIds: req.body?.source_ids,
     });
-    return res.status(result.reused ? 200 : 201).json(result);
+    const job = await enqueueBusinessProfileGenerationJob({
+      database: pool,
+      tenantId,
+      businessIdentityId: prepared.business_identity_id,
+      sourceIds: prepared.source_ids,
+      requestedBy: prepared.requested_by,
+      fingerprint: prepared.fingerprint,
+      providerPolicy: prepared.provider_policy,
+    });
+    return res.status(202).json({ job, reused: job.status === 'READY' });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.get('/:tenantId/knowledge-intelligence/profiles/generation-jobs/:jobId', requireTenantAccess, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId || !isValidUUID(req.params.jobId)) return res.status(400).json({ error: 'Invalid Business Profile generation job ID' });
+  try {
+    const job = await getBusinessProfileGenerationJob({ database: pool, tenantId, jobId: req.params.jobId });
+    if (!job) return res.status(404).json({ error: 'Business Profile generation job not found' });
+    return res.json({ job });
   } catch (error) {
     return safeError(res, error);
   }

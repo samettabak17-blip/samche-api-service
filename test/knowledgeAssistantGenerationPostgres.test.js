@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import pg from 'pg';
+import { resolvePostgresSsl } from '../config/postgres-ssl.js';
 import { generateAssistantConfigurationVersion, generateAssistantRecommendation, reviewAssistantRecommendation } from '../services/knowledge-assistant-lifecycle.js';
 
 const { Pool } = pg;
@@ -9,13 +10,16 @@ const HASH = 'b'.repeat(64);
 
 function database() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required; this PostgreSQL contract must not be skipped');
-  return new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.DATABASE_SSL === 'false' ? false : undefined });
+  return new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: resolvePostgresSsl({ connectionString: process.env.DATABASE_URL }),
+  });
 }
 
 async function fixture(pool) {
   const tenantId = randomUUID(); const userId = randomUUID(); const identityId = randomUUID(); const assistantId = randomUUID(); const profileId = randomUUID(); const versionId = randomUUID(); const sourceId = randomUUID();
-  await pool.query(`INSERT INTO tenants (id,name) VALUES ($1,'Assistant generation contract')`, [tenantId]);
-  await pool.query(`INSERT INTO users (id,email,password_hash,system_role) VALUES ($1,$2,'test-only','CUSTOMER')`, [userId, `assistant-generation-${randomUUID()}@example.test`]);
+  await pool.query(`INSERT INTO tenants (id,name,plan_code) VALUES ($1,'Assistant generation contract','STARTER')`, [tenantId]);
+  await pool.query(`INSERT INTO users (id,email,email_normalized,password_hash,system_role) VALUES ($1,$2,$2,'test-only','CUSTOMER')`, [userId, `assistant-generation-${randomUUID()}@example.test`]);
   await pool.query(`INSERT INTO business_identities (id,tenant_id,display_name,normalized_identity) VALUES ($1,$2,'Scope Test LLC','scope test')`, [identityId, tenantId]);
   await pool.query(`INSERT INTO ai_assistants (id,tenant_id,name,status) VALUES ($1,$2,'Scope Assistant','active')`, [assistantId, tenantId]);
   await pool.query(`INSERT INTO business_profiles (id,tenant_id,business_identity_id) VALUES ($1,$2,$3)`, [profileId, tenantId, identityId]);

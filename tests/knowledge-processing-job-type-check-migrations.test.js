@@ -23,3 +23,10 @@ test('rerunnable processing-job constraint migrations preserve every canonical j
     }
   }
 });
+
+test('latest Business Profile job migration preserves all prior job types and adds its own', () => {
+  const migration = fs.readFileSync(new URL('../migrations/066_business_profile_generation_jobs.sql', import.meta.url), 'utf8');
+  for (const jobType of [...canonicalJobTypes, 'GENERATE_BUSINESS_PROFILE']) {
+    assert.match(migration, new RegExp(`'${jobType}'`));
+  }
+});

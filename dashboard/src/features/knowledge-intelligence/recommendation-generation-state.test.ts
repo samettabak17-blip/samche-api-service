@@ -94,4 +94,30 @@ describe("assistant recommendation generation UI state", () => {
     expect(failed.phase).toBe("FAILED");
     expect(failed.error).toBe("Configuration generation failed. You can retry.");
   });
+
+  it("uses the same durable lifecycle for Business Profile generation", () => {
+    const starting = recommendationGenerationReducer(
+      initialRecommendationGenerationState,
+      { type: "START", operation: "Business Profile" },
+    );
+    const pending = recommendationGenerationReducer(starting, {
+      type: "ACCEPTED",
+      job: { id: "profile-job", status: "PENDING", attempts: 0 },
+      reused: false,
+      operation: "Business Profile",
+    });
+    const ready = recommendationGenerationReducer(pending, {
+      type: "JOB_STATUS",
+      job: {
+        id: "profile-job",
+        status: "READY",
+        attempts: 1,
+        metadata: { profile_version_id: "profile-version" },
+      },
+    });
+
+    expect(pending.phase).toBe("PENDING");
+    expect(ready.phase).toBe("SUCCEEDED");
+    expect(ready.message).toBe("Business Profile generated successfully.");
+  });
 });

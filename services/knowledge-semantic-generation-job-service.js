@@ -87,6 +87,20 @@ function safeAssistantRecommendationJob(job) {
   };
 }
 
+function safeBusinessProfileJob(job) {
+  if (!job) return job;
+  const metadata = job.metadata && typeof job.metadata === 'object' ? job.metadata : {};
+  return {
+    ...job,
+    metadata: {
+      ...(metadata.business_identity_id ? { business_identity_id: metadata.business_identity_id } : {}),
+      ...(Array.isArray(metadata.source_ids) ? { source_ids: metadata.source_ids } : {}),
+      ...(metadata.profile_version_id ? { profile_version_id: metadata.profile_version_id } : {}),
+      ...(metadata.profile_status ? { profile_status: metadata.profile_status } : {}),
+    },
+  };
+}
+
 function validate({ database, tenantId, sourceId, extractionHash }) {
   if (!database?.query) throw new KnowledgeSemanticGenerationJobError('KNOWLEDGE_DATABASE_UNAVAILABLE', 'Knowledge database is unavailable');
   if (!tenantId || !sourceId || !HASH.test(String(extractionHash ?? ''))) {
@@ -124,6 +138,52 @@ export async function getImageSemanticGenerationJob({ database, tenantId, source
     [tenantId, sourceId],
   );
   return result.rows[0] ?? null;
+}
+
+export async function enqueueBusinessProfileGenerationJob({ database, tenantId, businessIdentityId, sourceIds, requestedBy, fingerprint, providerPolicy }) {
+  if (!database?.query || !UUID.test(String(tenantId)) || !UUID.test(String(businessIdentityId))
+    || !UUID.test(String(requestedBy)) || !HASH.test(String(fingerprint))
+    || !Array.isArray(sourceIds) || !sourceIds.length || new Set(sourceIds).size !== sourceIds.length
+    || sourceIds.some((sourceId) => !UUID.test(String(sourceId)))) {
+    throw new KnowledgeSemanticGenerationJobError('KNOWLEDGE_BUSINESS_PROFILE_JOB_INVALID', 'Business Profile generation request is invalid');
+  }
+  const metadata = {
+    business_identity_id: String(businessIdentityId),
+    source_ids: sourceIds.map(String),
+    requested_by: String(requestedBy),
+    request_fingerprint: String(fingerprint).toLowerCase(),
+    provider_policy: typeof providerPolicy === 'string' ? providerPolicy.slice(0, 160) : null,
+  };
+  const result = await database.query(
+    `INSERT INTO knowledge_processing_jobs (
+       tenant_id, source_id, job_type, content_hash, embedding_model, embedding_version, status, metadata
+     ) VALUES ($1, NULL, 'GENERATE_BUSINESS_PROFILE', $3, 'BUSINESS_PROFILE', '1', 'PENDING', $2::jsonb)
+     ON CONFLICT (tenant_id, job_type, content_hash, embedding_model, embedding_version)
+       WHERE job_type = 'GENERATE_BUSINESS_PROFILE'
+     DO UPDATE SET
+       status = CASE WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') THEN knowledge_processing_jobs.status ELSE 'PENDING' END,
+       attempts = CASE WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') THEN knowledge_processing_jobs.attempts ELSE 0 END,
+       available_at = CASE WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') THEN knowledge_processing_jobs.available_at ELSE CURRENT_TIMESTAMP END,
+       last_error_code = CASE WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') THEN knowledge_processing_jobs.last_error_code ELSE NULL END,
+       metadata = knowledge_processing_jobs.metadata || EXCLUDED.metadata,
+       updated_at = CURRENT_TIMESTAMP
+     RETURNING id, tenant_id, job_type, status, attempts, available_at, last_error_code, metadata, created_at, updated_at`,
+    [tenantId, JSON.stringify(metadata), String(fingerprint).toLowerCase()],
+  );
+  return safeBusinessProfileJob(result.rows[0]);
+}
+
+export async function getBusinessProfileGenerationJob({ database, tenantId, jobId }) {
+  if (!database?.query || !UUID.test(String(tenantId)) || !UUID.test(String(jobId))) {
+    throw new KnowledgeSemanticGenerationJobError('KNOWLEDGE_BUSINESS_PROFILE_JOB_INVALID', 'Business Profile generation job is invalid');
+  }
+  const result = await database.query(
+    `SELECT id, tenant_id, job_type, status, attempts, available_at, last_error_code, metadata, created_at, updated_at
+       FROM knowledge_processing_jobs
+      WHERE id = $1 AND tenant_id = $2 AND job_type = 'GENERATE_BUSINESS_PROFILE'`,
+    [jobId, tenantId],
+  );
+  return result.rows[0] ? safeBusinessProfileJob(result.rows[0]) : null;
 }
 
 export async function enqueueAssistantRecommendationGenerationJob({ database, tenantId, assistantId, businessProfileVersionId, requestedBy, fingerprint, providerPolicy }) {
@@ -367,6 +427,41 @@ export async function recoverStaleAssistantRecommendationGenerationJobs(database
   };
 }
 
+export async function recoverStaleBusinessProfileGenerationJobs(database) {
+  const result = await database.query(
+    `UPDATE knowledge_processing_jobs
+        SET status = CASE WHEN COALESCE((metadata->>'stale_recovery_count')::integer, 0) >= 2 THEN 'FAILED' ELSE 'PENDING' END,
+            locked_at = NULL,
+            locked_until = NULL,
+            available_at = CASE WHEN COALESCE((metadata->>'stale_recovery_count')::integer, 0) >= 2 THEN available_at ELSE CURRENT_TIMESTAMP END,
+            last_error_code = 'KNOWLEDGE_BUSINESS_PROFILE_LEASE_EXPIRED',
+            metadata = jsonb_set(metadata, '{stale_recovery_count}', to_jsonb(COALESCE((metadata->>'stale_recovery_count')::integer, 0) + 1), TRUE),
+            updated_at = CURRENT_TIMESTAMP
+      WHERE job_type = 'GENERATE_BUSINESS_PROFILE'
+        AND status = 'PROCESSING'
+        AND (locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP)
+      RETURNING id, status`,
+  );
+  return {
+    recovered: (result.rows ?? []).filter((item) => item.status === 'PENDING').length,
+    failed: (result.rows ?? []).filter((item) => item.status === 'FAILED').length,
+  };
+}
+
+export async function claimNextBusinessProfileGenerationJob(database) {
+  const result = await database.query(
+    `WITH candidate AS (
+       SELECT id FROM knowledge_processing_jobs
+        WHERE job_type = 'GENERATE_BUSINESS_PROFILE' AND status = 'PENDING' AND available_at <= CURRENT_TIMESTAMP
+        ORDER BY created_at ASC FOR UPDATE SKIP LOCKED LIMIT 1
+     ) UPDATE knowledge_processing_jobs job
+          SET status = 'PROCESSING', attempts = attempts + 1, locked_at = CURRENT_TIMESTAMP,
+              locked_until = CURRENT_TIMESTAMP + INTERVAL '5 minutes', updated_at = CURRENT_TIMESTAMP
+         FROM candidate WHERE job.id = candidate.id RETURNING job.*`,
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function claimNextAssistantRecommendationGenerationJob(database) {
   const result = await database.query(
     `WITH candidate AS (
@@ -423,6 +518,58 @@ function recommendationJobMetadata(job) {
     throw new KnowledgeSemanticGenerationJobError('KNOWLEDGE_ASSISTANT_RECOMMENDATION_JOB_INVALID', 'Assistant Recommendation job metadata is invalid');
   }
   return metadata;
+}
+
+function businessProfileJobMetadata(job) {
+  const metadata = job?.metadata && typeof job.metadata === 'object' ? job.metadata : {};
+  if (!UUID.test(String(metadata.business_identity_id ?? '')) || !UUID.test(String(metadata.requested_by ?? ''))
+    || !HASH.test(String(metadata.request_fingerprint ?? '')) || !Array.isArray(metadata.source_ids)
+    || !metadata.source_ids.length || new Set(metadata.source_ids).size !== metadata.source_ids.length
+    || metadata.source_ids.some((sourceId) => !UUID.test(String(sourceId)))) {
+    throw new KnowledgeSemanticGenerationJobError('KNOWLEDGE_BUSINESS_PROFILE_JOB_INVALID', 'Business Profile job metadata is invalid');
+  }
+  return metadata;
+}
+
+function retryableBusinessProfileError(error) {
+  return ['KNOWLEDGE_GENERATION_TIMEOUT', 'KNOWLEDGE_GENERATION_PROVIDER_FAILED'].includes(String(error?.code ?? '').toUpperCase());
+}
+
+export async function processBusinessProfileGenerationJob({ database, job, generateProfile }) {
+  const metadata = businessProfileJobMetadata(job);
+  if (typeof generateProfile !== 'function') {
+    throw new KnowledgeSemanticGenerationJobError('KNOWLEDGE_BUSINESS_PROFILE_WORKER_CONFIG_INVALID', 'Business Profile worker is not configured');
+  }
+  try {
+    const result = await generateProfile({
+      database,
+      tenantId: job.tenant_id,
+      requestedBy: metadata.requested_by,
+      businessIdentityId: metadata.business_identity_id,
+      sourceIds: metadata.source_ids,
+      expectedFingerprint: metadata.request_fingerprint,
+    });
+    await database.query(
+      `UPDATE knowledge_processing_jobs
+          SET status = 'READY', locked_at = NULL, locked_until = NULL, last_error_code = NULL,
+              metadata = metadata || $3::jsonb, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1 AND tenant_id = $2`,
+      [job.id, job.tenant_id, JSON.stringify({ profile_version_id: result.profile.id, profile_status: result.profile.status, reused: result.reused === true })],
+    );
+    return { status: 'READY', profile: result.profile, reused: result.reused === true };
+  } catch (error) {
+    const code = String(error?.code ?? 'KNOWLEDGE_BUSINESS_PROFILE_GENERATION_FAILED').replace(/[^A-Z0-9_]/gi, '_').slice(0, 80) || 'KNOWLEDGE_BUSINESS_PROFILE_GENERATION_FAILED';
+    const retry = retryableBusinessProfileError(error) && Number(job.attempts ?? 1) < 3;
+    await database.query(
+      retry
+        ? `UPDATE knowledge_processing_jobs SET status = 'PENDING', locked_at = NULL, locked_until = NULL,
+             available_at = CURRENT_TIMESTAMP + INTERVAL '30 seconds', last_error_code = $3::varchar(80), updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2`
+        : `UPDATE knowledge_processing_jobs SET status = 'FAILED', locked_at = NULL, locked_until = NULL,
+             last_error_code = $3::varchar(80), updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2`,
+      [job.id, job.tenant_id, code],
+    );
+    throw error;
+  }
 }
 
 export async function processAssistantRecommendationGenerationJob({ database, job, generateRecommendation }) {
@@ -549,7 +696,7 @@ export async function processImageSemanticGenerationJob({ database, job, semanti
   }
 }
 
-export function startImageSemanticGenerationWorker({ database, semanticClassifier, generateRecommendation = null, generateConfiguration = null, intervalMs = 2_000, logger = console }) {
+export function startImageSemanticGenerationWorker({ database, semanticClassifier, generateProfile = null, generateRecommendation = null, generateConfiguration = null, intervalMs = 2_000, logger = console }) {
   if (!database?.query || typeof semanticClassifier?.classify !== 'function') {
     throw new KnowledgeSemanticGenerationJobError('KNOWLEDGE_SEMANTIC_WORKER_CONFIG_INVALID', 'Semantic generation worker is not configured');
   }
@@ -566,6 +713,7 @@ export function startImageSemanticGenerationWorker({ database, semanticClassifie
     lastTickAt = new Date().toISOString();
     try {
       await recoverStaleImageSemanticGenerationJobs(database);
+      await recoverStaleBusinessProfileGenerationJobs(database);
       await recoverStaleAssistantRecommendationGenerationJobs(database);
       await recoverStaleAssistantConfigurationGenerationJobs(database);
       const job = await claimNextImageSemanticGenerationJob(database);
@@ -576,24 +724,34 @@ export function startImageSemanticGenerationWorker({ database, semanticClassifie
         lastFailureCode = null;
       } else {
         let handled = false;
-        if (typeof generateRecommendation === 'function') {
-        const recommendationJob = await claimNextAssistantRecommendationGenerationJob(database);
-        if (recommendationJob) {
-          lastClaimedAt = new Date().toISOString();
-          await processAssistantRecommendationGenerationJob({ database, job: recommendationJob, generateRecommendation });
-          lastCompletedAt = new Date().toISOString();
-          lastFailureCode = null;
-          handled = true;
+        if (typeof generateProfile === 'function') {
+          const profileJob = await claimNextBusinessProfileGenerationJob(database);
+          if (profileJob) {
+            lastClaimedAt = new Date().toISOString();
+            await processBusinessProfileGenerationJob({ database, job: profileJob, generateProfile });
+            lastCompletedAt = new Date().toISOString();
+            lastFailureCode = null;
+            handled = true;
+          }
         }
+        if (!handled && typeof generateRecommendation === 'function') {
+          const recommendationJob = await claimNextAssistantRecommendationGenerationJob(database);
+          if (recommendationJob) {
+            lastClaimedAt = new Date().toISOString();
+            await processAssistantRecommendationGenerationJob({ database, job: recommendationJob, generateRecommendation });
+            lastCompletedAt = new Date().toISOString();
+            lastFailureCode = null;
+            handled = true;
+          }
         }
         if (!handled && typeof generateConfiguration === 'function') {
-        const configurationJob = await claimNextAssistantConfigurationGenerationJob(database);
-        if (configurationJob) {
-          lastClaimedAt = new Date().toISOString();
-          await processAssistantConfigurationGenerationJob({ database, job: configurationJob, generateConfiguration });
-          lastCompletedAt = new Date().toISOString();
-          lastFailureCode = null;
-        }
+          const configurationJob = await claimNextAssistantConfigurationGenerationJob(database);
+          if (configurationJob) {
+            lastClaimedAt = new Date().toISOString();
+            await processAssistantConfigurationGenerationJob({ database, job: configurationJob, generateConfiguration });
+            lastCompletedAt = new Date().toISOString();
+            lastFailureCode = null;
+          }
         }
       }
     } catch (error) {

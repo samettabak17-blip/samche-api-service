@@ -16,6 +16,7 @@ import { resendInvitationLifecycle, revokeInvitationLifecycle } from '../service
 import { AssistantModelAccessError, assertAssistantModelWriteAllowed, serializeAssistantForActor } from '../services/assistant-model-access-policy.js';
 import { PLAN_CODES, TenantPlanError, changeTenantPlanAsOwner, requestTenantPlanUpgrade, resolveTenantPlanUpgrade } from '../services/tenant-plan-service.js';
 import { listPlanUpgradeNotificationsForOwner, markPlanUpgradeNotificationRead, notifyPlatformOwnersOfPlanUpgrade } from '../services/tenant-plan-notification-service.js';
+import { createTenantWithPlatformCapabilities, TenantPlatformProvisioningError } from '../services/tenant-platform-provisioning-service.js';
 
 const router = express.Router();
 
@@ -80,19 +81,19 @@ router.post('/', requireOwner, async (req, res) => {
     }
 
     try {
-        const result = await query(`
-            INSERT INTO tenants (name, plan_code)
-            VALUES ($1, $2)
-            RETURNING id, name, status, plan_code, created_at
-        `, [name.trim(), String(plan_code).toUpperCase()]);
+        const tenant = await createTenantWithPlatformCapabilities({
+            database: pool,
+            name,
+            planCode: plan_code,
+        });
 
-        return res.status(201).json(result.rows[0]);
+        return res.status(201).json(tenant);
 
     } catch (err) {
         console.error('Create tenant error:', err);
 
-        return res.status(500).json({
-            error: 'Server error'
+        return res.status(err instanceof TenantPlatformProvisioningError ? 400 : 500).json({
+            error: err instanceof TenantPlatformProvisioningError ? 'Tenant configuration is invalid' : 'Server error'
         });
     }
 });

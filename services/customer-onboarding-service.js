@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { normalizeEmail, isValidEmail, isValidTenantRole } from '../middleware/validators.js';
 import { createInvitationLifecycle } from './customer-invitation-service.js';
 import { PLAN_CODES } from './tenant-plan-service.js';
+import { provisionTenantPlatformCapabilities } from './tenant-platform-provisioning-service.js';
 
 export class CustomerOnboardingError extends Error {
   constructor(code, message = 'Customer onboarding request is invalid') {
@@ -78,6 +79,7 @@ export async function onboardCustomer({ database, ownerUserId, idempotencyKey, p
       `INSERT INTO tenants (name, plan_code) VALUES ($1, $2) RETURNING id, name, status, plan_code, created_at`,
       [input.name, input.planCode],
     )).rows[0];
+    await provisionTenantPlatformCapabilities({ client, tenantId: tenant.id });
     const userResult = await client.query(
       `SELECT id, email, system_role, status FROM users WHERE email_normalized = $1 FOR UPDATE`,
       [input.email],

@@ -27,7 +27,8 @@ import { processHumanSupportNotificationOutbox } from './services/human-support-
 import { resolveHumanSupportRecipients } from './services/human-support-recipient-service.js';
 import { processDueContextualFollowUps, scheduleContextualFollowUp } from './services/durable-follow-up-service.js';
 import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
-import { describeWhatsAppHumanSupportPolicySources, resolveWhatsAppHumanSupportPolicy, summarizeWhatsAppHumanSupportTopic } from './services/whatsapp-human-support-policy-service.js';
+import { summarizeWhatsAppHumanSupportTopic } from './services/whatsapp-human-support-policy-service.js';
+import { resolvePlatformHumanSupportPolicy } from './services/platform-lifecycle-message-service.js';
 import { persistAndDeliverWhatsAppAssistant } from "./services/whatsapp-assistant-response-service.js";
 import { buildWhatsAppActivePersonaTenantContext, buildWhatsAppTenantModelContext, classifyWhatsAppCurrentCustomerIntent, detectWhatsAppModelResponseLanguage, isWhatsAppResponseLanguageMismatch, resolveWhatsAppPersonaUnavailableResponse, WhatsAppTenantContextError } from "./services/whatsapp-tenant-context-service.js";
 import { inferWhatsAppDeterministicInboundLanguage, planWhatsAppDeterministicSocialResponse, resolveWhatsAppDeterministicTemplateLanguage } from "./services/whatsapp-deterministic-social-response-service.js";
@@ -54,6 +55,7 @@ import { createKnowledgeGenerationProvider } from "./services/knowledge-generati
 import { createGoogleGeminiProvider } from "./services/google-gemini-provider.js";
 import { startImageSemanticGenerationWorker } from "./services/knowledge-semantic-generation-job-service.js";
 import { generateAssistantConfigurationVersion, generateAssistantRecommendation } from "./services/knowledge-assistant-lifecycle.js";
+import { generateBusinessProfileVersion } from "./services/knowledge-profile-lifecycle.js";
 import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext, resolveAssistantRuntimeKnowledgeContext } from "./services/knowledge-runtime-context-service.js";
 import { buildTenantRuntimeSystemInstruction, resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
 import { resolveChannelAssistantRuntime } from "./services/assistant-runtime-resolution-service.js";
@@ -353,6 +355,10 @@ const processedWpMessages = new Set();
 // ============================================================================
 const googleGeminiProvider = createGoogleGeminiProvider();
 const googleGeminiEnabled = process.env.GOOGLE_GENAI_MODE?.trim().toLowerCase() === 'vertex' || Boolean(process.env.GEMINI_API_KEY);
+const knowledgeGenerationProviderName = String(process.env.KNOWLEDGE_GENERATION_PROVIDER || 'GEMINI').trim().toUpperCase();
+const knowledgeGenerationEnabled = knowledgeGenerationProviderName === 'OPENAI'
+  ? Boolean(process.env.OPENAI_API_KEY)
+  : googleGeminiEnabled;
 // The WhatsApp runtime uses the same Vertex-compatible Gemini model family as
 // the accepted Knowledge Intelligence generation paths. The environment may
 // choose another platform-approved model without exposing that choice to tenants.
@@ -375,10 +381,14 @@ function startKnowledgeWorkers() {
     console.info('KNOWLEDGE_PROCESSING_WORKER_DISABLED');
   }
 
-  if (googleGeminiEnabled && process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
+  if (knowledgeGenerationEnabled && process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
     imageSemanticGenerationWorker = startImageSemanticGenerationWorker({
       database: pool,
       semanticClassifier: createImageKnowledgeSemanticClassifier({ provider: createKnowledgeGenerationProvider() }),
+      generateProfile: (input) => generateBusinessProfileVersion({
+        ...input,
+        provider: createKnowledgeGenerationProvider(),
+      }),
       generateRecommendation: (input) => generateAssistantRecommendation({
         ...input,
         provider: createKnowledgeGenerationProvider(),
@@ -1253,6 +1263,12 @@ app.post("/chat", async (req, res) => {
       idempotencyKey: req.get("Idempotency-Key") || null,
       integration: guideRuntimeIntegration,
     });
+    if (inboxState && !inboxState.shouldInvokeAi) {
+      return res.status(409).json({
+        error: 'AI Guide response is unavailable while human support is active.',
+        conversation_session: publicSession.token,
+      });
+    }
 
     const moduleThread = guideConversation.module === 'ROADMAP'
       ? guideSessionState.roadmapState.messages
@@ -2136,41 +2152,12 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       // prevent a customer reaching the tenant's Live Inbox.
       const humanSupportRequest = parseCustomerHumanSupportRequest(text);
       if (humanSupportRequest.requested) {
-        let activeTemplates = null;
+        let handoffPolicy;
         try {
-          const persona = await resolveTenantRuntimePersona({
-            database: pool,
-            tenantId: whatsappInbox.integration.tenant_id,
-            assistantId: whatsappInbox.integration.assistant_id,
-          });
-          activeTemplates = persona?.available
-            ? persona.configuration?.channel_adaptations?.whatsapp?.deterministic_templates ?? null
-            : null;
+          handoffPolicy = await resolvePlatformHumanSupportPolicy({ database: pool, locale: lang });
         } catch {
-          activeTemplates = null;
-        }
-        const handoffPolicySources = describeWhatsAppHumanSupportPolicySources({
-          activeTemplates,
-          legacyTemplates: tenantContext.deterministicTemplates,
-          language: lang,
-        });
-        const handoffPolicy = resolveWhatsAppHumanSupportPolicy({
-          activeTemplates,
-          legacyTemplates: tenantContext.deterministicTemplates,
-          language: lang,
-        });
-        if (!handoffPolicy) {
-          console.error('WHATSAPP_HUMAN_SUPPORT_POLICY_UNAVAILABLE active_present=' + Number(handoffPolicySources.active_present) +
-            ' active_disabled=' + Number(handoffPolicySources.active_explicitly_disabled) +
-            ' active_usable=' + Number(handoffPolicySources.active_usable) +
-            ' legacy_present=' + Number(handoffPolicySources.legacy_present) +
-            ' legacy_disabled=' + Number(handoffPolicySources.legacy_explicitly_disabled) +
-            ' legacy_usable=' + Number(handoffPolicySources.legacy_usable));
+          console.error('WHATSAPP_HUMAN_SUPPORT_POLICY_UNAVAILABLE source=PLATFORM_DATABASE');
           return;
-        }
-        if (handoffPolicy.source === 'PLATFORM_DEFAULT') {
-          console.info('WHATSAPP_HUMAN_SUPPORT_POLICY_SOURCE source=PLATFORM_DEFAULT active_usable=' + Number(handoffPolicySources.active_usable) +
-            ' legacy_usable=' + Number(handoffPolicySources.legacy_usable));
         }
         const topicSummary = summarizeWhatsAppHumanSupportTopic({
           text,

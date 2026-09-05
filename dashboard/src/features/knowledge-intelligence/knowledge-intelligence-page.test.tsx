@@ -48,6 +48,7 @@ vi.mock("../dashboard/dashboard-api", async (importOriginal) => {
       listBusinessProfiles: vi.fn(),
       analyzeBusinessProfileScope: vi.fn(),
       generateBusinessProfile: vi.fn(),
+      getBusinessProfileGenerationJob: vi.fn(),
       listKnowledgeRecommendations: vi.fn(),
       generateKnowledgeRecommendation: vi.fn(),
       getKnowledgeRecommendationGenerationJob: vi.fn(),
@@ -111,7 +112,7 @@ function renderPage(
 
 beforeEach(() => {
   mockedApi.getKnowledgeOverview.mockResolvedValue({
-    sources: { ready: 3, processing: 1, failed: 2 },
+    sources: { ready: 3, processed: 3, profileEligible: 3, processing: 1, failed: 2 },
     reviewQueue: {
       candidates: 4,
       profiles: 1,
@@ -139,6 +140,7 @@ beforeEach(() => {
   mockedApi.listKnowledgeGaps.mockResolvedValue([]);
   mockedApi.listBusinessIdentities.mockResolvedValue([]);
   mockedApi.listBusinessProfiles.mockResolvedValue([]);
+  mockedApi.getBusinessProfileGenerationJob.mockResolvedValue({ id: "profile-job", status: "READY", attempts: 1 });
   mockedApi.listKnowledgeRecommendations.mockResolvedValue([]);
   mockedApi.getKnowledgeRecommendationGenerationJob.mockResolvedValue({ id: "recommendation-job", status: "READY", attempts: 1 });
   mockedApi.listAssistantConfigurations.mockResolvedValue([]);
@@ -182,6 +184,8 @@ it("requires a Business Identity and explicit READY source scope before generati
       processing_status: "READY",
       indexing_status: "READY",
       enabled: true,
+      business_profile_eligible: true,
+      business_profile_eligibility_reason: "ELIGIBLE",
     },
     {
       id: "source-nova",
@@ -190,17 +194,13 @@ it("requires a Business Identity and explicit READY source scope before generati
       processing_status: "READY",
       indexing_status: "READY",
       enabled: true,
+      business_profile_eligible: true,
+      business_profile_eligibility_reason: "ELIGIBLE",
     },
   ]);
   mockedApi.generateBusinessProfile.mockResolvedValue({
-    profile: {
-      id: "profile-a",
-      profile_data: {},
-      status: "NEEDS_REVIEW",
-      active_version_id: null,
-    },
+    job: { id: "profile-job", status: "PENDING", attempts: 0 },
     reused: false,
-    run_id: "run-a",
   });
   renderPage(true, "/app/tenant-a/knowledge-base/profile");
   await screen.findByRole("option", { name: "Meridian Arc Technologies LLC" });
@@ -233,14 +233,13 @@ it("surfaces a new review-only generation and opens the exact returned version e
     .mockResolvedValueOnce([])
     .mockRejectedValueOnce(new Error("refetch failed"));
   mockedApi.generateBusinessProfile.mockResolvedValue({
-    profile: {
-      id: "12345678-1234-4234-8234-123456789012",
-      profile_data: { company_identity: "Meridian Arc Technologies LLC" },
-      status: "NEEDS_REVIEW",
-      active_version_id: null,
+    job: {
+      id: "profile-job-new",
+      status: "READY",
+      attempts: 1,
+      metadata: { profile_version_id: "12345678-1234-4234-8234-123456789012", profile_status: "NEEDS_REVIEW" },
     },
     reused: false,
-    run_id: "run-new",
   });
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
     configurable: true,
@@ -269,14 +268,13 @@ it("surfaces a new review-only generation and opens the exact returned version e
 it("surfaces an exact reused generation result and clears it when scope changes", async () => {
   prepareIdentityScope();
   mockedApi.generateBusinessProfile.mockResolvedValue({
-    profile: {
-      id: "87654321-1234-4234-8234-123456789012",
-      profile_data: {},
-      status: "NEEDS_REVIEW",
-      active_version_id: null,
+    job: {
+      id: "profile-job-existing",
+      status: "READY",
+      attempts: 1,
+      metadata: { profile_version_id: "87654321-1234-4234-8234-123456789012", profile_status: "NEEDS_REVIEW" },
     },
     reused: true,
-    run_id: "run-existing",
   });
   renderPage(true, "/app/tenant-a/knowledge-base/profile");
   await selectMeridianScope();
@@ -313,7 +311,7 @@ it("keeps a safe generation failure beside the generate panel", async () => {
   ).toBeVisible();
 });
 
-it("shows a clear generating state and a duplicate-safe retry after timeout", async () => {
+it("polls an accepted profile job and offers a duplicate-safe retry after terminal failure", async () => {
   mockedApi.listBusinessIdentities.mockResolvedValue([
     {
       id: "identity-meridian",
@@ -330,15 +328,20 @@ it("shows a clear generating state and a duplicate-safe retry after timeout", as
       processing_status: "READY",
       indexing_status: "READY",
       enabled: true,
+      business_profile_eligible: true,
+      business_profile_eligibility_reason: "ELIGIBLE",
     },
   ]);
-  let rejectGeneration!: (error: unknown) => void;
-  mockedApi.generateBusinessProfile.mockImplementation(
-    () =>
-      new Promise((_, reject) => {
-        rejectGeneration = reject;
-      }),
-  );
+  mockedApi.generateBusinessProfile.mockResolvedValue({
+    job: { id: "profile-job-timeout", status: "PENDING", attempts: 0 },
+    reused: false,
+  });
+  mockedApi.getBusinessProfileGenerationJob.mockResolvedValue({
+    id: "profile-job-timeout",
+    status: "FAILED",
+    attempts: 3,
+    last_error_code: "KNOWLEDGE_GENERATION_TIMEOUT",
+  });
   renderPage(true, "/app/tenant-a/knowledge-base/profile");
   await screen.findByRole("option", { name: "Meridian Arc Technologies LLC" });
   fireEvent.change(
@@ -356,23 +359,54 @@ it("shows a clear generating state and a duplicate-safe retry after timeout", as
   await waitFor(() =>
     expect(mockedApi.generateBusinessProfile).toHaveBeenCalledTimes(1),
   );
-  expect(
-    await screen.findByRole("button", { name: "Generating Business Profile…" }),
-  ).toBeDisabled();
-  rejectGeneration(
-    new ApiError(503, "Knowledge generation timed out", {
-      code: "KNOWLEDGE_GENERATION_TIMEOUT",
-    }),
-  );
-  expect(await screen.findByRole("status")).toHaveTextContent(
-    "No Business Profile was created",
-  );
+  expect(await screen.findByRole("alert")).toHaveTextContent("Business Profile generation failed");
+  expect(screen.queryByText("No Business Profile was created")).not.toBeInTheDocument();
   expect(
     await screen.findByRole("button", {
       name: "Retry scoped Business Profile",
     }),
   ).toBeEnabled();
   expect(screen.queryByText(/GEMINI|provider|model/i)).not.toBeInTheDocument();
+});
+
+it("restores and completes a pending Business Profile job after page re-entry", async () => {
+  prepareIdentityScope();
+  window.sessionStorage.setItem(
+    "samche:business-profile-generation:tenant-a",
+    JSON.stringify({
+      scope: JSON.stringify({ businessIdentityId: "identity-meridian", sourceIds: ["source-meridian"] }),
+      job: { id: "profile-job-restored", status: "PENDING", attempts: 0 },
+    }),
+  );
+  mockedApi.getBusinessProfileGenerationJob.mockResolvedValue({
+    id: "profile-job-restored",
+    status: "READY",
+    attempts: 1,
+    metadata: { profile_version_id: "restored-profile-version", profile_status: "NEEDS_REVIEW" },
+  });
+
+  renderPage(true, "/app/tenant-a/knowledge-base/profile");
+  await selectMeridianScope();
+  expect(await screen.findByText("Business Profile generated")).toBeVisible();
+  expect(mockedApi.getBusinessProfileGenerationJob).toHaveBeenCalledWith("tenant-a", "profile-job-restored");
+  expect(window.sessionStorage.getItem("samche:business-profile-generation:tenant-a")).toBeNull();
+});
+
+it("uses server-owned source eligibility and explains why a processed source is excluded", async () => {
+  mockedApi.listKnowledgeSources.mockResolvedValue([{
+    id: "source-not-indexed",
+    title: "Processed but not indexed",
+    source_type: "DOCUMENT",
+    processing_status: "READY",
+    indexing_status: "PROCESSING",
+    enabled: true,
+    business_profile_eligible: false,
+    business_profile_eligibility_reason: "INDEXING_NOT_READY",
+  }]);
+  renderPage(true, "/app/tenant-a/knowledge-base/profile");
+  expect(await screen.findByRole("checkbox", { name: "Processed but not indexed" })).toBeDisabled();
+  expect(screen.getByText("Not eligible: Indexing is not ready")).toBeVisible();
+  expect(screen.getByText("No eligible READY sources are available.")).toBeVisible();
 });
 
 const conflictError = (
@@ -426,6 +460,8 @@ function prepareIdentityScope() {
       processing_status: "READY",
       indexing_status: "READY",
       enabled: true,
+      business_profile_eligible: true,
+      business_profile_eligibility_reason: "ELIGIBLE",
     },
     {
       id: "source-nova",
@@ -434,6 +470,8 @@ function prepareIdentityScope() {
       processing_status: "READY",
       indexing_status: "READY",
       enabled: true,
+      business_profile_eligible: true,
+      business_profile_eligibility_reason: "ELIGIBLE",
     },
   ]);
 }
@@ -1522,6 +1560,7 @@ it("reconciles a failed Configuration job into one retryable terminal state with
 });
 afterEach(() => {
   cleanup();
+  window.sessionStorage.clear();
   vi.clearAllMocks();
 });
 

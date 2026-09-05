@@ -11,6 +11,7 @@ import { createConversationResourceStorage } from './conversation-resource-stora
 import { buildConversationStorageKey, ConversationResourceValidationError, validateConversationUpload } from './conversation-resource-validation.js';
 import { normalizeOperatorVoiceNote, OperatorVoiceNormalizationError } from './operator-voice-normalization-service.js';
 import { isSameKnowledgeAuthority, resolveConversationKnowledgeAuthority } from './knowledge-authority-service.js';
+import { loadPlatformLifecycleMessages, renderPlatformLifecycleMessage } from './platform-lifecycle-message-service.js';
 
 export class ConversationOperationError extends Error {
   constructor(status, message, code = 'CONVERSATION_OPERATION_FAILED') {
@@ -545,32 +546,10 @@ export async function operateConversation({ tenantId, conversationId, actor, act
   }
 }
 
-export function resolveHumanSupportTemplate(templates, key, language) {
-  const candidate = templates?.human_support?.[key]?.[language]
-    ?? templates?.human_support?.[key]?.en
-    ?? null;
-  return typeof candidate === 'string' && candidate.trim() ? candidate : null;
-}
-
 async function loadWhatsAppHumanSupportNotice(client, conversation, templateKey) {
-  const result = await client.query(
-    `SELECT a.whatsapp_response_templates
-       FROM channel_integrations ci
-       JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
-      WHERE ci.channel_id = $1
-        AND ci.tenant_id = $2
-        AND ci.integration_type = 'WHATSAPP'
-        AND ci.enabled = TRUE
-        AND a.status = 'active'
-      LIMIT 2`,
-    [conversation.channel_id, conversation.tenant_id]
-  );
-  if (result.rowCount !== 1) return null;
-  return resolveHumanSupportTemplate(
-    result.rows[0].whatsapp_response_templates,
-    templateKey,
-    conversation.communication_language
-  );
+  const key = templateKey === 'manual_takeover' ? 'human_takeover' : templateKey;
+  const templates = await loadPlatformLifecycleMessages({ database: client });
+  return renderPlatformLifecycleMessage({ templates, key, locale: conversation.communication_language });
 }
 
 async function loadWhatsAppAgentDelivery(client, conversation) {

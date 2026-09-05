@@ -1,5 +1,6 @@
 import pkg from 'pg';
 import dotenv from 'dotenv';
+import { resolvePostgresSsl } from './postgres-ssl.js';
 
 // Explicitly load environment variables at the module level
 dotenv.config();
@@ -19,7 +20,7 @@ const { Pool } = pkg;
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  ssl: resolvePostgresSsl({ connectionString: process.env.DATABASE_URL }),
 });
 
 pool.on('error', (err) => {

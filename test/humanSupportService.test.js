@@ -64,6 +64,24 @@ function lifecycleDatabase({ attention = 'REQUESTED', lastActivityAt, warningSen
   const client = {
     async query(sql, params = []) {
       calls.push({ sql, params });
+      if (sql.includes('FROM platform_lifecycle_message_templates')) {
+        const messages = {
+          human_support_default_topic: { tr: 'Genel destek', en: 'General support', ar: 'الدعم العام' },
+          human_support_request: { tr: '{TOPIC} destek talebi', en: '{TOPIC} support request', ar: 'طلب دعم {TOPIC}' },
+          human_session_warning: { tr: 'canonical warning', en: 'canonical warning en', ar: 'canonical warning ar' },
+          human_takeover: { tr: 'canonical takeover', en: 'canonical takeover en', ar: 'canonical takeover ar' },
+          return_to_ai: { tr: 'canonical return', en: 'canonical return en', ar: 'canonical return ar' },
+        };
+        const rows = Object.entries(messages).flatMap(([message_key, localized]) =>
+          Object.entries(localized).map(([locale, body]) => ({
+            message_key,
+            locale,
+            body,
+            allowed_variables: message_key === 'human_support_request' ? ['TOPIC'] : [],
+          })),
+        );
+        return { rowCount: rows.length, rows };
+      }
       if (sql.startsWith('SELECT c.*, tc.external_channel_id')) {
         return {
           rows: [{
@@ -100,6 +118,7 @@ test('unacknowledged customer support requests receive the persisted five-minute
 
   assert.equal(actions.length, 1);
   assert.equal(actions[0].type, 'WARNING_5M');
+  assert.equal(actions[0].content, 'canonical warning');
   const dueQuery = fixture.calls.find(({ sql }) => sql.startsWith('SELECT c.*, tc.external_channel_id'));
   assert.match(dueQuery?.sql ?? '', /c\.human_attention_state IN \('REQUESTED', 'ACKNOWLEDGED'\)/);
   assert.ok(fixture.calls.some(({ sql }) => sql.includes('human_support_warning_sent_at')));
@@ -112,6 +131,7 @@ test('unacknowledged customer support requests close at ten minutes and return h
 
   assert.equal(actions.length, 1);
   assert.equal(actions[0].type, 'TIMEOUT_CLOSE');
+  assert.equal(actions[0].content, 'canonical return');
   assert.ok(fixture.calls.some(({ sql }) => sql.includes("SET handling_mode = 'AI'")));
   assert.ok(fixture.calls.some(({ sql }) => sql.includes("human_attention_state = 'RESOLVED'")));
 });

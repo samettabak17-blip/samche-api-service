@@ -6,7 +6,8 @@ export async function getKnowledgeOverview({ database, tenantId }) {
   if (!UUID_PATTERN.test(String(tenantId ?? ''))) throw new KnowledgeOverviewError('KNOWLEDGE_TENANT_INVALID', 'Tenant identifier is invalid');
   const result = await database.query(
     `SELECT
-      (SELECT count(*) FROM knowledge_base_documents WHERE tenant_id = $1 AND enabled = TRUE AND processing_status = 'READY') AS ready_sources,
+      (SELECT count(*) FROM knowledge_base_documents WHERE tenant_id = $1 AND enabled = TRUE AND status = 'active' AND processing_status = 'READY') AS processed_sources,
+      (SELECT count(*) FROM knowledge_base_documents WHERE tenant_id = $1 AND enabled = TRUE AND status = 'active' AND processing_status = 'READY' AND indexing_status = 'READY' AND content_hash IS NOT NULL) AS profile_eligible_sources,
       (SELECT count(*) FROM knowledge_base_documents WHERE tenant_id = $1 AND enabled = TRUE AND processing_status IN ('UPLOADED', 'PROCESSING')) AS processing_sources,
       (SELECT count(*) FROM knowledge_base_documents WHERE tenant_id = $1 AND processing_status = 'FAILED') AS failed_sources,
       (SELECT count(*) FROM knowledge_candidates WHERE tenant_id = $1 AND status IN ('DRAFT', 'NEEDS_REVIEW')) AS review_candidates,
@@ -21,7 +22,13 @@ export async function getKnowledgeOverview({ database, tenantId }) {
   );
   const row = result.rows[0] ?? {};
   return {
-    sources: { ready: Number(row.ready_sources ?? 0), processing: Number(row.processing_sources ?? 0), failed: Number(row.failed_sources ?? 0) },
+    sources: {
+      ready: Number(row.profile_eligible_sources ?? 0),
+      processed: Number(row.processed_sources ?? 0),
+      profileEligible: Number(row.profile_eligible_sources ?? 0),
+      processing: Number(row.processing_sources ?? 0),
+      failed: Number(row.failed_sources ?? 0),
+    },
     reviewQueue: { candidates: Number(row.review_candidates ?? 0), profiles: Number(row.review_profiles ?? 0), recommendations: Number(row.review_recommendations ?? 0), configurations: Number(row.review_configurations ?? 0) },
     gaps: { open: Number(row.open_gaps ?? 0) },
     runtime: { activeProfile: Number(row.active_profile ?? 0) > 0, activeConfigurations: Number(row.active_configurations ?? 0), assistants: Number(row.assistants ?? 0) },

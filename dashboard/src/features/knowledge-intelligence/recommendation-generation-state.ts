@@ -15,7 +15,7 @@ export interface RecommendationGenerationState {
   message: string | null;
   error: string | null;
   reused: boolean;
-  operation: "Recommendation" | "Configuration";
+  operation: "Recommendation" | "Configuration" | "Business Profile";
 }
 
 export const initialRecommendationGenerationState: RecommendationGenerationState = {
@@ -49,8 +49,8 @@ export function normalizeRecommendationGenerationJob(value: unknown): AssistantR
 }
 
 type Action =
-  | { type: "START"; operation?: "Recommendation" | "Configuration" }
-  | { type: "ACCEPTED"; job: AssistantRecommendationGenerationJob; reused: boolean; operation?: "Recommendation" | "Configuration" }
+  | { type: "START"; operation?: "Recommendation" | "Configuration" | "Business Profile" }
+  | { type: "ACCEPTED"; job: AssistantRecommendationGenerationJob; reused: boolean; operation?: "Recommendation" | "Configuration" | "Business Profile" }
   | { type: "JOB_STATUS"; job: AssistantRecommendationGenerationJob }
   | { type: "ENQUEUE_FAILED" }
   | { type: "POLL_ERROR" }

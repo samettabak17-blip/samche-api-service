@@ -7,11 +7,13 @@ const appSource = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8')
 test('mapped AI Guide resolves ACTIVE tenant persona after its existing AI-handling gate', () => {
   const humanGate = appSource.indexOf('if (inboxState && !inboxState.shouldInvokeAi)');
   const resolveRuntime = appSource.indexOf('resolveAssistantRuntimeKnowledgeContext({', appSource.indexOf('app.post("/chat"'));
+  const sharedRuntime = appSource.indexOf('resolveChannelAssistantRuntime({', appSource.indexOf('app.post("/chat"'));
   assert.ok(humanGate >= 0);
-  assert.ok(resolveRuntime > humanGate);
-  assert.match(appSource, /tenantId: inboxState\.integration\.tenant_id,/);
-  assert.match(appSource, /assistantId: inboxState\.integration\.assistant_id,/);
-  assert.match(appSource, /resolveTenantRuntimePersona\(\{[\s\S]*tenantId: inboxState\.integration\.tenant_id,[\s\S]*assistantId: inboxState\.integration\.assistant_id,/);
+  assert.ok(sharedRuntime > humanGate);
+  assert.ok(resolveRuntime < 0 || resolveRuntime > sharedRuntime);
+  assert.match(appSource, /scope: guideRuntimeIntegration,/);
+  assert.match(appSource, /resolvePersona: resolveTenantRuntimePersona,/);
+  assert.match(appSource, /resolveKnowledge: resolveAssistantRuntimeKnowledgeContext,/);
   assert.match(appSource, /runtimeSystemInstruction = buildTenantRuntimeSystemInstruction\(\{/);
   assert.match(appSource, /AI Guide assistant configuration is temporarily unavailable/);
 });

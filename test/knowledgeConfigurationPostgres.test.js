@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import pg from 'pg';
+import { resolvePostgresSsl } from '../config/postgres-ssl.js';
 import {
   activateAssistantConfigurationVersion,
   activateBusinessProfileVersion,
@@ -13,7 +14,7 @@ const { Pool } = pg;
 function database() {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error('DATABASE_URL is required; this PostgreSQL contract must not be skipped');
-  return new Pool({ connectionString, ssl: process.env.DATABASE_SSL === 'false' ? false : undefined });
+  return new Pool({ connectionString, ssl: resolvePostgresSsl({ connectionString }) });
 }
 
 async function createFixture(pool, {
@@ -30,10 +31,10 @@ async function createFixture(pool, {
   const versionId = randomUUID();
   const sourceId = randomUUID();
 
-  await pool.query(`INSERT INTO tenants (id, name) VALUES ($1, 'Knowledge locking test')`, [tenantId]);
+  await pool.query(`INSERT INTO tenants (id, name, plan_code) VALUES ($1, 'Knowledge locking test', 'STARTER')`, [tenantId]);
   await pool.query(
-    `INSERT INTO users (id, email, password_hash, system_role)
-     VALUES ($1, $2, 'test-only', 'CUSTOMER')`,
+    `INSERT INTO users (id, email, email_normalized, password_hash, system_role)
+     VALUES ($1, $2, $2, 'test-only', 'CUSTOMER')`,
     [userId, `locking-${userId}@example.test`],
   );
   await pool.query(`INSERT INTO ai_assistants (id, tenant_id, name) VALUES ($1, $2, 'Locking test assistant')`, [assistantId, tenantId]);
@@ -147,7 +148,7 @@ test('real PostgreSQL activates an Assistant Configuration whose source profile 
     await pool.query(
       `INSERT INTO assistant_configuration_versions
          (id, tenant_id, assistant_id, configuration_data, source_profile_version_id, generated_by, status)
-       VALUES ($1, $2, $3, '{}'::jsonb, $4, 'AI', 'APPROVED')`,
+       VALUES ($1, $2, $3, '{"assistant_identity":"Fixture Assistant"}'::jsonb, $4, 'AI', 'APPROVED')`,
       [configurationId, fixture.tenantId, fixture.assistantId, fixture.versionId],
     );
 

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import pg from 'pg';
 import { loadCurrentProviderHistory } from '../services/knowledge-authority-service.js';
+import { resolvePostgresSsl } from '../config/postgres-ssl.js';
 
 const { Client } = pg;
 
@@ -14,7 +15,7 @@ function createClient() {
 
   return new Client({
     connectionString,
-    ssl: process.env.DATABASE_SSL === 'false' ? false : undefined,
+    ssl: resolvePostgresSsl({ connectionString }),
   });
 }
 
@@ -44,8 +45,8 @@ test('knowledge authority epoch is atomic, monotonic, scoped, and activation-awa
     const source = randomUUID();
 
     await client.query(
-      `INSERT INTO tenants (id, name)
-       VALUES ($1, 'Authority Test A'), ($2, 'Authority Test B')`,
+      `INSERT INTO tenants (id, name, plan_code)
+       VALUES ($1, 'Authority Test A', 'STARTER'), ($2, 'Authority Test B', 'STARTER')`,
       [tenantA, tenantB],
     );
     await client.query(
@@ -160,7 +161,7 @@ test('only ACTIVE profile and configuration pointer changes bump authority', asy
     const profileVersionId = randomUUID();
     const configurationVersionId = randomUUID();
 
-    await client.query(`INSERT INTO tenants (id, name) VALUES ($1, 'Activation Test')`, [tenantId]);
+    await client.query(`INSERT INTO tenants (id, name, plan_code) VALUES ($1, 'Activation Test', 'STARTER')`, [tenantId]);
     await client.query(
       `INSERT INTO ai_assistants (id, tenant_id, name) VALUES ($1, $2, 'Activation Assistant')`,
       [assistantId, tenantId],
@@ -218,7 +219,7 @@ test('legacy knowledge changes preserve scoped compatibility while bumping autho
     const scopedLegacyId = randomUUID();
     const globalLegacyId = randomUUID();
 
-    await client.query(`INSERT INTO tenants (id, name) VALUES ($1, 'Legacy Test')`, [tenantId]);
+    await client.query(`INSERT INTO tenants (id, name, plan_code) VALUES ($1, 'Legacy Test', 'STARTER')`, [tenantId]);
     await client.query(
       `INSERT INTO ai_assistants (id, tenant_id, name)
        VALUES ($1, $2, 'Legacy A'), ($3, $2, 'Legacy B')`,
@@ -266,7 +267,7 @@ test('message provenance preserves the transcript but provider history fails clo
     const conversationId = randomUUID();
     const sourceId = randomUUID();
 
-    await client.query(`INSERT INTO tenants (id, name) VALUES ($1, 'History Authority Test')`, [tenantId]);
+    await client.query(`INSERT INTO tenants (id, name, plan_code) VALUES ($1, 'History Authority Test', 'STARTER')`, [tenantId]);
     await client.query(
       `INSERT INTO ai_assistants (id, tenant_id, name) VALUES ($1, $2, 'History Assistant')`,
       [assistantId, tenantId],
@@ -380,7 +381,7 @@ test('an unrelated source authority change intentionally resets the whole Assist
     const firstSourceId = randomUUID();
     const unrelatedSourceId = randomUUID();
 
-    await client.query(`INSERT INTO tenants (id, name) VALUES ($1, 'Coarse Reset Test')`, [tenantId]);
+    await client.query(`INSERT INTO tenants (id, name, plan_code) VALUES ($1, 'Coarse Reset Test', 'STARTER')`, [tenantId]);
     await client.query(
       `INSERT INTO ai_assistants (id, tenant_id, name) VALUES ($1, $2, 'Coarse Reset Assistant')`,
       [assistantId, tenantId],

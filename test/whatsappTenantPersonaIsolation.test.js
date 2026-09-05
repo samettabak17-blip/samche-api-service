@@ -69,7 +69,7 @@ test('persona unavailable response is neutral and localized without a business f
 test('mapped WhatsApp resolves ACTIVE persona before any customer-visible deterministic response', () => {
   const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   const webhook = app.slice(app.indexOf('const tenantContext = whatsappInbox?.tenantContext;'), app.indexOf('// --------------------------------------\n      // TARİHÇE VE SKOR'));
-  const personaResolution = webhook.indexOf('resolveTenantRuntimePersona({');
+  const personaResolution = webhook.indexOf('resolveChannelAssistantRuntime({');
   const deterministicResponse = webhook.indexOf('planWhatsAppDeterministicSocialResponse({');
   const legacyShortReply = webhook.indexOf('wpCorporateShortReplyMap[lower]');
   assert.ok(personaResolution >= 0);

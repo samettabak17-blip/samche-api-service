@@ -1,12 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getDashboardOverview } from '../services/dashboard-analytics-service.js';
+import { resolvePostgresSsl } from '../config/postgres-ssl.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 
 test('Overview aggregates real PostgreSQL activity by tenant and equivalent periods', { skip: !databaseUrl }, async () => {
   const { Client } = await import('pg');
-  const client = new Client({ connectionString: databaseUrl, ssl: false });
+  const client = new Client({
+    connectionString: databaseUrl,
+    ssl: resolvePostgresSsl({ connectionString: databaseUrl }),
+  });
   await client.connect();
   await client.query('BEGIN');
   try {
@@ -18,7 +22,7 @@ test('Overview aggregates real PostgreSQL activity by tenant and equivalent peri
     const web = 'd1030000-0000-4000-8000-000000000002';
     const foreignWeb = 'd1030000-0000-4000-8000-000000000003';
 
-    await client.query(`INSERT INTO tenants (id, name) VALUES ($1, 'Analytics Tenant A'), ($2, 'Analytics Tenant B')`, [tenantA, tenantB]);
+    await client.query(`INSERT INTO tenants (id, name, plan_code) VALUES ($1, 'Analytics Tenant A', 'STARTER'), ($2, 'Analytics Tenant B', 'STARTER')`, [tenantA, tenantB]);
     await client.query(`INSERT INTO ai_assistants (id, tenant_id, name) VALUES ($1, $2, 'Sales Assistant'), ($3, $4, 'Foreign Assistant')`, [assistantA, tenantA, assistantB, tenantB]);
     await client.query(`INSERT INTO tenant_channels (id, tenant_id, assistant_id, channel_type, display_name)
       VALUES ($1, $2, $3, 'WHATSAPP', 'WhatsApp'), ($4, $2, $3, 'WEB_CHAT', 'Web'), ($5, $6, $7, 'WEB_CHAT', 'Foreign Web')`,

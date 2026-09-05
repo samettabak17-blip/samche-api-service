@@ -22,7 +22,6 @@ import {
 import type {
   Assistant,
   BusinessIdentityScopeAnalysis,
-  BusinessProfileGenerationResult,
   BusinessProfileVersion,
   KnowledgeRecommendation,
 } from "../../types/api";
@@ -89,8 +88,17 @@ const recommendationGenerationStorageKey = (tenantId: string, assistantId: strin
   `samche:recommendation-generation:${tenantId}:${assistantId}:${profileVersionId}`;
 const configurationGenerationStorageKey = (tenantId: string, assistantId: string) =>
   `samche:configuration-generation:${tenantId}:${assistantId}`;
+const profileGenerationStorageKey = (tenantId: string) =>
+  `samche:business-profile-generation:${tenantId}`;
 const activeRecommendationGenerationPhase = (phase: string) =>
   phase === "ENQUEUEING" || phase === "PENDING" || phase === "PROCESSING";
+const sourceEligibilityLabel: Record<string, string> = {
+  SOURCE_DISABLED: "Source is disabled",
+  SOURCE_INACTIVE: "Source is inactive",
+  PROCESSING_NOT_READY: "Processing is not ready",
+  INDEXING_NOT_READY: "Indexing is not ready",
+  CONTENT_HASH_MISSING: "Processed content is unavailable",
+};
 const hasRuntimeAssistantIdentity = (data: Record<string, unknown> | null | undefined) =>
   typeof data?.assistant_identity === "string" && Boolean(data.assistant_identity.trim());
 const hasRuntimeCompanyIdentity = (data: Record<string, unknown> | null | undefined) =>
@@ -348,10 +356,11 @@ export function KnowledgeIntelligencePage() {
     scope: string;
     error: unknown;
   } | null>(null);
-  const [generationResult, setGenerationResult] = useState<{
-    scope: string;
-    result: BusinessProfileGenerationResult;
-  } | null>(null);
+  const [profileGeneration, dispatchProfileGeneration] = useReducer(
+    recommendationGenerationReducer,
+    { ...initialRecommendationGenerationState, operation: "Business Profile" },
+  );
+  const [profileGenerationScope, setProfileGenerationScope] = useState<string | null>(null);
   const [configurationProfileVersionId, setConfigurationProfileVersionId] =
     useState("");
   const [recommendationGeneration, dispatchRecommendationGeneration] = useReducer(
@@ -372,6 +381,22 @@ export function KnowledgeIntelligencePage() {
     value: string;
   } | null>(null);
   const queryClient = useQueryClient();
+  useEffect(() => {
+    dispatchProfileGeneration({ type: "RESET" });
+    setProfileGenerationScope(null);
+    if (!tenantId) return;
+    try {
+      const serialized = window.sessionStorage.getItem(profileGenerationStorageKey(tenantId));
+      const cached = serialized ? JSON.parse(serialized) as { job?: unknown; scope?: unknown } : null;
+      const job = normalizeRecommendationGenerationJob(cached?.job);
+      if (job && ["PENDING", "PROCESSING"].includes(job.status) && typeof cached?.scope === "string") {
+        setProfileGenerationScope(cached.scope);
+        dispatchProfileGeneration({ type: "ACCEPTED", job, reused: false, operation: "Business Profile" });
+      }
+    } catch {
+      // Browser cache is advisory only; canonical job state remains on the API.
+    }
+  }, [tenantId]);
   useEffect(() => {
     dispatchRecommendationGeneration({ type: "RESET" });
     if (!tenantId || !assistantId || !configurationProfileVersionId) return;
@@ -502,6 +527,15 @@ export function KnowledgeIntelligencePage() {
     ),
     refetchInterval: activeRecommendationGenerationPhase(configurationGeneration.phase) ? 2_000 : false,
   });
+  const profileGenerationJob = useQuery({
+    queryKey: ['tenant', tenantId, 'knowledge-intelligence', 'profile-generation', profileGeneration.job?.id],
+    queryFn: () => tenantApi.getBusinessProfileGenerationJob(tenantId, profileGeneration.job!.id),
+    enabled: Boolean(
+      tenantId && profileGeneration.job?.id && tab === 'profiles'
+        && ["PENDING", "PROCESSING"].includes(profileGeneration.phase),
+    ),
+    refetchInterval: activeRecommendationGenerationPhase(profileGeneration.phase) ? 2_000 : false,
+  });
   const generateProfile = useMutation({
     mutationFn: (scope: {
       businessIdentityId: string;
@@ -513,23 +547,42 @@ export function KnowledgeIntelligencePage() {
         scope.businessIdentityId,
         scope.sourceIds,
       ),
+    onMutate: (scope) => {
+      setProfileGenerationScope(scope.fingerprint);
+      setGenerationFailure(null);
+      dispatchProfileGeneration({ type: "START", operation: "Business Profile" });
+    },
     onSuccess: (result, scope) => {
       setGenerationFailure(null);
-      setGenerationResult({ scope: scope.fingerprint, result });
-      queryClient.setQueryData<BusinessProfileVersion[]>(
-        tenantKeys.businessProfiles(tenantId),
-        (current) => [
-          result.profile,
-          ...(current ?? []).filter((profile) => profile.id !== result.profile.id),
-        ],
-      );
-      void queryClient.invalidateQueries({
-        queryKey: tenantKeys.businessProfiles(tenantId),
-      });
+      const job = normalizeRecommendationGenerationJob(result?.job);
+      if (!job) {
+        dispatchProfileGeneration({ type: "INVALID_RESPONSE" });
+        return;
+      }
+      dispatchProfileGeneration({ type: "ACCEPTED", job, reused: result.reused === true, operation: "Business Profile" });
+      if (["PENDING", "PROCESSING"].includes(job.status)) {
+        window.sessionStorage.setItem(profileGenerationStorageKey(tenantId), JSON.stringify({ job, scope: scope.fingerprint }));
+      } else {
+        window.sessionStorage.removeItem(profileGenerationStorageKey(tenantId));
+        if (job.status === "READY") void queryClient.invalidateQueries({ queryKey: tenantKeys.businessProfiles(tenantId) });
+      }
     },
-    onError: (error, scope) =>
-      setGenerationFailure({ scope: scope.fingerprint, error }),
+    onError: (error, scope) => {
+      dispatchProfileGeneration({ type: "ENQUEUE_FAILED" });
+      setGenerationFailure({ scope: scope.fingerprint, error });
+    },
   });
+  useEffect(() => {
+    const job = normalizeRecommendationGenerationJob(profileGenerationJob.data);
+    if (!job) return;
+    dispatchProfileGeneration({ type: "JOB_STATUS", job });
+    if (["READY", "FAILED", "CANCELLED"].includes(job.status) && tenantId) {
+      window.sessionStorage.removeItem(profileGenerationStorageKey(tenantId));
+    }
+    if (job.status === "READY") {
+      void queryClient.invalidateQueries({ queryKey: tenantKeys.businessProfiles(tenantId) });
+    }
+  }, [profileGenerationJob.data, queryClient, tenantId]);
   const analyzeProfileScope = useMutation({
     mutationFn: () =>
       tenantApi.analyzeBusinessProfileScope(
@@ -541,7 +594,6 @@ export function KnowledgeIntelligencePage() {
       setProfileScopeAnalysis(analysis);
       generateProfile.reset();
       setGenerationFailure(null);
-      setGenerationResult(null);
     },
   });
   const createBusinessIdentity = useMutation({
@@ -931,10 +983,8 @@ export function KnowledgeIntelligencePage() {
     generationFailure?.scope === currentProfileScope
       ? generationFailure.error
       : null;
-  const currentGenerationResult =
-    generationResult?.scope === currentProfileScope
-      ? generationResult.result
-      : null;
+  const currentProfileGeneration =
+    profileGenerationScope === currentProfileScope ? profileGeneration : null;
   const generationErrorBody =
     currentGenerationError instanceof ApiError &&
     currentGenerationError.body &&
@@ -961,13 +1011,8 @@ export function KnowledgeIntelligencePage() {
   const profileEvidence = generationErrorBody?.details?.evidence ?? [];
   const identityResolutionFailed =
     generationErrorBody?.code === "IDENTITY_RESOLUTION_REQUIRED";
-  const profileGenerationTimedOut =
-    generationErrorBody?.code === "KNOWLEDGE_GENERATION_TIMEOUT";
   const eligibleProfileSources = (sources.data ?? []).filter(
-    (source) =>
-      source.enabled &&
-      source.processing_status === "READY" &&
-      source.indexing_status === "READY",
+    (source) => source.business_profile_eligible,
   );
 
   return (
@@ -1175,7 +1220,6 @@ export function KnowledgeIntelligencePage() {
                 onChange={(event) => {
                   generateProfile.reset();
                   setGenerationFailure(null);
-                  setGenerationResult(null);
                   setProfileScopeAnalysis(null);
                   setBusinessIdentityId(event.target.value);
                 }}
@@ -1224,7 +1268,7 @@ export function KnowledgeIntelligencePage() {
               Selected source scope
             </legend>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              {eligibleProfileSources.map((source) => (
+              {(sources.data ?? []).map((source) => (
                 <div
                   key={source.id}
                   className="rounded-lg border border-line bg-elevated p-3"
@@ -1234,10 +1278,10 @@ export function KnowledgeIntelligencePage() {
                       ? `${source.original_filename || source.title} · Source ${source.id.slice(0, 8)}`
                       : (source.original_filename || source.title)}
                     checked={profileSourceIds.includes(source.id)}
+                    disabled={!source.business_profile_eligible}
                     onChange={(event) => {
                       generateProfile.reset();
                       setGenerationFailure(null);
-                      setGenerationResult(null);
                       setProfileScopeAnalysis(null);
                       setProfileSourceIds((current) =>
                         event.target.checked
@@ -1257,6 +1301,11 @@ export function KnowledgeIntelligencePage() {
                       <span className="mt-1 block text-xs text-stone-400">
                         Source {source.id.slice(0, 8)} · {source.processing_status} · Index {source.indexing_status}
                       </span>
+                      {!source.business_profile_eligible && (
+                        <span className="block text-xs text-amber-300">
+                          Not eligible: {sourceEligibilityLabel[source.business_profile_eligibility_reason ?? ""] ?? "Source is not ready for Business Profile generation"}
+                        </span>
+                      )}
                       {source.source_type === "CONVERSATION_CANDIDATE" && (
                         <span className="block text-xs text-stone-400">
                           {source.provenance_status === "VERIFIED"
@@ -1288,48 +1337,43 @@ export function KnowledgeIntelligencePage() {
             disabled={
               !businessIdentityId ||
               !profileSourceIds.length ||
-              generateProfile.isPending
+              activeRecommendationGenerationPhase(currentProfileGeneration?.phase ?? "IDLE")
             }
           >
-            {generateProfile.isPending
+            {activeRecommendationGenerationPhase(currentProfileGeneration?.phase ?? "IDLE")
               ? "Generating Business Profile…"
-              : profileGenerationTimedOut
+              : currentProfileGeneration?.phase === "FAILED"
                 ? "Retry scoped Business Profile"
                 : "Generate scoped Business Profile"}
           </DashboardButton>
-          {profileGenerationTimedOut && (
+          {currentProfileGeneration && ["ENQUEUEING", "PENDING", "PROCESSING"].includes(currentProfileGeneration.phase) && (
             <p
               role="status"
               className="rounded-lg border border-amber-700/60 bg-amber-950/30 p-3 text-sm text-amber-200"
             >
-              Generation timed out. No Business Profile was created. You can
-              retry this exact source scope safely.
+              Business Profile generation is {currentProfileGeneration.phase === "PROCESSING" ? "processing" : "queued"}.
+              You can leave this page; status resumes when you return.
             </p>
           )}
-          {currentGenerationResult && (
+          {currentProfileGeneration && ["SUCCEEDED", "EXISTING_RESULT"].includes(currentProfileGeneration.phase) && typeof currentProfileGeneration.job?.metadata?.profile_version_id === "string" && (
             <div
               role="status"
               aria-live="polite"
-              id={`generated-profile-result-${currentGenerationResult.profile.id}`}
-              data-profile-version-id={currentGenerationResult.profile.id}
+              id={`generated-profile-result-${currentProfileGeneration.job.metadata.profile_version_id}`}
+              data-profile-version-id={currentProfileGeneration.job.metadata.profile_version_id}
               tabIndex={-1}
               className="rounded-lg border border-emerald-700/60 bg-emerald-950/30 p-4 text-sm text-emerald-100"
             >
               <strong className="text-emerald-200">
-                {currentGenerationResult.reused
+                {currentProfileGeneration.phase === "EXISTING_RESULT"
                   ? "Existing exact generation result reused"
                   : "Business Profile generated"}
               </strong>
               <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold">
-                <span>{currentGenerationResult.profile.status}</span>
+                <span>{String(currentProfileGeneration.job.metadata.profile_status ?? "DRAFT")}</span>
+                <span>NOT ACTIVE</span>
                 <span>
-                  {currentGenerationResult.profile.active_version_id ===
-                  currentGenerationResult.profile.id
-                    ? "ACTIVE"
-                    : "NOT ACTIVE"}
-                </span>
-                <span>
-                  Version {currentGenerationResult.profile.id.slice(0, 8)}
+                  Version {currentProfileGeneration.job.metadata.profile_version_id.slice(0, 8)}
                 </span>
               </div>
               <DashboardButton
@@ -1340,10 +1384,10 @@ export function KnowledgeIntelligencePage() {
                   window.setTimeout(() => {
                     const target =
                       document.getElementById(
-                        `business-profile-version-${currentGenerationResult.profile.id}`,
+                        `business-profile-version-${currentProfileGeneration.job!.metadata!.profile_version_id}`,
                       ) ??
                       document.getElementById(
-                        `generated-profile-result-${currentGenerationResult.profile.id}`,
+                        `generated-profile-result-${currentProfileGeneration.job!.metadata!.profile_version_id}`,
                       );
                     target?.scrollIntoView({
                       behavior: "smooth",
@@ -1357,13 +1401,17 @@ export function KnowledgeIntelligencePage() {
               </DashboardButton>
             </div>
           )}
-          {Boolean(currentGenerationError) &&
-            !profileGenerationTimedOut &&
-            !identityResolutionFailed && (
+          {Boolean(currentGenerationError) && !identityResolutionFailed && (
               <div className="rounded-lg border border-red-700/60 bg-red-950/30 p-3">
                 <MutationFeedback error={currentGenerationError} />
               </div>
             )}
+          {!currentGenerationError && currentProfileGeneration?.phase === "FAILED" && (
+            <p role="alert" className="rounded-lg border border-red-700/60 bg-red-950/30 p-3 text-sm text-red-200">
+              {currentProfileGeneration.error}
+              {currentProfileGeneration.job?.last_error_code ? ` (${currentProfileGeneration.job.last_error_code})` : ""}
+            </p>
+          )}
           {identityResolutionFailed && (
             <div
               role="alert"

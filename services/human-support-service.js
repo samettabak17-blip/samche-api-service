@@ -1,3 +1,5 @@
+import { loadPlatformLifecycleMessages, renderPlatformLifecycleMessage } from './platform-lifecycle-message-service.js';
+
 async function defaultDatabase() {
   return (await import('../config/db.js')).default;
 }
@@ -115,8 +117,9 @@ export async function claimDueCustomerSupportLifecycle({ database = null, now = 
   const client = await (database ?? await defaultDatabase()).connect();
   try {
     await client.query('BEGIN');
+    const lifecycleTemplates = await loadPlatformLifecycleMessages({ database: client });
     const due = await client.query(
-      `SELECT c.*, tc.external_channel_id, a.whatsapp_response_templates
+      `SELECT c.*, tc.external_channel_id
          FROM conversations c
          JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
          JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id
@@ -137,10 +140,8 @@ export async function claimDueCustomerSupportLifecycle({ database = null, now = 
     for (const conversation of due.rows) {
       const requestedAt = new Date(conversation.human_attention_requested_at);
       const elapsed = now.getTime() - requestedAt.getTime();
-      const templates = conversation.whatsapp_response_templates?.human_support ?? {};
       if (elapsed >= 10 * 60 * 1000) {
-        const content = templates.timeout_close?.[conversation.communication_language] ?? templates.timeout_close?.tr;
-        if (typeof content !== 'string' || !content.trim()) continue;
+        const content = renderPlatformLifecycleMessage({ templates: lifecycleTemplates, key: 'return_to_ai', locale: conversation.communication_language });
         await client.query(
           `UPDATE conversations SET handling_mode = 'AI', assigned_agent_user_id = NULL,
               human_attention_state = 'RESOLVED', handoff_requested = FALSE, handoff_reason = NULL,
@@ -157,8 +158,7 @@ export async function claimDueCustomerSupportLifecycle({ database = null, now = 
         console.info('HUMAN_SUPPORT_TIMEOUT status=CLAIMED tenant=' + String(conversation.tenant_id).slice(0, 8));
         actions.push({ type: 'TIMEOUT_CLOSE', tenantId: conversation.tenant_id, conversationId: conversation.id, recipient: conversation.customer_external_id, content });
       } else if (elapsed >= 5 * 60 * 1000 && !conversation.human_support_warning_sent_at) {
-        const content = templates.warning_5m?.[conversation.communication_language] ?? templates.warning_5m?.tr;
-        if (typeof content !== 'string' || !content.trim()) continue;
+        const content = renderPlatformLifecycleMessage({ templates: lifecycleTemplates, key: 'human_session_warning', locale: conversation.communication_language });
         await client.query(
           `UPDATE conversations SET human_support_warning_sent_at = $1, updated_at = $1
             WHERE id = $2 AND tenant_id = $3 AND human_support_warning_sent_at IS NULL`,

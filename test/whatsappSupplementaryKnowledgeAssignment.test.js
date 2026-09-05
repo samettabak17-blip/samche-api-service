@@ -42,9 +42,9 @@ async function closeDatabase({ client, pool }) {
 
 async function seedIdentity(client) {
   await client.query(
-    `INSERT INTO tenants (id, name) VALUES
-      ($1, 'WhatsApp supplementary assignment fixture'),
-      ($2, 'WhatsApp supplementary isolation fixture')`,
+    `INSERT INTO tenants (id, name, plan_code) VALUES
+      ($1, 'WhatsApp supplementary assignment fixture', 'STARTER'),
+      ($2, 'WhatsApp supplementary isolation fixture', 'STARTER')`,
     [tenantId, otherTenantId],
   );
   await client.query(

@@ -125,3 +125,29 @@ modify files outside the authorized scope.
   is not an active runtime dependency, and wpSessions is not a source of truth.
 - Background employee-phone delivery requires a configured external transport;
   do not simulate it or add provider credentials without explicit approval.
+
+## 10. Agent continuity and cumulative release gate
+
+- This file is the single authoritative cross-agent engineering contract for
+  Codex, Cline, Aider, and future coding agents. Agent-specific entry files may
+  point here but must not duplicate or diverge from this policy.
+- A new tenant is not a new implementation. Canonical provisioning and
+  idempotent, non-destructive repair/backfill must give old and new tenants the
+  same shared platform capabilities, subject only to supported entitlements
+  and tenant data/configuration.
+- Never repair missing platform behavior with tenant-specific application code
+  or manual tenant patches.
+- The machine-readable capability registry, canonical provisioning/ensure
+  service, migrations/backfills, old-tenant fixture, two-fresh-tenant isolation
+  checks, and cumulative Fresh Tenant Golden Path are release contracts.
+- New-tenant provisioning and old-tenant repair must call the same ensure
+  semantics. Only the normal provisioning path may be used for fresh-tenant
+  acceptance; manual database patches cannot satisfy the release contract.
+- A competing source of truth, critical process-memory authority, tenant
+  boundary failure, or screen-level customer-visible error is a release
+  blocker even when unit tests pass.
+- Every tenant-affecting platform task must retain the prior Golden Path and add
+  its new capability coverage. Never replace or narrow prior GREEN coverage.
+- Run the release-blocking golden-path command before claiming completion. If a
+  previously GREEN capability regresses, tenant age alone changes behavior, or
+  tenant-specific source changes are required, report `TASK_COMPLETE = NO`.
