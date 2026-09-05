@@ -40,7 +40,7 @@ test('snapshots historical evidence before explicit reassignment without rewriti
   const db = database({ existing: ['eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'] });
   await assignKnowledgeSourceBusinessIdentity({ database: db, tenantId, sourceId, businessIdentityId: identityId, assignedBy: actorId });
   const snapshot = db.calls.find(({ sql }) => /UPDATE knowledge_candidate_image_evidence/i.test(sql));
-  assert.deepEqual(snapshot.params, [tenantId, sourceId, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee']);
+  assert.deepEqual(snapshot.params, [tenantId, sourceId, null, 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee']);
   assert.equal(db.calls.some(({ sql }) => /UPDATE knowledge_candidates/i.test(sql)), false);
 });
 
@@ -48,7 +48,7 @@ test('first explicit assignment repairs unassigned review candidate evidence wit
   const db = database();
   await assignKnowledgeSourceBusinessIdentity({ database: db, tenantId, sourceId, businessIdentityId: identityId, assignedBy: actorId });
   const repair = db.calls.find(({ sql }) => /UPDATE knowledge_candidate_image_evidence/i.test(sql));
-  assert.deepEqual(repair.params, [tenantId, sourceId, identityId]);
+  assert.deepEqual(repair.params, [tenantId, sourceId, null, identityId]);
   assert.match(repair.sql, /candidate\.status IN \('DRAFT', 'NEEDS_REVIEW'\)/i);
   assert.match(repair.sql, /candidate\.image_semantic_version IS NOT NULL/i);
 });

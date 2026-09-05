@@ -47,6 +47,25 @@ test('a fresh image candidate fails closed without one trusted primary BUSINESS 
   );
 });
 
+test('approval converges an existing unassigned image candidate from one current source identity', async () => {
+  let repaired = false;
+  const identityId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+  const client = { async query(sql) {
+    if (/SELECT id, assistant_id, proposed_title/i.test(sql)) return { rows: [{ id: candidateId, assistant_id: null, proposed_title: 'Image fact', proposed_content: 'Redacted business fact', status: 'NEEDS_REVIEW', pii_redaction_status: 'PASSED', image_semantic_version: '1' }] };
+    if (/UPDATE knowledge_candidate_image_evidence/i.test(sql)) { repaired = true; return { rowCount: 1, rows: [] }; }
+    if (/primary_business_evidence_count/i.test(sql)) return { rows: [repaired
+      ? { primary_business_evidence_count: 1, trusted_identity_count: 1, original_source_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }
+      : { primary_business_evidence_count: 1, trusted_identity_count: 0 }] };
+    if (/INSERT INTO knowledge_base_documents/i.test(sql)) return { rows: [{ id: 'approved-source', tenant_id: tenantId, processing_status: 'UPLOADED', indexing_status: 'PENDING' }] };
+    if (/INSERT INTO knowledge_processing_jobs/i.test(sql)) return { rows: [{ id: 'job-1' }] };
+    return { rows: [] };
+  } };
+  const database = { connect: async () => ({ ...client, release: () => {} }) };
+  const source = await approveConversationKnowledgeCandidate({ database, tenantId, candidateId, reviewedBy: reviewerId });
+  assert.equal(source.id, 'approved-source');
+  assert.equal(repaired, true);
+});
+
 test('approval rolls back candidate materialization when provenance persistence fails', async () => {
   const calls = [];
   const client = { async query(sql, params = []) {

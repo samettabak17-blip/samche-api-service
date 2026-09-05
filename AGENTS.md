@@ -151,3 +151,8 @@ modify files outside the authorized scope.
 - Run the release-blocking golden-path command before claiming completion. If a
   previously GREEN capability regresses, tenant age alone changes behavior, or
   tenant-specific source changes are required, report `TASK_COMPLETE = NO`.
+- Image-derived candidate approval requires exactly one tenant-scoped trusted
+  Business Identity chain from BUSINESS PRIMARY evidence. Canonical convergence
+  may repair only unapproved historical candidates when one explicit source
+  identity is proven; CUSTOMER evidence is never business truth, missing or
+  conflicting identities fail closed, and APPROVED history is immutable.

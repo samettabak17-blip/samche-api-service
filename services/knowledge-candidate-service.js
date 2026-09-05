@@ -73,6 +73,57 @@ async function candidateTransaction(database, work) {
   }
 }
 
+// Converge an eligible image candidate onto one explicitly trusted source
+// identity. This is reusable at assignment and approval boundaries so
+// historical unapproved candidates do not depend on a later mutation or
+// regeneration request.
+export async function convergeImageCandidateIdentityProvenance({
+  database,
+  tenantId,
+  sourceId = null,
+  candidateId = null,
+  businessIdentityId = null,
+}) {
+  return db(database,
+    `WITH candidate_scope AS (
+       SELECT evidence.tenant_id, evidence.candidate_id, evidence.source_id,
+              CASE WHEN $4::uuid IS NULL THEN identity_link.business_identity_id ELSE $4::uuid END AS resolved_identity_id
+         FROM knowledge_candidate_image_evidence evidence
+         JOIN knowledge_candidates candidate
+           ON candidate.tenant_id = evidence.tenant_id
+          AND candidate.id = evidence.candidate_id
+         LEFT JOIN knowledge_source_business_identities identity_link
+           ON identity_link.tenant_id = evidence.tenant_id
+          AND identity_link.source_id = evidence.source_id
+        WHERE evidence.tenant_id = $1
+          AND ($2::uuid IS NULL OR evidence.source_id = $2::uuid)
+          AND ($3::uuid IS NULL OR evidence.candidate_id = $3::uuid)
+          AND evidence.role = 'BUSINESS'
+          AND evidence.evidence_kind = 'PRIMARY'
+          AND evidence.business_identity_id IS NULL
+          AND candidate.status IN ('DRAFT', 'NEEDS_REVIEW')
+          AND candidate.image_semantic_version IS NOT NULL
+     ), resolved AS (
+       SELECT tenant_id, candidate_id, source_id, MIN(resolved_identity_id) AS business_identity_id
+         FROM candidate_scope
+        WHERE resolved_identity_id IS NOT NULL
+        GROUP BY tenant_id, candidate_id, source_id
+       HAVING COUNT(DISTINCT resolved_identity_id) = 1
+     )
+     UPDATE knowledge_candidate_image_evidence evidence
+        SET business_identity_id = resolved.business_identity_id
+       FROM resolved
+      WHERE evidence.tenant_id = resolved.tenant_id
+        AND evidence.candidate_id = resolved.candidate_id
+        AND evidence.source_id = resolved.source_id
+        AND evidence.role = 'BUSINESS'
+        AND evidence.evidence_kind = 'PRIMARY'
+        AND evidence.business_identity_id IS NULL
+     RETURNING evidence.candidate_id, evidence.source_id, evidence.business_identity_id`,
+    [tenantId, sourceId, candidateId, businessIdentityId],
+  );
+}
+
 function imageCandidateFingerprint({ tenantId, assistantId, sourceId, extractionHash, segmentOrder }) {
   return crypto.createHash('sha256')
     .update([tenantId, assistantId ?? '', sourceId, extractionHash, segmentOrder].join(':'))
@@ -380,6 +431,8 @@ export async function approveConversationKnowledgeCandidate({
       // business truth; tenant membership is deliberately not an identity
       // fallback.
       if (candidate.image_semantic_version) {
+        phase = 'IMAGE_PROVENANCE_CONVERGENCE';
+        await convergeImageCandidateIdentityProvenance({ database: client, tenantId, candidateId });
         phase = 'IMAGE_PROVENANCE_VALIDATION';
         const provenance = await db(client,
           `SELECT COUNT(*) FILTER (
