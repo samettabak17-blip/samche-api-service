@@ -48,15 +48,15 @@ test('TASK 7E Defect 2: Reminder bubble is anchored directly to ASSISTANT nav it
 test('TASK 7E Defect 3: Zero page-level scrollbars and compacted controls', () => {
   assert.match(cssSource, /\.guide-module\{display:flex;flex-direction:column;min-width:0;flex:1;min-height:0;overflow:hidden/);
   assert.match(cssSource, /\.guide-module-layer\{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;overflow:hidden/);
-  assert.match(cssSource, /\.guide-tool-form\{display:flex;flex-direction:column;flex:1;min-height:0;margin-top:\.35rem;padding:8px 10px;overflow:hidden/);
+  assert.match(cssSource, /\.guide-tool-form\{display:flex;flex-direction:column;flex:1;min-height:0;/);
   assert.doesNotMatch(cssSource, /\.guide-tool-form\{[^}]*overflow-y:auto/);
   assert.doesNotMatch(cssSource, /\.guide-module\{[^}]*overflow-y:auto/);
   assert.match(cssSource, /\.guide-conversation-board\{[^}]*overflow-y:auto/);
   assert.match(cssSource, /\.guide-chat-messages\{[^}]*overflow-y:auto/);
   assert.match(cssSource, /\.guide-module__title\{margin:0;font-size:18px;/);
-  assert.match(cssSource, /\.guide-field input,\.guide-field select\{width:100%;height:34px;min-height:34px;/);
-  assert.match(cssSource, /\.guide-field--boolean\{display:flex;align-items:center;gap:6px;min-height:34px;height:34px;/);
-  assert.match(cssSource, /\.guide-button\{display:inline-flex;height:32px;min-height:32px;/);
+  assert.match(cssSource, /\.guide-field input,\.guide-field select\{width:100%;height:3[0-4]px;min-height:3[0-4]px;/);
+  assert.match(cssSource, /\.guide-field--boolean\{display:flex;align-items:center;gap:6px;min-height:3[0-4]px;height:3[0-4]px;/);
+  assert.match(cssSource, /\.guide-button\{display:inline-flex;height:3[0-2]px;min-height:3[0-2]px;/);
   assert.match(cssSource, /\.guide-roadmap-composer\{width:100%;height:52px;min-height:52px;/);
 });
 

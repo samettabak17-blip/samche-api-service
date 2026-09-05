@@ -324,10 +324,135 @@ function renderConversationalRoadmap(container) {
 function renderRoadmap(container) { const roadmap = experience.roadmap || { steps: [] }; if (guideState.roadmap_reviewed) { container.append(element('p', 'guide-module__eyebrow', 'ROADMAP'), element('h2', 'guide-module__title', roadmap.title || 'Your roadmap')); renderRoadmapReview(container, roadmap, visibleFields(roadmap.steps, guideState.roadmap)); return; } renderConversationalRoadmap(container); }
 
 function calculateTool() { const tool = experience.interactive_tool; let amount = safeNumber(tool.calculation?.base_amount); const rows = []; for (const term of tool.calculation?.terms || []) { const value = guideState.tool[term.field_id]; let valueAmount = 0; if (term.kind === 'NUMBER_MULTIPLIER' && typeof value === 'number') valueAmount = value * safeNumber(term.multiplier); else if (term.kind === 'BOOLEAN_AMOUNT' && value === true) valueAmount = safeNumber(term.amount); else if (term.kind === 'SELECT_AMOUNT' && typeof value === 'string') valueAmount = safeNumber(term.amounts?.[value]); amount += valueAmount; if (valueAmount || value !== undefined) rows.push({ label: term.label || term.field_id, amount: Number(valueAmount.toFixed(2)) }); } return { total: Number(amount.toFixed(2)), rows }; }
-function renderInteractiveTool(container) { const tool = experience.interactive_tool || { fields: [], calculation: { terms: [] } }; const pricingAvailable = tool.pricing_mode === 'APPROVED_PRICING'; container.append(element('p', 'guide-module__eyebrow', 'INTERACTIVE TOOL'), element('h2', 'guide-module__title', tool.title || 'Interactive tool')); if (tool.description) container.append(element('p', 'guide-module__description', tool.description)); const form = element('form', 'guide-tool-form'); form.noValidate = true; for (const field of visibleFields(tool.fields, guideState.tool)) form.append(inputForField(field, guideState.tool, () => { persistState(); renderActiveModule(); })); const result = element('section', 'guide-tool-result'); result.append(element('p', 'guide-tool-result__label', tool.result_label || 'Planning snapshot')); if (pricingAvailable) { const calculated = calculateTool(); if (calculated.rows.length) { const table = document.createElement('table'); table.className = 'guide-tool-breakdown'; const head = document.createElement('thead'); const header = document.createElement('tr'); header.append(element('th', '', tool.result_breakdown_label || 'Category'), element('th', '', 'Estimate')); head.append(header); const body = document.createElement('tbody'); for (const row of calculated.rows) { const item = document.createElement('tr'); item.append(element('td', '', row.label), element('td', '', `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(row.amount)}${tool.currency ? ` ${tool.currency}` : ''}`)); body.append(item); } table.append(head, body); result.append(table); } result.append(element('strong', 'guide-tool-result__amount', `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(calculated.total)}${tool.currency ? ` ${tool.currency}` : ''}`), element('p', 'guide-tool-result__notice', 'Indicative estimate only. Final scope and pricing are confirmed after review.')); } else { const selected = visibleFields(tool.fields, guideState.tool).filter((field) => guideState.tool[field.id] !== undefined && guideState.tool[field.id] !== ''); if (selected.length) { const table = document.createElement('table'); table.className = 'guide-tool-breakdown'; const head = document.createElement('thead'); const header = document.createElement('tr'); header.append(element('th', '', tool.result_breakdown_label || 'Category'), element('th', '', 'Selected requirement')); head.append(header); const body = document.createElement('tbody'); for (const field of selected) { const item = document.createElement('tr'); item.append(element('td', '', field.label), element('td', '', displayFieldValue(field, guideState.tool[field.id]))); body.append(item); } table.append(head, body); result.append(table); } result.append(element('p', 'guide-tool-result__notice', 'Your planning scope is ready for commercial review. Final pricing and quotation require confirmation.')); } form.append(result); const assistant = element('button', 'guide-button', 'Ask the assistant about this'); assistant.type = 'button'; assistant.addEventListener('click', handoffToAssistant); form.append(assistant); container.append(form); }
+function renderToolBreakdown(tool) {
+  const pricingAvailable = tool.pricing_mode === 'APPROVED_PRICING';
+  if (!pricingAvailable) {
+    return element('p', 'guide-tool-result__notice', 'Your planning scope is ready for commercial review. Final pricing and quotation require confirmation.');
+  }
+  const table = document.createElement('table');
+  table.className = 'guide-tool-breakdown';
+  return table;
+}
+function renderInteractiveTool(container) {
+  const tool = experience.interactive_tool || { fields: [], calculation: { terms: [] } };
+  container.append(
+    element('p', 'guide-module__eyebrow', 'PLANNING'),
+    element('h2', 'guide-module__title', tool.title || 'Event Planning')
+  );
+  if (tool.description) {
+    container.append(element('p', 'guide-module__description', tool.description));
+  }
+
+  const form = element('form', 'guide-tool-form');
+  form.noValidate = true;
+
+  const fieldsGrid = element('div', 'guide-tool-grid');
+  for (const field of visibleFields(tool.fields, guideState.tool)) {
+    fieldsGrid.append(inputForField(field, guideState.tool, () => {
+      persistState();
+      queueGuideContextSync();
+    }));
+  }
+  form.append(fieldsGrid);
+
+  const actions = element('div', 'guide-tool-actions');
+  const askButton = element('button', 'guide-button guide-button--primary guide-tool-ask-button', 'Ask the Assistant');
+  askButton.type = 'button';
+  askButton.addEventListener('click', handoffToAssistant);
+  actions.append(askButton);
+  form.append(actions);
+
+  container.append(form);
+}
 
 function contextEntries(fields, values) { return visibleFields(fields, values).filter((field) => values[field.id] !== undefined && values[field.id] !== '').map((field) => ({ label: field.label, value: displayFieldValue(field, values[field.id]) })); }
+function buildPlanningNaturalDraft(fields, values) {
+  const activeEntries = visibleFields(fields, values)
+    .filter((f) => values[f.id] !== undefined && values[f.id] !== '' && values[f.id] !== false && values[f.id] !== 'None' && values[f.id] !== 'Not selected');
+
+  if (!activeEntries.length) {
+    return 'I’m planning an event. Please help me refine the plan and recommend the next steps.';
+  }
+
+  const findVal = (idPatterns) => {
+    const entry = activeEntries.find((f) => idPatterns.some((p) => f.id.toLowerCase().includes(p) || f.label.toLowerCase().includes(p)));
+    return entry ? { field: entry, value: values[entry.id], display: displayFieldValue(entry, values[entry.id]) } : null;
+  };
+
+  const guestEntry = findVal(['guest', 'attendee', 'count']);
+  const venueEntry = findVal(['venue', 'location']);
+  const durationEntry = findVal(['duration', 'day', 'hour', 'length']);
+
+  const handledIds = new Set();
+  if (guestEntry) handledIds.add(guestEntry.field.id);
+  if (venueEntry) handledIds.add(venueEntry.field.id);
+  if (durationEntry) handledIds.add(durationEntry.field.id);
+
+  let intro = 'I’m planning an event';
+  if (guestEntry && venueEntry) {
+    const venueLower = venueEntry.display.toLowerCase();
+    const venuePrefix = venueLower.startsWith('hotel') || venueLower.startsWith('dedicated') || venueLower.startsWith('outdoor') ? 'in a ' : 'at ';
+    intro += ` for ${guestEntry.value} guests ${venuePrefix}${venueLower}`;
+  } else if (guestEntry) {
+    intro += ` for ${guestEntry.value} guests`;
+  } else if (venueEntry) {
+    intro += ` at ${venueEntry.display}`;
+  }
+  intro += '.';
+
+  const remaining = activeEntries.filter((f) => !handledIds.has(f.id));
+  const detailPhrases = [];
+
+  const requiredBooleans = [];
+  for (const item of remaining) {
+    const val = values[item.id];
+    if (item.input_type === 'BOOLEAN' && val === true) {
+      let label = item.label.toLowerCase().replace(/\s+required$/i, '');
+      requiredBooleans.push(label);
+    } else if (item.input_type === 'SELECT' || item.input_type === 'TEXT') {
+      const display = displayFieldValue(item, val);
+      if (display && display.toLowerCase() !== 'none' && display.toLowerCase() !== 'not selected') {
+        let label = item.label;
+        if (/stage.*av.*production/i.test(label)) label = 'AV/production';
+        else if (/decoration/i.test(label)) label = 'decoration';
+        detailPhrases.push(`${label} is ${display.toLowerCase()}`);
+      }
+    } else if (item.input_type === 'NUMBER') {
+      detailPhrases.push(`${item.label.toLowerCase()} is ${val}${item.unit ? ' ' + item.unit : ''}`);
+    }
+  }
+
+  if (requiredBooleans.length > 0) {
+    const boolText = requiredBooleans.length === 1
+      ? `${requiredBooleans[0]} is required`
+      : `${requiredBooleans.slice(0, -1).join(', ')} and ${requiredBooleans[requiredBooleans.length - 1]} are required`;
+    detailPhrases.push(boolText);
+  }
+
+  if (durationEntry) {
+    const unit = durationEntry.field.unit || (Number(durationEntry.value) === 1 ? 'hour' : 'hours');
+    detailPhrases.push(`the event duration is ${durationEntry.value} ${unit}`);
+  }
+
+  let detailsSentence = '';
+  if (detailPhrases.length === 1) {
+    detailsSentence = `${detailPhrases[0].charAt(0).toUpperCase() + detailPhrases[0].slice(1)}.`;
+  } else if (detailPhrases.length > 1) {
+    const joined = detailPhrases.slice(0, -1).join(', ') + ', and ' + detailPhrases[detailPhrases.length - 1];
+    detailsSentence = `${joined.charAt(0).toUpperCase() + joined.slice(1)}.`;
+  }
+
+  const parts = [intro];
+  if (detailsSentence) parts.push(detailsSentence);
+  parts.push('Please help me refine the plan and recommend the next steps.');
+
+  return parts.join(' ').slice(0, 2000);
+}
+
 function buildAssistantPrefill() {
+  if (guideState.active_module === MODULES.INTERACTIVE_TOOL || Object.keys(guideState.tool || {}).length > 0) {
+    return buildPlanningNaturalDraft(experience.interactive_tool?.fields || [], guideState.tool);
+  }
   const groups = [{ label: experience.roadmap?.summary_label || 'Roadmap', entries: contextEntries(experience.roadmap?.steps || [], guideState.roadmap) }, { label: experience.interactive_tool?.result_label || 'Planning scope', entries: contextEntries(experience.interactive_tool?.fields || [], guideState.tool) }].filter((group) => group.entries.length);
   const lines = ['I would like recommendations based on my plan.'];
   for (const group of groups) { lines.push('', `${group.label}:`); for (const item of group.entries) lines.push(`${item.label}: ${item.value}`); }
@@ -359,22 +484,33 @@ async function persistGuideContext() {
 }
 function queueGuideContextSync() { window.clearTimeout(contextSyncTimer); contextSyncTimer = window.setTimeout(async () => { contextSyncState = 'saving'; try { await persistGuideContext(); contextSyncState = 'saved'; } catch { contextSyncState = 'error'; } }, 350); }
 async function handoffToAssistant() {
-  if (!guideState.assistant_draft || guideState.assistant_draft_origin === 'HANDOFF') { guideState.assistant_draft = buildAssistantPrefill(); guideState.assistant_draft_origin = 'HANDOFF'; }
-  guideState.active_module = MODULES.AI_ASSISTANT; persistState(); contextSyncState = 'saving'; renderActiveModule();
-  try { await persistGuideContext(); contextSyncState = 'saved'; } catch { contextSyncState = 'error'; }
-  if (guideState.active_module === MODULES.AI_ASSISTANT) { renderActiveModule(); window.requestAnimationFrame(() => root.querySelector('.guide-chat-form textarea')?.focus()); }
+  guideState.assistant_draft = buildPlanningNaturalDraft(experience.interactive_tool?.fields || [], guideState.tool);
+  guideState.assistant_draft_origin = 'HANDOFF';
+  guideState.active_module = MODULES.AI_ASSISTANT;
+  persistState();
+  renderActiveModule();
+  queueGuideContextSync();
+  window.requestAnimationFrame(() => {
+    const textarea = root.querySelector('.guide-chat-form textarea');
+    if (textarea) {
+      textarea.value = guideState.assistant_draft;
+      textarea.focus();
+    }
+  });
 }
 function addMessage(value, kind) { messages.push({ value: text(value), kind }); const board = preservedAssistantChat || root.querySelector('.guide-chat-messages'); if (!board) return; const item = element('p', `guide-message guide-message--${kind}`, value); board.append(item); item.scrollIntoView({ block: 'end' }); }
 async function submitMessage(event) {
   event.preventDefault();
   const input = event.currentTarget.querySelector('textarea');
-  const value = input.value.trim();
+  const value = text(input?.value).trim();
   if (!value) return;
   guideState.assistant_draft = '';
   guideState.assistant_draft_origin = 'NONE';
   persistState();
   input.value = '';
   const board = preservedAssistantChat || root.querySelector('.guide-chat-messages');
+  const empty = board?.querySelector('.guide-empty-state');
+  empty?.remove();
   board.append(element('p', 'guide-message guide-message--user', value));
   await submitGuideRequest({
     value,
@@ -393,8 +529,52 @@ async function submitMessage(event) {
     }
   });
 }
-function renderAssistant(container) { const hasContext = Object.keys(guideState.roadmap).length || Object.keys(guideState.tool).length; const intro = hasContext ? experience.assistant_copy?.contextual_intro : experience.assistant_copy?.intro; container.append(element('p', 'guide-module__eyebrow', 'AI ASSISTANT'), element('h2', 'guide-module__title', experience.assistant_display_name || 'AI Assistant'), element('p', 'guide-module__description', intro || experience.empty_state_copy || 'Ask a question or continue from your roadmap and tool selections.')); const summary = renderGuideContextSummary(); if (summary) container.append(summary); const chat = element('section', 'guide-chat'); if (!preservedAssistantChat) { preservedAssistantChat = element('section', 'guide-chat-messages'); preservedAssistantChat.setAttribute('aria-live', 'polite'); if (!messages.length) { const empty = element('section', 'guide-empty-state'); empty.append(element('strong', '', hasContext ? 'Your details are ready to discuss.' : 'Start with a question, roadmap, or planning tool.'), element('p', '', hasContext ? 'Review the prepared message, edit it if needed, then send it when ready.' : (intro || experience.welcome_message || 'Tell us what you would like to plan.'))); preservedAssistantChat.append(empty); } for (const message of messages) preservedAssistantChat.append(element('p', `guide-message guide-message--${message.kind}`, message.value)); }
-  const board = preservedAssistantChat; chat.append(board); const form = element('form', 'guide-chat-form'); const input = document.createElement('textarea'); input.rows = 3; input.maxLength = 2000; input.required = true; input.value = guideState.assistant_draft; input.placeholder = experience.input_placeholder || 'Type your message'; input.setAttribute('aria-label', 'Message'); input.addEventListener('input', () => { guideState.assistant_draft = input.value.slice(0, 2000); guideState.assistant_draft_origin = 'USER'; persistState(); }); const button = element('button', 'guide-button guide-chat-form__send', experience.launcher_label || 'Send'); button.type = 'submit'; form.append(input, button); bindEnterToSubmit(input, form); form.addEventListener('submit', submitMessage); chat.append(form); container.append(chat); }
+function renderAssistant(container) {
+  const intro = experience.assistant_copy?.intro || experience.empty_state_copy || 'Ask a question or describe what you need.';
+  container.append(
+    element('p', 'guide-module__eyebrow', 'AI ASSISTANT'),
+    element('h2', 'guide-module__title', experience.assistant_display_name || 'AI Assistant'),
+    element('p', 'guide-module__description', intro)
+  );
+  const chat = element('section', 'guide-chat');
+  if (!preservedAssistantChat) {
+    preservedAssistantChat = element('section', 'guide-chat-messages');
+    preservedAssistantChat.setAttribute('aria-live', 'polite');
+    if (!messages.length) {
+      const empty = element('section', 'guide-empty-state');
+      empty.append(
+        element('strong', '', 'How can we help?'),
+        element('p', '', intro || experience.welcome_message || 'Start a conversation with our AI assistant.')
+      );
+      preservedAssistantChat.append(empty);
+    }
+    for (const message of messages) {
+      preservedAssistantChat.append(element('p', `guide-message guide-message--${message.kind}`, message.value));
+    }
+  }
+  const board = preservedAssistantChat;
+  chat.append(board);
+  const form = element('form', 'guide-chat-form');
+  const input = document.createElement('textarea');
+  input.rows = 2;
+  input.maxLength = 2000;
+  input.required = true;
+  input.value = guideState.assistant_draft || '';
+  input.placeholder = experience.input_placeholder || 'Type your message';
+  input.setAttribute('aria-label', 'Message');
+  input.addEventListener('input', () => {
+    guideState.assistant_draft = input.value.slice(0, 2000);
+    guideState.assistant_draft_origin = 'USER';
+    persistState();
+  });
+  const button = element('button', 'guide-button guide-chat-form__send', experience.launcher_label || 'Send');
+  button.type = 'submit';
+  form.append(input, button);
+  bindEnterToSubmit(input, form);
+  form.addEventListener('submit', submitMessage);
+  chat.append(form);
+  container.append(chat);
+}
 
 function renderConversationReminder(container) { if (!messages.some((message) => message.kind === 'assistant')) return; container.append(element('p', 'guide-conversation-reminder', 'Continue your conversation whenever you are ready.')); }
 let assistantReminderTimeout = null;

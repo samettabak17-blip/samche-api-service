@@ -438,7 +438,7 @@ function addGuideMemory(sessionKey, moduleOrRole, roleOrText, textOrAuth = null,
     knowledgeAuthority = textOrAuth;
   }
   if (!guideMemoryStore[sessionKey][targetModule]) guideMemoryStore[sessionKey][targetModule] = [];
-  guideMemoryStore[sessionKey][targetModule].push(stampProviderMemoryEntry({ role, parts: [{ text: text || '' }] }, knowledgeAuthority));
+  guideMemoryStore[sessionKey][targetModule].push(stampProviderMemoryEntry({ role, content: text || '', parts: [{ text: text || '' }] }, knowledgeAuthority));
   if (guideMemoryStore[sessionKey][targetModule].length > MAX_GUIDE_MEMORY) {
     guideMemoryStore[sessionKey][targetModule].splice(0, guideMemoryStore[sessionKey][targetModule].length - MAX_GUIDE_MEMORY);
   }
@@ -1222,8 +1222,7 @@ app.post("/chat", async (req, res) => {
         sessionId: userId,
     });
 
-    // Add user message to the correct memory store (for AI context)
-    // First, initialize if not present.
+    // Initialize memory store if not present
     if (!guideMemoryStore[sessionKey]) {
       guideMemoryStore[sessionKey] = {};
     }
@@ -1231,12 +1230,24 @@ app.post("/chat", async (req, res) => {
       guideMemoryStore[sessionKey][guideConversation.module] = [];
     }
 
-    addGuideMemory(sessionKey, guideConversation.module, "user", cleanText, inboxState.knowledgeAuthority ?? null);
+    // Retrieve prior conversation history for the AI provider from the specific module's memory
+    const rawMemory = guideMemoryStore[sessionKey][guideConversation.module] || [];
+    const authorityMemory = inboxState?.knowledgeAuthority
+      ? filterProviderMemoryByAuthority(rawMemory, inboxState.knowledgeAuthority)
+      : rawMemory;
 
-    // Retrieve conversation history for the AI provider from the specific module's memory
-    const rawMessages = (guideMemoryStore[sessionKey]?.[guideConversation.module] || []).map((message) => ({ role: message.role, content: message.content }));
-    const conversationHistory = rawMessages.filter((entry) => entry.role === 'user' || entry.role === 'assistant')
-      .map((entry) => ({ role: entry.role === 'user' ? 'user' : 'model', parts: [{ text: entry.content }] }));
+    const conversationHistory = authorityMemory
+      .filter((entry) => entry.role === 'user' || entry.role === 'assistant' || entry.role === 'model')
+      .map((entry) => ({
+        role: entry.role === 'assistant' || entry.role === 'model' ? 'model' : 'user',
+        parts: Array.isArray(entry.parts) && entry.parts.length > 0 && typeof entry.parts[0]?.text === 'string'
+          ? [{ text: String(entry.parts[0].text) }]
+          : [{ text: typeof entry.content === 'string' ? entry.content : String(entry.text || '') }],
+      }))
+      .filter((entry) => entry.parts[0].text.trim().length > 0);
+
+    // Record the current user message in module memory
+    addGuideMemory(sessionKey, guideConversation.module, "user", cleanText, inboxState.knowledgeAuthority ?? null);
 
     // Construct system instruction based on shared context and other relevant states
     const guideContextSummary = buildGuideSessionContextSummary({
