@@ -9,7 +9,7 @@ import { GuideExperienceError, createGuideExperienceDraft, inspectGuideExperienc
 import { GuideRecommendationError, generateGuideExperienceRecommendation } from '../services/guide-experience-recommendation-service.js';
 import { GuideThemeError, deriveAccessibleGuideTheme } from '../services/guide-theme-service.js';
 import { resolveCname } from 'node:dns/promises';
-import { GuideDomainError, activateGuideDomain, archiveGuideDomain, configuredGuideDomainIngressTarget, configuredManagedGuideDomainSuffix, createGuideDomain, listGuideDomains, managedGuideHostnameFromSlug, verifyGuideDomainDns } from '../services/guide-domain-service.js';
+import { GuideDomainError, activateGuideDomain, archiveGuideDomain, configuredGuideDomainIngressTarget, configuredManagedGuideDomainSuffix, createGuideDomain, ensureManagedGuideDomainForAssistant, listGuideDomains, managedGuideHostnameFromSlug, verifyGuideDomainDns } from '../services/guide-domain-service.js';
 import { archiveGuideDomainIngress, provisionGuideDomainIngress, resolveGuideDomainIngressStatus, verifyGuideDomainIngress } from '../services/guide-domain-ingress-service.js';
 import { issueGuidePreviewToken } from '../services/guide-preview-service.js';
 
@@ -111,6 +111,13 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/drafts/:versio
   try {
     await verifyAssistant(scope); await client.query('BEGIN');
     const version = await publishGuideExperience({ client, ...scope, versionId: req.params.versionId, actorUserId: req.user.user_id });
+    const channelResult = await client.query(
+      `SELECT channel_id FROM channel_integrations WHERE tenant_id=$1 AND assistant_id=$2 AND integration_type='SAMCHEGUIDE' AND enabled=TRUE LIMIT 1`,
+      [scope.tenantId, scope.assistantId],
+    );
+    if (channelResult.rowCount) {
+      await ensureManagedGuideDomainForAssistant({ database: client, tenantId: scope.tenantId, assistantId: scope.assistantId, channelId: channelResult.rows[0].channel_id });
+    }
     await client.query('COMMIT'); return res.json({ version, cache_key: `guide-experience:${scope.tenantId}:${scope.assistantId}:${version.version}` });
   } catch (error) { await client.query('ROLLBACK').catch(() => {}); return sendError(res, error); }
   finally { client.release(); }
@@ -123,7 +130,16 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/drafts/:versio
     const draft = await pool.query(`SELECT id, status FROM guide_experience_versions WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3`, [req.params.versionId, scope.tenantId, scope.assistantId]);
     if (!draft.rowCount || draft.rows[0].status !== 'DRAFT') return res.status(409).json({ error: 'Only a private draft can be previewed.', code: 'GUIDE_PREVIEW_DRAFT_REQUIRED' });
     const domains = await listGuideDomains({ database: pool, ...scope });
-    const activeDomain = domains.find((domain) => domain.status === 'ACTIVE');
+    let activeDomain = domains.find((domain) => domain.status === 'ACTIVE');
+    if (!activeDomain) {
+      const channelResult = await pool.query(
+        `SELECT channel_id FROM channel_integrations WHERE tenant_id=$1 AND assistant_id=$2 AND integration_type='SAMCHEGUIDE' AND enabled=TRUE LIMIT 1`,
+        [scope.tenantId, scope.assistantId],
+      );
+      if (channelResult.rowCount) {
+        activeDomain = await ensureManagedGuideDomainForAssistant({ database: pool, tenantId: scope.tenantId, assistantId: scope.assistantId, channelId: channelResult.rows[0].channel_id });
+      }
+    }
     if (!activeDomain) return res.status(409).json({ error: 'An active Guide domain is required for private preview.', code: 'GUIDE_PREVIEW_DOMAIN_REQUIRED' });
     const token = issueGuidePreviewToken({ tenantId: scope.tenantId, assistantId: scope.assistantId, versionId: req.params.versionId, actorUserId: req.user.user_id });
     return res.json({ preview_path: `/?preview=${encodeURIComponent(token)}`, hostname: activeDomain.hostname, expires_in_seconds: 600 });

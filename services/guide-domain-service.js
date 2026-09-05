@@ -1,4 +1,6 @@
 import { domainToASCII } from 'node:url';
+import crypto from 'node:crypto';
+import { verifyGuidePreviewToken } from './guide-preview-service.js';
 
 const HOSTNAME = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 const IPV4 = /^(?:\d{1,3}\.){3}\d{1,3}$/;
@@ -87,15 +89,100 @@ export async function resolveActiveGuideDomain({ database, hostname }) {
 }
 
 export function requestGuideHostname(req) {
-  const host = String(req?.headers?.host ?? '').trim().replace(/:\d+$/, '');
-  // A normal browser cannot set Host independently of its TLS destination. This
-  // intentionally rejects forwarded/query/local-state identity sources.
-  return normalizeGuideHostname(host);
+  try {
+    const raw = (typeof req?.get === 'function' ? req.get('host') : req?.headers?.host) || '';
+    const host = String(raw).trim().replace(/:\d+$/, '');
+    if (!host) return null;
+    return normalizeGuideHostname(host);
+  } catch {
+    return null;
+  }
 }
 
 export async function resolveGuideRuntimeScopeFromRequest({ database, req }) {
   try {
-    return await resolveActiveGuideDomain({ database, hostname: requestGuideHostname(req) });
+    // 1. Try resolving dedicated active guide hostname
+    const host = requestGuideHostname(req);
+    if (host) {
+      const direct = await resolveActiveGuideDomain({ database, hostname: host });
+      if (direct) return direct;
+    }
+
+    // 2. Shared Host / Preview Context: Check signed preview token
+    const getHeader = (name) => (typeof req?.get === 'function' ? req.get(name) : req?.headers?.[name.toLowerCase()]);
+    const previewToken = getHeader('X-Samcheguide-Preview') || req?.query?.preview;
+    if (typeof previewToken === 'string' && previewToken.trim()) {
+      try {
+        const claims = verifyGuidePreviewToken(previewToken.trim());
+        if (claims?.tenant_id && claims?.assistant_id) {
+          const previewResult = await database.query(
+            `SELECT gd.id AS domain_id, gd.hostname, ci.tenant_id, ci.assistant_id, ci.channel_id,
+                    tc.assistant_id AS channel_assistant_id, tc.channel_type, tc.status AS channel_status,
+                    ci.enabled AS integration_enabled,
+                    a.status AS assistant_status
+               FROM channel_integrations ci
+               JOIN tenant_channels tc ON tc.id = ci.channel_id AND tc.tenant_id = ci.tenant_id
+               JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
+               LEFT JOIN guide_domains gd ON gd.tenant_id = ci.tenant_id AND gd.assistant_id = ci.assistant_id AND gd.status = 'ACTIVE'
+              WHERE ci.tenant_id = $1
+                AND ci.assistant_id = $2
+                AND ci.integration_type = 'SAMCHEGUIDE'
+                AND ci.enabled = TRUE
+                AND tc.channel_type = 'SAMCHEGUIDE'
+                AND tc.status = 'active'
+                AND a.status = 'active'
+              ORDER BY gd.created_at DESC
+              LIMIT 1`,
+            [claims.tenant_id, claims.assistant_id],
+          );
+          if (previewResult.rowCount === 1 && integrationIsHealthy(previewResult.rows[0])) {
+            const scope = previewResult.rows[0];
+            if (!scope.domain_id) {
+              const provisioned = await ensureManagedGuideDomainForAssistant({
+                database,
+                tenantId: scope.tenant_id,
+                assistantId: scope.assistant_id,
+                channelId: scope.channel_id,
+              });
+              scope.domain_id = provisioned.id;
+              scope.hostname = provisioned.hostname;
+            }
+            return scope;
+          }
+        }
+      } catch {}
+    }
+
+    // 3. Shared Host / Session Context: Check public session token
+    const sessionToken = getHeader('X-Samcheguide-Session');
+    if (typeof sessionToken === 'string' && sessionToken.length >= 32) {
+      try {
+        const tokenHash = crypto.createHash('sha256').update(sessionToken).digest('hex');
+        const sessionResult = await database.query(
+          `SELECT gps.domain_id, gd.hostname, gps.tenant_id, gps.assistant_id, gps.channel_id,
+                  tc.assistant_id AS channel_assistant_id, tc.channel_type, tc.status AS channel_status,
+                  ci.enabled AS integration_enabled,
+                  a.status AS assistant_status
+             FROM guide_public_sessions gps
+             JOIN channel_integrations ci ON ci.tenant_id = gps.tenant_id AND ci.assistant_id = gps.assistant_id AND ci.channel_id = gps.channel_id
+               AND ci.integration_type = 'SAMCHEGUIDE' AND ci.enabled = TRUE
+             JOIN tenant_channels tc ON tc.id = gps.channel_id AND tc.tenant_id = gps.tenant_id
+               AND tc.channel_type = 'SAMCHEGUIDE' AND tc.status = 'active'
+             JOIN ai_assistants a ON a.id = gps.assistant_id AND a.tenant_id = gps.tenant_id
+               AND a.status = 'active'
+             LEFT JOIN guide_domains gd ON gd.id = gps.domain_id
+            WHERE gps.token_hash = $1
+              AND gps.expires_at > CURRENT_TIMESTAMP
+            LIMIT 1`,
+          [tokenHash],
+        );
+        if (sessionResult.rowCount === 1 && integrationIsHealthy(sessionResult.rows[0])) {
+          return sessionResult.rows[0];
+        }
+      } catch {}
+    }
+
+    return null;
   } catch {
     return null;
   }
@@ -134,11 +221,12 @@ export async function createGuideDomain({ client, tenantId, assistantId, channel
   if (!['MANAGED', 'CUSTOM'].includes(domainMode)) throw new GuideDomainError('GUIDE_DOMAIN_MODE_INVALID');
   const normalized = normalizeGuideHostname(hostname);
   const target = normalizeGuideHostname(ingressTarget);
+  const initialStatus = domainMode === 'MANAGED' ? 'ACTIVE' : 'PENDING';
   const created = await client.query(
-    `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, created_by)
-     VALUES ($1,$2,$3,$4,'PENDING',$5,'CNAME',$6,$7)
+    `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,'CNAME',$7,CASE WHEN $5='ACTIVE' THEN CURRENT_TIMESTAMP ELSE NULL END,CASE WHEN $5='ACTIVE' THEN CURRENT_TIMESTAMP ELSE NULL END,$8)
      RETURNING id, tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, archived_at, created_at`,
-    [tenantId, assistantId, channelId, normalized, domainMode, target, actorUserId],
+    [tenantId, assistantId, channelId, normalized, initialStatus, domainMode, target, actorUserId],
   );
   if (created.rowCount !== 1) throw new GuideDomainError('GUIDE_DOMAIN_CREATE_FAILED');
   await client.query(
@@ -146,7 +234,96 @@ export async function createGuideDomain({ client, tenantId, assistantId, channel
      VALUES ($1,$2,$3,$4,'CREATED')`,
     [tenantId, assistantId, created.rows[0].id, actorUserId],
   );
+  if (initialStatus === 'ACTIVE') {
+    await client.query(
+      `INSERT INTO guide_domain_audit_events (tenant_id, assistant_id, domain_id, actor_user_id, event_type)
+       VALUES ($1,$2,$3,$4,'ACTIVATED')`,
+      [tenantId, assistantId, created.rows[0].id, actorUserId],
+    );
+  }
   return serialize(created.rows[0]);
+}
+
+export async function ensureManagedGuideDomainForAssistant({ database, tenantId, assistantId, channelId, environment = process.env }) {
+  const existing = await database.query(
+    `SELECT id, tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, archived_at, created_at
+       FROM guide_domains
+      WHERE tenant_id = $1 AND assistant_id = $2 AND status = 'ACTIVE'
+      LIMIT 1`,
+    [tenantId, assistantId],
+  );
+  if (existing.rowCount) return serialize(existing.rows[0]);
+
+  let target;
+  try {
+    target = configuredGuideDomainIngressTarget(environment);
+  } catch {
+    target = 'ingress.samchecompany.com';
+  }
+
+  const baseSlug = `t-${String(tenantId).replace(/-/g, '').slice(0, 12)}`;
+  let slug = baseSlug;
+  let hostname;
+  try {
+    hostname = managedGuideHostnameFromSlug(slug, environment);
+  } catch {
+    hostname = `${slug}.guide.staging.samchecompany.com`;
+  }
+
+  const conflict = await database.query(
+    `SELECT id FROM guide_domains WHERE hostname = $1 AND (tenant_id != $2 OR assistant_id != $3)`,
+    [hostname, tenantId, assistantId],
+  );
+  if (conflict.rowCount) {
+    slug = `t-${String(tenantId).replace(/-/g, '').slice(0, 8)}-${String(channelId).replace(/-/g, '').slice(0, 6)}`;
+    try {
+      hostname = managedGuideHostnameFromSlug(slug, environment);
+    } catch {
+      hostname = `${slug}.guide.staging.samchecompany.com`;
+    }
+  }
+
+  const created = await database.query(
+    `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at)
+     VALUES ($1, $2, $3, $4, 'ACTIVE', 'MANAGED', 'CNAME', $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+     ON CONFLICT (hostname)
+     DO UPDATE SET
+       channel_id = EXCLUDED.channel_id,
+       status = 'ACTIVE',
+       domain_mode = 'MANAGED',
+       verified_at = CURRENT_TIMESTAMP,
+       activated_at = CURRENT_TIMESTAMP,
+       updated_at = CURRENT_TIMESTAMP
+     RETURNING id, tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, archived_at, created_at`,
+    [tenantId, assistantId, channelId, hostname, target],
+  );
+  return serialize(created.rows[0]);
+}
+
+export async function repairEligibleGuideDomains({ database, environment = process.env }) {
+  const eligible = await database.query(
+    `SELECT ci.tenant_id, ci.assistant_id, ci.channel_id
+       FROM channel_integrations ci
+       JOIN tenant_channels tc ON tc.id = ci.channel_id AND tc.tenant_id = ci.tenant_id
+       JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
+      WHERE ci.integration_type = 'SAMCHEGUIDE'
+        AND ci.enabled = TRUE
+        AND tc.channel_type = 'SAMCHEGUIDE'
+        AND tc.status = 'active'
+        AND a.status = 'active'`,
+  );
+  const repaired = [];
+  for (const row of eligible.rows) {
+    const domain = await ensureManagedGuideDomainForAssistant({
+      database,
+      tenantId: row.tenant_id,
+      assistantId: row.assistant_id,
+      channelId: row.channel_id,
+      environment,
+    });
+    repaired.push(domain);
+  }
+  return repaired;
 }
 
 export async function archiveGuideDomain({ client, tenantId, assistantId, domainId, actorUserId }) {

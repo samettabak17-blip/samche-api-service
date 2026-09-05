@@ -744,4 +744,4 @@ export function applyExperience(value) {
   canvas.append(navigation); shell.append(canvas); root.replaceChildren(shell); guideInitialized = true; window.clearTimeout(initializationTimeout); renderActiveModule(); resumeGuideSession();
 }
 
-fetch(`/guide/bootstrap${previewToken ? `?preview=${encodeURIComponent(previewToken)}` : ''}`, { cache: 'no-store' }).then(async (response) => { if (!response.ok) throw new Error('unavailable'); return response.json(); }).then((payload) => applyExperience(payload?.experience)).catch(showGuideError);
+fetch('/guide/bootstrap' + (previewToken ? `?preview=${encodeURIComponent(previewToken)}` : ''), { cache: 'no-store' }).then(async (response) => { if (!response.ok) throw new Error('unavailable'); return response.json(); }).then((payload) => applyExperience(payload?.experience)).catch(showGuideError);

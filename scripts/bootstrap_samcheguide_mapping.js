@@ -4,6 +4,7 @@ import {
   SAMCHEGUIDE_RUNTIME,
   isCompatibleSamcheguideRuntimeAssistant,
 } from '../services/samcheguide-runtime.js';
+import { ensureManagedGuideDomainForAssistant } from '../services/guide-domain-service.js';
 
 const { Pool } = pg;
 const connectionString = process.env.STAGING_DATABASE_URL || process.env.DATABASE_URL;
@@ -197,6 +198,7 @@ try {
     const channel = await resolveChannel(client, assistant.assistant);
     const mapping = await resolveMapping(client, assistant.assistant, channel.channel, existingMapping);
     await verifyMapping(client, assistant.assistant, channel.channel, mapping.mapping);
+    await ensureManagedGuideDomainForAssistant({ database: client, tenantId, assistantId: assistant.assistant.id, channelId: channel.channel.id });
 
     await client.query('COMMIT');
     console.log(`SAMCHEGUIDE_MAPPING: READY (assistant=${assistant.outcome}; channel=${channel.outcome}; mapping=${mapping.outcome})`);

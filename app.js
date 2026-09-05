@@ -55,7 +55,7 @@ import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext
 import { buildTenantRuntimeSystemInstruction, resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
 import { resolveChannelAssistantRuntime } from "./services/assistant-runtime-resolution-service.js";
 import { normalizeGuideExperience, resolvePublishedGuideExperience } from "./services/guide-experience-service.js";
-import { configuredManagedGuideDomainSuffix, resolveGuideRuntimeScopeFromRequest } from './services/guide-domain-service.js';
+import { configuredManagedGuideDomainSuffix, repairEligibleGuideDomains, resolveGuideRuntimeScopeFromRequest } from './services/guide-domain-service.js';
 import { getPublicGuideExperienceAsset } from "./services/guide-experience-asset-service.js";
 import { samcheguideRuntimeSessionKey } from "./services/samcheguide-runtime-session-service.js";
 import { buildTenantFollowUpRequest } from "./services/tenant-follow-up-service.js";
@@ -1128,6 +1128,7 @@ app.post("/chat", async (req, res) => {
     try {
       guideRuntimeIntegration = await resolveGuideRuntimeScope(req);
       if (!guideRuntimeIntegration) {
+        console.error('CHAT_RESPONSE_503 stage=TENANT_PERSONA_UNAVAILABLE');
         return res.status(503).json({
           error: "AI Guide assistant configuration is temporarily unavailable.",
         });
@@ -2587,6 +2588,9 @@ const PORT = process.env.PORT || 3000;
 async function startServer() {
   try {
     await runMigrations();
+    await repairEligibleGuideDomains({ database: pool }).catch((error) => {
+      console.error('GUIDE_DOMAIN_REPAIR_FAILED:', error?.message || error);
+    });
     startKnowledgeWorkers();
     customerInvitationOutboxStartup = createCustomerInvitationOutboxStartup({
       database: pool,
