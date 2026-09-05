@@ -53,6 +53,19 @@ function loadState() {
 }
 function persistState() { try { window.sessionStorage?.setItem(stateStorageKey(), JSON.stringify(guideState)); } catch {} }
 function guideContext() { return { active_module: guideState.active_module, roadmap: guideState.roadmap, tool: guideState.tool }; }
+function guideSessionPayloadState() {
+  return {
+    active_module: guideState.active_module,
+    sharedContext: guideState.shared_context || {},
+    roadmapState: {
+      category: guideState.roadmap_category || '',
+      initialGoal: guideState.roadmap_goal || '',
+      generatedAnalysis: guideState.roadmap_result || null,
+      structuredInputs: guideState.roadmap || {},
+    },
+    planningState: guideState.tool || {},
+  };
+}
 function saveSession(token) { if (!token) return; session = token; try { window.localStorage?.setItem(resumeStorageKey, session); } catch {} }
 async function resumeGuideSession() {
   if (!session || !experience) return;
@@ -287,9 +300,6 @@ function renderConversationalRoadmap(container) {
       guideState.shared_context = { ...(guideState.shared_context || {}), goal: value };
     }
 
-    guideState.roadmap_messages.push({ role: "user", content: value });
-    persistState();
-
     const empty = resultBoard.querySelector(".guide-empty-state");
     empty?.remove();
     resultBoard.append(element("p", "guide-message guide-message--user", value));
@@ -306,6 +316,7 @@ function renderConversationalRoadmap(container) {
           const aiResponseText = payload.candidates?.[0]?.content?.parts?.[0]?.text
             || (payload.guide_events || []).filter((e) => e.type === "TEXT_DELTA").map((e) => e.text).join(" ")
             || "Analysis generated.";
+          guideState.roadmap_messages.push({ role: "user", content: value });
           if (isInitialAnalyze) {
             guideState.roadmap_result = aiResponseText;
           }
@@ -501,9 +512,12 @@ async function handoffToAssistant() {
 function addMessage(value, kind) { messages.push({ value: text(value), kind }); const board = preservedAssistantChat || root.querySelector('.guide-chat-messages'); if (!board) return; const item = element('p', `guide-message guide-message--${kind}`, value); board.append(item); item.scrollIntoView({ block: 'end' }); }
 async function submitMessage(event) {
   event.preventDefault();
-  const input = event.currentTarget.querySelector('textarea');
+  const form = event.currentTarget;
+  if (form?.dataset?.submitting) return;
+  const input = form.querySelector('textarea');
   const value = text(input?.value).trim();
   if (!value) return;
+  form.dataset.submitting = 'true';
   guideState.assistant_draft = '';
   guideState.assistant_draft_origin = 'NONE';
   persistState();
@@ -512,22 +526,26 @@ async function submitMessage(event) {
   const empty = board?.querySelector('.guide-empty-state');
   empty?.remove();
   board.append(element('p', 'guide-message guide-message--user', value));
-  await submitGuideRequest({
-    value,
-    module: MODULES.AI_ASSISTANT,
-    board,
-    input,
-    submit: event.currentTarget.querySelector('button[type="submit"]'),
-    onResponse: (payload) => {
-      const aiResponseText = payload.candidates?.[0]?.content?.parts?.[0]?.text
-        || (payload.guide_events || []).filter((e) => e.type === "TEXT_DELTA").map((e) => e.text).join(" ");
-      messages.push({ value, kind: 'user' });
-      if (aiResponseText) {
-        messages.push({ value: aiResponseText, kind: 'assistant' });
+  try {
+    await submitGuideRequest({
+      value,
+      module: MODULES.AI_ASSISTANT,
+      board,
+      input,
+      submit: form.querySelector('button[type="submit"]'),
+      onResponse: (payload) => {
+        const aiResponseText = payload.candidates?.[0]?.content?.parts?.[0]?.text
+          || (payload.guide_events || []).filter((e) => e.type === "TEXT_DELTA").map((e) => e.text).join(" ");
+        messages.push({ value, kind: 'user' });
+        if (aiResponseText) {
+          messages.push({ value: aiResponseText, kind: 'assistant' });
+        }
+        syncAssistantReminder();
       }
-      syncAssistantReminder();
-    }
-  });
+    });
+  } finally {
+    delete form.dataset.submitting;
+  }
 }
 function renderAssistant(container) {
   const intro = experience.assistant_copy?.intro || experience.empty_state_copy || 'Ask a question or describe what you need.';
