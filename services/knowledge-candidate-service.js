@@ -168,7 +168,6 @@ export async function createImageKnowledgeCandidates({
           AND source.status = 'active'
           AND source.processing_status = 'READY'
           AND source.mime_type IN ('image/jpeg', 'image/png')
-          AND source.indexing_status = 'DISABLED'
           AND ($4::uuid IS NULL OR EXISTS (
                 SELECT 1 FROM knowledge_source_assistants assignment
                  WHERE assignment.tenant_id = source.tenant_id

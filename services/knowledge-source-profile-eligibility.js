@@ -9,17 +9,9 @@ export async function resolveKnowledgeSourceProfileEligibility(database, tenantI
     };
   }
 
-  let reason = 'ELIGIBLE';
-  if (!state.profileEligible) {
-      if (!state.processingReady) reason = 'PROCESSING_NOT_READY';
-      else if (!state.indexReady) reason = 'INDEXING_NOT_READY';
-      else if (!state.identityValid) reason = 'IDENTITY_INVALID';
-      else reason = 'UNKNOWN';
-  }
-
   return {
-    business_profile_eligible: reason === 'ELIGIBLE',
-    business_profile_eligibility_reason: reason,
+    business_profile_eligible: state.profileEligible,
+    business_profile_eligibility_reason: state.profileEligibilityReason,
   };
 }
 
@@ -28,4 +20,3 @@ export async function presentKnowledgeSourceWithProfileEligibility(database, ten
   const { content_hash: _contentHash, status: _status, ...publicSource } = source;
   return { ...publicSource, ...eligibility };
 }
-

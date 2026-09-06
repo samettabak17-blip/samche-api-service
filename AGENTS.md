@@ -165,3 +165,12 @@ modify files outside the authorized scope.
   migration timing, assignment timing, generation timing or coding-agent
   changes. Every root-caused defect class fixed in human acceptance must become
   permanent regression coverage.
+- Knowledge lifecycle state is derived, never duplicated as ad-hoc raw-column
+  checks: index eligibility and index readiness are distinct, and only a
+  successful normal indexing operation may establish index readiness. Candidate
+  approval eligibility and Business Profile eligibility remain separate.
+  CUSTOMER-context-bearing raw sources must never enter retrieval merely to
+  satisfy profile eligibility; only safely approved canonical knowledge follows
+  the normal durable indexing path. Historical and fresh tenant data converge
+  through the same tenant-scoped, idempotent product behavior, never through a
+  manual tenant patch.

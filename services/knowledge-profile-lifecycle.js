@@ -8,6 +8,7 @@ import {
 } from './knowledge-generation-persistence.js';
 import crypto from 'node:crypto';
 import { analyzeBusinessIdentityScope, normalizeBusinessIdentity, summarizeBusinessIdentityEvidence } from './business-identity-service.js';
+import { deriveKnowledgeSourceCanonicalState } from './knowledge-source-canonical-state.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -44,7 +45,8 @@ async function loadBusinessProfileSourceScope({ database, tenantId, businessIden
   );
   if (!identity.rows[0]) throw new KnowledgeProfileLifecycleError('KNOWLEDGE_BUSINESS_IDENTITY_NOT_FOUND', 'Business Identity was not found');
   const sources = await database.query(
-    `SELECT source.id, source.title, source.content, source.content_hash, source.source_type, source.mime_type,
+    `SELECT source.id, source.tenant_id, source.title, source.content, source.content_hash, source.source_type, source.mime_type,
+            source.enabled, source.status, source.processing_status, source.indexing_status, source.extraction_hash,
             COALESCE((
               SELECT array_agg(DISTINCT identity_link.business_identity_id)
                 FROM (
@@ -97,12 +99,13 @@ async function loadBusinessProfileSourceScope({ database, tenantId, businessIden
                 ) AS identity_link
             ), ARRAY[]::uuid[]) AS trusted_identity_ids
        FROM knowledge_base_documents source
-      WHERE source.tenant_id = $1 AND source.id = ANY($2::uuid[]) AND source.enabled = TRUE AND source.status = 'active'
-        AND processing_status = 'READY' AND indexing_status = 'READY' AND content_hash IS NOT NULL
+      WHERE source.tenant_id = $1 AND source.id = ANY($2::uuid[])
       ORDER BY source.id`,
     [tenantId, sourceIds],
   );
-  if (sources.rows.length !== sourceIds.length) throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_SOURCE_SCOPE_INVALID', 'One or more selected sources are unavailable or ineligible');
+  if (sources.rows.length !== sourceIds.length || sources.rows.some((source) => !deriveKnowledgeSourceCanonicalState(source)?.profileEligible)) {
+    throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_SOURCE_SCOPE_INVALID', 'One or more selected sources are unavailable or ineligible');
+  }
   return { business_identity: identity.rows[0], source_ids: sourceIds, sources: sources.rows };
 }
 

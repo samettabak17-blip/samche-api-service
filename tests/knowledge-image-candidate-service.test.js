@@ -112,6 +112,14 @@ test('stale or disabled image source produces no candidate', async () => {
   assert.deepEqual(result, []);
 });
 
+test('image candidate generation is independent from retrieval index readiness after extraction', async () => {
+  const db = database();
+  await createImageKnowledgeCandidates({ database: db, tenantId, sourceId, extractionHash, semanticClassifier });
+  const sourceScope = db.calls.find(({ sql }) => /FROM knowledge_source_extraction_segments/i.test(sql));
+  assert.doesNotMatch(sourceScope.sql, /source\.indexing_status\s*=\s*'DISABLED'/i);
+  assert.doesNotMatch(sourceScope.sql, /source\.indexing_status\s*=\s*'READY'/i);
+});
+
 test('redaction or evidence failure rolls back without leaving a candidate', async () => {
   const db = database({ failOnEvidence: true });
   await assert.rejects(() => createImageKnowledgeCandidates({ database: db, tenantId, assistantId, sourceId, extractionHash, semanticClassifier }), { code: 'IMAGE_EVIDENCE_WRITE_FAILED' });

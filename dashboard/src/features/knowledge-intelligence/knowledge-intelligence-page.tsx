@@ -98,6 +98,7 @@ const sourceEligibilityLabel: Record<string, string> = {
   PROCESSING_NOT_READY: "Processing is not ready",
   INDEXING_NOT_READY: "Indexing is not ready",
   CONTENT_HASH_MISSING: "Processed content is unavailable",
+  CANONICAL_CANDIDATE_APPROVAL_REQUIRED: "Approve a trusted candidate to create canonical indexed knowledge",
 };
 const hasRuntimeAssistantIdentity = (data: Record<string, unknown> | null | undefined) =>
   typeof data?.assistant_identity === "string" && Boolean(data.assistant_identity.trim());

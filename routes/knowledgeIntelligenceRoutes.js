@@ -186,7 +186,7 @@ router.get('/:tenantId/knowledge-intelligence/sources', requireTenantAccess, asy
         LIMIT 100`,
       [tenantId, requestedStatus || null]
     );
-    return res.json({ sources: result.rows.map(presentKnowledgeSourceWithProfileEligibility) });
+    return res.json({ sources: await Promise.all(result.rows.map((source) => presentKnowledgeSourceWithProfileEligibility(pool, tenantId, source))) });
   } catch (error) {
     return safeError(res, error);
   }
@@ -244,7 +244,7 @@ router.get('/:tenantId/knowledge-intelligence/sources/:sourceId', requireTenantA
       [id, tenantId]
     );
     if (!result.rowCount) return res.status(404).json({ error: 'Knowledge source not found' });
-    return res.json({ source: presentKnowledgeSourceWithProfileEligibility(result.rows[0]) });
+    return res.json({ source: await presentKnowledgeSourceWithProfileEligibility(pool, tenantId, result.rows[0]) });
   } catch (error) {
     return safeError(res, error);
   }

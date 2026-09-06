@@ -409,6 +409,23 @@ it("uses server-owned source eligibility and explains why a processed source is 
   expect(screen.getByText("No eligible READY sources are available.")).toBeVisible();
 });
 
+it("explains that a raw image requires canonical candidate approval instead of falsely reporting an indexing failure", async () => {
+  mockedApi.listKnowledgeSources.mockResolvedValue([{
+    id: "raw-image-source",
+    title: "Processed screenshot",
+    source_type: "DOCUMENT",
+    mime_type: "image/png",
+    processing_status: "READY",
+    indexing_status: "DISABLED",
+    enabled: true,
+    business_profile_eligible: false,
+    business_profile_eligibility_reason: "CANONICAL_CANDIDATE_APPROVAL_REQUIRED",
+  }]);
+  renderPage(true, "/app/tenant-a/knowledge-base/profile");
+  expect(await screen.findByRole("checkbox", { name: "Processed screenshot" })).toBeDisabled();
+  expect(screen.getByText("Not eligible: Approve a trusted candidate to create canonical indexed knowledge")).toBeVisible();
+});
+
 const conflictError = (
   identities = [
     {
