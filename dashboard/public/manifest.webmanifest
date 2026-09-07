@@ -1,0 +1,10 @@
+{
+  "name": "SamChe Dashboard",
+  "short_name": "SamChe",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#151817",
+  "theme_color": "#151817",
+  "icons": [{ "src": "/samche-logo.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" }]
+}

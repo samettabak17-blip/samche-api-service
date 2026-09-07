@@ -6,6 +6,7 @@ import { DashboardButton, DashboardField, DashboardFormMessage, DashboardPasswor
 import { useAuth } from '../auth/auth-context';
 import { onboardingApi, tenantApi } from '../dashboard/dashboard-api';
 import { useTenant } from '../tenants/tenant-context';
+import { PushNotificationControl } from './push-notification-control';
 
 type PlanCode = 'STARTER' | 'GROWTH' | 'BUSINESS' | 'ENTERPRISE';
 
@@ -65,6 +66,7 @@ export function SettingsPage() {
         {isPlatformOwner && <div className="mt-5 space-y-3 border-t border-line pt-5"><DashboardField label="Manage plan"><DashboardSelect aria-label="Manage plan" value={selectedPlanCode} onChange={(event) => setSelectedPlanCode(event.target.value as PlanCode)} disabled={tenantPlan.isLoading || planCatalog.isLoading || Boolean(tenantPlan.data?.pending_request)}>{(planCatalog.data ?? []).map((plan) => <option key={plan.code} value={plan.code}>{plan.display_name}</option>)}</DashboardSelect></DashboardField>{tenantPlan.data?.pending_request && <DashboardFormMessage tone="info">This tenant has a pending upgrade request. Resolve it before changing this tenant plan.</DashboardFormMessage>}<DashboardButton type="button" variant="primary" onClick={() => savePlan.mutate()} disabled={!planChanged || savePlan.isPending || Boolean(tenantPlan.data?.pending_request)}>{savePlan.isPending ? 'Saving plan…' : 'Save plan'}</DashboardButton>{planStatus && <DashboardFormMessage tone={planStatus === 'Plan saved.' ? 'success' : 'error'}>{planStatus}</DashboardFormMessage>}</div>}
       </section>
     </div>
+    <PushNotificationControl tenantId={selectedTenant.id} />
     <section className="panel max-w-xl p-6"><h2 className="font-semibold text-ink">Security</h2><p className="mt-1 text-sm text-stone-500">Change password</p><form onSubmit={changePassword} className="mt-5 space-y-3"><label className="auth-label block">Current password<DashboardPasswordInput aria-label="Current password" autoComplete="current-password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} placeholder="Current password" /></label><label className="auth-label block">New password<DashboardPasswordInput aria-label="New password" autoComplete="new-password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="New password" /></label><label className="auth-label block">Confirm new password<DashboardPasswordInput aria-label="Confirm new password" autoComplete="new-password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="New password" /></label><DashboardButton variant="primary" type="submit" disabled={changing}>{changing ? 'Updating…' : 'Change password'}</DashboardButton>{passwordStatus && <DashboardFormMessage tone={passwordStatus === 'Password updated.' ? 'success' : 'error'}>{passwordStatus}</DashboardFormMessage>}</form></section>
   </div>;
 }

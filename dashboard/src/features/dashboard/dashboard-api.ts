@@ -36,6 +36,16 @@ export interface InvitationValidation {
   email?: string;
 }
 
+export interface PushNotificationCapability {
+  configured: boolean;
+  publicKey: string | null;
+}
+
+export interface PushNotificationPreference {
+  push_enabled: boolean;
+  categories: Record<string, boolean>;
+}
+
 export const onboardingApi = {
   createCompanyInvitation: (payload: CompanyInvitationPayload, idempotencyKey: string) => apiClient.post<CompanyOnboardingResponse>('/api/v1/tenants/onboard', payload, { headers: { 'Idempotency-Key': idempotencyKey } }),
   listInvitationStatuses: (tenantId: string) => apiClient.get<InvitationDeliveryStatus[]>(`${tenantRoot(tenantId)}/invitations`),
@@ -47,6 +57,14 @@ export const onboardingApi = {
   validatePasswordReset: (token: string) => apiClient.post<{ status: string; email?: string }>('/api/v1/auth/password-resets/validate', { token }),
   consumePasswordReset: (payload: { token: string; password: string; confirm_password: string }) => apiClient.post<{ status: string }>('/api/v1/auth/password-resets/consume', payload),
   changePassword: (payload: { current_password: string; new_password: string; confirm_password: string }) => apiClient.post<{ status: string }>('/api/v1/auth/change-password', payload),
+};
+
+export const pushNotificationApi = {
+  getCapability: (tenantId: string) => apiClient.get<PushNotificationCapability>(`${tenantRoot(tenantId)}/push-notifications/capability`),
+  getPreference: (tenantId: string) => apiClient.get<PushNotificationPreference>(`${tenantRoot(tenantId)}/push-notifications/preference`),
+  updatePreference: (tenantId: string, pushEnabled: boolean) => apiClient.patch<PushNotificationPreference>(`${tenantRoot(tenantId)}/push-notifications/preference`, { push_enabled: pushEnabled }),
+  registerSubscription: (tenantId: string, subscription: PushSubscriptionJSON) => apiClient.put<{ subscription: { endpoint: string; enabled: boolean } }>(`${tenantRoot(tenantId)}/push-notifications/subscription`, { subscription }),
+  unsubscribe: (tenantId: string, endpoint: string) => apiClient.delete<{ unsubscribed: boolean }>(`${tenantRoot(tenantId)}/push-notifications/subscription`, { body: { endpoint } }),
 };
 
 export const tenantKeys = {

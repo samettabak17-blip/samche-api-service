@@ -14,6 +14,11 @@ import {
   PLATFORM_CAPABILITY_MANIFEST_VERSION,
   validatePlatformCapabilityManifest,
 } from '../services/platform-capability-registry.js';
+import {
+  createPushNotificationIntent,
+  processPushNotificationOutbox,
+  registerPushSubscription,
+} from '../services/push-notification-service.js';
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error('FRESH_TENANT_GOLDEN_PATH_REQUIRES_TEST_DATABASE_URL');
@@ -91,6 +96,10 @@ async function provisionedState(tenantId) {
 after(async () => {
   try {
     if (tenantIds.length) {
+      await database.query('DELETE FROM push_notification_outbox WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
+      await database.query('DELETE FROM push_notification_intents WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
+      await database.query('DELETE FROM push_notification_subscriptions WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
+      await database.query('DELETE FROM push_notification_preferences WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
       await database.query('DELETE FROM owner_onboarding_idempotency WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
       await database.query('DELETE FROM human_support_escalation_levels WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
       await database.query('DELETE FROM human_support_escalation_policies WHERE tenant_id = ANY($1::uuid[])', [tenantIds]);
@@ -199,4 +208,41 @@ test('cumulative old-tenant and two-fresh-tenant provisioning parity is canonica
     [email('admin-a'), freshB.tenant.id, email('admin-b'), freshA.tenant.id],
   );
   assert.equal(crossTenant.rows[0].visible, 0);
+
+  const freshAUser = await database.query(`SELECT id FROM users WHERE email_normalized=$1`, [email('admin-a')]);
+  const freshBUser = await database.query(`SELECT id FROM users WHERE email_normalized=$1`, [email('admin-b')]);
+  await registerPushSubscription({
+    database,
+    tenantId: freshA.tenant.id,
+    userId: freshAUser.rows[0].id,
+    subscription: { endpoint: `https://push.example.test/${runTag}/fresh-a`, keys: { p256dh: 'fixture-key-a', auth: 'fixture-auth-a' } },
+  });
+  await registerPushSubscription({
+    database,
+    tenantId: freshB.tenant.id,
+    userId: freshBUser.rows[0].id,
+    subscription: { endpoint: `https://push.example.test/${runTag}/fresh-b`, keys: { p256dh: 'fixture-key-b', auth: 'fixture-auth-b' } },
+  });
+  await createPushNotificationIntent({
+    database,
+    tenantId: freshA.tenant.id,
+    eventId: `fresh-push-${runTag}`,
+    eventType: 'REVIEW_REQUIRED',
+    deepLink: `/app/${freshA.tenant.id}/knowledge`,
+    recipientUserIds: [freshAUser.rows[0].id],
+  });
+  const pushDelivery = await processPushNotificationOutbox({
+    database,
+    tenantId: freshA.tenant.id,
+    deliver: async () => ({ status: 'DELIVERED' }),
+  });
+  assert.equal(pushDelivery.delivered, 1);
+  const pushIsolation = await database.query(
+    `SELECT tenant_id, count(*)::integer AS rows
+       FROM push_notification_outbox
+      WHERE tenant_id = ANY($1::uuid[])
+      GROUP BY tenant_id ORDER BY tenant_id`,
+    [[freshA.tenant.id, freshB.tenant.id]],
+  );
+  assert.deepEqual(pushIsolation.rows, [{ tenant_id: freshA.tenant.id, rows: 1 }]);
 });

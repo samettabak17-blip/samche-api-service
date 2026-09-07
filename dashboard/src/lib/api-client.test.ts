@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from './api-client';
 import { session } from './session';
+import { pushNotificationApi } from '../features/dashboard/dashboard-api';
 
 describe('apiClient', () => {
   const apiBaseUrl = 'https://api.example.test';
@@ -71,5 +72,20 @@ describe('apiClient', () => {
     }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, expect.any(String), expect.objectContaining({ method: 'DELETE' }));
   });
-});
 
+  it('sends authenticated JSON patch requests for explicit preference changes', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', apiBaseUrl);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ push_enabled: true }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await apiClient.patch('/api/v1/tenants/tenant/push-notifications/preference', { push_enabled: true });
+    expect(fetchMock).toHaveBeenCalledWith('https://api.example.test/api/v1/tenants/tenant/push-notifications/preference', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ push_enabled: true }) }));
+  });
+
+  it('scopes push capability lookup to the authenticated tenant route', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', apiBaseUrl);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ configured: false, publicKey: null }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await pushNotificationApi.getCapability('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    expect(fetchMock).toHaveBeenCalledWith('https://api.example.test/api/v1/tenants/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/push-notifications/capability', expect.objectContaining({ method: 'GET' }));
+  });
+});

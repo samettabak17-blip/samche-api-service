@@ -15,6 +15,7 @@ import { deliverWhatsAppText, whatsappHttpsAgent } from "./services/whatsapp-del
 import { verifyWhatsAppSignature } from "./middleware/whatsappSignature.js";
 import authRoutes from "./routes/authRoutes.js";
 import tenantRoutes from "./routes/tenantRoutes.js";
+import pushNotificationRoutes from './routes/pushNotificationRoutes.js';
 import dashboardRoutes from "./routes/dashboardRoutes.js";
 import crmRoutes from "./routes/crmRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
@@ -25,6 +26,8 @@ import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.j
 import { claimDueCustomerSupportLifecycle, claimDueHumanSupportEscalations, requestCustomerHumanSupport } from "./services/human-support-service.js";
 import { processHumanSupportNotificationOutbox } from './services/human-support-notification-outbox-service.js';
 import { resolveHumanSupportRecipients } from './services/human-support-recipient-service.js';
+import { enqueueHumanHandoffPushNotification, processPushNotificationOutbox } from './services/push-notification-service.js';
+import { createWebPushDeliveryAdapter } from './services/web-push-delivery-adapter.js';
 import { processDueContextualFollowUps, scheduleContextualFollowUp } from './services/durable-follow-up-service.js';
 import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
 import { summarizeWhatsAppHumanSupportTopic } from './services/whatsapp-human-support-policy-service.js';
@@ -316,6 +319,7 @@ app.use('/guide', async (req, res, next) => {
 
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/tenants", tenantRoutes);
+app.use('/api/v1/tenants', pushNotificationRoutes);
 app.use("/api/v1/tenants", conversationRoutes);
 app.use("/api/v1/tenants", knowledgeIntelligenceRoutes);
 app.use("/api/v1/tenants", guideExperienceRoutes);
@@ -797,6 +801,15 @@ async function processContextualFollowUpJobs() {
       });
       return { delivered: true };
     },
+  });
+}
+
+async function processConfiguredPushNotifications() {
+  const pushAdapter = await createWebPushDeliveryAdapter();
+  if (!pushAdapter) return { status: 'NOT_CONFIGURED' };
+  return processPushNotificationOutbox({
+    database: pool,
+    deliver: (input) => pushAdapter.deliver(input),
   });
 }
 
@@ -2334,15 +2347,24 @@ cron.schedule("* * * * *", async () => {
       await processHumanSupportNotificationOutbox({
         database: pool,
         resolveRecipients: (input) => resolveHumanSupportRecipients({ database: pool, ...input }),
-        deliver: async ({ recipients, tenantId }) => {
-          // The durable, provider-neutral boundary is ready. A real closed-browser
-          // phone transport requires a tenant-approved external provider setup.
-          console.warn('HUMAN_SUPPORT_NOTIFICATION_TRANSPORT_UNCONFIGURED tenant=' + String(tenantId).slice(0, 8) + ' recipients=' + recipients.length);
-          return { retryable: true };
+        deliver: async ({ recipients, tenantId, conversationId, outboxId }) => {
+          await enqueueHumanHandoffPushNotification({
+            database: pool,
+            tenantId,
+            conversationId,
+            handoffOutboxId: outboxId,
+            recipients,
+          });
+          return { status: 'DELIVERED' };
         },
       });
     } catch (error) {
       console.error('HUMAN_SUPPORT_NOTIFICATION_WORKER status=FAIL reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    }
+    try {
+      await processConfiguredPushNotifications();
+    } catch (error) {
+      console.error('PUSH_NOTIFICATION_WORKER status=FAIL reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     }
     try {
       await processContextualFollowUpJobs();
