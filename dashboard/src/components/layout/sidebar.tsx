@@ -10,7 +10,7 @@ import { Modal } from '../ui/modal';
 
 interface SidebarProps { tenantId: string; tenantName: string; tenantRole: TenantRole | 'OWNER' | undefined; email: string; onLogout(): void; onNavigate(): void; }
 
-const navigation = [
+export const CANONICAL_NAVIGATION = [
   { label: 'Overview', suffix: '/overview', icon: LayoutDashboard },
   { label: 'AI Assistants', suffix: '/assistants', icon: Bot },
   { label: 'Channels', suffix: '/channels', icon: Cable },
@@ -23,13 +23,18 @@ const navigation = [
   { label: 'Settings', suffix: '/settings', icon: Settings },
 ];
 
-const groups = [
+export const CANONICAL_GROUPS = [
   { title: 'MAIN', labels: ['Overview'] },
   { title: 'AI SOLUTIONS', labels: ['AI Assistants', 'Channels', 'Guide Experience', 'Knowledge Intelligence', 'Knowledge Base'] },
   { title: 'CUSTOMER ENGAGEMENT', labels: ['Leads', 'Pipeline'] },
   { title: 'OPERATIONS', labels: ['Team'] },
   { title: 'SETTINGS', labels: ['Settings'] },
 ];
+
+const navigation = CANONICAL_NAVIGATION;
+const groups = CANONICAL_GROUPS;
+
+
 
 export function workspaceAccessCopy(tenantRole: TenantRole | 'OWNER' | undefined) {
   if (tenantRole === 'OWNER') return { label: 'ADMIN', detail: 'FULL ACCESS' };
@@ -49,7 +54,7 @@ function ConversationNavigation({ tenantId, active, open, onToggle, onNavigate }
         { label: 'WhatsApp', route: 'whatsapp', icon: MessageCircle },
         { label: 'Web Chatbot', route: 'web-chat', icon: MessageCircle },
         { label: 'AI Guide', route: 'guide', icon: Bot },
-      ].map(({ label, route, icon: Icon }) => <NavLink key={route} to={base + '/' + route} onClick={onNavigate} className={({ isActive }) => 'flex items-center gap-2 rounded-md px-3 py-2 text-[13px] font-medium transition ' + (isActive ? 'bg-signal/15 text-red-100' : 'text-stone-400 hover:bg-white/[0.04] hover:text-white')}><Icon aria-hidden="true" size={15} />{label}</NavLink>)
+      ].map(({ label, route, icon: Icon }) => <NavLink key={route} to={base + '/' + route} onClick={onNavigate} className={({ isActive }) => 'flex min-h-[38px] items-center gap-2 rounded-md px-3 py-2 text-[13px] font-medium transition ' + (isActive ? 'bg-signal/15 text-red-100' : 'text-stone-400 hover:bg-white/[0.04] hover:text-white')}><Icon aria-hidden="true" size={15} />{label}</NavLink>)
     }</div>}
   </div>;
 }
@@ -69,17 +74,17 @@ export function Sidebar({ tenantId, tenantName, tenantRole, email, onLogout, onN
   const upgrade = useMutation({ mutationFn: () => tenantApi.requestPlanUpgrade(tenantId, requestedPlan), onSuccess: () => { void plan.refetch(); setUpgradeOpen(true); } });
   const availableUpgrades = (catalog.data ?? []).filter((item) => item.rank > (plan.data?.rank ?? Number.MAX_SAFE_INTEGER));
 
-  return <aside className="flex h-full w-full flex-col border-r border-line/80 bg-shell/95 px-2.5 py-5 text-white">
-    <div className="mb-6 px-2.5"><img src={samcheLogo} alt="SamChe Company LLC" className="mx-auto h-32 w-full max-w-full object-contain object-center" /><p className="mt-2 text-center text-[10px] font-semibold uppercase tracking-[0.24em] text-gold">AI Platform</p></div>
-    <div className="glass-surface mb-6 rounded-xl px-3 py-3"><p className="truncate text-sm font-medium" title={tenantName}>{tenantName}</p><p className="mt-1 text-xs text-stone-400">{isAgent ? 'Read-only access' : tenantRole ?? 'Workspace access'}</p></div>
-    <nav aria-label="Dashboard navigation" className="space-y-4">
+  return <aside className="flex h-full w-full flex-col border-r border-line/80 bg-shell/95 px-2.5 pt-[max(1.25rem,env(safe-area-inset-top,1.25rem))] pb-[max(1.25rem,env(safe-area-inset-bottom,1.25rem))] text-white min-h-0 overflow-y-auto overscroll-y-contain subtle-scrollbar">
+    <div className="mb-6 px-2.5 shrink-0"><img src={samcheLogo} alt="SamChe Company LLC" className="mx-auto h-32 w-full max-w-full object-contain object-center" /><p className="mt-2 text-center text-[10px] font-semibold uppercase tracking-[0.24em] text-gold">AI Platform</p></div>
+    <div className="glass-surface mb-6 rounded-xl px-3 py-3 shrink-0"><p className="truncate text-sm font-medium" title={tenantName}>{tenantName}</p><p className="mt-1 text-xs text-stone-400">{isAgent ? 'Read-only access' : tenantRole ?? 'Workspace access'}</p></div>
+    <nav aria-label="Dashboard navigation" className="space-y-4 shrink-0">
       {groups.map((group) => <section key={group.title}>
         <p className="mb-2 px-3 text-[10px] font-semibold tracking-[0.16em] text-stone-500">{group.title}</p>
         {group.title === 'CUSTOMER ENGAGEMENT' && <ConversationNavigation tenantId={tenantId} active={conversationRouteActive} open={conversationsOpen} onToggle={() => setConversationsOpen((value) => !value)} onNavigate={onNavigate} />}
         {navigation.filter((item) => group.labels.includes(item.label)).map(({ label, suffix, icon: Icon }) => <NavLink key={suffix} to={'/app/' + tenantId + suffix} onClick={onNavigate} className={({ isActive }) => 'nav-link ' + (isActive ? 'nav-link-active' : '')}><Icon aria-hidden="true" size={18} strokeWidth={1.8} />{label}</NavLink>)}
       </section>)}
     </nav>
-    <div className="mt-auto border-t border-line/80 pt-4">
+    <div className="mt-auto border-t border-line/80 pt-4 shrink-0">
       {tenantRole !== 'OWNER' && plan.data && <div className="mb-3 rounded-xl border border-gold/25 bg-[linear-gradient(145deg,rgba(23,28,38,.94),rgba(10,14,21,.94))] px-3 py-3">
         <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gold">Current plan</p>
         <p className="mt-1 text-sm font-semibold text-white">{plan.data.display_name}</p>
@@ -89,10 +94,10 @@ export function Sidebar({ tenantId, tenantName, tenantRole, email, onLogout, onN
       <div className="rounded-xl border border-signal/30 bg-[radial-gradient(circle_at_16%_18%,rgba(212,33,41,.2),transparent_8rem),rgba(48,16,24,.58)] px-3 py-3 shadow-[0_12px_28px_rgba(0,0,0,.18)]">
         <p className="text-[10px] font-semibold tracking-[0.18em] text-signal">{access.label}</p>
         <p className="mt-1 text-sm font-semibold text-white">{access.detail}</p>
-        {tenantRole === 'OWNER' && <Link to={'/app/' + tenantId + '/settings'} onClick={onNavigate} className="mt-3 flex w-full items-center justify-center rounded-lg border border-signal/35 bg-black/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-signal hover:shadow-signal">Manage Plan</Link>}
+        {tenantRole === 'OWNER' && <Link to={'/app/' + tenantId + '/settings'} onClick={onNavigate} className="mt-3 flex min-h-[38px] w-full items-center justify-center rounded-lg border border-signal/35 bg-black/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-signal hover:shadow-signal">Manage Plan</Link>}
       </div>
       <p className="mt-3 truncate text-xs text-stone-400" title={email}>{email}</p>
-      <button type="button" onClick={onLogout} className="mt-3 w-full rounded-lg border border-line bg-elevated/50 px-3 py-2 text-left text-sm text-stone-400 transition hover:border-signal/30 hover:bg-signal/10 hover:text-white">Sign out</button>
+      <button type="button" onClick={onLogout} className="mt-3 flex min-h-[40px] w-full items-center rounded-lg border border-line bg-elevated/50 px-3 py-2 text-left text-sm text-stone-400 transition hover:border-signal/30 hover:bg-signal/10 hover:text-white">Sign out</button>
       <Modal open={upgradeOpen} title="Request plan upgrade" onClose={() => { if (!upgrade.isPending) setUpgradeOpen(false); }} className="max-w-md">
         {plan.data?.pending_request ? <div className="mt-5 space-y-4"><p className="text-sm text-stone-300">Your plan will not change until a Platform Super Admin approves this request.</p><dl className="rounded-xl border border-gold/25 bg-elevated/70 p-4 text-sm"><div><dt className="dashboard-helper text-xs">Requested plan</dt><dd className="mt-1 font-semibold text-white">{catalog.data?.find((item) => item.code === plan.data?.pending_request?.requested_plan_code)?.display_name ?? plan.data.pending_request.requested_plan_code}</dd></div><div className="mt-3"><dt className="dashboard-helper text-xs">Status</dt><dd className="mt-1 font-semibold text-gold">Pending approval</dd></div></dl><div className="flex justify-end"><DashboardButton type="button" variant="ghost" onClick={() => setUpgradeOpen(false)}>Close</DashboardButton></div></div> : <form className="mt-5 space-y-4" onSubmit={(event) => { event.preventDefault(); if (requestedPlan) upgrade.mutate(); }}>
           <p className="text-sm text-stone-300">Your plan will not change until a Platform Super Admin approves this request.</p>

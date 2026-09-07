@@ -15,10 +15,16 @@
 }
 
 * { box-sizing: border-box; }
+html {
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+}
 body {
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at 82% -12%, rgba(212, 33, 41, 0.11), transparent 30rem),
     radial-gradient(circle at 15% 85%, rgba(15, 88, 132, 0.10), transparent 32rem),
@@ -71,10 +77,10 @@ button.bg-ink:hover { background: #b81920; }
   .page-title { @apply text-2xl font-semibold tracking-tight text-ink sm:text-3xl; }
   .eyebrow { @apply text-[10px] font-semibold uppercase tracking-[0.22em] text-signal; }
   .dashboard-section-label { @apply text-[10px] font-semibold uppercase tracking-[0.16em] text-stone-500; }
-  .nav-link { @apply flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium text-stone-400 transition hover:bg-signal/10 hover:text-white; }
+  .nav-link { @apply flex min-h-[40px] items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium text-stone-400 transition hover:bg-signal/10 hover:text-white; }
   .nav-link-active { @apply border border-signal/35 bg-gradient-to-r from-signal to-[#b31620] text-white shadow-[0_10px_24px_rgba(212,33,41,0.20)]; }
   .icon-orb { @apply grid h-10 w-10 place-items-center rounded-xl border border-white/[0.06] bg-white/[0.035]; }
-  .subtle-scrollbar { scrollbar-color: #26364a transparent; scrollbar-width: thin; }
+  .subtle-scrollbar { scrollbar-color: #26364a transparent; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
   .subtle-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
   .subtle-scrollbar::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: #26364a; background-clip: padding-box; }
   .dashboard-field-label { color: #dee6f1; }

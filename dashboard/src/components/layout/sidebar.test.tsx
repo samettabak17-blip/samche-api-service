@@ -69,4 +69,24 @@ describe('workspace access presentation', () => {
     const managePlan = screen.getByRole('link', { name: 'Manage Plan' });
     expect(managePlan.getAttribute('href')).toBe('/app/tenant-owner/settings');
   });
+
+  it('renders all canonical navigation links including Settings for navigation to Phone Notifications', () => {
+    renderSidebar(
+      <MemoryRouter initialEntries={['/app/tenant-admin/overview']}>
+        <Sidebar tenantId="tenant-admin" tenantName="Admin tenant" tenantRole="ADMIN" email="admin@samche.test" onLogout={() => undefined} onNavigate={() => undefined} />
+      </MemoryRouter>
+    );
+    expect(screen.getByRole('link', { name: 'Overview' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'AI Assistants' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Channels' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Guide Experience' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Knowledge Base' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Knowledge Intelligence' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Leads' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Pipeline' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Team' })).toBeTruthy();
+    const settingsLink = screen.getByRole('link', { name: 'Settings' });
+    expect(settingsLink).toBeTruthy();
+    expect(settingsLink.getAttribute('href')).toBe('/app/tenant-admin/settings');
+  });
 });

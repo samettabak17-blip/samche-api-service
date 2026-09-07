@@ -261,7 +261,7 @@ export function useLiveSupportAttention() {
 export function GlobalLiveSupportIndicator({ tenantId }: { tenantId: string }) {
   const { requestedCount, muted, audioState, setMuted } = useLiveSupportAttention();
   if (requestedCount < 1) return null;
-  return <div role="status" className="mx-auto flex w-full max-w-7xl items-center justify-between gap-3 border-b border-red-400/40 bg-red-500/10 px-4 py-2 text-sm text-red-100 sm:px-7 lg:px-10">
+  return <div role="status" className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-2.5 border-b border-red-400/40 bg-red-500/10 px-4 py-2 text-sm text-red-100 sm:gap-3 sm:px-7 lg:px-10">
     <Link to={'/app/' + tenantId + '/conversations'} className="inline-flex items-center gap-3 font-semibold">
       <span className="h-2.5 w-2.5 rounded-full bg-red-400 motion-safe:animate-pulse" />
       <span className="tracking-[0.12em]">LIVE SUPPORT</span>

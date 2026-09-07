@@ -91,13 +91,13 @@ export function PushNotificationControl({ tenantId }: { tenantId: string }) {
 
   const canEnable = state === 'ready' && configured && !deviceSubscribed;
   const canDisable = state === 'enabled' && configured && deviceSubscribed;
-  return <section className="panel max-w-xl p-6" aria-label="Phone notifications">
+  return <section className="panel max-w-xl p-4 sm:p-6" aria-label="Phone notifications">
     <h2 className="font-semibold text-ink">Phone notifications</h2>
     <p className="mt-1 text-sm text-stone-500">Receive attention-worthy updates on this device.</p>
-    <p className="mt-4 text-sm font-medium text-ink" role="status">{state === 'loading' ? 'Checking notification availability…' : label}</p>
+    <p className="mt-4 text-sm font-medium text-ink break-words" role="status">{state === 'loading' ? 'Checking notification availability…' : label}</p>
     <div className="mt-4 flex flex-wrap gap-3">
-      {canEnable && <DashboardButton type="button" variant="primary" onClick={() => { void enable(); }}>Enable phone notifications</DashboardButton>}
-      {canDisable && <DashboardButton type="button" variant="secondary" onClick={() => { void disable(); }}>Disable phone notifications</DashboardButton>}
+      {canEnable && <DashboardButton type="button" variant="primary" className="max-w-full whitespace-normal text-center h-auto min-h-10 py-2.5 px-4" onClick={() => { void enable(); }}>Enable phone notifications</DashboardButton>}
+      {canDisable && <DashboardButton type="button" variant="secondary" className="max-w-full whitespace-normal text-center h-auto min-h-10 py-2.5 px-4" onClick={() => { void disable(); }}>Disable phone notifications</DashboardButton>}
     </div>
     {message && <DashboardFormMessage tone="error">{message}</DashboardFormMessage>}
   </section>;
