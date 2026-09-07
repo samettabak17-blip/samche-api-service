@@ -44,6 +44,11 @@ async function loadBusinessProfileSourceScope({ database, tenantId, businessIden
     [businessIdentityId, tenantId],
   );
   if (!identity.rows[0]) throw new KnowledgeProfileLifecycleError('KNOWLEDGE_BUSINESS_IDENTITY_NOT_FOUND', 'Business Identity was not found');
+  const identityDirectory = await database.query(
+    `SELECT id, display_name, normalized_identity FROM business_identities
+      WHERE tenant_id = $1 AND status = 'ACTIVE'`,
+    [tenantId],
+  );
   const sources = await database.query(
     `SELECT source.id, source.tenant_id, source.title, source.content, source.content_hash, source.source_type, source.mime_type,
             source.enabled, source.status, source.processing_status, source.indexing_status, source.extraction_hash,
@@ -106,7 +111,50 @@ async function loadBusinessProfileSourceScope({ database, tenantId, businessIden
   if (sources.rows.length !== sourceIds.length || sources.rows.some((source) => !deriveKnowledgeSourceCanonicalState(source)?.profileEligible)) {
     throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_SOURCE_SCOPE_INVALID', 'One or more selected sources are unavailable or ineligible');
   }
-  return { business_identity: identity.rows[0], source_ids: sourceIds, sources: sources.rows };
+  return { business_identity: identity.rows[0], business_identity_directory: identityDirectory.rows, source_ids: sourceIds, sources: sources.rows };
+}
+
+function displayIdentityComparisonKey(value) {
+  return normalizeBusinessIdentity(value)
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '');
+}
+
+function canonicalIdentityForEvidence({ scope, evidence }) {
+  if (evidence.business_identity_id) return String(evidence.business_identity_id);
+  const comparisonKey = displayIdentityComparisonKey(evidence.detected_identity);
+  if (!comparisonKey) return null;
+  const matches = scope.business_identity_directory.filter((identity) =>
+    displayIdentityComparisonKey(identity.normalized_identity || identity.display_name) === comparisonKey,
+  );
+  return matches.length === 1 ? String(matches[0].id) : null;
+}
+
+function canonicalizeBusinessProfileIdentityAnalysis({ scope, evidence }) {
+  const canonicalEvidence = evidence.map((item) => ({
+    ...item,
+    business_identity_id: canonicalIdentityForEvidence({ scope, evidence: item }),
+  }));
+  const resolvedEvidence = canonicalEvidence.filter((item) => item.normalized_identity && item.confidence >= 0.7);
+  const canonicalIds = [...new Set(resolvedEvidence.map((item) => item.business_identity_id).filter(Boolean))];
+  const everySourceHasOneCanonicalIdentity = canonicalEvidence.length > 0
+    && canonicalEvidence.length === resolvedEvidence.length
+    && canonicalEvidence.every((item) => item.business_identity_id);
+  const status = everySourceHasOneCanonicalIdentity && canonicalIds.length === 1
+    && canonicalIds[0] === String(scope.business_identity.id)
+    ? 'RESOLVED'
+    : 'IDENTITY_RESOLUTION_REQUIRED';
+  const identities = canonicalIds.map((identityId) => {
+    const identity = scope.business_identity_directory.find((item) => String(item.id) === identityId);
+    const identityEvidence = canonicalEvidence.filter((item) => item.business_identity_id === identityId);
+    return {
+      business_identity_id: identityId,
+      detected_identity: identity?.display_name || identityEvidence[0]?.detected_identity || 'unknown',
+      normalized_identity: identity?.normalized_identity || identityEvidence[0]?.normalized_identity || null,
+      source_ids: identityEvidence.map((item) => item.source_id),
+    };
+  });
+  return { status, identities, evidence: canonicalEvidence };
 }
 
 function uniqueTrustedIdentityIds(source) {
@@ -144,6 +192,7 @@ function trustedProvenance(scope, businessIdentityId) {
         confidence: 1,
         safe_evidence: 'Trusted source provenance',
         resolution_origin: 'PROVENANCE_INHERITED',
+        business_identity_id: String(businessIdentityId),
       });
     } else {
       conflicting.push({
@@ -180,12 +229,7 @@ async function resolveBusinessIdentityAnalysis({ database, provider, tenantId, b
     };
   }
   if (!provenance.unresolved.length) {
-    return {
-      status: 'RESOLVED',
-      identities: [{ detected_identity: scope.business_identity.display_name, normalized_identity: scope.business_identity.normalized_identity || normalizeBusinessIdentity(scope.business_identity.display_name), source_ids: provenance.inherited.map((item) => item.source_id) }],
-      evidence: provenance.inherited,
-      persistable_evidence: [],
-    };
+    return { ...canonicalizeBusinessProfileIdentityAnalysis({ scope, evidence: provenance.inherited }), persistable_evidence: [] };
   }
   const existing = await database.query(
     `SELECT evidence.source_id, source.title AS source_title, evidence.content_hash, evidence.detected_identity,
@@ -204,7 +248,7 @@ async function resolveBusinessIdentityAnalysis({ database, provider, tenantId, b
   } else {
     analysis = await analyzeBusinessIdentityScope({ provider, sources: provenance.unresolved });
   }
-  const combined = summarizeBusinessIdentityEvidence([...provenance.inherited, ...analysis.evidence]);
+  const combined = canonicalizeBusinessProfileIdentityAnalysis({ scope, evidence: [...provenance.inherited, ...analysis.evidence] });
   combined.evidence = combined.evidence.map((item) => ({
     ...item,
     resolution_origin: provenance.inherited.some((inherited) => inherited.source_id === item.source_id)
@@ -295,9 +339,7 @@ export async function analyzeBusinessProfileSourceScope({ database, provider, te
   if (typeof provider?.generateBusinessIdentityAnalysis !== 'function') throw new KnowledgeProfileLifecycleError('KNOWLEDGE_PROFILE_GENERATION_UNAVAILABLE', 'Business Profile generation is unavailable');
   const scope = await loadBusinessProfileSourceScope({ database, tenantId, businessIdentityId, sourceIds });
   const analysis = await resolveBusinessIdentityAnalysis({ database, provider, tenantId, businessIdentityId, scope });
-  const selectedIdentity = scope.business_identity.normalized_identity || normalizeBusinessIdentity(scope.business_identity.display_name);
-  const status = analysis.status === 'RESOLVED' && analysis.identities[0]?.normalized_identity === selectedIdentity ? 'RESOLVED' : 'IDENTITY_RESOLUTION_REQUIRED';
-  return { status, business_identity: scope.business_identity, source_ids: sourceIds, identities: analysis.identities, evidence: analysis.evidence, sources: scope.sources };
+  return { status: analysis.status, business_identity: scope.business_identity, source_ids: sourceIds, identities: analysis.identities, evidence: analysis.evidence, sources: scope.sources };
 }
 
 export async function generateBusinessProfileVersion({ database, provider, tenantId, requestedBy, businessIdentityId, sourceIds, expectedFingerprint = null }) {
@@ -331,9 +373,7 @@ export async function generateBusinessProfileVersion({ database, provider, tenan
       stage: runStage, promptCharacterCount: 0, sourceCount: baseScope.sources.length });
     try {
     const analysis = await resolveBusinessIdentityAnalysis({ database: generationDatabase, provider, tenantId, businessIdentityId, scope: baseScope });
-    const selectedIdentity = baseScope.business_identity.normalized_identity || normalizeBusinessIdentity(baseScope.business_identity.display_name);
-    const status = analysis.status === 'RESOLVED' && analysis.identities[0]?.normalized_identity === selectedIdentity ? 'RESOLVED' : 'IDENTITY_RESOLUTION_REQUIRED';
-    if (status !== 'RESOLVED') {
+    if (analysis.status !== 'RESOLVED') {
       throw new KnowledgeProfileLifecycleError('IDENTITY_RESOLUTION_REQUIRED', 'Selected sources contain unresolved or conflicting company identities', { identities: analysis.identities, evidence: analysis.evidence });
     }
     const provenance = { ...baseProvenance, sources: analysis.evidence };

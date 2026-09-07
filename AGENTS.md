@@ -184,3 +184,10 @@ modify files outside the authorized scope.
   assignment must converge eligible unapproved provenance without duplicating
   audit history. Historical restoration may use only one unambiguous, same-tenant
   authoritative assignment trail and must otherwise fail closed.
+- Once a Business Identity has been resolved, its tenant-scoped canonical ID is
+  authoritative for domain equality, eligibility, authorization, conflict
+  detection, and lifecycle decisions. Display names are presentation and
+  evidence-explanation data only; they may support a bounded, unambiguous
+  resolution step but must never override a contradictory canonical ID or become
+  a parallel frontend source of identity truth. PostgreSQL-backed identity and
+  provenance decisions require disposable real-PostgreSQL regression coverage.

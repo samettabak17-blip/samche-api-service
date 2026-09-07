@@ -8,6 +8,7 @@ import {
   convergeImageCandidateIdentityProvenance,
 } from '../services/knowledge-candidate-service.js';
 import { assignKnowledgeSourceBusinessIdentity } from '../services/knowledge-source-business-identity-service.js';
+import { analyzeBusinessProfileSourceScope } from '../services/knowledge-profile-lifecycle.js';
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error('IMAGE_PROVENANCE_POSTGRES_REQUIRES_TEST_DATABASE_URL');
@@ -188,6 +189,62 @@ test('real PostgreSQL handles the historical missing-link shape and converges on
     );
     assert.equal(persisted.rows.filter((row) => row.business_identity_id !== null).length, 1);
     assert.equal(persisted.rows.find((row) => row.candidate_id === historical.candidateId).business_identity_id, identities.rows[0].id);
+  } finally {
+    await client.query('ROLLBACK').catch(() => {});
+    client.release();
+  }
+});
+
+test('real PostgreSQL resolves trusted canonical sources and Unicode display evidence to one Business Identity ID', async () => {
+  const client = await database.connect();
+  try {
+    await client.query('BEGIN');
+    const tenant = await client.query(
+      `INSERT INTO tenants (name, plan_code) VALUES ('Profile identity PostgreSQL fixture', 'STARTER') RETURNING id`,
+    );
+    const identity = await client.query(
+      `INSERT INTO business_identities (tenant_id, display_name, normalized_identity)
+       VALUES ($1, 'yesil vadi peyzaj', 'yesil vadi peyzaj') RETURNING id`,
+      [tenant.rows[0].id],
+    );
+    const sources = [];
+    for (let index = 0; index < 5; index += 1) {
+      const source = await client.query(
+        `INSERT INTO knowledge_base_documents (
+           tenant_id, title, content, source_type, original_filename, mime_type,
+           content_hash, processing_status, indexing_status, enabled
+         ) VALUES ($1, $2, 'fixture', 'DOCUMENT', $3, 'text/plain', $4, 'READY', 'READY', TRUE)
+         RETURNING id`,
+        [tenant.rows[0].id, `Profile source ${index}`, `profile-${index}.txt`, String(index + 1).repeat(64)],
+      );
+      sources.push(source.rows[0].id);
+    }
+    for (const sourceId of sources.slice(0, 4)) {
+      await client.query(
+        `INSERT INTO knowledge_source_business_identities (tenant_id, source_id, business_identity_id, assignment_origin)
+         VALUES ($1, $2, $3, 'POSTGRES_REGRESSION_FIXTURE')`,
+        [tenant.rows[0].id, sourceId, identity.rows[0].id],
+      );
+    }
+    const result = await analyzeBusinessProfileSourceScope({
+      database: client,
+      tenantId: tenant.rows[0].id,
+      businessIdentityId: identity.rows[0].id,
+      sourceIds: sources,
+      provider: {
+        provider: 'GEMINI',
+        model: 'gemini-3-flash-preview',
+        generateBusinessIdentityAnalysis: async () => ({
+          detected_identity: 'Yeşil Vadi Peyzaj',
+          confidence: 1,
+          evidence: 'Company name field and document title',
+        }),
+      },
+    });
+    assert.equal(result.status, 'RESOLVED');
+    assert.equal(result.identities.length, 1);
+    assert.equal(result.identities[0].business_identity_id, identity.rows[0].id);
+    assert.equal(result.evidence.length, 5);
   } finally {
     await client.query('ROLLBACK').catch(() => {});
     client.release();

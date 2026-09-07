@@ -65,6 +65,43 @@ test('resolves a canonical fact through its trusted source identity even when it
   assert.equal(result.evidence[0].detected_identity, 'Meridian Arc Technologies LLC');
 });
 
+test('resolves trusted canonical facts and a document to one canonical identity despite Turkish display forms', async () => {
+  const businessIdentityId = '55555555-5555-4555-8555-555555555555';
+  const sourceIds = [
+    '11111111-1111-4111-8111-111111111111',
+    '22222222-2222-4222-8222-222222222222',
+    '33333333-3333-4333-8333-333333333333',
+    '44444444-4444-4444-8444-444444444444',
+    '66666666-6666-4666-8666-666666666666',
+  ];
+  const database = { query: async (sql) => {
+    if (/FROM business_identities/i.test(sql)) return { rows: [{ id: businessIdentityId, display_name: 'yesil vadi peyzaj', normalized_identity: 'yesil vadi peyzaj' }] };
+    if (/FROM knowledge_base_documents/i.test(sql)) return { rows: [
+      ...sourceIds.slice(0, 4).map((id, index) => profileReady({ id, title: `Approved image fact ${index + 1}`, content: 'Approved canonical image fact.', content_hash: String(index + 1).repeat(64), source_type: 'CONVERSATION_CANDIDATE', trusted_identity_ids: [businessIdentityId] })),
+      profileReady({ id: sourceIds[4], title: 'Company document', content: 'Company identity.', content_hash: '5'.repeat(64), trusted_identity_ids: [] }),
+    ] };
+    if (/FROM business_identity_source_evidence/i.test(sql)) return { rows: [] };
+    if (/INSERT INTO business_identity_source_evidence/i.test(sql)) return { rows: [] };
+    throw new Error(`unexpected SQL ${sql}`);
+  } };
+  const provider = {
+    provider: 'GEMINI',
+    model: 'gemini-3-flash-preview',
+    generateBusinessIdentityAnalysis: async ({ source }) => ({
+      detected_identity: source.id === sourceIds[4] ? 'Yeşil Vadi Peyzaj' : 'unknown',
+      confidence: 1,
+      evidence: 'Company name field and document title',
+    }),
+  };
+
+  const result = await analyzeBusinessProfileSourceScope({ database, provider, tenantId, businessIdentityId, sourceIds });
+
+  assert.equal(result.status, 'RESOLVED');
+  assert.equal(result.identities.length, 1);
+  assert.equal(result.identities[0].business_identity_id, businessIdentityId);
+  assert.equal(result.evidence.length, 5);
+});
+
 test('does not inherit a Business Identity from tenant scope when canonical provenance is absent or conflicts', async () => {
   const businessIdentityId = '55555555-5555-4555-8555-555555555555';
   const otherIdentityId = '66666666-6666-4666-8666-666666666666';
@@ -81,6 +118,30 @@ test('does not inherit a Business Identity from tenant scope when canonical prov
   assert.equal(result.status, 'IDENTITY_RESOLUTION_REQUIRED');
   assert.equal(providerCalls, 0);
   assert.equal(result.evidence[0].resolution_origin, 'CONFLICTING_PROVENANCE');
+});
+
+test('fails closed when similar display forms map to distinct canonical Business Identity IDs', async () => {
+  const businessIdentityId = '55555555-5555-4555-8555-555555555555';
+  const otherIdentityId = '66666666-6666-4666-8666-666666666666';
+  const sourceId = '11111111-1111-4111-8111-111111111111';
+  const database = { query: async (sql, params = []) => {
+    if (/FROM business_identities/i.test(sql)) return { rows: params.length === 1
+      ? [
+        { id: businessIdentityId, display_name: 'yesil vadi peyzaj', normalized_identity: 'yesil vadi peyzaj' },
+        { id: otherIdentityId, display_name: 'Yeşil Vadi Peyzaj', normalized_identity: 'yeşil vadi peyzaj' },
+      ]
+      : [{ id: businessIdentityId, display_name: 'yesil vadi peyzaj', normalized_identity: 'yesil vadi peyzaj' }] };
+    if (/FROM knowledge_base_documents/i.test(sql)) return { rows: [profileReady({ id: sourceId, title: 'Ambiguous document', content: 'Company identity.', content_hash: 'a'.repeat(64), trusted_identity_ids: [] })] };
+    if (/FROM business_identity_source_evidence/i.test(sql)) return { rows: [] };
+    if (/INSERT INTO business_identity_source_evidence/i.test(sql)) return { rows: [] };
+    throw new Error(`unexpected SQL ${sql}`);
+  } };
+  const provider = { provider: 'GEMINI', model: 'gemini-3-flash-preview', generateBusinessIdentityAnalysis: async () => ({ detected_identity: 'Yeşil Vadi Peyzaj', confidence: 1, evidence: 'Company name field' }) };
+
+  const result = await analyzeBusinessProfileSourceScope({ database, provider, tenantId, businessIdentityId, sourceIds: [sourceId] });
+
+  assert.equal(result.status, 'IDENTITY_RESOLUTION_REQUIRED');
+  assert.equal(result.evidence[0].business_identity_id, null);
 });
 
 test('reports a missing explicit source assignment for canonical image facts instead of weakening provenance with text inference', async () => {
@@ -173,8 +234,13 @@ test('rejects cross-tenant or ineligible selected source sets before provider ge
 });
 
 test('conflicting selected identities block profile generation and expose safe conflict details', async () => {
-  const database = { query: async (sql) => {
-    if (/FROM business_identities/i.test(sql)) return { rows: [{ id: '55555555-5555-4555-8555-555555555555', display_name: 'Meridian' }] };
+  const database = { query: async (sql, params = []) => {
+    if (/FROM business_identities/i.test(sql)) return { rows: params.length === 1
+      ? [
+        { id: '55555555-5555-4555-8555-555555555555', display_name: 'Meridian' },
+        { id: '77777777-7777-4777-8777-777777777777', display_name: 'Nova' },
+      ]
+      : [{ id: '55555555-5555-4555-8555-555555555555', display_name: 'Meridian' }] };
     if (/FROM knowledge_base_documents/i.test(sql)) return { rows: [
       profileReady({ id: '11111111-1111-4111-8111-111111111111', title: 'Meridian', content: 'Meridian', content_hash: 'a'.repeat(64) }),
       profileReady({ id: '66666666-6666-4666-8666-666666666666', title: 'Nova', content: 'Nova', content_hash: 'b'.repeat(64) }),
