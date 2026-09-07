@@ -4,6 +4,28 @@ const GOLDEN_PATH = 'tests/fresh-tenant-golden-path.test.js';
 const ENSURE = 'ensure_tenant_platform_capabilities';
 const REPAIR = 'repairTenantPlatformCapabilities';
 
+function lifecycleFor(enablement, key) {
+  if (enablement === 'ALWAYS') {
+    return {
+      canonical_creator: 'PLATFORM_ENSURE',
+      historical_convergence_path: 'IDEMPOTENT_ENSURE',
+      fresh_tenant_path: 'BASELINE_PROVISIONING',
+    };
+  }
+  if (enablement === 'CHANNEL_ENABLED') {
+    return {
+      canonical_creator: key === 'guide_persistence' ? 'RUNTIME_RESOLUTION' : 'CHANNEL_FLOW',
+      historical_convergence_path: 'RUNTIME_VALIDATION',
+      fresh_tenant_path: 'NORMAL_CHANNEL_FLOW',
+    };
+  }
+  return {
+    canonical_creator: key === 'retrieval' ? 'RUNTIME_RESOLUTION' : 'DOMAIN_FLOW',
+    historical_convergence_path: 'DOMAIN_OPERATION',
+    fresh_tenant_path: 'NORMAL_DOMAIN_FLOW',
+  };
+}
+
 function capability(key, task, owner, authority, enablement, runtimeDependencies = [], entitlement = 'NONE') {
   return Object.freeze({
     key,
@@ -16,8 +38,41 @@ function capability(key, task, owner, authority, enablement, runtimeDependencies
     entitlement_dependency: entitlement,
     runtime_dependencies: Object.freeze([...runtimeDependencies]),
     enablement,
+    ...lifecycleFor(enablement, key),
   });
 }
+
+function relationship(key, canonicalCreator, canonicalOwner, tenantAuthority, idempotency, historicalRepairPath, freshTenantPath) {
+  return Object.freeze({
+    key,
+    canonical_creator: canonicalCreator,
+    canonical_owner: canonicalOwner,
+    tenant_authority: tenantAuthority,
+    idempotency,
+    historical_repair_path: historicalRepairPath,
+    fresh_tenant_path: freshTenantPath,
+  });
+}
+
+export const PLATFORM_RELATIONSHIP_OWNERSHIP = Object.freeze([
+  relationship('tenant_user', 'customer-onboarding-service', 'tenant_users', 'authenticated owner/customer administration', 'owner onboarding idempotency key', 'existing tenant membership constraints', 'normal onboarding'),
+  relationship('tenant_platform_capability', 'tenant-platform-provisioning-service', 'tenant_platform_provisioning', 'tenant id in caller transaction', 'ensure_tenant_platform_capabilities', 'repairTenantPlatformCapabilities', 'createTenantWithPlatformCapabilities'),
+  relationship('tenant_business_identity', 'knowledge-intelligence tenant-admin route', 'business_identities', 'authenticated tenant admin', 'tenant normalized identity uniqueness', 'none; explicit domain intent required', 'normal Business Identity creation'),
+  relationship('tenant_assistant', 'assistant domain operation', 'ai_assistants', 'authenticated tenant administration', 'tenant-scoped assistant operation', 'existing tenant-scoped assistant data', 'normal assistant creation'),
+  relationship('channel_assistant', 'channel domain operation', 'tenant_channels + channel_integrations', 'same-tenant channel/assistant validation', 'tenant-scoped channel binding', 'runtime scope validation', 'normal channel enablement'),
+  relationship('source_business_identity', 'assignKnowledgeSourceBusinessIdentity', 'knowledge_source_business_identities + assignment events', 'authenticated tenant admin', 'same identity assignment converges', 'unambiguous explicit assignment convergence', 'normal explicit assignment'),
+  relationship('source_assistant', 'knowledge source scope operation', 'knowledge_source_assistants', 'same-tenant source/assistant validation', 'tenant/source/assistant uniqueness', 'migration 067 + normal scope operation', 'normal source scope assignment'),
+  relationship('candidate_source', 'candidate generation service', 'knowledge_candidates + evidence', 'tenant-scoped source ownership', 'candidate fingerprint/domain idempotency', 'candidate evidence migration path', 'normal candidate generation'),
+  relationship('materialized_source_provenance', 'candidate approval service', 'knowledge_materialized_source_provenance', 'approved tenant candidate provenance', 'candidate materialization idempotency', 'historical provenance migrations', 'normal approval materialization'),
+  relationship('materialized_source_assistant_scope', 'candidate approval service', 'knowledge_source_assistants', 'same-tenant original source scope', 'tenant/source/assistant uniqueness', 'migration 067', 'normal materialization inheritance'),
+  relationship('chunk_source', 'knowledge source indexing service', 'knowledge_chunks', 'tenant-owned indexed source', 'source/chunk index uniqueness', 'normal reindex job only', 'normal indexing'),
+  relationship('embedding_chunk', 'knowledge source indexing service', 'knowledge_chunks.embedding', 'tenant-owned indexed chunk', 'chunk index replacement semantics', 'normal reindex job only', 'normal indexing'),
+  relationship('business_profile_identity', 'business profile lifecycle service', 'business_profiles + versions', 'tenant-scoped canonical identity', 'version/run idempotency', 'durable profile generation job', 'normal profile generation'),
+  relationship('recommendation_profile', 'assistant recommendation lifecycle service', 'assistant_recommendation_versions', 'tenant-scoped approved profile', 'generation job idempotency', 'durable recommendation generation job', 'normal recommendation generation'),
+  relationship('configuration_assistant_profile', 'assistant configuration lifecycle service', 'assistant_configuration_versions', 'tenant-scoped assistant and active profile', 'generation job idempotency', 'durable configuration generation job', 'normal configuration generation'),
+  relationship('conversation_tenant_channel_assistant', 'live inbox ingress service', 'conversations + messages', 'resolved enabled channel integration', 'external message id/idempotency key', 'durable conversation state', 'normal channel ingress'),
+  relationship('push_subscription_user_device', 'push notification subscription service', 'push_subscriptions', 'authenticated tenant user', 'tenant/user/endpoint uniqueness', 'opt-in subscription convergence', 'explicit device subscription'),
+]);
 
 export const PLATFORM_CAPABILITY_MANIFEST = Object.freeze([
   capability('platform_foundation', 1, 'tenant-platform-provisioning-service', 'tenants + tenant_users', 'ALWAYS', ['PostgreSQL']),
@@ -36,6 +91,7 @@ export const PLATFORM_CAPABILITY_MANIFEST = Object.freeze([
   capability('live_inbox', 5, 'live-inbox-service', 'tenant-scoped conversations and durable events', 'ALWAYS', ['conversations', 'conversation_audit_events']),
   capability('escalation', 5, 'human-support-service', 'human_support_escalation_policies + levels + instances', 'ALWAYS', ['human_support_escalations']),
   capability('notification', 5, 'human-support-notification-outbox-service', 'human_support_notification_outbox', 'ALWAYS', ['external transport when configured']),
+  capability('push_notifications', 7, 'push-notification-service', 'tenant/user/device scoped push intents, subscriptions, and outbox', 'ALWAYS', ['PostgreSQL', 'Web Push transport when configured']),
   capability('knowledge_intelligence', 6, 'knowledge-intelligence-service', 'tenant-scoped Knowledge tables', 'ALWAYS', ['PostgreSQL', 'pgvector']),
   capability('source_processing', 6, 'knowledge-source-processing-service', 'knowledge_base_documents + knowledge_processing_jobs', 'ON_DEMAND', ['enabled source']),
   capability('business_identity', 6, 'business-identity-service', 'business_identities + source identity evidence', 'ON_DEMAND', ['eligible Knowledge source']),
@@ -56,7 +112,8 @@ export function validatePlatformCapabilityManifest(manifest = PLATFORM_CAPABILIT
   const required = [
     'key', 'introduced_by_task', 'canonical_owner_service', 'canonical_source_of_truth',
     'provisioning_ensure_function', 'existing_tenant_repair_path', 'golden_path_test',
-    'entitlement_dependency', 'runtime_dependencies', 'enablement',
+    'entitlement_dependency', 'runtime_dependencies', 'enablement', 'canonical_creator',
+    'historical_convergence_path', 'fresh_tenant_path',
   ];
   for (const item of manifest) {
     if (!item || required.some((field) => item[field] === undefined || item[field] === '')) throw new TypeError('PLATFORM_CAPABILITY_METADATA_INCOMPLETE');
@@ -64,6 +121,9 @@ export function validatePlatformCapabilityManifest(manifest = PLATFORM_CAPABILIT
     if (!/^TASK_[1-7]$/.test(item.introduced_by_task)) throw new TypeError('PLATFORM_CAPABILITY_TASK_INVALID');
     if (!Array.isArray(item.runtime_dependencies)) throw new TypeError('PLATFORM_CAPABILITY_DEPENDENCIES_INVALID');
     if (!['ALWAYS', 'ON_DEMAND', 'CHANNEL_ENABLED'].includes(item.enablement)) throw new TypeError('PLATFORM_CAPABILITY_ENABLEMENT_INVALID');
+    if (!['PLATFORM_ENSURE', 'DOMAIN_FLOW', 'CHANNEL_FLOW', 'RUNTIME_RESOLUTION'].includes(item.canonical_creator)) throw new TypeError('PLATFORM_CAPABILITY_CREATOR_INVALID');
+    if (!['IDEMPOTENT_ENSURE', 'REPLAY_SAFE_MIGRATION', 'DOMAIN_OPERATION', 'RUNTIME_VALIDATION'].includes(item.historical_convergence_path)) throw new TypeError('PLATFORM_CAPABILITY_CONVERGENCE_INVALID');
+    if (!['BASELINE_PROVISIONING', 'NORMAL_DOMAIN_FLOW', 'NORMAL_CHANNEL_FLOW'].includes(item.fresh_tenant_path)) throw new TypeError('PLATFORM_CAPABILITY_FRESH_PATH_INVALID');
     keys.add(item.key);
   }
   return true;

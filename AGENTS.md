@@ -188,6 +188,28 @@ modify files outside the authorized scope.
   assignment must converge eligible unapproved provenance without duplicating
   audit history. Historical restoration may use only one unambiguous, same-tenant
   authoritative assignment trail and must otherwise fail closed.
+
+- Fresh tenants must inherit the complete shared platform capability baseline
+  through normal provisioning without manual database, relationship, scope,
+  index, embedding, or runtime repair. Provisioning must not fabricate
+  customer-owned domain entities whose creation requires normal user/domain
+  intent; historical tenants converge through the same tenant-scoped,
+  idempotent capability, migration, runtime, or approved durable-job path.
+- Every critical tenant lifecycle relationship has exactly one documented
+  canonical creator and owner. Tenant-specific behavior belongs only to data
+  and supported configuration, never source-code branches. Cross-cutting
+  lifecycle changes require historical, fresh, and isolation evidence before
+  GREEN; incomplete test or platform resources are not GREEN.
+- Guide, Web, and WhatsApp are channel adapters over the same canonical tenant
+  identity, active configuration, active Business Profile, and approved
+  knowledge authority. They must not introduce parallel business truth or
+  require an admin/debug action to repair hidden runtime state.
+- Push subscriptions are tenant/user/device scoped records; a browser
+  subscription never grants tenant authorization. Notification intents and
+  delivery transports are observational, idempotent, bounded, and replaceable:
+  a delivery failure must never mutate the originating domain outcome. Push
+  payloads and deep links must minimize sensitive data and permit only validated
+  internal routes. Real device receipt remains a human-acceptance gate.
 - Once a Business Identity has been resolved, its tenant-scoped canonical ID is
   authoritative for domain equality, eligibility, authorization, conflict
   detection, and lifecycle decisions. Display names are presentation and

@@ -111,7 +111,7 @@ async function seedCandidateForSource(client, { tenantId, sourceId, suffix, segm
 }
 
 test('real PostgreSQL persists a review-only configuration using the active canonical Business Identity when generated text omits it', async () => {
-  const client = await database.connect();
+  let client = await database.connect();
   let tenantId = null;
   let userId = null;
   try {
@@ -172,6 +172,12 @@ test('real PostgreSQL persists a review-only configuration using the active cano
       }),
     };
 
+    // The fixture owns this checked-out client. Release it before invoking the
+    // domain service, which correctly acquires its own transaction client.
+    // Holding a max:1 pool client here would deadlock the test harness.
+    client.release();
+    client = null;
+
     const result = await generateAssistantConfigurationVersion({
       database,
       provider,
@@ -183,7 +189,7 @@ test('real PostgreSQL persists a review-only configuration using the active cano
 
     assert.equal(result.configuration.status, 'NEEDS_REVIEW');
     assert.equal(result.configuration.configuration_data.assistant_identity, identity.rows[0].display_name);
-    const persisted = await client.query(
+    const persisted = await database.query(
       `SELECT configuration_data, status FROM assistant_configuration_versions
         WHERE id = $1 AND tenant_id = $2`,
       [result.configuration.id, tenant.rows[0].id],
@@ -193,18 +199,19 @@ test('real PostgreSQL persists a review-only configuration using the active cano
     assert.equal(persisted.rows[0].configuration_data.assistant_identity, identity.rows[0].display_name);
   } finally {
     if (tenantId) {
-      await client.query(`DELETE FROM assistant_configuration_versions WHERE tenant_id = $1`, [tenantId]);
-      await client.query(`DELETE FROM knowledge_generation_runs WHERE tenant_id = $1`, [tenantId]);
-      await client.query(`DELETE FROM assistant_knowledge_recommendations WHERE tenant_id = $1`, [tenantId]);
-      await client.query(`UPDATE business_profiles SET active_version_id = NULL, approved_version_id = NULL WHERE tenant_id = $1`, [tenantId]);
-      await client.query(`DELETE FROM business_profile_versions WHERE tenant_id = $1`, [tenantId]);
-      await client.query(`DELETE FROM business_profiles WHERE tenant_id = $1`, [tenantId]);
-      await client.query(`DELETE FROM ai_assistants WHERE tenant_id = $1`, [tenantId]);
-      await client.query(`DELETE FROM business_identities WHERE tenant_id = $1`, [tenantId]);
-      await client.query(`DELETE FROM tenants WHERE id = $1`, [tenantId]);
+      await database.query(`DELETE FROM assistant_configuration_versions WHERE tenant_id = $1`, [tenantId]);
+      await database.query(`DELETE FROM knowledge_generation_runs WHERE tenant_id = $1`, [tenantId]);
+      await database.query(`DELETE FROM assistant_knowledge_recommendations WHERE tenant_id = $1`, [tenantId]);
+      await database.query(`UPDATE business_profiles SET active_version_id = NULL, approved_version_id = NULL WHERE tenant_id = $1`, [tenantId]);
+      await database.query(`DELETE FROM business_profile_versions WHERE tenant_id = $1`, [tenantId]);
+      await database.query(`DELETE FROM business_profiles WHERE tenant_id = $1`, [tenantId]);
+      await database.query(`DELETE FROM ai_assistants WHERE tenant_id = $1`, [tenantId]);
+      await database.query(`DELETE FROM business_identities WHERE tenant_id = $1`, [tenantId]);
+      await database.query(`DELETE FROM crm_pipeline_stages WHERE tenant_id = $1`, [tenantId]);
+      await database.query(`DELETE FROM tenants WHERE id = $1`, [tenantId]);
     }
-    if (userId) await client.query(`DELETE FROM users WHERE id = $1`, [userId]);
-    client.release();
+    if (userId) await database.query(`DELETE FROM users WHERE id = $1`, [userId]);
+    client?.release();
   }
 });
 
