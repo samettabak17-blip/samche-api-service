@@ -53,6 +53,7 @@ import { createOpenAIEmbedder } from '../services/knowledge-intelligence-service
 import { KnowledgeRetrievalPreviewError, previewKnowledgeRetrieval } from '../services/knowledge-retrieval-preview.js';
 import { normalizeBusinessIdentity } from '../services/business-identity-service.js';
 import { assignKnowledgeSourceBusinessIdentity, KnowledgeSourceBusinessIdentityError } from '../services/knowledge-source-business-identity-service.js';
+import { observeKnowledgeSourceBusinessIdentityRequest } from '../services/knowledge-source-business-identity-observability.js';
 import { presentKnowledgeSourceWithProfileEligibility } from '../services/knowledge-source-profile-eligibility.js';
 
 const upload = multer({
@@ -93,6 +94,7 @@ async function verifyAssistant(tenantId, assistantId) {
 }
 
 const router = express.Router();
+router.use(observeKnowledgeSourceBusinessIdentityRequest);
 router.use(authenticateToken);
 
 router.get('/:tenantId/knowledge-intelligence/overview', requireTenantAccess, async (req, res) => {

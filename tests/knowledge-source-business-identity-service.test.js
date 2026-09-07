@@ -23,7 +23,10 @@ test('explicitly assigns a tenant source to an active tenant Business Identity w
   const db = database();
   const result = await assignKnowledgeSourceBusinessIdentity({ database: db, tenantId, sourceId, businessIdentityId: identityId, assignedBy: actorId });
   assert.equal(result.changed, true);
-  const insert = db.calls.find(({ sql }) => /INSERT INTO knowledge_source_business_identities/i.test(sql));
+  const insert = db.calls.find(({ sql }) => (
+    /INSERT INTO knowledge_source_business_identities/i.test(sql)
+    && /VALUES \(\$1, \$2, \$3, \$4,/i.test(sql)
+  ));
   assert.deepEqual(insert.params, [tenantId, sourceId, identityId, actorId]);
   assert.match(insert.sql, /HUMAN_CONFIRMED_SOURCE_IDENTITY/);
   assert.ok(db.calls.some(({ sql }) => /knowledge_source_business_identity_assignment_events/i.test(sql)));
@@ -34,6 +37,8 @@ test('does not rewrite an identical explicit assignment or generate duplicate au
   const result = await assignKnowledgeSourceBusinessIdentity({ database: db, tenantId, sourceId, businessIdentityId: identityId, assignedBy: actorId });
   assert.equal(result.changed, false);
   assert.equal(db.calls.some(({ sql }) => /INSERT INTO knowledge_source_business_identity_assignment_events/i.test(sql)), false);
+  const convergence = db.calls.find(({ sql }) => /UPDATE knowledge_candidate_image_evidence/i.test(sql));
+  assert.deepEqual(convergence.params, [tenantId, sourceId, null, identityId]);
 });
 
 test('snapshots historical evidence before explicit reassignment without rewriting candidates', async () => {
@@ -51,4 +56,29 @@ test('first explicit assignment repairs unassigned review candidate evidence wit
   assert.deepEqual(repair.params, [tenantId, sourceId, null, identityId]);
   assert.match(repair.sql, /candidate\.status IN \('DRAFT', 'NEEDS_REVIEW'\)/i);
   assert.match(repair.sql, /candidate\.image_semantic_version IS NOT NULL/i);
+});
+
+test('emits safe durable-operation stages only after each assignment boundary completes', async () => {
+  const stages = [];
+  await assignKnowledgeSourceBusinessIdentity({
+    database: database(),
+    tenantId,
+    sourceId,
+    businessIdentityId: identityId,
+    assignedBy: actorId,
+    onDiagnostic: (event) => stages.push(event),
+  });
+
+  assert.deepEqual(stages.map((event) => event.stage), [
+    'VALIDATION_PASSED',
+    'TRANSACTION_STARTED',
+    'SOURCE_VALIDATED',
+    'IDENTITY_VALIDATED',
+    'CANONICAL_LINK_PERSISTED',
+    'ASSIGNMENT_AUDIT_PERSISTED',
+    'PROVENANCE_CONVERGED',
+    'TRANSACTION_COMMITTED',
+    'SUCCESS',
+  ]);
+  assert.deepEqual(stages.every((event) => Object.keys(event).every((key) => ['stage', 'code'].includes(key))), true);
 });

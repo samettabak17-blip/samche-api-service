@@ -148,6 +148,10 @@ modify files outside the authorized scope.
   blocker even when unit tests pass.
 - Every tenant-affecting platform task must retain the prior Golden Path and add
   its new capability coverage. Never replace or narrow prior GREEN coverage.
+- Critical SQL paths that depend on PostgreSQL-specific types, operators,
+  aggregates, constraints, or transaction behavior must execute in the
+  disposable PostgreSQL release gate; mocked query-shape tests alone cannot
+  establish compatibility with the deployed database engine.
 - Run the release-blocking golden-path command before claiming completion. If a
   previously GREEN capability regresses, tenant age alone changes behavior, or
   tenant-specific source changes are required, report `TASK_COMPLETE = NO`.
@@ -174,3 +178,9 @@ modify files outside the authorized scope.
   the normal durable indexing path. Historical and fresh tenant data converge
   through the same tenant-scoped, idempotent product behavior, never through a
   manual tenant patch.
+- A successful user-visible domain mutation must correspond to durable canonical
+  state. Explicit source Business Identity assignment persists both the current
+  tenant-scoped relationship and its audit evidence transactionally; repeated
+  assignment must converge eligible unapproved provenance without duplicating
+  audit history. Historical restoration may use only one unambiguous, same-tenant
+  authoritative assignment trail and must otherwise fail closed.

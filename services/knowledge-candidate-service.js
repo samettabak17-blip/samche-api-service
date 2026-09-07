@@ -85,16 +85,67 @@ export async function convergeImageCandidateIdentityProvenance({
   businessIdentityId = null,
 }) {
   return db(database,
-    `WITH candidate_scope AS (
+    `WITH audited_source_identity AS (
+       SELECT assignment.tenant_id, assignment.source_id,
+              (ARRAY_AGG(DISTINCT assignment.new_business_identity_id))[1] AS business_identity_id,
+              MIN(assignment.created_at) AS assigned_at
+         FROM knowledge_source_business_identity_assignment_events assignment
+         JOIN business_identities identity
+           ON identity.tenant_id = assignment.tenant_id
+          AND identity.id = assignment.new_business_identity_id
+          AND identity.status = 'ACTIVE'
+        WHERE assignment.tenant_id = $1
+          AND $4::uuid IS NULL
+          AND ($2::uuid IS NULL OR assignment.source_id = $2::uuid)
+          AND EXISTS (
+                SELECT 1
+                  FROM knowledge_candidate_image_evidence audit_evidence
+                  JOIN knowledge_candidates audit_candidate
+                    ON audit_candidate.tenant_id = audit_evidence.tenant_id
+                   AND audit_candidate.id = audit_evidence.candidate_id
+                 WHERE audit_evidence.tenant_id = assignment.tenant_id
+                   AND audit_evidence.source_id = assignment.source_id
+                   AND ($3::uuid IS NULL OR audit_evidence.candidate_id = $3::uuid)
+                   AND audit_evidence.role = 'BUSINESS'
+                   AND audit_evidence.evidence_kind = 'PRIMARY'
+                   AND audit_evidence.business_identity_id IS NULL
+                   AND audit_candidate.status IN ('DRAFT', 'NEEDS_REVIEW')
+                   AND audit_candidate.image_semantic_version IS NOT NULL
+              )
+          AND NOT EXISTS (
+                SELECT 1
+                  FROM knowledge_source_business_identities current_identity
+                 WHERE current_identity.tenant_id = assignment.tenant_id
+                   AND current_identity.source_id = assignment.source_id
+              )
+        GROUP BY assignment.tenant_id, assignment.source_id
+       HAVING COUNT(DISTINCT assignment.new_business_identity_id) = 1
+     ), restored_source_identity AS (
+       INSERT INTO knowledge_source_business_identities
+         (tenant_id, source_id, business_identity_id, assigned_by_user_id, assigned_at, assignment_origin)
+       SELECT tenant_id, source_id, business_identity_id, NULL, assigned_at,
+              'AUDIT_RESTORED_HUMAN_ASSIGNMENT'
+         FROM audited_source_identity
+       ON CONFLICT DO NOTHING
+       RETURNING tenant_id, source_id, business_identity_id
+     ), source_identity AS (
+       SELECT identity_link.tenant_id, identity_link.source_id, identity_link.business_identity_id
+         FROM knowledge_source_business_identities identity_link
+        WHERE identity_link.tenant_id = $1
+          AND ($2::uuid IS NULL OR identity_link.source_id = $2::uuid)
+       UNION
+       SELECT tenant_id, source_id, business_identity_id
+         FROM restored_source_identity
+     ), candidate_scope AS (
        SELECT evidence.tenant_id, evidence.candidate_id, evidence.source_id,
-              CASE WHEN $4::uuid IS NULL THEN identity_link.business_identity_id ELSE $4::uuid END AS resolved_identity_id
+              CASE WHEN $4::uuid IS NULL THEN source_identity.business_identity_id ELSE $4::uuid END AS resolved_identity_id
          FROM knowledge_candidate_image_evidence evidence
          JOIN knowledge_candidates candidate
            ON candidate.tenant_id = evidence.tenant_id
           AND candidate.id = evidence.candidate_id
-         LEFT JOIN knowledge_source_business_identities identity_link
-           ON identity_link.tenant_id = evidence.tenant_id
-          AND identity_link.source_id = evidence.source_id
+         LEFT JOIN source_identity
+           ON source_identity.tenant_id = evidence.tenant_id
+          AND source_identity.source_id = evidence.source_id
         WHERE evidence.tenant_id = $1
           AND ($2::uuid IS NULL OR evidence.source_id = $2::uuid)
           AND ($3::uuid IS NULL OR evidence.candidate_id = $3::uuid)
@@ -104,7 +155,8 @@ export async function convergeImageCandidateIdentityProvenance({
           AND candidate.status IN ('DRAFT', 'NEEDS_REVIEW')
           AND candidate.image_semantic_version IS NOT NULL
      ), resolved AS (
-       SELECT tenant_id, candidate_id, source_id, MIN(resolved_identity_id) AS business_identity_id
+       SELECT tenant_id, candidate_id, source_id,
+              (ARRAY_AGG(DISTINCT resolved_identity_id))[1] AS business_identity_id
          FROM candidate_scope
         WHERE resolved_identity_id IS NOT NULL
         GROUP BY tenant_id, candidate_id, source_id

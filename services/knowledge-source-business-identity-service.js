@@ -17,35 +17,53 @@ function requiredUuid(value, code) {
   return String(value);
 }
 
-async function transaction(database, operation) {
+function emitAssignmentDiagnostic(onDiagnostic, stage, code = null) {
+  onDiagnostic({ stage, ...(code ? { code } : {}) });
+}
+
+function defaultAssignmentDiagnostic(event) {
+  console.info('KNOWLEDGE_SOURCE_IDENTITY_ASSIGNMENT', JSON.stringify(event));
+}
+
+async function transaction(database, operation, onDiagnostic) {
   if (!database?.connect) throw new KnowledgeSourceBusinessIdentityError('KNOWLEDGE_DATABASE_UNAVAILABLE', 'Business Identity assignment is unavailable');
   const client = await database.connect();
   try {
     await client.query('BEGIN');
+    emitAssignmentDiagnostic(onDiagnostic, 'TRANSACTION_STARTED');
     const result = await operation(client);
     await client.query('COMMIT');
+    emitAssignmentDiagnostic(onDiagnostic, 'TRANSACTION_COMMITTED');
     return result;
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
+    emitAssignmentDiagnostic(onDiagnostic, 'TRANSACTION_ROLLED_BACK', error?.code ?? 'UNEXPECTED');
     throw error;
   } finally {
     client.release?.();
   }
 }
 
-export async function assignKnowledgeSourceBusinessIdentity({ database, tenantId, sourceId, businessIdentityId, assignedBy }) {
-  requiredUuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
-  requiredUuid(sourceId, 'KNOWLEDGE_SOURCE_INVALID');
-  requiredUuid(businessIdentityId, 'KNOWLEDGE_BUSINESS_IDENTITY_INVALID');
-  requiredUuid(assignedBy, 'KNOWLEDGE_ASSIGNER_INVALID');
+export async function assignKnowledgeSourceBusinessIdentity({ database, tenantId, sourceId, businessIdentityId, assignedBy, onDiagnostic = defaultAssignmentDiagnostic }) {
+  try {
+    requiredUuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
+    requiredUuid(sourceId, 'KNOWLEDGE_SOURCE_INVALID');
+    requiredUuid(businessIdentityId, 'KNOWLEDGE_BUSINESS_IDENTITY_INVALID');
+    requiredUuid(assignedBy, 'KNOWLEDGE_ASSIGNER_INVALID');
+    emitAssignmentDiagnostic(onDiagnostic, 'VALIDATION_PASSED');
+  } catch (error) {
+    emitAssignmentDiagnostic(onDiagnostic, 'VALIDATION_FAILED', error?.code ?? 'UNEXPECTED');
+    throw error;
+  }
 
-  return transaction(database, async (client) => {
+  const assignment = await transaction(database, async (client) => {
     const source = await client.query(
       `SELECT id FROM knowledge_base_documents
         WHERE id = $1 AND tenant_id = $2 AND enabled = TRUE`,
       [sourceId, tenantId],
     );
     if (!source.rowCount) throw new KnowledgeSourceBusinessIdentityError('KNOWLEDGE_SOURCE_NOT_FOUND', 'Knowledge source was not found');
+    emitAssignmentDiagnostic(onDiagnostic, 'SOURCE_VALIDATED');
 
     const identity = await client.query(
       `SELECT id, display_name FROM business_identities
@@ -53,6 +71,7 @@ export async function assignKnowledgeSourceBusinessIdentity({ database, tenantId
       [businessIdentityId, tenantId],
     );
     if (!identity.rowCount) throw new KnowledgeSourceBusinessIdentityError('KNOWLEDGE_BUSINESS_IDENTITY_NOT_FOUND', 'Business Identity was not found');
+    emitAssignmentDiagnostic(onDiagnostic, 'IDENTITY_VALIDATED');
 
     const existing = await client.query(
       `SELECT business_identity_id FROM knowledge_source_business_identities
@@ -62,6 +81,13 @@ export async function assignKnowledgeSourceBusinessIdentity({ database, tenantId
     );
     const previousIds = (existing.rows ?? []).map((row) => String(row.business_identity_id));
     if (previousIds.length === 1 && previousIds[0] === businessIdentityId) {
+      await convergeImageCandidateIdentityProvenance({
+        database: client,
+        tenantId,
+        sourceId,
+        businessIdentityId,
+      });
+      emitAssignmentDiagnostic(onDiagnostic, 'PROVENANCE_CONVERGED');
       return { source_id: sourceId, business_identity: identity.rows[0], changed: false };
     }
 
@@ -86,12 +112,25 @@ export async function assignKnowledgeSourceBusinessIdentity({ database, tenantId
        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, 'HUMAN_CONFIRMED_SOURCE_IDENTITY')`,
       [tenantId, sourceId, businessIdentityId, assignedBy],
     );
+    emitAssignmentDiagnostic(onDiagnostic, 'CANONICAL_LINK_PERSISTED');
     await client.query(
       `INSERT INTO knowledge_source_business_identity_assignment_events
          (id, tenant_id, source_id, previous_business_identity_id, new_business_identity_id, changed_by_user_id, change_origin)
        VALUES ($1, $2, $3, $4::uuid, $5, $6, 'HUMAN_CONFIRMED_SOURCE_IDENTITY')`,
       [crypto.randomUUID(), tenantId, sourceId, previousIds.length === 1 ? previousIds[0] : null, businessIdentityId, assignedBy],
     );
+    emitAssignmentDiagnostic(onDiagnostic, 'ASSIGNMENT_AUDIT_PERSISTED');
+    if (previousIds.length === 0) {
+      await convergeImageCandidateIdentityProvenance({
+        database: client,
+        tenantId,
+        sourceId,
+        businessIdentityId,
+      });
+    }
+    emitAssignmentDiagnostic(onDiagnostic, 'PROVENANCE_CONVERGED');
     return { source_id: sourceId, business_identity: identity.rows[0], changed: true };
-  });
+  }, onDiagnostic);
+  emitAssignmentDiagnostic(onDiagnostic, 'SUCCESS');
+  return assignment;
 }
