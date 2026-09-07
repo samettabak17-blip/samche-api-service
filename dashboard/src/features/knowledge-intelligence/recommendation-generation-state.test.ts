@@ -95,6 +95,24 @@ describe("assistant recommendation generation UI state", () => {
     expect(failed.error).toBe("Configuration generation failed. You can retry.");
   });
 
+  it("keeps the durable active job when one status poll fails", () => {
+    const pending = recommendationGenerationReducer(
+      initialRecommendationGenerationState,
+      {
+        type: "ACCEPTED",
+        job: { id: "configuration-job", status: "PROCESSING", attempts: 1 },
+        reused: false,
+        operation: "Configuration",
+      },
+    );
+
+    const afterPollFailure = recommendationGenerationReducer(pending, { type: "POLL_ERROR" });
+
+    expect(afterPollFailure.phase).toBe("PROCESSING");
+    expect(afterPollFailure.job?.id).toBe("configuration-job");
+    expect(afterPollFailure.error).toBeNull();
+  });
+
   it("uses the same durable lifecycle for Business Profile generation", () => {
     const starting = recommendationGenerationReducer(
       initialRecommendationGenerationState,

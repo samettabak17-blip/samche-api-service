@@ -880,11 +880,6 @@ export function KnowledgeIntelligencePage() {
   useEffect(() => {
     if (recommendationGenerationJob.isError && activeRecommendationGenerationPhase(recommendationGeneration.phase)) {
       dispatchRecommendationGeneration({ type: "POLL_ERROR" });
-      if (tenantId && assistantId && configurationProfileVersionId) {
-        window.sessionStorage.removeItem(
-          recommendationGenerationStorageKey(tenantId, assistantId, configurationProfileVersionId),
-        );
-      }
     }
   }, [assistantId, configurationProfileVersionId, recommendationGeneration.phase, recommendationGenerationJob.isError, tenantId]);
   const generateConfiguration = useMutation({
@@ -930,7 +925,6 @@ export function KnowledgeIntelligencePage() {
   useEffect(() => {
     if (configurationGenerationJob.isError && activeRecommendationGenerationPhase(configurationGeneration.phase)) {
       dispatchConfigurationGeneration({ type: "POLL_ERROR" });
-      if (tenantId && assistantId) window.sessionStorage.removeItem(configurationGenerationStorageKey(tenantId, assistantId));
     }
   }, [assistantId, configurationGeneration.phase, configurationGenerationJob.isError, tenantId]);
   const configurationAction = useMutation({

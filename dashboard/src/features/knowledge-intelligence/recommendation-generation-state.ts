@@ -104,9 +104,11 @@ export function recommendationGenerationReducer(
     case "POLL_ERROR":
       return {
         ...state,
-        phase: "FAILED",
-        message: null,
-        error: `${state.operation} generation status could not be retrieved. You can retry.`,
+        // A polling failure is not a server-owned job failure. Keep the durable
+        // job active so React Query can continue observing it and re-entry can
+        // restore the same job from session storage.
+        message: `${state.operation} status is temporarily unavailable. The durable job is still being checked.`,
+        error: null,
       };
     case "ENQUEUE_FAILED":
       return {
