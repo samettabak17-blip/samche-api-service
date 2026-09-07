@@ -622,11 +622,16 @@ test('real PostgreSQL rolls back a failed assignment after the canonical-link bo
      RETURNING id`,
     [tenant.rows[0].id],
   );
+  let released = false;
   const failingDatabase = {
     connect: async () => {
       const client = await database.connect();
       return {
         ...client,
+        release: () => {
+          released = true;
+          return client.release();
+        },
         query: async (sql, params) => {
           if (/INSERT INTO knowledge_source_business_identity_assignment_events/i.test(sql)) {
             const error = new Error('forced assignment audit failure');
@@ -650,6 +655,7 @@ test('real PostgreSQL rolls back a failed assignment after the canonical-link bo
       }),
       (error) => error?.code === 'TEST_ASSIGNMENT_AUDIT_FAILURE',
     );
+    assert.equal(released, true);
     const state = await database.query(
       `SELECT
          (SELECT COUNT(*) FROM knowledge_source_business_identities

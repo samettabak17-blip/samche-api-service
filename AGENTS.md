@@ -89,6 +89,10 @@ A task is complete only when all of the following are true:
    clearly reported.
 5. The final diff contains no unrelated changes and `git diff --check` passes.
 
+Automated release/test processes must own and close every resource they create.
+A suite that completes assertions but leaves referenced resources keeping Node
+alive is not GREEN; forced process termination must not mask lifecycle leaks.
+
 Report files read, files modified, verification performed, results, and any
 remaining limitation. Never report success merely because code compiles or
 tests pass.
