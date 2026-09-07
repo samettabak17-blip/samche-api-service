@@ -8,7 +8,7 @@ function requireProvider(database, provider, method) { if (!database?.query || t
 
 const SCHEMA_VERSION = 2;
 const RECOMMENDATION_IDENTITY_CONTRACT = 'V2_TENANT_OWNED_IDENTITY_ONLY';
-const CONFIGURATION_RUNTIME_CONTRACT = 'V2_ASSISTANT_IDENTITY_PROVENANCE_REQUIRED';
+const CONFIGURATION_RUNTIME_CONTRACT = 'V3_CANONICAL_BUSINESS_IDENTITY_FALLBACK';
 
 function nonEmptyText(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -20,9 +20,10 @@ function tenantOwnedIdentity(candidate, assistantName) {
   return value && (!metadata || value !== metadata) ? value : null;
 }
 
-function withRuntimeAssistantIdentity(output, { recommendationData, profileData, assistantName }) {
+function withRuntimeAssistantIdentity(output, { recommendationData, profileData, businessIdentityDisplayName, assistantName }) {
   const assistantIdentity = tenantOwnedIdentity(output?.assistant_identity, assistantName)
     ?? tenantOwnedIdentity(recommendationData?.assistant_identity, assistantName)
+    ?? nonEmptyText(businessIdentityDisplayName)
     ?? nonEmptyText(profileData?.company_display_name)
     ?? nonEmptyText(profileData?.company_identity);
   if (!assistantIdentity) {
@@ -165,10 +166,13 @@ export async function prepareAssistantConfigurationGeneration({ database, provid
   const activeProfilePredicate = allowInactiveProfileSnapshot ? '' : 'AND profile.active_version_id = profile_version.id';
   const context = await database.query(
     `SELECT recommendation.recommendation_data, assistant.name AS assistant_name, profile_version.id AS profile_version_id, profile.business_identity_id,
+            identity.display_name AS business_identity_display_name,
             profile_version.source_scope, profile_version.evidence AS profile_evidence, profile_version.profile_data
        FROM assistant_knowledge_recommendations recommendation
        JOIN ai_assistants assistant ON assistant.id = recommendation.assistant_id AND assistant.tenant_id = recommendation.tenant_id
        JOIN business_profiles profile ON profile.tenant_id = assistant.tenant_id AND profile.active_version_id IS NOT NULL
+       JOIN business_identities identity ON identity.id = profile.business_identity_id
+         AND identity.tenant_id = profile.tenant_id AND identity.status = 'ACTIVE'
        JOIN business_profile_versions profile_version ON ${profileVersionPredicate} AND profile_version.profile_id = profile.id AND profile_version.tenant_id = profile.tenant_id AND profile_version.status = 'APPROVED'
       WHERE recommendation.id = $1 AND recommendation.tenant_id = $2 AND recommendation.assistant_id = $3 AND recommendation.status = 'APPROVED' ${activeProfilePredicate}`,
     businessProfileVersionId === null ? [recommendationId, tenantId, assistantId] : [recommendationId, tenantId, assistantId, businessProfileVersionId]);
@@ -184,7 +188,7 @@ export async function prepareAssistantConfigurationGeneration({ database, provid
     `ACTIVE factual profile: ${JSON.stringify(context.rows[0].profile_data)}`,
     `APPROVED AI recommendation: ${JSON.stringify(context.rows[0].recommendation_data)}`,
   ].join('\n');
-  const fingerprint = requestFingerprint({ tenant_id: tenantId, assistant_id: assistantId, active_profile_version_id: context.rows[0].profile_version_id, business_identity_id: provenance.business_identity_id, source_scope: provenance.source_scope, source_hashes: sourceHashes, recommendation_id: recommendationId, schema_version: SCHEMA_VERSION, configuration_runtime_contract: CONFIGURATION_RUNTIME_CONTRACT, provider: provider.provider, model: provider.model, generation_policy: provider.assistantConfigurationGenerationPolicy ?? provider.assistantGenerationPolicy ?? null });
+  const fingerprint = requestFingerprint({ tenant_id: tenantId, assistant_id: assistantId, active_profile_version_id: context.rows[0].profile_version_id, business_identity_id: provenance.business_identity_id, business_identity_display_name: context.rows[0].business_identity_display_name, source_scope: provenance.source_scope, source_hashes: sourceHashes, recommendation_id: recommendationId, schema_version: SCHEMA_VERSION, configuration_runtime_contract: CONFIGURATION_RUNTIME_CONTRACT, provider: provider.provider, model: provider.model, generation_policy: provider.assistantConfigurationGenerationPolicy ?? provider.assistantGenerationPolicy ?? null });
   return { context: context.rows[0], prompt, provenance, fingerprint, sourceCount: provenance.source_scope?.source_ids?.length ?? 0 };
 }
 
@@ -197,6 +201,7 @@ export async function generateAssistantConfigurationVersion({ database, provider
     const configurationData = withRuntimeAssistantIdentity(output, {
       recommendationData: prepared.context.recommendation_data,
       profileData: prepared.context.profile_data,
+      businessIdentityDisplayName: prepared.context.business_identity_display_name,
       assistantName: prepared.context.assistant_name,
     });
     const result = await generationDatabase.query(`INSERT INTO assistant_configuration_versions

@@ -9,6 +9,7 @@ import {
 } from '../services/knowledge-candidate-service.js';
 import { assignKnowledgeSourceBusinessIdentity } from '../services/knowledge-source-business-identity-service.js';
 import { analyzeBusinessProfileSourceScope } from '../services/knowledge-profile-lifecycle.js';
+import { generateAssistantConfigurationVersion } from '../services/knowledge-assistant-lifecycle.js';
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error('IMAGE_PROVENANCE_POSTGRES_REQUIRES_TEST_DATABASE_URL');
@@ -108,6 +109,104 @@ async function seedCandidateForSource(client, { tenantId, sourceId, suffix, segm
   );
   return candidate.rows[0].id;
 }
+
+test('real PostgreSQL persists a review-only configuration using the active canonical Business Identity when generated text omits it', async () => {
+  const client = await database.connect();
+  let tenantId = null;
+  let userId = null;
+  try {
+    const tenant = await client.query(
+      `INSERT INTO tenants (name, plan_code) VALUES ('Configuration canonical identity PostgreSQL fixture', 'STARTER') RETURNING id`,
+    );
+    tenantId = tenant.rows[0].id;
+    const user = await client.query(
+      `WITH generated_email AS (
+         SELECT concat('configuration-fixture-', gen_random_uuid(), '@example.test') AS value
+       )
+       INSERT INTO users (email, email_normalized, password_hash, system_role)
+       SELECT value, value, 'fixture', 'OWNER' FROM generated_email
+       RETURNING id`,
+    );
+    userId = user.rows[0].id;
+    const identity = await client.query(
+      `INSERT INTO business_identities (tenant_id, display_name, normalized_identity)
+       VALUES ($1, 'Canonical Fixture Identity', 'canonical-fixture-identity') RETURNING id, display_name`,
+      [tenant.rows[0].id],
+    );
+    const assistant = await client.query(
+      `INSERT INTO ai_assistants (tenant_id, name, status) VALUES ($1, 'Fixture Assistant', 'active') RETURNING id`,
+      [tenant.rows[0].id],
+    );
+    const profile = await client.query(
+      `INSERT INTO business_profiles (tenant_id, business_identity_id) VALUES ($1, $2) RETURNING id`,
+      [tenant.rows[0].id, identity.rows[0].id],
+    );
+    const profileVersion = await client.query(
+      `INSERT INTO business_profile_versions (
+         tenant_id, profile_id, profile_data, evidence, source_scope,
+         identity_resolution_status, schema_version, status, generated_by
+       ) VALUES ($1, $2, '{"company_summary":"Approved facts only"}'::jsonb,
+                 '{"source_hashes":["fixture-hash"]}'::jsonb,
+                 '{"source_ids":["fixture-source"]}'::jsonb,
+                 'RESOLVED', 2, 'APPROVED', 'AI') RETURNING id`,
+      [tenant.rows[0].id, profile.rows[0].id],
+    );
+    await client.query(
+      `UPDATE business_profiles
+          SET approved_version_id = $2, active_version_id = $2
+        WHERE id = $1 AND tenant_id = $3`,
+      [profile.rows[0].id, profileVersion.rows[0].id, tenant.rows[0].id],
+    );
+    const recommendation = await client.query(
+      `INSERT INTO assistant_knowledge_recommendations (
+         tenant_id, assistant_id, recommendation_data, evidence, status, schema_version
+       ) VALUES ($1, $2, '{"tone":"Professional"}'::jsonb, '{}'::jsonb, 'APPROVED', 2) RETURNING id`,
+      [tenant.rows[0].id, assistant.rows[0].id],
+    );
+    const provider = {
+      provider: 'GEMINI',
+      model: 'fixture-model',
+      generateAssistantConfiguration: async () => ({
+        schema_version: 2,
+        assistant_instructions: 'Use approved facts only.',
+      }),
+    };
+
+    const result = await generateAssistantConfigurationVersion({
+      database,
+      provider,
+      tenantId: tenant.rows[0].id,
+      assistantId: assistant.rows[0].id,
+      recommendationId: recommendation.rows[0].id,
+      requestedBy: user.rows[0].id,
+    });
+
+    assert.equal(result.configuration.status, 'NEEDS_REVIEW');
+    assert.equal(result.configuration.configuration_data.assistant_identity, identity.rows[0].display_name);
+    const persisted = await client.query(
+      `SELECT configuration_data, status FROM assistant_configuration_versions
+        WHERE id = $1 AND tenant_id = $2`,
+      [result.configuration.id, tenant.rows[0].id],
+    );
+    assert.equal(persisted.rows.length, 1);
+    assert.equal(persisted.rows[0].status, 'NEEDS_REVIEW');
+    assert.equal(persisted.rows[0].configuration_data.assistant_identity, identity.rows[0].display_name);
+  } finally {
+    if (tenantId) {
+      await client.query(`DELETE FROM assistant_configuration_versions WHERE tenant_id = $1`, [tenantId]);
+      await client.query(`DELETE FROM knowledge_generation_runs WHERE tenant_id = $1`, [tenantId]);
+      await client.query(`DELETE FROM assistant_knowledge_recommendations WHERE tenant_id = $1`, [tenantId]);
+      await client.query(`UPDATE business_profiles SET active_version_id = NULL, approved_version_id = NULL WHERE tenant_id = $1`, [tenantId]);
+      await client.query(`DELETE FROM business_profile_versions WHERE tenant_id = $1`, [tenantId]);
+      await client.query(`DELETE FROM business_profiles WHERE tenant_id = $1`, [tenantId]);
+      await client.query(`DELETE FROM ai_assistants WHERE tenant_id = $1`, [tenantId]);
+      await client.query(`DELETE FROM business_identities WHERE tenant_id = $1`, [tenantId]);
+      await client.query(`DELETE FROM tenants WHERE id = $1`, [tenantId]);
+    }
+    if (userId) await client.query(`DELETE FROM users WHERE id = $1`, [userId]);
+    client.release();
+  }
+});
 
 test('real PostgreSQL handles the historical missing-link shape and converges only one UUID identity', async () => {
   const client = await database.connect();

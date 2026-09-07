@@ -111,6 +111,46 @@ test('generates a review-only configuration from an approved recommendation', as
   assert.match(calls.find(({ sql }) => /FROM assistant_knowledge_recommendations recommendation/i.test(sql)).sql, /profile_version\.profile_id = profile\.id/i);
 });
 
+test('uses the active profile canonical Business Identity display name when generated content omits an assistant identity', async () => {
+  const calls = [];
+  const recommendationId = '33333333-3333-4333-8333-333333333333';
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/FROM assistant_knowledge_recommendations recommendation/i.test(sql)) {
+      return { rows: [{
+        recommendation_data: { schema_version: 2, tone: 'Professional' },
+        assistant_name: 'Yesil Vadi',
+        profile_version_id: '11111111-1111-4111-8111-111111111111',
+        business_identity_id: '55555555-5555-4555-8555-555555555555',
+        business_identity_display_name: 'Yeşil Vadi Peyzaj',
+        source_scope: { source_ids: ['canonical-fact-a'] },
+        profile_evidence: { source_hashes: ['approved-fact-hash'] },
+        profile_data: { company_summary: 'Approved canonical business facts only.' },
+      }] };
+    }
+    if (/INSERT INTO knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'RUNNING' }] };
+    if (/INSERT INTO assistant_configuration_versions/i.test(sql)) return { rows: [{ id: '44444444-4444-4444-8444-444444444444', status: 'NEEDS_REVIEW', configuration_data: params[2] }] };
+    if (/UPDATE knowledge_generation_runs/i.test(sql)) return { rows: [{ id: params[0], status: 'SUCCEEDED' }] };
+    return { rows: [] };
+  } };
+
+  const result = await generateAssistantConfigurationVersion({
+    database,
+    provider: provider({ schema_version: 2, assistant_instructions: 'Use approved facts only.' }),
+    tenantId,
+    assistantId,
+    recommendationId,
+    requestedBy: actorId,
+  });
+
+  assert.equal(result.configuration.status, 'NEEDS_REVIEW');
+  assert.equal(result.configuration.configuration_data.assistant_identity, 'Yeşil Vadi Peyzaj');
+  const context = calls.find(({ sql }) => /FROM assistant_knowledge_recommendations recommendation/i.test(sql));
+  assert.match(context.sql, /JOIN business_identities identity/i);
+  assert.match(context.sql, /identity\.id = profile\.business_identity_id/i);
+  assert.match(context.sql, /identity\.tenant_id = profile\.tenant_id/i);
+});
+
 test('configuration generation fingerprints its dedicated provider policy rather than the recommendation policy', async () => {
   const database = { query: async (sql) => {
     if (/FROM assistant_knowledge_recommendations recommendation/i.test(sql)) {
