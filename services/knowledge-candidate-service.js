@@ -512,13 +512,25 @@ export async function approveConversationKnowledgeCandidate({
       }
 
       phase = 'CANONICAL_SOURCE_CREATE';
+      const inheritedAssistantAssignments = originalSourceId
+        ? await db(client,
+          `SELECT assistant_id
+             FROM knowledge_source_assistants
+            WHERE tenant_id = $1 AND source_id = $2
+            ORDER BY assistant_id`,
+          [tenantId, originalSourceId])
+        : { rows: [] };
+      const materializedAssistantIds = [...new Set([
+        ...(candidate.assistant_id ? [candidate.assistant_id] : []),
+        ...(inheritedAssistantAssignments.rows ?? []).map((row) => row.assistant_id).filter(Boolean),
+      ])];
       const source = await createManualKnowledgeSource({
         database: client,
         tenantId,
         uploadedBy: reviewedBy,
         title: candidate.proposed_title,
         content: candidate.proposed_content,
-        assistantIds: candidate.assistant_id ? [candidate.assistant_id] : [],
+        assistantIds: materializedAssistantIds,
         sourceType: 'CONVERSATION_CANDIDATE',
       });
       materializedSourceId = source.id;

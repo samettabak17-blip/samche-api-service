@@ -31,6 +31,30 @@ test('explicit approval materializes only redacted candidate text through the ca
   assert.ok(calls.some(({ sql }) => /SET status = 'APPROVED'/i.test(sql)));
 });
 
+test('approval preserves explicit assistant scope from the original image source', async () => {
+  const assistantId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const calls = [];
+  const client = { async query(sql, params = []) {
+    calls.push({ sql, params });
+    if (/SELECT id, assistant_id, proposed_title/i.test(sql)) return { rows: [{ id: candidateId, assistant_id: null, proposed_title: 'Image fact', proposed_content: 'Redacted business fact', status: 'NEEDS_REVIEW', pii_redaction_status: 'REDACTED', image_semantic_version: '1' }] };
+    if (/primary_business_evidence_count/i.test(sql)) return { rows: [{ primary_business_evidence_count: 1, trusted_identity_count: 1, original_source_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' }] };
+    if (/SELECT assistant_id[\s\S]*FROM knowledge_source_assistants/i.test(sql)) return { rows: [{ assistant_id: assistantId }] };
+    if (/FROM ai_assistants/i.test(sql)) return { rows: [{ id: assistantId }] };
+    if (/INSERT INTO knowledge_base_documents/i.test(sql)) return { rows: [{ id: 'approved-source', tenant_id: tenantId, processing_status: 'UPLOADED', indexing_status: 'PENDING' }] };
+    if (/INSERT INTO knowledge_processing_jobs/i.test(sql)) return { rows: [{ id: 'job-1' }] };
+    return { rows: [] };
+  } };
+  const database = { connect: async () => ({ ...client, release: () => {} }) };
+
+  await approveConversationKnowledgeCandidate({ database, tenantId, candidateId, reviewedBy: reviewerId });
+
+  const assignment = calls.find(({ sql }) => /INSERT INTO knowledge_source_assistants/i.test(sql));
+  assert.ok(assignment, 'materialized canonical source must retain explicit assistant scope');
+  assert.equal(assignment.params[0], tenantId);
+  assert.match(assignment.params[1], /^[0-9a-f-]{36}$/i);
+  assert.deepEqual(assignment.params[2], [assistantId]);
+});
+
 test('a fresh image candidate fails closed without one trusted primary BUSINESS evidence identity', async () => {
   const client = { async query(sql) {
     if (/SELECT id, assistant_id, proposed_title/i.test(sql)) return { rows: [{ id: candidateId, assistant_id: null, proposed_title: 'Image fact', proposed_content: 'Redacted business fact', status: 'NEEDS_REVIEW', pii_redaction_status: 'PASSED', image_semantic_version: '1' }] };
