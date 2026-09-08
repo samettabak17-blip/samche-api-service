@@ -121,12 +121,17 @@ export function canonicalGuideResponseEvents(content, { nextActions = [] } = {})
     }
     if (bullet) {
       flush();
+      const isNumbered = /^\d+[.)]\s+/.test(line);
       const items = [safeInline(bullet[1])];
       while (index + 1 < lines.length && /^(?:[-*]|\d+[.)])\s+/.test(lines[index + 1])) {
         index += 1;
         items.push(safeInline(lines[index].replace(/^(?:[-*]|\d+[.)])\s+/, '')));
       }
-      events.push({ type: 'LIST', items: items.flatMap((item) => boundedTextSegments(item)) });
+      events.push({
+        type: 'LIST',
+        items: items.flatMap((item) => boundedTextSegments(item)),
+        ...(isNumbered ? { ordered: true } : {}),
+      });
       continue;
     }
     paragraph.push(line);

@@ -25,7 +25,15 @@ const resumeStorageKey = previewToken
 try { session = window.localStorage?.getItem(resumeStorageKey) || ''; } catch { session = ''; }
 
 const MODULES = Object.freeze({ ROADMAP: 'ROADMAP', INTERACTIVE_TOOL: 'INTERACTIVE_TOOL', AI_ASSISTANT: 'AI_ASSISTANT' });
-const PRESENTATION_TIMING = Object.freeze({ chunk_words: 5, base_delay_ms: 92, sentence_pause_ms: 260, section_pause_ms: 360, thinking_minimum_ms: 420 });
+export const PRESENTATION_TIMING = Object.freeze({
+  chunk_words: 2,
+  base_delay_ms: 48,
+  comma_pause_ms: 90,
+  sentence_pause_ms: 220,
+  section_pause_ms: 280,
+  list_item_pause_ms: 140,
+  thinking_minimum_ms: 420,
+});
 const text = (value, fallback = '') => typeof value === 'string' ? value : fallback;
 const element = (tag, className, content) => { const node = document.createElement(tag); if (className) node.className = className; if (content !== undefined) node.textContent = String(content); return node; };
 const clear = (node) => node.replaceChildren();
@@ -178,15 +186,97 @@ function suggestedRoadmapIntents(roadmap) {
   return (roadmap.steps || []).filter((field) => field.input_type === 'SELECT').flatMap((field) => field.options || []).map((option) => option.label).slice(0, 5);
 }
 function addThinking(board) { const thinking = element('p', 'guide-thinking', document.documentElement.lang?.startsWith('tr') ? 'Düşünüyorum' : 'Thinking'); thinking.setAttribute('role', 'status'); board.append(thinking); thinking.scrollIntoView({ block: 'end' }); return thinking; }
-const responseDelay = (value = PRESENTATION_TIMING.base_delay_ms) => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : value;
-async function progressiveText(node, value) { const words = text(value).split(/(\s+)/); for (let index = 0; index < words.length; index += PRESENTATION_TIMING.chunk_words) { const chunk = words.slice(index, index + PRESENTATION_TIMING.chunk_words).join(''); node.textContent += chunk; const terminal = /[.!?]\s*$/.test(chunk) ? PRESENTATION_TIMING.sentence_pause_ms : PRESENTATION_TIMING.base_delay_ms; if (responseDelay(terminal)) await new Promise((resolve) => window.setTimeout(resolve, responseDelay(terminal))); } }
-async function playGuideResponseEvents(board, events) {
+export const responseDelay = (value = PRESENTATION_TIMING.base_delay_ms) => {
+  try {
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
+      return 0;
+    }
+  } catch {
+    return value;
+  }
+  return value;
+};
+
+export async function progressiveText(node, value, { signal } = {}) {
+  const words = text(value).split(/(\s+)/);
+  const step = Math.max(2, (PRESENTATION_TIMING.chunk_words || 2) * 2);
+  for (let index = 0; index < words.length; index += step) {
+    if (signal?.aborted) return;
+    if (node && typeof node.isConnected === 'boolean' && !node.isConnected) return;
+    const chunk = words.slice(index, index + step).join('');
+    node.textContent += chunk;
+    const isSentenceEnd = /[.!?]\s*$/.test(chunk);
+    const isClauseEnd = /[,;:]\s*$/.test(chunk);
+    const pause = isSentenceEnd
+      ? PRESENTATION_TIMING.sentence_pause_ms
+      : isClauseEnd
+        ? PRESENTATION_TIMING.comma_pause_ms
+        : PRESENTATION_TIMING.base_delay_ms;
+    const delay = responseDelay(pause);
+    if (delay > 0 && typeof window !== 'undefined') {
+      await new Promise((resolve) => window.setTimeout(resolve, delay));
+    }
+  }
+}
+
+export async function playGuideResponseEvents(board, events, { signal } = {}) {
   for (const event of Array.isArray(events) ? events : []) {
+    if (signal?.aborted) return;
+    if (board && typeof board.isConnected === 'boolean' && !board.isConnected) return;
     if (event.type === 'THINKING' || event.type === 'MESSAGE_START' || event.type === 'MESSAGE_COMPLETE') continue;
-    if (event.type === 'SECTION') { const heading = element('h3', 'guide-response__section'); board.append(heading); if (responseDelay(PRESENTATION_TIMING.section_pause_ms)) await new Promise((resolve) => window.setTimeout(resolve, responseDelay(PRESENTATION_TIMING.section_pause_ms))); await progressiveText(heading, event.text || event.title); continue; }
-    if (event.type === 'LIST') { const list = element('ul', 'guide-response__list'); for (const item of event.items || []) list.append(element('li', '', item)); board.append(list); continue; }
-    if (event.type === 'ACTION') { for (const label of event.actions || [event.label]) { const action = element('button', 'guide-response__action', label); action.type = 'button'; action.addEventListener('click', () => { if (/refine|roadmap|plan/i.test(label) && !/build|assistant/i.test(label)) { root.querySelector('.guide-roadmap-composer')?.focus(); return; } guideState.active_module = /assistant/i.test(label) ? MODULES.AI_ASSISTANT : MODULES.INTERACTIVE_TOOL; persistState(); renderActiveModule(); }); board.append(action); } continue; }
-    if (event.type === 'TEXT_DELTA') { const paragraph = element('p', 'guide-response__text'); board.append(paragraph); await progressiveText(paragraph, event.text); }
+
+    if (event.type === 'SECTION') {
+      const heading = element('h3', 'guide-response__section');
+      board.append(heading);
+      const sectionDelay = responseDelay(PRESENTATION_TIMING.section_pause_ms);
+      if (sectionDelay > 0 && typeof window !== 'undefined') {
+        await new Promise((resolve) => window.setTimeout(resolve, sectionDelay));
+      }
+      await progressiveText(heading, event.text || event.title, { signal });
+      continue;
+    }
+
+    if (event.type === 'LIST') {
+      const isOrdered = Boolean(event.ordered);
+      const list = element(isOrdered ? 'ol' : 'ul', 'guide-response__list');
+      board.append(list);
+      for (const item of event.items || []) {
+        if (signal?.aborted) return;
+        if (board && typeof board.isConnected === 'boolean' && !board.isConnected) return;
+        const li = element('li', '');
+        list.append(li);
+        const itemDelay = responseDelay(PRESENTATION_TIMING.list_item_pause_ms);
+        if (itemDelay > 0 && typeof window !== 'undefined') {
+          await new Promise((resolve) => window.setTimeout(resolve, itemDelay));
+        }
+        await progressiveText(li, item, { signal });
+      }
+      continue;
+    }
+
+    if (event.type === 'ACTION') {
+      for (const label of event.actions || [event.label]) {
+        const action = element('button', 'guide-response__action', label);
+        action.type = 'button';
+        action.addEventListener('click', () => {
+          if (/refine|roadmap|plan/i.test(label) && !/build|assistant/i.test(label)) {
+            root?.querySelector('.guide-roadmap-composer')?.focus();
+            return;
+          }
+          guideState.active_module = /assistant/i.test(label) ? MODULES.AI_ASSISTANT : MODULES.INTERACTIVE_TOOL;
+          persistState();
+          renderActiveModule();
+        });
+        board.append(action);
+      }
+      continue;
+    }
+
+    if (event.type === 'TEXT_DELTA') {
+      const paragraph = element('p', 'guide-response__text');
+      board.append(paragraph);
+      await progressiveText(paragraph, event.text, { signal });
+    }
   }
 }
 async function submitGuideRequest({ value, module, board, input, submit, idempotencyKey, onResponse, onFailure }) {

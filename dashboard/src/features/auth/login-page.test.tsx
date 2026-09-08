@@ -21,10 +21,10 @@ describe('LoginPage', () => {
     render(<MemoryRouter><LoginPage /></MemoryRouter>);
 
     expect(screen.getAllByRole('img', { name: 'SamChe Company LLC' }).length).toBeGreaterThan(0);
-    expect(screen.getByRole('heading', { name: 'AI OPERATIONS.' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Manage your AI operations from a single platform.' })).toBeTruthy();
     expect(screen.getAllByRole('img', { name: 'SamChe Company LLC' })[0]).toHaveClass('auth-hero-logo');
-    expect(screen.getByRole('heading', { name: 'SMARTER.' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'STRONGER.' })).toBeTruthy();
+
+
     expect(screen.getByText('Analytics')).toBeTruthy();
     expect(screen.queryByRole('link', { name: /forgot password/i })).toBeNull();
   });

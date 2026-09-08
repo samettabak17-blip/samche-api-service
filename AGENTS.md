@@ -228,3 +228,5 @@ modify files outside the authorized scope.
   resolution step but must never override a contradictory canonical ID or become
   a parallel frontend source of identity truth. PostgreSQL-backed identity and
   provenance decisions require disposable real-PostgreSQL regression coverage.
+- Tenant-specific factual claims require eligible canonical tenant authority (ACTIVE Business Profile, ACTIVE Assistant Configuration, or approved canonical Knowledge Intelligence). General model/world knowledge may support reasoning, generic domain concepts, or general educational explanation, but must never be promoted into unsupported facts about a tenant.
+
