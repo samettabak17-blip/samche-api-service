@@ -28,7 +28,7 @@ describe('AcceptInvitationPage', () => {
     expect(onboardingApi.validateInvitation).toHaveBeenCalledWith('safe-token');
     expect(window.location.search).toBe('');
     expect(screen.getByText('Northwind')).toBeTruthy();
-    expect(screen.getAllByRole('img', { name: 'SamChe Company LLC' }).find((image) => image.classList.contains('auth-card-logo'))).toBeTruthy();
+    expect(screen.getAllByRole('img', { name: 'SamChe Company LLC' })).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Back to sign in' })).toBeTruthy();
   });
 

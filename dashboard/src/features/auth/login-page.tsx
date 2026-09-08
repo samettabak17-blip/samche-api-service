@@ -36,9 +36,9 @@ export function LoginPage() {
 
   return <AuthVisualLayout>
           <div className="auth-badge"><LockKeyhole aria-hidden="true" size={13} className="text-red-500" /><span>SECURE SIGN IN</span></div>
-          <h1 className="mt-4 text-3xl font-bold tracking-tight text-white">Welcome back</h1>
-          <p className="mt-1.5 text-sm text-stone-400">Sign in to access your SamChe AI Platform workspace.</p>
-          <form className="mt-7 space-y-4" onSubmit={submit} noValidate>
+          <h1 className="auth-login-card-heading mt-4 text-3xl font-bold tracking-tight text-white">Welcome back</h1>
+          <p className="auth-login-card-description mt-1.5 text-sm text-stone-400">Sign in to access your SamChe AI Platform workspace.</p>
+          <form className="auth-login-form mt-7 space-y-4" onSubmit={submit} noValidate>
             <DashboardField label="Email"><DashboardInput type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required placeholder="admin@samchecompany.com" aria-label="Email" /></DashboardField>
             <DashboardField label="Password"><DashboardPasswordInput autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required placeholder="••••••••••••" aria-label="Password" /></DashboardField>
             <div className="flex items-center justify-between pt-0.5 text-xs"><label className="flex items-center gap-2 text-stone-300 cursor-pointer select-none"><input type="checkbox" className="h-4 w-4 rounded border-white/20 bg-black/40 text-red-600 accent-red-600" />Remember me</label><button type="button" onClick={() => { setForgotOpen(true); setForgotStatus(''); }} className="text-[#f59e0b] hover:text-amber-400 font-medium transition">Forgot password?</button></div>

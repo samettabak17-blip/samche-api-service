@@ -3,12 +3,12 @@ import type { ReactNode } from 'react';
 import samcheLogo from '../../assets/branding/samche-company-llc-logo.png';
 
 const capabilities = [
-  ['AI Assistants', 'Create and manage intelligent assistants', Bot],
-  ['Knowledge Intelligence', 'Turn approved knowledge into useful answers', BookOpenText],
-  ['Omnichannel', 'Connect conversations across every channel', Cable],
-  ['CRM & Pipeline', 'Move leads and deals forward with clarity', KanbanSquare],
-  ['Automation / Agentic', 'Automate work with capable AI agents', Zap],
-  ['Analytics', 'Turn conversations into clear decisions', Activity],
+  ['AI Assistants', 'AI Assistants', 'Create and manage intelligent assistants', Bot],
+  ['Knowledge Intelligence', 'Knowledge Intelligence', 'Turn approved knowledge into useful answers', BookOpenText],
+  ['Omnichannel', 'Omnichannel', 'Connect conversations across every channel', Cable],
+  ['CRM & Pipeline', 'CRM & Pipeline', 'Move leads and deals forward with clarity', KanbanSquare],
+  ['Automation / Agentic', 'Automation', 'Automate work with capable AI agents', Zap],
+  ['Analytics', 'Analytics', 'Turn conversations into clear decisions', Activity],
 ] as const;
 
 export function AuthVisualLayout({
@@ -17,7 +17,6 @@ export function AuthVisualLayout({
   heroHeading,
   heroLines,
   heroDescription,
-  capabilityCount = 6,
   showCardLogo = false,
 }: {
   children: ReactNode;
@@ -25,6 +24,7 @@ export function AuthVisualLayout({
   heroHeading?: string;
   heroLines?: readonly string[];
   heroDescription?: string;
+  /** Retained for existing callers; the reference composition always has six cards. */
   capabilityCount?: number;
   showCardLogo?: boolean;
 }) {
@@ -35,7 +35,7 @@ export function AuthVisualLayout({
     <main className="auth-page">
       {/* Authoritative Futuristic Red Laser & Particle Mesh Background */}
       <svg
-        className="auth-laser-bg pointer-events-none absolute inset-0 -z-10 h-full w-full"
+        className="auth-laser-bg pointer-events-none absolute inset-0 h-full w-full"
         preserveAspectRatio="xMidYMid slice"
         viewBox="0 0 1600 983"
         fill="none"
@@ -125,22 +125,17 @@ export function AuthVisualLayout({
       {/* Form Card Area: Contains the login/invitation card */}
       <section className={`auth-panel${showCardLogo ? ' auth-panel-invitation' : ''}`}>
         <div className={`auth-card${showCardLogo ? ' auth-card-invitation' : ''}`}>
-          {showCardLogo && (
-            <div className="auth-card-logo-frame">
-              <img src={samcheLogo} alt="SamChe Company LLC" className="auth-card-logo" />
-            </div>
-          )}
           {children}
         </div>
       </section>
 
       {/* Hero Bottom Area: Contains the 6 Capability Cards & Copyright Footer */}
       <section className="auth-hero-bottom">
-        <div className="auth-capability-grid grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2.5 sm:gap-3">
-          {capabilities.slice(0, capabilityCount).map(([title, description, Icon]) => (
+        <div className="auth-capability-grid grid grid-cols-3 xl:grid-cols-6 gap-2.5 sm:gap-3">
+          {capabilities.map(([title, mobileTitle, description, Icon]) => (
             <article key={title} className="auth-capability-card">
               <Icon aria-hidden="true" className="text-red-500" size={24} strokeWidth={1.8} />
-              <h2>{title}</h2>
+              <h2 aria-label={mobileTitle}><span className="auth-capability-title" data-mobile-title={mobileTitle}>{title}</span></h2>
               <p>{description}</p>
             </article>
           ))}

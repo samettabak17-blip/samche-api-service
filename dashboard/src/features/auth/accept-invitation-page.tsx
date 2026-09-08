@@ -89,15 +89,15 @@ export function AcceptInvitationPage() {
 
   return <PageFrame>
     <div className="auth-badge"><LockKeyhole aria-hidden="true" size={13} className="text-red-500" /><span>CUSTOMER INVITATION</span></div>
-    <h1 className="mt-4 text-3xl font-bold tracking-tight text-white">Set up your account</h1>
-    <p className="mt-1.5 text-sm text-stone-400">{invitation?.company_name ? <>You were invited to join <span className="font-semibold text-[#f59e0b]">{invitation.company_name}</span>.</> : 'Choose a password to finish joining your workspace.'}</p>
+    <h1 className="auth-invitation-card-heading mt-4 text-3xl font-bold tracking-tight text-white">Set up your account</h1>
+    <p className="auth-invitation-card-description mt-1.5 text-sm text-stone-400">{invitation?.company_name ? <>You were invited to join <span className="font-semibold text-[#f59e0b]">{invitation.company_name}</span>{invitation.company_name.endsWith('.') ? '' : '.'}</> : 'Choose a password to finish joining your workspace.'}</p>
     {invitation?.email && (
-      <div className="mx-auto my-3 flex items-center justify-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs text-stone-200 w-fit">
+      <div className="auth-invitation-email mx-auto my-3 flex items-center justify-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-4 py-1.5 text-xs text-stone-200 w-fit">
         <span className="grid h-5 w-5 place-items-center rounded-full bg-amber-500/25 text-[#f59e0b]"><Mail aria-hidden="true" size={12} /></span>
         <span className="font-semibold text-white">{invitation.email}</span>
       </div>
     )}
-    <form className="mt-5 space-y-3.5" onSubmit={submit} noValidate>
+    <form className="auth-invitation-form mt-5 space-y-3.5" onSubmit={submit} noValidate>
       <DashboardField label="First name"><DashboardInput aria-label="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="Enter your first name" /></DashboardField>
       <DashboardField label="Last name"><DashboardInput aria-label="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Enter your last name" /></DashboardField>
       <DashboardField label="Password"><DashboardPasswordInput aria-label="Password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required placeholder="Create a strong password" /></DashboardField>
