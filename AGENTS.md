@@ -282,6 +282,7 @@ modify files outside the authorized scope.
 - Platform-managed staging Guide routing uses one canonical platform hostname
   with tenant-safe path-based resolution; tenant-specific wildcard DNS is not a
   runtime dependency; custom Guide domains remain host-based.
+- WhatsApp conversations maintain provider-native typing indicators strictly scoped to eligible inbound AI responses: typing is initiated via canonical transport before generation, suppressed when a human owns handling or during handoff, bounded by adaptive natural compose pacing when generation is fast, introduces zero artificial delay for naturally paced responses, and terminates naturally upon message delivery or safe error handling without keepalive loops or content alteration.
 
 - Push subscriptions are tenant/user/device scoped records; a browser
   subscription never grants tenant authorization. Notification intents and

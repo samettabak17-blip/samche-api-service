@@ -11,7 +11,8 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 import cron from "node-cron";
 import path from 'node:path';
-import { deliverWhatsAppText, whatsappHttpsAgent } from "./services/whatsapp-delivery-service.js";
+import { deliverWhatsAppText, whatsappHttpsAgent, sendWhatsAppTypingIndicator } from "./services/whatsapp-delivery-service.js";
+import { applyWhatsAppAdaptivePacing, MIN_COMPOSE_WINDOW_MS, MAX_ARTIFICIAL_DELAY_MS } from "./services/whatsapp-response-pacing-service.js";
 import { verifyWhatsAppSignature } from "./middleware/whatsappSignature.js";
 import authRoutes from "./routes/authRoutes.js";
 import tenantRoutes from "./routes/tenantRoutes.js";
@@ -2153,15 +2154,6 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         return;
       }
 
-      // 🔥 MAVİ TIK (OKUNDU) ONAYI (Ateşle ve Unut)
-      if (wpMessageId) {
-        axios.post(
-          `https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
-          { messaging_product: "whatsapp", status: "read", message_id: wpMessageId },
-          { httpsAgent, headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, "Content-Type": "application/json" }, timeout: 10000 }
-        ).catch(() => {});
-      }
-
       // Gelen içerik desteklenmiyorsa
       const isInvalid = ((!text || text === "") && !mediaDescriptor) || message.type === "video" || message.type === "sticker";
       if (isInvalid) {
@@ -2211,6 +2203,22 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         return;
       }
 
+      if (whatsappInbox.conversation?.handling_mode === 'HUMAN') {
+        console.info('WHATSAPP_HUMAN_HANDLING_ACTIVE handling_mode=HUMAN ai_suppressed=1');
+        return;
+      }
+
+      // Initiate WhatsApp native typing indicator for eligible AI processing
+      const aiResponseStartedAt = Date.now();
+      if (wpMessageId) {
+        sendWhatsAppTypingIndicator({
+          phoneNumberId: process.env.WHATSAPP_PHONE_ID,
+          incomingMessageId: wpMessageId,
+        }).catch((error) => {
+          console.warn('WHATSAPP_TYPING_INDICATOR_DISPATCH_WARNING', error?.code ?? error?.name ?? 'UNKNOWN');
+        });
+      }
+
       let runtimeTenantContext;
       let runtime;
       try {
@@ -2238,7 +2246,9 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         await scheduleTenantContextualFollowUps({ whatsappInbox, persona: runtime.persona });
       } catch (error) {
         console.error('KNOWLEDGE_RUNTIME_CONTEXT_UNAVAILABLE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
-        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, resolveWhatsAppPersonaUnavailableResponse(tenantContext.communicationLanguage));
+        const unavailableFallback = resolveWhatsAppPersonaUnavailableResponse(tenantContext.communicationLanguage);
+        await applyWhatsAppAdaptivePacing({ generationStartedAt: aiResponseStartedAt, content: unavailableFallback });
+        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, unavailableFallback);
         return;
       }
 
@@ -2262,6 +2272,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           ' template_language=' + deterministicTemplateLanguage +
           ' persisted_language=' + tenantContext.communicationLanguage
         );
+        await applyWhatsAppAdaptivePacing({ generationStartedAt: aiResponseStartedAt, content: deterministicSocialResponse.content });
         await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, deterministicSocialResponse.content);
         return;
       }
@@ -2325,16 +2336,9 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       }
 
       logWhatsAppTiming('model_response_complete');
-      if (!aiResponse) {
-        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, corporateFallback(expectedLanguage));
-        return;
-      }
-
-      const lowerAi = aiResponse.toLowerCase();
-
-      // Model text is conversational only. A human-support transition may
-      // originate from the customer request above, never from model wording.
-      await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, aiResponse);
+      const outgoingAssistantContent = aiResponse || corporateFallback(expectedLanguage);
+      await applyWhatsAppAdaptivePacing({ generationStartedAt: aiResponseStartedAt, content: outgoingAssistantContent });
+      await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, outgoingAssistantContent);
       return;
 
     } catch (error) {

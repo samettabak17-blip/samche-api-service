@@ -103,7 +103,7 @@ export function AcceptInvitationPage() {
       <DashboardField label="Password"><DashboardPasswordInput aria-label="Password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} required placeholder="Create a strong password" /></DashboardField>
       <DashboardField label="Confirm password"><DashboardPasswordInput aria-label="Confirm password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required placeholder="Confirm your password" /></DashboardField>
       {error && <p role="alert" className="rounded-xl border border-red-400/35 bg-red-950/35 px-3.5 py-3 text-sm text-red-100">{error}</p>}
-      <DashboardButton type="submit" variant="primary" disabled={submitting} className="auth-button-primary mt-6 text-sm"><span>{submitting ? 'Setting up…' : 'Set up account'}</span><ArrowRight aria-hidden="true" size={16} /></DashboardButton>
+      <DashboardButton type="submit" variant="primary" disabled={submitting} className="auth-button-primary w-full mt-6 text-sm"><span>{submitting ? 'Setting up…' : 'Set up account'}</span><ArrowRight aria-hidden="true" size={16} /></DashboardButton>
       <DashboardButton type="button" variant="ghost" className="w-full" onClick={() => navigate('/login')}>Back to sign in</DashboardButton>
     </form>
     <div className="auth-invitation-assurance"><span><ShieldCheck aria-hidden="true" size={14} className="text-[#f59e0b]" />Secure invitation link</span><span><LockKeyhole aria-hidden="true" size={14} className="text-[#f59e0b]" />Encrypted access</span><span><Users aria-hidden="true" size={14} className="text-[#f59e0b]" />Role-based workspace access</span></div>

@@ -242,3 +242,61 @@ export async function deliverWhatsAppMedia({
   if (isVoiceMessage) console.info('VOICE_SEND stage=META_MESSAGE_ACCEPTED wamid_present=1');
   return { delivery: 'SENT_TO_WHATSAPP', mediaId, providerMessageId };
 }
+
+/**
+ * Dispatches the official WhatsApp native typing indicator / read receipt presence
+ * for an incoming message. Associates strictly with the inbound WhatsApp message ID.
+ */
+export async function sendWhatsAppTypingIndicator({
+  phoneNumberId,
+  incomingMessageId,
+  env = process.env,
+  httpClient = axios,
+  httpsAgent = whatsappHttpsAgent,
+}) {
+  const configuredPhoneNumberId = configuredValue(env.WHATSAPP_PHONE_ID);
+  const accessToken = configuredValue(env.WHATSAPP_TOKEN);
+  const expectedPhoneNumberId = configuredValue(phoneNumberId);
+  const messageId = configuredValue(incomingMessageId);
+
+  if (!configuredPhoneNumberId || !accessToken) {
+    throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_NOT_CONFIGURED');
+  }
+  if (!expectedPhoneNumberId || expectedPhoneNumberId !== configuredPhoneNumberId) {
+    throw new WhatsAppDeliveryError('WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH');
+  }
+  if (!messageId) {
+    throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_INVALID_INPUT');
+  }
+
+  try {
+    const response = await httpClient.post(
+      `https://graph.facebook.com/v20.0/${configuredPhoneNumberId}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        status: 'read',
+        message_id: messageId,
+      },
+      {
+        httpsAgent,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 10000,
+      }
+    );
+    const success = Boolean(response?.data?.success ?? true);
+    return { ok: success, messageId };
+  } catch (error) {
+    const diagnostic = safeProviderDiagnostic(error, 'TYPING_INDICATOR');
+    throw new WhatsAppDeliveryError(
+      error?.response?.status === 401 || error?.response?.status === 403
+        ? 'WHATSAPP_DELIVERY_AUTH_FAILED'
+        : 'WHATSAPP_TYPING_INDICATOR_FAILED',
+      'WhatsApp typing indicator failed',
+      diagnostic
+    );
+  }
+}
+
