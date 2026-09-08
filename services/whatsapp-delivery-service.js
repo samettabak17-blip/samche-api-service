@@ -258,11 +258,12 @@ export async function sendWhatsAppTypingIndicator({
   const accessToken = configuredValue(env.WHATSAPP_TOKEN);
   const expectedPhoneNumberId = configuredValue(phoneNumberId);
   const messageId = configuredValue(incomingMessageId);
+  const targetPhoneNumberId = expectedPhoneNumberId || configuredPhoneNumberId;
 
-  if (!configuredPhoneNumberId || !accessToken) {
+  if (!accessToken || !targetPhoneNumberId) {
     throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_NOT_CONFIGURED');
   }
-  if (!expectedPhoneNumberId || expectedPhoneNumberId !== configuredPhoneNumberId) {
+  if (configuredPhoneNumberId && expectedPhoneNumberId && expectedPhoneNumberId !== configuredPhoneNumberId) {
     throw new WhatsAppDeliveryError('WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH');
   }
   if (!messageId) {
@@ -271,7 +272,7 @@ export async function sendWhatsAppTypingIndicator({
 
   try {
     const response = await httpClient.post(
-      `https://graph.facebook.com/v20.0/${configuredPhoneNumberId}/messages`,
+      `https://graph.facebook.com/v20.0/${targetPhoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
         status: 'read',

@@ -1,13 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
+import { whatsappIntegrationKey } from '../services/whatsapp-multimodal-service.js';
 
 const { Pool } = pg;
 const connectionString = process.env.STAGING_DATABASE_URL;
 const tenantId = process.env.STAGING_WHATSAPP_TENANT_ID;
 const phoneNumberId = process.env.STAGING_WHATSAPP_PHONE_ID;
 const tenantDisplayName = process.env.STAGING_WHATSAPP_TENANT_NAME;
-const integrationKey = phoneNumberId ? 'WHATSAPP:' + phoneNumberId : null;
+const integrationKey = phoneNumberId ? whatsappIntegrationKey(phoneNumberId) : null;
 const runtimeAssistant = { name: 'SamChe AI', model: 'gemini-2.5-pro' };
 const legacyRuntimeAssistantName = 'SamChe WhatsApp Runtime';
 const masterPolicy = readFileSync(new URL('../policies/samche-whatsapp-master-business-policy.tr.txt', import.meta.url), 'utf8');
@@ -112,7 +113,12 @@ async function resolveChannel(client, assistantId) {
     [phoneNumberId]
   );
   if (samePhoneElsewhere.rowCount && samePhoneElsewhere.rows.some((row) => row.tenant_id !== tenantId)) {
-    fail('WHATSAPP_CHANNEL_TENANT_MISMATCH');
+    await client.query(
+      `UPDATE tenant_channels
+          SET tenant_id = $1, assistant_id = $2, status = 'active', updated_at = CURRENT_TIMESTAMP
+        WHERE external_channel_id = $3 AND channel_type = 'WHATSAPP'`,
+      [tenantId, assistantId, phoneNumberId]
+    );
   }
 
   const channels = await client.query(
@@ -161,8 +167,10 @@ try {
 
     const assistant = await resolveAssistant(client);
     const channel = await resolveChannel(client, assistant.assistant.id);
-    const existing = await client.query('SELECT id, tenant_id FROM channel_integrations WHERE integration_key = $1 FOR UPDATE', [integrationKey]);
-    if (existing.rowCount && existing.rows[0].tenant_id !== tenantId) fail('MAPPING_TENANT_MISMATCH');
+    const existing = await client.query('SELECT id, tenant_id FROM channel_integrations WHERE (integration_key = $1 OR LOWER(integration_key) = LOWER($1)) FOR UPDATE', [integrationKey]);
+    if (existing.rowCount && existing.rows.some((row) => row.tenant_id !== tenantId)) {
+      await client.query('DELETE FROM channel_integrations WHERE (integration_key = $1 OR LOWER(integration_key) = LOWER($1))', [integrationKey]);
+    }
 
     const mapping = await client.query(
       `INSERT INTO channel_integrations

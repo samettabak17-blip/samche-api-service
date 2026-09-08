@@ -2211,8 +2211,8 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       // Initiate WhatsApp native typing indicator for eligible AI processing
       const aiResponseStartedAt = Date.now();
       if (wpMessageId) {
-        sendWhatsAppTypingIndicator({
-          phoneNumberId: process.env.WHATSAPP_PHONE_ID,
+        await sendWhatsAppTypingIndicator({
+          phoneNumberId: phoneNumberId || whatsappInbox?.integration?.external_channel_id || process.env.WHATSAPP_PHONE_ID,
           incomingMessageId: wpMessageId,
         }).catch((error) => {
           console.warn('WHATSAPP_TYPING_INDICATOR_DISPATCH_WARNING', error?.code ?? error?.name ?? 'UNKNOWN');

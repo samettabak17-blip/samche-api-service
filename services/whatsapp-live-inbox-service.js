@@ -52,17 +52,61 @@ async function notify(client, tenantId, conversationId, type) {
 }
 
 export async function resolveWhatsAppIntegration(client, phoneNumberId) {
+  const cleanPhone = String(phoneNumberId ?? '').replace(/^whatsapp:/i, '').trim();
+  const key = whatsappIntegrationKey(phoneNumberId);
+
+  // 1. Authoritative check on tenant_channels
+  const directChannel = await client.query(
+    `SELECT tc.tenant_id, tc.id AS channel_id, tc.assistant_id, tc.assistant_id AS channel_assistant_id,
+            tc.channel_type, tc.status AS channel_status, a.status AS assistant_status,
+            t.name AS tenant_name, a.name AS assistant_name, a.system_prompt AS assistant_system_prompt,
+            a.whatsapp_response_templates AS assistant_whatsapp_response_templates
+       FROM tenant_channels tc
+       JOIN tenants t ON t.id = tc.tenant_id AND t.status = 'active'
+       JOIN ai_assistants a ON a.id = tc.assistant_id AND a.tenant_id = tc.tenant_id
+      WHERE tc.channel_type = 'WHATSAPP'
+        AND (tc.external_channel_id = $1 OR tc.external_channel_id = $2 OR LOWER(tc.external_channel_id) = LOWER($1))
+        AND tc.status = 'active'
+        AND a.status = 'active'
+      ORDER BY tc.updated_at DESC
+      LIMIT 2`,
+    [cleanPhone, key]
+  );
+
+  if (directChannel.rowCount === 1) {
+    const integration = directChannel.rows[0];
+    try {
+      await client.query(
+        `INSERT INTO channel_integrations
+          (integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled)
+         VALUES ($1, 'WHATSAPP', $2, $3, $4, TRUE)
+         ON CONFLICT (integration_key)
+         DO UPDATE SET tenant_id = EXCLUDED.tenant_id,
+                       channel_id = EXCLUDED.channel_id,
+                       assistant_id = EXCLUDED.assistant_id,
+                       enabled = TRUE,
+                       updated_at = CURRENT_TIMESTAMP`,
+        [key, integration.tenant_id, integration.channel_id, integration.assistant_id]
+      );
+    } catch {}
+    return integration;
+  }
+
+  // 2. Fallback to channel_integrations (case-insensitive key match)
   const result = await client.query(
-    `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id, tc.assistant_id AS channel_assistant_id, tc.channel_type, tc.status AS channel_status, a.status AS assistant_status, t.name AS tenant_name, a.name AS assistant_name, a.system_prompt AS assistant_system_prompt, a.whatsapp_response_templates AS assistant_whatsapp_response_templates
+    `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id, tc.assistant_id AS channel_assistant_id,
+            tc.channel_type, tc.status AS channel_status, a.status AS assistant_status,
+            t.name AS tenant_name, a.name AS assistant_name, a.system_prompt AS assistant_system_prompt,
+            a.whatsapp_response_templates AS assistant_whatsapp_response_templates
        FROM channel_integrations ci
        JOIN tenant_channels tc ON tc.id = ci.channel_id AND tc.tenant_id = ci.tenant_id
        JOIN tenants t ON t.id = ci.tenant_id AND t.status = 'active'
        JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
-      WHERE ci.integration_key = $1
+      WHERE (ci.integration_key = $1 OR LOWER(ci.integration_key) = LOWER($1))
         AND ci.integration_type = 'WHATSAPP'
         AND ci.enabled = TRUE
       LIMIT 2`,
-    [whatsappIntegrationKey(phoneNumberId)]
+    [key]
   );
   if (result.rowCount !== 1) return null;
   const integration = result.rows[0];
@@ -344,7 +388,7 @@ export async function persistWhatsAppInbound({
         (tenant_id, channel_id, external_conversation_id, customer_external_id, last_activity_at)
        VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
        ON CONFLICT (channel_id, external_conversation_id)
-       DO UPDATE SET last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       DO UPDATE SET tenant_id = EXCLUDED.tenant_id, last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
        RETURNING *`,
       [integration.tenant_id, integration.channel_id, externalConversationId(customerPhone), customerReference(customerPhone)]
     );

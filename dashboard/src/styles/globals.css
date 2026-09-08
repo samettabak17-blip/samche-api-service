@@ -106,27 +106,144 @@ button.bg-ink:hover { background: #b81920; }
   .auth-surface { @apply border border-white/[.14] bg-[#161618]/95 shadow-[0_22px_70px_rgba(0,0,0,.36)]; }
   .auth-label { @apply text-xs font-semibold; color: #cbd5e1; }
   .auth-input { @apply mt-1.5 block w-full rounded-xl border border-white/10 bg-[#12141a] px-3.5 py-2.5 text-sm text-white outline-none transition placeholder:text-stone-500 focus:border-red-500 focus:ring-1 focus:ring-red-500/50; }
-  .auth-page { @apply relative min-h-screen text-white overflow-x-hidden lg:grid lg:grid-cols-[1.35fr_1fr] xl:grid-cols-[1.45fr_1fr]; background: radial-gradient(circle at 82% 45%, rgba(220, 38, 38, 0.28) 0%, rgba(180, 20, 30, 0.12) 35%, transparent 70%), radial-gradient(circle at 15% 85%, rgba(220, 38, 38, 0.22) 0%, transparent 55%), radial-gradient(circle at 50% 10%, rgba(220, 38, 38, 0.15) 0%, transparent 45%), linear-gradient(135deg, #06070a 0%, #0d090d 50%, #06070a 100%); }
-  .auth-hero { @apply relative isolate flex flex-col justify-between overflow-hidden px-6 py-8 sm:px-8 sm:py-10 xl:px-14 xl:py-12; }
+  .auth-page {
+    @apply relative min-h-screen text-white overflow-x-hidden flex flex-col items-center px-4 py-8 sm:px-6;
+    background:
+      radial-gradient(circle at 82% 42%, rgba(239, 68, 68, 0.32) 0%, rgba(185, 28, 28, 0.14) 35%, transparent 70%),
+      radial-gradient(circle at 18% 85%, rgba(239, 68, 68, 0.24) 0%, transparent 55%),
+      radial-gradient(circle at 50% 8%, rgba(239, 68, 68, 0.16) 0%, transparent 45%),
+      linear-gradient(135deg, #050608 0%, #0d080c 50%, #050608 100%);
+  }
+  @media (min-width: 1024px) {
+    .auth-page {
+      display: grid;
+      grid-template-columns: 1.35fr 1fr;
+      grid-template-rows: auto 1fr;
+      grid-template-areas:
+        "hero-top card"
+        "hero-bottom card";
+      min-height: 100vh;
+      padding: 0;
+      align-items: stretch;
+    }
+  }
+  @media (min-width: 1280px) {
+    .auth-page {
+      grid-template-columns: 1.45fr 1fr;
+    }
+  }
   .auth-laser-bg { @apply pointer-events-none absolute inset-0 -z-10 h-full w-full overflow-hidden; }
-  .auth-hero-content { @apply w-full max-w-3xl pt-2 text-left; }
-  .auth-hero-logo-frame { @apply h-[68px] sm:h-[72px] w-auto mb-8 max-w-[280px]; }
-  .auth-hero-logo { @apply h-[68px] sm:h-[72px] w-auto max-w-[280px] object-contain object-left; }
+  .auth-hero-top {
+    @apply relative isolate w-full max-w-[480px] text-center mb-6 pt-2;
+  }
+  @media (min-width: 1024px) {
+    .auth-hero-top {
+      grid-area: hero-top;
+      max-width: none;
+      text-align: left;
+      padding: 2.5rem 2.5rem 0.5rem 2.5rem;
+    }
+  }
+  @media (min-width: 1280px) {
+    .auth-hero-top {
+      padding: 3.5rem 3.5rem 1rem 3.5rem;
+    }
+  }
+  .auth-hero-top-invitation .auth-hero-text {
+    @apply hidden lg:block;
+  }
+  .auth-hero-logo-frame {
+    @apply h-[80px] sm:h-[88px] w-auto mx-auto mb-5 flex items-center justify-center;
+  }
+  @media (min-width: 1024px) {
+    .auth-hero-logo-frame {
+      @apply h-[88px] sm:h-[96px] w-auto max-w-[320px] mb-8 mx-0 justify-start;
+    }
+  }
+  .auth-hero-logo {
+    @apply h-[80px] sm:h-[88px] w-auto max-w-[280px] sm:max-w-[300px] object-contain;
+  }
+  @media (min-width: 1024px) {
+    .auth-hero-logo {
+      @apply h-[88px] sm:h-[96px] w-auto max-w-[320px] object-contain object-left;
+    }
+  }
   .auth-hero-eyebrow { @apply text-xs font-bold uppercase tracking-[0.2em] text-[#ef4444]; }
-  .auth-hero-heading { @apply mt-4 text-4xl font-bold tracking-tight text-white xl:text-5xl leading-[1.15]; }
-  .auth-hero-description { @apply mt-4 max-w-xl text-base leading-relaxed text-stone-400; }
-  .auth-capability-grid { @apply mt-10 grid grid-cols-2 gap-3 xl:grid-cols-3 2xl:grid-cols-6; }
-  .auth-capability-card { @apply rounded-xl border border-white/[0.08] bg-[#0c0d12]/80 p-3.5 backdrop-blur-sm transition; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 10px 25px rgba(0, 0, 0, 0.3); }
-  .auth-capability-card h2 { @apply mt-3 text-xs font-semibold leading-4 text-white; }
-  .auth-capability-card p { @apply mt-1.5 text-[11px] leading-4 text-stone-400; }
-  .auth-hero-footer { @apply mt-6 text-center text-xs text-stone-500; }
-  .auth-panel { @apply relative flex min-h-screen flex-col items-center justify-center px-4 py-8 sm:px-6 lg:px-8; }
-  .auth-card { @apply relative w-full max-w-[480px] rounded-3xl bg-[#0e1015]/95 p-7 sm:p-9 backdrop-blur-xl; border: 1.5px solid rgba(239, 68, 68, 0.75); box-shadow: 0 0 45px -5px rgba(220, 38, 38, 0.42), 0 0 90px -10px rgba(220, 38, 38, 0.22), inset 0 0 25px -5px rgba(220, 38, 38, 0.14); }
-  .auth-card::before { content: ''; position: absolute; top: -1px; left: 50%; transform: translateX(-50%); width: 90px; height: 2px; background: #ffffff; box-shadow: 0 0 16px 3px #ff3333, 0 0 6px 1px #ffffff; border-radius: 9999px; }
+  .auth-hero-heading {
+    @apply mt-3 text-2xl sm:text-3xl font-extrabold tracking-tight text-white leading-tight;
+  }
+  @media (min-width: 1024px) {
+    .auth-hero-heading {
+      @apply mt-4 text-4xl xl:text-5xl font-bold tracking-tight leading-[1.15];
+    }
+  }
+  .auth-hero-description {
+    @apply mt-2.5 max-w-md mx-auto text-sm leading-relaxed text-stone-400;
+  }
+  @media (min-width: 1024px) {
+    .auth-hero-description {
+      @apply mt-4 max-w-xl mx-0 text-base leading-relaxed;
+    }
+  }
+  .auth-panel {
+    @apply relative flex w-full flex-col items-center justify-center px-0 py-2;
+  }
+  @media (min-width: 1024px) {
+    .auth-panel {
+      grid-area: card;
+      min-height: 100vh;
+      padding: 2rem 2.5rem;
+    }
+  }
+  .auth-card {
+    @apply relative w-full max-w-[480px] rounded-3xl bg-[#0e1015]/95 p-6 sm:p-9 backdrop-blur-2xl;
+    border: 1.5px solid rgba(239, 68, 68, 0.82);
+    box-shadow: 0 0 50px -5px rgba(239, 68, 68, 0.45), 0 0 100px -10px rgba(220, 38, 38, 0.25), inset 0 0 25px -5px rgba(239, 68, 68, 0.15);
+  }
+  .auth-card::before {
+    content: '';
+    position: absolute;
+    top: -1px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 90px;
+    height: 2.5px;
+    background: #ffffff;
+    box-shadow: 0 0 18px 4px #ff3333, 0 0 6px 2px #ffffff;
+    border-radius: 9999px;
+  }
   .auth-card-invitation { @apply max-w-[500px]; }
-  .auth-card-logo-frame { @apply mb-6 h-10 w-full overflow-hidden text-center; }
-  .auth-card-logo { @apply mx-auto h-10 w-auto object-contain; }
-  .auth-mobile-brand { @apply mb-6; }
+  .auth-card-logo-frame { @apply mb-6 h-12 sm:h-14 w-full overflow-hidden text-center; }
+  .auth-card-logo { @apply mx-auto h-12 sm:h-14 w-auto object-contain; }
+  .auth-hero-bottom {
+    @apply relative isolate w-full max-w-[480px] mt-8 mb-4 text-center;
+  }
+  @media (min-width: 1024px) {
+    .auth-hero-bottom {
+      grid-area: hero-bottom;
+      max-width: none;
+      text-align: left;
+      padding: 1rem 2.5rem 2.5rem 2.5rem;
+      align-self: end;
+      margin-top: auto;
+      margin-bottom: 0;
+    }
+  }
+  @media (min-width: 1280px) {
+    .auth-hero-bottom {
+      padding: 1rem 3.5rem 3.5rem 3.5rem;
+    }
+  }
+  .auth-capability-grid {
+    @apply w-full;
+  }
+  .auth-capability-card {
+    @apply rounded-xl border border-white/[0.08] bg-[#0c0d12]/80 p-2.5 sm:p-3.5 backdrop-blur-sm transition text-left;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 10px 25px rgba(0, 0, 0, 0.35);
+  }
+  .auth-capability-card h2 { @apply mt-2 text-[11px] sm:text-xs font-semibold leading-tight text-white; }
+  .auth-capability-card p { @apply mt-1 text-[10px] sm:text-[11px] leading-tight text-stone-400 line-clamp-2; }
+  .auth-hero-footer { @apply mt-6 text-center text-xs text-stone-500; }
   .auth-badge { @apply inline-flex items-center gap-2 rounded-full border border-red-500/30 bg-red-500/10 px-3.5 py-1 text-[11px] font-bold uppercase tracking-[0.15em] text-red-500; }
   .auth-input-field { @apply mt-1.5 block w-full rounded-xl border border-white/10 bg-[#12141a] px-3.5 py-2.5 text-sm text-white outline-none transition placeholder:text-stone-500 focus:border-red-500/80 focus:ring-1 focus:ring-red-500/50; }
   .auth-button-primary { @apply flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#dc2626] text-sm font-semibold text-white transition hover:bg-[#b91c1c] active:bg-[#991b1b] disabled:opacity-60; box-shadow: 0 4px 18px rgba(220, 38, 38, 0.45); }

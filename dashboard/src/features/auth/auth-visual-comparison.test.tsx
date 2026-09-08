@@ -97,19 +97,70 @@ describe('Workstream B - Evidence-based Reference Matching Verification', () => 
     expect(screen.getByText('Role-based workspace access')).toBeTruthy();
   });
 
-  it('MOBILE LOGIN and INVITATION retain 2-column capability grid and responsive contract down to 320px', () => {
+  it('MOBILE LOGIN matches reference login.mobile.png and adapts cleanly down to 320px', () => {
     vi.mocked(useAuth).mockReturnValue({ login: vi.fn(), status: 'anonymous' } as never);
     render(<MemoryRouter><LoginPage /></MemoryRouter>);
 
-    const grid = document.querySelector('.auth-capability-grid');
-    expect(grid).toHaveClass('grid-cols-2');
+    const page = screen.getByRole('main');
+    expect(page).toHaveClass('auth-page');
 
-    // Button and input are full-width block elements
+    // 1. Top section has logo and hero text
+    const heroTop = page.querySelector('.auth-hero-top');
+    expect(heroTop).toBeTruthy();
+    expect(heroTop?.querySelector('.auth-hero-logo')).toBeTruthy();
+    expect(screen.getByText('SAMCHE AI PLATFORM')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Manage your AI operations from a single platform.' })).toBeTruthy();
+
+    // 2. Middle section has login card
+    const card = page.querySelector('.auth-card');
+    expect(card).toBeTruthy();
     const button = screen.getByRole('button', { name: /Sign in/ });
     expect(button).toHaveClass('w-full');
     expect(button).toHaveClass('auth-button-primary');
 
-    const emailInput = screen.getByLabelText('Email');
-    expect(emailInput).toHaveClass('w-full');
+    // 3. Bottom section has 6 capability cards below the form
+    const heroBottom = page.querySelector('.auth-hero-bottom');
+    expect(heroBottom).toBeTruthy();
+    const grid = heroBottom?.querySelector('.auth-capability-grid');
+    expect(grid).toBeTruthy();
+    expect(grid).toHaveClass('grid-cols-2');
+
+    const capabilities = ['AI Assistants', 'Knowledge Intelligence', 'Omnichannel', 'CRM & Pipeline', 'Automation / Agentic', 'Analytics'];
+    for (const cap of capabilities) {
+      expect(screen.getByText(cap)).toBeTruthy();
+    }
+  });
+
+  it('MOBILE INVITATION matches reference invatation.login.png with no hero split above card', async () => {
+    window.history.replaceState({}, '', '/accept-invitation?token=valid-invite-token');
+    vi.mocked(onboardingApi.validateInvitation).mockResolvedValue({
+      status: 'VALID',
+      company_name: 'Blue Dune Event Management LLC',
+      email: 'smttbk@gmail.com',
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/accept-invitation?token=valid-invite-token']}>
+        <AcceptInvitationPage />
+      </MemoryRouter>
+    );
+
+    await screen.findByRole('heading', { name: 'Set up your account' });
+    const page = screen.getByRole('main');
+
+    // 1. Top section has logo and hides hero text on mobile via auth-hero-top-invitation
+    const heroTop = page.querySelector('.auth-hero-top-invitation');
+    expect(heroTop).toBeTruthy();
+    expect(heroTop?.querySelector('.auth-hero-logo')).toBeTruthy();
+
+    // 2. Card contains customer invitation fields directly
+    expect(screen.getByText('CUSTOMER INVITATION')).toBeTruthy();
+    expect(screen.getByText('Blue Dune Event Management LLC')).toBeTruthy();
+    expect(screen.getByPlaceholderText('Enter your first name')).toBeTruthy();
+
+    // 3. Bottom section has capability cards and copyright below card
+    const heroBottom = page.querySelector('.auth-hero-bottom');
+    expect(heroBottom).toBeTruthy();
+    expect(heroBottom?.querySelector('.auth-capability-grid')).toBeTruthy();
   });
 });
