@@ -13,6 +13,7 @@ import cron from "node-cron";
 import path from 'node:path';
 import { deliverWhatsAppText, whatsappHttpsAgent, sendWhatsAppTypingIndicator } from "./services/whatsapp-delivery-service.js";
 import { applyWhatsAppAdaptivePacing, MIN_COMPOSE_WINDOW_MS, MAX_ARTIFICIAL_DELAY_MS } from "./services/whatsapp-response-pacing-service.js";
+import { orchestrateWhatsAppInboundAiResponse } from './services/whatsapp-inbound-ai-orchestrator.js';
 import { verifyWhatsAppSignature } from "./middleware/whatsappSignature.js";
 import authRoutes from "./routes/authRoutes.js";
 import tenantRoutes from "./routes/tenantRoutes.js";
@@ -688,11 +689,11 @@ function safeWhatsAppStorageFailureLog(error) {
   });
 }
 
-async function sendMessage(to, body) {
+async function sendMessage(to, body, phoneNumberId) {
   if (!body || typeof body !== 'string') return;
   try {
     const outcome = await deliverWhatsAppText({
-      phoneNumberId: process.env.WHATSAPP_PHONE_ID,
+      phoneNumberId,
       recipient: to,
       content: body,
       continueOnChunkFailure: true,
@@ -705,9 +706,9 @@ async function sendMessage(to, body) {
   }
 }
 
-async function deliverWhatsAppAssistantText(to, body) {
+async function deliverWhatsAppAssistantText(phoneNumberId, to, body) {
   return deliverWhatsAppText({
-    phoneNumberId: process.env.WHATSAPP_PHONE_ID,
+    phoneNumberId,
     recipient: to,
     content: body,
     requireProviderMessageId: true,
@@ -725,7 +726,11 @@ async function persistAndSendWhatsAppAssistant(whatsappInbox, recipient, content
     content,
     persistAssistantResponse: persistAssistantResponseIfCurrent,
     persistProviderMessageId: recordWhatsAppAssistantProviderAcceptance,
-    deliver: deliverWhatsAppAssistantText,
+    deliver: (to, body) => deliverWhatsAppAssistantText(
+      whatsappInbox.integration.external_channel_id,
+      to,
+      body,
+    ),
   });
 }
 
@@ -759,7 +764,7 @@ async function resolveContextualFollowUpWorkerContext(job) {
   const conversationResult = await pool.query(
     `SELECT c.id, c.tenant_id, c.customer_external_id, c.handling_version, c.communication_language,
             c.status, c.handling_mode, c.human_attention_state,
-            tc.channel_type, tc.status AS channel_status
+            tc.channel_type, tc.status AS channel_status, tc.external_channel_id AS phone_number_id
        FROM conversations c
        JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
       WHERE c.id = $1 AND c.tenant_id = $2 AND c.channel_id = $3`,
@@ -806,7 +811,11 @@ async function processContextualFollowUpJobs() {
     },
     deliver: async ({ context, message, content }) => {
       if (message.external_message_id) return { delivered: true };
-      const delivery = await deliverWhatsAppAssistantText(context.conversation.customer_external_id, content);
+      const delivery = await deliverWhatsAppAssistantText(
+        context.conversation.phone_number_id,
+        context.conversation.customer_external_id,
+        content,
+      );
       const providerMessageId = String(delivery?.providerMessageId ?? delivery?.providerMessageIds?.[0] ?? '').trim();
       if (!providerMessageId) return { delivered: false };
       await recordWhatsAppAssistantProviderAcceptance({
@@ -2111,7 +2120,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
             handlingVersion: whatsappInbox.handlingVersion,
             knowledgeAuthority: whatsappInbox.knowledgeAuthority,
           });
-          if (persisted.delivered) await sendMessage(cleanFrom, processingMessage);
+          if (persisted.delivered) await sendMessage(cleanFrom, processingMessage, whatsappInbox.integration.external_channel_id);
           return;
         }
         const latestResourcePlan = planLatestExplicitResource({
@@ -2121,7 +2130,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         if (latestResourcePlan.action === 'RESOURCE_FAILED') {
           const failureMessage = resourceFailureAcknowledgement(whatsappInbox.tenantContext?.communicationLanguage ?? 'en', whatsappInbox.resourceContext.latestResource.media_category);
           const persisted = await persistAssistantResponseIfCurrent({ tenantId: whatsappInbox.integration.tenant_id, conversationId: whatsappInbox.conversation.id, content: failureMessage, handlingVersion: whatsappInbox.handlingVersion, knowledgeAuthority: whatsappInbox.knowledgeAuthority });
-          if (persisted.delivered) await sendMessage(cleanFrom, failureMessage);
+          if (persisted.delivered) await sendMessage(cleanFrom, failureMessage, whatsappInbox.integration.external_channel_id);
           return;
         }
         const standaloneMediaPlan = planStandaloneWhatsAppMediaResponse({
@@ -2140,7 +2149,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
             knowledgeAuthority: whatsappInbox.knowledgeAuthority,
           });
           if (acknowledgement.delivered) {
-            await sendMessage(cleanFrom, standaloneMediaPlan.message);
+            await sendMessage(cleanFrom, standaloneMediaPlan.message, whatsappInbox.integration.external_channel_id);
           }
           return;
         }
@@ -2198,26 +2207,17 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           topicSummary,
         });
         if (!handoff.duplicate) {
-          await sendMessage(cleanFrom, acknowledgement);
+          await sendMessage(cleanFrom, acknowledgement, whatsappInbox.integration.external_channel_id);
         }
         return;
       }
 
-      if (whatsappInbox.conversation?.handling_mode === 'HUMAN') {
-        console.info('WHATSAPP_HUMAN_HANDLING_ACTIVE handling_mode=HUMAN ai_suppressed=1');
-        return;
-      }
-
-      // Initiate WhatsApp native typing indicator for eligible AI processing
-      const aiResponseStartedAt = Date.now();
-      if (wpMessageId) {
-        await sendWhatsAppTypingIndicator({
-          phoneNumberId: phoneNumberId || whatsappInbox?.integration?.external_channel_id || process.env.WHATSAPP_PHONE_ID,
-          incomingMessageId: wpMessageId,
-        }).catch((error) => {
-          console.warn('WHATSAPP_TYPING_INDICATOR_DISPATCH_WARNING', error?.code ?? error?.name ?? 'UNKNOWN');
-        });
-      }
+      return orchestrateWhatsAppInboundAiResponse({
+        whatsappInbox,
+        incomingMessageId: wpMessageId,
+        sendTyping: sendWhatsAppTypingIndicator,
+        processAiResponse: async () => {
+          const aiResponseStartedAt = Date.now();
 
       let runtimeTenantContext;
       let runtime;
@@ -2248,8 +2248,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         console.error('KNOWLEDGE_RUNTIME_CONTEXT_UNAVAILABLE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
         const unavailableFallback = resolveWhatsAppPersonaUnavailableResponse(tenantContext.communicationLanguage);
         await applyWhatsAppAdaptivePacing({ generationStartedAt: aiResponseStartedAt, content: unavailableFallback });
-        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, unavailableFallback);
-        return;
+        return persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, unavailableFallback);
       }
 
       const currentIntent = classifyWhatsAppCurrentCustomerIntent(text);
@@ -2273,8 +2272,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           ' persisted_language=' + tenantContext.communicationLanguage
         );
         await applyWhatsAppAdaptivePacing({ generationStartedAt: aiResponseStartedAt, content: deterministicSocialResponse.content });
-        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, deterministicSocialResponse.content);
-        return;
+        return persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, deterministicSocialResponse.content);
       }
 
       // --------------------------------------
@@ -2338,8 +2336,9 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       logWhatsAppTiming('model_response_complete');
       const outgoingAssistantContent = aiResponse || corporateFallback(expectedLanguage);
       await applyWhatsAppAdaptivePacing({ generationStartedAt: aiResponseStartedAt, content: outgoingAssistantContent });
-      await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, outgoingAssistantContent);
-      return;
+      return persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, outgoingAssistantContent);
+        },
+      });
 
     } catch (error) {
       console.error("WhatsApp webhook error:", error);
@@ -2357,7 +2356,7 @@ cron.schedule("* * * * *", async () => {
       lifecycleActions = await claimDueCustomerSupportLifecycle({ database: pool });
       for (const action of lifecycleActions) {
         try {
-          await sendMessage(action.recipient, action.content);
+          await sendMessage(action.recipient, action.content, action.phoneNumberId);
           console.info('HUMAN_SUPPORT_' + action.type + ' status=DELIVERED tenant=' + String(action.tenantId).slice(0, 8));
         } catch {
           console.error('HUMAN_SUPPORT_' + action.type + ' status=FAILED tenant=' + String(action.tenantId).slice(0, 8));

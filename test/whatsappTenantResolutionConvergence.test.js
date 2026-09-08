@@ -50,11 +50,11 @@ test('WhatsApp tenant resolution: authoritative tenant_channels overrides stale 
   // Verify that convergence upsert occurred
   const upsertQuery = queries.find((q) => q.sql.includes('INSERT INTO channel_integrations'));
   assert.ok(upsertQuery, 'channel_integrations convergence upsert must be executed');
-  assert.equal(upsertQuery.params[0], 'WHATSAPP:948536645017374');
+  assert.equal(upsertQuery.params[0], 'whatsapp:948536645017374');
   assert.equal(upsertQuery.params[1], 'target-tenant-1111-1111-111111111111');
 });
 
-test('WhatsApp tenant resolution: case-insensitive channel_integrations fallback', async () => {
+test('WhatsApp tenant resolution: stale integration history cannot override missing canonical ownership', async () => {
   const fakeClient = {
     async query(sql, params) {
       // Direct tenant_channels check returns 0 (e.g. historical migration record)
@@ -89,8 +89,7 @@ test('WhatsApp tenant resolution: case-insensitive channel_integrations fallback
   };
 
   const integration = await resolveWhatsAppIntegration(fakeClient, '948536645017374');
-  assert.ok(integration);
-  assert.equal(integration.tenant_name, 'Historical Tenant LLC');
+  assert.equal(integration, null);
 });
 
 test('WhatsApp native typing indicator: supports multi-tenant phone ID without mismatch failure', async () => {
@@ -120,5 +119,6 @@ test('WhatsApp native typing indicator: supports multi-tenant phone ID without m
     messaging_product: 'whatsapp',
     status: 'read',
     message_id: 'wamid.TEST_MULTI_TENANT_TYPING',
+    typing_indicator: { type: 'text' },
   });
 });

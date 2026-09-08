@@ -1,7 +1,10 @@
+process.env.DATABASE_URL ||= 'postgres://invalid:invalid@127.0.0.1:1/unused';
+process.env.JWT_SECRET ||= 'test-secret';
+
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { appendAgentMessage, ConversationOperationError, getHumanDeliveryCapability } from '../services/live-inbox-service.js';
-import { WhatsAppDeliveryError, deliverWhatsAppText } from '../services/whatsapp-delivery-service.js';
+const { appendAgentMessage, ConversationOperationError, getHumanDeliveryCapability } = await import('../services/live-inbox-service.js');
+const { WhatsAppDeliveryError, deliverWhatsAppText } = await import('../services/whatsapp-delivery-service.js');
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
 const otherTenantId = '99999999-9999-4999-8999-999999999999';
@@ -106,19 +109,16 @@ test('cross-tenant conversation lookup cannot invoke WhatsApp delivery', async (
   assert.equal(delivered, false);
 });
 
-test('WhatsApp delivery refuses a channel/configuration mismatch before any provider request', async () => {
-  let calls = 0;
-  await assert.rejects(
-    deliverWhatsAppText({
-      phoneNumberId: 'different-phone-id',
-      recipient: 'whatsapp:15551234567',
-      content: 'Operator response',
-      env: { WHATSAPP_PHONE_ID: '948536645017374', WHATSAPP_TOKEN: 'test-token' },
-      httpClient: { async post() { calls += 1; } },
-    }),
-    (error) => error instanceof WhatsAppDeliveryError && error.code === 'WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH'
-  );
-  assert.equal(calls, 0);
+test('WhatsApp delivery uses the canonical per-channel phone id instead of a different legacy global id', async () => {
+  const calls = [];
+  await deliverWhatsAppText({
+    phoneNumberId: '222222222222222',
+    recipient: 'whatsapp:15551234567',
+    content: 'Operator response',
+    env: { WHATSAPP_PHONE_ID: '111111111111111', WHATSAPP_TOKEN: 'test-token' },
+    httpClient: { async post(url) { calls.push(url); return { data: { messages: [{ id: 'wamid.operator' }] } }; } },
+  });
+  assert.deepEqual(calls, ['https://graph.facebook.com/v20.0/222222222222222/messages']);
 });
 
 

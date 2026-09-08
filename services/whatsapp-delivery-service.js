@@ -65,17 +65,13 @@ export async function deliverWhatsAppText({
   continueOnChunkFailure = false,
   requireProviderMessageId = false,
 }) {
-  const configuredPhoneNumberId = configuredValue(env.WHATSAPP_PHONE_ID);
   const accessToken = configuredValue(env.WHATSAPP_TOKEN);
   const destination = trustedRecipient(recipient);
-  const expectedPhoneNumberId = configuredValue(phoneNumberId);
+  const targetPhoneNumberId = configuredValue(phoneNumberId);
   const body = String(content ?? '');
 
-  if (!configuredPhoneNumberId || !accessToken) {
+  if (!targetPhoneNumberId || !accessToken) {
     throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_NOT_CONFIGURED');
-  }
-  if (!expectedPhoneNumberId || expectedPhoneNumberId !== configuredPhoneNumberId) {
-    throw new WhatsAppDeliveryError('WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH');
   }
   if (!destination || !body.trim()) {
     throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_INVALID_INPUT');
@@ -87,7 +83,7 @@ export async function deliverWhatsAppText({
   for (const chunk of chunksFor(body)) {
     try {
       const providerResponse = await httpClient.post(
-        `https://graph.facebook.com/v20.0/${configuredPhoneNumberId}/messages`,
+        `https://graph.facebook.com/v20.0/${targetPhoneNumberId}/messages`,
         {
           messaging_product: 'whatsapp',
           to: destination,
@@ -161,17 +157,15 @@ export async function deliverWhatsAppMedia({
   httpClient = axios,
   httpsAgent = whatsappHttpsAgent,
 }) {
-  const configuredPhoneNumberId = configuredValue(env.WHATSAPP_PHONE_ID);
   const accessToken = configuredValue(env.WHATSAPP_TOKEN);
   const destination = trustedRecipient(recipient);
-  const expectedPhoneNumberId = configuredValue(phoneNumberId);
+  const targetPhoneNumberId = configuredValue(phoneNumberId);
   const buffer = file?.buffer;
   const mimeType = configuredValue(file?.mimetype);
   const filename = configuredValue(file?.originalname) || 'attachment';
   const resolvedMediaCategory = resolveMediaCategory(file, mediaCategory);
 
-  if (!configuredPhoneNumberId || !accessToken) throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_NOT_CONFIGURED');
-  if (!expectedPhoneNumberId || expectedPhoneNumberId !== configuredPhoneNumberId) throw new WhatsAppDeliveryError('WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH');
+  if (!targetPhoneNumberId || !accessToken) throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_NOT_CONFIGURED');
   if (!destination || !Buffer.isBuffer(buffer) || !buffer.length || !mimeType || !resolvedMediaCategory) throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_INVALID_INPUT');
 
   const startedAt = Date.now();
@@ -188,7 +182,7 @@ export async function deliverWhatsAppMedia({
     // Node form-data preserves the binary stream, multipart boundary, and per-file Content-Type.
     form.append('file', buffer, { filename, contentType: mimeType, knownLength: buffer.length });
     upload = await httpClient.post(
-      `https://graph.facebook.com/v20.0/${configuredPhoneNumberId}/media`,
+      `https://graph.facebook.com/v20.0/${targetPhoneNumberId}/media`,
       form,
       { httpsAgent, headers: { Authorization: `Bearer ${accessToken}`, ...form.getHeaders() }, timeout: 20000 }
     );
@@ -218,7 +212,7 @@ export async function deliverWhatsAppMedia({
     timing('WHATSAPP_SEND_STARTED');
     voiceStage('META_MESSAGE_SEND_STARTED');
     submission = await httpClient.post(
-      `https://graph.facebook.com/v20.0/${configuredPhoneNumberId}/messages`,
+      `https://graph.facebook.com/v20.0/${targetPhoneNumberId}/messages`,
       payload,
       { httpsAgent, headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 20000 }
     );
@@ -254,17 +248,12 @@ export async function sendWhatsAppTypingIndicator({
   httpClient = axios,
   httpsAgent = whatsappHttpsAgent,
 }) {
-  const configuredPhoneNumberId = configuredValue(env.WHATSAPP_PHONE_ID);
   const accessToken = configuredValue(env.WHATSAPP_TOKEN);
-  const expectedPhoneNumberId = configuredValue(phoneNumberId);
+  const targetPhoneNumberId = configuredValue(phoneNumberId);
   const messageId = configuredValue(incomingMessageId);
-  const targetPhoneNumberId = expectedPhoneNumberId || configuredPhoneNumberId;
 
   if (!accessToken || !targetPhoneNumberId) {
     throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_NOT_CONFIGURED');
-  }
-  if (configuredPhoneNumberId && expectedPhoneNumberId && expectedPhoneNumberId !== configuredPhoneNumberId) {
-    throw new WhatsAppDeliveryError('WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH');
   }
   if (!messageId) {
     throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_INVALID_INPUT');
@@ -277,6 +266,7 @@ export async function sendWhatsAppTypingIndicator({
         messaging_product: 'whatsapp',
         status: 'read',
         message_id: messageId,
+        typing_indicator: { type: 'text' },
       },
       {
         httpsAgent,
@@ -288,7 +278,11 @@ export async function sendWhatsAppTypingIndicator({
       }
     );
     const success = Boolean(response?.data?.success ?? true);
-    return { ok: success, messageId };
+    return {
+      ok: success,
+      messageId,
+      providerStatus: Number.isInteger(Number(response?.status)) ? Number(response.status) : null,
+    };
   } catch (error) {
     const diagnostic = safeProviderDiagnostic(error, 'TYPING_INDICATOR');
     throw new WhatsAppDeliveryError(

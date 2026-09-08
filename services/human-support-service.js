@@ -156,7 +156,7 @@ export async function claimDueCustomerSupportLifecycle({ database = null, now = 
         await notify(client, conversation.tenant_id, conversation.id, 'HUMAN_SUPPORT_TIMEOUT');
         timeouts += 1;
         console.info('HUMAN_SUPPORT_TIMEOUT status=CLAIMED tenant=' + String(conversation.tenant_id).slice(0, 8));
-        actions.push({ type: 'TIMEOUT_CLOSE', tenantId: conversation.tenant_id, conversationId: conversation.id, recipient: conversation.customer_external_id, content });
+        actions.push({ type: 'TIMEOUT_CLOSE', tenantId: conversation.tenant_id, conversationId: conversation.id, recipient: conversation.customer_external_id, phoneNumberId: conversation.external_channel_id, content });
       } else if (elapsed >= 5 * 60 * 1000 && !conversation.human_support_warning_sent_at) {
         const content = renderPlatformLifecycleMessage({ templates: lifecycleTemplates, key: 'human_session_warning', locale: conversation.communication_language });
         await client.query(
@@ -169,7 +169,7 @@ export async function claimDueCustomerSupportLifecycle({ database = null, now = 
         await notify(client, conversation.tenant_id, conversation.id, 'HUMAN_SUPPORT_WARNING');
         warnings += 1;
         console.info('HUMAN_SUPPORT_WARNING status=CLAIMED tenant=' + String(conversation.tenant_id).slice(0, 8));
-        actions.push({ type: 'WARNING_5M', tenantId: conversation.tenant_id, conversationId: conversation.id, recipient: conversation.customer_external_id, content });
+        actions.push({ type: 'WARNING_5M', tenantId: conversation.tenant_id, conversationId: conversation.id, recipient: conversation.customer_external_id, phoneNumberId: conversation.external_channel_id, content });
       }
     }
     await client.query('COMMIT');

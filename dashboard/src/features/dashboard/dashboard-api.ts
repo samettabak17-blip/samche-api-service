@@ -141,6 +141,7 @@ export const tenantApi = {
   getChannel: (tenantId: string, channelId: string) => apiClient.get<TenantChannel>(`${tenantRoot(tenantId)}/channels/${channelId}`),
   createChannel: (tenantId: string, body: Omit<TenantChannel, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>) => apiClient.post<TenantChannel>(`${tenantRoot(tenantId)}/channels`, body),
   updateChannel: (tenantId: string, channelId: string, body: Partial<Omit<TenantChannel, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>>) => apiClient.put<TenantChannel>(`${tenantRoot(tenantId)}/channels/${channelId}`, body),
+  transferWhatsAppChannel: (tenantId: string, body: { external_channel_id: string; expected_source_channel_id: string; target_assistant_id: string; display_name: string; confirmation: 'TRANSFER' }) => apiClient.post<{ channel: TenantChannel; transfer: { source_channel_id: string; source_tenant_id: string; audit_event_id: string; external_channel_id: string } }>(`${tenantRoot(tenantId)}/channels/transfer-whatsapp`, body),
   deleteChannel: (tenantId: string, channelId: string) => apiClient.delete<{ message: string }>(`${tenantRoot(tenantId)}/channels/${channelId}`),
   listKnowledgeBase: (tenantId: string) => apiClient.get<KnowledgeDocument[]>(`${tenantRoot(tenantId)}/knowledge-base`),
   getKnowledgeDocument: (tenantId: string, documentId: string) => apiClient.get<KnowledgeDocument>(`${tenantRoot(tenantId)}/knowledge-base/${documentId}`),

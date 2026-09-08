@@ -23,16 +23,18 @@ export const requireTenantAccess = async (req, res, next) => {
             return res.status(400).json({ error: 'Valid Tenant ID is required' });
         }
 
-        if (req.user.system_role === 'OWNER') {
-            const tenantCheck = await query('SELECT id FROM tenants WHERE id = $1', [requestedTenantId]);
+        const queryFn = req.app?.locals?.query || query;
+
+        if (req.user?.system_role === 'OWNER') {
+            const tenantCheck = await queryFn('SELECT id FROM tenants WHERE id = $1', [requestedTenantId]);
             if (tenantCheck.rowCount === 0) return res.status(404).json({ error: 'Tenant not found' });
             
             req.verified_tenant_id = requestedTenantId;
             return next();
         }
 
-        if (req.user.system_role === 'CUSTOMER') {
-            const mappingResult = await query(
+        if (req.user?.system_role === 'CUSTOMER') {
+            const mappingResult = await queryFn(
                 'SELECT tenant_role FROM tenant_users WHERE user_id = $1 AND tenant_id = $2',
                 [req.user.user_id, requestedTenantId]
             );
@@ -52,17 +54,17 @@ export const requireTenantAccess = async (req, res, next) => {
 };
 
 export const requireOwner = (req, res, next) => {
-    if (req.user.system_role !== 'OWNER') {
+    if (req.user?.system_role !== 'OWNER') {
         return res.status(403).json({ error: 'OWNER access required' });
     }
     next();
 };
 
 export const requireTenantAdmin = (req, res, next) => {
-    if (req.user.system_role === 'OWNER') {
+    if (req.user?.system_role === 'OWNER') {
         return next();
     }
-    if (req.user.system_role === 'CUSTOMER' && req.verified_tenant_role === 'ADMIN') {
+    if (req.user?.system_role === 'CUSTOMER' && req.verified_tenant_role === 'ADMIN') {
         return next();
     }
     return res.status(403).json({ error: 'Tenant ADMIN access required' });

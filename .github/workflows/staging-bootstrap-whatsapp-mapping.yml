@@ -24,12 +24,12 @@ jobs:
           STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
           STAGING_WHATSAPP_TENANT_ID: ${{ secrets.STAGING_WHATSAPP_TENANT_ID }}
           STAGING_WHATSAPP_PHONE_ID: ${{ secrets.STAGING_WHATSAPP_PHONE_ID }}
-          STAGING_WHATSAPP_TENANT_NAME: SamChe Company LLC
+          STAGING_WHATSAPP_TENANT_NAME: ${{ secrets.STAGING_WHATSAPP_TENANT_NAME }}
         run: node scripts/bootstrap_whatsapp_mapping.js
       - name: Verify exact webhook runtime resolver mapping
         env:
           STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
           STAGING_WHATSAPP_TENANT_ID: ${{ secrets.STAGING_WHATSAPP_TENANT_ID }}
           STAGING_WHATSAPP_PHONE_ID: ${{ secrets.STAGING_WHATSAPP_PHONE_ID }}
-          STAGING_WHATSAPP_TENANT_NAME: SamChe Company LLC
+          STAGING_WHATSAPP_TENANT_NAME: ${{ secrets.STAGING_WHATSAPP_TENANT_NAME }}
         run: node scripts/verify_whatsapp_runtime_mapping.js

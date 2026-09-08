@@ -4,10 +4,11 @@ import { createConversationResource } from './conversation-resource-service.js';
 import { createConversationResourceStorage } from './conversation-resource-storage.js';
 import { extractDocumentText } from './conversation-document-extraction-service.js';
 import { buildConversationStorageKey, validateConversationUpload } from './conversation-resource-validation.js';
-import { buildGeminiImagePart, buildUntrustedDocumentContext, whatsappIntegrationKey } from './whatsapp-multimodal-service.js';
+import { buildGeminiImagePart, buildUntrustedDocumentContext } from './whatsapp-multimodal-service.js';
 import { waitForReadyResource } from './whatsapp-resource-retry.js';
 import { inferConservativeWhatsAppLanguage, inferReliableWhatsAppCustomerLanguage, resolveWhatsAppCommunicationLanguage, resolveWhatsAppMediaResponseLanguage } from './conversation-communication-language.js';
 import { loadCurrentProviderHistory } from './knowledge-authority-service.js';
+import { normalizeWhatsAppExternalId } from './whatsapp-channel-ownership-service.js';
 
 export class WhatsAppInboxError extends Error {
   constructor(code, message) {
@@ -52,29 +53,36 @@ async function notify(client, tenantId, conversationId, type) {
 }
 
 export async function resolveWhatsAppIntegration(client, phoneNumberId) {
-  const cleanPhone = String(phoneNumberId ?? '').replace(/^whatsapp:/i, '').trim();
-  const key = whatsappIntegrationKey(phoneNumberId);
+  let cleanPhone;
+  try {
+    cleanPhone = normalizeWhatsAppExternalId(phoneNumberId);
+  } catch {
+    return null;
+  }
+  const key = `whatsapp:${cleanPhone}`;
 
-  // 1. Authoritative check on tenant_channels
   const directChannel = await client.query(
     `SELECT tc.tenant_id, tc.id AS channel_id, tc.assistant_id, tc.assistant_id AS channel_assistant_id,
-            tc.channel_type, tc.status AS channel_status, a.status AS assistant_status,
+            tc.external_channel_id, tc.channel_type, tc.status AS channel_status, a.status AS assistant_status,
             t.name AS tenant_name, a.name AS assistant_name, a.system_prompt AS assistant_system_prompt,
             a.whatsapp_response_templates AS assistant_whatsapp_response_templates
        FROM tenant_channels tc
        JOIN tenants t ON t.id = tc.tenant_id AND t.status = 'active'
        JOIN ai_assistants a ON a.id = tc.assistant_id AND a.tenant_id = tc.tenant_id
       WHERE tc.channel_type = 'WHATSAPP'
-        AND (tc.external_channel_id = $1 OR tc.external_channel_id = $2 OR LOWER(tc.external_channel_id) = LOWER($1))
         AND tc.status = 'active'
         AND a.status = 'active'
+        AND regexp_replace(
+              regexp_replace(lower(trim(tc.external_channel_id)), '^whatsapp:\\s*', ''),
+              '[^0-9]', '', 'g'
+            ) = $1
       ORDER BY tc.updated_at DESC
       LIMIT 2`,
-    [cleanPhone, key]
+    [cleanPhone]
   );
 
   if (directChannel.rowCount === 1) {
-    const integration = directChannel.rows[0];
+    const integration = { ...directChannel.rows[0], external_channel_id: cleanPhone };
     try {
       await client.query(
         `INSERT INTO channel_integrations
@@ -88,35 +96,40 @@ export async function resolveWhatsAppIntegration(client, phoneNumberId) {
                        updated_at = CURRENT_TIMESTAMP`,
         [key, integration.tenant_id, integration.channel_id, integration.assistant_id]
       );
-    } catch {}
+    } catch (error) {
+      console.info(
+        'WHATSAPP_INTEGRATION_CONVERGENCE_FAILED tenant=' + String(integration.tenant_id).slice(0, 8)
+        + ' channel=' + String(integration.channel_id).slice(0, 8)
+        + ' code=' + String(error?.code ?? 'UNKNOWN').slice(0, 32)
+      );
+    }
     return integration;
   }
+  if (directChannel.rowCount > 1) {
+    console.info('WHATSAPP_CANONICAL_OWNERSHIP_AMBIGUOUS phone=' + whatsappPhoneNumberFingerprint(cleanPhone));
+  }
+  return null;
+}
 
-  // 2. Fallback to channel_integrations (case-insensitive key match)
+export async function upsertWhatsAppConversation(client, { tenantId, channelId, customerPhone }) {
   const result = await client.query(
-    `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id, tc.assistant_id AS channel_assistant_id,
-            tc.channel_type, tc.status AS channel_status, a.status AS assistant_status,
-            t.name AS tenant_name, a.name AS assistant_name, a.system_prompt AS assistant_system_prompt,
-            a.whatsapp_response_templates AS assistant_whatsapp_response_templates
-       FROM channel_integrations ci
-       JOIN tenant_channels tc ON tc.id = ci.channel_id AND tc.tenant_id = ci.tenant_id
-       JOIN tenants t ON t.id = ci.tenant_id AND t.status = 'active'
-       JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
-      WHERE (ci.integration_key = $1 OR LOWER(ci.integration_key) = LOWER($1))
-        AND ci.integration_type = 'WHATSAPP'
-        AND ci.enabled = TRUE
-      LIMIT 2`,
-    [key]
+    `INSERT INTO conversations
+      (tenant_id, channel_id, external_conversation_id, customer_external_id, last_activity_at)
+     VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+     ON CONFLICT (channel_id, external_conversation_id)
+     DO UPDATE SET last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       WHERE conversations.tenant_id = EXCLUDED.tenant_id
+         AND conversations.channel_id = EXCLUDED.channel_id
+     RETURNING *`,
+    [tenantId, channelId, externalConversationId(customerPhone), customerReference(customerPhone)]
   );
-  if (result.rowCount !== 1) return null;
-  const integration = result.rows[0];
-  if (
-    integration.channel_type !== 'WHATSAPP'
-    || integration.channel_status !== 'active'
-    || integration.assistant_status !== 'active'
-    || integration.channel_assistant_id !== integration.assistant_id
-  ) return null;
-  return integration;
+  if (result.rowCount !== 1) {
+    throw new WhatsAppInboxError(
+      'WHATSAPP_CONVERSATION_OWNERSHIP_CONFLICT',
+      'Conversation ownership conflicts with canonical WhatsApp channel ownership'
+    );
+  }
+  return result.rows[0];
 }
 
 export async function loadWhatsAppSupplementaryKnowledge(client, { tenantId, assistantId }) {
@@ -383,16 +396,12 @@ export async function persistWhatsAppInbound({
         phoneNumberFingerprint: whatsappPhoneNumberFingerprint(phoneNumberId),
       };
     }
-    const conversationResult = await client.query(
-      `INSERT INTO conversations
-        (tenant_id, channel_id, external_conversation_id, customer_external_id, last_activity_at)
-       VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-       ON CONFLICT (channel_id, external_conversation_id)
-       DO UPDATE SET tenant_id = EXCLUDED.tenant_id, last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-       RETURNING *`,
-      [integration.tenant_id, integration.channel_id, externalConversationId(customerPhone), customerReference(customerPhone)]
-    );
-    const conversationId = conversationResult.rows[0].id;
+    const convergedConversation = await upsertWhatsAppConversation(client, {
+      tenantId: integration.tenant_id,
+      channelId: integration.channel_id,
+      customerPhone,
+    });
+    const conversationId = convergedConversation.id;
     const locked = await client.query(
       'SELECT * FROM conversations WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
       [conversationId, integration.tenant_id]
@@ -542,5 +551,3 @@ export async function persistWhatsAppInbound({
     client.release();
   }
 }
-
-

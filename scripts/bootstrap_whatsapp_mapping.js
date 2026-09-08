@@ -1,14 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
-import { whatsappIntegrationKey } from '../services/whatsapp-multimodal-service.js';
+import { normalizeWhatsAppExternalId } from '../services/whatsapp-channel-ownership-service.js';
 
 const { Pool } = pg;
 const connectionString = process.env.STAGING_DATABASE_URL;
 const tenantId = process.env.STAGING_WHATSAPP_TENANT_ID;
 const phoneNumberId = process.env.STAGING_WHATSAPP_PHONE_ID;
 const tenantDisplayName = process.env.STAGING_WHATSAPP_TENANT_NAME;
-const integrationKey = phoneNumberId ? whatsappIntegrationKey(phoneNumberId) : null;
+const canonicalPhoneNumberId = phoneNumberId ? normalizeWhatsAppExternalId(phoneNumberId) : null;
+const integrationKey = canonicalPhoneNumberId ? `whatsapp:${canonicalPhoneNumberId}` : null;
 const runtimeAssistant = { name: 'SamChe AI', model: 'gemini-2.5-pro' };
 const legacyRuntimeAssistantName = 'SamChe WhatsApp Runtime';
 const masterPolicy = readFileSync(new URL('../policies/samche-whatsapp-master-business-policy.tr.txt', import.meta.url), 'utf8');
@@ -106,26 +107,25 @@ async function resolveAssistant(client) {
 }
 
 async function resolveChannel(client, assistantId) {
-  const samePhoneElsewhere = await client.query(
-    `SELECT tc.tenant_id FROM tenant_channels tc
-      WHERE tc.channel_type = 'WHATSAPP' AND tc.external_channel_id = $1
+  const activeOwners = await client.query(
+    `SELECT tc.id, tc.tenant_id FROM tenant_channels tc
+      WHERE tc.channel_type = 'WHATSAPP'
+        AND tc.status = 'active'
+        AND regexp_replace(regexp_replace(lower(trim(tc.external_channel_id)), '^whatsapp:\\s*', ''), '[^0-9]', '', 'g') = $1
       FOR UPDATE`,
-    [phoneNumberId]
+    [canonicalPhoneNumberId]
   );
-  if (samePhoneElsewhere.rowCount && samePhoneElsewhere.rows.some((row) => row.tenant_id !== tenantId)) {
-    await client.query(
-      `UPDATE tenant_channels
-          SET tenant_id = $1, assistant_id = $2, status = 'active', updated_at = CURRENT_TIMESTAMP
-        WHERE external_channel_id = $3 AND channel_type = 'WHATSAPP'`,
-      [tenantId, assistantId, phoneNumberId]
-    );
+  if (activeOwners.rowCount > 1) fail('WHATSAPP_CHANNEL_OWNERSHIP_AMBIGUOUS');
+  if (activeOwners.rowCount === 1 && activeOwners.rows[0].tenant_id !== tenantId) {
+    fail('WHATSAPP_CHANNEL_OWNERSHIP_CONFLICT_PLATFORM_TRANSFER_REQUIRED');
   }
 
   const channels = await client.query(
     `SELECT id, assistant_id, status FROM tenant_channels
-      WHERE tenant_id = $1 AND channel_type = 'WHATSAPP' AND external_channel_id = $2
+      WHERE tenant_id = $1 AND channel_type = 'WHATSAPP'
+        AND regexp_replace(regexp_replace(lower(trim(external_channel_id)), '^whatsapp:\\s*', ''), '[^0-9]', '', 'g') = $2
       FOR UPDATE`,
-    [tenantId, phoneNumberId]
+    [tenantId, canonicalPhoneNumberId]
   );
   if (channels.rowCount > 1) fail('WHATSAPP_CHANNEL_AMBIGUOUS');
   if (channels.rowCount === 1) {
@@ -146,7 +146,7 @@ async function resolveChannel(client, assistantId) {
       (tenant_id, assistant_id, channel_type, display_name, external_channel_id, status)
      VALUES ($1, $2, 'WHATSAPP', 'SamChe WhatsApp', $3, 'active')
      RETURNING id, assistant_id, status`,
-    [tenantId, assistantId, phoneNumberId]
+    [tenantId, assistantId, canonicalPhoneNumberId]
   );
   return { channel: created.rows[0], outcome: 'created' };
 }
@@ -169,7 +169,7 @@ try {
     const channel = await resolveChannel(client, assistant.assistant.id);
     const existing = await client.query('SELECT id, tenant_id FROM channel_integrations WHERE (integration_key = $1 OR LOWER(integration_key) = LOWER($1)) FOR UPDATE', [integrationKey]);
     if (existing.rowCount && existing.rows.some((row) => row.tenant_id !== tenantId)) {
-      await client.query('DELETE FROM channel_integrations WHERE (integration_key = $1 OR LOWER(integration_key) = LOWER($1))', [integrationKey]);
+      fail('WHATSAPP_INTEGRATION_OWNERSHIP_CONFLICT_PLATFORM_TRANSFER_REQUIRED');
     }
 
     const mapping = await client.query(

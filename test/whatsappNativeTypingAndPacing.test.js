@@ -30,7 +30,6 @@ test('Workstream A - Test A & B & C: sendWhatsAppTypingIndicator invokes provide
     phoneNumberId: '948536645017374',
     incomingMessageId: 'wamid.HBgLMTY1MDM4Nzk0MzkVAgARGBJDQjZCMzlEQUE4OTJBMTE4RTUA',
     env: {
-      WHATSAPP_PHONE_ID: '948536645017374',
       WHATSAPP_TOKEN: 'fake-access-token',
     },
     httpClient: fakeHttpClient,
@@ -44,16 +43,17 @@ test('Workstream A - Test A & B & C: sendWhatsAppTypingIndicator invokes provide
     messaging_product: 'whatsapp',
     status: 'read',
     message_id: 'wamid.HBgLMTY1MDM4Nzk0MzkVAgARGBJDQjZCMzlEQUE4OTJBMTE4RTUA',
+    typing_indicator: { type: 'text' },
   });
   assert.equal(posted[0].options.headers.Authorization, 'Bearer fake-access-token');
 });
 
-test('Workstream A - Test B: sendWhatsAppTypingIndicator validates incoming message id and configuration', async () => {
+test('Workstream A - Test B: sendWhatsAppTypingIndicator validates incoming message id and canonical channel configuration', async () => {
   await assert.rejects(
     sendWhatsAppTypingIndicator({
       phoneNumberId: '948536645017374',
       incomingMessageId: '',
-      env: { WHATSAPP_PHONE_ID: '948536645017374', WHATSAPP_TOKEN: 'token' },
+      env: { WHATSAPP_TOKEN: 'token' },
       httpClient: { post: async () => {} },
     }),
     (err) => err instanceof WhatsAppDeliveryError && err.code === 'WHATSAPP_DELIVERY_INVALID_INPUT'
@@ -61,13 +61,31 @@ test('Workstream A - Test B: sendWhatsAppTypingIndicator validates incoming mess
 
   await assert.rejects(
     sendWhatsAppTypingIndicator({
-      phoneNumberId: 'wrong-phone-id',
+      phoneNumberId: '',
       incomingMessageId: 'wamid.123',
-      env: { WHATSAPP_PHONE_ID: '948536645017374', WHATSAPP_TOKEN: 'token' },
+      env: { WHATSAPP_PHONE_ID: 'legacy-global-phone-id', WHATSAPP_TOKEN: 'token' },
       httpClient: { post: async () => {} },
     }),
-    (err) => err instanceof WhatsAppDeliveryError && err.code === 'WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH'
+    (err) => err instanceof WhatsAppDeliveryError && err.code === 'WHATSAPP_DELIVERY_NOT_CONFIGURED'
   );
+});
+
+test('Workstream A - Test C: canonical per-channel phone routing is not bound to a different global phone id', async () => {
+  const posted = [];
+  await sendWhatsAppTypingIndicator({
+    phoneNumberId: '222222222222222',
+    incomingMessageId: 'wamid.PER_CHANNEL',
+    env: { WHATSAPP_PHONE_ID: '111111111111111', WHATSAPP_TOKEN: 'token' },
+    httpClient: {
+      async post(url, payload) {
+        posted.push({ url, payload });
+        return { status: 200, data: { success: true } };
+      },
+    },
+  });
+
+  assert.equal(posted[0].url, 'https://graph.facebook.com/v20.0/222222222222222/messages');
+  assert.deepEqual(posted[0].payload.typing_indicator, { type: 'text' });
 });
 
 test('Workstream A - Test D: Naturally slow AI generation introduces ZERO artificial delay', () => {

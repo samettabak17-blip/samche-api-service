@@ -26,10 +26,24 @@ test('never submits a WhatsApp message when the media upload fails', async () =>
   assert.equal(calls.length, 1);
 });
 
-test('rejects a phone-number mismatch before attempting provider upload', async () => {
-  let calls = 0;
-  await assert.rejects(deliverWhatsAppMedia({ phoneNumberId: 'other-number', recipient: 'whatsapp:15551234567', file, env, httpClient: { async post() { calls += 1; } } }), (error) => error instanceof WhatsAppDeliveryError && error.code === 'WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH');
-  assert.equal(calls, 0);
+test('uses a canonical per-channel phone number even when the legacy global phone differs', async () => {
+  const calls = [];
+  await deliverWhatsAppMedia({
+    phoneNumberId: '222222222222222',
+    recipient: 'whatsapp:15551234567',
+    file,
+    env,
+    httpClient: {
+      async post(url) {
+        calls.push(url);
+        return url.endsWith('/media')
+          ? { data: { id: 'meta-upload-other-channel' } }
+          : { data: { messages: [{ id: 'wamid.other-channel' }] } };
+      },
+    },
+  });
+  assert.match(calls[0], /\/222222222222222\/media$/);
+  assert.match(calls[1], /\/222222222222222\/messages$/);
 });
 
 
