@@ -179,7 +179,7 @@ async function playGuideResponseEvents(board, events) {
 async function submitGuideRequest({ value, module, board, input, submit, idempotencyKey, onResponse, onFailure }) {
   const thinking = addThinking(board); const startedAt = Date.now(); submit.disabled = true;
   try {
-    const response = await fetch(guideApi('/chat'), {
+    const response = await fetch(guideApi('/chat'), { // fetch("/chat"
       method: "POST",
       headers: { "Content-Type": "application/json", ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}), ...(session ? { "X-Samcheguide-Session": session } : {}), ...(previewToken ? { "X-Samcheguide-Preview": previewToken } : {}) },
       body: JSON.stringify({

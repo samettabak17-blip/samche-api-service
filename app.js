@@ -1091,7 +1091,8 @@ app.get(["/chat/live", "/:slug/chat/live"], async (req, res) => {
   }
 });
 
-app.post(["/plan", "/:slug/plan"], async (req, res) => {
+let planPostHandler;
+app.post("/plan", planPostHandler = async (req, res) => {
   try {
     const { sector } = req.body;
     if (typeof sector !== "string") {
@@ -1166,11 +1167,13 @@ app.post(["/plan", "/:slug/plan"], async (req, res) => {
     return res.status(err.status || 500).json({ error: "Could not generate strategy plan." });
   }
 });
+app.post("/:slug/plan", (req, res) => planPostHandler(req, res));
 
 // This endpoint deliberately persists validated Guide state without invoking an
 // AI provider. It makes an explicit module handoff durable before a visitor
 // chooses to send a message, while the host-bound scope stays server-owned.
-app.post(["/guide/session-context", "/:slug/guide/session-context"], async (req, res) => {
+let guideSessionContextPostHandler;
+app.post("/guide/session-context", guideSessionContextPostHandler = async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ error: 'Guide session is unavailable.' });
@@ -1206,6 +1209,7 @@ app.post(["/guide/session-context", "/:slug/guide/session-context"], async (req,
     return res.status(503).json({ error: 'Guide session is temporarily unavailable.' });
   }
 });
+app.post("/:slug/guide/session-context", (req, res) => guideSessionContextPostHandler(req, res));
 
 app.get(["/guide/session-context", "/:slug/guide/session-context"], async (req, res) => {
   try {
@@ -1222,7 +1226,8 @@ app.get(["/guide/session-context", "/:slug/guide/session-context"], async (req, 
   }
 });
 
-app.post(["/chat", "/:slug/chat"], async (req, res) => {
+let chatPostHandler;
+app.post("/chat", chatPostHandler = async (req, res) => {
   console.info('CHAT_REQUEST_RECEIVED');
   try {
     const { text, guide_module: clientModule, guide_session_state: clientGuideSessionState } = req.body;
@@ -1470,6 +1475,7 @@ app.post(["/chat", "/:slug/chat"], async (req, res) => {
     return res.status(err.status || 500).json({ error: "Could not generate chat response." });
   }
 });
+app.post("/:slug/chat", (req, res) => chatPostHandler(req, res));
 
 
 
