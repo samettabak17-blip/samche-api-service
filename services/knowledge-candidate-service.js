@@ -56,8 +56,11 @@ export async function recordKnowledgeCandidateApprovalFailureDiagnostic({ databa
 }
 
 async function candidateTransaction(database, work) {
-  if (!database || typeof database.connect !== 'function') {
+  if (!database || (typeof database.connect !== 'function' && typeof database.query !== 'function')) {
     throw new KnowledgeCandidateError('KNOWLEDGE_DATABASE_TRANSACTION_UNAVAILABLE', 'Knowledge transaction is unavailable');
+  }
+  if (database._connected || (typeof database.connect !== 'function' && typeof database.query === 'function')) {
+    return work(database);
   }
   const client = await database.connect();
   try {
@@ -520,9 +523,38 @@ export async function approveConversationKnowledgeCandidate({
             ORDER BY assistant_id`,
           [tenantId, originalSourceId])
         : { rows: [] };
+      const candidateIdentityResult = await db(client,
+        `SELECT DISTINCT COALESCE(evidence.business_identity_id, identity_link.business_identity_id) AS business_identity_id
+           FROM knowledge_candidate_image_evidence evidence
+           LEFT JOIN knowledge_source_business_identities identity_link
+             ON identity_link.tenant_id = evidence.tenant_id
+            AND identity_link.source_id = evidence.source_id
+          WHERE evidence.tenant_id = $1 AND evidence.candidate_id = $2
+            AND COALESCE(evidence.business_identity_id, identity_link.business_identity_id) IS NOT NULL`,
+        [tenantId, candidateId],
+      );
+      const candidateIdentityIds = (candidateIdentityResult.rows ?? []).map((row) => row.business_identity_id).filter(Boolean);
+      const activeProfileAssistants = candidateIdentityIds.length === 1
+        ? await db(client,
+          `SELECT assistant.id AS assistant_id
+             FROM ai_assistants assistant
+             JOIN assistant_configuration_versions configuration
+               ON configuration.id = assistant.active_configuration_version_id
+              AND configuration.tenant_id = assistant.tenant_id
+              AND configuration.assistant_id = assistant.id
+              AND configuration.status = 'ACTIVE'
+             JOIN business_profiles profile
+               ON profile.tenant_id = assistant.tenant_id
+              AND profile.active_version_id = configuration.source_profile_version_id
+              AND profile.business_identity_id = $2
+            WHERE assistant.tenant_id = $1
+            ORDER BY assistant.id`,
+          [tenantId, candidateIdentityIds[0]])
+        : { rows: [] };
       const materializedAssistantIds = [...new Set([
         ...(candidate.assistant_id ? [candidate.assistant_id] : []),
         ...(inheritedAssistantAssignments.rows ?? []).map((row) => row.assistant_id).filter(Boolean),
+        ...(activeProfileAssistants.rows ?? []).map((row) => row.assistant_id).filter(Boolean),
       ])];
       const source = await createManualKnowledgeSource({
         database: client,

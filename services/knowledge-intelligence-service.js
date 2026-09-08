@@ -115,11 +115,58 @@ export async function retrieveApprovedKnowledge({
          AND s.status = 'active'
          AND s.processing_status = 'READY'
          AND s.indexing_status = 'READY'
-         AND EXISTS (
-           SELECT 1 FROM knowledge_source_assistants ksa
-            WHERE ksa.tenant_id = s.tenant_id
-              AND ksa.source_id = s.id
-              AND ksa.assistant_id = $2
+         AND (
+           EXISTS (
+             SELECT 1 FROM knowledge_source_assistants ksa
+              WHERE ksa.tenant_id = s.tenant_id
+                AND ksa.source_id = s.id
+                AND ksa.assistant_id = $2
+           )
+           OR EXISTS (
+             SELECT 1 FROM knowledge_materialized_source_provenance kmsp
+              JOIN knowledge_source_assistants ksa
+                ON ksa.tenant_id = kmsp.tenant_id
+               AND ksa.source_id = kmsp.original_source_id
+              WHERE kmsp.tenant_id = s.tenant_id
+                AND kmsp.materialized_source_id = s.id
+                AND ksa.assistant_id = $2
+           )
+           OR EXISTS (
+             SELECT 1
+               FROM ai_assistants a
+               JOIN assistant_configuration_versions acv
+                 ON acv.id = a.active_configuration_version_id
+                AND acv.tenant_id = a.tenant_id
+                AND acv.assistant_id = a.id
+                AND acv.status = 'ACTIVE'
+               JOIN business_profile_versions bpv
+                 ON bpv.id = acv.source_profile_version_id
+                AND bpv.tenant_id = acv.tenant_id
+                AND bpv.status = 'APPROVED'
+               JOIN business_profiles bp
+                 ON bp.tenant_id = a.tenant_id
+                AND bp.active_version_id = bpv.id
+              WHERE a.tenant_id = s.tenant_id
+                AND a.id = $2
+                AND (
+                  s.id::text = ANY(SELECT jsonb_array_elements_text(bpv.source_scope->'source_ids'))
+                  OR EXISTS (
+                    SELECT 1 FROM knowledge_materialized_source_provenance kmsp
+                     WHERE kmsp.tenant_id = s.tenant_id
+                       AND kmsp.materialized_source_id = s.id
+                       AND kmsp.original_source_id::text = ANY(SELECT jsonb_array_elements_text(bpv.source_scope->'source_ids'))
+                  )
+                  OR (
+                    s.source_type = 'CONVERSATION_CANDIDATE'
+                    AND EXISTS (
+                      SELECT 1 FROM knowledge_source_business_identities ksbi
+                       WHERE ksbi.tenant_id = s.tenant_id
+                         AND ksbi.source_id = s.id
+                         AND ksbi.business_identity_id = bp.business_identity_id
+                    )
+                  )
+                )
+           )
          )
        ORDER BY k.embedding <=> $3::vector
        LIMIT $4`,

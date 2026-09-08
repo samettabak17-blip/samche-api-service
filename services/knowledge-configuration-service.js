@@ -22,8 +22,12 @@ function assertRuntimeAssistantIdentity(configurationData) {
 }
 
 async function transaction(database, work) {
-  if (!database?.query) throw new KnowledgeConfigurationError('KNOWLEDGE_DATABASE_UNAVAILABLE', 'Knowledge database is unavailable');
-  if (typeof database.connect !== 'function') return work(database);
+  if (!database || (typeof database.connect !== 'function' && typeof database.query !== 'function')) {
+    throw new KnowledgeConfigurationError('KNOWLEDGE_DATABASE_UNAVAILABLE', 'Knowledge database is unavailable');
+  }
+  if (database._connected || (typeof database.connect !== 'function' && typeof database.query === 'function')) {
+    return work(database);
+  }
   const client = await database.connect();
   try {
     await client.query('BEGIN');
@@ -214,6 +218,41 @@ async function activateConfigurationVersion({
         WHERE id = $1 AND tenant_id = $2`,
       [assistantId, tenantId, versionId]
     );
+    await client.query(
+      `INSERT INTO knowledge_source_assistants (tenant_id, source_id, assistant_id)
+       SELECT DISTINCT $1::uuid, s.id, $2::uuid
+         FROM business_profile_versions bpv
+         JOIN business_profiles bp
+           ON bp.tenant_id = $1::uuid AND bp.active_version_id = bpv.id
+         JOIN knowledge_base_documents s
+           ON s.tenant_id = $1::uuid
+          AND s.enabled = TRUE
+          AND s.status = 'active'
+          AND s.processing_status = 'READY'
+          AND s.indexing_status = 'READY'
+          AND (
+            s.id::text = ANY(SELECT jsonb_array_elements_text(bpv.source_scope->'source_ids'))
+            OR EXISTS (
+              SELECT 1 FROM knowledge_materialized_source_provenance kmsp
+               WHERE kmsp.tenant_id = s.tenant_id
+                 AND kmsp.materialized_source_id = s.id
+                 AND kmsp.original_source_id::text = ANY(SELECT jsonb_array_elements_text(bpv.source_scope->'source_ids'))
+            )
+            OR (
+              s.source_type = 'CONVERSATION_CANDIDATE'
+              AND EXISTS (
+                SELECT 1 FROM knowledge_source_business_identities ksbi
+                 WHERE ksbi.tenant_id = s.tenant_id
+                   AND ksbi.source_id = s.id
+                   AND ksbi.business_identity_id = bp.business_identity_id
+              )
+            )
+          )
+        WHERE bpv.id = $3::uuid AND bpv.tenant_id = $1::uuid
+       ON CONFLICT (tenant_id, source_id, assistant_id) DO NOTHING`,
+      [tenantId, assistantId, target.source_profile_version_id],
+    );
+
     return { id: versionId, supersedesVersionId: previousId, status: 'ACTIVE' };
   });
 }

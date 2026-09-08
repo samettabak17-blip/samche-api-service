@@ -332,6 +332,14 @@ router.post('/:tenantId/knowledge-intelligence/sources/:sourceId/assignments', r
        ON CONFLICT (tenant_id, source_id, assistant_id) DO NOTHING`,
       [tenantId, id, assistantId]
     );
+    await pool.query(
+      `INSERT INTO knowledge_source_assistants (tenant_id, source_id, assistant_id)
+       SELECT DISTINCT provenance.tenant_id, provenance.materialized_source_id, $3::uuid
+         FROM knowledge_materialized_source_provenance provenance
+        WHERE provenance.tenant_id = $1 AND provenance.original_source_id = $2
+       ON CONFLICT (tenant_id, source_id, assistant_id) DO NOTHING`,
+      [tenantId, id, assistantId]
+    );
     return res.status(204).end();
   } catch (error) {
     return safeError(res, error);
@@ -346,6 +354,16 @@ router.delete('/:tenantId/knowledge-intelligence/sources/:sourceId/assignments/:
   try {
     await pool.query(
       'DELETE FROM knowledge_source_assistants WHERE tenant_id = $1 AND source_id = $2 AND assistant_id = $3',
+      [tenantId, id, req.params.assistantId]
+    );
+    await pool.query(
+      `DELETE FROM knowledge_source_assistants
+        WHERE tenant_id = $1 AND assistant_id = $3
+          AND source_id IN (
+            SELECT provenance.materialized_source_id
+              FROM knowledge_materialized_source_provenance provenance
+             WHERE provenance.tenant_id = $1 AND provenance.original_source_id = $2
+          )`,
       [tenantId, id, req.params.assistantId]
     );
     return res.status(204).end();
