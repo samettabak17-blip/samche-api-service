@@ -259,8 +259,9 @@ const handleGuideBootstrap = async (req, res) => {
 
 app.get("/guide/bootstrap", handleGuideBootstrap);
 app.get("/:slug/guide/bootstrap", handleGuideBootstrap);
+app.get("/guide/:slug/bootstrap", handleGuideBootstrap);
 
-app.get(['/guide/health', '/:slug/guide/health'], async (req, res) => {
+app.get(['/guide/health', '/:slug/guide/health', '/guide/:slug/health'], async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ status: 'UNAVAILABLE', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });

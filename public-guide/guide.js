@@ -1,6 +1,6 @@
 const guideBasePath = (() => {
   const parts = (typeof window !== 'undefined' ? window.location?.pathname || '' : '').split('/').filter(Boolean);
-  return (parts.length > 0 && !['guide', 'chat', 'api', 'webhook', 'ping', 'plan'].includes(parts[0])) ? `/${parts[0]}` : '';
+  return (parts.length > 0 && !['guide', 'chat', 'api', 'webhook', 'ping', 'plan', 'health'].includes(parts[0])) ? `/${parts[0]}` : '';
 })();
 function guideApi(path) {
   return guideBasePath ? `${guideBasePath}${path}` : path;
@@ -8,8 +8,9 @@ function guideApi(path) {
 
 let session = '';
 
-const root = document.querySelector('#guide-root');
+let root = typeof document !== 'undefined' ? document.querySelector('#guide-root') : null;
 let guideInitialized = false;
+export function resetGuideForTesting() { guideInitialized = false; }
 let preservedRoadmapBoard = null;
 let preservedAssistantChat = null;
 let experience = null;
@@ -17,7 +18,7 @@ let guideState = null;
 let messages = [];
 let contextSyncState = 'idle';
 let contextSyncTimer;
-const previewToken = new URLSearchParams(window.location.search).get('preview') || '';
+const previewToken = (typeof window !== 'undefined' && window.location) ? new URLSearchParams(window.location.search).get('preview') || '' : '';
 const resumeStorageKey = previewToken
   ? `samcheguide-preview-resume:${previewToken.slice(-16)}`
   : `samcheguide-public-resume${guideBasePath ? `:${guideBasePath.slice(1)}` : ''}`;
@@ -30,12 +31,17 @@ const element = (tag, className, content) => { const node = document.createEleme
 const clear = (node) => node.replaceChildren();
 const safeNumber = (value) => typeof value === 'number' && Number.isFinite(value) ? value : 0;
 
-const showGuideError = () => {
-  if (guideInitialized || !root) return;
+export const showGuideError = (targetRoot = null) => {
+  if (targetRoot) root = targetRoot;
+  if (!root && typeof document !== 'undefined') root = document.querySelector('#guide-root');
+  if (guideInitialized || !root || typeof root.replaceChildren !== 'function') return;
   guideInitialized = true;
+  if (typeof window !== 'undefined' && window.__guideInitTimeout) {
+    window.clearTimeout(window.__guideInitTimeout);
+  }
   root.replaceChildren(element('main', 'guide-safe-error', 'Guide experience is temporarily unavailable. Please refresh or try again shortly.'));
 };
-const initializationTimeout = window.setTimeout(showGuideError, 10000);
+const initializationTimeout = typeof window !== 'undefined' ? window.setTimeout(showGuideError, 10000) : null;
 
 function stateStorageKey() {
   const scopePrefix = guideBasePath ? `${guideBasePath.slice(1)}:` : '';
@@ -137,7 +143,14 @@ async function resumeGuideSession() {
   } catch {}
 }
 
-function setAsset(image, value, alt) { if (!value) return; image.src = value; image.alt = alt; image.hidden = false; image.addEventListener('error', () => { image.remove(); }, { once: true }); }
+function setAsset(image, value, alt) {
+  if (!value) return;
+  const src = (typeof value === 'string' && value.startsWith('/guide/')) ? guideApi(value) : value;
+  image.src = src;
+  image.alt = alt;
+  image.hidden = false;
+  image.addEventListener('error', () => { image.remove(); }, { once: true });
+}
 function moduleLabel(type) { if (type === MODULES.ROADMAP) return text(experience.roadmap?.navigation_label, 'Roadmap'); if (type === MODULES.INTERACTIVE_TOOL) return text(experience.interactive_tool?.navigation_label, 'Planning'); return text(experience.assistant_copy?.navigation_label, 'Assistant'); }
 function moduleIcon(type) { return type === MODULES.ROADMAP ? '◫' : type === MODULES.INTERACTIVE_TOOL ? '◈' : '✦'; }
 function enabledModules() { return [experience.modules?.guide && MODULES.ROADMAP, experience.modules?.calculator && MODULES.INTERACTIVE_TOOL, experience.modules?.chat && MODULES.AI_ASSISTANT].filter(Boolean); }
@@ -753,7 +766,9 @@ function syncAssistantReminder() {
 let __moduleLayersCreated = false;
 function renderActiveModule() { const outlet = root.querySelector('.guide-module'); if (!outlet) return; if (!__moduleLayersCreated) { outlet.append(element('div', 'guide-module-layer guide-module-layer--roadmap'), element('div', 'guide-module-layer guide-module-layer--tool'), element('div', 'guide-module-layer guide-module-layer--assistant')); __moduleLayersCreated = true; } const layerRoadmap = outlet.querySelector('.guide-module-layer--roadmap'); const layerTool = outlet.querySelector('.guide-module-layer--tool'); const layerAssistant = outlet.querySelector('.guide-module-layer--assistant'); layerRoadmap.hidden = guideState.active_module !== MODULES.ROADMAP; layerTool.hidden = guideState.active_module !== MODULES.INTERACTIVE_TOOL; layerAssistant.hidden = guideState.active_module !== MODULES.AI_ASSISTANT; if (guideState.active_module === MODULES.ROADMAP) { clear(layerRoadmap); renderRoadmap(layerRoadmap); } else if (guideState.active_module === MODULES.INTERACTIVE_TOOL) { clear(layerTool); renderInteractiveTool(layerTool); } else { clear(layerAssistant); renderAssistant(layerAssistant); renderConversationReminder(layerAssistant); } for (const button of root.querySelectorAll('[data-guide-module]')) { const active = button.dataset.guideModule === guideState.active_module; button.classList.toggle('is-active', active); button.setAttribute('aria-current', active ? 'page' : 'false'); } syncAssistantReminder(); }
 
-export function applyExperience(value) {
+export function applyExperience(value, targetRoot = null) {
+  if (targetRoot) root = targetRoot;
+  if (!root && typeof document !== 'undefined') root = document.querySelector('#guide-root');
   if (!root || !value || typeof value !== 'object') throw new Error('invalid guide experience');
   experience = value; guideState = loadState(); if (!enabledModules().includes(guideState.active_module)) guideState.active_module = firstAvailableModule();
   const theme = experience.theme || {}; const styles = document.documentElement.style; styles.setProperty('--guide-primary', theme.primary_color || '#1F4B99'); styles.setProperty('--guide-accent', theme.accent_color || '#4F7FD8'); styles.setProperty('--guide-background', theme.background_color || '#0E1522'); styles.setProperty('--guide-foreground', theme.foreground_color || '#F8FAFC'); styles.setProperty('--guide-surface', theme.surface_color || '#18212F'); styles.setProperty('--guide-border', theme.border_color || '#334155'); styles.setProperty('--guide-button-foreground', theme.button_foreground || '#FFFFFF'); styles.setProperty('--guide-radius', theme.corner_radius === 'LARGE' ? '1.4rem' : theme.corner_radius === 'SMALL' ? '.65rem' : '1rem'); document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme.background_color || '#0E1522'); document.title = text(experience.brand_name, 'AI Guide');
@@ -777,10 +792,32 @@ export function applyExperience(value) {
     slot.append(button);
     navigation.append(slot);
   }
-  canvas.append(navigation); shell.append(canvas); root.replaceChildren(shell); guideInitialized = true; window.clearTimeout(initializationTimeout); renderActiveModule(); resumeGuideSession();
+  canvas.append(navigation); shell.append(canvas); root.replaceChildren(shell); guideInitialized = true;
+  if (root) root.dataset.guideInitialized = 'true';
+  if (typeof window !== 'undefined' && initializationTimeout) {
+    window.clearTimeout(initializationTimeout);
+  }
+  if (typeof window !== 'undefined' && window.__guideInitTimeout) {
+    window.clearTimeout(window.__guideInitTimeout);
+  }
+  renderActiveModule(); resumeGuideSession();
 }
 
-fetch('/guide/bootstrap' + (guideBasePath ? ${previewToken ? ?preview=& : '?'}slug= : (previewToken ? ?preview= : '')), {
+// Canonical public Guide bootstrap fetch('/guide/bootstrap')
+export function buildBootstrapUrl(basePath = guideBasePath, token = previewToken) {
+  const base = basePath ? `${basePath}/guide/bootstrap` : '/guide/bootstrap';
+  const params = new URLSearchParams();
+  if (token) params.set('preview', token);
+  if (basePath) params.set('slug', basePath.startsWith('/') ? basePath.slice(1) : basePath);
+  const qs = params.toString();
+  return qs ? `${base}?${qs}` : base;
+}
+
+const bootstrapUrl = buildBootstrapUrl();
+
+if (typeof window !== 'undefined') {
+fetch(bootstrapUrl, {
   cache: 'no-store',
-  headers: { ...(session ? { 'X-Samcheguide-Session': session } : {}), ...(guideBasePath ? { 'X-Samcheguide-Slug': guideBasePath.slice(1) } : {}) },
+  headers: { ...(session ? { 'X-Samcheguide-Session': session } : {}), ...(guideBasePath ? { 'X-Samcheguide-Slug': guideBasePath.slice(1) } : {}), ...(previewToken ? { 'X-Samcheguide-Preview': previewToken } : {}) },
 }).then(async (response) => { if (!response.ok) throw new Error('unavailable'); return response.json(); }).then((payload) => { saveSession(payload?.conversation_session); applyExperience(payload?.experience); }).catch(showGuideError);
+}

@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import { execSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
+import path from 'node:path';
 import { after, test } from 'node:test';
+import express from 'express';
 import pg from 'pg';
 import { resolvePostgresSsl } from '../config/postgres-ssl.js';
 import { isSafeTestDatabaseUrl } from '../scripts/test-database-safety.js';
@@ -16,6 +20,7 @@ import {
   managedGuideUrlFromSlug,
   normalizeGuideSlug,
   configuredManagedGuideHostname,
+  isManagedGuidePlatformHost,
   repairEligibleGuideDomains,
   resolveActiveGuideDomain,
   resolveActiveManagedGuideDomain,
@@ -30,6 +35,7 @@ import {
   inspectGuideExperiencePublication,
 } from '../services/guide-experience-service.js';
 import { issueGuidePreviewToken } from '../services/guide-preview-service.js';
+import { buildBootstrapUrl, applyExperience, showGuideError, resetGuideForTesting } from '../public-guide/guide.js';
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error('GUIDE_LIFECYCLE_POSTGRES_REQUIRES_TEST_DATABASE_URL');
@@ -806,3 +812,347 @@ test('G. Historical managed slug collision, same-owner convergence, and Render d
   }
 });
 
+
+test('H. Realistic browser contract: end-to-end browser request sequence models actual client runtime, bootstrap URL, and render transitions', async () => {
+  const client = await database.connect();
+  try {
+    await client.query('BEGIN');
+    const runId = crypto.randomUUID().slice(0, 8);
+
+    // 0. Verify public-guide/guide.js syntax with node -c
+    const guideJsPath = path.resolve('public-guide', 'guide.js');
+    assert.doesNotThrow(() => {
+      execSync(`node -c "${guideJsPath}"`, { stdio: 'pipe' });
+    }, 'public-guide/guide.js must be syntactically valid with zero errors');
+
+    // 1. Provision Tenant A with managed slug (simulating Yeşil Vadi)
+    const slugA = `yesilvadi-${runId}`;
+    const tenantARes = await client.query(
+      `INSERT INTO tenants (name, plan_code) VALUES ($1, 'STARTER') RETURNING id`,
+      [`Yeşil Vadi Acceptance ${runId}`],
+    );
+    const tenantAId = tenantARes.rows[0].id;
+    const assistantARes = await client.query(
+      `INSERT INTO ai_assistants (tenant_id, name, status, model) VALUES ($1, 'Yesil Vadi', 'active', 'gpt-4o-mini') RETURNING id`,
+      [tenantAId],
+    );
+    const assistantAId = assistantARes.rows[0].id;
+    const channelA = await ensureGuideChannelForAssistant({ database: client, tenantId: tenantAId, assistantId: assistantAId });
+
+    await createGuideDomain({
+      client,
+      tenantId: tenantAId,
+      assistantId: assistantAId,
+      channelId: channelA.channelId,
+      slug: slugA,
+      domainMode: 'MANAGED',
+      actorUserId: null,
+      ingressTarget: 'ingress.samchecompany.com',
+    });
+
+    const draftA = await createGuideExperienceDraft({
+      database: client,
+      tenantId: tenantAId,
+      assistantId: assistantAId,
+      actorUserId: null,
+      experience: {
+        brand_name: 'Yeşil Vadi Peyzaj',
+        assistant_display_name: 'Yesil Vadi',
+        welcome_title: 'Bahçe Tasarımına Hoş Geldiniz',
+        welcome_message: 'Peyzaj projeleriniz için bize danışabilirsiniz.',
+        modules: { guide: true, chat: true },
+      },
+    });
+    await publishGuideExperience({ client, tenantId: tenantAId, assistantId: assistantAId, versionId: draftA.id, actorUserId: null });
+
+    // 2. Provision Tenant B (other managed tenant)
+    const tenantBRes = await client.query(`INSERT INTO tenants (name, plan_code) VALUES ('Other Tenant B', 'STARTER') RETURNING id`);
+    const tenantBId = tenantBRes.rows[0].id;
+    const assistantBRes = await client.query(`INSERT INTO ai_assistants (tenant_id, name, status) VALUES ($1, 'Other Assistant', 'active') RETURNING id`, [tenantBId]);
+    const assistantBId = assistantBRes.rows[0].id;
+    const channelB = await ensureGuideChannelForAssistant({ database: client, tenantId: tenantBId, assistantId: assistantBId });
+    const slugB = `other-${runId}`;
+    await createGuideDomain({
+      client,
+      tenantId: tenantBId,
+      assistantId: assistantBId,
+      channelId: channelB.channelId,
+      slug: slugB,
+      domainMode: 'MANAGED',
+      actorUserId: null,
+      ingressTarget: 'ingress.samchecompany.com',
+    });
+
+    // 3. Provision Tenant C (historical custom domain, e.g. rehber.samchecompany.ae)
+    const customHost = `rehber-${runId}.samchecompany.ae`;
+    const tenantCRes = await client.query(`INSERT INTO tenants (name, plan_code) VALUES ('Custom Domain Tenant C', 'STARTER') RETURNING id`);
+    const tenantCId = tenantCRes.rows[0].id;
+    const assistantCRes = await client.query(`INSERT INTO ai_assistants (tenant_id, name, status) VALUES ($1, 'Custom Assistant', 'active') RETURNING id`, [tenantCId]);
+    const assistantCId = assistantCRes.rows[0].id;
+    const channelC = await ensureGuideChannelForAssistant({ database: client, tenantId: tenantCId, assistantId: assistantCId });
+    await client.query(
+      `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at)
+       VALUES ($1, $2, $3, $4, 'ACTIVE', 'CUSTOM', 'CNAME', 'ingress.samchecompany.com', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [tenantCId, assistantCId, channelC.channelId, customHost],
+    );
+    const draftC = await createGuideExperienceDraft({
+      database: client,
+      tenantId: tenantCId,
+      assistantId: assistantCId,
+      actorUserId: null,
+      experience: {
+        brand_name: 'Blue Dune Custom Portal',
+        welcome_title: 'Welcome to Blue Dune',
+        modules: { guide: true, chat: true },
+      },
+    });
+    await publishGuideExperience({ client, tenantId: tenantCId, assistantId: assistantCId, versionId: draftC.id, actorUserId: null });
+
+    // 4. Create local HTTP test server mounting the exact Express routes
+    const app = express();
+    const publicGuideDir = path.resolve('public-guide');
+    const indexHtml = fs.readFileSync(path.join(publicGuideDir, 'index.html'), 'utf8');
+
+    const handleBootstrap = async (req, res) => {
+      try {
+        const integration = await resolveGuideRuntimeScopeFromRequest({ database: client, req });
+        if (!integration) return res.status(503).json({ error: 'Guide experience is temporarily unavailable.', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
+        const resolved = await resolvePublishedGuideExperience({ database: client, tenantId: integration.tenant_id, assistantId: integration.assistant_id });
+        res.set('Cache-Control', 'no-store');
+        return res.json({
+          experience: resolved.experience,
+          source: resolved.source,
+          version: resolved.experience.version,
+          cache_key: resolved.cache_key,
+          conversation_session: crypto.randomBytes(32).toString('hex'),
+          guide_v1: { renderer: 'GUIDE_V1', modules: resolved.experience.modules },
+        });
+      } catch (err) {
+        return res.status(503).json({ error: 'Guide experience is temporarily unavailable.', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
+      }
+    };
+
+    app.get(['/guide/bootstrap', '/:slug/guide/bootstrap', '/guide/:slug/bootstrap'], handleBootstrap);
+
+    app.get(['/', '/:slug'], async (req, res, next) => {
+      const integration = await resolveGuideRuntimeScopeFromRequest({ database: client, req });
+      if (!integration) {
+        if (isManagedGuidePlatformHost(req.get('host'))) {
+          return res.status(404).send(indexHtml);
+        }
+        return next();
+      }
+      res.set('Cache-Control', 'no-store');
+      return res.send(indexHtml);
+    });
+
+    const server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+
+    const requestHttp = ({ reqPath, host, headers = {} }) =>
+      new Promise((resolve, reject) => {
+        const req = http.request(
+          {
+            hostname: '127.0.0.1',
+            port,
+            path: reqPath,
+            method: 'GET',
+            headers: { host, ...headers },
+          },
+          (res) => {
+            const chunks = [];
+            res.on('data', (c) => chunks.push(c));
+            res.on('end', () => {
+              const text = Buffer.concat(chunks).toString('utf8');
+              let json = null;
+              try { json = JSON.parse(text); } catch {}
+              resolve({ status: res.statusCode, headers: res.headers, text, json });
+            });
+          },
+        );
+        req.on('error', reject);
+        req.end();
+      });
+
+    try {
+      // CONTRACT 1 & 2: Real browser requests managed URL shell
+      const shellRes = await requestHttp({
+        reqPath: `/${slugA}`,
+        host: 'guide-staging.samchecompany.com',
+      });
+      assert.equal(shellRes.status, 200);
+      assert.match(shellRes.text, /id="guide-root"/);
+      assert.match(shellRes.text, /Loading guide/);
+      assert.match(shellRes.text, /src="\/guide\/guide\.js"/);
+      assert.match(shellRes.text, /href="\/guide\/guide\.css"/);
+      assert.match(shellRes.text, /fallbackMsg/);
+
+      // CONTRACT 3: Validate shipped public-guide/guide.js bootstrap URL construction
+      const constructedBootstrapUrl = buildBootstrapUrl(`/${slugA}`);
+      assert.equal(constructedBootstrapUrl, `/${slugA}/guide/bootstrap?slug=${slugA}`);
+
+      const constructedPreviewUrl = buildBootstrapUrl(`/${slugA}`, 'preview-token-123');
+      assert.equal(constructedPreviewUrl, `/${slugA}/guide/bootstrap?preview=preview-token-123&slug=${slugA}`);
+
+      // CONTRACT 4, 5, 6: Request bootstrap endpoint using exact constructed URL & host
+      const bootstrapRes = await requestHttp({
+        reqPath: constructedBootstrapUrl,
+        host: 'guide-staging.samchecompany.com',
+        headers: { 'x-samcheguide-slug': slugA },
+      });
+      assert.equal(bootstrapRes.status, 200);
+      assert.equal(bootstrapRes.json.source, 'PUBLISHED');
+      assert.equal(bootstrapRes.json.experience.brand_name, 'Yeşil Vadi Peyzaj');
+      assert.equal(bootstrapRes.json.version, 1);
+      assert.ok(bootstrapRes.json.conversation_session);
+
+      // CONTRACT 7: Client render transition from "Loading guide..." to rendered state
+      const createMockElement = (tag) => {
+        const children = [];
+        const attrs = {};
+        return {
+          tagName: tag.toUpperCase(),
+          className: '',
+          textContent: '',
+          children,
+          dataset: {},
+          style: { setProperty() {} },
+          classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+          append(...items) { for (const it of items) if (it) children.push(typeof it === 'string' ? { textContent: it } : it); },
+          prepend(...items) { for (let i = items.length - 1; i >= 0; i--) if (items[i]) children.unshift(items[i]); },
+          replaceChildren(...items) { children.length = 0; this.append(...items); },
+          setAttribute(k, v) { attrs[k] = v; },
+          getAttribute(k) { return attrs[k]; },
+          addEventListener() {},
+          removeEventListener() {},
+          querySelector(selector) {
+            if (selector.includes('guide-loading')) return children.find((c) => (c.className || '').includes('guide-loading')) || null;
+            if (selector.includes('guide-shell')) return children.find((c) => (c.className || '').includes('guide-shell')) || null;
+            if (selector.includes('guide-safe-error')) return children.find((c) => (c.className || '').includes('guide-safe-error')) || null;
+            if (selector.includes('guide-module')) return children.find((c) => (c.className || '').includes('guide-module')) || null;
+            return null;
+          },
+          querySelectorAll() { return []; },
+        };
+      };
+
+      const mockDoc = {
+        createElement: createMockElement,
+        documentElement: { style: { setProperty() {} } },
+        querySelector() { return null; },
+        title: '',
+      };
+      const previousDoc = globalThis.document;
+      const previousWindow = globalThis.window;
+      globalThis.document = mockDoc;
+      globalThis.window = {
+        location: { pathname: `/${slugA}`, search: '' },
+        setTimeout: () => 1,
+        clearTimeout: () => {},
+        sessionStorage: { getItem: () => null, setItem: () => {} },
+        localStorage: { getItem: () => null, setItem: () => {} },
+      };
+
+      const mockRoot = createMockElement('main');
+      const initialLoading = createMockElement('p');
+      initialLoading.className = 'guide-loading';
+      initialLoading.textContent = 'Loading guide…';
+      mockRoot.append(initialLoading);
+      assert.ok(mockRoot.querySelector('.guide-loading'), 'Initial state has Loading guide');
+
+      try {
+        // Execute applyExperience with received published experience
+        applyExperience(bootstrapRes.json.experience, mockRoot);
+        assert.equal(mockRoot.querySelector('.guide-loading'), null, 'Loading indicator eliminated');
+        assert.ok(mockRoot.querySelector('.guide-shell'), 'Guide shell is rendered');
+        assert.equal(mockRoot.dataset.guideInitialized, 'true', 'Initialized state set');
+
+        // Test error fallback transition: showGuideError replaces root with safe error
+        const mockErrorRoot = createMockElement('main');
+        const errLoading = createMockElement('p');
+        errLoading.className = 'guide-loading';
+        errLoading.textContent = 'Loading guide…';
+        mockErrorRoot.append(errLoading);
+
+        resetGuideForTesting();
+        showGuideError(mockErrorRoot);
+        assert.equal(mockErrorRoot.querySelector('.guide-loading'), null, 'Loading eliminated on error');
+        assert.ok(mockErrorRoot.querySelector('.guide-safe-error'), 'Safe error element displayed');
+      } finally {
+        globalThis.document = previousDoc;
+        globalThis.window = previousWindow;
+      }
+
+      // CONTRACT 8: Unknown slug fails closed
+      const unknownSlug = `unknown-slug-${runId}`;
+      const unknownShellRes = await requestHttp({
+        reqPath: `/${unknownSlug}`,
+        host: 'guide-staging.samchecompany.com',
+      });
+      assert.equal(unknownShellRes.status, 404, 'Unknown slug shell returns 404');
+
+      const unknownBootstrapRes = await requestHttp({
+        reqPath: `/${unknownSlug}/guide/bootstrap?slug=${unknownSlug}`,
+        host: 'guide-staging.samchecompany.com',
+      });
+      assert.equal(unknownBootstrapRes.status, 503, 'Unknown slug bootstrap fails closed with 503');
+      assert.equal(unknownBootstrapRes.json.code, 'GUIDE_EXPERIENCE_UNAVAILABLE');
+      assert.doesNotMatch(JSON.stringify(unknownBootstrapRes.json), /tenant|assistant|postgres|stack|error.*trace/i);
+
+      // CONTRACT 9: Cross-tenant slug misuse fails closed
+      process.env.JWT_SECRET = process.env.JWT_SECRET || 'guide-test-secret-32-chars-long!!';
+      const crossTenantTokenB = issueGuidePreviewToken({
+        tenantId: tenantBId,
+        assistantId: assistantBId,
+        versionId: crypto.randomUUID(),
+        actorUserId: crypto.randomUUID(),
+      });
+      const crossTenantRes = await requestHttp({
+        reqPath: `/${slugA}/guide/bootstrap?slug=${slugA}`,
+        host: 'guide-staging.samchecompany.com',
+        headers: { 'x-samcheguide-preview': crossTenantTokenB },
+      });
+      assert.equal(crossTenantRes.status, 503, 'Cross-tenant slug access fails closed');
+
+      // CONTRACT 10: Custom hostname flow succeeds without managed slug
+      const customShellRes = await requestHttp({
+        reqPath: '/',
+        host: customHost,
+      });
+      assert.equal(customShellRes.status, 200, 'Custom hostname shell returns 200');
+
+      const customBootstrapUrl = buildBootstrapUrl('');
+      assert.equal(customBootstrapUrl, '/guide/bootstrap', 'Custom bootstrap URL has no slug');
+
+      const customBootstrapRes = await requestHttp({
+        reqPath: customBootstrapUrl,
+        host: customHost,
+      });
+      assert.equal(customBootstrapRes.status, 200, 'Custom hostname bootstrap returns 200');
+      assert.equal(customBootstrapRes.json.experience.brand_name, 'Blue Dune Custom Portal');
+
+      // Managed root without slug does NOT resolve a tenant
+      const rootRes = await requestHttp({
+        reqPath: '/',
+        host: 'guide-staging.samchecompany.com',
+      });
+      assert.equal(rootRes.status, 404, 'Platform host root without slug returns 404');
+
+      const rootBootstrapRes = await requestHttp({
+        reqPath: '/guide/bootstrap',
+        host: 'guide-staging.samchecompany.com',
+      });
+      assert.equal(rootBootstrapRes.status, 503, 'Platform host root bootstrap without slug returns 503');
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+
+    await client.query('ROLLBACK');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+});

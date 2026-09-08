@@ -9,6 +9,26 @@
   </head>
   <body>
     <main id="guide-root" aria-live="polite"><p class="guide-loading">Loading guide…</p></main>
+    <script>
+      (function() {
+        var fallbackMsg = 'Guide experience is temporarily unavailable. Please refresh or try again shortly.';
+        function showFallback() {
+          var root = document.getElementById('guide-root');
+          if (root && !root.dataset.guideInitialized && !root.querySelector('.guide-shell')) {
+            var err = document.createElement('main');
+            err.className = 'guide-safe-error';
+            err.textContent = fallbackMsg;
+            root.replaceChildren(err);
+          }
+        }
+        window.__guideInitTimeout = setTimeout(showFallback, 8000);
+        window.addEventListener('error', function() {
+          if (!document.querySelector('.guide-shell')) {
+            showFallback();
+          }
+        });
+      })();
+    </script>
     <script type="module" src="/guide/guide.js"></script>
   </body>
 </html>

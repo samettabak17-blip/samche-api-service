@@ -227,8 +227,11 @@ export function extractGuideSlug(req) {
   const pathname = (typeof req?.originalUrl === 'string' ? req.originalUrl : req?.path) || '';
   const cleanPath = pathname.split('?')[0];
   const parts = cleanPath.split('/').filter(Boolean);
-  if (parts.length > 0 && !['guide', 'chat', 'api', 'webhook', 'ping', 'plan'].includes(parts[0])) {
+  if (parts.length > 0 && !['guide', 'chat', 'api', 'webhook', 'ping', 'plan', 'health'].includes(parts[0])) {
     try { return normalizeGuideSlug(parts[0]); } catch { return null; }
+  }
+  if (parts.length > 1 && parts[0] === 'guide' && !['guide', 'chat', 'api', 'webhook', 'ping', 'plan', 'health', 'bootstrap', 'assets', 'session-context'].includes(parts[1])) {
+    try { return normalizeGuideSlug(parts[1]); } catch { return null; }
   }
 
   const referer = getHeader('referer') || getHeader('referrer');
@@ -237,7 +240,7 @@ export function extractGuideSlug(req) {
       const refUrl = new URL(referer);
       if (isManagedGuidePlatformHost(refUrl.hostname)) {
         const refParts = refUrl.pathname.split('/').filter(Boolean);
-        if (refParts.length > 0 && !['guide', 'chat', 'api', 'webhook', 'ping', 'plan'].includes(refParts[0])) {
+        if (refParts.length > 0 && !['guide', 'chat', 'api', 'webhook', 'ping', 'plan', 'health'].includes(refParts[0])) {
           return normalizeGuideSlug(refParts[0]);
         }
       }
