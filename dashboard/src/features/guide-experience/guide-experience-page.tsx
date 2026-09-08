@@ -74,6 +74,12 @@ const guideDomainFailureMessage = (error: unknown, fallback: string) => {
     "code" in error.body
       ? (error.body as { code?: unknown }).code
       : null;
+  if (code === "GUIDE_DOMAIN_HOSTNAME_EXISTS") {
+    return "This domain or slug is already bound to another Guide.";
+  }
+  if (code === "GUIDE_DOMAIN_INVALID_SLUG") {
+    return "Available slug must contain only lowercase letters, numbers, and hyphens (up to 30 characters).";
+  }
   return typeof code === "string" && code.startsWith("GUIDE_DOMAIN_INGRESS_")
     ? "Platform domain ingress is not available yet. Contact a platform owner."
     : fallback;
@@ -782,9 +788,11 @@ export function GuideExperiencePage() {
                   aria-label="Managed Guide slug"
                   value={managedSlug}
                   placeholder="customer"
-                  onChange={(event) =>
-                    setManagedSlug(event.target.value.toLowerCase())
-                  }
+                  onChange={(event) => {
+                    const raw = event.target.value.toLowerCase().trim();
+                    const cleaned = raw.replace(/\.guide\.(?:staging\.)?samchecompany\.com$/, "");
+                    setManagedSlug(cleaned);
+                  }}
                 />
               </DashboardField>
             ) : (

@@ -9,7 +9,7 @@ import { GuideExperienceError, createGuideExperienceDraft, inspectGuideExperienc
 import { GuideRecommendationError, generateGuideExperienceRecommendation } from '../services/guide-experience-recommendation-service.js';
 import { GuideThemeError, deriveAccessibleGuideTheme } from '../services/guide-theme-service.js';
 import { resolveCname } from 'node:dns/promises';
-import { GuideDomainError, activateGuideDomain, archiveGuideDomain, configuredGuideDomainIngressTarget, configuredManagedGuideDomainSuffix, createGuideDomain, ensureManagedGuideDomainForAssistant, listGuideDomains, managedGuideHostnameFromSlug, verifyGuideDomainDns } from '../services/guide-domain-service.js';
+import { GuideDomainError, activateGuideDomain, archiveGuideDomain, configuredGuideDomainIngressTarget, configuredManagedGuideDomainSuffix, createGuideDomain, ensureGuideChannelForAssistant, ensureManagedGuideDomainForAssistant, listGuideDomains, managedGuideHostnameFromSlug, verifyGuideDomainDns } from '../services/guide-domain-service.js';
 import { archiveGuideDomainIngress, provisionGuideDomainIngress, resolveGuideDomainIngressStatus, verifyGuideDomainIngress } from '../services/guide-domain-ingress-service.js';
 import { issueGuidePreviewToken } from '../services/guide-preview-service.js';
 
@@ -78,7 +78,12 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/assets', requi
 
 router.post('/:tenantId/guide-experiences/assistants/:assistantId/drafts', requireTenantAccess, requireTenantAdmin, async (req, res) => {
   const scope = validScope(req, res); if (!scope) return;
-  try { await verifyAssistant(scope); const version = await createGuideExperienceDraft({ database: pool, ...scope, actorUserId: req.user.user_id, experience: req.body?.experience }); return res.status(201).json({ version }); }
+  try {
+    await verifyAssistant(scope);
+    await ensureGuideChannelForAssistant({ database: pool, ...scope });
+    const version = await createGuideExperienceDraft({ database: pool, ...scope, actorUserId: req.user.user_id, experience: req.body?.experience });
+    return res.status(201).json({ version });
+  }
   catch (error) { return sendError(res, error); }
 });
 
@@ -111,13 +116,8 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/drafts/:versio
   try {
     await verifyAssistant(scope); await client.query('BEGIN');
     const version = await publishGuideExperience({ client, ...scope, versionId: req.params.versionId, actorUserId: req.user.user_id });
-    const channelResult = await client.query(
-      `SELECT channel_id FROM channel_integrations WHERE tenant_id=$1 AND assistant_id=$2 AND integration_type='SAMCHEGUIDE' AND enabled=TRUE LIMIT 1`,
-      [scope.tenantId, scope.assistantId],
-    );
-    if (channelResult.rowCount) {
-      await ensureManagedGuideDomainForAssistant({ database: client, tenantId: scope.tenantId, assistantId: scope.assistantId, channelId: channelResult.rows[0].channel_id });
-    }
+    const guideChannel = await ensureGuideChannelForAssistant({ database: client, tenantId: scope.tenantId, assistantId: scope.assistantId });
+    await ensureManagedGuideDomainForAssistant({ database: client, tenantId: scope.tenantId, assistantId: scope.assistantId, channelId: guideChannel.channelId });
     await client.query('COMMIT'); return res.json({ version, cache_key: `guide-experience:${scope.tenantId}:${scope.assistantId}:${version.version}` });
   } catch (error) { await client.query('ROLLBACK').catch(() => {}); return sendError(res, error); }
   finally { client.release(); }
@@ -132,13 +132,8 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/drafts/:versio
     const domains = await listGuideDomains({ database: pool, ...scope });
     let activeDomain = domains.find((domain) => domain.status === 'ACTIVE');
     if (!activeDomain) {
-      const channelResult = await pool.query(
-        `SELECT channel_id FROM channel_integrations WHERE tenant_id=$1 AND assistant_id=$2 AND integration_type='SAMCHEGUIDE' AND enabled=TRUE LIMIT 1`,
-        [scope.tenantId, scope.assistantId],
-      );
-      if (channelResult.rowCount) {
-        activeDomain = await ensureManagedGuideDomainForAssistant({ database: pool, tenantId: scope.tenantId, assistantId: scope.assistantId, channelId: channelResult.rows[0].channel_id });
-      }
+      const guideChannel = await ensureGuideChannelForAssistant({ database: pool, tenantId: scope.tenantId, assistantId: scope.assistantId });
+      activeDomain = await ensureManagedGuideDomainForAssistant({ database: pool, tenantId: scope.tenantId, assistantId: scope.assistantId, channelId: guideChannel.channelId });
     }
     if (!activeDomain) return res.status(409).json({ error: 'An active Guide domain is required for private preview.', code: 'GUIDE_PREVIEW_DOMAIN_REQUIRED' });
     const token = issueGuidePreviewToken({ tenantId: scope.tenantId, assistantId: scope.assistantId, versionId: req.params.versionId, actorUserId: req.user.user_id });
@@ -160,7 +155,11 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/versions/:vers
 
 router.get('/:tenantId/guide-experiences/assistants/:assistantId/domains', requireTenantAccess, async (req, res) => {
   const scope = validScope(req, res); if (!scope) return;
-  try { await verifyAssistant(scope); return res.json({ domains: await listGuideDomains({ database: pool, ...scope }), managed_domain_suffix: configuredManagedGuideDomainSuffix() }); }
+  try {
+    await verifyAssistant(scope);
+    await ensureGuideChannelForAssistant({ database: pool, tenantId: scope.tenantId, assistantId: scope.assistantId });
+    return res.json({ domains: await listGuideDomains({ database: pool, ...scope }), managed_domain_suffix: configuredManagedGuideDomainSuffix() });
+  }
   catch (error) { return sendError(res, error); }
 });
 
@@ -176,14 +175,16 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/domains', requ
   let provisioned = null;
   try {
     await verifyAssistant(scope);
-    await verifyGuideChannel({ ...scope, channelId: req.body?.channel_id });
+    const ensuredChannel = await ensureGuideChannelForAssistant({ database: client, tenantId: scope.tenantId, assistantId: scope.assistantId });
+    const channelId = req.body?.channel_id || ensuredChannel.channelId;
+    await verifyGuideChannel({ ...scope, channelId });
     const domainMode = req.body?.domain_mode === 'MANAGED' ? 'MANAGED' : 'CUSTOM';
     const hostname = domainMode === 'MANAGED' ? managedGuideHostnameFromSlug(req.body?.slug) : req.body?.hostname;
     // Managed hosts ride the shared wildcard ingress; only customer-owned
     // domains require an individual Render registration and DNS challenge.
     provisioned = domainMode === 'CUSTOM' ? await provisionGuideDomainIngress({ hostname }) : { state: 'WILDCARD', hostname };
     await client.query('BEGIN');
-    const domain = await createGuideDomain({ client, ...scope, channelId: req.body.channel_id, hostname, domainMode, actorUserId: req.user.user_id, ingressTarget: configuredGuideDomainIngressTarget() });
+    const domain = await createGuideDomain({ client, ...scope, channelId, hostname, domainMode, actorUserId: req.user.user_id, ingressTarget: configuredGuideDomainIngressTarget() });
     await client.query('COMMIT');
     return res.status(201).json({ domain, dns: { type: domain.verification_record_type, host: domain.hostname, target: domain.verification_target } });
   } catch (error) {

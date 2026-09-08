@@ -1,8 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChannelForm } from './channels-page';
 
 describe('ChannelForm', () => {
+  afterEach(() => cleanup());
+
   it('hides write controls from AGENT users', () => {
     render(<ChannelForm canManage={false} assistants={[]} onSubmit={vi.fn()} />);
     expect(screen.queryByRole('button', { name: /create channel|save/i })).toBeNull();
@@ -15,5 +17,11 @@ describe('ChannelForm', () => {
     expect(screen.getByText('Display name is required.')).toBeTruthy();
     expect(onSubmit).not.toHaveBeenCalled();
   });
-});
 
+  it('only exposes Web Chat and WhatsApp in ChannelForm for new channel creation', () => {
+    render(<ChannelForm canManage assistants={[]} onSubmit={vi.fn()} />);
+    const select = screen.getByRole('combobox', { name: 'Channel type' });
+    const options = Array.from(select.querySelectorAll('option')).map((o) => o.value);
+    expect(options).toEqual(['WEB_CHAT', 'WHATSAPP']);
+  });
+});

@@ -178,4 +178,31 @@ it('updates the selected private Draft rather than creating another version when
   expect(api.createGuideExperienceDraft).not.toHaveBeenCalled();
 });
 
+it('normalizes a full hostname entered as managed slug by stripping the suffix', async () => {
+  renderPage();
+  await openStep('Domains');
+  const slugInput = screen.getByRole('textbox', { name: 'Managed Guide slug' });
+  fireEvent.change(slugInput, { target: { value: 'yesil-vadi.guide.staging.samchecompany.com' } });
+  expect(slugInput).toHaveValue('yesil-vadi');
+});
+
+it('renders friendly feedback when guide domain hostname already exists', async () => {
+  api.createGuideDomain.mockRejectedValue(new ApiError(409, 'This hostname is already bound to a Guide.', { code: 'GUIDE_DOMAIN_HOSTNAME_EXISTS' }));
+  renderPage();
+  await openStep('Domains');
+  fireEvent.change(screen.getByRole('textbox', { name: 'Managed Guide slug' }), { target: { value: 'existing-slug' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add SamChe domain' }));
+  expect(await screen.findByText('This domain or slug is already bound to another Guide.')).toBeVisible();
+});
+
+it('renders friendly feedback when guide domain slug is invalid', async () => {
+  api.createGuideDomain.mockRejectedValue(new ApiError(400, 'Invalid slug.', { code: 'GUIDE_DOMAIN_INVALID_SLUG' }));
+  renderPage();
+  await openStep('Domains');
+  fireEvent.change(screen.getByRole('textbox', { name: 'Managed Guide slug' }), { target: { value: 'invalid-slug' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add SamChe domain' }));
+  expect(await screen.findByText('Available slug must contain only lowercase letters, numbers, and hyphens (up to 30 characters).')).toBeVisible();
+});
+
+
 afterEach(() => { cleanup(); vi.clearAllMocks(); });

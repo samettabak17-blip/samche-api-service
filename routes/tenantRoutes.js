@@ -17,6 +17,7 @@ import { AssistantModelAccessError, assertAssistantModelWriteAllowed, serializeA
 import { PLAN_CODES, TenantPlanError, changeTenantPlanAsOwner, requestTenantPlanUpgrade, resolveTenantPlanUpgrade } from '../services/tenant-plan-service.js';
 import { listPlanUpgradeNotificationsForOwner, markPlanUpgradeNotificationRead, notifyPlatformOwnersOfPlanUpgrade } from '../services/tenant-plan-notification-service.js';
 import { createTenantWithPlatformCapabilities, TenantPlatformProvisioningError } from '../services/tenant-platform-provisioning-service.js';
+import { ensureGuideChannelForAssistant } from '../services/guide-domain-service.js';
 
 const router = express.Router();
 
@@ -667,6 +668,8 @@ router.post(
                 system_prompt || null,
                 model || 'gpt-4o-mini'
             ]);
+
+            await ensureGuideChannelForAssistant({ database: { query }, tenantId: req.verified_tenant_id, assistantId: result.rows[0].id }).catch(() => {});
 
             return res.status(201).json(serializeAssistantForActor(result.rows[0], req.user.system_role));
 

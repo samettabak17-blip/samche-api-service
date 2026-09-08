@@ -2,6 +2,7 @@ import express from 'express';
 import { query } from '../config/db.js';
 import { authenticateToken, requireTenantAccess, requireTenantAdmin } from '../middleware/auth.js';
 import { isValidUUID } from '../middleware/validators.js';
+import { ensureGuideChannelsForTenant } from '../services/guide-domain-service.js';
 
 const router = express.Router();
 router.use(authenticateToken);
@@ -40,6 +41,7 @@ router.get('/:tenantId/channels', requireTenantAccess, async (req, res) => {
   if (!tenant(req, res)) return;
 
   try {
+    await ensureGuideChannelsForTenant({ database: { query }, tenantId: req.verified_tenant_id }).catch(() => {});
     const result = await query(
       'SELECT id,tenant_id,assistant_id,channel_type,display_name,external_channel_id,status,created_at,updated_at FROM tenant_channels WHERE tenant_id=$1 ORDER BY created_at DESC',
       [req.verified_tenant_id]
@@ -52,7 +54,7 @@ router.get('/:tenantId/channels', requireTenantAccess, async (req, res) => {
 });
 router.post('/:tenantId/channels', requireTenantAccess, requireTenantAdmin, async(req,res)=>{if(!tenant(req,res))return; const b=await channelBody(req,res);if(!b)return;try{const r=await query('INSERT INTO tenant_channels(channel_type,display_name,external_channel_id,assistant_id,status,tenant_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[...b,req.verified_tenant_id]);res.status(201).json(r.rows[0]);}catch(e){res.status(e.code==='23505'?409:500).json({error:e.code==='23505'?'Channel already exists':'Server error'});}});
 router.get('/:tenantId/channels/:channelId', requireTenantAccess, async(req,res)=>{if(!tenant(req,res)||!isValidUUID(req.params.channelId))return res.status(400).json({error:'Invalid channel ID'});const r=await query('SELECT * FROM tenant_channels WHERE id=$1 AND tenant_id=$2',[req.params.channelId,req.verified_tenant_id]);if(!r.rowCount)return res.status(404).json({error:'Channel not found'});res.json(r.rows[0]);});
-router.put('/:tenantId/channels/:channelId', requireTenantAccess, requireTenantAdmin, async(req,res)=>{if(!tenant(req,res)||!isValidUUID(req.params.channelId))return res.status(400).json({error:'Invalid channel ID'});const b=await channelBody(req,res);if(!b)return;const r=await query('UPDATE tenant_channels SET channel_type=$1,display_name=$2,external_channel_id=$3,assistant_id=$4,status=$5,updated_at=CURRENT_TIMESTAMP WHERE id=$6 AND tenant_id=$7 RETURNING *',[...b,req.params.channelId,req.verified_tenant_id]);if(!r.rowCount)return res.status(404).json({error:'Channel not found'});res.json(r.rows[0]);});
+router.put('/:tenantId/channels/:channelId', requireTenantAccess, requireTenantAdmin, async(req,res)=>{if(!tenant(req,res)||!isValidUUID(req.params.channelId))return res.status(400).json({error:'Invalid channel ID'});const existing=await query('SELECT channel_type FROM tenant_channels WHERE id=$1 AND tenant_id=$2',[req.params.channelId,req.verified_tenant_id]);if(existing.rowCount&&existing.rows[0].channel_type==='SAMCHEGUIDE')return res.status(409).json({error:'AI Guide channel is managed by the Guide lifecycle and cannot be modified here'});const b=await channelBody(req,res);if(!b)return;const r=await query('UPDATE tenant_channels SET channel_type=$1,display_name=$2,external_channel_id=$3,assistant_id=$4,status=$5,updated_at=CURRENT_TIMESTAMP WHERE id=$6 AND tenant_id=$7 RETURNING *',[...b,req.params.channelId,req.verified_tenant_id]);if(!r.rowCount)return res.status(404).json({error:'Channel not found'});res.json(r.rows[0]);});
 router.delete('/:tenantId/channels/:channelId', requireTenantAccess, requireTenantAdmin, async (req, res) => {
   if (!tenant(req, res) || !isValidUUID(req.params.channelId)) {
     return res.status(400).json({ error: 'Invalid channel ID' });
@@ -60,6 +62,10 @@ router.delete('/:tenantId/channels/:channelId', requireTenantAccess, requireTena
 
   const channelId = req.params.channelId;
   const tenantId = req.verified_tenant_id;
+  const existing = await query('SELECT channel_type FROM tenant_channels WHERE id = $1 AND tenant_id = $2', [channelId, tenantId]);
+  if (existing.rowCount && existing.rows[0].channel_type === 'SAMCHEGUIDE') {
+    return res.status(409).json({ error: 'AI Guide channel is managed by the Guide lifecycle and cannot be deleted' });
+  }
   const conflict = { error: 'Channel cannot be deleted while conversations are linked to it' };
 
   try {

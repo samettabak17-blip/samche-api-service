@@ -13,7 +13,7 @@ import {
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString || !isSafeTestDatabaseUrl(connectionString)) throw new Error('PUSH_NOTIFICATION_POSTGRES_REQUIRES_TEST_DATABASE_URL');
-const database = new pg.Pool({ connectionString, ssl: resolvePostgresSsl({ connectionString, databaseSsl: 'strict', nodeEnv: 'test' }), max: 2 });
+const database = new pg.Pool({ connectionString, ssl: resolvePostgresSsl({ connectionString, databaseSsl: process.env.DATABASE_SSL || 'strict', nodeEnv: 'test' }), max: 2 });
 
 const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 16);
 const endpoint = (name) => `https://push.example.test/${suffix}/${name}`;

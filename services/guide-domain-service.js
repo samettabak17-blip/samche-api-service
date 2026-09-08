@@ -52,10 +52,25 @@ export function configuredManagedGuideDomainSuffix(environment = process.env) {
 }
 
 export function managedGuideHostnameFromSlug(slug, environment = process.env) {
-  if (typeof slug !== 'string' || !/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(slug.trim().toLowerCase())) {
+  if (typeof slug !== 'string') {
     throw new GuideDomainError('GUIDE_DOMAIN_INVALID_SLUG');
   }
-  return `${slug.trim().toLowerCase()}.${configuredManagedGuideDomainSuffix(environment)}`;
+  const suffix = configuredManagedGuideDomainSuffix(environment);
+  let normalizedSlug = slug.trim().toLowerCase().replace(/\.$/, '');
+  const knownSuffixes = [
+    suffix,
+    'guide.staging.samchecompany.com',
+    'guide.samchecompany.com',
+  ];
+  for (const s of knownSuffixes) {
+    while (normalizedSlug.endsWith(`.${s}`)) {
+      normalizedSlug = normalizedSlug.slice(0, -(s.length + 1));
+    }
+  }
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/.test(normalizedSlug)) {
+    throw new GuideDomainError('GUIDE_DOMAIN_INVALID_SLUG');
+  }
+  return `${normalizedSlug}.${suffix}`;
 }
 
 function integrationIsHealthy(row) {
@@ -64,7 +79,7 @@ function integrationIsHealthy(row) {
     && row.channel_status === 'active'
     && row.assistant_status === 'active'
     && row.integration_enabled === true
-    && row.channel_assistant_id === row.assistant_id;
+    && (row.channel_assistant_id === row.assistant_id || (!row.channel_assistant_id && row.assistant_id));
 }
 
 export async function resolveActiveGuideDomain({ database, hostname }) {
@@ -78,7 +93,7 @@ export async function resolveActiveGuideDomain({ database, hostname }) {
        FROM guide_domains gd
        JOIN tenant_channels tc ON tc.id = gd.channel_id AND tc.tenant_id = gd.tenant_id
        JOIN channel_integrations ci ON ci.channel_id = gd.channel_id AND ci.tenant_id = gd.tenant_id
-         AND ci.assistant_id = gd.assistant_id AND ci.integration_type = 'SAMCHEGUIDE' AND ci.enabled = TRUE
+         AND (ci.assistant_id = gd.assistant_id OR ci.assistant_id IS NULL) AND ci.integration_type = 'SAMCHEGUIDE' AND ci.enabled = TRUE
        JOIN ai_assistants a ON a.id = gd.assistant_id AND a.tenant_id = gd.tenant_id
       WHERE gd.hostname = $1 AND gd.status = 'ACTIVE'
       LIMIT 2`,
@@ -222,11 +237,12 @@ export async function createGuideDomain({ client, tenantId, assistantId, channel
   const normalized = normalizeGuideHostname(hostname);
   const target = normalizeGuideHostname(ingressTarget);
   const initialStatus = domainMode === 'MANAGED' ? 'ACTIVE' : 'PENDING';
+  const activeTimestamp = initialStatus === 'ACTIVE' ? new Date() : null;
   const created = await client.query(
     `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,'CNAME',$7,CASE WHEN $5='ACTIVE' THEN CURRENT_TIMESTAMP ELSE NULL END,CASE WHEN $5='ACTIVE' THEN CURRENT_TIMESTAMP ELSE NULL END,$8)
+     VALUES ($1, $2, $3, $4, $5, $6, 'CNAME', $7, $8, $9, $10)
      RETURNING id, tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, archived_at, created_at`,
-    [tenantId, assistantId, channelId, normalized, initialStatus, domainMode, target, actorUserId],
+    [tenantId, assistantId, channelId, normalized, initialStatus, domainMode, target, activeTimestamp, activeTimestamp, actorUserId],
   );
   if (created.rowCount !== 1) throw new GuideDomainError('GUIDE_DOMAIN_CREATE_FAILED');
   await client.query(
@@ -244,6 +260,122 @@ export async function createGuideDomain({ client, tenantId, assistantId, channel
   return serialize(created.rows[0]);
 }
 
+export async function ensureGuideChannelForAssistant({ database, tenantId, assistantId }) {
+  if (!database?.query) throw new GuideDomainError('GUIDE_DOMAIN_DATABASE_INVALID');
+  const assistantResult = await database.query(
+    `SELECT id, name, status FROM ai_assistants WHERE id = $1 AND tenant_id = $2 AND status = 'active'`,
+    [assistantId, tenantId],
+  );
+  if (!assistantResult.rowCount) {
+    throw new GuideDomainError('GUIDE_DOMAIN_ASSISTANT_NOT_FOUND', 'Active assistant required for Guide channel.');
+  }
+
+  // 1. Check for existing active SAMCHEGUIDE channel for this assistant
+  let channel = null;
+  const existingChannel = await database.query(
+    `SELECT id, tenant_id, assistant_id, channel_type, display_name, external_channel_id, status
+       FROM tenant_channels
+      WHERE tenant_id = $1 AND assistant_id = $2 AND channel_type = 'SAMCHEGUIDE'
+      ORDER BY created_at DESC
+      LIMIT 1`,
+    [tenantId, assistantId],
+  );
+
+  if (existingChannel.rowCount) {
+    channel = existingChannel.rows[0];
+    if (channel.status !== 'active') {
+      const activated = await database.query(
+        `UPDATE tenant_channels SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2 RETURNING id, tenant_id, assistant_id, channel_type, display_name, external_channel_id, status`,
+        [channel.id, tenantId],
+      );
+      channel = activated.rows[0];
+    }
+  } else {
+    // 2. Check for any historical unassigned SAMCHEGUIDE channel in this tenant
+    const unassignedChannel = await database.query(
+      `SELECT id, tenant_id, assistant_id, channel_type, display_name, external_channel_id, status
+         FROM tenant_channels
+        WHERE tenant_id = $1 AND assistant_id IS NULL AND channel_type = 'SAMCHEGUIDE'
+        ORDER BY created_at ASC
+        LIMIT 1`,
+      [tenantId],
+    );
+    if (unassignedChannel.rowCount) {
+      const updated = await database.query(
+        `UPDATE tenant_channels
+            SET assistant_id = $1, status = 'active', updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2 AND tenant_id = $3
+          RETURNING id, tenant_id, assistant_id, channel_type, display_name, external_channel_id, status`,
+        [assistantId, unassignedChannel.rows[0].id, tenantId],
+      );
+      channel = updated.rows[0];
+    } else {
+      const inserted = await database.query(
+        `INSERT INTO tenant_channels (tenant_id, assistant_id, channel_type, display_name, external_channel_id, status)
+         VALUES ($1, $2, 'SAMCHEGUIDE', 'AI Guide', $3, 'active')
+         ON CONFLICT (tenant_id, channel_type, external_channel_id)
+         DO UPDATE SET assistant_id = EXCLUDED.assistant_id, status = 'active', updated_at = CURRENT_TIMESTAMP
+         RETURNING id, tenant_id, assistant_id, channel_type, display_name, external_channel_id, status`,
+        [tenantId, assistantId, `guide:${assistantId}`],
+      );
+      channel = inserted.rows[0];
+    }
+  }
+
+  // 3. Ensure channel_integrations row exists and links channel to assistant
+  const existingIntegration = await database.query(
+    `SELECT id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled
+       FROM channel_integrations
+      WHERE tenant_id = $1 AND channel_id = $2 AND integration_type = 'SAMCHEGUIDE'
+      LIMIT 1`,
+    [tenantId, channel.id],
+  );
+
+  let integration = null;
+  if (existingIntegration.rowCount) {
+    integration = existingIntegration.rows[0];
+    if (integration.assistant_id !== assistantId || !integration.enabled) {
+      const updated = await database.query(
+        `UPDATE channel_integrations
+            SET assistant_id = $1, enabled = TRUE, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2 AND tenant_id = $3
+          RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`,
+        [assistantId, integration.id, tenantId],
+      );
+      integration = updated.rows[0];
+    }
+  } else {
+    const integrationKey = `guide:${tenantId}:${assistantId}`;
+    const inserted = await database.query(
+      `INSERT INTO channel_integrations (integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled)
+       VALUES ($1, 'SAMCHEGUIDE', $2, $3, $4, TRUE)
+       ON CONFLICT (integration_key)
+       DO UPDATE SET channel_id = EXCLUDED.channel_id, assistant_id = EXCLUDED.assistant_id, enabled = TRUE, updated_at = CURRENT_TIMESTAMP
+       RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`,
+      [integrationKey, tenantId, channel.id, assistantId],
+    );
+    integration = inserted.rows[0];
+  }
+
+  return { channelId: channel.id, integrationId: integration.id, channel, integration };
+}
+
+export async function ensureGuideChannelsForTenant({ database, tenantId }) {
+  if (!database?.query) return [];
+  const assistants = await database.query(
+    `SELECT id, name FROM ai_assistants WHERE tenant_id = $1 AND status = 'active' ORDER BY created_at ASC`,
+    [tenantId],
+  );
+  const ensured = [];
+  for (const assistant of assistants.rows) {
+    try {
+      ensured.push(await ensureGuideChannelForAssistant({ database, tenantId, assistantId: assistant.id }));
+    } catch {}
+  }
+  return ensured;
+}
+
+
 export async function ensureManagedGuideDomainForAssistant({ database, tenantId, assistantId, channelId, environment = process.env }) {
   const existing = await database.query(
     `SELECT id, tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, archived_at, created_at
@@ -253,6 +385,12 @@ export async function ensureManagedGuideDomainForAssistant({ database, tenantId,
     [tenantId, assistantId],
   );
   if (existing.rowCount) return serialize(existing.rows[0]);
+
+  let resolvedChannelId = channelId;
+  if (!resolvedChannelId) {
+    const ensuredChannel = await ensureGuideChannelForAssistant({ database, tenantId, assistantId });
+    resolvedChannelId = ensuredChannel.channelId;
+  }
 
   let target;
   try {
@@ -275,7 +413,7 @@ export async function ensureManagedGuideDomainForAssistant({ database, tenantId,
     [hostname, tenantId, assistantId],
   );
   if (conflict.rowCount) {
-    slug = `t-${String(tenantId).replace(/-/g, '').slice(0, 8)}-${String(channelId).replace(/-/g, '').slice(0, 6)}`;
+    slug = `t-${String(tenantId).replace(/-/g, '').slice(0, 8)}-${String(resolvedChannelId).replace(/-/g, '').slice(0, 6)}`;
     try {
       hostname = managedGuideHostnameFromSlug(slug, environment);
     } catch {
@@ -295,12 +433,22 @@ export async function ensureManagedGuideDomainForAssistant({ database, tenantId,
        activated_at = CURRENT_TIMESTAMP,
        updated_at = CURRENT_TIMESTAMP
      RETURNING id, tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, archived_at, created_at`,
-    [tenantId, assistantId, channelId, hostname, target],
+    [tenantId, assistantId, resolvedChannelId, hostname, target],
   );
   return serialize(created.rows[0]);
 }
 
 export async function repairEligibleGuideDomains({ database, environment = process.env }) {
+  // Ensure channels exist for all active assistants across tenants
+  const activeAssistants = await database.query(
+    `SELECT id, tenant_id FROM ai_assistants WHERE status = 'active'`,
+  );
+  for (const row of activeAssistants.rows) {
+    try {
+      await ensureGuideChannelForAssistant({ database, tenantId: row.tenant_id, assistantId: row.id });
+    } catch {}
+  }
+
   const eligible = await database.query(
     `SELECT ci.tenant_id, ci.assistant_id, ci.channel_id
        FROM channel_integrations ci

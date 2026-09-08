@@ -204,6 +204,13 @@ modify files outside the authorized scope.
   identity, active configuration, active Business Profile, and approved
   knowledge authority. They must not introduce parallel business truth or
   require an admin/debug action to repair hidden runtime state.
+- The AI Guide channel (`SAMCHEGUIDE`) is the assistant-bound channel adapter
+  for the tenant's AI Assistant. Each active assistant maintains a canonical
+  same-tenant `tenant_channels` record and `channel_integrations` mapping. The
+  normal Guide lifecycle automatically ensures this channel across assistant
+  creation, channels enumeration, and Guide Experience domain and publication
+  flows; generic Web Chat and WhatsApp channel management UI must not fabricate
+  or expose manual Guide channel creation.
 - Push subscriptions are tenant/user/device scoped records; a browser
   subscription never grants tenant authorization. Notification intents and
   delivery transports are observational, idempotent, bounded, and replaceable:
