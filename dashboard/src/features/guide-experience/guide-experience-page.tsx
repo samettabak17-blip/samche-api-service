@@ -84,6 +84,12 @@ const guideDomainFailureMessage = (error: unknown, fallback: string) => {
     ? "Platform domain ingress is not available yet. Contact a platform owner."
     : fallback;
 };
+function guideDomainUrl(domain: GuideDomain): string {
+  if (domain.domain_mode === "MANAGED" && domain.slug) {
+    return `https://${domain.hostname}/${domain.slug}`;
+  }
+  return `https://${domain.hostname}`;
+}
 const guideRecommendationFailureMessage = (error: unknown) => {
   const code = error instanceof ApiError && error.body && typeof error.body === "object" && "code" in error.body
     ? (error.body as { code?: unknown }).code
@@ -361,7 +367,7 @@ export function GuideExperiencePage() {
       invalidateDomains();
       setFeedback(
         domain.domain_mode === "MANAGED"
-          ? `${domain.hostname} is reserved. It will become active after platform ingress verification.`
+          ? `${guideDomainUrl(domain)} is active and ready.`
           : `Domain ${domain.hostname} added. Set the displayed DNS CNAME, then verify it.`,
       );
     },
@@ -416,13 +422,13 @@ export function GuideExperiencePage() {
     () => versions.data?.filter((item) => item.status === "ARCHIVED") ?? [],
     [versions.data],
   );
-  const managedSuffix =
-    (domains.data as (GuideDomain[] & { managed_domain_suffix?: string }) | undefined)
+  const managedHost =
+    (domains.data as (GuideDomain[] & { managed_domain_host?: string; managed_domain_suffix?: string }) | undefined)
+      ?.managed_domain_host ??
+    (domains.data as (GuideDomain[] & { managed_domain_host?: string; managed_domain_suffix?: string }) | undefined)
       ?.managed_domain_suffix ??
-    "guide.staging.samchecompany.com";
-  const managedPreview = managedSlug
-    ? `${managedSlug}.${managedSuffix}`
-    : `your-slug.${managedSuffix}`;
+    "guide-staging.samchecompany.com";
+  const managedPreview = `https://${managedHost}/${managedSlug || "your-slug"}`;
   const update = (
     key:
       | "brand_name"
@@ -790,7 +796,10 @@ export function GuideExperiencePage() {
                   placeholder="customer"
                   onChange={(event) => {
                     const raw = event.target.value.toLowerCase().trim();
-                    const cleaned = raw.replace(/\.guide\.(?:staging\.)?samchecompany\.com$/, "");
+                    const cleaned = raw
+                      .replace(/^https?:\/\//, "")
+                      .replace(/^(?:guide-staging|guide\.staging|guide)\.samchecompany\.com\/?/, "")
+                      .replace(/\.guide\.(?:staging\.)?samchecompany\.com$/, "");
                     setManagedSlug(cleaned);
                   }}
                 />
@@ -846,7 +855,7 @@ export function GuideExperiencePage() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <span className="break-all text-sm font-medium text-stone-200">
-                      {domain.hostname}
+                      {guideDomainUrl(domain).replace(/^https?:\/\//, "")}
                     </span>
                     <span className="text-xs text-stone-400">
                       {domain.domain_mode === "MANAGED"
@@ -862,11 +871,32 @@ export function GuideExperiencePage() {
                     </p>
                   ) : (
                     <p className="text-xs text-stone-400">
-                      Managed ingress; no tenant DNS record is required after
-                      platform wildcard setup.
+                      Managed staging Guide; resolved via path slug without wildcard DNS.
                     </p>
                   )}
                   <div className="flex flex-wrap gap-2">
+                    {domain.status === "ACTIVE" ? (
+                      <>
+                        <a
+                          href={guideDomainUrl(domain)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-stone-200 hover:bg-white/5"
+                        >
+                          Open
+                        </a>
+                        <DashboardButton
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            void navigator.clipboard?.writeText(guideDomainUrl(domain));
+                            setFeedback("Guide URL copied to clipboard.");
+                          }}
+                        >
+                          Copy URL
+                        </DashboardButton>
+                      </>
+                    ) : null}
                     {["PENDING", "FAILED", "VERIFIED"].includes(
                       domain.status,
                     ) ? (

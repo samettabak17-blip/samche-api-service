@@ -204,5 +204,28 @@ it('renders friendly feedback when guide domain slug is invalid', async () => {
   expect(await screen.findByText('Available slug must contain only lowercase letters, numbers, and hyphens (up to 30 characters).')).toBeVisible();
 });
 
+it('displays canonical managed staging URL and provides Open and Copy URL controls', async () => {
+  api.listGuideDomains.mockResolvedValue([{
+    id: 'domain-managed',
+    tenant_id: 'tenant-a',
+    assistant_id: 'assistant-a',
+    channel_id: 'channel-a',
+    hostname: 'guide-staging.samchecompany.com',
+    slug: 'yesil-vadi',
+    domain_mode: 'MANAGED',
+    status: 'ACTIVE',
+    verification_record_type: 'CNAME',
+    verification_target: 'ingress.example',
+  }]);
+  renderPage();
+  await openStep('Domains');
+  expect(await screen.findByText('guide-staging.samchecompany.com/yesil-vadi')).toBeVisible();
+  const openLink = screen.getByRole('link', { name: 'Open' });
+  expect(openLink).toHaveAttribute('href', 'https://guide-staging.samchecompany.com/yesil-vadi');
+  const copyBtn = screen.getByRole('button', { name: 'Copy URL' });
+  expect(copyBtn).toBeVisible();
+});
+
+
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });

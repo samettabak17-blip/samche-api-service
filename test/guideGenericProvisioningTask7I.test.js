@@ -5,6 +5,7 @@ import {
   ensureManagedGuideDomainForAssistant,
   repairEligibleGuideDomains,
   resolveGuideRuntimeScopeFromRequest,
+  configuredManagedGuideHostname,
 } from '../services/guide-domain-service.js';
 import { issueGuidePreviewToken } from '../services/guide-preview-service.js';
 
@@ -27,7 +28,7 @@ test('1. Newly provisioned tenant with AI Guide enabled receives the required ge
       if (sql.includes('SELECT id, tenant_id') && sql.includes('guide_domains')) {
         return { rowCount: 0, rows: [] };
       }
-      if (sql.includes('SELECT id FROM guide_domains WHERE hostname')) {
+      if (sql.includes('SELECT id FROM guide_domains WHERE')) {
         return { rowCount: 0, rows: [] };
       }
       if (sql.includes('INSERT INTO guide_domains')) {
@@ -39,6 +40,7 @@ test('1. Newly provisioned tenant with AI Guide enabled receives the required ge
             assistant_id: ASSISTANT_A,
             channel_id: CHANNEL_A,
             hostname: params[3],
+            slug: params[4],
             status: 'ACTIVE',
             domain_mode: 'MANAGED',
             verification_record_type: 'CNAME',
@@ -65,7 +67,8 @@ test('1. Newly provisioned tenant with AI Guide enabled receives the required ge
   assert.equal(domain.domain_mode, 'MANAGED');
   assert.equal(domain.tenant_id, TENANT_A);
   assert.equal(domain.assistant_id, ASSISTANT_A);
-  assert.match(domain.hostname, /^t-[0-9a-f]+\.guide\./);
+  assert.match(domain.slug, /^t-[0-9a-f]+/);
+  assert.equal(domain.hostname, configuredManagedGuideHostname());
 });
 
 test('2. A second tenant receives independent configuration with a distinct non-colliding managed hostname', async () => {
@@ -74,7 +77,7 @@ test('2. A second tenant receives independent configuration with a distinct non-
       if (sql.includes('SELECT id, tenant_id') && sql.includes('guide_domains')) {
         return { rowCount: 0, rows: [] };
       }
-      if (sql.includes('SELECT id FROM guide_domains WHERE hostname')) {
+      if (sql.includes('SELECT id FROM guide_domains WHERE')) {
         return { rowCount: 0, rows: [] };
       }
       if (sql.includes('INSERT INTO guide_domains')) {
@@ -86,6 +89,7 @@ test('2. A second tenant receives independent configuration with a distinct non-
             assistant_id: ASSISTANT_B,
             channel_id: CHANNEL_B,
             hostname: params[3],
+            slug: params[4],
             status: 'ACTIVE',
             domain_mode: 'MANAGED',
             verification_record_type: 'CNAME',
@@ -111,20 +115,22 @@ test('2. A second tenant receives independent configuration with a distinct non-
   assert.equal(domainB.status, 'ACTIVE');
   assert.equal(domainB.tenant_id, TENANT_B);
   assert.notEqual(domainB.tenant_id, TENANT_A);
-  assert.match(domainB.hostname, /^t-[0-9a-f]+\.guide\./);
+  assert.match(domainB.slug, /^t-[0-9a-f]+/);
+  assert.equal(domainB.hostname, configuredManagedGuideHostname());
 });
 
 test('3. Tenant A Guide request resolves Tenant A only', async () => {
-  const hostA = 'tenant-a.guide.staging.samchecompany.com';
+  const slugA = 'tenant-a';
   const database = {
     async query(sql, params = []) {
-      if (sql.includes('WHERE gd.hostname = $1 AND gd.status = \'ACTIVE\'')) {
-        if (params[0] === hostA) {
+      if (sql.includes('WHERE gd.hostname = $1 AND gd.status = \'ACTIVE\'') || sql.includes('lower(gd.slug) = $1')) {
+        if (params[0] === slugA || params[0] === 'tenant-a.guide.staging.samchecompany.com') {
           return {
             rowCount: 1,
             rows: [{
               domain_id: DOMAIN_A,
-              hostname: hostA,
+              hostname: 'guide-staging.samchecompany.com',
+              slug: slugA,
               tenant_id: TENANT_A,
               assistant_id: ASSISTANT_A,
               channel_id: CHANNEL_A,
@@ -143,23 +149,24 @@ test('3. Tenant A Guide request resolves Tenant A only', async () => {
 
   const scopeByHost = await resolveGuideRuntimeScopeFromRequest({
     database,
-    req: { headers: { host: hostA } },
+    req: { headers: { host: 'guide-staging.samchecompany.com' }, params: { slug: slugA } },
   });
   assert.equal(scopeByHost?.tenant_id, TENANT_A);
   assert.equal(scopeByHost?.assistant_id, ASSISTANT_A);
 });
 
 test('4. Tenant B Guide request resolves Tenant B only', async () => {
-  const hostB = 'tenant-b.guide.staging.samchecompany.com';
+  const slugB = 'tenant-b';
   const database = {
     async query(sql, params = []) {
-      if (sql.includes('WHERE gd.hostname = $1 AND gd.status = \'ACTIVE\'')) {
-        if (params[0] === hostB) {
+      if (sql.includes('WHERE gd.hostname = $1 AND gd.status = \'ACTIVE\'') || sql.includes('lower(gd.slug) = $1')) {
+        if (params[0] === slugB || params[0] === 'tenant-b.guide.staging.samchecompany.com') {
           return {
             rowCount: 1,
             rows: [{
               domain_id: DOMAIN_B,
-              hostname: hostB,
+              hostname: 'guide-staging.samchecompany.com',
+              slug: slugB,
               tenant_id: TENANT_B,
               assistant_id: ASSISTANT_B,
               channel_id: CHANNEL_B,
@@ -178,7 +185,7 @@ test('4. Tenant B Guide request resolves Tenant B only', async () => {
 
   const scopeByHost = await resolveGuideRuntimeScopeFromRequest({
     database,
-    req: { headers: { host: hostB } },
+    req: { headers: { host: 'guide-staging.samchecompany.com' }, params: { slug: slugB } },
   });
   assert.equal(scopeByHost?.tenant_id, TENANT_B);
   assert.equal(scopeByHost?.assistant_id, ASSISTANT_B);
@@ -294,7 +301,7 @@ test('8. Existing eligible Guide integrations can be repaired/backfilled idempot
       if (sql.includes('SELECT id, tenant_id') && sql.includes('guide_domains')) {
         return { rowCount: 0, rows: [] };
       }
-      if (sql.includes('SELECT id FROM guide_domains WHERE hostname')) {
+      if (sql.includes('SELECT id FROM guide_domains WHERE')) {
         return { rowCount: 0, rows: [] };
       }
       if (sql.includes('INSERT INTO guide_domains')) {
@@ -306,6 +313,7 @@ test('8. Existing eligible Guide integrations can be repaired/backfilled idempot
             assistant_id: params[1],
             channel_id: params[2],
             hostname: params[3],
+            slug: params[4],
             status: 'ACTIVE',
             domain_mode: 'MANAGED',
             verification_record_type: 'CNAME',

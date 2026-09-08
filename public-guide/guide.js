@@ -1,3 +1,11 @@
+const guideBasePath = (() => {
+  const parts = (typeof window !== 'undefined' ? window.location?.pathname || '' : '').split('/').filter(Boolean);
+  return (parts.length > 0 && !['guide', 'chat', 'api', 'webhook', 'ping', 'plan'].includes(parts[0])) ? `/${parts[0]}` : '';
+})();
+function guideApi(path) {
+  return guideBasePath ? `${guideBasePath}${path}` : path;
+}
+
 let session = '';
 
 const root = document.querySelector('#guide-root');
@@ -10,7 +18,9 @@ let messages = [];
 let contextSyncState = 'idle';
 let contextSyncTimer;
 const previewToken = new URLSearchParams(window.location.search).get('preview') || '';
-const resumeStorageKey = previewToken ? `samcheguide-preview-resume:${previewToken.slice(-16)}` : 'samcheguide-public-resume';
+const resumeStorageKey = previewToken
+  ? `samcheguide-preview-resume:${previewToken.slice(-16)}`
+  : `samcheguide-public-resume${guideBasePath ? `:${guideBasePath.slice(1)}` : ''}`;
 try { session = window.localStorage?.getItem(resumeStorageKey) || ''; } catch { session = ''; }
 
 const MODULES = Object.freeze({ ROADMAP: 'ROADMAP', INTERACTIVE_TOOL: 'INTERACTIVE_TOOL', AI_ASSISTANT: 'AI_ASSISTANT' });
@@ -27,7 +37,10 @@ const showGuideError = () => {
 };
 const initializationTimeout = window.setTimeout(showGuideError, 10000);
 
-function stateStorageKey() { return `samcheguide-v1-state:${previewToken ? 'preview:' + previewToken.slice(-16) : 'public'}:${experience?.version ?? 'unknown'}`; }
+function stateStorageKey() {
+  const scopePrefix = guideBasePath ? `${guideBasePath.slice(1)}:` : '';
+  return `samcheguide-v1-state:${scopePrefix}${previewToken ? 'preview:' + previewToken.slice(-16) : 'public'}:${experience?.version ?? 'unknown'}`;
+}
 function firstAvailableModule() { if (experience?.modules?.guide) return MODULES.ROADMAP; if (experience?.modules?.calculator) return MODULES.INTERACTIVE_TOOL; return MODULES.AI_ASSISTANT; }
 function loadState() {
   const fallback = { active_module: firstAvailableModule(), roadmap: {}, tool: {}, roadmap_step: 0, roadmap_reviewed: false, roadmap_validation_error: '', assistant_draft: '', assistant_draft_origin: 'NONE', roadmap_category: '', roadmap_goal: '', roadmap_result: null, roadmap_messages: [], shared_context: {} };
@@ -71,7 +84,7 @@ async function resumeGuideSession() {
   if (!session || !experience) return;
   const headers = { 'X-Samcheguide-Session': session, ...(previewToken ? { 'X-Samcheguide-Preview': previewToken } : {}) };
   try {
-    const response = await fetch('/guide/session-context', { headers });
+    const response = await fetch(guideApi('/guide/session-context'), { headers });
     const payload = await response.json().catch(() => ({}));
     if (response.ok) {
       if (payload.guide_session_state && typeof payload.guide_session_state === 'object') {
@@ -111,7 +124,7 @@ async function resumeGuideSession() {
         if (Object.values(MODULES).includes(saved.active_module)) guideState.active_module = saved.active_module;
       }
     }
-    const history = messages.length ? null : await fetch('/chat/history', { headers }).then((result) => result.ok ? result.json() : null).catch(() => null);
+    const history = messages.length ? null : await fetch(guideApi('/chat/history'), { headers }).then((result) => result.ok ? result.json() : null).catch(() => null);
     if (Array.isArray(history?.messages)) {
       messages = history.messages
         .filter((message) => typeof message?.content === 'string')
@@ -166,7 +179,7 @@ async function playGuideResponseEvents(board, events) {
 async function submitGuideRequest({ value, module, board, input, submit, idempotencyKey, onResponse, onFailure }) {
   const thinking = addThinking(board); const startedAt = Date.now(); submit.disabled = true;
   try {
-    const response = await fetch("/chat", {
+    const response = await fetch(guideApi('/chat'), {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}), ...(session ? { "X-Samcheguide-Session": session } : {}), ...(previewToken ? { "X-Samcheguide-Preview": previewToken } : {}) },
       body: JSON.stringify({
@@ -499,7 +512,7 @@ function renderGuideContextSummary() {
   return summary;
 }
 async function persistGuideContext() {
-  const response = await fetch('/guide/session-context', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(session ? { 'X-Samcheguide-Session': session } : {}), ...(previewToken ? { 'X-Samcheguide-Preview': previewToken } : {}) }, body: JSON.stringify({ guide_context: guideContext() }) });
+  const response = await fetch(guideApi('/guide/session-context'), { method: 'POST', headers: { 'Content-Type': 'application/json', ...(session ? { 'X-Samcheguide-Session': session } : {}), ...(previewToken ? { 'X-Samcheguide-Preview': previewToken } : {}) }, body: JSON.stringify({ guide_context: guideContext() }) });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.context_saved) throw new Error('context unavailable');
   saveSession(payload.conversation_session);
@@ -767,7 +780,7 @@ export function applyExperience(value) {
   canvas.append(navigation); shell.append(canvas); root.replaceChildren(shell); guideInitialized = true; window.clearTimeout(initializationTimeout); renderActiveModule(); resumeGuideSession();
 }
 
-fetch('/guide/bootstrap' + (previewToken ? `?preview=${encodeURIComponent(previewToken)}` : ''), {
+fetch('/guide/bootstrap' + (guideBasePath ? ${previewToken ? ?preview=& : '?'}slug= : (previewToken ? ?preview= : '')), {
   cache: 'no-store',
-  headers: session ? { 'X-Samcheguide-Session': session } : {},
+  headers: { ...(session ? { 'X-Samcheguide-Session': session } : {}), ...(guideBasePath ? { 'X-Samcheguide-Slug': guideBasePath.slice(1) } : {}) },
 }).then(async (response) => { if (!response.ok) throw new Error('unavailable'); return response.json(); }).then((payload) => { saveSession(payload?.conversation_session); applyExperience(payload?.experience); }).catch(showGuideError);

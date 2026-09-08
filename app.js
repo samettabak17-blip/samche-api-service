@@ -63,7 +63,7 @@ import { appendRuntimeKnowledgeToSystemInstruction, applyRuntimeKnowledgeContext
 import { buildTenantRuntimeSystemInstruction, resolveTenantRuntimePersona } from "./services/tenant-runtime-persona-service.js";
 import { resolveChannelAssistantRuntime } from "./services/assistant-runtime-resolution-service.js";
 import { normalizeGuideExperience, resolvePublishedGuideExperience } from "./services/guide-experience-service.js";
-import { configuredManagedGuideDomainSuffix, repairEligibleGuideDomains, resolveGuideRuntimeScopeFromRequest } from './services/guide-domain-service.js';
+import { configuredManagedGuideDomainSuffix, configuredManagedGuideHostname, isManagedGuidePlatformHost, repairEligibleGuideDomains, resolveGuideRuntimeScopeFromRequest } from './services/guide-domain-service.js';
 import { getPublicGuideExperienceAsset } from "./services/guide-experience-asset-service.js";
 import { samcheguideRuntimeSessionKey } from "./services/samcheguide-runtime-session-service.js";
 import { buildTenantFollowUpRequest, resolveTenantFollowUpPolicy } from "./services/tenant-follow-up-service.js";
@@ -238,7 +238,12 @@ async function resolveGuideExperienceForRequest({ req, integration }) {
   return { resolved, durableSession };
 }
 
-app.get("/guide/bootstrap", async (req, res) => {
+const RESERVED_GUIDE_SLUGS = new Set(['guide', 'chat', 'api', 'webhook', 'ping', 'plan', 'health']);
+function isReservedGuideSlug(slug) {
+  return RESERVED_GUIDE_SLUGS.has(String(slug ?? '').toLowerCase());
+}
+
+const handleGuideBootstrap = async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(503).json({ error: 'Guide experience is temporarily unavailable.', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
@@ -250,9 +255,12 @@ app.get("/guide/bootstrap", async (req, res) => {
     console.error('GUIDE_EXPERIENCE_BOOTSTRAP_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return res.status(503).json({ error: 'Guide experience is temporarily unavailable.', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
   }
-});
+};
 
-app.get('/guide/health', async (req, res) => {
+app.get("/guide/bootstrap", handleGuideBootstrap);
+app.get("/:slug/guide/bootstrap", handleGuideBootstrap);
+
+app.get(['/guide/health', '/:slug/guide/health'], async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ status: 'UNAVAILABLE', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
@@ -264,14 +272,20 @@ app.get('/guide/health', async (req, res) => {
   }
 });
 
-app.get('/', async (req, res, next) => {
+app.get(['/', '/:slug'], async (req, res, next) => {
+  if (req.params?.slug && isReservedGuideSlug(req.params.slug)) return next();
   const integration = await resolveGuideRuntimeScope(req);
-  if (!integration) return next();
+  if (!integration) {
+    if (isManagedGuidePlatformHost(req.get('host'))) {
+      return res.status(404).sendFile(path.resolve('public-guide', 'index.html'));
+    }
+    return next();
+  }
   res.set('Cache-Control', 'no-store');
   return res.sendFile(path.resolve('public-guide', 'index.html'));
 });
 
-app.get('/guide/assets/:assetId', async (req, res) => {
+app.get(['/guide/assets/:assetId', '/:slug/guide/assets/:assetId'], async (req, res) => {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(req.params.assetId))) return res.sendStatus(404);
   try {
     const integration = await resolveGuideRuntimeScope(req);
@@ -300,14 +314,14 @@ const sharedGuideStatic = express.static('public-guide', {
 // The JavaScript and CSS shell are shared application code, not tenant data.
 // Serve only these explicit paths without a database/domain lookup so a
 // transient scope lookup cannot prevent the client from starting.
-app.use('/guide', (req, res, next) => {
+app.use(['/guide', '/:slug/guide'], (req, res, next) => {
   if (!isSharedPublicGuideAssetPath(req.path)) return next();
   return sharedGuideStatic(req, res, next);
 });
 
 // The shell document and every tenant-owned runtime/data route remain bound to
 // an exact active hostname; shared network ingress is never tenant authority.
-app.use('/guide', async (req, res, next) => {
+app.use(['/guide', '/:slug/guide'], async (req, res, next) => {
   const integration = await resolveGuideRuntimeScope(req);
   if (!integration) return res.sendStatus(404);
   return next();
@@ -1039,7 +1053,7 @@ async function issueOrResolvePublicConversationSession(req, scope, resolvedExper
   return issueGuideResumeSession({ database: pool, scope, experienceVersion: resolvedExperience.experience.version, experienceVersionId: resolvedExperience.experienceVersionId ?? resolvedExperience.version?.id ?? null, previewMode: previewModeForExperience(resolvedExperience) });
 }
 
-app.get("/chat/history", async (req, res) => {
+app.get(["/chat/history", "/:slug/chat/history"], async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ error: "Conversation is unavailable." });
@@ -1054,7 +1068,7 @@ app.get("/chat/history", async (req, res) => {
   }
 });
 
-app.get("/chat/live", async (req, res) => {
+app.get(["/chat/live", "/:slug/chat/live"], async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ error: "Conversation is unavailable." });
@@ -1077,7 +1091,7 @@ app.get("/chat/live", async (req, res) => {
   }
 });
 
-app.post("/plan", async (req, res) => {
+app.post(["/plan", "/:slug/plan"], async (req, res) => {
   try {
     const { sector } = req.body;
     if (typeof sector !== "string") {
@@ -1156,7 +1170,7 @@ app.post("/plan", async (req, res) => {
 // This endpoint deliberately persists validated Guide state without invoking an
 // AI provider. It makes an explicit module handoff durable before a visitor
 // chooses to send a message, while the host-bound scope stays server-owned.
-app.post("/guide/session-context", async (req, res) => {
+app.post(["/guide/session-context", "/:slug/guide/session-context"], async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ error: 'Guide session is unavailable.' });
@@ -1193,7 +1207,7 @@ app.post("/guide/session-context", async (req, res) => {
   }
 });
 
-app.get("/guide/session-context", async (req, res) => {
+app.get(["/guide/session-context", "/:slug/guide/session-context"], async (req, res) => {
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ error: 'Guide session is unavailable.' });
@@ -1208,7 +1222,7 @@ app.get("/guide/session-context", async (req, res) => {
   }
 });
 
-app.post("/chat", async (req, res) => {
+app.post(["/chat", "/:slug/chat"], async (req, res) => {
   console.info('CHAT_REQUEST_RECEIVED');
   try {
     const { text, guide_module: clientModule, guide_session_state: clientGuideSessionState } = req.body;

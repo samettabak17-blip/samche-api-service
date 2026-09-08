@@ -20,7 +20,7 @@ const childEnvironment = {
   ...process.env,
   NODE_ENV: 'test',
   DATABASE_URL: connectionString,
-  DATABASE_SSL: 'strict',
+  DATABASE_SSL: process.env.DATABASE_SSL || 'strict',
   JWT_SECRET: process.env.JWT_SECRET || 'fresh-golden-path-test-only-secret',
   CUSTOMER_INVITATION_ENVELOPE_KEY: process.env.CUSTOMER_INVITATION_ENVELOPE_KEY || Buffer.alloc(32, 7).toString('base64'),
 };

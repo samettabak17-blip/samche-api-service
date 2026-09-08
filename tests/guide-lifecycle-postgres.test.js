@@ -11,8 +11,12 @@ import {
   createGuideDomain,
   listGuideDomains,
   managedGuideHostnameFromSlug,
+  managedGuideUrlFromSlug,
+  normalizeGuideSlug,
+  configuredManagedGuideHostname,
   repairEligibleGuideDomains,
   resolveActiveGuideDomain,
+  resolveActiveManagedGuideDomain,
   resolveGuideRuntimeScopeFromRequest,
   GuideDomainError,
 } from '../services/guide-domain-service.js';
@@ -23,6 +27,7 @@ import {
   resolvePublishedGuideExperience,
   inspectGuideExperiencePublication,
 } from '../services/guide-experience-service.js';
+import { issueGuidePreviewToken } from '../services/guide-preview-service.js';
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString) throw new Error('GUIDE_LIFECYCLE_POSTGRES_REQUIRES_TEST_DATABASE_URL');
@@ -94,19 +99,22 @@ test('A. Fresh tenant Guide lifecycle: converges channel, domain, publication, a
 
     // 6. Configure SamChe-managed domain with slug
     const slug = `yesil-vadi-${runId}`;
-    const hostname = managedGuideHostnameFromSlug(slug, { NODE_ENV: 'staging' });
+    const expectedUrl = managedGuideUrlFromSlug(slug, { NODE_ENV: 'staging' });
+    assert.equal(expectedUrl, `https://guide-staging.samchecompany.com/${slug}`);
+
     const domain = await createGuideDomain({
       client,
       tenantId,
       assistantId,
       channelId: ensuredChannel.channelId,
-      hostname,
+      slug,
       domainMode: 'MANAGED',
       actorUserId: null,
       ingressTarget: 'ingress.samchecompany.com',
     });
     assert.equal(domain.status, 'ACTIVE');
-    assert.equal(domain.hostname, hostname);
+    assert.equal(domain.slug, slug);
+    assert.equal(domain.hostname, 'guide-staging.samchecompany.com');
     assert.equal(domain.channel_id, ensuredChannel.channelId);
 
     // 7. Publish draft explicitly
@@ -120,16 +128,32 @@ test('A. Fresh tenant Guide lifecycle: converges channel, domain, publication, a
     assert.equal(published.version, 1);
     assert.equal(published.status, 'PUBLISHED');
 
-    // 8. Resolve public Guide via hostname request
+    // 8. Resolve public Guide via managed host + path slug request
     const resolvedScope = await resolveGuideRuntimeScopeFromRequest({
       database: client,
-      req: { headers: { host: hostname } },
+      req: {
+        headers: { host: 'guide-staging.samchecompany.com' },
+        params: { slug },
+      },
     });
     assert.ok(resolvedScope);
     assert.equal(resolvedScope.tenant_id, tenantId);
     assert.equal(resolvedScope.assistant_id, assistantId);
     assert.equal(resolvedScope.channel_id, ensuredChannel.channelId);
     assert.equal(resolvedScope.channel_type, 'SAMCHEGUIDE');
+
+    // Also resolves via referer on platform host
+    const resolvedViaReferer = await resolveGuideRuntimeScopeFromRequest({
+      database: client,
+      req: {
+        headers: {
+          host: 'guide-staging.samchecompany.com',
+          referer: `https://guide-staging.samchecompany.com/${slug}`,
+        },
+      },
+    });
+    assert.ok(resolvedViaReferer);
+    assert.equal(resolvedViaReferer.tenant_id, tenantId);
 
     // Resolve published experience for this scope
     const liveExperience = await resolvePublishedGuideExperience({ database: client, tenantId, assistantId });
@@ -253,19 +277,20 @@ test('C. Cross-tenant denial and strict isolation', async () => {
     const channelA = await ensureGuideChannelForAssistant({ database: client, tenantId: tenantA, assistantId: assistantA });
     const channelB = await ensureGuideChannelForAssistant({ database: client, tenantId: tenantB, assistantId: assistantB });
 
-    const hostA = `tenant-a-${runId}.guide.staging.samchecompany.com`;
+    const slugA = `tenant-a-${runId}`;
+    const slugB = `tenant-b-${runId}`;
     await createGuideDomain({
       client,
       tenantId: tenantA,
       assistantId: assistantA,
       channelId: channelA.channelId,
-      hostname: hostA,
+      slug: slugA,
       domainMode: 'MANAGED',
       actorUserId: null,
       ingressTarget: 'ingress.samchecompany.com',
     });
 
-    // 1. Tenant B cannot attach Tenant A's domain (unique hostname conflict)
+    // 1. Tenant B cannot attach Tenant A's slug (unique slug conflict)
     await client.query('SAVEPOINT sp_unique');
     await assert.rejects(
       createGuideDomain({
@@ -273,21 +298,61 @@ test('C. Cross-tenant denial and strict isolation', async () => {
         tenantId: tenantB,
         assistantId: assistantB,
         channelId: channelB.channelId,
-        hostname: hostA,
+        slug: slugA,
         domainMode: 'MANAGED',
         actorUserId: null,
         ingressTarget: 'ingress.samchecompany.com',
       }),
-      (err) => err?.code === '23505',
+      (err) => err instanceof GuideDomainError && err.code === 'GUIDE_DOMAIN_HOSTNAME_EXISTS',
     );
     await client.query('ROLLBACK TO SAVEPOINT sp_unique');
 
-    // 2. Hostname A resolves Tenant A ONLY, never Tenant B
-    const resolvedA = await resolveActiveGuideDomain({ database: client, hostname: hostA });
+    // 2. Slug A resolves Tenant A ONLY, never Tenant B
+    const resolvedA = await resolveActiveManagedGuideDomain({ database: client, slug: slugA });
     assert.equal(resolvedA?.tenant_id, tenantA);
     assert.notEqual(resolvedA?.tenant_id, tenantB);
 
-    // 3. Tenant B cannot fetch Tenant A's draft
+    // 3. Managed host + path slug resolves Tenant A ONLY
+    const scopeA = await resolveGuideRuntimeScopeFromRequest({
+      database: client,
+      req: {
+        headers: { host: 'guide-staging.samchecompany.com' },
+        params: { slug: slugA },
+      },
+    });
+    assert.equal(scopeA?.tenant_id, tenantA);
+
+    // 4. Cross-tenant token access fails closed
+    process.env.JWT_SECRET = process.env.JWT_SECRET || 'guide-test-secret-32-chars-long!!';
+    const tokenB = issueGuidePreviewToken({
+      tenantId: tenantB,
+      assistantId: assistantB,
+      versionId: crypto.randomUUID(),
+      actorUserId: crypto.randomUUID(),
+    });
+    const crossTenantAttempt = await resolveGuideRuntimeScopeFromRequest({
+      database: client,
+      req: {
+        headers: {
+          host: 'guide-staging.samchecompany.com',
+          'x-samcheguide-preview': tokenB,
+        },
+        params: { slug: slugA },
+      },
+    });
+    assert.equal(crossTenantAttempt, null);
+
+    // 5. Invalid slug fails closed
+    const invalidSlugAttempt = await resolveGuideRuntimeScopeFromRequest({
+      database: client,
+      req: {
+        headers: { host: 'guide-staging.samchecompany.com' },
+        params: { slug: 'does-not-exist-slug' },
+      },
+    });
+    assert.equal(invalidSlugAttempt, null);
+
+    // 6. Tenant B cannot fetch Tenant A's draft
     const draftA = await createGuideExperienceDraft({
       database: client,
       tenantId: tenantA,
@@ -373,43 +438,55 @@ test('D. Draft != Published semantics: draft edits do not alter published versio
 });
 
 
-test('E. Slug normalization, rejection, and full hostname handling', () => {
-  // Normal slug
+test('E. Slug normalization, rejection, and canonical staging URL generation', () => {
+  // Canonical staging URL generation
   assert.equal(
-    managedGuideHostnameFromSlug('yesil-vadi', { NODE_ENV: 'staging' }),
-    'yesil-vadi.guide.staging.samchecompany.com',
+    managedGuideUrlFromSlug('yesil-vadi', { NODE_ENV: 'staging' }),
+    'https://guide-staging.samchecompany.com/yesil-vadi',
   );
 
-  // Full hostname entered instead of slug: normalizes without double suffix
+  // Normal slug
   assert.equal(
-    managedGuideHostnameFromSlug('yesil-vadi.guide.staging.samchecompany.com', { NODE_ENV: 'staging' }),
-    'yesil-vadi.guide.staging.samchecompany.com',
+    normalizeGuideSlug('yesil-vadi'),
+    'yesil-vadi',
+  );
+
+  // Full old hostname entered instead of slug: normalizes without double suffix
+  assert.equal(
+    normalizeGuideSlug('yesil-vadi.guide.staging.samchecompany.com'),
+    'yesil-vadi',
+  );
+
+  // Canonical managed URL entered: normalizes safely
+  assert.equal(
+    normalizeGuideSlug('https://guide-staging.samchecompany.com/yesil-vadi'),
+    'yesil-vadi',
   );
 
   // Repeated suffix: normalizes safely
   assert.equal(
-    managedGuideHostnameFromSlug('yesil-vadi.guide.staging.samchecompany.com.guide.staging.samchecompany.com', { NODE_ENV: 'staging' }),
-    'yesil-vadi.guide.staging.samchecompany.com',
+    normalizeGuideSlug('yesil-vadi.guide.staging.samchecompany.com.guide.staging.samchecompany.com'),
+    'yesil-vadi',
   );
 
   // Invalid characters / dots in base slug rejected
   assert.throws(
-    () => managedGuideHostnameFromSlug('yesil..vadi', { NODE_ENV: 'staging' }),
+    () => normalizeGuideSlug('yesil..vadi'),
     (err) => err instanceof GuideDomainError && err.code === 'GUIDE_DOMAIN_INVALID_SLUG',
   );
 
   assert.throws(
-    () => managedGuideHostnameFromSlug('-invalid-', { NODE_ENV: 'staging' }),
+    () => normalizeGuideSlug('-invalid-'),
     (err) => err instanceof GuideDomainError && err.code === 'GUIDE_DOMAIN_INVALID_SLUG',
   );
 
   assert.throws(
-    () => managedGuideHostnameFromSlug('otherdomain.org', { NODE_ENV: 'staging' }),
+    () => normalizeGuideSlug('otherdomain.org'),
     (err) => err instanceof GuideDomainError && err.code === 'GUIDE_DOMAIN_INVALID_SLUG',
   );
 });
 
-test('F. repairEligibleGuideDomains converges multiple tenants idempotently', async () => {
+test('F. repairEligibleGuideDomains converges multiple tenants idempotently to canonical platform host and distinct slugs', async () => {
   const client = await database.connect();
   try {
     await client.query('BEGIN');
@@ -422,20 +499,24 @@ test('F. repairEligibleGuideDomains converges multiple tenants idempotently', as
     const a2 = await client.query(`INSERT INTO ai_assistants (tenant_id, name, status) VALUES ($1, 'Assistant 2', 'active') RETURNING id`, [t2.rows[0].id]);
 
     // Run repair across all active assistants
-    const repaired1 = await repairEligibleGuideDomains({ database: client });
+    const repaired1 = await repairEligibleGuideDomains({ database: client, environment: { NODE_ENV: 'staging' } });
     assert.ok(repaired1.length >= 2);
 
-    // Verify both have active guide domains
+    // Verify both have active guide domains with canonical platform host and distinct slugs
     const d1 = await listGuideDomains({ database: client, tenantId: t1.rows[0].id, assistantId: a1.rows[0].id });
     const d2 = await listGuideDomains({ database: client, tenantId: t2.rows[0].id, assistantId: a2.rows[0].id });
     assert.equal(d1.length, 1);
     assert.equal(d2.length, 1);
     assert.equal(d1[0].status, 'ACTIVE');
     assert.equal(d2[0].status, 'ACTIVE');
-    assert.notEqual(d1[0].hostname, d2[0].hostname);
+    assert.equal(d1[0].hostname, 'guide-staging.samchecompany.com');
+    assert.equal(d2[0].hostname, 'guide-staging.samchecompany.com');
+    assert.ok(d1[0].slug);
+    assert.ok(d2[0].slug);
+    assert.notEqual(d1[0].slug, d2[0].slug);
 
     // Rerun repair: should be idempotent and not create duplicate domains
-    await repairEligibleGuideDomains({ database: client });
+    await repairEligibleGuideDomains({ database: client, environment: { NODE_ENV: 'staging' } });
     const d1After = await listGuideDomains({ database: client, tenantId: t1.rows[0].id, assistantId: a1.rows[0].id });
     const d2After = await listGuideDomains({ database: client, tenantId: t2.rows[0].id, assistantId: a2.rows[0].id });
     assert.equal(d1After.length, 1);
@@ -449,3 +530,97 @@ test('F. repairEligibleGuideDomains converges multiple tenants idempotently', as
     client.release();
   }
 });
+
+test('G. Historical managed hostname convergence: converges old multi-level staging hostname to canonical host + slug without touching custom domains', async () => {
+  const client = await database.connect();
+  try {
+    await client.query('BEGIN');
+    const runId = crypto.randomUUID().slice(0, 8);
+
+    // 1. Create tenant with historical managed domain (<slug>.guide.staging.samchecompany.com)
+    const tenantRes = await client.query(`INSERT INTO tenants (name, plan_code) VALUES ($1, 'STARTER') RETURNING id`, [`Historical Convergence ${runId}`]);
+    const tenantId = tenantRes.rows[0].id;
+    const assistantRes = await client.query(`INSERT INTO ai_assistants (tenant_id, name, status) VALUES ($1, 'Historical Assistant', 'active') RETURNING id`, [tenantId]);
+    const assistantId = assistantRes.rows[0].id;
+    const channel = await ensureGuideChannelForAssistant({ database: client, tenantId, assistantId });
+
+    const historicalOldHostname = `yesil-vadi-${runId}.guide.staging.samchecompany.com`;
+    const historicalSlug = `yesil-vadi-${runId}`;
+
+    await client.query(
+      `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at)
+       VALUES ($1, $2, $3, $4, 'ACTIVE', 'MANAGED', 'CNAME', 'ingress.samchecompany.com', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [tenantId, assistantId, channel.channelId, historicalOldHostname],
+    );
+
+    // 2. Also create historical custom domain (e.g. rehber.samchecompany.ae)
+    const customHost = `rehber-${runId}.samchecompany.ae`;
+    await client.query(
+      `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at)
+       VALUES ($1, $2, $3, $4, 'ACTIVE', 'CUSTOM', 'CNAME', 'ingress.samchecompany.com', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [tenantId, assistantId, channel.channelId, customHost],
+    );
+
+    // 3. Run migration 071
+    const migration071Sql = fs.readFileSync(new URL('../migrations/071_guide_staging_managed_domain_architecture.sql', import.meta.url), 'utf8');
+    await client.query(migration071Sql);
+
+    // 4. Verify historical managed record converged:
+    const convergedManaged = await client.query(
+      `SELECT hostname, slug, domain_mode, status FROM guide_domains WHERE tenant_id = $1 AND domain_mode = 'MANAGED'`,
+      [tenantId],
+    );
+    assert.equal(convergedManaged.rowCount, 1);
+    assert.equal(convergedManaged.rows[0].hostname, 'guide-staging.samchecompany.com');
+    assert.equal(convergedManaged.rows[0].slug, historicalSlug);
+    assert.equal(convergedManaged.rows[0].domain_mode, 'MANAGED');
+
+    // 5. Verify custom domain remains completely unchanged:
+    const untouchedCustom = await client.query(
+      `SELECT hostname, slug, domain_mode, status FROM guide_domains WHERE tenant_id = $1 AND domain_mode = 'CUSTOM'`,
+      [tenantId],
+    );
+    assert.equal(untouchedCustom.rowCount, 1);
+    assert.equal(untouchedCustom.rows[0].hostname, customHost);
+    assert.equal(untouchedCustom.rows[0].slug, null);
+    assert.equal(untouchedCustom.rows[0].domain_mode, 'CUSTOM');
+
+    // 6. Migration replay idempotency check:
+    await client.query(migration071Sql);
+    const replayedManaged = await client.query(
+      `SELECT hostname, slug, domain_mode, status FROM guide_domains WHERE tenant_id = $1 AND domain_mode = 'MANAGED'`,
+      [tenantId],
+    );
+    assert.equal(replayedManaged.rows[0].hostname, 'guide-staging.samchecompany.com');
+    assert.equal(replayedManaged.rows[0].slug, historicalSlug);
+
+    // 7. Test runtime scope resolution for converged managed domain:
+    const resolvedManagedScope = await resolveGuideRuntimeScopeFromRequest({
+      database: client,
+      req: {
+        headers: { host: 'guide-staging.samchecompany.com' },
+        params: { slug: historicalSlug },
+      },
+    });
+    assert.ok(resolvedManagedScope);
+    assert.equal(resolvedManagedScope.tenant_id, tenantId);
+
+    // 8. Test runtime scope resolution for custom domain:
+    const resolvedCustomScope = await resolveGuideRuntimeScopeFromRequest({
+      database: client,
+      req: {
+        headers: { host: customHost },
+      },
+    });
+    assert.ok(resolvedCustomScope);
+    assert.equal(resolvedCustomScope.tenant_id, tenantId);
+
+    await client.query('ROLLBACK');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+

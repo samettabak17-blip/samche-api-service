@@ -9,7 +9,7 @@ import { GuideExperienceError, createGuideExperienceDraft, inspectGuideExperienc
 import { GuideRecommendationError, generateGuideExperienceRecommendation } from '../services/guide-experience-recommendation-service.js';
 import { GuideThemeError, deriveAccessibleGuideTheme } from '../services/guide-theme-service.js';
 import { resolveCname } from 'node:dns/promises';
-import { GuideDomainError, activateGuideDomain, archiveGuideDomain, configuredGuideDomainIngressTarget, configuredManagedGuideDomainSuffix, createGuideDomain, ensureGuideChannelForAssistant, ensureManagedGuideDomainForAssistant, listGuideDomains, managedGuideHostnameFromSlug, verifyGuideDomainDns } from '../services/guide-domain-service.js';
+import { GuideDomainError, activateGuideDomain, archiveGuideDomain, configuredGuideDomainIngressTarget, configuredManagedGuideDomainSuffix, configuredManagedGuideHostname, createGuideDomain, ensureGuideChannelForAssistant, ensureManagedGuideDomainForAssistant, listGuideDomains, managedGuideHostnameFromSlug, managedGuideUrlFromSlug, normalizeGuideSlug, verifyGuideDomainDns } from '../services/guide-domain-service.js';
 import { archiveGuideDomainIngress, provisionGuideDomainIngress, resolveGuideDomainIngressStatus, verifyGuideDomainIngress } from '../services/guide-domain-ingress-service.js';
 import { issueGuidePreviewToken } from '../services/guide-preview-service.js';
 
@@ -137,7 +137,8 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/drafts/:versio
     }
     if (!activeDomain) return res.status(409).json({ error: 'An active Guide domain is required for private preview.', code: 'GUIDE_PREVIEW_DOMAIN_REQUIRED' });
     const token = issueGuidePreviewToken({ tenantId: scope.tenantId, assistantId: scope.assistantId, versionId: req.params.versionId, actorUserId: req.user.user_id });
-    return res.json({ preview_path: `/?preview=${encodeURIComponent(token)}`, hostname: activeDomain.hostname, expires_in_seconds: 600 });
+    const previewBasePath = activeDomain.domain_mode === 'MANAGED' && activeDomain.slug ? `/${activeDomain.slug}` : '';
+    return res.json({ preview_path: `${previewBasePath}/?preview=${encodeURIComponent(token)}`, hostname: activeDomain.hostname, expires_in_seconds: 600 });
   } catch (error) { return sendError(res, error); }
 });
 
@@ -158,7 +159,11 @@ router.get('/:tenantId/guide-experiences/assistants/:assistantId/domains', requi
   try {
     await verifyAssistant(scope);
     await ensureGuideChannelForAssistant({ database: pool, tenantId: scope.tenantId, assistantId: scope.assistantId });
-    return res.json({ domains: await listGuideDomains({ database: pool, ...scope }), managed_domain_suffix: configuredManagedGuideDomainSuffix() });
+    return res.json({
+      domains: await listGuideDomains({ database: pool, ...scope }),
+      managed_domain_host: configuredManagedGuideHostname(),
+      managed_domain_suffix: configuredManagedGuideHostname(),
+    });
   }
   catch (error) { return sendError(res, error); }
 });
@@ -179,12 +184,13 @@ router.post('/:tenantId/guide-experiences/assistants/:assistantId/domains', requ
     const channelId = req.body?.channel_id || ensuredChannel.channelId;
     await verifyGuideChannel({ ...scope, channelId });
     const domainMode = req.body?.domain_mode === 'MANAGED' ? 'MANAGED' : 'CUSTOM';
-    const hostname = domainMode === 'MANAGED' ? managedGuideHostnameFromSlug(req.body?.slug) : req.body?.hostname;
-    // Managed hosts ride the shared wildcard ingress; only customer-owned
+    const slug = domainMode === 'MANAGED' ? normalizeGuideSlug(req.body?.slug) : null;
+    const hostname = domainMode === 'MANAGED' ? configuredManagedGuideHostname() : req.body?.hostname;
+    // Managed hosts ride the shared platform domain; only customer-owned
     // domains require an individual Render registration and DNS challenge.
-    provisioned = domainMode === 'CUSTOM' ? await provisionGuideDomainIngress({ hostname }) : { state: 'WILDCARD', hostname };
+    provisioned = domainMode === 'CUSTOM' ? await provisionGuideDomainIngress({ hostname }) : { state: 'MANAGED', hostname };
     await client.query('BEGIN');
-    const domain = await createGuideDomain({ client, ...scope, channelId, hostname, domainMode, actorUserId: req.user.user_id, ingressTarget: configuredGuideDomainIngressTarget() });
+    const domain = await createGuideDomain({ client, ...scope, channelId, hostname, slug, domainMode, actorUserId: req.user.user_id, ingressTarget: configuredGuideDomainIngressTarget() });
     await client.query('COMMIT');
     return res.status(201).json({ domain, dns: { type: domain.verification_record_type, host: domain.hostname, target: domain.verification_target } });
   } catch (error) {

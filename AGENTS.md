@@ -211,6 +211,10 @@ modify files outside the authorized scope.
   creation, channels enumeration, and Guide Experience domain and publication
   flows; generic Web Chat and WhatsApp channel management UI must not fabricate
   or expose manual Guide channel creation.
+- Platform-managed staging Guide routing uses one canonical platform hostname
+  with tenant-safe path-based resolution; tenant-specific wildcard DNS is not a
+  runtime dependency; custom Guide domains remain host-based.
+
 - Push subscriptions are tenant/user/device scoped records; a browser
   subscription never grants tenant authorization. Notification intents and
   delivery transports are observational, idempotent, bounded, and replaceable:

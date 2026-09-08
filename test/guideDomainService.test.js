@@ -3,12 +3,16 @@ import test from 'node:test';
 import {
   GuideDomainError,
   normalizeGuideHostname,
+  normalizeGuideSlug,
   resolveActiveGuideDomain,
+  resolveActiveManagedGuideDomain,
   guideDomainCacheKey,
   archiveGuideDomain,
   activateGuideDomain,
   verifyGuideDomainDns,
   managedGuideHostnameFromSlug,
+  managedGuideUrlFromSlug,
+  configuredManagedGuideHostname,
 } from '../services/guide-domain-service.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
@@ -21,12 +25,57 @@ test('normalizes a public guide hostname without accepting URL, port, wildcard, 
   }
 });
 
-test('managed Guide slugs resolve to the platform namespace and reject takeover-shaped input', () => {
-  assert.equal(managedGuideHostnameFromSlug('Blue-Dune', { NODE_ENV: 'production' }), 'blue-dune.guide.samchecompany.com');
-  assert.equal(managedGuideHostnameFromSlug('Blue-Dune', { NODE_ENV: 'staging' }), 'blue-dune.guide.staging.samchecompany.com');
-  assert.equal(managedGuideHostnameFromSlug('exampletenant', { NODE_ENV: 'production', RENDER_SERVICE_NAME: 'samche-api-staging' }), 'exampletenant.guide.staging.samchecompany.com');
-  assert.throws(() => managedGuideHostnameFromSlug('blue.dune'), (error) => error.code === 'GUIDE_DOMAIN_INVALID_SLUG');
-  assert.equal(managedGuideHostnameFromSlug('clinic', { GUIDE_MANAGED_DOMAIN_SUFFIX: 'guide.example.test' }), 'clinic.guide.example.test');
+test('managed staging URL generation produces canonical platform host and path slug', () => {
+  assert.equal(
+    managedGuideUrlFromSlug('yesil-vadi', { NODE_ENV: 'staging' }),
+    'https://guide-staging.samchecompany.com/yesil-vadi',
+  );
+  assert.equal(
+    managedGuideUrlFromSlug('Blue-Dune', { NODE_ENV: 'staging' }),
+    'https://guide-staging.samchecompany.com/blue-dune',
+  );
+  assert.equal(
+    managedGuideUrlFromSlug('exampletenant', { NODE_ENV: 'production', RENDER_SERVICE_NAME: 'samche-api-staging' }),
+    'https://guide-staging.samchecompany.com/exampletenant',
+  );
+  assert.equal(
+    configuredManagedGuideHostname({ NODE_ENV: 'staging' }),
+    'guide-staging.samchecompany.com',
+  );
+  assert.throws(() => managedGuideUrlFromSlug('blue.dune'), (error) => error.code === 'GUIDE_DOMAIN_INVALID_SLUG');
+  assert.throws(() => normalizeGuideSlug('-invalid-'), (error) => error.code === 'GUIDE_DOMAIN_INVALID_SLUG');
+});
+
+test('resolves active managed guide domain by path slug', async () => {
+  const database = {
+    async query(sql, parameters) {
+      assert.match(sql, /guide_domains gd/i);
+      assert.match(sql, /lower\(gd\.slug\) = \$1/i);
+      assert.match(sql, /gd\.status = 'ACTIVE'/i);
+      assert.match(sql, /gd\.domain_mode = 'MANAGED'/i);
+      assert.deepEqual(parameters, ['yesil-vadi']);
+      return {
+        rowCount: 1,
+        rows: [{
+          domain_id: '33333333-3333-4333-8333-333333333333',
+          hostname: 'guide-staging.samchecompany.com',
+          slug: 'yesil-vadi',
+          tenant_id: tenantId,
+          assistant_id: assistantId,
+          channel_id: '44444444-4444-4444-8444-444444444444',
+          channel_assistant_id: assistantId,
+          channel_type: 'SAMCHEGUIDE',
+          channel_status: 'active',
+          assistant_status: 'active',
+          integration_enabled: true,
+        }],
+      };
+    },
+  };
+  const resolved = await resolveActiveManagedGuideDomain({ database, slug: 'Yesil-Vadi' });
+  assert.equal(resolved?.tenant_id, tenantId);
+  assert.equal(resolved?.slug, 'yesil-vadi');
+  assert.equal(resolved?.hostname, 'guide-staging.samchecompany.com');
 });
 
 test('resolves only an active hostname whose channel, tenant, and assistant ownership agree', async () => {
