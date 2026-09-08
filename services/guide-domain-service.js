@@ -49,6 +49,46 @@ export function normalizeGuideSlug(slug) {
   }
   return raw;
 }
+export async function allocateDeterministicManagedSlug({ database, baseSlug, tenantId, assistantId }) {
+  const normalized = normalizeGuideSlug(baseSlug);
+
+  // Check if current tenant & assistant already owns this slug
+  const ownRow = await database.query(
+    `SELECT id FROM guide_domains WHERE lower(slug) = $1 AND tenant_id = $2 AND assistant_id = $3 AND domain_mode = 'MANAGED'`,
+    [normalized, tenantId, assistantId],
+  );
+  if (ownRow.rowCount > 0) {
+    return normalized;
+  }
+
+  // Check if base slug is globally available among MANAGED domains
+  const conflict = await database.query(
+    `SELECT id FROM guide_domains WHERE lower(slug) = $1 AND domain_mode = 'MANAGED'`,
+    [normalized],
+  );
+  if (!conflict.rowCount) {
+    return normalized;
+  }
+
+  // Conflict exists: allocate deterministic collision-safe slug
+  const tenantSuffix = String(tenantId).replace(/-/g, '').slice(0, 6).toLowerCase();
+  const trimmedBase = normalized.slice(0, 25).replace(/-+$/, '');
+  const candidate1 = `${trimmedBase}-${tenantSuffix}`;
+
+  const conflict1 = await database.query(
+    `SELECT id FROM guide_domains WHERE lower(slug) = $1 AND (tenant_id != $2 OR assistant_id != $3) AND domain_mode = 'MANAGED'`,
+    [candidate1, tenantId, assistantId],
+  );
+  if (!conflict1.rowCount) {
+    return candidate1;
+  }
+
+  // If candidate1 also conflicts, append assistant suffix
+  const assistantSuffix = String(assistantId || '').replace(/-/g, '').slice(0, 4).toLowerCase() || '0000';
+  const trimmedBase2 = normalized.slice(0, 20).replace(/-+$/, '');
+  return `${trimmedBase2}-${tenantSuffix}-${assistantSuffix}`;
+}
+
 
 export function guideDomainCacheKey({ hostname, tenantId, assistantId }) {
   return `guide-domain:${normalizeGuideHostname(hostname)}:${tenantId}:${assistantId}`;
@@ -405,7 +445,7 @@ export async function listGuideDomains({ database, tenantId, assistantId }) {
   return result.rows.map(serialize);
 }
 
-export async function createGuideDomain({ client, tenantId, assistantId, channelId, hostname, slug, actorUserId, ingressTarget, domainMode = 'CUSTOM' }) {
+export async function createGuideDomain({ client, tenantId, assistantId, channelId, hostname, slug, actorUserId, ingressTarget, domainMode = 'CUSTOM', disambiguateSlug = false }) {
   if (!['MANAGED', 'CUSTOM'].includes(domainMode)) throw new GuideDomainError('GUIDE_DOMAIN_MODE_INVALID');
   const isManaged = domainMode === 'MANAGED';
   let target;
@@ -413,24 +453,28 @@ export async function createGuideDomain({ client, tenantId, assistantId, channel
   let normalizedSlug = null;
 
   if (isManaged) {
-    normalizedSlug = normalizeGuideSlug(slug);
+    if (disambiguateSlug) {
+      normalizedSlug = await allocateDeterministicManagedSlug({
+        database: client,
+        baseSlug: slug || `t-${String(tenantId).replace(/-/g, '').slice(0, 12)}`,
+        tenantId,
+        assistantId,
+      });
+    } else {
+      normalizedSlug = normalizeGuideSlug(slug);
+      const slugConflict = await client.query(
+        `SELECT id FROM guide_domains WHERE lower(slug) = $1 AND (tenant_id != $2 OR assistant_id != $3)`,
+        [normalizedSlug, tenantId, assistantId],
+      );
+      if (slugConflict.rowCount) {
+        throw new GuideDomainError('GUIDE_DOMAIN_HOSTNAME_EXISTS', 'This domain or slug is already bound to another Guide.');
+      }
+    }
     normalizedHostname = configuredManagedGuideHostname();
     target = ingressTarget || configuredGuideDomainIngressTarget();
   } else {
     normalizedHostname = normalizeGuideHostname(hostname);
     target = ingressTarget;
-  }
-
-  // Conflict check:
-  if (isManaged) {
-    const slugConflict = await client.query(
-      `SELECT id FROM guide_domains WHERE lower(slug) = $1 AND (tenant_id != $2 OR assistant_id != $3)`,
-      [normalizedSlug, tenantId, assistantId],
-    );
-    if (slugConflict.rowCount) {
-      throw new GuideDomainError('GUIDE_DOMAIN_HOSTNAME_EXISTS', 'This domain or slug is already bound to another Guide.');
-    }
-  } else {
     const hostConflict = await client.query(
       `SELECT id FROM guide_domains WHERE lower(hostname) = $1 AND domain_mode = 'CUSTOM' AND (tenant_id != $2 OR assistant_id != $3)`,
       [normalizedHostname, tenantId, assistantId],
@@ -580,7 +624,7 @@ export async function ensureGuideChannelsForTenant({ database, tenantId }) {
 }
 
 
-export async function ensureManagedGuideDomainForAssistant({ database, tenantId, assistantId, channelId, environment = process.env }) {
+export async function ensureManagedGuideDomainForAssistant({ database, tenantId, assistantId, channelId, slug: desiredSlug, environment = process.env }) {
   const existing = await database.query(
     `SELECT id, tenant_id, assistant_id, channel_id, hostname, slug, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, archived_at, created_at
        FROM guide_domains
@@ -593,13 +637,14 @@ export async function ensureManagedGuideDomainForAssistant({ database, tenantId,
     // Idempotent historical convergence: update old multi-level staging hostname to canonical platform host + slug
     if (row.domain_mode === 'MANAGED' && (row.hostname?.includes('.guide.staging.samchecompany.com') || !row.slug)) {
       const extractedSlug = row.slug || normalizeGuideSlug(row.hostname);
+      const safeSlug = await allocateDeterministicManagedSlug({ database, baseSlug: extractedSlug, tenantId, assistantId });
       const canonicalHost = configuredManagedGuideHostname(environment);
       const updated = await database.query(
         `UPDATE guide_domains
             SET hostname = $1, slug = $2, domain_mode = 'MANAGED', updated_at = CURRENT_TIMESTAMP
           WHERE id = $3
           RETURNING id, tenant_id, assistant_id, channel_id, hostname, slug, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, archived_at, created_at`,
-        [canonicalHost, extractedSlug, row.id],
+        [canonicalHost, safeSlug, row.id],
       );
       return serialize(updated.rows[0]);
     }
@@ -620,16 +665,15 @@ export async function ensureManagedGuideDomainForAssistant({ database, tenantId,
   }
 
   const canonicalHost = configuredManagedGuideHostname(environment);
-  const baseSlug = `t-${String(tenantId).replace(/-/g, '').slice(0, 12)}`;
-  let slug = baseSlug;
-
-  const conflict = await database.query(
-    `SELECT id FROM guide_domains WHERE lower(slug) = $1 AND (tenant_id != $2 OR assistant_id != $3)`,
-    [slug, tenantId, assistantId],
-  );
-  if (conflict.rowCount) {
-    slug = `t-${String(tenantId).replace(/-/g, '').slice(0, 8)}-${String(resolvedChannelId).replace(/-/g, '').slice(0, 6)}`;
-  }
+  const baseSlug = desiredSlug
+    ? normalizeGuideSlug(desiredSlug)
+    : `t-${String(tenantId).replace(/-/g, '').slice(0, 12)}`;
+  const slug = await allocateDeterministicManagedSlug({
+    database,
+    baseSlug,
+    tenantId,
+    assistantId,
+  });
 
   const created = await database.query(
     `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, slug, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at)

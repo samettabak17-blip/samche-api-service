@@ -8,6 +8,8 @@ import { isSafeTestDatabaseUrl } from '../scripts/test-database-safety.js';
 import {
   ensureGuideChannelForAssistant,
   ensureGuideChannelsForTenant,
+  ensureManagedGuideDomainForAssistant,
+  allocateDeterministicManagedSlug,
   createGuideDomain,
   listGuideDomains,
   managedGuideHostnameFromSlug,
@@ -531,11 +533,12 @@ test('F. repairEligibleGuideDomains converges multiple tenants idempotently to c
   }
 });
 
-test('G. Historical managed hostname convergence & Render deploy blocker reproduction: converges multiple historical staging hostnames to canonical shared host + slug without touching custom domains', async () => {
+test('G. Historical managed slug collision, same-owner convergence, and Render deploy blocker reproduction (CASES 1-7)', async () => {
   const client = await database.connect();
   try {
     await client.query('BEGIN');
     const runId = crypto.randomUUID().slice(0, 8);
+    const sharedBaseSlug = `bluedune-${runId}`;
 
     // 0. Re-establish historical schema state (as existed on staging before migration 071)
     await client.query(`DROP INDEX IF EXISTS uq_guide_domain_custom_hostname`);
@@ -543,34 +546,50 @@ test('G. Historical managed hostname convergence & Render deploy blocker reprodu
     await client.query(`ALTER TABLE guide_domains DROP CONSTRAINT IF EXISTS uq_guide_domain_hostname CASCADE`);
     await client.query(`ALTER TABLE guide_domains ADD CONSTRAINT uq_guide_domain_hostname UNIQUE (hostname)`);
 
-    // 1. Create Tenant A with historical managed domain (alpha.<slug>.guide.staging.samchecompany.com)
+    // 1. Create Tenant A (Blue Dune pattern with same-owner duplicate historical rows)
     const tenantARes = await client.query(`INSERT INTO tenants (name, plan_code) VALUES ($1, 'STARTER') RETURNING id`, [`Historical Tenant A ${runId}`]);
     const tenantAId = tenantARes.rows[0].id;
     const assistantARes = await client.query(`INSERT INTO ai_assistants (tenant_id, name, status) VALUES ($1, 'Assistant A', 'active') RETURNING id`, [tenantAId]);
     const assistantAId = assistantARes.rows[0].id;
     const channelA = await ensureGuideChannelForAssistant({ database: client, tenantId: tenantAId, assistantId: assistantAId });
-    const historicalHostnameA = `alpha-${runId}.guide.staging.samchecompany.com`;
-    const slugA = `alpha-${runId}`;
 
+    // Row A1: Prod-style host created earlier
+    const hostA1 = `${sharedBaseSlug}.guide.samchecompany.com`;
+    const rowA1Res = await client.query(
+      `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, 'ACTIVE', 'MANAGED', 'CNAME', 'ingress.samchecompany.com', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '2026-09-01 10:00:00Z', '2026-09-01 10:00:00Z') RETURNING id`,
+      [tenantAId, assistantAId, channelA.channelId, hostA1],
+    );
+    const domainA1Id = rowA1Res.rows[0].id;
+
+    // Row A2: Staging-style host created later
+    const hostA2 = `${sharedBaseSlug}.guide.staging.samchecompany.com`;
     await client.query(
-      `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at)
-       VALUES ($1, $2, $3, $4, 'ACTIVE', 'MANAGED', 'CNAME', 'ingress.samchecompany.com', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-      [tenantAId, assistantAId, channelA.channelId, historicalHostnameA],
+      `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, 'ACTIVE', 'MANAGED', 'CNAME', 'ingress.samchecompany.com', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '2026-09-02 10:00:00Z', '2026-09-02 10:00:00Z') RETURNING id`,
+      [tenantAId, assistantAId, channelA.channelId, hostA2],
     );
 
-    // 2. Create Tenant B with historical managed domain (beta.<slug>.guide.staging.samchecompany.com)
+    // Dependent public session pointing to earlier row A1
+    const sessionTokenHash = crypto.randomBytes(32).toString('hex');
+    await client.query(
+      `INSERT INTO guide_public_sessions (token_hash, session_id, tenant_id, assistant_id, channel_id, domain_id, experience_version, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 1, CURRENT_TIMESTAMP + INTERVAL '1 hour')`,
+      [sessionTokenHash, crypto.randomUUID(), tenantAId, assistantAId, channelA.channelId, domainA1Id],
+    );
+
+    // 2. Create Tenant B (Different tenant with legitimate collision on same desired base slug)
     const tenantBRes = await client.query(`INSERT INTO tenants (name, plan_code) VALUES ($1, 'STARTER') RETURNING id`, [`Historical Tenant B ${runId}`]);
     const tenantBId = tenantBRes.rows[0].id;
     const assistantBRes = await client.query(`INSERT INTO ai_assistants (tenant_id, name, status) VALUES ($1, 'Assistant B', 'active') RETURNING id`, [tenantBId]);
     const assistantBId = assistantBRes.rows[0].id;
     const channelB = await ensureGuideChannelForAssistant({ database: client, tenantId: tenantBId, assistantId: assistantBId });
-    const historicalHostnameB = `beta-${runId}.guide.staging.samchecompany.com`;
-    const slugB = `beta-${runId}`;
 
+    const hostB = `${sharedBaseSlug}.staging.samchecompany.com`;
     await client.query(
-      `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at)
-       VALUES ($1, $2, $3, $4, 'ACTIVE', 'MANAGED', 'CNAME', 'ingress.samchecompany.com', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-      [tenantBId, assistantBId, channelB.channelId, historicalHostnameB],
+      `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target, verified_at, activated_at, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, 'ACTIVE', 'MANAGED', 'CNAME', 'ingress.samchecompany.com', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '2026-09-03 10:00:00Z', '2026-09-03 10:00:00Z')`,
+      [tenantBId, assistantBId, channelB.channelId, hostB],
     );
 
     // 3. Create Tenant C with historical custom domain (rehber.samchecompany.ae)
@@ -587,46 +606,99 @@ test('G. Historical managed hostname convergence & Render deploy blocker reprodu
       [tenantCId, assistantCId, channelC.channelId, customHost],
     );
 
-    // 4. Exact Render failure reproduction:
+    // 4. Exact Render failure reproduction #1:
     // With legacy uq_guide_domain_hostname present, updating multiple managed rows to shared host violates uniqueness
-    await client.query('SAVEPOINT sp_reproduce_render_failure');
-    let reproducedError = null;
+    await client.query('SAVEPOINT sp_reproduce_render_failure_1');
+    let reproducedHostnameError = null;
+    try {
+      await client.query(`UPDATE guide_domains SET hostname = 'guide-staging.samchecompany.com' WHERE domain_mode = 'MANAGED'`);
+    } catch (err) {
+      reproducedHostnameError = err;
+    }
+    assert.ok(reproducedHostnameError, 'Expected legacy uq_guide_domain_hostname to reject shared managed hostname');
+    assert.equal(reproducedHostnameError.code, '23505');
+    await client.query('ROLLBACK TO SAVEPOINT sp_reproduce_render_failure_1');
+
+    // Exact Render failure reproduction #2:
+    // With naive slug extraction without duplicate convergence, uq_guide_domain_managed_slug fails on duplicated bluedune
+    await client.query('SAVEPOINT sp_reproduce_render_failure_2');
+    let reproducedSlugError = null;
     try {
       await client.query(`
         UPDATE guide_domains
-           SET hostname = 'guide-staging.samchecompany.com'
+           SET slug = '${sharedBaseSlug}'
          WHERE domain_mode = 'MANAGED'
       `);
+      await client.query(`CREATE UNIQUE INDEX uq_guide_domain_managed_slug ON guide_domains (lower(slug)) WHERE domain_mode = 'MANAGED'`);
     } catch (err) {
-      reproducedError = err;
+      reproducedSlugError = err;
     }
-    assert.ok(reproducedError, 'Expected UPDATE with uq_guide_domain_hostname to fail');
-    assert.equal(reproducedError.code, '23505', 'Expected PostgreSQL unique violation 23505');
-    assert.match(reproducedError.detail, /guide-staging\.samchecompany\.com/, 'Detail matches Render failure key');
-    await client.query('ROLLBACK TO SAVEPOINT sp_reproduce_render_failure');
+    assert.ok(reproducedSlugError, 'Expected uq_guide_domain_managed_slug to reject duplicate slug');
+    assert.equal(reproducedSlugError.code, '23505');
+    assert.match(reproducedSlugError.detail, new RegExp(sharedBaseSlug));
+    await client.query('ROLLBACK TO SAVEPOINT sp_reproduce_render_failure_2');
 
     // 5. Run fixed migration 071
     const migration071Sql = fs.readFileSync(new URL('../migrations/071_guide_staging_managed_domain_architecture.sql', import.meta.url), 'utf8');
     await client.query(migration071Sql);
 
-    // 6. Verify Tenant A and Tenant B both converged to shared platform host with distinct slugs:
-    const convergedManaged = await client.query(
-      `SELECT tenant_id, hostname, slug, domain_mode, status
-         FROM guide_domains
-        WHERE tenant_id IN ($1, $2) AND domain_mode = 'MANAGED'
-        ORDER BY slug ASC`,
-      [tenantAId, tenantBId],
+    // CASE 1: SAME OWNER HISTORICAL DUPLICATE
+    // Tenant A's duplicate managed rows converged to one canonical active survivor
+    const activeDomainsA = await client.query(
+      `SELECT id, hostname, slug, domain_mode, status FROM guide_domains WHERE tenant_id = $1 AND domain_mode = 'MANAGED' AND status = 'ACTIVE'`,
+      [tenantAId],
     );
-    assert.equal(convergedManaged.rowCount, 2);
-    assert.equal(convergedManaged.rows[0].hostname, 'guide-staging.samchecompany.com');
-    assert.equal(convergedManaged.rows[0].slug, slugA);
-    assert.equal(convergedManaged.rows[0].tenant_id, tenantAId);
+    assert.equal(activeDomainsA.rowCount, 1, 'Tenant A must have exactly one active managed domain');
+    assert.equal(activeDomainsA.rows[0].hostname, 'guide-staging.samchecompany.com');
+    assert.equal(activeDomainsA.rows[0].slug, sharedBaseSlug);
+    const survivorId = activeDomainsA.rows[0].id;
 
-    assert.equal(convergedManaged.rows[1].hostname, 'guide-staging.samchecompany.com');
-    assert.equal(convergedManaged.rows[1].slug, slugB);
-    assert.equal(convergedManaged.rows[1].tenant_id, tenantBId);
+    // The other row is safely archived with an archival slug
+    const archivedDomainsA = await client.query(
+      `SELECT id, hostname, slug, status FROM guide_domains WHERE tenant_id = $1 AND domain_mode = 'MANAGED' AND status = 'ARCHIVED'`,
+      [tenantAId],
+    );
+    assert.equal(archivedDomainsA.rowCount, 1);
+    assert.match(archivedDomainsA.rows[0].slug, new RegExp(`^${sharedBaseSlug}-arch-`));
 
-    // 7. Verify Tenant C (custom domain) remains completely unchanged:
+    // Public session foreign key preserved and repointed to survivor
+    const sessionCheck = await client.query(`SELECT domain_id FROM guide_public_sessions WHERE token_hash = $1`, [sessionTokenHash]);
+    assert.equal(sessionCheck.rows[0].domain_id, survivorId);
+
+    // CASE 2: DIFFERENT TENANTS SAME BASE SLUG
+    // Tenant B receives deterministic tenant-suffixed slug and remains usable
+    const expectedSlugB = `${sharedBaseSlug.slice(0, 25)}-${tenantBId.replace(/-/g, '').slice(0, 6)}`;
+    const activeDomainsB = await client.query(
+      `SELECT id, hostname, slug, domain_mode, status FROM guide_domains WHERE tenant_id = $1 AND domain_mode = 'MANAGED' AND status = 'ACTIVE'`,
+      [tenantBId],
+    );
+    assert.equal(activeDomainsB.rowCount, 1);
+    assert.equal(activeDomainsB.rows[0].hostname, 'guide-staging.samchecompany.com');
+    assert.equal(activeDomainsB.rows[0].slug, expectedSlugB);
+
+    // Runtime resolution for Tenant A
+    const resolvedManagedScopeA = await resolveGuideRuntimeScopeFromRequest({
+      database: client,
+      req: {
+        headers: { host: 'guide-staging.samchecompany.com' },
+        params: { slug: sharedBaseSlug },
+      },
+    });
+    assert.ok(resolvedManagedScopeA);
+    assert.equal(resolvedManagedScopeA.tenant_id, tenantAId);
+
+    // Runtime resolution for Tenant B
+    const resolvedManagedScopeB = await resolveGuideRuntimeScopeFromRequest({
+      database: client,
+      req: {
+        headers: { host: 'guide-staging.samchecompany.com' },
+        params: { slug: expectedSlugB },
+      },
+    });
+    assert.ok(resolvedManagedScopeB);
+    assert.equal(resolvedManagedScopeB.tenant_id, tenantBId);
+
+    // CASE 3: EXISTING CUSTOM DOMAIN
     const untouchedCustom = await client.query(
       `SELECT hostname, slug, domain_mode, status FROM guide_domains WHERE tenant_id = $1`,
       [tenantCId],
@@ -636,91 +708,94 @@ test('G. Historical managed hostname convergence & Render deploy blocker reprodu
     assert.equal(untouchedCustom.rows[0].slug, null);
     assert.equal(untouchedCustom.rows[0].domain_mode, 'CUSTOM');
 
-    // 8. Verify canonical partial uniqueness:
-    // a. MANAGED slug uniqueness: attempting to insert another managed domain with duplicate slug fails with 23505
-    let managedSlugConflict = null;
-    await client.query('SAVEPOINT sp_managed_slug_conflict');
+    const resolvedCustomScope = await resolveGuideRuntimeScopeFromRequest({
+      database: client,
+      req: { headers: { host: customHost } },
+    });
+    assert.ok(resolvedCustomScope);
+    assert.equal(resolvedCustomScope.tenant_id, tenantCId);
+
+    // CASE 4: PREVIOUS HOSTNAME FAILURE
+    // Multiple managed tenants safely share guide-staging.samchecompany.com
+    const sharedHostCount = await client.query(
+      `SELECT count(*)::int as count FROM guide_domains WHERE hostname = 'guide-staging.samchecompany.com' AND status = 'ACTIVE'`,
+    );
+    assert.ok(sharedHostCount.rows[0].count >= 2);
+
+    // CASE 5: FRESH CREATION COLLISION
+    // Two fresh tenants requesting the same desired managed slug automatically receive unique routes
+    const freshDesiredSlug = `acme-${runId}`;
+    const tenantDRes = await client.query(`INSERT INTO tenants (name, plan_code) VALUES ('Fresh Tenant D', 'STARTER') RETURNING id`);
+    const tenantDId = tenantDRes.rows[0].id;
+    const assistantDRes = await client.query(`INSERT INTO ai_assistants (tenant_id, name, status) VALUES ($1, 'Assistant D', 'active') RETURNING id`, [tenantDId]);
+    const assistantDId = assistantDRes.rows[0].id;
+    const channelD = await ensureGuideChannelForAssistant({ database: client, tenantId: tenantDId, assistantId: assistantDId });
+
+    const tenantERes = await client.query(`INSERT INTO tenants (name, plan_code) VALUES ('Fresh Tenant E', 'STARTER') RETURNING id`);
+    const tenantEId = tenantERes.rows[0].id;
+    const assistantERes = await client.query(`INSERT INTO ai_assistants (tenant_id, name, status) VALUES ($1, 'Assistant E', 'active') RETURNING id`, [tenantEId]);
+    const assistantEId = assistantERes.rows[0].id;
+    const channelE = await ensureGuideChannelForAssistant({ database: client, tenantId: tenantEId, assistantId: assistantEId });
+
+    const domainD = await ensureManagedGuideDomainForAssistant({
+      database: client,
+      tenantId: tenantDId,
+      assistantId: assistantDId,
+      channelId: channelD.channelId,
+      slug: freshDesiredSlug,
+    });
+    const domainE = await ensureManagedGuideDomainForAssistant({
+      database: client,
+      tenantId: tenantEId,
+      assistantId: assistantEId,
+      channelId: channelE.channelId,
+      slug: freshDesiredSlug,
+    });
+    assert.equal(domainD.slug, freshDesiredSlug);
+    const expectedSlugE = `${freshDesiredSlug.slice(0, 25)}-${tenantEId.replace(/-/g, '').slice(0, 6)}`;
+    assert.equal(domainE.slug, expectedSlugE);
+    assert.notEqual(domainD.slug, domainE.slug);
+
+    // CASE 6: UNIQUE INDEX
+    // Duplicate MANAGED lower(slug) insertion rejected with 23505
+    let duplicateManagedRejected = false;
+    await client.query('SAVEPOINT sp_dup_managed');
     try {
       await client.query(
         `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, slug, status, domain_mode, verification_record_type, verification_target)
          VALUES ($1, $2, $3, 'guide-staging.samchecompany.com', $4, 'ACTIVE', 'MANAGED', 'CNAME', 'ingress.samchecompany.com')`,
-        [tenantBId, assistantBId, channelB.channelId, slugA],
+        [tenantDId, assistantDId, channelD.channelId, domainD.slug],
       );
     } catch (err) {
-      managedSlugConflict = err;
+      duplicateManagedRejected = err.code === '23505';
     }
-    assert.ok(managedSlugConflict, 'Expected managed duplicate slug to be rejected');
-    assert.equal(managedSlugConflict.code, '23505');
-    await client.query('ROLLBACK TO SAVEPOINT sp_managed_slug_conflict');
+    assert.ok(duplicateManagedRejected, 'Expected duplicate managed slug to be rejected by unique index');
+    await client.query('ROLLBACK TO SAVEPOINT sp_dup_managed');
 
-    // b. CUSTOM hostname uniqueness: attempting to insert another custom domain with duplicate hostname fails with 23505
-    let customHostConflict = null;
-    await client.query('SAVEPOINT sp_custom_host_conflict');
+    // Duplicate CUSTOM lower(hostname) insertion rejected with 23505
+    let duplicateCustomRejected = false;
+    await client.query('SAVEPOINT sp_dup_custom');
     try {
       await client.query(
         `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, status, domain_mode, verification_record_type, verification_target)
          VALUES ($1, $2, $3, $4, 'ACTIVE', 'CUSTOM', 'CNAME', 'ingress.samchecompany.com')`,
-        [tenantAId, assistantAId, channelA.channelId, customHost],
+        [tenantDId, assistantDId, channelD.channelId, customHost],
       );
     } catch (err) {
-      customHostConflict = err;
+      duplicateCustomRejected = err.code === '23505';
     }
-    assert.ok(customHostConflict, 'Expected custom duplicate hostname to be rejected');
-    assert.equal(customHostConflict.code, '23505');
-    await client.query('ROLLBACK TO SAVEPOINT sp_custom_host_conflict');
+    assert.ok(duplicateCustomRejected, 'Expected duplicate custom hostname to be rejected by unique index');
+    await client.query('ROLLBACK TO SAVEPOINT sp_dup_custom');
 
-    // c. Multiple managed domains legitimately sharing guide-staging.samchecompany.com succeeds
-    const slugD = `delta-${runId}`;
-    const insertManagedResult = await client.query(
-      `INSERT INTO guide_domains (tenant_id, assistant_id, channel_id, hostname, slug, status, domain_mode, verification_record_type, verification_target)
-       VALUES ($1, $2, $3, 'guide-staging.samchecompany.com', $4, 'ACTIVE', 'MANAGED', 'CNAME', 'ingress.samchecompany.com')
-       RETURNING id, hostname, slug, domain_mode`,
-      [tenantAId, assistantAId, channelA.channelId, slugD],
-    );
-    assert.equal(insertManagedResult.rowCount, 1);
-    assert.equal(insertManagedResult.rows[0].hostname, 'guide-staging.samchecompany.com');
-    assert.equal(insertManagedResult.rows[0].slug, slugD);
-
-    // 9. Migration replay idempotency check:
+    // CASE 7: MIGRATION REPLAY
+    // Replay migration 071: zero errors, identical slugs
     await client.query(migration071Sql);
-    const replayedA = await client.query(
-      `SELECT hostname, slug, domain_mode, status FROM guide_domains WHERE tenant_id = $1 AND slug = $2`,
-      [tenantAId, slugA],
-    );
+    const replayedA = await client.query(`SELECT slug, hostname, status FROM guide_domains WHERE id = $1`, [survivorId]);
+    assert.equal(replayedA.rows[0].slug, sharedBaseSlug);
     assert.equal(replayedA.rows[0].hostname, 'guide-staging.samchecompany.com');
-    assert.equal(replayedA.rows[0].slug, slugA);
 
-    // 10. Runtime scope resolution for Tenant A (managed path-based):
-    const resolvedManagedScopeA = await resolveGuideRuntimeScopeFromRequest({
-      database: client,
-      req: {
-        headers: { host: 'guide-staging.samchecompany.com' },
-        params: { slug: slugA },
-      },
-    });
-    assert.ok(resolvedManagedScopeA);
-    assert.equal(resolvedManagedScopeA.tenant_id, tenantAId);
-
-    // 11. Runtime scope resolution for Tenant B (managed path-based):
-    const resolvedManagedScopeB = await resolveGuideRuntimeScopeFromRequest({
-      database: client,
-      req: {
-        headers: { host: 'guide-staging.samchecompany.com' },
-        params: { slug: slugB },
-      },
-    });
-    assert.ok(resolvedManagedScopeB);
-    assert.equal(resolvedManagedScopeB.tenant_id, tenantBId);
-
-    // 12. Runtime scope resolution for Tenant C (custom host-based):
-    const resolvedCustomScope = await resolveGuideRuntimeScopeFromRequest({
-      database: client,
-      req: {
-        headers: { host: customHost },
-      },
-    });
-    assert.ok(resolvedCustomScope);
-    assert.equal(resolvedCustomScope.tenant_id, tenantCId);
+    const replayedB = await client.query(`SELECT slug, hostname, status FROM guide_domains WHERE tenant_id = $1 AND status = 'ACTIVE'`, [tenantBId]);
+    assert.equal(replayedB.rows[0].slug, expectedSlugB);
 
     await client.query('ROLLBACK');
   } catch (error) {
