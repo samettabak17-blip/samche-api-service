@@ -1,14 +1,40 @@
 # SamChe Strict Execution / Non-Regression Contract
 
-This is the canonical repository-level instruction for AI coding agents working
-in SamChe. It is intended to be discovered and read by Codex, Cline, Aider,
-and future AI coding agents before they inspect or change the repository.
+This is the canonical repository-level instruction for every coding or
+execution agent working in SamChe. It applies without exception to every
+current and future agent, including Codex, Cline, Aider, and successors. An
+agent name in this file or in historical repository guidance is illustrative
+only; it never narrows, waives, or changes this contract.
 
 Read this file together with the existing guidance in `.agent/budget-policy.md`
 and `docs/engineering/`. Those sources remain authoritative for their own
 topics; do not duplicate or replace them here.
 
-## 1. Strict execution and scope
+## 1. Mandatory task preflight and contract acknowledgement
+
+Before inspecting, changing, testing, committing, pushing, or deploying for
+every task, every coding/execution agent MUST:
+
+1. Read the complete, current `AGENTS.md` directly from the target repository;
+   a cached summary, prior prompt, partial excerpt, or another agent's report
+   is not sufficient.
+2. Verify and report the repository root, intended branch, worktree identity
+   (including whether it is linked), current `HEAD`, and the intended remote
+   target before making a change. If any required target is unclear or differs
+   from the task, stop for human direction.
+3. Read and explicitly acknowledge all directly applicable repository
+   contracts, including `.agent/budget-policy.md` and the relevant
+   `docs/engineering/` guidance, before acting on them.
+4. Explicitly acknowledge that the task will preserve canonical tenant-wide
+   behavior, historical/fresh tenant parity, strict tenant isolation,
+   non-regression, security, testing, verification, commit/push, and
+   human-acceptance requirements that apply to the task.
+
+No prompt, agent-specific instruction, task shorthand, or historical workflow
+may bypass this preflight. Where repository guidance conflicts, this canonical
+repository contract governs.
+
+## 2. Strict execution and scope
 
 - Do exactly the requested task and its explicit acceptance criteria.
 - Do not broaden scope, redesign unrelated architecture, perform speculative
@@ -17,10 +43,13 @@ topics; do not duplicate or replace them here.
   names, tenant IDs, or one-off behavior. Implement generic, tenant-driven
   architecture using configuration, capabilities, policies, and data rather
   than hardcoded customer exceptions.
+- Do not use manual database repairs, per-tenant prompt patches, or
+  tenant-specific source-code branches to restore or create platform behavior.
+  They cannot satisfy a task's acceptance or release contract.
 - If a required dependency or file is outside the authorized scope, stop and
   report `REQUIRED_ADDITIONAL_FILE`, `REQUIRED_FUNCTION`, and `WHY_REQUIRED`.
 
-## 2. Absolute non-regression and compatibility
+## 3. Absolute non-regression and compatibility
 
 - Backward compatibility and non-regression are mandatory, not optional.
 - Preserve every existing valid capability, API contract, authorization rule,
@@ -34,7 +63,7 @@ topics; do not duplicate or replace them here.
 - Treat all prior capabilities as regression contracts. New tests must cover
   the requested behavior without weakening old tests or acceptance criteria.
 
-## 3. Repository access boundary
+## 4. Repository access boundary
 
 - Work only with files explicitly listed in the task and directly referenced
   dependencies that are strictly necessary.
@@ -48,7 +77,7 @@ topics; do not duplicate or replace them here.
 - Never expose, print, copy, or commit secrets, credentials, tokens, or private
   customer data.
 
-## 4. Diagnosis, tests, and runtime verification
+## 5. Diagnosis, tests, and runtime verification
 
 - Do not guess the root cause. Establish it from the smallest relevant set of
   files, reproducible evidence, and focused checks.
@@ -61,7 +90,7 @@ topics; do not duplicate or replace them here.
   do not claim completion based only on static checks.
 - Do not weaken, delete, skip, or broadly rewrite tests to obtain a pass.
 
-## 5. Safe logging and observability
+## 6. Safe logging and observability
 
 - Logs must be safe for production and multi-tenant operation.
 - Never log secrets, credentials, access tokens, full sensitive payloads,
@@ -69,7 +98,7 @@ topics; do not duplicate or replace them here.
 - Use safe identifiers, redaction, and sufficient context to diagnose failures
   without exposing sensitive information.
 
-## 6. Git and worktree safety
+## 7. Git and worktree safety
 
 - Preserve unrelated staged, unstaged, and untracked worktree changes.
 - Do not reset, clean, overwrite, delete, stash, or reformat unrelated work.
@@ -78,7 +107,7 @@ topics; do not duplicate or replace them here.
 - Review the final diff and ensure every changed file is within the authorized
   scope.
 
-## 7. Completion gate
+## 8. Completion gate
 
 A task is complete only when all of the following are true:
 
@@ -97,7 +126,7 @@ Report files read, files modified, verification performed, results, and any
 remaining limitation. Never report success merely because code compiles or
 tests pass.
 
-## 8. Stop condition
+## 9. Stop condition
 
 Stop and request human review immediately for production deployment, a
 staging/main merge, destructive migrations, secrets or credentials, billing or
@@ -106,7 +135,7 @@ changes, customer-specific hardcoding risk, an unclear root cause after
 verification, repeated verification failure, or any request to inspect or
 modify files outside the authorized scope.
 
-## 9. Canonical tenant behavior and messaging
+## 10. Canonical tenant behavior and messaging
 
 - A tenant inherits the canonical platform behavior engine; tenant data and
   explicitly supported configuration may specialize behavior but must never
@@ -130,11 +159,12 @@ modify files outside the authorized scope.
 - Background employee-phone delivery requires a configured external transport;
   do not simulate it or add provider credentials without explicit approval.
 
-## 10. Agent continuity and cumulative release gate
+## 11. Agent continuity and cumulative release gate
 
 - This file is the single authoritative cross-agent engineering contract for
-  Codex, Cline, Aider, and future coding agents. Agent-specific entry files may
-  point here but must not duplicate or diverge from this policy.
+  every current and future coding/execution agent. Agent-specific entry files
+  may point here but must not duplicate, reinterpret, weaken, or diverge from
+  this policy.
 - A new tenant is not a new implementation. Canonical provisioning and
   idempotent, non-destructive repair/backfill must give old and new tenants the
   same shared platform capabilities, subject only to supported entitlements
@@ -229,4 +259,3 @@ modify files outside the authorized scope.
   a parallel frontend source of identity truth. PostgreSQL-backed identity and
   provenance decisions require disposable real-PostgreSQL regression coverage.
 - Tenant-specific factual claims require eligible canonical tenant authority (ACTIVE Business Profile, ACTIVE Assistant Configuration, or approved canonical Knowledge Intelligence). General model/world knowledge may support reasoning, generic domain concepts, or general educational explanation, but must never be promoted into unsupported facts about a tenant.
-
