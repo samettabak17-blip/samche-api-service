@@ -17,6 +17,51 @@ describe('ChannelForm', () => {
     expect(screen.getByText('Display name is required.')).toBeTruthy();
     expect(onSubmit).not.toHaveBeenCalled();
   });
+  it('treats uppercase ACTIVE and default status as eligible for WhatsApp assignment', () => {
+    const onSubmit = vi.fn();
+    render(<ChannelForm canManage assistants={[
+      { id: 'uppercase-assistant', tenant_id: 'tenant-a', name: 'Yesil Vadi', status: 'ACTIVE' },
+    ]} onSubmit={onSubmit} />);
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Channel type' }), { target: { value: 'WHATSAPP' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Display name' }), { target: { value: 'WhatsApp' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'External channel ID' }), { target: { value: '948536645017374' } });
+
+    const assistant = screen.getByRole('combobox', { name: 'Assigned assistant' }) as HTMLSelectElement;
+    expect(assistant.value).toBe('uppercase-assistant');
+    fireEvent.click(screen.getByRole('button', { name: 'Create channel' }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      channel_type: 'WHATSAPP',
+      assistant_id: 'uppercase-assistant',
+      status: 'active',
+    }));
+  });
+
+  it('retains existing eligible assistant assignment when editing an active WhatsApp channel', () => {
+    const onSubmit = vi.fn();
+    render(<ChannelForm
+      canManage
+      assistants={[
+        { id: 'assistant-1', tenant_id: 'tenant-a', name: 'First', status: 'active' },
+        { id: 'assistant-2', tenant_id: 'tenant-a', name: 'Second', status: 'active' },
+      ]}
+      initial={{
+        id: 'chan-1',
+        tenant_id: 'tenant-a',
+        channel_type: 'WHATSAPP',
+        display_name: 'WhatsApp Channel',
+        external_channel_id: '948536645017374',
+        assistant_id: 'assistant-2',
+        status: 'active',
+        created_at: '2026-09-08T00:00:00Z',
+        updated_at: '2026-09-08T00:00:00Z',
+      }}
+      onSubmit={onSubmit}
+    />);
+
+    const assistant = screen.getByRole('combobox', { name: 'Assigned assistant' }) as HTMLSelectElement;
+    expect(assistant.value).toBe('assistant-2');
+  });
 
   it('only exposes Web Chat and WhatsApp in ChannelForm for new channel creation', () => {
     render(<ChannelForm canManage assistants={[]} onSubmit={vi.fn()} />);

@@ -5,7 +5,8 @@ import { tenantKeys } from '../dashboard/dashboard-api';
 export type TenantResource = 'assistants' | 'channels' | 'knowledge-base';
 
 export function selectTenantAssistants(assistants: Assistant[], tenantId: string): Assistant[] {
-  return assistants.filter((assistant) => assistant.tenant_id === tenantId);
+  if (!tenantId) return [];
+  return assistants.filter((assistant) => !assistant.tenant_id || assistant.tenant_id === tenantId);
 }
 
 export async function invalidateTenantResource(

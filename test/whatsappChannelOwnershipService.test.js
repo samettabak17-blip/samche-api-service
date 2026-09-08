@@ -4,6 +4,7 @@ import {
   WhatsAppChannelOwnershipError,
   configureWhatsAppChannel,
   normalizeWhatsAppExternalId,
+  reconcileWhatsAppChannelIntegrity,
   transferWhatsAppChannelOwnership,
 } from '../services/whatsapp-channel-ownership-service.js';
 
@@ -239,4 +240,31 @@ test('platform transfer fails atomically when canonical active ownership is ambi
 
   assert.ok(database.calls.some(({ sql }) => sql === 'ROLLBACK'));
   assert.ok(!database.calls.some(({ sql }) => sql === 'COMMIT'));
+});
+
+test('reconcileWhatsAppChannelIntegrity deactivates active WhatsApp channels that lack an eligible assistant and disables integrations', async () => {
+  const queries = [];
+  const database = {
+    async query(sql, params) {
+      queries.push({ sql: String(sql).replace(/\s+/g, ' ').trim(), params });
+      return { rows: [], rowCount: 1 };
+    },
+  };
+
+  await reconcileWhatsAppChannelIntegrity({ database, tenantId: 'tenant-test-123' });
+
+  assert.equal(queries.length, 2);
+  assert.ok(queries[0].sql.includes("UPDATE tenant_channels tc SET status = 'inactive'"));
+  assert.ok(queries[0].sql.includes("tc.channel_type = 'WHATSAPP' AND tc.status = 'active'"));
+  assert.ok(queries[0].sql.includes("lower(aa.status) = 'active'"));
+  assert.deepEqual(queries[0].params, ['tenant-test-123']);
+
+  assert.ok(queries[1].sql.includes("UPDATE channel_integrations ci SET enabled = FALSE"));
+  assert.ok(queries[1].sql.includes("integration_type = 'WHATSAPP'"));
+  assert.deepEqual(queries[1].params, ['tenant-test-123']);
+});
+
+test('reconcileWhatsAppChannelIntegrity safely handles missing tenantId or database', async () => {
+  await reconcileWhatsAppChannelIntegrity({ database: null, tenantId: 'tenant-1' });
+  await reconcileWhatsAppChannelIntegrity({ database: { query() {} }, tenantId: null });
 });

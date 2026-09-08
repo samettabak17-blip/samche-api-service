@@ -18,6 +18,7 @@ import { PLAN_CODES, TenantPlanError, changeTenantPlanAsOwner, requestTenantPlan
 import { listPlanUpgradeNotificationsForOwner, markPlanUpgradeNotificationRead, notifyPlatformOwnersOfPlanUpgrade } from '../services/tenant-plan-notification-service.js';
 import { createTenantWithPlatformCapabilities, TenantPlatformProvisioningError } from '../services/tenant-platform-provisioning-service.js';
 import { ensureGuideChannelForAssistant } from '../services/guide-domain-service.js';
+import { reconcileWhatsAppChannelIntegrity } from '../services/whatsapp-channel-ownership-service.js';
 
 const router = express.Router();
 
@@ -591,13 +592,16 @@ router.get('/:tenantId', requireTenantAccess, async (req, res) => {
 // GET /api/v1/tenants/:tenantId/assistants
 router.get('/:tenantId/assistants', requireTenantAccess, async (req, res) => {
     try {
-        const result = await query(`
+        const result = await (req.app?.locals?.database?.query?.bind(req.app.locals.database) || req.app?.locals?.query || query)(`
             SELECT
                 id,
+                tenant_id,
                 name,
                 model,
                 status,
-                created_at
+                active_configuration_version_id,
+                created_at,
+                updated_at
             FROM ai_assistants
             WHERE tenant_id = $1
             ORDER BY created_at DESC
@@ -788,6 +792,8 @@ router.put(
                 });
             }
 
+            await reconcileWhatsAppChannelIntegrity({ database: req.app?.locals?.database || pool, tenantId: req.verified_tenant_id }).catch(() => {});
+
             return res.json(serializeAssistantForActor(result.rows[0], req.user.system_role));
 
         } catch (err) {
@@ -834,6 +840,8 @@ router.delete(
                     error: 'Assistant not found'
                 });
             }
+
+            await reconcileWhatsAppChannelIntegrity({ database: req.app?.locals?.database || pool, tenantId: req.verified_tenant_id }).catch(() => {});
 
             return res.json({
                 message: 'Assistant deleted successfully'

@@ -2272,7 +2272,8 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           ' persisted_language=' + tenantContext.communicationLanguage
         );
         await applyWhatsAppAdaptivePacing({ generationStartedAt: aiResponseStartedAt, content: deterministicSocialResponse.content });
-        return persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, deterministicSocialResponse.content);
+        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, deterministicSocialResponse.content);
+        return;
       }
 
       // --------------------------------------

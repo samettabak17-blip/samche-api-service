@@ -80,7 +80,7 @@ async function requireEligibleAssistant(client, tenantId, assistantId) {
        FROM ai_assistants
       WHERE id = $1
         AND tenant_id = $2
-        AND status = 'active'`,
+        AND lower(status) = 'active'`,
     [assistantId, tenantId]
   );
   if (assistant.rowCount !== 1) {
@@ -359,4 +359,40 @@ export async function transferWhatsAppChannelOwnership({
       externalChannelId: normalizedExternalId,
     };
   });
+}
+
+export async function reconcileWhatsAppChannelIntegrity({ database, tenantId }) {
+  if (!database?.query || !tenantId) return;
+  await database.query(
+    `UPDATE tenant_channels tc
+        SET status = 'inactive',
+            updated_at = CURRENT_TIMESTAMP
+      WHERE tc.tenant_id = $1
+        AND tc.channel_type = 'WHATSAPP'
+        AND tc.status = 'active'
+        AND (
+          tc.assistant_id IS NULL
+          OR NOT EXISTS (
+            SELECT 1 FROM ai_assistants aa
+             WHERE aa.id = tc.assistant_id
+               AND aa.tenant_id = tc.tenant_id
+               AND lower(aa.status) = 'active'
+          )
+        )`,
+    [tenantId]
+  );
+  await database.query(
+    `UPDATE channel_integrations ci
+        SET enabled = FALSE,
+            updated_at = CURRENT_TIMESTAMP
+      WHERE ci.tenant_id = $1
+        AND ci.integration_type = 'WHATSAPP'
+        AND ci.channel_id IN (
+          SELECT id FROM tenant_channels
+           WHERE tenant_id = $1
+             AND channel_type = 'WHATSAPP'
+             AND status <> 'active'
+        )`,
+    [tenantId]
+  );
 }

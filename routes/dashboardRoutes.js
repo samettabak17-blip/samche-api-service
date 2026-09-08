@@ -5,6 +5,7 @@ import { isValidUUID } from '../middleware/validators.js';
 import { ensureGuideChannelsForTenant } from '../services/guide-domain-service.js';
 import {
   configureWhatsAppChannel,
+  reconcileWhatsAppChannelIntegrity,
   transferWhatsAppChannelOwnership,
   WhatsAppChannelOwnershipError,
 } from '../services/whatsapp-channel-ownership-service.js';
@@ -60,9 +61,19 @@ const channelBody = async (req, res) => {
   if (!['WEB_CHAT','WHATSAPP'].includes(channel_type) || typeof display_name !== 'string' || !display_name.trim() || !['active','inactive'].includes(status)) {
     res.status(400).json({ error: 'Invalid channel body' }); return null;
   }
+  if (channel_type === 'WHATSAPP' && status === 'active' && !assistant_id) {
+    res.status(400).json({
+      error: 'WHATSAPP_ASSISTANT_REQUIRED',
+      message: 'An active assistant is required for an active WhatsApp channel',
+    });
+    return null;
+  }
   if (assistant_id && !isValidUUID(assistant_id)) { res.status(400).json({ error: 'Invalid assistant ID' }); return null; }
   if (assistant_id) {
-    const a = await query("SELECT id FROM ai_assistants WHERE id=$1 AND tenant_id=$2 AND status='active'", [assistant_id, req.verified_tenant_id]);
+    const a = await (req.app?.locals?.database?.query?.bind(req.app.locals.database) || req.app?.locals?.query || pool?.query?.bind(pool) || query)(
+      "SELECT id FROM ai_assistants WHERE id=$1 AND tenant_id=$2 AND lower(status)='active'",
+      [assistant_id, req.verified_tenant_id]
+    );
     if (!a.rowCount) { res.status(400).json({ error: 'Assistant must be active and belong to this tenant' }); return null; }
   }
   return [channel_type, display_name.trim(), external_channel_id || null, assistant_id, status];
@@ -76,8 +87,10 @@ router.get('/:tenantId/channels', requireTenantAccess, async (req, res) => {
   if (!tenant(req, res)) return;
 
   try {
-    await ensureGuideChannelsForTenant({ database: { query }, tenantId: req.verified_tenant_id }).catch(() => {});
-    const result = await query(
+    const db = req.app?.locals?.database || { query };
+    await ensureGuideChannelsForTenant({ database: db, tenantId: req.verified_tenant_id }).catch(() => {});
+    await reconcileWhatsAppChannelIntegrity({ database: req.app?.locals?.database || pool, tenantId: req.verified_tenant_id }).catch(() => {});
+    const result = await (req.app?.locals?.database?.query?.bind(req.app.locals.database) || req.app?.locals?.query || query)(
       'SELECT id,tenant_id,assistant_id,channel_type,display_name,external_channel_id,status,created_at,updated_at FROM tenant_channels WHERE tenant_id=$1 ORDER BY created_at DESC',
       [req.verified_tenant_id]
     );
@@ -156,10 +169,10 @@ router.post('/:tenantId/channels/transfer-whatsapp', requireOwner, requireTenant
     return res.status(500).json({ error: 'Server error' });
   }
 });
-router.get('/:tenantId/channels/:channelId', requireTenantAccess, async(req,res)=>{if(!tenant(req,res)||!isValidUUID(req.params.channelId))return res.status(400).json({error:'Invalid channel ID'});const r=await query('SELECT * FROM tenant_channels WHERE id=$1 AND tenant_id=$2',[req.params.channelId,req.verified_tenant_id]);if(!r.rowCount)return res.status(404).json({error:'Channel not found'});res.json(r.rows[0]);});
+router.get('/:tenantId/channels/:channelId', requireTenantAccess, async(req,res)=>{if(!tenant(req,res)||!isValidUUID(req.params.channelId))return res.status(400).json({error:'Invalid channel ID'});await reconcileWhatsAppChannelIntegrity({ database: req.app?.locals?.database || pool, tenantId: req.verified_tenant_id }).catch(() => {});const r=await (req.app?.locals?.database?.query?.bind(req.app.locals.database) || req.app?.locals?.query || query)('SELECT * FROM tenant_channels WHERE id=$1 AND tenant_id=$2',[req.params.channelId,req.verified_tenant_id]);if(!r.rowCount)return res.status(404).json({error:'Channel not found'});res.json(r.rows[0]);});
 router.put('/:tenantId/channels/:channelId', requireTenantAccess, requireTenantAdmin, async (req, res) => {
   if (!tenant(req, res) || !isValidUUID(req.params.channelId)) return res.status(400).json({ error: 'Invalid channel ID' });
-  const existing = await query('SELECT channel_type FROM tenant_channels WHERE id=$1 AND tenant_id=$2', [req.params.channelId, req.verified_tenant_id]);
+  const existing = await (req.app?.locals?.database?.query?.bind(req.app.locals.database) || req.app?.locals?.query || pool?.query?.bind(pool) || query)('SELECT channel_type FROM tenant_channels WHERE id=$1 AND tenant_id=$2', [req.params.channelId, req.verified_tenant_id]);
   if (existing.rowCount && existing.rows[0].channel_type === 'SAMCHEGUIDE') {
     return res.status(409).json({ error: 'AI Guide channel is managed by the Guide lifecycle and cannot be modified here' });
   }
@@ -169,7 +182,7 @@ router.put('/:tenantId/channels/:channelId', requireTenantAccess, requireTenantA
     const [channelType, displayName, externalChannelId, assistantId, status] = body;
     if (channelType === 'WHATSAPP') {
       const channel = await configureWhatsAppChannel({
-        database: pool,
+        database: req.app?.locals?.database || pool,
         tenantId: req.verified_tenant_id,
         channelId: req.params.channelId,
         displayName,
