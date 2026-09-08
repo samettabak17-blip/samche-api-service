@@ -18,10 +18,13 @@ every task, every coding/execution agent MUST:
 1. Read the complete, current `AGENTS.md` directly from the target repository;
    a cached summary, prior prompt, partial excerpt, or another agent's report
    is not sufficient.
-2. Verify and report the repository root, intended branch, worktree identity
-   (including whether it is linked), current `HEAD`, and the intended remote
-   target before making a change. If any required target is unclear or differs
-   from the task, stop for human direction.
+2. Inspect and report `git status`, then verify and report the repository root,
+   intended branch, worktree identity (including whether it is linked), current
+   `HEAD`, and the intended remote target before analysis or a change. Classify
+   the worktree as a clean baseline, current-task changes, unrelated
+   pre-existing changes, or changes that may belong to another active task;
+   preserve every unrelated change. If any required target is unclear or
+   differs from the task, stop for human direction.
 3. Read and explicitly acknowledge all directly applicable repository
    contracts, including `.agent/budget-policy.md` and the relevant
    `docs/engineering/` guidance, before acting on them.
@@ -106,6 +109,41 @@ repository contract governs.
 - Do not commit, push, merge, or change branches unless explicitly instructed.
 - Review the final diff and ensure every changed file is within the authorized
   scope.
+
+### Multi-agent and remote staging safety
+
+- Commit construction is task-scoped: commit only the approved current task's
+  files and changes. Never include another agent's work, unrelated user work,
+  or pre-existing unrelated modifications. If a file contains both current-task
+  and unrelated changes, preserve both and do not destructively rewrite it just
+  to simplify a commit.
+- When active tasks need the same file or overlapping code, treat it as a
+  coordination/conflict condition. Inspect the current state, preserve newer
+  valid changes, and integrate only when both scopes can be safely reconciled.
+  If reconciliation would require guessing, destructive rewriting, or changing
+  another task's semantics, stop and report the conflict.
+- For staging tasks, refresh and inspect `origin/staging` before committing,
+  pushing, or claiming completion. If another task advanced it, never overwrite
+  it, force-push, or reset away local work; safely reconcile with the newer
+  staging state, preserve both valid histories, and re-evaluate assumptions
+  affected by the newer changes.
+- After reconciliation with newer `origin/staging`, rerun every focused,
+  regression, tenant-isolation, migration, real-PostgreSQL, Fresh Tenant Golden
+  Path, build/syntax, and other mandatory gate whose validity could have been
+  affected. Previously GREEN evidence cannot be reused when code or dependency
+  state changed underneath it.
+- For a staging task explicitly authorized to commit and push, refresh the
+  remote after the final push and report both hashes. `LOCAL_HEAD` MUST equal
+  `origin/staging` HEAD before claiming successful completion; if they differ,
+  `TASK_COMPLETE` MUST NOT be `YES`. This requirement does not authorize a
+  commit or push by itself.
+- Never use destructive Git or worktree operations to eliminate another task's
+  state or make the current task easier. Unless an exceptional, human-approved
+  recovery explicitly requires it, this includes reset, clean, stashing another
+  task's work, checkout/restore that discards unrelated changes, force-push,
+  destructive rebase over another task, deleting another task's files, or
+  overwriting shared-file changes without reconciliation. The normal solution
+  is preservation and safe reconciliation, never deletion.
 
 ## 8. Completion gate
 
