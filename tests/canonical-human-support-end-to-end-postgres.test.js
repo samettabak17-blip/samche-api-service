@@ -152,7 +152,10 @@ test('canonical human-support end-to-end: support request, auto-assignment, inst
     const acknowledgement = policy.acknowledgement();
 
     // Verify deterministic acknowledgement: does NOT quote previous question, does NOT contain TOPIC placeholders
-    assert.equal(acknowledgement, 'Canlı destek talebinizi aldık. Görüşmeniz canlı destek ekibimize aktarılıyor, bir ekip üyesi en kısa sürede yardımcı olacaktır.');
+    const expectedAck = `Canlı temsilci ile görüşme ilgili talebinizi aldım. Genel Destek konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.
+Talebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.
+Müşteri temsilcimize bağlanırken lütfen beklemede kalın ⏳.`;
+    assert.equal(acknowledgement.replace(/\r\n/g, '\n'), expectedAck);
     assert.doesNotMatch(acknowledgement, /CANLI DESTEK ALMAK İSTİYORUM/);
     assert.doesNotMatch(acknowledgement, /\{TOPIC\}/);
     assert.doesNotMatch(acknowledgement, /Maltepe/);
@@ -281,7 +284,11 @@ test('canonical human-support end-to-end: support request, auto-assignment, inst
     assert.equal(returnedConv.human_attention_state, 'RESOLVED');
 
     assert.equal(returnNoticeSent.length, 1);
-    assert.equal(returnNoticeSent[0].content, 'Canlı destek oturumu sona erdi. AI asistanıyla sohbete devam edebilirsiniz.');
+    const expectedReturn = `🔒 Canlı destek oturumu sona ermiştir.
+
+Yapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına 'canlı destek' yazmanız yeterlidir.
+Ekibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.`;
+    assert.equal(returnNoticeSent[0].content.replace(/\r\n/g, '\n'), expectedReturn);
 
     // Escalations must be completed / closed
     const escResult = await client.query(

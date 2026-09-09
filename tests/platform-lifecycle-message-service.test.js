@@ -65,38 +65,58 @@ test('missing locale or lifecycle key fails closed instead of selecting another 
     /PLATFORM_LIFECYCLE_TEMPLATE_INCOMPLETE/,
   );
 });
-test('canonical human-support acknowledgement communicates request, handoff, and team assistance across TR EN AR', async () => {
+test('canonical human-support acknowledgement communicates request, handoff, and team assistance across TR EN AR without topic injection', async () => {
   const canonicalRows = [
-    ['human_support_default_topic', 'tr', 'Genel destek', []],
-    ['human_support_default_topic', 'en', 'General support', []],
+    ['human_support_default_topic', 'tr', 'Genel Destek', []],
+    ['human_support_default_topic', 'en', 'General Support', []],
     ['human_support_default_topic', 'ar', 'الدعم العام', []],
-    ['human_support_request', 'tr', 'Canlı temsilci ile görüşme talebinizi aldım. {TOPIC} konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.\n\nTalebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.\n\nMüşteri temsilcimize bağlanırken lütfen beklemede kalın ⌛️.', ['TOPIC']],
-    ['human_support_request', 'en', 'I have received your request to speak with a live representative. Regarding {TOPIC}, I am transferring you to our live customer representative to provide the most accurate support.\n\nYour request has been queued, and you will be connected to our live customer representative as soon as possible.\n\nPlease stay on hold while we connect you ⌛️.', ['TOPIC']],
-    ['human_support_request', 'ar', 'لقد تلقيت طلبك للتحدث مع ممثل مباشر. بخصوص {TOPIC}، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا لتقديم الدعم الأنسب لك.\n\nسيتم وضع طلبك في قائمة الانتظار، وسيتم توصيلك بممثلنا المباشر في أقرب وقت ممكن.\n\nيرجى البقاء على الخط أثناء الاتصال بممثل خدمة العملاء لدينا ⌛️.', ['TOPIC']],
-    ['human_session_warning', 'tr', 'Uyarı', []],
-    ['human_session_warning', 'en', 'Warning', []],
-    ['human_session_warning', 'ar', 'تحذير', []],
-    ['human_takeover', 'tr', 'Devralındı', []],
-    ['human_takeover', 'en', 'Taken over', []],
-    ['human_takeover', 'ar', 'تم الاستلام', []],
-    ['return_to_ai', 'tr', 'Bitti', []],
-    ['return_to_ai', 'en', 'Ended', []],
-    ['return_to_ai', 'ar', 'انتهت', []],
+    ['human_support_request', 'tr', `Canlı temsilci ile görüşme ilgili talebinizi aldım. Genel Destek konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.
+Talebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.
+Müşteri temsilcimize bağlanırken lütfen beklemede kalın ⏳.`, []],
+    ['human_support_request', 'en', `I have received your request to speak with a live representative. In order to provide you with the most accurate support regarding General Support, I am transferring you to our live customer representative.
+Your request will be queued, and you will be connected to our live customer representative shortly.
+Please stay on the line while connecting to our representative ⏳.`, []],
+    ['human_support_request', 'ar', `لقد تلقيت طلبك للتحدث مع ممثل مباشر. لنقدم لك الدعم الأنسب بخصوص الدعم العام، أقوم بتحويلك إلى ممثل خدمة العملاء المباشر لدينا.
+سيتم وضع طلبك في قائمة الانتظار، وسيتم ربطك بممثل خدمة العملاء المباشر في أقرب وقت.
+يرجى البقاء على اتصال أثناء الاتصال بممثلنا ⏳.`, []],
+    ['human_session_warning', 'tr', 'Canlı destek talebiniz açık. Beklerken bu konuşmaya mesaj göndererek oturumu aktif tutabilirsiniz.', []],
+    ['human_session_warning', 'en', 'Your live support request is open. You can send messages to this conversation while waiting to keep the session active.', []],
+    ['human_session_warning', 'ar', 'طلب الدعم المباشر الخاص بك مفتوح. يمكنك إرسال رسائل في هذه المحادثة أثناء الانتظار للحفاظ على الجلسة نشطة.', []],
+    ['human_takeover', 'tr', `DİKKAT ⚠️ Canlı temsilcimiz bu konuşmayı devralmıştır. Lütfen sohbete bağlanana kadar beklemede kalın ⏳
+
+⚠️ Canlı temsilcimiz bu konuşmayı sonlandırmadığı sürece yapay zeka danışmanı devre dışıdır. 🔒`, []],
+    ['human_takeover', 'en', `ATTENTION ⚠️ Our live representative has taken over this conversation. Please stay on the line until connected ⏳
+
+⚠️ As long as our live representative does not end this conversation, the AI consultant is disabled. 🔒`, []],
+    ['human_takeover', 'ar', `تنبيه ⚠️ تولى ممثلنا المباشر هذه المحادثة. يرجى البقاء على اتصال حتى يتم الربط ⏳
+
+⚠️ طالما لم يقم ممثلنا المباشر بإنهاء هذه المحادثة، فإن المستشار الذكي معطل. 🔒`, []],
+    ['return_to_ai', 'tr', `🔒 Canlı destek oturumu sona ermiştir.
+
+Yapay zeka asistanımızla sohbete devam edebilir ya da canlı temsilciye tekrar bağlanmak isterseniz sohbet alanına 'canlı destek' yazmanız yeterlidir.
+Ekibimiz size her zaman yardımcı olmaktan mutluluk duyacaktır.`, []],
+    ['return_to_ai', 'en', `🔒 The live support session has ended.
+
+You may continue chatting with our AI assistant, or if you wish to connect to a live representative again, simply type 'live support' in the chat.
+Our team is always happy to assist you.`, []],
+    ['return_to_ai', 'ar', `🔒 انتهت جلسة الدعم المباشر.
+
+يمكنك متابعة الدردشة مع مساعد الذكاء الاصطناعي، أو إذا كنت ترغب في الاتصال بممثل مباشر مرة أخرى، فما عليك سوى كتابة 'دعم مباشر' في الدردشة.
+يسعد فريقنا دائمًا بمساعدتك.`, []],
   ].map(([message_key, locale, body, allowed_variables]) => ({ message_key, locale, body, allowed_variables }));
 
   const trPolicy = await resolvePlatformHumanSupportPolicy({ database: databaseWith(canonicalRows), locale: 'tr' });
   const trAck = trPolicy.acknowledgement();
-  assert.match(trAck, /Canlı temsilci ile görüşme talebinizi aldım/);
-  assert.match(trAck, /Genel destek konusuyla ilgili/);
-  assert.match(trAck, /canlı müşteri temsilcimize aktarıyorum/);
-  assert.match(trAck, /en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız/);
-  assert.match(trAck, /beklemede kalın/);
+  assert.equal(trAck, `Canlı temsilci ile görüşme ilgili talebinizi aldım. Genel Destek konusuyla ilgili size en doğru desteği sağlayabilmek için sizi canlı müşteri temsilcimize aktarıyorum.
+Talebiniz işlem sırasına alınacak, en kısa süre içinde canlı müşteri temsilcimize bağlanacaksınız.
+Müşteri temsilcimize bağlanırken lütfen beklemede kalın ⏳.`);
 
   const enPolicy = await resolvePlatformHumanSupportPolicy({ database: databaseWith(canonicalRows), locale: 'en' });
   const enAck = enPolicy.acknowledgement('landscape planning');
-  assert.match(enAck, /I have received your request to speak with a live representative/);
-  assert.match(enAck, /Regarding landscape planning/);
-  assert.match(enAck, /transferring you to our live customer representative/);
+  assert.equal(enAck, `I have received your request to speak with a live representative. In order to provide you with the most accurate support regarding General Support, I am transferring you to our live customer representative.
+Your request will be queued, and you will be connected to our live customer representative shortly.
+Please stay on the line while connecting to our representative ⏳.`);
+  assert.doesNotMatch(enAck, /landscape planning/);
 
   const arPolicy = await resolvePlatformHumanSupportPolicy({ database: databaseWith(canonicalRows), locale: 'ar' });
   const arAck = arPolicy.acknowledgement();

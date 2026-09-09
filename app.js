@@ -136,6 +136,12 @@ app.get("/api/v1/health", (req, res) => {
     managed_guide_domain_suffix: configuredManagedGuideDomainSuffix(),
     onboarding_outbox_worker: customerInvitationOutboxStartup?.status() ?? 'NOT_STARTED',
     semantic_generation_worker: imageSemanticGenerationWorker?.status?.() ?? { state: 'NOT_STARTED' },
+    push_service: {
+      vapid_configured: Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT),
+      vapid_public_key_present: Boolean(process.env.VAPID_PUBLIC_KEY),
+      vapid_private_key_present: Boolean(process.env.VAPID_PRIVATE_KEY),
+      vapid_subject_present: Boolean(process.env.VAPID_SUBJECT),
+    },
   });
 });
 
@@ -2208,8 +2214,23 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           topicSummary: handoffPolicy.defaultTopic,
         });
         if (!handoff.duplicate) {
+          const typingStartedAt = Date.now();
+          if (wpMessageId && whatsappInbox.integration.external_channel_id) {
+            try {
+              await sendWhatsAppTypingIndicator({
+                phoneNumberId: whatsappInbox.integration.external_channel_id,
+                incomingMessageId: wpMessageId,
+              });
+              await applyWhatsAppAdaptivePacing({
+                generationStartedAt: typingStartedAt,
+                content: acknowledgement,
+              });
+            } catch (err) {
+              console.warn('SUPPORT_REQUEST_TYPING_NON_BLOCKING_ERROR', err?.message);
+            }
+          }
           await sendMessage(cleanFrom, acknowledgement, whatsappInbox.integration.external_channel_id);
-          console.info('LIFECYCLE_MESSAGE_SENT = tenant=' + String(whatsappInbox.integration.tenant_id).slice(0, 8) + ' conversation=' + String(whatsappInbox.conversation.id).slice(0, 8) + ' event_type=human_support_request');
+          console.info('LIFECYCLE_MESSAGE_SENT = tenant=' + String(whatsappInbox.integration.tenant_id).slice(0, 8) + ' conversation=' + String(whatsappInbox.conversation.id).slice(0, 8) + ' event_type=human_support_request typing=' + (wpMessageId ? '1' : '0'));
           const pushAdapter = await createWebPushDeliveryAdapter().catch(() => null);
           triggerImmediateHumanSupportNotificationPipeline({
             database: pool,
@@ -2379,6 +2400,29 @@ cron.schedule("* * * * *", async () => {
       lifecycleActions = await claimDueCustomerSupportLifecycle({ database: pool });
       for (const action of lifecycleActions) {
         try {
+          let lastCustomerMsgId = null;
+          try {
+            const lastMsg = await pool.query(
+              `SELECT external_message_id FROM conversation_messages
+                WHERE tenant_id = $1 AND conversation_id = $2 AND sender_type = 'CUSTOMER' AND external_message_id IS NOT NULL
+                ORDER BY created_at DESC, id DESC LIMIT 1`,
+              [action.tenantId, action.conversationId]
+            );
+            lastCustomerMsgId = lastMsg.rows?.[0]?.external_message_id ?? null;
+          } catch {}
+          if (lastCustomerMsgId && action.phoneNumberId) {
+            const typingStart = Date.now();
+            try {
+              await sendWhatsAppTypingIndicator({
+                phoneNumberId: action.phoneNumberId,
+                incomingMessageId: lastCustomerMsgId,
+              });
+              await applyWhatsAppAdaptivePacing({
+                generationStartedAt: typingStart,
+                content: action.content,
+              });
+            } catch {}
+          }
           await sendMessage(action.recipient, action.content, action.phoneNumberId);
           console.info('HUMAN_SUPPORT_' + action.type + ' status=DELIVERED tenant=' + String(action.tenantId).slice(0, 8));
         } catch {

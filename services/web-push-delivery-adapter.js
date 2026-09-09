@@ -14,7 +14,15 @@ export async function createWebPushDeliveryAdapter({ configuration = readWebPush
   return {
     async deliver({ subscription, notification }) {
       try {
-        await webpush.sendNotification(subscription, JSON.stringify({ type: notification.type, deepLink: notification.deepLink, eventId: notification.eventId }), { TTL: 300 });
+        const payload = JSON.stringify({
+          type: notification.type,
+          title: notification.title || 'SamChe Canlı Destek',
+          body: notification.body || (notification.type === 'HUMAN_HANDOFF_REQUESTED' ? 'Yeni canlı destek talebi aktarıldı.' : notification.type?.replaceAll('_', ' ')),
+          deepLink: notification.deepLink,
+          eventId: notification.eventId,
+        });
+        console.info('PUSH_PAYLOAD_DIAGNOSTIC SERVICE_WORKER_PAYLOAD_CREATED=1 has_title=1 has_deeplink=1');
+        await webpush.sendNotification(subscription, payload, { TTL: 300, urgency: 'high' });
         return { status: 'DELIVERED' };
       } catch (error) {
         const statusCode = Number(error?.statusCode ?? 0) || null;

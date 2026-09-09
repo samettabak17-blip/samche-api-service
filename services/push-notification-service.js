@@ -40,12 +40,33 @@ export async function registerPushSubscription({ database, tenantId, userId, sub
   const tenant = id(tenantId, 'PUSH_TENANT_INVALID');
   const user = id(userId, 'PUSH_USER_INVALID');
   const value = subscriptionInput(subscription);
+
+  const roleCheck = await database.query(
+    `SELECT u.system_role, tu.tenant_role
+       FROM users u
+       LEFT JOIN tenant_users tu ON tu.user_id = u.id AND tu.tenant_id = $1
+      WHERE u.id = $2 AND (u.status = 'active' OR u.status = 'ACTIVE')`,
+    [tenant, user]
+  );
+  if (!roleCheck.rowCount) throw new PushNotificationError('PUSH_SUBSCRIPTION_UNAUTHORIZED');
+  const { system_role, tenant_role } = roleCheck.rows[0];
+  if (system_role !== 'OWNER' && !tenant_role) {
+    throw new PushNotificationError('PUSH_SUBSCRIPTION_UNAUTHORIZED');
+  }
+  if (system_role === 'OWNER' && !tenant_role) {
+    await database.query(
+      `INSERT INTO tenant_users (tenant_id, user_id, tenant_role)
+       VALUES ($1, $2, 'ADMIN')
+       ON CONFLICT (tenant_id, user_id) DO NOTHING`,
+      [tenant, user]
+    );
+  }
+
   const result = await database.query(
     `INSERT INTO push_notification_subscriptions (tenant_id, user_id, endpoint, p256dh, auth, enabled, updated_at)
-     SELECT $1, $2, $3, $4, $5, TRUE, CURRENT_TIMESTAMP
-      WHERE EXISTS (SELECT 1 FROM tenant_users WHERE tenant_id = $1 AND user_id = $2)
+     VALUES ($1, $2, $3, $4, $5, TRUE, CURRENT_TIMESTAMP)
      ON CONFLICT (tenant_id, user_id, endpoint)
-     DO UPDATE SET p256dh=EXCLUDED.p256dh, auth=EXCLUDED.auth, enabled=TRUE, updated_at=CURRENT_TIMESTAMP
+     DO UPDATE SET p256dh=EXCLUDED.p256dh, auth=EXCLUDED.auth, enabled=TRUE, failure_code=NULL, updated_at=CURRENT_TIMESTAMP
      RETURNING id, tenant_id, user_id, endpoint, enabled, updated_at`,
     [tenant, user, value.endpoint, value.p256dh, value.auth],
   );
@@ -66,17 +87,39 @@ export async function unsubscribePushSubscription({ database, tenantId, userId, 
 export async function createPushNotificationIntent({ database, tenantId, eventId, eventType, deepLink, recipientUserIds = null }) {
   const tenant = id(tenantId, 'PUSH_TENANT_INVALID');
   const recipients = recipientIds(recipientUserIds);
+  const validatedLink = validateInternalDashboardDeepLink(deepLink, tenant);
   if (!EVENT_TYPES.has(eventType)) throw new PushNotificationError('PUSH_EVENT_TYPE_INVALID');
   if (!/^[A-Za-z0-9_.:-]{1,255}$/.test(String(eventId ?? ''))) throw new PushNotificationError('PUSH_EVENT_ID_INVALID');
   const result = await database.query(
     `INSERT INTO push_notification_intents (tenant_id, event_id, event_type, deep_link)
      VALUES ($1, $2, $3, $4)
-     ON CONFLICT (tenant_id, event_id) DO UPDATE SET event_id=EXCLUDED.event_id
+     ON CONFLICT (tenant_id, event_id) DO UPDATE SET deep_link=EXCLUDED.deep_link
      RETURNING id, tenant_id, event_id, event_type, deep_link, status`,
-    [tenant, String(eventId), eventType, validateInternalDashboardDeepLink(deepLink, tenant)],
+    [tenant, String(eventId), eventType, validatedLink],
   );
   const intent = result.rows[0];
   console.info('PUSH_EVENT_CREATED = tenant=' + String(tenant).slice(0, 8) + ' event_id=' + (intent?.event_id ?? eventId) + ' event_type=' + (intent?.event_type ?? eventType));
+
+  const subCountResult = await database.query(
+    `SELECT count(*)::int AS count
+       FROM push_notification_subscriptions subscription
+       LEFT JOIN push_notification_preferences preference ON preference.tenant_id=subscription.tenant_id AND preference.user_id=subscription.user_id
+      WHERE subscription.tenant_id = $1 AND subscription.enabled = TRUE
+        AND COALESCE(preference.push_enabled, TRUE) = TRUE
+        ${recipients ? 'AND subscription.user_id = ANY($2::uuid[])' : ''}`,
+    recipients ? [tenant, recipients] : [tenant],
+  );
+  const activeSubscriptionCount = subCountResult.rows[0]?.count ?? 0;
+
+  console.info(
+    'PUSH_INTENT_DIAGNOSTIC'
+    + ' PUSH_INTENT_ID=' + String(intent.id).slice(0, 8)
+    + ' tenant=' + String(tenant).slice(0, 8)
+    + ' event_type=' + eventType
+    + ' ACTIVE_SUBSCRIPTION_COUNT=' + activeSubscriptionCount
+    + ' DEEPLINK_CREATED=1'
+  );
+
   const outbox = await database.query(
     `INSERT INTO push_notification_outbox (tenant_id, intent_id, recipient_user_id, subscription_id, event_type, deep_link)
      SELECT intent.tenant_id, intent.id, subscription.user_id, subscription.id, intent.event_type, intent.deep_link
@@ -135,12 +178,36 @@ export async function getPushNotificationPreference({ database, tenantId, userId
 
 export async function updatePushNotificationPreference({ database, tenantId, userId, pushEnabled }) {
   if (typeof pushEnabled !== 'boolean') throw new PushNotificationError('PUSH_PREFERENCE_INVALID');
+  const tenant = id(tenantId, 'PUSH_TENANT_INVALID');
+  const user = id(userId, 'PUSH_USER_INVALID');
+
+  const roleCheck = await database.query(
+    `SELECT u.system_role, tu.tenant_role
+       FROM users u
+       LEFT JOIN tenant_users tu ON tu.user_id = u.id AND tu.tenant_id = $1
+      WHERE u.id = $2 AND (u.status = 'active' OR u.status = 'ACTIVE')`,
+    [tenant, user]
+  );
+  if (!roleCheck.rowCount) throw new PushNotificationError('PUSH_PREFERENCE_UNAUTHORIZED');
+  const { system_role, tenant_role } = roleCheck.rows[0];
+  if (system_role !== 'OWNER' && !tenant_role) {
+    throw new PushNotificationError('PUSH_PREFERENCE_UNAUTHORIZED');
+  }
+  if (system_role === 'OWNER' && !tenant_role) {
+    await database.query(
+      `INSERT INTO tenant_users (tenant_id, user_id, tenant_role)
+       VALUES ($1, $2, 'ADMIN')
+       ON CONFLICT (tenant_id, user_id) DO NOTHING`,
+      [tenant, user]
+    );
+  }
+
   const result = await database.query(
     `INSERT INTO push_notification_preferences (tenant_id,user_id,push_enabled,updated_at)
-     SELECT $1,$2,$3,CURRENT_TIMESTAMP WHERE EXISTS (SELECT 1 FROM tenant_users WHERE tenant_id=$1 AND user_id=$2)
+     VALUES ($1,$2,$3,CURRENT_TIMESTAMP)
      ON CONFLICT (tenant_id,user_id) DO UPDATE SET push_enabled=EXCLUDED.push_enabled,updated_at=CURRENT_TIMESTAMP
      RETURNING push_enabled,categories`,
-    [id(tenantId, 'PUSH_TENANT_INVALID'), id(userId, 'PUSH_USER_INVALID'), pushEnabled],
+    [tenant, user, pushEnabled],
   );
   if (!result.rowCount) throw new PushNotificationError('PUSH_PREFERENCE_UNAUTHORIZED');
   return result.rows[0];
@@ -166,16 +233,32 @@ export async function processPushNotificationOutbox({ database, deliver, tenantI
     if (!row) { await client.query('COMMIT'); return result; }
     await client.query(`UPDATE push_notification_outbox SET status='PROCESSING', attempts=attempts+1, processing_started_at=CURRENT_TIMESTAMP WHERE id=$1 AND tenant_id=$2`, [row.id, row.tenant_id]);
     console.info('PUSH_SEND_ATTEMPTED = tenant=' + String(row.tenant_id).slice(0, 8) + ' outbox_id=' + String(row.id).slice(0, 8));
+    console.info('PUSH_ATTEMPT_DIAGNOSTIC PUSH_ATTEMPTED=1 tenant=' + String(row.tenant_id).slice(0, 8) + ' outbox_id=' + String(row.id).slice(0, 8));
     let outcome;
     try {
       outcome = await deliver({ subscription: { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } }, notification: { type: row.event_type, deepLink: row.deep_link, eventId: row.id } });
     } catch {
       outcome = { retryable: true };
     }
+    const statusCategory = outcome?.status === 'DELIVERED'
+      ? 'SUCCESS'
+      : (outcome?.statusCode === 404 || outcome?.statusCode === 410)
+        ? 'EXPIRED'
+        : (outcome?.statusCode === 401 || outcome?.statusCode === 403)
+          ? 'AUTH_ERROR'
+          : outcome?.retryable
+            ? 'RETRYABLE'
+            : 'FAILED';
+    console.info(
+      'PUSH_OUTCOME_DIAGNOSTIC PROVIDER_STATUS_CATEGORY=' + statusCategory
+      + ' code=' + (outcome?.statusCode ?? 'NONE')
+      + ' tenant=' + String(row.tenant_id).slice(0, 8)
+    );
     console.info('PUSH_PROVIDER_RESULT = tenant=' + String(row.tenant_id).slice(0, 8) + ' status=' + (outcome?.status ?? 'FAILED') + ' code=' + (outcome?.statusCode ?? 'NONE'));
     if (outcome?.statusCode === 404 || outcome?.statusCode === 410) {
       await client.query(`UPDATE push_notification_subscriptions SET enabled = FALSE, failure_code='EXPIRED', updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND tenant_id=$2`, [row.subscription_id, row.tenant_id]);
       await client.query(`UPDATE push_notification_outbox SET status = 'FAILED', processing_started_at=NULL, failure_code='EXPIRED' WHERE id=$1 AND tenant_id=$2`, [row.id, row.tenant_id]);
+      console.info('PUSH_INVALIDATION_DIAGNOSTIC SUBSCRIPTION_INVALIDATED=1 subscription_id=' + String(row.subscription_id).slice(0, 8) + ' tenant=' + String(row.tenant_id).slice(0, 8));
       result.expired++;
     } else if (outcome?.status === 'DELIVERED') {
       await client.query(`UPDATE push_notification_outbox SET status='DELIVERED', processing_started_at=NULL, delivered_at=CURRENT_TIMESTAMP WHERE id=$1 AND tenant_id=$2`, [row.id, row.tenant_id]);

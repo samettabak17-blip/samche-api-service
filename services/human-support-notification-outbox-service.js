@@ -59,7 +59,11 @@ export async function processHumanSupportNotificationOutbox({ database = null, d
       } else if (outcome?.retryable) {
         await client.query(`UPDATE human_support_notification_outbox SET status = 'RETRY' WHERE id = $1 AND tenant_id = $2`, [row.id, row.tenant_id]); result.retried++;
       } else { await client.query(`UPDATE human_support_notification_outbox SET status = 'FAILED' WHERE id = $1 AND tenant_id = $2`, [row.id, row.tenant_id]); result.failed++; }
-    } catch { await client.query(`UPDATE human_support_notification_outbox SET status = 'RETRY' WHERE id = $1 AND tenant_id = $2`, [row.id, row.tenant_id]); result.retried++; }
+    } catch (error) {
+      console.error('HUMAN_SUPPORT_NOTIFICATION_DELIVER_ERROR', error?.message ?? error);
+      await client.query(`UPDATE human_support_notification_outbox SET status = 'RETRY' WHERE id = $1 AND tenant_id = $2`, [row.id, row.tenant_id]);
+      result.retried++;
+    }
     await client.query('COMMIT'); return result;
   } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; } finally { client.release(); }
 }

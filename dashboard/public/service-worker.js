@@ -18,15 +18,36 @@ self.addEventListener('message', (event) => {
 self.addEventListener('activate', (event) => event.waitUntil(clients.claim()));
 
 self.addEventListener('push', (event) => {
-  const payload = event.data?.json?.() ?? {};
-  const type = typeof payload.type === 'string' ? payload.type.slice(0, 64) : 'NOTIFICATION';
-  const deepLink = safeDeepLink(payload.deepLink);
-  event.waitUntil(self.registration.showNotification('SamChe', {
-    body: type.replaceAll('_', ' '),
-    icon: '/samche-logo.png',
-    badge: '/samche-logo.png',
-    data: { deepLink },
-  }));
+  event.waitUntil((async () => {
+    let payload = {};
+    try {
+      payload = event.data ? event.data.json() : {};
+    } catch {
+      try {
+        payload = { body: event.data ? event.data.text() : '' };
+      } catch {
+        payload = {};
+      }
+    }
+    const type = typeof payload.type === 'string' ? payload.type.slice(0, 64) : 'NOTIFICATION';
+    const title = payload.title || 'SamChe Canlı Destek';
+    const body = payload.body || (type === 'HUMAN_HANDOFF_REQUESTED' ? 'Yeni canlı destek talebi aktarıldı.' : type.replaceAll('_', ' '));
+    const deepLink = safeDeepLink(payload.deepLink);
+    const options = {
+      body,
+      icon: '/samche-logo.png',
+      badge: '/samche-logo.png',
+      data: { deepLink },
+      tag: payload.eventId || 'samche-live-support',
+      renotify: true,
+      requireInteraction: true,
+    };
+    try {
+      await self.registration.showNotification(title, options);
+    } catch {
+      await self.registration.showNotification('SamChe', { body });
+    }
+  })());
 });
 
 self.addEventListener('notificationclick', (event) => {

@@ -2,7 +2,8 @@ import crypto from 'crypto';
 import { randomUUID } from 'node:crypto';
 import pool, { query } from '../config/db.js';
 import { canOperateConversation } from './conversation-permissions.js';
-import { deliverWhatsAppText, deliverWhatsAppMedia, WhatsAppDeliveryError } from './whatsapp-delivery-service.js';
+import { deliverWhatsAppText, deliverWhatsAppMedia, WhatsAppDeliveryError, sendWhatsAppTypingIndicator } from './whatsapp-delivery-service.js';
+import { applyWhatsAppAdaptivePacing } from './whatsapp-response-pacing-service.js';
 import { whatsappIntegrationKey } from './whatsapp-multimodal-service.js';
 import { ensureConversationCrmIdentity } from './crm-lead-service.js';
 import { queueLeadQualification } from './lead-qualification-runner.js';
@@ -344,6 +345,8 @@ export async function operateConversation({
   action,
   reason = null,
   deliverWhatsApp = deliverWhatsAppText,
+  sendTyping = sendWhatsAppTypingIndicator,
+  applyPacing = applyWhatsAppAdaptivePacing,
 } = {}) {
   const client = await (database ?? pool).connect();
   try {
@@ -438,10 +441,16 @@ export async function operateConversation({
           throw new ConversationOperationError(409, 'WhatsApp human delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
         }
         try {
-          await deliverWhatsApp({
-            phoneNumberId: integration.external_channel_id,
-            recipient: takenOver.customer_external_id,
+          await deliverWhatsAppLifecycleNotice({
+            client,
+            tenantId,
+            conversationId,
+            conversation: takenOver,
             content,
+            integration,
+            deliverWhatsApp,
+            sendTyping,
+            applyPacing,
           });
         } catch (error) {
           const code = error instanceof WhatsAppDeliveryError ? error.code : 'WHATSAPP_DELIVERY_FAILED';
@@ -499,10 +508,16 @@ export async function operateConversation({
           throw new ConversationOperationError(409, 'WhatsApp human delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
         }
         try {
-          await deliverWhatsApp({
-            phoneNumberId: integration.external_channel_id,
-            recipient: returned.customer_external_id,
+          await deliverWhatsAppLifecycleNotice({
+            client,
+            tenantId,
+            conversationId,
+            conversation: returned,
             content,
+            integration,
+            deliverWhatsApp,
+            sendTyping,
+            applyPacing,
           });
         } catch (error) {
           const code = error instanceof WhatsAppDeliveryError ? error.code : 'WHATSAPP_DELIVERY_FAILED';
@@ -578,6 +593,70 @@ export async function operateConversation({
   } finally {
     client.release();
   }
+}
+
+async function deliverWhatsAppLifecycleNotice({
+  client,
+  tenantId,
+  conversationId,
+  conversation,
+  content,
+  integration,
+  deliverWhatsApp,
+  sendTyping,
+  applyPacing,
+}) {
+  let lastCustomerMessageId = null;
+  try {
+    const lastCustomerMsg = await client.query(
+      `SELECT external_message_id FROM conversation_messages
+        WHERE tenant_id = $1 AND conversation_id = $2 AND sender_type = 'CUSTOMER' AND external_message_id IS NOT NULL
+        ORDER BY created_at DESC, id DESC LIMIT 1`,
+      [tenantId, conversationId]
+    );
+    lastCustomerMessageId = lastCustomerMsg.rows?.[0]?.external_message_id ?? null;
+  } catch (err) {
+    console.warn('LIFECYCLE_TYPING_WAMID_LOOKUP_FAILED', err?.message);
+  }
+
+  let typingAttempted = false;
+  let typingSucceeded = false;
+  if (lastCustomerMessageId && typeof sendTyping === 'function') {
+    typingAttempted = true;
+    const typingStartedAt = Date.now();
+    try {
+      const outcome = await sendTyping({
+        phoneNumberId: integration.external_channel_id,
+        incomingMessageId: lastCustomerMessageId,
+      });
+      typingSucceeded = outcome?.ok !== false;
+    } catch (err) {
+      console.warn('LIFECYCLE_TYPING_NON_BLOCKING_ERROR', err?.message);
+    }
+    if (typingSucceeded && typeof applyPacing === 'function') {
+      try {
+        await applyPacing({
+          generationStartedAt: typingStartedAt,
+          content,
+        });
+      } catch {}
+    }
+  }
+
+  console.info(
+    'LIFECYCLE_TYPING_DIAGNOSTIC'
+    + ' tenant=' + String(tenantId).slice(0, 8)
+    + ' conversation=' + String(conversationId).slice(0, 8)
+    + ' typing_attempted=' + (typingAttempted ? '1' : '0')
+    + ' typing_succeeded=' + (typingSucceeded ? '1' : '0')
+    + ' wamid=' + (lastCustomerMessageId ? 'RESOLVED' : 'NONE')
+  );
+
+  return deliverWhatsApp({
+    phoneNumberId: integration.external_channel_id,
+    recipient: conversation.customer_external_id,
+    content,
+  });
 }
 
 async function loadWhatsAppHumanSupportNotice(client, conversation, templateKey) {

@@ -1,6 +1,7 @@
 import axios from 'axios';
 import FormData from 'form-data';
 import https from 'https';
+import { applyWhatsAppAdaptivePacing } from './whatsapp-response-pacing-service.js';
 
 export class WhatsAppDeliveryError extends Error {
   constructor(code, message = 'WhatsApp delivery failed', diagnostic = {}) {
@@ -294,4 +295,109 @@ export async function sendWhatsAppTypingIndicator({
     );
   }
 }
+
+/**
+ * Canonical platform delivery abstraction for automated WhatsApp messages.
+ * Initiates native typing and natural pacing before outbound delivery when an inbound
+ * message context is available, failing gracefully if typing cannot be presented.
+ */
+export async function deliverAutomatedWhatsAppMessageWithTyping({
+  database = null,
+  tenantId = null,
+  conversationId = null,
+  phoneNumberId,
+  recipient,
+  content,
+  incomingMessageId = null,
+  sendTyping = sendWhatsAppTypingIndicator,
+  deliverText = deliverWhatsAppText,
+  applyPacing = applyWhatsAppAdaptivePacing,
+  logger = console,
+}) {
+  const startedAt = Date.now();
+  let resolvedMessageId = incomingMessageId;
+
+  if (!resolvedMessageId && database?.query && tenantId && conversationId) {
+    try {
+      const result = await database.query(
+        `SELECT external_message_id
+           FROM conversation_messages
+          WHERE tenant_id = $1
+            AND conversation_id = $2
+            AND sender_type = 'CUSTOMER'
+            AND external_message_id IS NOT NULL
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1`,
+        [tenantId, conversationId]
+      );
+      if (result.rows?.[0]?.external_message_id) {
+        resolvedMessageId = result.rows[0].external_message_id;
+      }
+    } catch (err) {
+      logger.warn('LIFECYCLE_TYPING_WAMID_LOOKUP_FAILED', err?.message);
+    }
+  }
+
+  let typingAttempted = false;
+  let typingSucceeded = false;
+  let typingProviderStatus = null;
+
+  if (resolvedMessageId && phoneNumberId) {
+    typingAttempted = true;
+    try {
+      const outcome = await sendTyping({
+        phoneNumberId,
+        incomingMessageId: resolvedMessageId,
+      });
+      typingSucceeded = outcome?.ok !== false;
+      typingProviderStatus = outcome?.providerStatus ?? 200;
+    } catch (err) {
+      typingSucceeded = false;
+      typingProviderStatus = err?.providerStatus ?? (err instanceof WhatsAppDeliveryError ? 400 : 500);
+      logger.warn('LIFECYCLE_TYPING_INDICATOR_NON_BLOCKING_ERROR', err?.message);
+    }
+  }
+
+  let delayedMs = 0;
+  if (typingAttempted && typingSucceeded) {
+    try {
+      const pacingOutcome = await applyPacing({
+        generationStartedAt: startedAt,
+        content,
+      });
+      delayedMs = pacingOutcome?.delayedMs ?? 0;
+    } catch {
+      delayedMs = 0;
+    }
+  }
+
+  const deliveryResult = await deliverText({
+    phoneNumberId,
+    recipient,
+    content,
+  });
+
+  logger.info(
+    'AUTOMATED_WHATSAPP_DELIVERY_DIAGNOSTIC'
+    + ' tenant=' + String(tenantId ?? 'unknown').slice(0, 8)
+    + ' conversation=' + String(conversationId ?? 'unknown').slice(0, 8)
+    + ' typing_attempted=' + (typingAttempted ? '1' : '0')
+    + ' typing_succeeded=' + (typingSucceeded ? '1' : '0')
+    + ' typing_status=' + (typingProviderStatus ?? 'SKIPPED')
+    + ' wamid=' + (resolvedMessageId ? 'RESOLVED' : 'NONE')
+    + ' pacing_ms=' + delayedMs
+  );
+
+  return {
+    ...deliveryResult,
+    typing: {
+      attempted: typingAttempted,
+      succeeded: typingSucceeded,
+      providerStatus: typingProviderStatus,
+      wamidResolved: Boolean(resolvedMessageId),
+      delayedMs,
+    },
+  };
+}
+
 

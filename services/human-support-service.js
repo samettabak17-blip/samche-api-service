@@ -76,9 +76,15 @@ export async function resolveCanonicalHumanSupportOperator({ client, tenantId, c
       const roleUsers = await client.query(
         `SELECT u.id FROM users u
            JOIN tenant_users tu ON tu.user_id = u.id
+           LEFT JOIN (
+             SELECT user_id, count(*)::int AS sub_count
+               FROM push_notification_subscriptions
+              WHERE tenant_id = $1 AND enabled = TRUE
+              GROUP BY user_id
+           ) pns ON pns.user_id = u.id
           WHERE tu.tenant_id = $1 AND tu.tenant_role = $2
             AND (u.status = 'active' OR u.status = 'ACTIVE')
-          ORDER BY tu.created_at ASC, u.id ASC
+          ORDER BY (COALESCE(pns.sub_count, 0) > 0) DESC, tu.created_at ASC, u.id ASC
           LIMIT 1`,
         [tenantId, targetRole]
       );
@@ -90,8 +96,15 @@ export async function resolveCanonicalHumanSupportOperator({ client, tenantId, c
     `SELECT u.id, u.system_role, tu.tenant_role
        FROM users u
        JOIN tenant_users tu ON tu.user_id = u.id
+       LEFT JOIN (
+         SELECT user_id, count(*)::int AS sub_count
+           FROM push_notification_subscriptions
+          WHERE tenant_id = $1 AND enabled = TRUE
+          GROUP BY user_id
+       ) pns ON pns.user_id = u.id
       WHERE tu.tenant_id = $1 AND (u.status = 'active' OR u.status = 'ACTIVE')
-      ORDER BY CASE
+      ORDER BY (COALESCE(pns.sub_count, 0) > 0) DESC,
+               CASE
                  WHEN tu.tenant_role = 'ADMIN' THEN 1
                  WHEN tu.tenant_role = 'OWNER' THEN 2
                  WHEN tu.tenant_role = 'AGENT' THEN 3
@@ -358,11 +371,16 @@ export async function triggerImmediateHumanSupportNotificationPipeline({
       },
     });
     if (typeof deliverWebPush === 'function') {
-      await processPushNotificationOutbox({
-        database: db,
-        tenantId,
-        deliver: deliverWebPush,
-      });
+      for (let pass = 0; pass < 10; pass++) {
+        const outboxResult = await processPushNotificationOutbox({
+          database: db,
+          tenantId,
+          deliver: deliverWebPush,
+        });
+        if (!outboxResult.delivered && !outboxResult.failed && !outboxResult.expired && !outboxResult.retried) {
+          break;
+        }
+      }
     }
   } catch (error) {
     console.error('IMMEDIATE_HUMAN_SUPPORT_PUSH_PIPELINE error=' + (error?.code ?? error?.message ?? 'UNKNOWN'));
