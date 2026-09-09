@@ -9,6 +9,12 @@ import {
   transferWhatsAppChannelOwnership,
   WhatsAppChannelOwnershipError,
 } from '../services/whatsapp-channel-ownership-service.js';
+import {
+  ensureWebChatIntegration,
+  getWebChatIntegrationForTenant,
+  TenantWebChatProvisioningError,
+} from '../services/tenant-web-chat-provisioning-service.js';
+
 
 const router = express.Router();
 router.use(authenticateToken);
@@ -56,6 +62,29 @@ const channelOwnershipErrorResponse = (req, res, error) => {
   res.status(statuses[error.code] ?? 400).json(body);
   return true;
 };
+const webChatProvisioningErrorResponse = (req, res, error) => {
+  if (!(error instanceof TenantWebChatProvisioningError)) return false;
+  const statuses = {
+    WEB_CHAT_PROVISIONING_TENANT_NOT_FOUND: 404,
+    WEB_CHAT_PROVISIONING_ASSISTANT_NOT_FOUND: 404,
+    WEB_CHAT_PROVISIONING_CHANNEL_NOT_FOUND: 404,
+    WEB_CHAT_PROVISIONING_TENANT_INACTIVE: 400,
+    WEB_CHAT_PROVISIONING_ASSISTANT_INACTIVE: 400,
+    WEB_CHAT_PROVISIONING_CHANNEL_TYPE_MISMATCH: 400,
+    WEB_CHAT_PROVISIONING_TENANT_INVALID: 400,
+    WEB_CHAT_PROVISIONING_ASSISTANT_INVALID: 400,
+    WEB_CHAT_PROVISIONING_CHANNEL_INVALID: 400,
+    WEB_CHAT_PROVISIONING_WIDGET_KEY_INVALID: 400,
+    WEB_CHAT_INTEGRATION_KEY_CONFLICT: 409,
+    WEB_CHAT_PROVISIONING_DATABASE_INVALID: 500,
+  };
+  res.status(statuses[error.code] ?? 400).json({
+    error: error.code,
+    message: error.message,
+  });
+  return true;
+};
+
 const channelBody = async (req, res) => {
   const { channel_type, display_name, external_channel_id = null, assistant_id = null, status = 'active' } = req.body;
   if (!['WEB_CHAT','WHATSAPP'].includes(channel_type) || typeof display_name !== 'string' || !display_name.trim() || !['active','inactive'].includes(status)) {
@@ -106,25 +135,72 @@ router.post('/:tenantId/channels', requireTenantAccess, requireTenantAdmin, asyn
   if (!body) return;
   try {
     const [channelType, displayName, externalChannelId, assistantId, status] = body;
-    const channel = channelType === 'WHATSAPP'
-      ? await configureWhatsAppChannel({
+    let channel;
+    if (channelType === 'WHATSAPP') {
+      channel = await configureWhatsAppChannel({
         database: req.app?.locals?.database || pool,
         tenantId: req.verified_tenant_id,
         displayName,
         externalChannelId,
         assistantId,
         status,
-      })
-      : (await (req.app?.locals?.query || query)(
+      });
+    } else if (channelType === 'WEB_CHAT') {
+      const result = await ensureWebChatIntegration({
+        database: req.app?.locals?.database || pool,
+        tenantId: req.verified_tenant_id,
+        assistantId,
+        displayName,
+      });
+      channel = result.channel;
+    } else {
+      channel = (await (req.app?.locals?.query || query)(
         'INSERT INTO tenant_channels(channel_type,display_name,external_channel_id,assistant_id,status,tenant_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
         [...body, req.verified_tenant_id]
       )).rows[0];
+    }
     return res.status(201).json(channel);
   } catch (error) {
     if (channelOwnershipErrorResponse(req, res, error)) return;
+    if (webChatProvisioningErrorResponse(req, res, error)) return;
     return res.status(error?.code === '23505' ? 409 : 500).json({
       error: error?.code === '23505' ? 'CHANNEL_ALREADY_EXISTS' : 'Server error',
     });
+  }
+});
+router.get('/:tenantId/channels/web-chat', requireTenantAccess, async (req, res) => {
+  if (!tenant(req, res)) return;
+  try {
+    const integration = await getWebChatIntegrationForTenant({
+      database: req.app?.locals?.database || pool,
+      tenantId: req.verified_tenant_id,
+    });
+    if (!integration) {
+      return res.status(404).json({ error: 'WEB_CHAT_NOT_CONFIGURED', message: 'Web Chat is not configured for this tenant' });
+    }
+    return res.json(integration);
+  } catch (error) {
+    if (webChatProvisioningErrorResponse(req, res, error)) return;
+    console.error('Fetch web chat channel error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+router.post('/:tenantId/channels/web-chat', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  if (!tenant(req, res)) return;
+  const { assistant_id: assistantId = null, widget_key: widgetKey = null, display_name: displayName = null } = req.body ?? {};
+  try {
+    const integration = await ensureWebChatIntegration({
+      database: req.app?.locals?.database || pool,
+      tenantId: req.verified_tenant_id,
+      assistantId,
+      widgetKey,
+      displayName,
+    });
+    return res.status(200).json(integration);
+  } catch (error) {
+    if (webChatProvisioningErrorResponse(req, res, error)) return;
+    console.error('Provision web chat channel error:', error);
+    return res.status(500).json({ error: 'Server error' });
   }
 });
 // Cross-tenant channel transfer requires canonical platform-level administrative authority.

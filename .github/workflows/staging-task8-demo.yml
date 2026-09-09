@@ -1,0 +1,88 @@
+name: Staging Task 8 Demo & Web Chat Runtime Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      bootstrap_staging:
+        description: 'Execute idempotent database bootstrap for Task 8 demo tenant and widget key'
+        type: boolean
+        default: true
+        required: false
+      run_ai_probes:
+        description: 'Execute live AI model grounding & prompt injection probes'
+        type: boolean
+        default: true
+        required: false
+      staging_url:
+        description: 'Target staging API base URL'
+        type: string
+        default: 'https://samche-api-staging.onrender.com'
+        required: false
+  push:
+    branches: [staging]
+    paths:
+      - '.github/workflows/staging-task8-demo.yml'
+      - 'public/task8-demo/**'
+      - 'scripts/bootstrap_task8_demo.js'
+      - 'scripts/verify_staging_task8_demo.js'
+      - 'services/tenant-web-chat-provisioning-service.js'
+      - 'services/public-web-chat-integration-service.js'
+
+permissions:
+  contents: read
+
+jobs:
+  verify_contracts:
+    name: Verify Web Chat & Fixture Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Run unit & contract tests
+        run: >
+          node --test
+          tests/task8-demo-fixture.test.js
+          tests/tenant-web-chat-provisioning-service.test.js
+          tests/public-web-chat-integration-service.test.js
+          tests/public-web-chat-runtime-integration.test.js
+          tests/web-chat-page-context-runtime.test.js
+
+  staging_bootstrap_and_verification:
+    name: Staging Bootstrap and Live Runtime Verification
+    needs: verify_contracts
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Bootstrap Task 8 Demo Tenant & Web Chat Widget
+        if: github.event_name != 'workflow_dispatch' || inputs.bootstrap_staging != false
+        env:
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          TASK8_DEMO_WIDGET_KEY: 'wch_staging_task8_demo'
+        run: node scripts/bootstrap_task8_demo.js
+
+      - name: Run Live Staging Runtime Verification
+        env:
+          STAGING_SERVICE_URL: ${{ inputs.staging_url || 'https://samche-api-staging.onrender.com' }}
+          TASK8_DEMO_WIDGET_KEY: 'wch_staging_task8_demo'
+          RUN_AI_PROBES: ${{ inputs.run_ai_probes != false }}
+        run: node scripts/verify_staging_task8_demo.js

@@ -415,6 +415,9 @@ app.use(['/guide', '/:slug/guide'], async (req, res, next) => {
 
 app.use('/public', express.static('public'));
 app.get('/web-chat.js', (req, res) => res.sendFile(path.resolve('public', 'web-chat.js')));
+app.use('/task8-demo', express.static(path.resolve('public', 'task8-demo')));
+app.get(['/task8-demo', '/task8-demo/*'], (req, res) => res.sendFile(path.resolve('public', 'task8-demo', 'index.html')));
+
 
 
 // ==========================================
@@ -1581,7 +1584,10 @@ app.post("/chat", chatPostHandler = async (req, res) => {
     return res.status(err.status || 500).json({ error: "Could not generate chat response." });
   }
 });
-app.post("/:slug/chat", (req, res) => chatPostHandler(req, res));
+app.post("/:slug/chat", (req, res, next) => {
+  if (req.params.slug === 'api') return next();
+  return chatPostHandler(req, res);
+});
 
 
 

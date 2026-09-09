@@ -18,3 +18,11 @@ export async function resolvePublicWebChatIntegration({ database, widgetKey }) {
   return integration;
 }
 
+export {
+  TenantWebChatProvisioningError,
+  ensureWebChatIntegration,
+  getWebChatIntegrationForTenant,
+  ensureTenantWebChatPersona,
+} from './tenant-web-chat-provisioning-service.js';
+
+
