@@ -104,7 +104,7 @@ test('real PostgreSQL: complete canonical human support lifecycle with multi-lev
     );
     const convAId = convA.rows[0].id;
 
-    // STEP 1: Customer requests human support
+    // STEP 1: Customer requests human support - automatically assigned to Admin A
     const handoff = await requestCustomerHumanSupport({
       tenantId: tenantAId,
       conversationId: convAId,
@@ -115,6 +115,7 @@ test('real PostgreSQL: complete canonical human support lifecycle with multi-lev
     assert.equal(handoff.duplicate, false);
     assert.equal(handoff.conversation.handling_mode, 'HUMAN');
     assert.equal(handoff.conversation.human_attention_state, 'REQUESTED');
+    assert.equal(handoff.conversation.assigned_agent_user_id, userAId);
 
     // STEP 2: Claim due escalation (Level 1: ASSIGNED_OWNER claims)
     const claimedL1 = await claimDueHumanSupportEscalations({ database, now: new Date() });
@@ -123,8 +124,7 @@ test('real PostgreSQL: complete canonical human support lifecycle with multi-lev
     assert.equal(claimedL1Tenant[0].level, 1);
     assert.equal(claimedL1Tenant[0].recipientRule, 'ASSIGNED_OWNER');
 
-    // STEP 3: Outbox processes Level 1 - unassigned conversation has 0 recipients.
-    // It must record no recipients and advance escalation next_due_at immediately!
+    // STEP 3: Outbox processes Level 1 - resolves Admin A and enqueues push notification immediately!
     const outboxL1 = await processHumanSupportNotificationOutbox({
       database,
       tenantId: tenantAId,
@@ -134,29 +134,9 @@ test('real PostgreSQL: complete canonical human support lifecycle with multi-lev
         return { status: 'DELIVERED' };
       },
     });
-    assert.equal(outboxL1.noRecipients, 1);
-    assert.equal(outboxL1.delivered, 0);
+    assert.equal(outboxL1.delivered, 1);
 
-    // STEP 4: Claim due escalation again - Level 2 (ROLE: ADMIN) claims immediately!
-    const claimedL2 = await claimDueHumanSupportEscalations({ database, now: new Date() });
-    const claimedL2Tenant = claimedL2.filter((r) => r.tenantId === tenantAId);
-    assert.equal(claimedL2Tenant.length, 1);
-    assert.equal(claimedL2Tenant[0].level, 2);
-    assert.equal(claimedL2Tenant[0].recipientRule, 'ROLE');
-
-    // STEP 5: Outbox processes Level 2 - resolves Admin A and enqueues push notification
-    const outboxL2 = await processHumanSupportNotificationOutbox({
-      database,
-      tenantId: tenantAId,
-      resolveRecipients: (input) => resolveHumanSupportRecipients({ database, ...input }),
-      deliver: async ({ recipients, tenantId, conversationId, outboxId }) => {
-        await enqueueHumanHandoffPushNotification({ database, tenantId, conversationId, handoffOutboxId: outboxId, recipients });
-        return { status: 'DELIVERED' };
-      },
-    });
-    assert.equal(outboxL2.delivered, 1);
-
-    // STEP 6: Process push notification outbox
+    // STEP 4: Process push notification outbox - delivered to Admin A
     const deliveredEndpoints = [];
     const pushResult = await processPushNotificationOutbox({
       database,
@@ -170,6 +150,14 @@ test('real PostgreSQL: complete canonical human support lifecycle with multi-lev
     });
     assert.equal(pushResult.delivered, 1);
     assert.deepEqual(deliveredEndpoints, ['https://push.example.test/' + suffix + '/a']);
+
+    // STEP 5: Escalation chain: after 300s timeout without takeover, Level 2 (ROLE: ADMIN) claims!
+    const futureTime = new Date(Date.now() + 301000);
+    const claimedL2 = await claimDueHumanSupportEscalations({ database, now: futureTime });
+    const claimedL2Tenant = claimedL2.filter((r) => r.tenantId === tenantAId);
+    assert.equal(claimedL2Tenant.length, 1);
+    assert.equal(claimedL2Tenant[0].level, 2);
+    assert.equal(claimedL2Tenant[0].recipientRule, 'ROLE');
 
     // STEP 7: Tenant isolation: verify Tenant B never received or saw Tenant A's push
     const crossTenantOutbox = await client.query(

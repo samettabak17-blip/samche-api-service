@@ -25,7 +25,7 @@ import knowledgeIntelligenceRoutes from "./routes/knowledgeIntelligenceRoutes.js
 import guideExperienceRoutes from "./routes/guideExperienceRoutes.js";
 import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
-import { claimDueCustomerSupportLifecycle, claimDueHumanSupportEscalations, requestCustomerHumanSupport } from "./services/human-support-service.js";
+import { claimDueCustomerSupportLifecycle, claimDueHumanSupportEscalations, requestCustomerHumanSupport, triggerImmediateHumanSupportNotificationPipeline } from "./services/human-support-service.js";
 import { processHumanSupportNotificationOutbox } from './services/human-support-notification-outbox-service.js';
 import { resolveHumanSupportRecipients } from './services/human-support-recipient-service.js';
 import { enqueueHumanHandoffPushNotification, processPushNotificationOutbox } from './services/push-notification-service.js';
@@ -2200,22 +2200,23 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           console.error('WHATSAPP_HUMAN_SUPPORT_POLICY_UNAVAILABLE source=PLATFORM_DATABASE');
           return;
         }
-        const topicSummary = summarizeWhatsAppHumanSupportTopic({
-          text,
-          conversationHistory: whatsappInbox.conversationHistory,
-          fallback: handoffPolicy.defaultTopic,
-        });
-        const acknowledgement = handoffPolicy.acknowledgement(topicSummary);
+        const acknowledgement = handoffPolicy.acknowledgement();
         const handoff = await requestCustomerHumanSupport({
           tenantId: whatsappInbox.integration.tenant_id,
           conversationId: whatsappInbox.conversation.id,
           acknowledgement,
-          topicSummary,
+          topicSummary: handoffPolicy.defaultTopic,
         });
         if (!handoff.duplicate) {
           await sendMessage(cleanFrom, acknowledgement, whatsappInbox.integration.external_channel_id);
           console.info('LIFECYCLE_MESSAGE_SENT = tenant=' + String(whatsappInbox.integration.tenant_id).slice(0, 8) + ' conversation=' + String(whatsappInbox.conversation.id).slice(0, 8) + ' event_type=human_support_request');
-          claimDueHumanSupportEscalations({ database: pool }).catch(() => {});
+          const pushAdapter = await createWebPushDeliveryAdapter().catch(() => null);
+          triggerImmediateHumanSupportNotificationPipeline({
+            database: pool,
+            tenantId: whatsappInbox.integration.tenant_id,
+            conversationId: whatsappInbox.conversation.id,
+            deliverWebPush: pushAdapter ? (input) => pushAdapter.deliver(input) : null,
+          }).catch(() => {});
         }
         return;
       }

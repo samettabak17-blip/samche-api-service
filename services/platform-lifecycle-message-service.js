@@ -44,7 +44,7 @@ export async function loadPlatformLifecycleMessages({ database }) {
     const body = typeof row.body === 'string' ? row.body.trim() : '';
     const allowed = normalizedAllowedVariables(row.allowed_variables);
     const used = variablesIn(body);
-    if (!body || used.some((name) => !allowed.includes(name)) || allowed.some((name) => name !== 'TOPIC')) {
+    if (!body || used.some((name) => !allowed.includes(name))) {
       throw new PlatformLifecycleMessageError('PLATFORM_LIFECYCLE_TEMPLATE_INVALID');
     }
     templates[row.message_key] ??= {};
@@ -80,13 +80,16 @@ export async function resolvePlatformHumanSupportPolicy({ database, locale = 'en
   const templates = await loadPlatformLifecycleMessages({ database });
   const language = canonicalLocale(locale);
   const defaultTopic = renderPlatformLifecycleMessage({ templates, key: 'human_support_default_topic', locale: language });
+  const requestTemplate = templates?.human_support_request?.[language] ?? templates?.human_support_request?.en;
   return Object.freeze({
     source: 'PLATFORM_DATABASE',
     language,
     defaultTopic,
     acknowledgement(topic = defaultTopic) {
-      const normalized = typeof topic === 'string' && topic.trim() ? topic.trim().slice(0, 255) : defaultTopic;
-      return renderPlatformLifecycleMessage({ templates, key: 'human_support_request', locale: language, variables: { TOPIC: normalized } });
+      const variables = requestTemplate?.allowed_variables?.includes('TOPIC')
+        ? { TOPIC: typeof topic === 'string' && topic.trim() ? topic.trim().slice(0, 255) : defaultTopic }
+        : {};
+      return renderPlatformLifecycleMessage({ templates, key: 'human_support_request', locale: language, variables });
     },
     lifecycleMessage(event) {
       return renderPlatformLifecycleMessage({ templates, key: event, locale: language });

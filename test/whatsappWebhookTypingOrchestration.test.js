@@ -191,3 +191,110 @@ test('native typing executes repeatedly on every turn of a multi-turn conversati
   assert.match(logOutput, /AI_RESPONSE_PATH=CONTEXTUAL_MULTI_TURN/);
 });
 
+test('full 4-message turn contract proves MESSAGE 1, 2, 3, 4, greeting, knowledge, contextual, fallback, human suppression, and return typing', async () => {
+  const typingDispatches = [];
+
+  // MESSAGE 1: Greeting
+  const msg1 = await orchestrateWhatsAppInboundAiResponse({
+    whatsappInbox: eligibleInbox({ isFirstAssistantResponse: true }),
+    incomingMessageId: 'wamid.MSG_1',
+    sendTyping: async ({ incomingMessageId }) => { typingDispatches.push(incomingMessageId); return { ok: true, providerStatus: 200 }; },
+    typingAttemptNumber: 1,
+    processAiResponse: async () => ({ delivered: true, aiResponsePath: 'DETERMINISTIC_GREETING' }),
+  });
+  assert.equal(msg1.typing.attempted, true);
+  assert.equal(msg1.typing.succeeded, true);
+  assert.equal(msg1.aiResponsePath, 'DETERMINISTIC_GREETING');
+
+  // MESSAGE 2: Knowledge intelligence
+  const msg2 = await orchestrateWhatsAppInboundAiResponse({
+    whatsappInbox: eligibleInbox({
+      isFirstAssistantResponse: false,
+      conversationHistory: [
+        { sender_type: 'CUSTOMER', content: 'Merhaba' },
+        { sender_type: 'ASSISTANT', content: 'Merhaba! Nasıl yardımcı olabilirim?' },
+      ],
+    }),
+    incomingMessageId: 'wamid.MSG_2',
+    sendTyping: async ({ incomingMessageId }) => { typingDispatches.push(incomingMessageId); return { ok: true, providerStatus: 200 }; },
+    typingAttemptNumber: 2,
+    processAiResponse: async () => ({ delivered: true, aiResponsePath: 'KNOWLEDGE_INTELLIGENCE' }),
+  });
+  assert.equal(msg2.typing.attempted, true);
+  assert.equal(msg2.typing.succeeded, true);
+  assert.equal(msg2.aiResponsePath, 'KNOWLEDGE_INTELLIGENCE');
+
+  // MESSAGE 3: Contextual multi-turn follow up
+  const msg3 = await orchestrateWhatsAppInboundAiResponse({
+    whatsappInbox: eligibleInbox({
+      isFirstAssistantResponse: false,
+      conversationHistory: [
+        { sender_type: 'CUSTOMER', content: 'Merhaba' },
+        { sender_type: 'ASSISTANT', content: 'Merhaba! Nasıl yardımcı olabilirim?' },
+        { sender_type: 'CUSTOMER', content: 'Maltepe projesi' },
+        { sender_type: 'ASSISTANT', content: 'Maltepe detayları...' },
+      ],
+    }),
+    incomingMessageId: 'wamid.MSG_3',
+    sendTyping: async ({ incomingMessageId }) => { typingDispatches.push(incomingMessageId); return { ok: true, providerStatus: 200 }; },
+    typingAttemptNumber: 3,
+    processAiResponse: async () => ({ delivered: true, aiResponsePath: 'CONTEXTUAL_MULTI_TURN' }),
+  });
+  assert.equal(msg3.typing.attempted, true);
+  assert.equal(msg3.typing.succeeded, true);
+  assert.equal(msg3.aiResponsePath, 'CONTEXTUAL_MULTI_TURN');
+
+  // MESSAGE 4: Fallback response
+  const msg4 = await orchestrateWhatsAppInboundAiResponse({
+    whatsappInbox: eligibleInbox({
+      isFirstAssistantResponse: false,
+      conversationHistory: [
+        { sender_type: 'CUSTOMER', content: 'Merhaba' },
+        { sender_type: 'ASSISTANT', content: 'Merhaba! Nasıl yardımcı olabilirim?' },
+        { sender_type: 'CUSTOMER', content: 'Maltepe projesi' },
+        { sender_type: 'ASSISTANT', content: 'Maltepe detayları...' },
+        { sender_type: 'CUSTOMER', content: 'Detaylar nedir?' },
+        { sender_type: 'ASSISTANT', content: 'Detaylar...' },
+      ],
+    }),
+    incomingMessageId: 'wamid.MSG_4',
+    sendTyping: async ({ incomingMessageId }) => { typingDispatches.push(incomingMessageId); return { ok: true, providerStatus: 200 }; },
+    typingAttemptNumber: 4,
+    processAiResponse: async () => ({ delivered: true, aiResponsePath: 'UNAVAILABLE_FALLBACK' }),
+  });
+  assert.equal(msg4.typing.attempted, true);
+  assert.equal(msg4.typing.succeeded, true);
+  assert.equal(msg4.aiResponsePath, 'UNAVAILABLE_FALLBACK');
+
+  // During human handling: NO typing, NO AI invocation
+  const humanTurn = await orchestrateWhatsAppInboundAiResponse({
+    whatsappInbox: eligibleInbox({ conversation: { handling_mode: 'HUMAN' } }),
+    incomingMessageId: 'wamid.HUMAN_MODE',
+    sendTyping: async () => { typingDispatches.push('SHOULD_NOT_FIRE'); },
+    processAiResponse: async () => { throw new Error('AI must not run during human mode'); },
+  });
+  assert.equal(humanTurn.suppressed, true);
+
+  // After Return to AI: next inbound activates typing and AI reply resumes
+  const postReturnTurn = await orchestrateWhatsAppInboundAiResponse({
+    whatsappInbox: eligibleInbox({
+      conversation: { handling_mode: 'AI', human_support_closed_at: new Date().toISOString() },
+      conversationHistory: [],
+    }),
+    incomingMessageId: 'wamid.POST_RETURN',
+    sendTyping: async ({ incomingMessageId }) => { typingDispatches.push(incomingMessageId); return { ok: true, providerStatus: 200 }; },
+    typingAttemptNumber: 5,
+    processAiResponse: async () => ({ delivered: true, aiResponsePath: 'POST_RETURN_TO_AI' }),
+  });
+  assert.equal(postReturnTurn.suppressed, false);
+  assert.equal(postReturnTurn.typing.succeeded, true);
+  assert.equal(postReturnTurn.aiResponsePath, 'POST_RETURN_TO_AI');
+
+  assert.deepEqual(typingDispatches, [
+    'wamid.MSG_1',
+    'wamid.MSG_2',
+    'wamid.MSG_3',
+    'wamid.MSG_4',
+    'wamid.POST_RETURN',
+  ]);
+});

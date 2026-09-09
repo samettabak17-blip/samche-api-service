@@ -359,7 +359,8 @@ export async function operateConversation({
     }
 
     const actorUserId = actor.userId;
-    if (action === 'takeover' && conversation.assigned_agent_user_id && conversation.assigned_agent_user_id !== actorUserId) {
+    const isPrivilegedOperator = actor.systemRole === 'OWNER' || actor.tenantRole === 'ADMIN';
+    if (action === 'takeover' && !isPrivilegedOperator && conversation.assigned_agent_user_id && conversation.assigned_agent_user_id !== actorUserId) {
       throw new ConversationOperationError(409, 'Conversation is already handled by another agent', 'CONVERSATION_ALREADY_ASSIGNED');
     }
 
@@ -382,7 +383,7 @@ export async function operateConversation({
 
     if (action === 'takeover') {
       console.info('TAKEOVER_STAGE stage=STARTED tenant=' + String(tenantId).slice(0, 8));
-      if (conversation.handling_mode === 'HUMAN' && conversation.assigned_agent_user_id === actorUserId) {
+      if (conversation.handling_mode === 'HUMAN' && conversation.assigned_agent_user_id === actorUserId && conversation.human_attention_state === 'ACKNOWLEDGED') {
         await client.query('COMMIT');
         return conversation;
       }
@@ -430,7 +431,7 @@ export async function operateConversation({
       console.info('TAKEOVER_STAGE stage=ASSIGNED tenant=' + String(tenantId).slice(0, 8));
       // The customer-request transfer has already been delivered. Only a voluntary
       // manual takeover receives the separate deterministic manual-takeover notice.
-      if (takenOver.channel_type === 'WHATSAPP' && conversation.human_attention_state !== 'REQUESTED' && conversation.human_attention_state !== 'ACKNOWLEDGED') {
+      if (String(takenOver.channel_type ?? '').toUpperCase() === 'WHATSAPP' && conversation.human_attention_state !== 'REQUESTED' && conversation.human_attention_state !== 'ACKNOWLEDGED') {
         const content = await loadWhatsAppHumanSupportNotice(client, takenOver, 'manual_takeover');
         const integration = await loadWhatsAppAgentDelivery(client, takenOver);
         if (!content || !integration) {
@@ -491,7 +492,7 @@ export async function operateConversation({
         `UPDATE human_support_notification_outbox SET status = 'CANCELLED'
          WHERE tenant_id = $1 AND conversation_id = $2 AND status = 'PENDING'`, [tenantId, conversationId]
       );
-      if (returned.channel_type === 'WHATSAPP') {
+      if (String(returned.channel_type ?? '').toUpperCase() === 'WHATSAPP') {
         const content = await loadWhatsAppHumanSupportNotice(client, returned, 'return_to_ai');
         const integration = await loadWhatsAppAgentDelivery(client, returned);
         if (!content || !integration) {
@@ -592,7 +593,24 @@ async function loadWhatsAppHumanSupportNotice(client, conversation, templateKey)
 }
 
 async function loadWhatsAppAgentDelivery(client, conversation) {
-  const rawPhone = String(conversation.external_channel_id ?? '').trim();
+  const channelId = conversation?.channel_id;
+  const tenantId = conversation?.tenant_id ?? conversation?.tenantId;
+  if (!channelId || !tenantId) return null;
+
+  const result = await client.query(
+    `SELECT tc.id AS channel_id, tc.tenant_id, tc.external_channel_id, tc.channel_type, tc.status AS channel_status,
+            ci.id AS integration_id, ci.integration_key, ci.enabled AS integration_enabled
+       FROM tenant_channels tc
+       LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND UPPER(ci.integration_type) = 'WHATSAPP'
+      WHERE tc.id = $1
+        AND tc.tenant_id = $2
+        AND UPPER(tc.channel_type) = 'WHATSAPP'
+        AND LOWER(tc.status) = 'active'`,
+    [channelId, tenantId]
+  );
+  if (result.rowCount < 1) return null;
+  const row = result.rows[0];
+  const rawPhone = String(row.external_channel_id ?? conversation.external_channel_id ?? '').trim();
   let cleanPhone = '';
   try {
     cleanPhone = normalizeWhatsAppExternalId(rawPhone);
@@ -601,39 +619,30 @@ async function loadWhatsAppAgentDelivery(client, conversation) {
   }
   if (!cleanPhone && !rawPhone) return null;
 
-  const result = await client.query(
-    `SELECT tc.external_channel_id, ci.integration_key
-       FROM tenant_channels tc
-       JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id
-       LEFT JOIN ai_assistants a ON a.id = COALESCE(ci.assistant_id, tc.assistant_id) AND a.tenant_id = tc.tenant_id
-      WHERE tc.id = $1
-        AND tc.tenant_id = $2
-        AND tc.channel_type = 'WHATSAPP'
-        AND LOWER(tc.status) = 'active'
-        AND ci.integration_type = 'WHATSAPP'
-        AND ci.enabled = TRUE
-        AND (
-          LOWER(ci.integration_key) = LOWER($3)
-          OR LOWER(ci.integration_key) = LOWER($4)
-          OR LOWER(ci.integration_key) = LOWER($5)
-          OR LOWER(ci.integration_key) = LOWER($6)
-        )
-        AND (a.id IS NULL OR LOWER(a.status) = 'active')
-      LIMIT 2`,
-    [
-      conversation.channel_id,
-      conversation.tenant_id,
-      whatsappIntegrationKey(cleanPhone || rawPhone),
-      `whatsapp:${cleanPhone || rawPhone}`,
-      cleanPhone || rawPhone,
-      `whatsapp:${rawPhone}`,
-    ]
-  );
-  if (result.rowCount !== 1) return null;
-  const row = result.rows[0];
+  const canonicalKey = `whatsapp:${cleanPhone || rawPhone}`;
+  if (!row.integration_id || !row.integration_enabled) {
+    try {
+      await client.query(
+        `INSERT INTO channel_integrations
+           (integration_key, integration_type, tenant_id, channel_id, enabled)
+         VALUES ($1, 'WHATSAPP', $2, $3, TRUE)
+         ON CONFLICT (integration_key)
+         DO UPDATE SET channel_id = EXCLUDED.channel_id,
+                       tenant_id = EXCLUDED.tenant_id,
+                       enabled = TRUE,
+                       updated_at = CURRENT_TIMESTAMP`,
+        [canonicalKey, tenantId, channelId]
+      );
+    } catch {
+      // Non-fatal if another transaction converged it concurrently
+    }
+  }
+
   return {
-    ...row,
-    external_channel_id: cleanPhone || row.external_channel_id,
+    channel_id: channelId,
+    tenant_id: tenantId,
+    external_channel_id: cleanPhone || rawPhone,
+    integration_key: row.integration_key || canonicalKey,
   };
 }
 
@@ -649,11 +658,12 @@ export async function getHumanDeliveryCapability({ tenantId, conversationId, dat
     );
     const conversation = result.rows[0];
     if (!conversation) return null;
-    if (conversation.channel_type === 'SAMCHEGUIDE' || conversation.channel_type === 'WEB_CHAT') {
-      return { channelType: conversation.channel_type, configured: true };
+    const channelType = String(conversation.channel_type ?? '').toUpperCase();
+    if (channelType === 'SAMCHEGUIDE' || channelType === 'WEB_CHAT') {
+      return { channelType, configured: true };
     }
-    if (conversation.channel_type !== 'WHATSAPP') {
-      return { channelType: conversation.channel_type, configured: false };
+    if (channelType !== 'WHATSAPP') {
+      return { channelType, configured: false };
     }
     return {
       channelType: 'WHATSAPP',
@@ -723,7 +733,8 @@ export async function appendAgentMessage({
       conversation.assigned_agent_user_id = actor.userId;
     }
 
-    if (idempotencyKey && conversation.channel_type === 'WHATSAPP') {
+    const isWhatsApp = String(conversation.channel_type ?? '').toUpperCase() === 'WHATSAPP';
+    if (idempotencyKey && isWhatsApp) {
       const existing = await client.query(
         `SELECT * FROM conversation_messages
           WHERE tenant_id = $1 AND conversation_id = $2 AND idempotency_key = $3
@@ -732,12 +743,12 @@ export async function appendAgentMessage({
       );
       if (existing.rows[0]) {
         await client.query('COMMIT');
-        return { duplicate: true, message: existing.rows[0], delivery: conversation.channel_type === 'WHATSAPP' ? 'SENT_TO_WHATSAPP' : 'AVAILABLE_TO_SAMCHEGUIDE' };
+        return { duplicate: true, message: existing.rows[0], delivery: isWhatsApp ? 'SENT_TO_WHATSAPP' : 'AVAILABLE_TO_SAMCHEGUIDE' };
       }
     }
 
     let delivery = 'AVAILABLE_TO_SAMCHEGUIDE';
-    if (conversation.channel_type === 'WHATSAPP') {
+    if (isWhatsApp) {
       const integration = await loadWhatsAppAgentDelivery(client, conversation);
       if (!integration) {
         throw new ConversationOperationError(409, 'WhatsApp delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
@@ -918,7 +929,7 @@ export async function appendAgentMediaMessage({
     }
 
     let deliveryResult = { delivery: 'AVAILABLE_TO_SAMCHEGUIDE', mediaId: null, providerMessageId: null };
-    if (conversation.channel_type === 'WHATSAPP') {
+    if (String(conversation.channel_type ?? '').toUpperCase() === 'WHATSAPP') {
       const integration = await loadWhatsAppAgentDelivery(client, conversation);
       if (!integration) throw new ConversationOperationError(409, 'WhatsApp delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
       try {

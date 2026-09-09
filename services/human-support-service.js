@@ -1,4 +1,5 @@
 import { loadPlatformLifecycleMessages, renderPlatformLifecycleMessage } from './platform-lifecycle-message-service.js';
+import { canOperateConversation } from './conversation-permissions.js';
 
 async function defaultDatabase() {
   return (await import('../config/db.js')).default;
@@ -27,6 +28,104 @@ async function audit(client, { tenantId, conversationId, eventType, metadata = {
   );
 }
 
+export async function resolveCanonicalHumanSupportOperator({ client, tenantId, conversationId = null }) {
+  if (conversationId) {
+    const existing = await client.query(
+      `SELECT c.assigned_agent_user_id, u.system_role, tu.tenant_role
+         FROM conversations c
+         JOIN users u ON u.id = c.assigned_agent_user_id
+         JOIN tenant_users tu ON tu.user_id = u.id AND tu.tenant_id = c.tenant_id
+        WHERE c.id = $1 AND c.tenant_id = $2
+          AND (u.status = 'active' OR u.status = 'ACTIVE')`,
+      [conversationId, tenantId]
+    );
+    if (existing.rowCount === 1) {
+      const row = existing.rows[0];
+      if (canOperateConversation({
+        systemRole: row.system_role,
+        tenantRole: row.tenant_role,
+        action: 'send_message',
+        assignedAgentUserId: row.assigned_agent_user_id,
+        actorUserId: row.assigned_agent_user_id,
+      })) {
+        return row.assigned_agent_user_id;
+      }
+    }
+  }
+
+  const policyResult = await client.query(
+    `SELECT l.recipient_rule, l.recipient_target
+       FROM human_support_escalation_policies p
+       JOIN human_support_escalation_levels l ON l.tenant_id = p.tenant_id AND l.policy_id = p.id
+      WHERE p.tenant_id = $1 AND p.event_type = 'HUMAN_SUPPORT_REQUESTED' AND p.enabled = TRUE
+      ORDER BY l.level_order ASC`,
+    [tenantId]
+  );
+  for (const level of policyResult.rows) {
+    if (level.recipient_rule === 'USER' && level.recipient_target?.userId) {
+      const userResult = await client.query(
+        `SELECT u.id FROM users u
+           JOIN tenant_users tu ON tu.user_id = u.id
+          WHERE tu.tenant_id = $1 AND u.id = $2 AND (u.status = 'active' OR u.status = 'ACTIVE')`,
+        [tenantId, level.recipient_target.userId]
+      );
+      if (userResult.rowCount === 1) return userResult.rows[0].id;
+    }
+    if (level.recipient_rule === 'ROLE') {
+      const targetRole = level.recipient_target?.role ?? 'ADMIN';
+      const roleUsers = await client.query(
+        `SELECT u.id FROM users u
+           JOIN tenant_users tu ON tu.user_id = u.id
+          WHERE tu.tenant_id = $1 AND tu.tenant_role = $2
+            AND (u.status = 'active' OR u.status = 'ACTIVE')
+          ORDER BY tu.created_at ASC, u.id ASC
+          LIMIT 1`,
+        [tenantId, targetRole]
+      );
+      if (roleUsers.rowCount === 1) return roleUsers.rows[0].id;
+    }
+  }
+
+  const candidateUsers = await client.query(
+    `SELECT u.id, u.system_role, tu.tenant_role
+       FROM users u
+       JOIN tenant_users tu ON tu.user_id = u.id
+      WHERE tu.tenant_id = $1 AND (u.status = 'active' OR u.status = 'ACTIVE')
+      ORDER BY CASE
+                 WHEN tu.tenant_role = 'ADMIN' THEN 1
+                 WHEN tu.tenant_role = 'OWNER' THEN 2
+                 WHEN tu.tenant_role = 'AGENT' THEN 3
+                 ELSE 4
+               END ASC,
+               tu.created_at ASC,
+               u.id ASC
+      LIMIT 1`,
+    [tenantId]
+  );
+  if (candidateUsers.rowCount === 1) {
+    return candidateUsers.rows[0].id;
+  }
+
+  const platformOwner = await client.query(
+    `SELECT u.id FROM users u
+      WHERE u.system_role = 'OWNER' AND (u.status = 'active' OR u.status = 'ACTIVE')
+      ORDER BY u.created_at ASC, u.id ASC
+      LIMIT 1`
+  );
+  if (platformOwner.rowCount === 1) {
+    const ownerId = platformOwner.rows[0].id;
+    await client.query(
+      `INSERT INTO tenant_users (tenant_id, user_id, tenant_role)
+       VALUES ($1, $2, 'ADMIN')
+       ON CONFLICT (tenant_id, user_id) DO NOTHING`,
+      [tenantId, ownerId]
+    );
+    return ownerId;
+  }
+
+  return null;
+}
+
 export async function requestCustomerHumanSupport({
   tenantId, conversationId, acknowledgement, topicSummary = null, database = null,
 }) {
@@ -44,10 +143,15 @@ export async function requestCustomerHumanSupport({
       await client.query('COMMIT');
       return { duplicate: true, conversation };
     }
+    const assignedAgentUserId = await resolveCanonicalHumanSupportOperator({
+      client,
+      tenantId,
+      conversationId,
+    });
     const updated = await client.query(
       `UPDATE conversations
           SET handling_mode = 'HUMAN',
-              assigned_agent_user_id = NULL,
+              assigned_agent_user_id = $1,
               handoff_requested = TRUE,
               handoff_reason = 'CUSTOMER_REQUESTED_HUMAN_SUPPORT',
               handling_version = handling_version + 1,
@@ -58,12 +162,12 @@ export async function requestCustomerHumanSupport({
               human_support_last_activity_at = CURRENT_TIMESTAMP,
               human_support_warning_sent_at = NULL,
               human_support_closed_at = NULL,
-              human_support_topic_summary = $1,
+              human_support_topic_summary = $2,
               last_activity_at = CURRENT_TIMESTAMP,
               updated_at = CURRENT_TIMESTAMP
-        WHERE id = $2 AND tenant_id = $3
+        WHERE id = $3 AND tenant_id = $4
         RETURNING *`,
-      [topicSummary, conversationId, tenantId]
+      [assignedAgentUserId, topicSummary, conversationId, tenantId]
     );
     await client.query(
       `INSERT INTO conversation_messages (tenant_id, conversation_id, sender_type, content)
@@ -89,9 +193,10 @@ export async function requestCustomerHumanSupport({
     console.info('HUMAN_SUPPORT_REQUEST persisted=1 attention=REQUESTED tenant=' + String(tenantId).slice(0, 8));
     console.info('DASHBOARD_SSE_PUBLISH event_type=HUMAN_SUPPORT_REQUESTED tenant=' + String(tenantId).slice(0, 8));
     console.info('SUPPORT_REQUEST_CREATED = tenant=' + String(tenantId).slice(0, 8) + ' conversation=' + String(conversationId).slice(0, 8));
+    console.info('AUTO_OPERATOR_ASSIGNED = tenant=' + String(tenantId).slice(0, 8) + ' conversation=' + String(conversationId).slice(0, 8) + ' operator=' + String(assignedAgentUserId).slice(0, 8));
     console.info('AI_SUPPRESSION_SET = tenant=' + String(tenantId).slice(0, 8) + ' conversation=' + String(conversationId).slice(0, 8) + ' handling_mode=HUMAN');
     console.info('ESCALATION_SCHEDULED = tenant=' + String(tenantId).slice(0, 8) + ' level=1 timeout_sec=300');
-    return { duplicate: false, conversation: updated.rows[0] };
+    return { duplicate: false, conversation: updated.rows[0], assignedOperatorId: assignedAgentUserId };
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     throw error;
@@ -223,4 +328,43 @@ export async function claimDueHumanSupportEscalations({ database = null, now = n
     return actions;
   } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; }
   finally { client.release(); }
+}
+
+export async function triggerImmediateHumanSupportNotificationPipeline({
+  database = null,
+  tenantId,
+  conversationId,
+  deliverWebPush = null,
+} = {}) {
+  const db = database ?? await defaultDatabase();
+  try {
+    await claimDueHumanSupportEscalations({ database: db });
+    const { resolveHumanSupportRecipients } = await import('./human-support-recipient-service.js');
+    const { processHumanSupportNotificationOutbox } = await import('./human-support-notification-outbox-service.js');
+    const { enqueueHumanHandoffPushNotification, processPushNotificationOutbox } = await import('./push-notification-service.js');
+    await processHumanSupportNotificationOutbox({
+      database: db,
+      tenantId,
+      resolveRecipients: (input) => resolveHumanSupportRecipients({ database: db, ...input }),
+      deliver: async ({ recipients, tenantId: tId, conversationId: cId, outboxId }) => {
+        await enqueueHumanHandoffPushNotification({
+          database: db,
+          tenantId: tId,
+          conversationId: cId,
+          handoffOutboxId: outboxId,
+          recipients,
+        });
+        return { status: 'DELIVERED' };
+      },
+    });
+    if (typeof deliverWebPush === 'function') {
+      await processPushNotificationOutbox({
+        database: db,
+        tenantId,
+        deliver: deliverWebPush,
+      });
+    }
+  } catch (error) {
+    console.error('IMMEDIATE_HUMAN_SUPPORT_PUSH_PIPELINE error=' + (error?.code ?? error?.message ?? 'UNKNOWN'));
+  }
 }

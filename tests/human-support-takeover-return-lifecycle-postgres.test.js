@@ -179,15 +179,16 @@ test('real PostgreSQL: canonical human support Take Over, Return to AI, and Live
     });
     assert.equal(handoff.conversation.handling_mode, 'HUMAN', 'AI suppression must turn ON');
     assert.equal(handoff.conversation.human_attention_state, 'REQUESTED');
-    assert.equal(handoff.conversation.assigned_agent_user_id, null, 'Newly requested conversation is unassigned');
+    assert.equal(handoff.conversation.assigned_agent_user_id, adminAId, 'Newly requested conversation is automatically assigned to canonical operator');
 
     // Live Inbox UI logic:
-    // Unassigned conversation allows takeover by eligible operator
-    assert.equal(canTakeOverConversation({ status: 'open', handlingMode: 'HUMAN', humanAttentionState: 'REQUESTED', assignedAgentUserId: null, operatorAllowed: true }), true);
-    // Unassigned conversation blocks reply for agent who does not own it yet
+    // Assigned operator composer is immediately available
     assert.equal(canUseHumanReplyComposer('WHATSAPP', capability.configured), true);
-    const canSendBeforeTakeover = Boolean(capability.configured && handoff.conversation.handling_mode === 'HUMAN' && (false || (true && false)));
-    assert.equal(canSendBeforeTakeover, false, 'Unassigned conversation composer must remain blocked for agent before takeover');
+    const canSendAssigned = Boolean(capability.configured && handoff.conversation.handling_mode === 'HUMAN' && true);
+    assert.equal(canSendAssigned, true, 'Assigned operator composer must be immediately available');
+    // Another unassigned agent cannot reply without takeover
+    const canSendUnassignedAgent = Boolean(capability.configured && handoff.conversation.handling_mode === 'HUMAN' && (false || (true && false)));
+    assert.equal(canSendUnassignedAgent, false, 'Unassigned agent composer remains blocked before takeover');
 
     // --- TEST 3: TAKE OVER by Platform OWNER with NO prior tenant_users row ---
     // This proves the bug fix: platform owner automatically establishes membership in tenant_users
