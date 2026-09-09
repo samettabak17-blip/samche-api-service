@@ -418,12 +418,21 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'X-Samche-Web-Chat-Session': webChatSessionToken,
             'Authorization': 'Bearer ' + webChatSessionToken
           },
           body: JSON.stringify({
+            page_context: contextData,
             context: contextData
           })
-        }).catch((err) => console.warn('Could not post live page-context:', err));
+        })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && data.proactive_engagement && data.proactive_engagement.should_open && data.proactive_engagement.message) {
+            triggerProactiveOpen(data.proactive_engagement.message);
+          }
+        })
+        .catch((err) => console.warn('Could not post live page-context:', err));
       }
     }
     function renderCatalog() {
@@ -563,6 +572,19 @@
     const chatMessages = document.getElementById('chat-messages');
     const chatForm = document.getElementById('chat-form');
     const chatInput = document.getElementById('chat-input');
+    let hasProactiveShown = false;
+    window.hasUserMessaged = false;
+
+    function triggerProactiveOpen(message) {
+      if (window.hasUserMessaged || hasProactiveShown) return;
+      hasProactiveShown = true;
+      chatWindow.style.display = 'flex';
+      const typingIndicator = appendMessage('bot', 'TeknoStore Asistanı yazıyor...');
+      setTimeout(() => {
+        typingIndicator.textContent = message;
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }, 700);
+    }
 
     chatToggleBtn.addEventListener('click', () => {
       const isVisible = chatWindow.style.display === 'flex';
@@ -575,6 +597,9 @@
 
     chatCloseBtn.addEventListener('click', () => {
       chatWindow.style.display = 'none';
+      if (window.SamcheProactiveEngagement) {
+        window.SamcheProactiveEngagement.recordDismissal();
+      }
     });
 
     async function initChatSession() {
@@ -591,7 +616,7 @@
 
         if (res.ok) {
           const data = await res.json();
-          webChatSessionToken = data.conversation_session || data.token;
+          webChatSessionToken = data.conversation_session || data.token || data.session;
           syncPageContext(currentProduct);
         } else {
           console.warn('Bootstrap returned status', res.status);
@@ -612,6 +637,10 @@
 
     async function sendMessage(text) {
       if (!text || !text.trim()) return;
+      window.hasUserMessaged = true;
+      if (window.SamcheProactiveEngagement) {
+        window.SamcheProactiveEngagement.recordUserMessage();
+      }
       const cleanText = text.trim();
 
       appendMessage('user', cleanText);
@@ -673,6 +702,7 @@
 
     // Initial page route execution
     handleRouting();
+    initChatSession();
   </script>
 </body>
 </html>

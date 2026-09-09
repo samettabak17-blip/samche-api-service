@@ -140,11 +140,135 @@
     window.addEventListener('hashchange', checkNavigation);
   }
 
+  var proactiveState = {
+    sessionToken: null,
+    hasUserMessaged: false,
+    hasProactivelyEngaged: false,
+    dismissedAt: 0,
+    dwellTimer: null,
+    dwellSeconds: 0,
+    intervalTimer: null,
+    cooldownSeconds: 300,
+    dwellThresholdSeconds: 15,
+    onAutoOpen: null,
+    onProactiveMessage: null,
+  };
+
+  function configureProactive(opts) {
+    if (!opts) return;
+    if (opts.sessionToken) proactiveState.sessionToken = opts.sessionToken;
+    if (typeof opts.cooldownSeconds === 'number') proactiveState.cooldownSeconds = opts.cooldownSeconds;
+    if (typeof opts.dwellThresholdSeconds === 'number') proactiveState.dwellThresholdSeconds = opts.dwellThresholdSeconds;
+    if (typeof opts.onAutoOpen === 'function') proactiveState.onAutoOpen = opts.onAutoOpen;
+    if (typeof opts.onProactiveMessage === 'function') proactiveState.onProactiveMessage = opts.onProactiveMessage;
+  }
+
+  function clearTimers() {
+    if (proactiveState.dwellTimer) clearTimeout(proactiveState.dwellTimer);
+    if (proactiveState.intervalTimer) clearInterval(proactiveState.intervalTimer);
+    proactiveState.dwellTimer = null;
+    proactiveState.intervalTimer = null;
+    proactiveState.dwellSeconds = 0;
+  }
+
+  function recordUserMessage() {
+    proactiveState.hasUserMessaged = true;
+    clearTimers();
+  }
+
+  function recordDismissal() {
+    proactiveState.dismissedAt = Date.now();
+    clearTimers();
+    if (proactiveState.sessionToken && typeof fetch === 'function') {
+      fetch('/api/chat/dismiss-proactive', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Samche-Web-Chat-Session': proactiveState.sessionToken,
+        },
+      }).catch(function() {});
+    }
+  }
+
+  function startDwellTracker(token, customDwellSeconds) {
+    if (token) proactiveState.sessionToken = token;
+    if (proactiveState.hasUserMessaged || proactiveState.hasProactivelyEngaged) return;
+
+    var cooldownMs = proactiveState.cooldownSeconds * 1000;
+    if (proactiveState.dismissedAt && (Date.now() - proactiveState.dismissedAt < cooldownMs)) {
+      return;
+    }
+
+    clearTimers();
+    var threshold = customDwellSeconds || proactiveState.dwellThresholdSeconds;
+
+    proactiveState.intervalTimer = setInterval(function() {
+      proactiveState.dwellSeconds += 1;
+      if (proactiveState.dwellSeconds >= threshold) {
+        clearTimers();
+        checkDwellIntent();
+      }
+    }, 1000);
+  }
+
+  function checkDwellIntent() {
+    if (!proactiveState.sessionToken || proactiveState.hasUserMessaged || proactiveState.hasProactivelyEngaged) return;
+    var cooldownMs = proactiveState.cooldownSeconds * 1000;
+    if (proactiveState.dismissedAt && (Date.now() - proactiveState.dismissedAt < cooldownMs)) {
+      return;
+    }
+
+    fetch('/api/chat/evaluate-intent', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Samche-Web-Chat-Session': proactiveState.sessionToken,
+      },
+      body: JSON.stringify({
+        dwell_seconds: proactiveState.dwellSeconds || proactiveState.dwellThresholdSeconds,
+      }),
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      handleProactiveResult(data);
+    })
+    .catch(function() {});
+  }
+
+  function handleProactiveResult(data) {
+    if (!data || !data.proactive_engagement) return;
+    var pe = data.proactive_engagement;
+    if (pe.should_open && pe.message && !proactiveState.hasUserMessaged && !proactiveState.hasProactivelyEngaged) {
+      var cooldownMs = proactiveState.cooldownSeconds * 1000;
+      if (proactiveState.dismissedAt && (Date.now() - proactiveState.dismissedAt < cooldownMs)) {
+        return;
+      }
+      proactiveState.hasProactivelyEngaged = true;
+      if (typeof proactiveState.onAutoOpen === 'function') {
+        proactiveState.onAutoOpen(pe.message, pe);
+      }
+      if (typeof proactiveState.onProactiveMessage === 'function') {
+        proactiveState.onProactiveMessage(pe.message, pe);
+      }
+    }
+  }
+
   global.SamcheContextCapture = {
     capturePageContext: capturePageContext,
     initSpaNavigationListener: initSpaNavigationListener,
   };
+  global.SamcheProactiveEngagement = {
+    configure: configureProactive,
+    startDwellTracker: startDwellTracker,
+    handleProactiveResult: handleProactiveResult,
+    recordUserMessage: recordUserMessage,
+    recordDismissal: recordDismissal,
+    getState: function() { return Object.assign({}, proactiveState); },
+  };
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = global.SamcheContextCapture;
+    module.exports = {
+      SamcheContextCapture: global.SamcheContextCapture,
+      SamcheProactiveEngagement: global.SamcheProactiveEngagement,
+    };
   }
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { resolveTenantProactiveConfig } from './visitor-intent-service.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const WIDGET_KEY_REGEX = /^[a-zA-Z0-9_\-\.:]{3,100}$/;
@@ -389,6 +390,7 @@ export async function ensureTenantWebChatPersona(databaseOrOptions, maybeOptions
     assistantIdentity = opts.assistantIdentity || 'SamChe Satış ve Destek Asistanı',
     rules = opts.rules || opts.guidelines || [],
     instructions = opts.instructions || 'Müşterilere Türkçe olarak kibar, doğru ve ürün kataloğuna sadık bilgi verin.',
+    proactiveEngagement = opts.proactiveEngagement || opts.proactive_engagement || null,
   } = opts;
 
   const validTenantId = validateUUID(tenantId, 'WEB_CHAT_PROVISIONING_TENANT_INVALID', 'Invalid tenant ID format');
@@ -462,6 +464,7 @@ export async function ensureTenantWebChatPersona(databaseOrOptions, maybeOptions
         'Kablosuz şarj desteği olmayan ürünler için kesinlikle kablosuz şarj var demeyin.',
       ],
       language: 'tr',
+      proactive_engagement: resolveTenantProactiveConfig(proactiveEngagement ? { proactive_engagement: proactiveEngagement } : null),
     };
 
     // Supersede any existing active assistant configuration version to satisfy idx_assistant_configuration_versions_one_active

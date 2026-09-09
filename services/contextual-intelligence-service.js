@@ -240,6 +240,7 @@ export function updateSessionBrowsingState({
     currentPage: currentState?.currentPage ?? null,
     currentEntity: currentState?.currentEntity ?? null,
     previousEntities: Array.isArray(currentState?.previousEntities) ? [...currentState.previousEntities] : [],
+    engagementState: currentState?.engagementState ?? {},
     lastSeenAt: new Date().toISOString(),
   };
 
@@ -454,21 +455,42 @@ export async function saveWebChatSessionBrowsingState({
   const expiresAt = new Date(now + ttlHours * 60 * 60 * 1000);
   const currentPageJson = JSON.stringify(browsingState.currentPage || browsingState.currentEntity || null);
   const browsingHistoryJson = JSON.stringify(browsingState.previousEntities || []);
+  const engagementStateJson = JSON.stringify(browsingState.engagementState || {});
 
   try {
-    await database.query(
-      `INSERT INTO web_chat_public_sessions
-         (session_id, tenant_id, assistant_id, channel_id, widget_key, current_page, browsing_history, created_at, last_seen_at, expires_at)
-       VALUES
-         ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $8)
-       ON CONFLICT (session_id) DO UPDATE
-         SET current_page = EXCLUDED.current_page,
-             browsing_history = EXCLUDED.browsing_history,
-             last_seen_at = CURRENT_TIMESTAMP,
-             expires_at = EXCLUDED.expires_at`,
-      [sessionId, tenantId, assistantId, channelId, widgetKey, currentPageJson, browsingHistoryJson, expiresAt],
-    );
-    return true;
+    try {
+      await database.query(
+        `INSERT INTO web_chat_public_sessions
+           (session_id, tenant_id, assistant_id, channel_id, widget_key, current_page, browsing_history, engagement_state, created_at, last_seen_at, expires_at)
+         VALUES
+           ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $9)
+         ON CONFLICT (session_id) DO UPDATE
+           SET current_page = EXCLUDED.current_page,
+               browsing_history = EXCLUDED.browsing_history,
+               engagement_state = EXCLUDED.engagement_state,
+               last_seen_at = CURRENT_TIMESTAMP,
+               expires_at = EXCLUDED.expires_at`,
+        [sessionId, tenantId, assistantId, channelId, widgetKey, currentPageJson, browsingHistoryJson, engagementStateJson, expiresAt],
+      );
+      return true;
+    } catch (colErr) {
+      if (colErr?.message && colErr.message.includes('engagement_state')) {
+        await database.query(
+          `INSERT INTO web_chat_public_sessions
+             (session_id, tenant_id, assistant_id, channel_id, widget_key, current_page, browsing_history, created_at, last_seen_at, expires_at)
+           VALUES
+             ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $8)
+           ON CONFLICT (session_id) DO UPDATE
+             SET current_page = EXCLUDED.current_page,
+                 browsing_history = EXCLUDED.browsing_history,
+                 last_seen_at = CURRENT_TIMESTAMP,
+                 expires_at = EXCLUDED.expires_at`,
+          [sessionId, tenantId, assistantId, channelId, widgetKey, currentPageJson, browsingHistoryJson, expiresAt],
+        );
+        return true;
+      }
+      throw colErr;
+    }
   } catch (error) {
     console.error('SAVE_WEB_CHAT_BROWSING_STATE_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return false;
@@ -479,21 +501,42 @@ export async function loadWebChatSessionBrowsingState({ database, tenantId, sess
   if (!database?.query || !sessionId || !tenantId) return null;
 
   try {
-    const result = await database.query(
-      `SELECT current_page, browsing_history, expires_at
-         FROM web_chat_public_sessions
-        WHERE session_id = $1
-          AND tenant_id = $2
-          AND expires_at > CURRENT_TIMESTAMP
-        LIMIT 1`,
-      [sessionId, tenantId],
-    );
-
-    if (result.rowCount !== 1) return null;
-    const row = result.rows[0];
+    let row;
+    try {
+      const result = await database.query(
+        `SELECT current_page, browsing_history, expires_at, engagement_state
+           FROM web_chat_public_sessions
+          WHERE session_id = $1
+            AND tenant_id = $2
+            AND expires_at > CURRENT_TIMESTAMP
+          LIMIT 1`,
+        [sessionId, tenantId],
+      );
+      if (result.rowCount !== 1) return null;
+      row = result.rows[0];
+    } catch (colErr) {
+      if (colErr?.message && colErr.message.includes('engagement_state')) {
+        const result = await database.query(
+          `SELECT current_page, browsing_history, expires_at
+             FROM web_chat_public_sessions
+            WHERE session_id = $1
+              AND tenant_id = $2
+              AND expires_at > CURRENT_TIMESTAMP
+            LIMIT 1`,
+          [sessionId, tenantId],
+        );
+        if (result.rowCount !== 1) return null;
+        row = result.rows[0];
+      } else {
+        throw colErr;
+      }
+    }
 
     const rawCurrent = row.current_page;
     const rawHistory = Array.isArray(row.browsing_history) ? row.browsing_history : [];
+    const rawEngagement = (row.engagement_state && typeof row.engagement_state === 'object')
+      ? row.engagement_state
+      : {};
 
     const currentEntity = rawCurrent?.entity_type ? rawCurrent : resolvePageEntity(rawCurrent);
 
@@ -501,11 +544,34 @@ export async function loadWebChatSessionBrowsingState({ database, tenantId, sess
       currentPage: rawCurrent,
       currentEntity,
       previousEntities: rawHistory,
+      engagementState: rawEngagement,
       expiresAt: row.expires_at,
     };
   } catch (error) {
     console.error('LOAD_WEB_CHAT_BROWSING_STATE_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return null;
+  }
+}
+
+export async function updateWebChatSessionEngagementState({
+  database,
+  tenantId,
+  sessionId,
+  engagementState,
+}) {
+  if (!database?.query || !sessionId || !tenantId) return false;
+  try {
+    await database.query(
+      `UPDATE web_chat_public_sessions
+          SET engagement_state = $1::jsonb,
+              last_seen_at = CURRENT_TIMESTAMP
+        WHERE session_id = $2 AND tenant_id = $3`,
+      [JSON.stringify(engagementState || {}), sessionId, tenantId],
+    );
+    return true;
+  } catch (error) {
+    console.error('UPDATE_WEB_CHAT_ENGAGEMENT_STATE_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    return false;
   }
 }
 

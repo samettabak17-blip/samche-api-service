@@ -91,7 +91,16 @@ import {
   updateSessionBrowsingStateWithEntity,
   updateConversationVisitorContext,
   loadConversationVisitorContext,
+  updateWebChatSessionEngagementState,
 } from './services/contextual-intelligence-service.js';
+import {
+  INTENT_STATES,
+  DEFAULT_PROACTIVE_CONFIG,
+  resolveTenantProactiveConfig,
+  computeVisitorIntentScore,
+  evaluateVisitorIntent,
+  generateContextualProactiveMessage,
+} from './services/visitor-intent-service.js';
 import { extractUrlsFromText, processMessageUrlIntelligence } from './services/url-intelligence-service.js';
 
 
@@ -1630,8 +1639,21 @@ app.post("/api/chat/bootstrap", async (req, res) => {
   }
 });
 
+function extractWebChatSessionToken(req) {
+  const customHeader = req.get('X-Samche-Web-Chat-Session');
+  if (customHeader) return customHeader.trim();
+  const authHeader = req.get('Authorization');
+  if (authHeader && /^Bearer\s+/i.test(authHeader)) {
+    return authHeader.replace(/^Bearer\s+/i, '').trim();
+  }
+  if (typeof req.body?.conversation_session === 'string' && req.body.conversation_session.trim()) {
+    return req.body.conversation_session.trim();
+  }
+  return null;
+}
+
 app.post("/api/chat/page-context", async (req, res) => {
-  const suppliedWebChatSession = req.get('X-Samche-Web-Chat-Session');
+  const suppliedWebChatSession = extractWebChatSessionToken(req);
   if (!suppliedWebChatSession) {
     return res.status(401).json({ error: 'Web Chat session is required.' });
   }
@@ -1680,6 +1702,80 @@ app.post("/api/chat/page-context", async (req, res) => {
       rawPageContext: rawPayload,
     });
 
+    // Resolve tenant persona & configuration for proactive settings & runtime grounding
+    let webChatRuntimePersona = null;
+    try {
+      webChatRuntimePersona = await resolveTenantRuntimePersona({
+        database: pool,
+        tenantId: webChatIntegration.tenant_id,
+        assistantId: webChatIntegration.assistant_id,
+      });
+    } catch {}
+
+    // Check active conversation & human handoff safety
+    const rawMemory = webMemoryStore[webChatSession.sessionId] || [];
+    const hasConversation = rawMemory.length > 0;
+    const messageCount = rawMemory.length;
+
+    let humanHandoffActive = false;
+    try {
+      const convCheck = await pool.query(
+        `SELECT handling_mode FROM conversations WHERE external_conversation_id = $1 AND tenant_id = $2 LIMIT 1`,
+        [webChatSession.sessionId, webChatIntegration.tenant_id]
+      );
+      if (convCheck.rowCount > 0 && convCheck.rows[0].handling_mode === 'HUMAN') {
+        humanHandoffActive = true;
+      }
+    } catch {}
+
+    // Evaluate visitor intent and proactive engagement
+    const sessionBrowsingSignals = {
+      dwellSeconds: req.body?.dwell_seconds ?? 0,
+      revisitCount: req.body?.revisit_count ?? 0,
+      signals: Array.isArray(req.body?.signals) ? req.body.signals : [],
+    };
+
+    const intentEvaluation = evaluateVisitorIntent({
+      pageContext: updatedState.currentPage,
+      currentEntity: updatedState.currentEntity,
+      previousEntities: updatedState.previousEntities,
+      sessionBrowsing: sessionBrowsingSignals,
+      tenantConfig: webChatRuntimePersona?.configuration,
+      engagementState: {
+        ...(updatedState.engagementState || {}),
+        hasConversation,
+        messageCount,
+        humanHandoffActive,
+      },
+    });
+
+    let proactiveMessage = null;
+    if (intentEvaluation.shouldProactivelyEngage) {
+      proactiveMessage = await generateContextualProactiveMessage({
+        persona: webChatRuntimePersona,
+        currentEntity: updatedState.currentEntity,
+        previousEntities: updatedState.previousEntities,
+        channelRules: 'Return a short, natural, friendly greeting suitable for Web Chat. No HTML wrapping.',
+        openaiClient,
+        language: updatedState.currentPage?.language || webChatRuntimePersona?.configuration?.language || 'tr',
+      });
+
+      updatedState.engagementState = {
+        ...(updatedState.engagementState || {}),
+        proactiveMessageSent: true,
+        proactiveEngagedAt: new Date().toISOString(),
+        intentState: intentEvaluation.intentState,
+        intentScore: intentEvaluation.score,
+      };
+
+      logContextualObservability('PROACTIVE_ENGAGEMENT_TRIGGERED', {
+        tenant_id: webChatIntegration.tenant_id,
+        session_id: webChatSession.sessionId,
+        score: intentEvaluation.score,
+        reason: intentEvaluation.reason,
+      });
+    }
+
     await saveWebChatSessionBrowsingState({
       database: pool,
       tenantId: webChatIntegration.tenant_id,
@@ -1717,6 +1813,16 @@ app.post("/api/chat/page-context", async (req, res) => {
         canonical_url: updatedState.currentEntity.canonical_url,
       } : null,
       previous_entities_count: updatedState.previousEntities.length,
+      intent_state: intentEvaluation.intentState,
+      intent_score: intentEvaluation.score,
+      proactive_engagement: {
+        should_open: intentEvaluation.shouldAutoOpen,
+        should_engage: intentEvaluation.shouldProactivelyEngage,
+        intent_state: intentEvaluation.intentState,
+        intent_score: intentEvaluation.score,
+        reason: intentEvaluation.reason,
+        message: proactiveMessage,
+      },
     });
   } catch (error) {
     const reason = error?.code ?? error?.message ?? 'PAGE_CONTEXT_ERROR';
@@ -1727,6 +1833,199 @@ app.post("/api/chat/page-context", async (req, res) => {
     }
     console.error('PAGE_CONTEXT_UPDATE_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return res.status(500).json({ error: 'Failed to update page context.' });
+  }
+});
+
+app.post("/api/chat/evaluate-intent", async (req, res) => {
+  const sessionToken = extractWebChatSessionToken(req);
+  if (!sessionToken) {
+    return res.status(401).json({ error: 'Web Chat session is required.' });
+  }
+
+  let webChatSession = null;
+  let webChatIntegration = null;
+  try {
+    webChatSession = verifyPublicWebChatSession(sessionToken, {
+      secret: configuredPublicWebChatSessionSecret(),
+    });
+    webChatIntegration = await resolvePublicWebChatIntegration({
+      database: pool,
+      widgetKey: webChatSession.widgetKey,
+    });
+  } catch (error) {
+    if (error instanceof PublicWebChatSessionError) {
+      return res.status(401).json({ error: 'Web Chat session is invalid.' });
+    }
+  }
+
+  if (!webChatIntegration) {
+    return res.status(401).json({ error: 'Web Chat session is invalid.' });
+  }
+
+  try {
+    const currentState = await loadWebChatSessionBrowsingState({
+      database: pool,
+      tenantId: webChatIntegration.tenant_id,
+      sessionId: webChatSession.sessionId,
+    });
+
+    if (!currentState) {
+      return res.status(404).json({ error: 'Session browsing state not found.' });
+    }
+
+    let webChatRuntimePersona = null;
+    try {
+      webChatRuntimePersona = await resolveTenantRuntimePersona({
+        database: pool,
+        tenantId: webChatIntegration.tenant_id,
+        assistantId: webChatIntegration.assistant_id,
+      });
+    } catch {}
+
+    const rawMemory = webMemoryStore[webChatSession.sessionId] || [];
+    const hasConversation = rawMemory.length > 0;
+    const messageCount = rawMemory.length;
+
+    let humanHandoffActive = false;
+    try {
+      const convCheck = await pool.query(
+        `SELECT handling_mode FROM conversations WHERE external_conversation_id = $1 AND tenant_id = $2 LIMIT 1`,
+        [webChatSession.sessionId, webChatIntegration.tenant_id]
+      );
+      if (convCheck.rowCount > 0 && convCheck.rows[0].handling_mode === 'HUMAN') {
+        humanHandoffActive = true;
+      }
+    } catch {}
+
+    const sessionBrowsingSignals = {
+      dwellSeconds: req.body?.dwell_seconds ?? 0,
+      revisitCount: req.body?.revisit_count ?? 0,
+      signals: Array.isArray(req.body?.signals) ? req.body.signals : [],
+    };
+
+    const intentEvaluation = evaluateVisitorIntent({
+      pageContext: currentState.currentPage,
+      currentEntity: currentState.currentEntity,
+      previousEntities: currentState.previousEntities,
+      sessionBrowsing: sessionBrowsingSignals,
+      tenantConfig: webChatRuntimePersona?.configuration,
+      engagementState: {
+        ...(currentState.engagementState || {}),
+        hasConversation,
+        messageCount,
+        humanHandoffActive,
+      },
+    });
+
+    let proactiveMessage = null;
+    if (intentEvaluation.shouldProactivelyEngage) {
+      proactiveMessage = await generateContextualProactiveMessage({
+        persona: webChatRuntimePersona,
+        currentEntity: currentState.currentEntity,
+        previousEntities: currentState.previousEntities,
+        channelRules: 'Return a short, natural, friendly greeting suitable for Web Chat. No HTML wrapping.',
+        openaiClient,
+        language: currentState.currentPage?.language || webChatRuntimePersona?.configuration?.language || 'tr',
+      });
+
+      const updatedEngagementState = {
+        ...(currentState.engagementState || {}),
+        proactiveMessageSent: true,
+        proactiveEngagedAt: new Date().toISOString(),
+        intentState: intentEvaluation.intentState,
+        intentScore: intentEvaluation.score,
+      };
+
+      await updateWebChatSessionEngagementState({
+        database: pool,
+        tenantId: webChatIntegration.tenant_id,
+        sessionId: webChatSession.sessionId,
+        engagementState: updatedEngagementState,
+      });
+
+      logContextualObservability('PROACTIVE_ENGAGEMENT_TRIGGERED', {
+        tenant_id: webChatIntegration.tenant_id,
+        session_id: webChatSession.sessionId,
+        score: intentEvaluation.score,
+        reason: intentEvaluation.reason,
+      });
+    }
+
+    return res.json({
+      status: 'ok',
+      intent_state: intentEvaluation.intentState,
+      intent_score: intentEvaluation.score,
+      proactive_engagement: {
+        should_open: intentEvaluation.shouldAutoOpen,
+        should_engage: intentEvaluation.shouldProactivelyEngage,
+        intent_state: intentEvaluation.intentState,
+        intent_score: intentEvaluation.score,
+        reason: intentEvaluation.reason,
+        message: proactiveMessage,
+      },
+    });
+  } catch (error) {
+    console.error('EVALUATE_INTENT_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    return res.status(500).json({ error: 'Failed to evaluate visitor intent.' });
+  }
+});
+
+app.post("/api/chat/dismiss-proactive", async (req, res) => {
+  const sessionToken = extractWebChatSessionToken(req);
+  if (!sessionToken) {
+    return res.status(401).json({ error: 'Web Chat session is required.' });
+  }
+
+  let webChatSession = null;
+  let webChatIntegration = null;
+  try {
+    webChatSession = verifyPublicWebChatSession(sessionToken, {
+      secret: configuredPublicWebChatSessionSecret(),
+    });
+    webChatIntegration = await resolvePublicWebChatIntegration({
+      database: pool,
+      widgetKey: webChatSession.widgetKey,
+    });
+  } catch (error) {
+    if (error instanceof PublicWebChatSessionError) {
+      return res.status(401).json({ error: 'Web Chat session is invalid.' });
+    }
+  }
+
+  if (!webChatIntegration) {
+    return res.status(401).json({ error: 'Web Chat session is invalid.' });
+  }
+
+  try {
+    const currentState = await loadWebChatSessionBrowsingState({
+      database: pool,
+      tenantId: webChatIntegration.tenant_id,
+      sessionId: webChatSession.sessionId,
+    });
+
+    const currentEngagement = currentState?.engagementState || {};
+    const updatedEngagement = {
+      ...currentEngagement,
+      dismissedAt: new Date().toISOString(),
+    };
+
+    await updateWebChatSessionEngagementState({
+      database: pool,
+      tenantId: webChatIntegration.tenant_id,
+      sessionId: webChatSession.sessionId,
+      engagementState: updatedEngagement,
+    });
+
+    logContextualObservability('PROACTIVE_DISMISSAL_RECORDED', {
+      tenant_id: webChatIntegration.tenant_id,
+      session_id: webChatSession.sessionId,
+      dismissed_at: updatedEngagement.dismissedAt,
+    });
+
+    return res.json({ status: 'ok', dismissed: true });
+  } catch (error) {
+    console.error('DISMISS_PROACTIVE_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    return res.status(500).json({ error: 'Failed to record dismissal.' });
   }
 });
 
@@ -1741,7 +2040,7 @@ app.post("/api/chat", async (req, res) => {
 
     let webChatSession = null;
     let webChatIntegration = null;
-    const suppliedWebChatSession = req.get('X-Samche-Web-Chat-Session');
+    const suppliedWebChatSession = extractWebChatSessionToken(req);
     if (suppliedWebChatSession) {
       try {
         webChatSession = verifyPublicWebChatSession(suppliedWebChatSession, {
@@ -1841,6 +2140,23 @@ app.post("/api/chat", async (req, res) => {
           database: pool,
           tenantId: webChatIntegration.tenant_id,
           sessionId: webChatSession.sessionId,
+        });
+      }
+
+      if (webChatBrowsingState) {
+        webChatBrowsingState.engagementState = {
+          ...(webChatBrowsingState.engagementState || {}),
+          hasConversation: true,
+          messageCount: ((webChatBrowsingState.engagementState?.messageCount || 0) + 1),
+        };
+        await saveWebChatSessionBrowsingState({
+          database: pool,
+          tenantId: webChatIntegration.tenant_id,
+          assistantId: webChatIntegration.assistant_id,
+          channelId: webChatIntegration.channel_id,
+          widgetKey: webChatSession.widgetKey,
+          sessionId: webChatSession.sessionId,
+          browsingState: webChatBrowsingState,
         });
       }
 

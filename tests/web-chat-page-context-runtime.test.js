@@ -33,3 +33,13 @@ test('public/web-chat.js static asset is served', () => {
   assert.match(appSource, /app\.get\('\/web-chat\.js'/);
   assert.ok(fs.existsSync(new URL('../public/web-chat.js', import.meta.url)));
 });
+
+test('app.js exposes canonical proactive visitor intent endpoints', () => {
+  assert.match(appSource, /app\.post\("\/api\/chat\/evaluate-intent"/);
+  assert.match(appSource, /app\.post\("\/api\/chat\/dismiss-proactive"/);
+  assert.match(appSource, /evaluateVisitorIntent\(\{/);
+  assert.match(appSource, /proactive_engagement:\s*\{/);
+  assert.match(appSource, /updateWebChatSessionEngagementState\(\{/);
+  assert.match(appSource, /extractWebChatSessionToken\(req\)/);
+});
+

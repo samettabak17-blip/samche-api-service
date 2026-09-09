@@ -21,6 +21,7 @@ const {
   cleanupExpiredWebChatSessions,
   updateSessionBrowsingState,
   formatVisitorContextForHandoff,
+  updateWebChatSessionEngagementState,
 } = await import('../services/contextual-intelligence-service.js');
 const { persistWebChatInbound } = await import('../services/live-inbox-service.js');
 
@@ -112,6 +113,26 @@ test('Migration 077 applies cleanly and idempotently', async () => {
   }
 });
 
+test('Migration 078 applies cleanly and idempotently', async () => {
+  const client = await database.connect();
+  try {
+    const migrationSql = fs.readFileSync(
+      new URL('../migrations/078_canonical_web_chat_proactive_engagement.sql', import.meta.url),
+      'utf8',
+    );
+    await client.query(migrationSql);
+    await client.query(migrationSql);
+
+    const checkTable = await client.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'web_chat_public_sessions' AND column_name = 'engagement_state'`,
+    );
+    assert.equal(checkTable.rowCount, 1);
+  } finally {
+    client.release();
+  }
+});
+
+
 
 test('Real PostgreSQL: session storage, loading, updating, tenant isolation, and TTL cleanup', async () => {
   const client = await database.connect();
@@ -192,6 +213,29 @@ test('Real PostgreSQL: session storage, loading, updating, tenant isolation, and
     assert.equal(reloadedA.currentEntity.entity_name, 'Tower B');
     assert.equal(reloadedA.previousEntities.length, 1);
     assert.equal(reloadedA.previousEntities[0].entity_name, 'Tower A');
+
+    // 4b. Test engagement state updating and loading
+    const updatedEngagement = await updateWebChatSessionEngagementState({
+      database,
+      tenantId: tenantA.tenantId,
+      sessionId: sessionAId,
+      engagementState: {
+        proactiveMessageSent: true,
+        intentState: 'HIGH',
+        intentScore: 85,
+        dismissedAt: null,
+      },
+    });
+    assert.equal(updatedEngagement, true);
+
+    const reloadedWithEngagement = await loadWebChatSessionBrowsingState({
+      database,
+      tenantId: tenantA.tenantId,
+      sessionId: sessionAId,
+    });
+    assert.equal(reloadedWithEngagement.engagementState.proactiveMessageSent, true);
+    assert.equal(reloadedWithEngagement.engagementState.intentState, 'HIGH');
+    assert.equal(reloadedWithEngagement.engagementState.intentScore, 85);
 
     // 5. Save expired session for Tenant B to verify TTL cleanup
     const expiredBrowsingB = updateSessionBrowsingState({
