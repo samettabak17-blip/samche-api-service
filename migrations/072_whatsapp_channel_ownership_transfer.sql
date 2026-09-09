@@ -1,7 +1,17 @@
 -- Canonical WhatsApp physical-channel ownership and immutable transfer history.
 -- Historical channel rows and conversations remain tenant-owned and are never moved.
 
-DROP INDEX IF EXISTS uq_tenant_channels_whatsapp_phone_number;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'uq_tenant_channels_whatsapp_phone_number'
+      AND conrelid = 'tenant_channels'::regclass
+  ) THEN
+    ALTER TABLE tenant_channels DROP CONSTRAINT uq_tenant_channels_whatsapp_phone_number CASCADE;
+  END IF;
+  DROP INDEX IF EXISTS uq_tenant_channels_whatsapp_phone_number;
+END $$;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_channels_active_whatsapp_external_id
   ON tenant_channels (
