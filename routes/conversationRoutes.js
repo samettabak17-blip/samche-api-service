@@ -42,7 +42,7 @@ function actor(req) {
   return {
     userId: req.user.user_id,
     systemRole: req.user.system_role,
-    tenantRole: req.verified_tenant_role,
+    tenantRole: req.verified_tenant_role || (req.user.system_role === 'OWNER' ? 'ADMIN' : undefined),
   };
 }
 
@@ -64,11 +64,32 @@ function operationError(res, error, label) {
       retryable: error.status >= 500,
     });
   }
-  const code = error?.code ?? error?.name ?? 'CONVERSATION_OPERATION_FAILED';
+  if (error?.name === 'PlatformLifecycleMessageError') {
+    return res.status(500).json({
+      error: 'Human support lifecycle template error',
+      code: error.code || 'HUMAN_SUPPORT_STATE_INVALID',
+      retryable: false,
+    });
+  }
+  if (error?.code === '23503') {
+    return res.status(403).json({
+      error: 'Operator is not eligible to handle this conversation',
+      code: 'OPERATOR_NOT_ELIGIBLE',
+      retryable: false,
+    });
+  }
+  if (error?.code === '23505') {
+    return res.status(409).json({
+      error: 'Conversation operation conflict',
+      code: 'CONVERSATION_ALREADY_ASSIGNED',
+      retryable: false,
+    });
+  }
+  const code = typeof error?.code === 'string' && error.code.length <= 64 ? error.code : 'CONVERSATION_OPERATION_FAILED';
   console.error(label, code);
   return res.status(500).json({
     error: 'The conversation operation could not be completed. Please try again.',
-    code: 'CONVERSATION_OPERATION_FAILED',
+    code,
     retryable: true,
   });
 }

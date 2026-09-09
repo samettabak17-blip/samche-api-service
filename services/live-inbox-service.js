@@ -12,6 +12,7 @@ import { buildConversationStorageKey, ConversationResourceValidationError, valid
 import { normalizeOperatorVoiceNote, OperatorVoiceNormalizationError } from './operator-voice-normalization-service.js';
 import { isSameKnowledgeAuthority, resolveConversationKnowledgeAuthority } from './knowledge-authority-service.js';
 import { loadPlatformLifecycleMessages, renderPlatformLifecycleMessage } from './platform-lifecycle-message-service.js';
+import { normalizeWhatsAppExternalId } from './whatsapp-channel-ownership-service.js';
 
 export class ConversationOperationError extends Error {
   constructor(status, message, code = 'CONVERSATION_OPERATION_FAILED') {
@@ -335,7 +336,15 @@ export async function recordWhatsAppAssistantProviderAcceptance({
   }
 }
 
-export async function operateConversation({ database = pool, tenantId, conversationId, actor, action, reason = null } = {}) {
+export async function operateConversation({
+  database = pool,
+  tenantId,
+  conversationId,
+  actor,
+  action,
+  reason = null,
+  deliverWhatsApp = deliverWhatsAppText,
+} = {}) {
   const client = await (database ?? pool).connect();
   try {
     await client.query('BEGIN');
@@ -350,6 +359,10 @@ export async function operateConversation({ database = pool, tenantId, conversat
     }
 
     const actorUserId = actor.userId;
+    if (action === 'takeover' && conversation.assigned_agent_user_id && conversation.assigned_agent_user_id !== actorUserId) {
+      throw new ConversationOperationError(409, 'Conversation is already handled by another agent', 'CONVERSATION_ALREADY_ASSIGNED');
+    }
+
     const permission = canOperateConversation({
       systemRole: actor.systemRole,
       tenantRole: actor.tenantRole,
@@ -357,17 +370,31 @@ export async function operateConversation({ database = pool, tenantId, conversat
       assignedAgentUserId: conversation.assigned_agent_user_id,
       actorUserId,
     });
-    if (!permission) throw new ConversationOperationError(403, 'Conversation operation is not permitted', 'CONVERSATION_OPERATION_DENIED');
+    if (!permission) {
+      if (action === 'takeover') {
+        throw new ConversationOperationError(403, 'Takeover is not permitted for this operator', 'TAKEOVER_NOT_ALLOWED');
+      }
+      if (action === 'return_to_ai') {
+        throw new ConversationOperationError(403, 'Return to AI is not permitted for this operator', 'RETURN_TO_AI_NOT_ALLOWED');
+      }
+      throw new ConversationOperationError(403, 'Conversation operation is not permitted', 'OPERATOR_NOT_ELIGIBLE');
+    }
 
     if (action === 'takeover') {
       console.info('TAKEOVER_STAGE stage=STARTED tenant=' + String(tenantId).slice(0, 8));
-      if (conversation.assigned_agent_user_id && conversation.assigned_agent_user_id !== actorUserId) {
-        throw new ConversationOperationError(409, 'Conversation is already handled by another agent', 'CONVERSATION_ALREADY_ASSIGNED');
-      }
       if (conversation.handling_mode === 'HUMAN' && conversation.assigned_agent_user_id === actorUserId) {
         await client.query('COMMIT');
         return conversation;
       }
+
+      // Establish operator assignment in tenant_users safely if missing (e.g. platform OWNER or eligible admin)
+      const operatorTenantRole = actor.tenantRole || (actor.systemRole === 'OWNER' ? 'ADMIN' : 'AGENT');
+      await client.query(
+        `INSERT INTO tenant_users (tenant_id, user_id, tenant_role)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (tenant_id, user_id) DO NOTHING`,
+        [tenantId, actorUserId, operatorTenantRole]
+      );
       const updated = await client.query(
         `UPDATE conversations
             SET handling_mode = 'HUMAN',
@@ -403,14 +430,14 @@ export async function operateConversation({ database = pool, tenantId, conversat
       console.info('TAKEOVER_STAGE stage=ASSIGNED tenant=' + String(tenantId).slice(0, 8));
       // The customer-request transfer has already been delivered. Only a voluntary
       // manual takeover receives the separate deterministic manual-takeover notice.
-      if (takenOver.channel_type === 'WHATSAPP' && conversation.human_attention_state !== 'REQUESTED') {
+      if (takenOver.channel_type === 'WHATSAPP' && conversation.human_attention_state !== 'REQUESTED' && conversation.human_attention_state !== 'ACKNOWLEDGED') {
         const content = await loadWhatsAppHumanSupportNotice(client, takenOver, 'manual_takeover');
         const integration = await loadWhatsAppAgentDelivery(client, takenOver);
         if (!content || !integration) {
           throw new ConversationOperationError(409, 'WhatsApp human delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
         }
         try {
-          await deliverWhatsAppText({
+          await deliverWhatsApp({
             phoneNumberId: integration.external_channel_id,
             recipient: takenOver.customer_external_id,
             content,
@@ -431,8 +458,10 @@ export async function operateConversation({ database = pool, tenantId, conversat
     }
 
     if (action === 'return_to_ai') {
+      if (conversation.handling_mode !== 'HUMAN' && conversation.handling_mode !== 'PAUSED') {
+        throw new ConversationOperationError(409, 'Only conversations in human or paused handling mode can be returned to AI', 'HUMAN_SUPPORT_STATE_INVALID');
+      }
       const updated = await client.query(
-
         `UPDATE conversations
             SET handling_mode = 'AI',
                 assigned_agent_user_id = NULL,
@@ -469,7 +498,7 @@ export async function operateConversation({ database = pool, tenantId, conversat
           throw new ConversationOperationError(409, 'WhatsApp human delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
         }
         try {
-          await deliverWhatsAppText({
+          await deliverWhatsApp({
             phoneNumberId: integration.external_channel_id,
             recipient: returned.customer_external_id,
             content,
@@ -551,31 +580,61 @@ export async function operateConversation({ database = pool, tenantId, conversat
 }
 
 async function loadWhatsAppHumanSupportNotice(client, conversation, templateKey) {
-  const key = templateKey === 'manual_takeover' ? 'human_takeover' : templateKey;
-  const templates = await loadPlatformLifecycleMessages({ database: client });
-  return renderPlatformLifecycleMessage({ templates, key, locale: conversation.communication_language });
+  try {
+    const key = templateKey === 'manual_takeover' ? 'human_takeover' : templateKey;
+    const templates = await loadPlatformLifecycleMessages({ database: client });
+    return renderPlatformLifecycleMessage({ templates, key, locale: conversation.communication_language });
+  } catch (error) {
+    if (error instanceof ConversationOperationError) throw error;
+    console.error('LIFECYCLE_TEMPLATE_LOAD_FAILED', error?.code ?? error?.message);
+    throw new ConversationOperationError(500, 'Lifecycle message template could not be loaded', error?.code ?? 'PLATFORM_LIFECYCLE_ERROR');
+  }
 }
 
 async function loadWhatsAppAgentDelivery(client, conversation) {
-  const phoneNumberId = String(conversation.external_channel_id ?? '').trim();
-  if (!phoneNumberId) return null;
+  const rawPhone = String(conversation.external_channel_id ?? '').trim();
+  let cleanPhone = '';
+  try {
+    cleanPhone = normalizeWhatsAppExternalId(rawPhone);
+  } catch {
+    cleanPhone = rawPhone.replace(/^whatsapp:\s*/i, '').replace(/[^0-9]/g, '');
+  }
+  if (!cleanPhone && !rawPhone) return null;
+
   const result = await client.query(
     `SELECT tc.external_channel_id, ci.integration_key
        FROM tenant_channels tc
        JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id
-       JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
+       LEFT JOIN ai_assistants a ON a.id = COALESCE(ci.assistant_id, tc.assistant_id) AND a.tenant_id = tc.tenant_id
       WHERE tc.id = $1
         AND tc.tenant_id = $2
         AND tc.channel_type = 'WHATSAPP'
-        AND tc.status = 'active'
+        AND LOWER(tc.status) = 'active'
         AND ci.integration_type = 'WHATSAPP'
         AND ci.enabled = TRUE
-        AND ci.integration_key = $3
-        AND a.status = 'active'
+        AND (
+          LOWER(ci.integration_key) = LOWER($3)
+          OR LOWER(ci.integration_key) = LOWER($4)
+          OR LOWER(ci.integration_key) = LOWER($5)
+          OR LOWER(ci.integration_key) = LOWER($6)
+        )
+        AND (a.id IS NULL OR LOWER(a.status) = 'active')
       LIMIT 2`,
-    [conversation.channel_id, conversation.tenant_id, whatsappIntegrationKey(phoneNumberId)]
+    [
+      conversation.channel_id,
+      conversation.tenant_id,
+      whatsappIntegrationKey(cleanPhone || rawPhone),
+      `whatsapp:${cleanPhone || rawPhone}`,
+      cleanPhone || rawPhone,
+      `whatsapp:${rawPhone}`,
+    ]
   );
-  return result.rowCount === 1 ? result.rows[0] : null;
+  if (result.rowCount !== 1) return null;
+  const row = result.rows[0];
+  return {
+    ...row,
+    external_channel_id: cleanPhone || row.external_channel_id,
+  };
 }
 
 export async function getHumanDeliveryCapability({ tenantId, conversationId, database = pool }) {
@@ -644,6 +703,25 @@ export async function appendAgentMessage({
       actorUserId: actor.userId,
     });
     if (!allowed) throw new ConversationOperationError(403, 'Conversation operation is not permitted', 'CONVERSATION_OPERATION_DENIED');
+
+    // If conversation is currently unassigned in HUMAN handling mode, establish assignment to the operator
+    if (!conversation.assigned_agent_user_id) {
+      const operatorTenantRole = actor.tenantRole || (actor.systemRole === 'OWNER' ? 'ADMIN' : 'AGENT');
+      await client.query(
+        `INSERT INTO tenant_users (tenant_id, user_id, tenant_role)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (tenant_id, user_id) DO NOTHING`,
+        [tenantId, actor.userId, operatorTenantRole]
+      );
+      await client.query(
+        `UPDATE conversations
+            SET assigned_agent_user_id = $1,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2 AND tenant_id = $3 AND assigned_agent_user_id IS NULL`,
+        [actor.userId, conversationId, tenantId]
+      );
+      conversation.assigned_agent_user_id = actor.userId;
+    }
 
     if (idempotencyKey && conversation.channel_type === 'WHATSAPP') {
       const existing = await client.query(
@@ -806,6 +884,25 @@ export async function appendAgentMediaMessage({
       actorUserId: actor.userId,
     });
     if (!allowed) throw new ConversationOperationError(403, 'Conversation operation is not permitted', 'CONVERSATION_OPERATION_DENIED');
+
+    // If conversation is currently unassigned in HUMAN handling mode, establish assignment to the operator
+    if (!conversation.assigned_agent_user_id) {
+      const operatorTenantRole = actor.tenantRole || (actor.systemRole === 'OWNER' ? 'ADMIN' : 'AGENT');
+      await client.query(
+        `INSERT INTO tenant_users (tenant_id, user_id, tenant_role)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (tenant_id, user_id) DO NOTHING`,
+        [tenantId, actor.userId, operatorTenantRole]
+      );
+      await client.query(
+        `UPDATE conversations
+            SET assigned_agent_user_id = $1,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2 AND tenant_id = $3 AND assigned_agent_user_id IS NULL`,
+        [actor.userId, conversationId, tenantId]
+      );
+      conversation.assigned_agent_user_id = actor.userId;
+    }
 
     if (idempotencyKey) {
       const existing = await client.query(

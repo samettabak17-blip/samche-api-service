@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canTakeOverConversation, clearSentAgentDraft, displayConversationCustomerIdentifier, isInlinePreviewableAttachment, isVoiceResource, voiceResourceDisplayLabel, resourceDisplayName, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel, deliveryTickPresentation } from './conversation-utils';
+import { canTakeOverConversation, canUseHumanReplyComposer, clearSentAgentDraft, displayConversationCustomerIdentifier, isInlinePreviewableAttachment, isVoiceResource, voiceResourceDisplayLabel, resourceDisplayName, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel, deliveryTickPresentation } from './conversation-utils';
 
 describe('conversation sender presentation', () => {
   it('maps every backend sender type to a distinct safe label', () => {
@@ -58,6 +58,20 @@ describe('customer-requested live-support ownership', () => {
     expect(canTakeOverConversation({ ...allowed, handlingMode: 'HUMAN', humanAttentionState: 'ACKNOWLEDGED' })).toBe(false);
     expect(canTakeOverConversation({ ...allowed, handlingMode: 'HUMAN', humanAttentionState: 'NONE' })).toBe(false);
     expect(canTakeOverConversation({ ...allowed, handlingMode: 'AI', humanAttentionState: 'NONE' })).toBe(true);
+  });
+
+  it('blocks Take Over when conversation is already assigned to another operator or closed', () => {
+    expect(canTakeOverConversation({ status: 'open', assignedAgentUserId: 'other-operator', operatorAllowed: true, handlingMode: 'HUMAN', humanAttentionState: 'REQUESTED' })).toBe(false);
+    expect(canTakeOverConversation({ status: 'closed', assignedAgentUserId: null, operatorAllowed: true, handlingMode: 'HUMAN', humanAttentionState: 'REQUESTED' })).toBe(false);
+    expect(canTakeOverConversation({ status: 'open', assignedAgentUserId: null, operatorAllowed: false, handlingMode: 'HUMAN', humanAttentionState: 'REQUESTED' })).toBe(false);
+  });
+
+  it('verifies human reply composer requires delivery configured on supported channels', () => {
+    expect(canUseHumanReplyComposer('WHATSAPP', true)).toBe(true);
+    expect(canUseHumanReplyComposer('WHATSAPP', false)).toBe(false);
+    expect(canUseHumanReplyComposer('WHATSAPP', undefined)).toBe(false);
+    expect(canUseHumanReplyComposer('SAMCHEGUIDE', true)).toBe(true);
+    expect(canUseHumanReplyComposer('EMAIL', true)).toBe(false);
   });
 });
 
