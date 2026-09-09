@@ -23,12 +23,16 @@ on:
     paths:
       - '.github/workflows/staging-task8-demo.yml'
       - 'public/task8-demo/**'
+      - 'public/web-chat.js'
       - 'scripts/bootstrap_task8_demo.js'
       - 'scripts/verify_staging_task8_demo.js'
       - 'services/tenant-web-chat-provisioning-service.js'
       - 'services/public-web-chat-integration-service.js'
       - 'services/url-intelligence-service.js'
       - 'services/contextual-intelligence-service.js'
+      - 'services/visitor-intent-service.js'
+      - 'migrations/078_canonical_web_chat_proactive_engagement.sql'
+      - 'tests/proactive-visitor-intent.test.js'
       - 'app.js'
 
 permissions:
@@ -61,6 +65,7 @@ jobs:
           tests/url-intelligence-service.test.js
           tests/contextual-intelligence-service.test.js
           tests/permanence-multi-tenant-contract.test.js
+          tests/proactive-visitor-intent.test.js
 
   staging_bootstrap_and_verification:
     name: Staging Bootstrap and Live Runtime Verification

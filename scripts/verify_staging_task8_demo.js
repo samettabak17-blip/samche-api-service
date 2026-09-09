@@ -21,24 +21,30 @@ async function verifyStagingTask8Demo() {
   console.log(`Task 8 Demo Verification: ${BASE_URL} (key: ${TARGET_WIDGET_KEY})\n`);
   const results = { storefront_fixture: false, web_chat_bootstrap: false, page_context_sync: false };
 
-  // 1. Fixture with readiness wait
-  console.log('[1/4] Verifying Storefront HTML Fixture...');
+  // 1. Fixture with readiness wait (polling for both storefront fixture and proactive deployment)
+  console.log('[1/4] Verifying Storefront HTML Fixture & Staging Deploy Readiness...');
   let sfHtml = '';
-  const maxAttempts = 12;
+  const maxAttempts = 35;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const sfRes = await fetchWithTimeout(`${BASE_URL}/task8-demo/`, {}, 12000);
+      const evalProbe = await fetchWithTimeout(`${BASE_URL}/api/chat/evaluate-intent`, { method: 'POST' }, 8000).catch(() => ({ status: 0 }));
       if (sfRes.ok) {
-        sfHtml = await sfRes.text();
-        if (sfHtml.includes('SamChe Teknoloji') && sfHtml.includes('samche-schema-jsonld')) {
-          break;
+        const text = await sfRes.text();
+        if (text.includes('SamChe Teknoloji') && text.includes('samche-schema-jsonld')) {
+          sfHtml = text;
+          // HTTP 401 on evaluate-intent verifies the new proactive engine endpoint is live
+          if (evalProbe.status === 401) {
+            console.log(`      ✓ Verified staging deployment with proactive engine active (attempt ${attempt}).`);
+            break;
+          }
         }
       }
     } catch {
       // Retry
     }
     if (attempt < maxAttempts) {
-      console.log(`      Waiting for staging service readiness (attempt ${attempt}/${maxAttempts})...`);
+      console.log(`      Waiting for staging service to deploy new proactive revision (attempt ${attempt}/${maxAttempts})...`);
       await new Promise((r) => setTimeout(r, 6000));
     }
   }
