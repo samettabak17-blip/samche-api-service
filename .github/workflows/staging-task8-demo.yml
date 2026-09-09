@@ -60,6 +60,7 @@ jobs:
           tests/web-chat-page-context-runtime.test.js
           tests/url-intelligence-service.test.js
           tests/contextual-intelligence-service.test.js
+          tests/permanence-multi-tenant-contract.test.js
 
   staging_bootstrap_and_verification:
     name: Staging Bootstrap and Live Runtime Verification
