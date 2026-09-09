@@ -312,6 +312,9 @@ test('FRESH_TENANT_INHERITANCE: Brand new tenant inherits all URL intelligence a
       if (cleanSql.startsWith('UPDATE business_profiles SET active_version_id = $1')) {
         return { rowCount: 1, rows: [] };
       }
+      if (cleanSql.startsWith('UPDATE assistant_configuration_versions')) {
+        return { rowCount: 1, rows: [] };
+      }
       if (cleanSql.startsWith('INSERT INTO assistant_configuration_versions')) {
         const row = { id: randomUUID(), tenant_id: params[0], assistant_id: params[1], configuration_data: JSON.parse(params[2]) };
         mockDbState.configVersions.push(row);

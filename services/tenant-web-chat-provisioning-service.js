@@ -464,6 +464,14 @@ export async function ensureTenantWebChatPersona(databaseOrOptions, maybeOptions
       language: 'tr',
     };
 
+    // Supersede any existing active assistant configuration version to satisfy idx_assistant_configuration_versions_one_active
+    await client.query(
+      `UPDATE assistant_configuration_versions
+          SET status = 'SUPERSEDED', updated_at = CURRENT_TIMESTAMP
+        WHERE tenant_id = $1 AND assistant_id = $2 AND status = 'ACTIVE'`,
+      [validTenantId, validAssistantId]
+    );
+
     const configInsert = await client.query(
       `INSERT INTO assistant_configuration_versions (
          tenant_id, assistant_id, configuration_data, status, schema_version, source_profile_version_id, activated_at
