@@ -286,6 +286,8 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
     return {
       tenant_id: validTenantId,
       widget_key: resolvedIntegration.integration_key,
+      channel_id: resolvedChannel.id,
+      integration_id: resolvedIntegration.id,
       channel: {
         id: resolvedChannel.id,
         channel_type: resolvedChannel.channel_type,
@@ -439,7 +441,7 @@ export async function ensureTenantWebChatPersona(databaseOrOptions, maybeOptions
     const versionInsert = await client.query(
       `INSERT INTO business_profile_versions (
          tenant_id, profile_id, profile_data, evidence, status, schema_version, identity_resolution_status, source_scope
-       ) VALUES ($1, $2, $3, $4, 'APPROVED', 2, 'RESOLVED', 'MANUAL')
+       ) VALUES ($1, $2, $3, $4, 'APPROVED', 2, 'RESOLVED', '{"mode": "MANUAL"}'::jsonb)
        RETURNING id`,
       [validTenantId, profileId, JSON.stringify(profileData), JSON.stringify(evidence)]
     );
