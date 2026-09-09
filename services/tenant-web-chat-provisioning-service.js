@@ -23,6 +23,12 @@ function generateWidgetKey() {
 }
 
 async function runInTransaction(database, operation) {
+  // If it's already a single connected Client (or transaction context), execute directly on it
+  if (typeof database?.query === 'function' && typeof database?.totalCount !== 'number') {
+    return operation(database);
+  }
+
+  // If it's a Pool, checkout a client and manage transaction
   if (typeof database?.connect === 'function') {
     const client = await database.connect();
     try {
