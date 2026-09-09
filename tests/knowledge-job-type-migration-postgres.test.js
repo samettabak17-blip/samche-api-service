@@ -8,7 +8,7 @@ import { isSafeTestDatabaseUrl } from '../scripts/test-database-safety.js';
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString || !isSafeTestDatabaseUrl(connectionString)) throw new Error('KNOWLEDGE_JOB_TYPE_POSTGRES_REQUIRES_TEST_DATABASE_URL');
-const database = new pg.Pool({ connectionString, ssl: resolvePostgresSsl({ connectionString, databaseSsl: 'strict', nodeEnv: 'test' }), max: 1 });
+const database = new pg.Pool({ connectionString, ssl: resolvePostgresSsl({ connectionString, databaseSsl: process.env.DATABASE_SSL || 'strict', nodeEnv: 'test' }), max: 1 });
 test.after(async () => database.end());
 
 test('rerunnable historical knowledge-job migrations preserve every canonical job type', async () => {

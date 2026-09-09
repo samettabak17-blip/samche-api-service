@@ -29,7 +29,7 @@ import { claimDueCustomerSupportLifecycle, claimDueHumanSupportEscalations, requ
 import { processHumanSupportNotificationOutbox } from './services/human-support-notification-outbox-service.js';
 import { resolveHumanSupportRecipients } from './services/human-support-recipient-service.js';
 import { enqueueHumanHandoffPushNotification, processPushNotificationOutbox } from './services/push-notification-service.js';
-import { createWebPushDeliveryAdapter } from './services/web-push-delivery-adapter.js';
+import { createWebPushDeliveryAdapter, getLatestWebPushDeliveryAttempt } from './services/web-push-delivery-adapter.js';
 import { processDueContextualFollowUps, scheduleContextualFollowUp } from './services/durable-follow-up-service.js';
 import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
 import { summarizeWhatsAppHumanSupportTopic } from './services/whatsapp-human-support-policy-service.js';
@@ -167,6 +167,72 @@ app.get("/api/v1/health/db", async (req, res) => {
     });
   }
 });
+app.get("/api/v1/health/push-diagnostics", async (_req, res) => {
+  try {
+    const vapidConfigured = Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT);
+    const subCount = await pool.query(`SELECT count(*)::int AS total, count(*) FILTER (WHERE enabled = TRUE)::int AS active FROM push_notification_subscriptions`);
+    const subs = await pool.query(
+      `SELECT id, tenant_id, user_id, endpoint, enabled, failure_code, last_delivered_at, updated_at
+         FROM push_notification_subscriptions
+        ORDER BY updated_at DESC LIMIT 5`
+    );
+    const latestIntent = await pool.query(
+      `SELECT id, tenant_id, event_id, event_type, status, created_at
+         FROM push_notification_intents
+        ORDER BY created_at DESC LIMIT 1`
+    );
+    const latestOutbox = await pool.query(
+      `SELECT id, tenant_id, intent_id, recipient_user_id, status, attempts, failure_code, delivered_at, created_at
+         FROM push_notification_outbox
+        ORDER BY created_at DESC LIMIT 1`
+    );
+    res.json({
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      push_service: {
+        vapid_configured: vapidConfigured,
+        vapid_public_key_present: Boolean(process.env.VAPID_PUBLIC_KEY),
+        vapid_private_key_present: Boolean(process.env.VAPID_PRIVATE_KEY),
+        vapid_subject_present: Boolean(process.env.VAPID_SUBJECT),
+      },
+      subscriptions_summary: {
+        total: subCount.rows[0]?.total ?? 0,
+        active: subCount.rows[0]?.active ?? 0,
+      },
+      recent_subscriptions: subs.rows.map((s) => ({
+        id: String(s.id).slice(0, 8),
+        tenant_id: String(s.tenant_id).slice(0, 8),
+        user_id: String(s.user_id).slice(0, 8),
+        endpoint_host: (() => { try { return new URL(s.endpoint).host; } catch { return 'unknown'; } })(),
+        enabled: s.enabled,
+        failure_code: s.failure_code,
+        last_delivered_at: s.last_delivered_at,
+        updated_at: s.updated_at,
+      })),
+      latest_intent: latestIntent.rows[0] ? {
+        id: String(latestIntent.rows[0].id).slice(0, 8),
+        tenant_id: String(latestIntent.rows[0].tenant_id).slice(0, 8),
+        event_id: String(latestIntent.rows[0].event_id).slice(0, 48),
+        event_type: latestIntent.rows[0].event_type,
+        status: latestIntent.rows[0].status,
+        created_at: latestIntent.rows[0].created_at,
+      } : null,
+      latest_outbox: latestOutbox.rows[0] ? {
+        id: String(latestOutbox.rows[0].id).slice(0, 8),
+        tenant_id: String(latestOutbox.rows[0].tenant_id).slice(0, 8),
+        status: latestOutbox.rows[0].status,
+        attempts: latestOutbox.rows[0].attempts,
+        failure_code: latestOutbox.rows[0].failure_code,
+        delivered_at: latestOutbox.rows[0].delivered_at,
+        created_at: latestOutbox.rows[0].created_at,
+      } : null,
+      latest_provider_attempt: getLatestWebPushDeliveryAttempt(),
+    });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: error?.message ?? "Push diagnostics error" });
+  }
+});
+
 
 // One public Guide shell is served for every tenant.  Its visual identity is
 // resolved solely from the configured Guide integration, never a browser tenant

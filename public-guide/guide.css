@@ -14,11 +14,12 @@ button,input,select,textarea{font:inherit}
 
 /* HEADER: logo 32px, brand 14px, status 9.5px, padding 6-10px */
 .guide-header{display:flex;flex:none;align-items:center;justify-content:space-between;gap:.5rem;padding:6px 10px;border-bottom:1px solid var(--guide-border,#334155);background:color-mix(in srgb,var(--guide-surface,#18212f) 75%,transparent)}
-.guide-identity{display:flex;min-width:0;align-items:center;gap:.5rem}
+.guide-identity{display:flex;flex:1 1 auto;min-width:0;align-items:center;gap:.5rem}
 .guide-logo,.guide-avatar{width:32px;height:32px;flex:0 0 32px;object-fit:contain;border:1px solid var(--guide-border,#334155);border-radius:.55rem;background:color-mix(in srgb,var(--guide-background,#0e1522) 65%,#000);image-rendering:auto;opacity:1}
 .guide-avatar{border-radius:50%;object-fit:cover}
 .guide-logo[hidden],.guide-avatar[hidden]{display:none}
-.guide-brand-name{overflow:hidden;margin:0;font-size:14px;font-weight:800;line-height:1.2;text-overflow:ellipsis;white-space:nowrap}
+.guide-names{flex:1 1 auto;min-width:0}
+.guide-brand-name{margin:0;font-size:14px;font-weight:800;line-height:1.2;overflow-wrap:break-word;word-break:normal;white-space:normal}
 .guide-status{margin:.1rem 0 0;color:var(--guide-muted);font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;line-height:1.2}
 
 /* HERO: compact fixed-height, padding 8-10px, eyebrow 9.5px, title 18px max, subtitle 12px */
@@ -151,6 +152,9 @@ button,input,select,textarea{font:inherit}
 @media(max-width:540px){
   .guide-shell{display:block;padding:0}
   .guide-canvas{width:100%;height:100svh;border:0;border-radius:0}
+  .guide-shell--content-active{min-height:0}
+  .guide-canvas--content-active{height:auto;min-height:0}
+  .guide-module--content-active,.guide-module--content-active .guide-module-layer:not([hidden]),.guide-module--content-active .guide-tool-form{flex:none;min-height:0;overflow:visible}
   .guide-header,.guide-hero{padding:6px 8px}
   .guide-module{padding:6px 8px}
   .guide-actions .guide-button{flex:1}
@@ -161,7 +165,6 @@ button,input,select,textarea{font:inherit}
   .guide-tool-grid{grid-template-columns:1fr;row-gap:4px}
 }
 @media(max-width:380px){
-  .guide-brand-name{max-width:11rem}
   .guide-navigation{gap:.15rem;padding-inline:.25rem}
   .guide-navigation__item{padding-inline:.1rem}
   .guide-chat-form{grid-template-columns:1fr}

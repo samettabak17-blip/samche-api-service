@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import pg from 'pg';
+import { resolvePostgresSsl } from '../config/postgres-ssl.js';
 import { INSERT_CONVERSATION_MESSAGE_SQL, recordWhatsAppDeliveryStatus, UPDATE_WHATSAPP_DELIVERY_STATUS_SQL } from '../services/live-inbox-service.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
@@ -75,7 +76,7 @@ test('maps SENT and FAILED provider events without changing delivery correlation
 test('regression: every provider delivery status executes against the staging SQL contract', { skip: !process.env.DATABASE_URL }, async (t) => {
   const database = new pg.Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
+    ssl: resolvePostgresSsl({ connectionString: process.env.DATABASE_URL, databaseSsl: process.env.DATABASE_SSL || 'strict', nodeEnv: 'test' }),
   });
   const client = await database.connect();
   let transactionOpen = false;

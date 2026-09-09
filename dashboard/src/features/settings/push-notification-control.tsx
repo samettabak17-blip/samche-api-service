@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { DashboardButton, DashboardFormMessage } from '../../components/ui/dashboard-control';
-import { pushNotificationApi, type PushNotificationCapability, type PushNotificationPreference } from '../dashboard/dashboard-api';
+import {
+  pushNotificationApi,
+  type PushNotificationCapability,
+  type PushNotificationPreference,
+  type PushSubscriptionStatus,
+} from '../dashboard/dashboard-api';
 
 type State = 'loading' | 'unsupported' | 'unavailable' | 'denied' | 'ready' | 'enabled' | 'error';
 
@@ -15,6 +20,21 @@ function applicationServerKey(value: string) {
   const padded = `${value}${'='.repeat((4 - (value.length % 4)) % 4)}`;
   const binary = atob(padded.replace(/-/g, '+').replace(/_/g, '/'));
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+function applicationServerKeysMatch(appServerKey: ArrayBuffer | null, base64UrlPublicKey: string): boolean {
+  if (!appServerKey || !base64UrlPublicKey) return false;
+  try {
+    const currentBytes = new Uint8Array(appServerKey);
+    const expectedBytes = applicationServerKey(base64UrlPublicKey);
+    if (currentBytes.length !== expectedBytes.length) return false;
+    for (let i = 0; i < currentBytes.length; i++) {
+      if (currentBytes[i] !== expectedBytes[i]) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function PushNotificationControl({ tenantId }: { tenantId: string }) {
@@ -32,14 +52,71 @@ export function PushNotificationControl({ tenantId }: { tenantId: string }) {
       .then(async ([nextCapability, nextPreference]) => {
         if (!active) return;
         setCapability(nextCapability); setPreference(nextPreference);
-        if (!nextCapability.configured || !nextCapability.publicKey) setState('unavailable');
-        else if (Notification.permission === 'denied') setState('denied');
-        else {
-          const registration = await navigator.serviceWorker.getRegistration();
-          const subscription = await registration?.pushManager.getSubscription();
+        if (!nextCapability.configured || !nextCapability.publicKey) {
+          setState('unavailable');
+          return;
+        }
+        if (Notification.permission === 'denied') {
+          setState('denied');
+          return;
+        }
+
+        try {
+          const registration = await (navigator.serviceWorker.ready || navigator.serviceWorker.getRegistration());
+          let subscription = await registration?.pushManager?.getSubscription();
           if (!active) return;
-          setDeviceSubscribed(Boolean(subscription));
-          setState(nextPreference.push_enabled && subscription ? 'enabled' : 'ready');
+
+          let serverStatus: PushSubscriptionStatus | null = null;
+          let keysAligned = false;
+
+          if (subscription && nextCapability.publicKey) {
+            keysAligned = applicationServerKeysMatch(subscription.options?.applicationServerKey ?? null, nextCapability.publicKey);
+
+            // Self-healing: if existing browser subscription has mismatched VAPID key, replace it
+            if (!keysAligned && Notification.permission === 'granted' && typeof subscription.unsubscribe === 'function') {
+              try {
+                await subscription.unsubscribe();
+                subscription = await registration?.pushManager?.subscribe({
+                  userVisibleOnly: true,
+                  applicationServerKey: applicationServerKey(nextCapability.publicKey),
+                });
+                keysAligned = true;
+                if (subscription) {
+                  await pushNotificationApi.registerSubscription(tenantId, subscription.toJSON());
+                }
+              } catch {
+                keysAligned = false;
+              }
+            }
+
+            if (keysAligned && subscription && typeof pushNotificationApi.getSubscriptionStatus === 'function') {
+              try {
+                serverStatus = await pushNotificationApi.getSubscriptionStatus(tenantId, subscription.endpoint);
+                if ((!serverStatus.registered || !serverStatus.enabled || serverStatus.failureCode === 'AUTH_ERROR') && nextPreference.push_enabled) {
+                  await pushNotificationApi.registerSubscription(tenantId, subscription.toJSON());
+                  serverStatus = await pushNotificationApi.getSubscriptionStatus(tenantId, subscription.endpoint);
+                } else if (serverStatus.failureCode === 'EXPIRED') {
+                  await subscription.unsubscribe();
+                  subscription = await registration?.pushManager?.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: applicationServerKey(nextCapability.publicKey),
+                  });
+                  if (subscription) {
+                    await pushNotificationApi.registerSubscription(tenantId, subscription.toJSON());
+                    serverStatus = await pushNotificationApi.getSubscriptionStatus(tenantId, subscription.endpoint);
+                  }
+                }
+              } catch {}
+            }
+          }
+
+          if (!active) return;
+          const isSubscribedOnDevice = Boolean(subscription && (keysAligned || !nextCapability.publicKey));
+          const isServerEnabled = serverStatus ? Boolean(serverStatus.registered && serverStatus.enabled) : isSubscribedOnDevice;
+          setDeviceSubscribed(isSubscribedOnDevice && isServerEnabled);
+          setState(nextPreference.push_enabled && isSubscribedOnDevice && isServerEnabled ? 'enabled' : 'ready');
+        } catch {
+          if (active) setState('ready');
         }
       })
       .catch(() => { if (active) { setState('error'); setMessage('Notification settings could not be loaded.'); } });
@@ -63,7 +140,16 @@ export function PushNotificationControl({ tenantId }: { tenantId: string }) {
     try {
       const registration = await navigator.serviceWorker.ready;
       let subscription = await registration.pushManager.getSubscription();
-      if (!subscription) subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: applicationServerKey(capability!.publicKey!) });
+      if (subscription && capability?.publicKey && !applicationServerKeysMatch(subscription.options?.applicationServerKey ?? null, capability.publicKey)) {
+        await subscription.unsubscribe();
+        subscription = null;
+      }
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: applicationServerKey(capability!.publicKey!),
+        });
+      }
       await pushNotificationApi.registerSubscription(tenantId, subscription.toJSON());
       const nextPreference = await pushNotificationApi.updatePreference(tenantId, true);
       setPreference(nextPreference); setDeviceSubscribed(true); setState('enabled');
@@ -89,11 +175,19 @@ export function PushNotificationControl({ tenantId }: { tenantId: string }) {
     }
   }
 
-  const canEnable = state === 'ready' && configured && !deviceSubscribed;
+  const isIos = typeof navigator !== 'undefined' && /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const isStandalone = typeof window !== 'undefined' && (window.matchMedia?.('(display-mode: standalone)')?.matches || ('standalone' in navigator && Boolean((navigator as { standalone?: boolean }).standalone)));
+
+  const canEnable = (state === 'ready' || (!deviceSubscribed && state !== 'unavailable' && state !== 'unsupported' && state !== 'denied' && state !== 'loading')) && configured;
   const canDisable = state === 'enabled' && configured && deviceSubscribed;
   return <section className="panel max-w-xl p-4 sm:p-6" aria-label="Phone notifications">
     <h2 className="font-semibold text-ink">Phone notifications</h2>
     <p className="mt-1 text-sm text-stone-500">Receive attention-worthy updates on this device.</p>
+    {isIos && !isStandalone && (
+      <p className="mt-2 text-xs text-amber-400">
+        On iPhone/iPad, push notifications require adding this web app to your Home Screen first.
+      </p>
+    )}
     <p className="mt-4 text-sm font-medium text-ink break-words" role="status">{state === 'loading' ? 'Checking notification availability…' : label}</p>
     <div className="mt-4 flex flex-wrap gap-3">
       {canEnable && <DashboardButton type="button" variant="primary" className="max-w-full whitespace-normal text-center h-auto min-h-10 py-2.5 px-4" onClick={() => { void enable(); }}>Enable phone notifications</DashboardButton>}

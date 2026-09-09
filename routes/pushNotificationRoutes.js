@@ -6,6 +6,8 @@ import {
   registerPushSubscription,
   unsubscribePushSubscription,
   updatePushNotificationPreference,
+  getPushSubscriptionStatus,
+  getPushDiagnostics,
   PushNotificationError,
 } from '../services/push-notification-service.js';
 
@@ -40,6 +42,28 @@ router.put('/:tenantId/push-notifications/subscription', requireTenantAccess, as
 router.delete('/:tenantId/push-notifications/subscription', requireTenantAccess, async (req, res) => {
   try { return res.json({ unsubscribed: await unsubscribePushSubscription({ database: pool, tenantId: req.verified_tenant_id, userId: req.user.user_id, endpoint: req.body?.endpoint }) }); }
   catch (error) { return res.status(error instanceof PushNotificationError ? 400 : 503).json({ error: 'Push subscription is unavailable' }); }
+});
+
+router.get('/:tenantId/push-notifications/status', requireTenantAccess, async (req, res) => {
+  try {
+    const endpoint = typeof req.query?.endpoint === 'string' ? req.query.endpoint : null;
+    return res.json(await getPushSubscriptionStatus({
+      database: pool,
+      tenantId: req.verified_tenant_id,
+      userId: req.user.user_id,
+      endpoint,
+    }));
+  } catch (error) {
+    return res.status(error instanceof PushNotificationError ? 400 : 503).json({ error: 'Push status is unavailable' });
+  }
+});
+
+router.get('/:tenantId/push-notifications/diagnostics', requireTenantAccess, async (req, res) => {
+  try {
+    return res.json(await getPushDiagnostics({ database: pool, tenantId: req.verified_tenant_id }));
+  } catch (error) {
+    return res.status(error instanceof PushNotificationError ? 400 : 503).json({ error: 'Push diagnostics are unavailable' });
+  }
 });
 
 export default router;

@@ -14,11 +14,18 @@ const subscription = { endpoint: 'https://push.example.test/subscription/one', k
 
 test('registers a tenant/user scoped subscription idempotently without trusting client tenant authority', async () => {
   const calls = [];
-  const database = { query: async (sql, params = []) => { calls.push({ sql, params }); return { rowCount: 1, rows: [{ id: 'subscription-1', tenant_id: tenantId, user_id: userId, endpoint: subscription.endpoint, enabled: true }] }; } };
+  const database = {
+    query: async (sql, params = []) => {
+      calls.push({ sql, params });
+      if (/FROM users u/.test(sql)) return { rowCount: 1, rows: [{ system_role: 'ADMIN', tenant_role: 'ADMIN' }] };
+      return { rowCount: 1, rows: [{ id: 'subscription-1', tenant_id: tenantId, user_id: userId, endpoint: subscription.endpoint, enabled: true }] };
+    },
+  };
   const result = await registerPushSubscription({ database, tenantId, userId, subscription });
   assert.equal(result.id, 'subscription-1');
-  assert.match(calls[0].sql, /ON CONFLICT \(tenant_id, user_id, endpoint\)/);
-  assert.deepEqual(calls[0].params.slice(0, 3), [tenantId, userId, subscription.endpoint]);
+  const insertCall = calls.find((c) => /ON CONFLICT \(tenant_id, user_id, endpoint\)/.test(c.sql));
+  assert.ok(insertCall);
+  assert.deepEqual(insertCall.params.slice(0, 3), [tenantId, userId, subscription.endpoint]);
 });
 
 test('never deletes a different tenant or user subscription', async () => {

@@ -8,6 +8,7 @@ vi.mock('../dashboard/dashboard-api', () => ({
     updatePreference: vi.fn(),
     registerSubscription: vi.fn(),
     unsubscribe: vi.fn(),
+    getSubscriptionStatus: vi.fn().mockResolvedValue({ registered: false, enabled: false, failureCode: null }),
   },
 }));
 

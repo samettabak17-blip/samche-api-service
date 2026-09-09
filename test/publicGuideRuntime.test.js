@@ -107,6 +107,30 @@ test('Guide theme consumes explicit accessible tokens without filtering logo pix
   assert.doesNotMatch(css, /mix-blend-mode/i);
 });
 
+test('mobile Roadmap and Interactive Tool use content-driven height without clipping their active layer', () => {
+  const css = fs.readFileSync(new URL('../public-guide/guide.css', import.meta.url), 'utf8');
+  const mobileRules = css.match(/@media\(max-width:540px\)\{([\s\S]*?)\n\}/)?.[1] ?? '';
+
+  assert.match(source, /guide-module--content-active/);
+  assert.match(source, /guide-canvas--content-active/);
+  assert.match(source, /guide-shell--content-active/);
+  assert.match(mobileRules, /\.guide-module--content-active,\.guide-module--content-active \.guide-module-layer:not\(\[hidden\]\),\.guide-module--content-active \.guide-tool-form\{[^}]*flex:none[^}]*overflow:visible/);
+});
+
+test('tenant header gives multi-word names available space without truncation or aggressive word breaking', () => {
+  const css = fs.readFileSync(new URL('../public-guide/guide.css', import.meta.url), 'utf8');
+  const brandRule = css.match(/\.guide-brand-name\{([^}]*)\}/)?.[1] ?? '';
+
+  assert.match(css, /\.guide-identity\{[^}]*flex:1 1 auto[^}]*min-width:0/);
+  assert.match(css, /\.guide-names\{[^}]*flex:1 1 auto[^}]*min-width:0/);
+  assert.match(brandRule, /white-space:normal/);
+  assert.match(brandRule, /overflow-wrap:break-word/);
+  assert.doesNotMatch(brandRule, /overflow:hidden|text-overflow:ellipsis|white-space:nowrap/);
+  assert.doesNotMatch(css, /@media\(max-width:380px\)\{\s*\.guide-brand-name\{[^}]*max-width/);
+  assert.doesNotMatch(css, /word-break:break-all/);
+  assert.doesNotMatch(css, /BlueDune/i);
+});
+
 test('conversational Roadmap is primary and shares visible progressive response semantics with Assistant', () => {
   assert.match(source, /renderConversationalRoadmap/);
   assert.match(source, /suggestedRoadmapIntents/);

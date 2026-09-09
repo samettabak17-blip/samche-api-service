@@ -34,6 +34,8 @@ test.after(async () => {
       await database.query('DELETE FROM human_support_escalation_policies WHERE tenant_id = ANY($1::uuid[])', [createdTenantIds]);
       await database.query('DELETE FROM tenant_platform_provisioning WHERE tenant_id = ANY($1::uuid[])', [createdTenantIds]);
       await database.query('DELETE FROM crm_pipeline_stages WHERE tenant_id = ANY($1::uuid[])', [createdTenantIds]);
+      await database.query('DELETE FROM guide_experience_audit_events WHERE tenant_id = ANY($1::uuid[])', [createdTenantIds]);
+      await database.query('DELETE FROM guide_experience_versions WHERE tenant_id = ANY($1::uuid[])', [createdTenantIds]);
       await database.query('DELETE FROM ai_assistants WHERE tenant_id = ANY($1::uuid[])', [createdTenantIds]);
       await database.query('DELETE FROM tenants WHERE id = ANY($1::uuid[])', [createdTenantIds]);
     }

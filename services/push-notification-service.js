@@ -100,26 +100,6 @@ export async function createPushNotificationIntent({ database, tenantId, eventId
   const intent = result.rows[0];
   console.info('PUSH_EVENT_CREATED = tenant=' + String(tenant).slice(0, 8) + ' event_id=' + (intent?.event_id ?? eventId) + ' event_type=' + (intent?.event_type ?? eventType));
 
-  const subCountResult = await database.query(
-    `SELECT count(*)::int AS count
-       FROM push_notification_subscriptions subscription
-       LEFT JOIN push_notification_preferences preference ON preference.tenant_id=subscription.tenant_id AND preference.user_id=subscription.user_id
-      WHERE subscription.tenant_id = $1 AND subscription.enabled = TRUE
-        AND COALESCE(preference.push_enabled, TRUE) = TRUE
-        ${recipients ? 'AND subscription.user_id = ANY($2::uuid[])' : ''}`,
-    recipients ? [tenant, recipients] : [tenant],
-  );
-  const activeSubscriptionCount = subCountResult.rows[0]?.count ?? 0;
-
-  console.info(
-    'PUSH_INTENT_DIAGNOSTIC'
-    + ' PUSH_INTENT_ID=' + String(intent.id).slice(0, 8)
-    + ' tenant=' + String(tenant).slice(0, 8)
-    + ' event_type=' + eventType
-    + ' ACTIVE_SUBSCRIPTION_COUNT=' + activeSubscriptionCount
-    + ' DEEPLINK_CREATED=1'
-  );
-
   const outbox = await database.query(
     `INSERT INTO push_notification_outbox (tenant_id, intent_id, recipient_user_id, subscription_id, event_type, deep_link)
      SELECT intent.tenant_id, intent.id, subscription.user_id, subscription.id, intent.event_type, intent.deep_link
@@ -131,6 +111,16 @@ export async function createPushNotificationIntent({ database, tenantId, eventId
      ON CONFLICT (tenant_id, intent_id, subscription_id) DO NOTHING`,
     recipients ? [intent.id, recipients] : [intent.id],
   );
+
+  console.info(
+    'PUSH_INTENT_DIAGNOSTIC'
+    + ' PUSH_INTENT_ID=' + String(intent.id).slice(0, 8)
+    + ' tenant=' + String(tenant).slice(0, 8)
+    + ' event_type=' + eventType
+    + ' ACTIVE_SUBSCRIPTION_COUNT=' + (outbox.rowCount ?? 0)
+    + ' DEEPLINK_CREATED=1'
+  );
+
   if (!outbox.rowCount) {
     const existing = await database.query(
       `SELECT count(*)::integer AS count FROM push_notification_outbox WHERE tenant_id=$1 AND intent_id=$2`,
@@ -234,9 +224,22 @@ export async function processPushNotificationOutbox({ database, deliver, tenantI
     await client.query(`UPDATE push_notification_outbox SET status='PROCESSING', attempts=attempts+1, processing_started_at=CURRENT_TIMESTAMP WHERE id=$1 AND tenant_id=$2`, [row.id, row.tenant_id]);
     console.info('PUSH_SEND_ATTEMPTED = tenant=' + String(row.tenant_id).slice(0, 8) + ' outbox_id=' + String(row.id).slice(0, 8));
     console.info('PUSH_ATTEMPT_DIAGNOSTIC PUSH_ATTEMPTED=1 tenant=' + String(row.tenant_id).slice(0, 8) + ' outbox_id=' + String(row.id).slice(0, 8));
+    let conversationId = null;
+    const match = String(row.deep_link ?? '').match(/\/conversations\/whatsapp\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/i);
+    if (match) conversationId = match[1];
+
     let outcome;
     try {
-      outcome = await deliver({ subscription: { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } }, notification: { type: row.event_type, deepLink: row.deep_link, eventId: row.id } });
+      outcome = await deliver({
+        subscription: { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } },
+        notification: {
+          type: row.event_type,
+          deepLink: row.deep_link,
+          eventId: row.id,
+          tenantId: row.tenant_id,
+          conversationId,
+        },
+      });
     } catch {
       outcome = { retryable: true };
     }
@@ -260,6 +263,11 @@ export async function processPushNotificationOutbox({ database, deliver, tenantI
       await client.query(`UPDATE push_notification_outbox SET status = 'FAILED', processing_started_at=NULL, failure_code='EXPIRED' WHERE id=$1 AND tenant_id=$2`, [row.id, row.tenant_id]);
       console.info('PUSH_INVALIDATION_DIAGNOSTIC SUBSCRIPTION_INVALIDATED=1 subscription_id=' + String(row.subscription_id).slice(0, 8) + ' tenant=' + String(row.tenant_id).slice(0, 8));
       result.expired++;
+    } else if (outcome?.statusCode === 401 || outcome?.statusCode === 403) {
+      await client.query(`UPDATE push_notification_subscriptions SET enabled = FALSE, failure_code='AUTH_ERROR', updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND tenant_id=$2`, [row.subscription_id, row.tenant_id]);
+      await client.query(`UPDATE push_notification_outbox SET status = 'FAILED', processing_started_at=NULL, failure_code='AUTH_ERROR' WHERE id=$1 AND tenant_id=$2`, [row.id, row.tenant_id]);
+      console.info('PUSH_INVALIDATION_DIAGNOSTIC SUBSCRIPTION_AUTH_ERROR=1 subscription_id=' + String(row.subscription_id).slice(0, 8) + ' tenant=' + String(row.tenant_id).slice(0, 8));
+      result.failed++;
     } else if (outcome?.status === 'DELIVERED') {
       await client.query(`UPDATE push_notification_outbox SET status='DELIVERED', processing_started_at=NULL, delivered_at=CURRENT_TIMESTAMP WHERE id=$1 AND tenant_id=$2`, [row.id, row.tenant_id]);
       await client.query(`UPDATE push_notification_subscriptions SET last_delivered_at=CURRENT_TIMESTAMP, failure_code=NULL WHERE id=$1 AND tenant_id=$2`, [row.subscription_id, row.tenant_id]);
@@ -271,4 +279,91 @@ export async function processPushNotificationOutbox({ database, deliver, tenantI
     } else { await client.query(`UPDATE push_notification_outbox SET status='FAILED', processing_started_at=NULL, failure_code='DELIVERY_FAILED' WHERE id=$1 AND tenant_id=$2`, [row.id, row.tenant_id]); result.failed++; }
     await client.query('COMMIT'); return result;
   } catch (error) { await client.query('ROLLBACK').catch(() => {}); throw error; } finally { client.release(); }
+}
+
+
+
+export async function getPushSubscriptionStatus({ database, tenantId, userId, endpoint = null }) {
+  const tenant = id(tenantId, 'PUSH_TENANT_INVALID');
+  const user = id(userId, 'PUSH_USER_INVALID');
+
+  let deviceSub = null;
+  if (typeof endpoint === 'string' && endpoint.trim()) {
+    const ep = endpoint.trim().slice(0, 2048);
+    const result = await database.query(
+      `SELECT id, enabled, failure_code, last_delivered_at
+         FROM push_notification_subscriptions
+        WHERE tenant_id = $1 AND user_id = $2 AND endpoint = $3`,
+      [tenant, user, ep]
+    );
+    if (result.rowCount) deviceSub = result.rows[0];
+  }
+
+  const allSubs = await database.query(
+    `SELECT count(*)::int AS active_count
+       FROM push_notification_subscriptions
+      WHERE tenant_id = $1 AND user_id = $2 AND enabled = TRUE`,
+    [tenant, user]
+  );
+  const activeCount = allSubs.rows[0]?.active_count ?? 0;
+
+  return {
+    registered: Boolean(deviceSub),
+    enabled: Boolean(deviceSub?.enabled),
+    failureCode: deviceSub?.failure_code ?? null,
+    lastDeliveredAt: deviceSub?.last_delivered_at ?? null,
+    hasActiveSubscription: activeCount > 0,
+    activeSubscriptionCount: activeCount,
+  };
+}
+
+export async function getPushDiagnostics({ database, tenantId }) {
+  const tenant = id(tenantId, 'PUSH_TENANT_INVALID');
+  const subs = await database.query(
+    `SELECT id, user_id, endpoint, enabled, failure_code, last_delivered_at, created_at, updated_at
+       FROM push_notification_subscriptions
+      WHERE tenant_id = $1
+      ORDER BY updated_at DESC LIMIT 10`,
+    [tenant]
+  );
+  const recentOutbox = await database.query(
+    `SELECT id, intent_id, recipient_user_id, subscription_id, status, attempts, failure_code, delivered_at, created_at
+       FROM push_notification_outbox
+      WHERE tenant_id = $1
+      ORDER BY created_at DESC LIMIT 10`,
+    [tenant]
+  );
+  const recentIntents = await database.query(
+    `SELECT id, event_id, event_type, status, created_at
+       FROM push_notification_intents
+      WHERE tenant_id = $1
+      ORDER BY created_at DESC LIMIT 5`,
+    [tenant]
+  );
+  return {
+    subscriptions: subs.rows.map((s) => ({
+      id: String(s.id).slice(0, 8),
+      userId: String(s.user_id).slice(0, 8),
+      endpointHost: (() => { try { return new URL(s.endpoint).host; } catch { return 'unknown'; } })(),
+      enabled: s.enabled,
+      failureCode: s.failure_code,
+      lastDeliveredAt: s.last_delivered_at,
+      updatedAt: s.updated_at,
+    })),
+    recentOutbox: recentOutbox.rows.map((o) => ({
+      id: String(o.id).slice(0, 8),
+      status: o.status,
+      attempts: o.attempts,
+      failureCode: o.failure_code,
+      deliveredAt: o.delivered_at,
+      createdAt: o.created_at,
+    })),
+    recentIntents: recentIntents.rows.map((i) => ({
+      id: String(i.id).slice(0, 8),
+      eventId: String(i.event_id).slice(0, 32),
+      eventType: i.event_type,
+      status: i.status,
+      createdAt: i.created_at,
+    })),
+  };
 }

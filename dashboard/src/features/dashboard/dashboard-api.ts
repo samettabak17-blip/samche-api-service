@@ -45,6 +45,15 @@ export interface PushNotificationPreference {
   push_enabled: boolean;
   categories: Record<string, boolean>;
 }
+export interface PushSubscriptionStatus {
+  registered: boolean;
+  enabled: boolean;
+  failureCode: string | null;
+  lastDeliveredAt: string | null;
+  hasActiveSubscription: boolean;
+  activeSubscriptionCount: number;
+}
+
 
 export const onboardingApi = {
   createCompanyInvitation: (payload: CompanyInvitationPayload, idempotencyKey: string) => apiClient.post<CompanyOnboardingResponse>('/api/v1/tenants/onboard', payload, { headers: { 'Idempotency-Key': idempotencyKey } }),
@@ -65,6 +74,11 @@ export const pushNotificationApi = {
   updatePreference: (tenantId: string, pushEnabled: boolean) => apiClient.patch<PushNotificationPreference>(`${tenantRoot(tenantId)}/push-notifications/preference`, { push_enabled: pushEnabled }),
   registerSubscription: (tenantId: string, subscription: PushSubscriptionJSON) => apiClient.put<{ subscription: { endpoint: string; enabled: boolean } }>(`${tenantRoot(tenantId)}/push-notifications/subscription`, { subscription }),
   unsubscribe: (tenantId: string, endpoint: string) => apiClient.delete<{ unsubscribed: boolean }>(`${tenantRoot(tenantId)}/push-notifications/subscription`, { body: { endpoint } }),
+  getSubscriptionStatus: (tenantId: string, endpoint?: string) =>
+    apiClient.get<PushSubscriptionStatus>(
+      `${tenantRoot(tenantId)}/push-notifications/status${endpoint ? `?endpoint=${encodeURIComponent(endpoint)}` : ''}`
+    ),
+
 };
 
 export const tenantKeys = {

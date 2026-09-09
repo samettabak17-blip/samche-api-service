@@ -16,7 +16,7 @@ if (!isSafeTestDatabaseUrl(connectionString)) throw new Error('ASSISTANT_CONFIGU
 const { Pool } = pg;
 const database = new Pool({
   connectionString,
-  ssl: resolvePostgresSsl({ connectionString, databaseSsl: 'strict', nodeEnv: 'test' }),
+  ssl: resolvePostgresSsl({ connectionString, databaseSsl: process.env.DATABASE_SSL || 'strict', nodeEnv: 'test' }),
   max: 1,
 });
 

@@ -1,5 +1,5 @@
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
-const DASHBOARD_ROUTE = '(?:overview|settings|team|guide-experience|knowledge(?:-base)?(?:/[a-z-]+)?|conversations/[a-z_-]+(?:/' + UUID + ')?|leads(?:/' + UUID + ')?|pipeline(?:/' + UUID + ')?|assistants(?:/' + UUID + ')?|channels(?:/' + UUID + ')?)';
+const DASHBOARD_ROUTE = '(?:overview|settings|team|guide-experience|knowledge(?:-base)?(?:/[a-z-]+)?|conversations(?:/[a-z_-]+(?:/' + UUID + ')?)?|leads(?:/' + UUID + ')?|pipeline(?:/' + UUID + ')?|assistants(?:/' + UUID + ')?|channels(?:/' + UUID + ')?)';
 
 function isAllowedDashboardPath(value) {
   return typeof value === 'string'
@@ -10,6 +10,10 @@ function isAllowedDashboardPath(value) {
 function safeDeepLink(value) {
   return isAllowedDashboardPath(value) ? value : '/';
 }
+
+self.addEventListener('install', () => {
+  self.skipWaiting();
+});
 
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
@@ -32,12 +36,20 @@ self.addEventListener('push', (event) => {
     const type = typeof payload.type === 'string' ? payload.type.slice(0, 64) : 'NOTIFICATION';
     const title = payload.title || 'SamChe Canlı Destek';
     const body = payload.body || (type === 'HUMAN_HANDOFF_REQUESTED' ? 'Yeni canlı destek talebi aktarıldı.' : type.replaceAll('_', ' '));
-    const deepLink = safeDeepLink(payload.deepLink);
+    const rawLink = payload.deepLink || payload.url || payload.data?.deepLink || payload.data?.url;
+    const deepLink = safeDeepLink(payload.deepLink) !== '/' ? safeDeepLink(payload.deepLink) : safeDeepLink(rawLink);
     const options = {
       body,
       icon: '/samche-logo.png',
       badge: '/samche-logo.png',
-      data: { deepLink },
+      data: {
+        deepLink,
+        url: deepLink,
+        tenantId: payload.tenantId || payload.data?.tenantId || null,
+        conversationId: payload.conversationId || payload.data?.conversationId || null,
+        type,
+        eventId: payload.eventId || payload.data?.eventId || null,
+      },
       tag: payload.eventId || 'samche-live-support',
       renotify: true,
       requireInteraction: true,
@@ -45,16 +57,28 @@ self.addEventListener('push', (event) => {
     try {
       await self.registration.showNotification(title, options);
     } catch {
-      await self.registration.showNotification('SamChe', { body });
+      try {
+        await self.registration.showNotification(title, { body, data: { deepLink } });
+      } catch {
+        await self.registration.showNotification('SamChe', { body });
+      }
     }
   })());
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const deepLink = safeDeepLink(event.notification.data?.deepLink);
+  const deepLink = safeDeepLink(event.notification.data?.deepLink || event.notification.data?.url);
   event.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
     const match = windows.find((client) => new URL(client.url).pathname === deepLink);
-    return match ? match.focus() : clients.openWindow(deepLink);
+    if (match) return match.focus();
+    const anyWindow = windows.find((client) => 'focus' in client);
+    if (anyWindow) {
+      if ('navigate' in anyWindow) {
+        return anyWindow.navigate(deepLink).then((c) => c?.focus?.());
+      }
+      return anyWindow.focus();
+    }
+    return clients.openWindow(deepLink);
   }));
 });
