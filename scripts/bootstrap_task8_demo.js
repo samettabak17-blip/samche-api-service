@@ -88,11 +88,13 @@ async function bootstrapTask8Demo(options = {}) {
     }
 
     // 3. Provision Web Chat Integration and Channel
-    const integrationOutcome = await ensureWebChatIntegration(client, {
+    const integrationOutcome = await ensureWebChatIntegration({
+      database: client,
       tenantId,
       widgetKey: TARGET_WIDGET_KEY,
       assistantId,
       channelName: 'SamChe Teknoloji Web Chat',
+      displayName: 'SamChe Teknoloji Web Chat',
       allowedOrigins: ['*'],
       welcomeMessage: 'Merhaba! SamChe Teknoloji Mağazasına hoş geldiniz. Size nasıl yardımcı olabilirim?',
       metadata: {
@@ -109,10 +111,12 @@ async function bootstrapTask8Demo(options = {}) {
     console.log(`      Outcome:        ${integrationOutcome.outcome}`);
 
     // 4. Configure v2 Business Profile & Persona with Turkish e-commerce facts
-    const personaOutcome = await ensureTenantWebChatPersona(client, {
+    const personaOutcome = await ensureTenantWebChatPersona({
+      database: client,
       tenantId,
       assistantId,
       companyName: 'SamChe Teknoloji',
+      assistantIdentity: 'SamChe Teknoloji Danışmanı',
       industry: 'E-Ticaret & Tüketici Elektroniği',
       supportEmail: 'destek@samche.test',
       supportPhone: '+90 850 123 45 67',

@@ -49,14 +49,18 @@ async function runInTransaction(database, operation) {
  * Idempotently provisions or updates a Web Chat channel and integration mapping for any tenant.
  * Guarantees tenant isolation, fails closed on cross-tenant conflicts, and preserves provider independence.
  */
-export async function ensureWebChatIntegration({
-  database,
-  tenantId,
-  assistantId = null,
-  channelId = null,
-  widgetKey = null,
-  displayName = null,
-}) {
+export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions = {}) {
+  const isPositional = databaseOrOptions && (typeof databaseOrOptions.query === 'function' || typeof databaseOrOptions.connect === 'function');
+  const database = isPositional ? databaseOrOptions : databaseOrOptions?.database;
+  const opts = isPositional ? (maybeOptions || {}) : (databaseOrOptions || {});
+  const {
+    tenantId = opts.tenantId,
+    assistantId = opts.assistantId ?? null,
+    channelId = opts.channelId ?? null,
+    widgetKey = opts.widgetKey ?? null,
+    displayName = opts.displayName ?? opts.channelName ?? null,
+  } = opts;
+
   if (!database || (typeof database.query !== 'function' && typeof database.connect !== 'function')) {
     throw new TenantWebChatProvisioningError('WEB_CHAT_PROVISIONING_DATABASE_INVALID', 'Database connection is missing or invalid');
   }
@@ -366,15 +370,19 @@ export async function getWebChatIntegrationForTenant({ database, tenantId }) {
  * Ensures an active Business Profile Version (v2) and Assistant Configuration Version (v2)
  * for the tenant and assistant, so resolveTenantRuntimePersona resolves available: true.
  */
-export async function ensureTenantWebChatPersona({
-  database,
-  tenantId,
-  assistantId,
-  companyName = 'SamChe Mağazası',
-  assistantIdentity = 'SamChe Satış ve Destek Asistanı',
-  rules = [],
-  instructions = 'Müşterilere Türkçe olarak kibar, doğru ve ürün kataloğuna sadık bilgi verin.',
-}) {
+export async function ensureTenantWebChatPersona(databaseOrOptions, maybeOptions = {}) {
+  const isPositional = databaseOrOptions && (typeof databaseOrOptions.query === 'function' || typeof databaseOrOptions.connect === 'function');
+  const database = isPositional ? databaseOrOptions : databaseOrOptions?.database;
+  const opts = isPositional ? (maybeOptions || {}) : (databaseOrOptions || {});
+  const {
+    tenantId = opts.tenantId,
+    assistantId = opts.assistantId,
+    companyName = opts.companyName || 'SamChe Mağazası',
+    assistantIdentity = opts.assistantIdentity || 'SamChe Satış ve Destek Asistanı',
+    rules = opts.rules || opts.guidelines || [],
+    instructions = opts.instructions || 'Müşterilere Türkçe olarak kibar, doğru ve ürün kataloğuna sadık bilgi verin.',
+  } = opts;
+
   const validTenantId = validateUUID(tenantId, 'WEB_CHAT_PROVISIONING_TENANT_INVALID', 'Invalid tenant ID format');
   const validAssistantId = validateUUID(assistantId, 'WEB_CHAT_PROVISIONING_ASSISTANT_INVALID', 'Invalid assistant ID format');
 
