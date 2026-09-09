@@ -11,8 +11,14 @@ import './styles/globals.css';
 setSamCheFavicon(samcheBrandLogo);
 
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => { void registerDashboardServiceWorker(); });
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    void registerDashboardServiceWorker();
+  } else {
+    window.addEventListener('DOMContentLoaded', () => { void registerDashboardServiceWorker(); });
+    window.addEventListener('load', () => { void registerDashboardServiceWorker(); });
+  }
 }
+
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

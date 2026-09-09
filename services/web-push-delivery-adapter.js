@@ -65,22 +65,40 @@ export async function createWebPushDeliveryAdapter({ configuration = readWebPush
           attempted: true,
           endpointHost,
           statusCode: 201,
-          status: 'DELIVERED',
+          status: 'ACCEPTED_BY_PUSH_SERVICE',
+          providerAccepted: true,
+          classification: 'ACCEPTED_BY_PUSH_SERVICE',
           failureClass: null,
           errorBody: null,
           timestamp: new Date().toISOString(),
         };
-        return { status: 'DELIVERED', statusCode: 201 };
+        console.info(
+          'PUSH_PROVIDER_DELIVERY_ACCEPTED'
+          + ' host=' + endpointHost
+          + ' status=201'
+          + ' classification=ACCEPTED_BY_PUSH_SERVICE'
+        );
+        return { status: 'ACCEPTED_BY_PUSH_SERVICE', statusCode: 201, providerAccepted: true, classification: 'ACCEPTED_BY_PUSH_SERVICE' };
       } catch (error) {
         const statusCode = Number(error?.statusCode ?? 0) || null;
         const errorClass = error?.name || (error instanceof Error ? error.constructor.name : 'UnknownError');
         const errorBody = typeof error?.body === 'string' ? error.body.trim().slice(0, 256) : null;
         const errorMessage = error?.message ? String(error.message).slice(0, 256) : null;
+        let classification = 'OTHER_PROVIDER_ERROR';
+        if (statusCode === 404) classification = 'SUBSCRIPTION_NOT_FOUND';
+        else if (statusCode === 410) classification = 'SUBSCRIPTION_EXPIRED';
+        else if (statusCode === 401 || statusCode === 403) classification = 'AUTHORIZATION_OR_VAPID_ERROR';
+        else if (errorClass === 'PayloadEncodingError' || errorClass === 'SyntaxError') classification = 'PAYLOAD_ENCRYPTION_ERROR';
+        else if (error?.code === 'ETIMEDOUT' || error?.code === 'ECONNRESET' || errorClass === 'TimeoutError') classification = 'NETWORK_TIMEOUT';
+        else if (statusCode && statusCode >= 500) classification = 'PROVIDER_SERVER_ERROR';
+
         latestDeliveryAttempt = {
           attempted: true,
           endpointHost,
           statusCode,
           status: 'FAILED',
+          providerAccepted: false,
+          classification,
           failureClass: errorClass,
           errorBody: errorBody || errorMessage,
           timestamp: new Date().toISOString(),
@@ -89,11 +107,14 @@ export async function createWebPushDeliveryAdapter({ configuration = readWebPush
           'PUSH_PROVIDER_DELIVERY_FAILURE'
           + ' host=' + endpointHost
           + ' status=' + (statusCode ?? 'NONE')
+          + ' classification=' + classification
           + ' error_class=' + errorClass
           + ' error_body=' + (errorBody || errorMessage || 'NONE')
         );
         return {
           statusCode,
+          status: 'FAILED',
+          classification,
           errorClass,
           errorBody,
           errorMessage,

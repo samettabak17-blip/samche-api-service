@@ -163,3 +163,49 @@ test('can process a tenant-scoped notification intent without claiming another t
   assert.match(claim.sql, /outbox\.tenant_id=\$1/);
   assert.deepEqual(claim.params, [tenantId]);
 });
+
+test('ACCEPTED_BY_PUSH_SERVICE marks outbox delivered and updates subscription delivery timestamp', async () => {
+  const calls = [];
+  const database = {
+    connect: async () => ({
+      query: async (sql, params = []) => {
+        calls.push({ sql, params });
+        if (/FOR UPDATE OF outbox SKIP LOCKED/.test(sql)) {
+          return { rows: [{ id: 'outbox-1', tenant_id: tenantId, recipient_user_id: userId, event_type: 'HUMAN_HANDOFF_REQUESTED', deep_link: `/app/${tenantId}/conversations/whatsapp/${otherTenantId}`, subscription_id: 'sub-1', endpoint: subscription.endpoint, p256dh: 'key-a', auth: 'auth-a', attempts: 0 }] };
+        }
+        return { rows: [] };
+      },
+      release: () => {},
+    }),
+  };
+  const outcome = await processPushNotificationOutbox({
+    database,
+    deliver: async () => ({ status: 'ACCEPTED_BY_PUSH_SERVICE', statusCode: 201 }),
+  });
+  assert.equal(outcome.delivered, 1);
+  assert.ok(calls.some(({ sql }) => /UPDATE push_notification_outbox SET status='DELIVERED'/.test(sql)));
+  assert.ok(calls.some(({ sql }) => /UPDATE push_notification_subscriptions SET last_delivered_at=CURRENT_TIMESTAMP/.test(sql)));
+});
+
+test('401/403 provider response marks subscription as AUTH_ERROR failure code', async () => {
+  const calls = [];
+  const database = {
+    connect: async () => ({
+      query: async (sql, params = []) => {
+        calls.push({ sql, params });
+        if (/FOR UPDATE OF outbox SKIP LOCKED/.test(sql)) {
+          return { rows: [{ id: 'outbox-1', tenant_id: tenantId, recipient_user_id: userId, event_type: 'HUMAN_HANDOFF_REQUESTED', deep_link: `/app/${tenantId}/conversations/whatsapp/${otherTenantId}`, subscription_id: 'sub-1', endpoint: subscription.endpoint, p256dh: 'key-a', auth: 'auth-a', attempts: 0 }] };
+        }
+        return { rows: [] };
+      },
+      release: () => {},
+    }),
+  };
+  const outcome = await processPushNotificationOutbox({
+    database,
+    deliver: async () => ({ statusCode: 401, errorClass: 'WebPushError' }),
+  });
+  assert.equal(outcome.failed, 1);
+  assert.ok(calls.some(({ sql }) => /failure_code='AUTH_ERROR'/.test(sql)));
+});
+

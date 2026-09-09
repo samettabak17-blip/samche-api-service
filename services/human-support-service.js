@@ -198,7 +198,9 @@ export async function requestCustomerHumanSupport({
          (SELECT id FROM human_support_escalation_policies
            WHERE tenant_id = $1 AND event_type = 'HUMAN_SUPPORT_REQUESTED' AND enabled = TRUE LIMIT 1),
          'PENDING', 0, CURRENT_TIMESTAMP, $3)
-       ON CONFLICT (tenant_id, conversation_id, idempotency_key) DO NOTHING`,
+       ON CONFLICT (tenant_id, conversation_id, idempotency_key)
+       DO UPDATE SET status = 'PENDING', current_level = 0, next_due_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       WHERE human_support_escalations.status IN ('COMPLETED', 'CANCELLED')`,
       [tenantId, conversationId, `human-support-requested:${conversationId}`],
     );
     await notify(client, tenantId, conversationId, 'HUMAN_SUPPORT_REQUESTED');
@@ -325,7 +327,10 @@ export async function claimDueHumanSupportEscalations({ database = null, now = n
         `INSERT INTO human_support_notification_outbox
           (tenant_id, escalation_id, conversation_id, level_order, idempotency_key, status)
          VALUES ($1, $2, $3, $4, $5, 'PENDING')
-         ON CONFLICT (tenant_id, idempotency_key) DO NOTHING RETURNING id`,
+         ON CONFLICT (tenant_id, idempotency_key)
+         DO UPDATE SET status = 'PENDING', processing_started_at = NULL
+         WHERE human_support_notification_outbox.status IN ('DELIVERED', 'CANCELLED', 'FAILED')
+         RETURNING id`,
         [row.tenant_id, row.escalation_id, row.conversation_id, row.level_order, key]
       );
       if (!inserted.rowCount) continue;
@@ -355,21 +360,24 @@ export async function triggerImmediateHumanSupportNotificationPipeline({
     const { resolveHumanSupportRecipients } = await import('./human-support-recipient-service.js');
     const { processHumanSupportNotificationOutbox } = await import('./human-support-notification-outbox-service.js');
     const { enqueueHumanHandoffPushNotification, processPushNotificationOutbox } = await import('./push-notification-service.js');
-    await processHumanSupportNotificationOutbox({
-      database: db,
-      tenantId,
-      resolveRecipients: (input) => resolveHumanSupportRecipients({ database: db, ...input }),
-      deliver: async ({ recipients, tenantId: tId, conversationId: cId, outboxId }) => {
-        await enqueueHumanHandoffPushNotification({
-          database: db,
-          tenantId: tId,
-          conversationId: cId,
-          handoffOutboxId: outboxId,
-          recipients,
-        });
-        return { status: 'DELIVERED' };
-      },
-    });
+    for (let pass = 0; pass < 5; pass++) {
+      const outboxResult = await processHumanSupportNotificationOutbox({
+        database: db,
+        tenantId,
+        resolveRecipients: (input) => resolveHumanSupportRecipients({ database: db, ...input }),
+        deliver: async ({ recipients, tenantId: tId, conversationId: cId, outboxId }) => {
+          await enqueueHumanHandoffPushNotification({
+            database: db,
+            tenantId: tId,
+            conversationId: cId,
+            handoffOutboxId: outboxId,
+            recipients,
+          });
+          return { status: 'DELIVERED' };
+        },
+      });
+      if (!outboxResult.delivered && !outboxResult.noRecipients) break;
+    }
     if (typeof deliverWebPush === 'function') {
       for (let pass = 0; pass < 10; pass++) {
         const outboxResult = await processPushNotificationOutbox({

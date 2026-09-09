@@ -211,5 +211,21 @@ test('support request sets AI suppression and logs mandatory observability field
   } finally {
     console.info = originalInfo;
   }
+
+test('resets escalation to PENDING on new support request if previous escalation was COMPLETED or CANCELLED', async () => {
+  const fixture = database();
+  const result = await requestCustomerHumanSupport({
+    tenantId,
+    conversationId,
+    acknowledgement: 'test',
+    database: fixture.database,
+  });
+  assert.equal(result.duplicate, false);
+  const escalationInsert = fixture.calls.find(({ sql }) => sql.includes('INSERT INTO human_support_escalations'));
+  assert.ok(escalationInsert, 'escalation insert query must be called');
+  assert.match(escalationInsert.sql, /DO UPDATE SET status = 'PENDING'/);
+  assert.match(escalationInsert.sql, /WHERE human_support_escalations\.status IN \('COMPLETED', 'CANCELLED'\)/);
+});
+
 });
 

@@ -2183,7 +2183,63 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           );
           return;
         }
-        if (whatsappInbox.duplicate || !whatsappInbox.shouldInvokeAi) return;
+        if (whatsappInbox.duplicate) return;
+
+        // Human support is an ownership transition, not an AI response. Resolve
+        // it before persona, retrieval or provider work so an AI outage or
+        // non-AI handling mode cannot prevent a customer reaching the tenant's Live Inbox.
+        const humanSupportRequest = parseCustomerHumanSupportRequest(text);
+        if (humanSupportRequest.requested) {
+          const tenantContext = whatsappInbox?.tenantContext;
+          const lang = ['tr', 'en', 'ar'].includes(tenantContext?.communicationLanguage)
+            ? tenantContext.communicationLanguage
+            : 'en';
+          let handoffPolicy;
+          try {
+            handoffPolicy = await resolvePlatformHumanSupportPolicy({ database: pool, locale: lang });
+          } catch {
+            console.error('WHATSAPP_HUMAN_SUPPORT_POLICY_UNAVAILABLE source=PLATFORM_DATABASE');
+            return;
+          }
+          const acknowledgement = handoffPolicy.acknowledgement();
+          const handoff = await requestCustomerHumanSupport({
+            tenantId: whatsappInbox.integration.tenant_id,
+            conversationId: whatsappInbox.conversation.id,
+            acknowledgement,
+            topicSummary: handoffPolicy.defaultTopic,
+          });
+          if (!handoff.duplicate) {
+            const typingStartedAt = Date.now();
+            if (wpMessageId && whatsappInbox.integration.external_channel_id) {
+              try {
+                await sendWhatsAppTypingIndicator({
+                  phoneNumberId: whatsappInbox.integration.external_channel_id,
+                  incomingMessageId: wpMessageId,
+                });
+                await applyWhatsAppAdaptivePacing({
+                  generationStartedAt: typingStartedAt,
+                  content: acknowledgement,
+                });
+              } catch (err) {
+                console.warn('SUPPORT_REQUEST_TYPING_NON_BLOCKING_ERROR', err?.message);
+              }
+            }
+            await sendMessage(cleanFrom, acknowledgement, whatsappInbox.integration.external_channel_id);
+            console.info('LIFECYCLE_MESSAGE_SENT = tenant=' + String(whatsappInbox.integration.tenant_id).slice(0, 8) + ' conversation=' + String(whatsappInbox.conversation.id).slice(0, 8) + ' event_type=human_support_request typing=' + (wpMessageId ? '1' : '0'));
+          }
+          const pushAdapter = await createWebPushDeliveryAdapter().catch(() => null);
+          await triggerImmediateHumanSupportNotificationPipeline({
+            database: pool,
+            tenantId: whatsappInbox.integration.tenant_id,
+            conversationId: whatsappInbox.conversation.id,
+            deliverWebPush: pushAdapter ? (input) => pushAdapter.deliver(input) : null,
+          }).catch((err) => {
+            console.error('IMMEDIATE_PUSH_TRIGGER_ERROR', err?.message);
+          });
+          return;
+        }
+
+        if (!whatsappInbox.shouldInvokeAi) return;
         resourceFollowUp = planWhatsAppResourceFollowUp({
           customerText: text,
           readyResourceCount: whatsappInbox.aiContextParts?.length ?? 0,
@@ -2259,54 +2315,6 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       const lang = ['tr', 'en', 'ar'].includes(tenantContext.communicationLanguage)
         ? tenantContext.communicationLanguage
         : 'en';
-
-      // Human support is an ownership transition, not an AI response. Resolve
-      // it before persona, retrieval or provider work so an AI outage cannot
-      // prevent a customer reaching the tenant's Live Inbox.
-      const humanSupportRequest = parseCustomerHumanSupportRequest(text);
-      if (humanSupportRequest.requested) {
-        let handoffPolicy;
-        try {
-          handoffPolicy = await resolvePlatformHumanSupportPolicy({ database: pool, locale: lang });
-        } catch {
-          console.error('WHATSAPP_HUMAN_SUPPORT_POLICY_UNAVAILABLE source=PLATFORM_DATABASE');
-          return;
-        }
-        const acknowledgement = handoffPolicy.acknowledgement();
-        const handoff = await requestCustomerHumanSupport({
-          tenantId: whatsappInbox.integration.tenant_id,
-          conversationId: whatsappInbox.conversation.id,
-          acknowledgement,
-          topicSummary: handoffPolicy.defaultTopic,
-        });
-        if (!handoff.duplicate) {
-          const typingStartedAt = Date.now();
-          if (wpMessageId && whatsappInbox.integration.external_channel_id) {
-            try {
-              await sendWhatsAppTypingIndicator({
-                phoneNumberId: whatsappInbox.integration.external_channel_id,
-                incomingMessageId: wpMessageId,
-              });
-              await applyWhatsAppAdaptivePacing({
-                generationStartedAt: typingStartedAt,
-                content: acknowledgement,
-              });
-            } catch (err) {
-              console.warn('SUPPORT_REQUEST_TYPING_NON_BLOCKING_ERROR', err?.message);
-            }
-          }
-          await sendMessage(cleanFrom, acknowledgement, whatsappInbox.integration.external_channel_id);
-          console.info('LIFECYCLE_MESSAGE_SENT = tenant=' + String(whatsappInbox.integration.tenant_id).slice(0, 8) + ' conversation=' + String(whatsappInbox.conversation.id).slice(0, 8) + ' event_type=human_support_request typing=' + (wpMessageId ? '1' : '0'));
-          const pushAdapter = await createWebPushDeliveryAdapter().catch(() => null);
-          triggerImmediateHumanSupportNotificationPipeline({
-            database: pool,
-            tenantId: whatsappInbox.integration.tenant_id,
-            conversationId: whatsappInbox.conversation.id,
-            deliverWebPush: pushAdapter ? (input) => pushAdapter.deliver(input) : null,
-          }).catch(() => {});
-        }
-        return;
-      }
 
       const assistantMessageCount = (whatsappInbox?.conversationHistory ?? []).filter((m) => m.sender_type === 'ASSISTANT').length;
       const typingAttemptNumber = assistantMessageCount + 1;

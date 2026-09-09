@@ -108,7 +108,9 @@ export async function createPushNotificationIntent({ database, tenantId, eventId
        LEFT JOIN push_notification_preferences preference ON preference.tenant_id=subscription.tenant_id AND preference.user_id=subscription.user_id
       WHERE intent.id=$1 AND COALESCE(preference.push_enabled, TRUE)=TRUE
         ${recipients ? 'AND subscription.user_id = ANY($2::uuid[])' : ''}
-     ON CONFLICT (tenant_id, intent_id, subscription_id) DO NOTHING`,
+     ON CONFLICT (tenant_id, intent_id, subscription_id)
+     DO UPDATE SET status = 'PENDING', attempts = 0, processing_started_at = NULL, failure_code = NULL, delivered_at = NULL
+     WHERE push_notification_outbox.status IN ('DELIVERED', 'FAILED')`,
     recipients ? [intent.id, recipients] : [intent.id],
   );
 
@@ -243,21 +245,28 @@ export async function processPushNotificationOutbox({ database, deliver, tenantI
     } catch {
       outcome = { retryable: true };
     }
-    const statusCategory = outcome?.status === 'DELIVERED'
-      ? 'SUCCESS'
-      : (outcome?.statusCode === 404 || outcome?.statusCode === 410)
-        ? 'EXPIRED'
-        : (outcome?.statusCode === 401 || outcome?.statusCode === 403)
-          ? 'AUTH_ERROR'
-          : outcome?.retryable
-            ? 'RETRYABLE'
-            : 'FAILED';
+    const isAccepted = outcome?.status === 'ACCEPTED_BY_PUSH_SERVICE' || outcome?.status === 'DELIVERED' || outcome?.statusCode === 201;
+    const statusCategory = isAccepted
+      ? 'ACCEPTED_BY_PUSH_SERVICE'
+      : (outcome?.statusCode === 404)
+        ? 'NOT_FOUND'
+        : (outcome?.statusCode === 410)
+          ? 'EXPIRED'
+          : (outcome?.statusCode === 401 || outcome?.statusCode === 403)
+            ? 'AUTH_ERROR'
+            : (outcome?.classification === 'PAYLOAD_ENCRYPTION_ERROR' || outcome?.errorClass === 'PayloadEncodingError' || outcome?.errorClass === 'SyntaxError')
+              ? 'PAYLOAD_ENCRYPTION_ERROR'
+              : (outcome?.classification === 'NETWORK_TIMEOUT' || outcome?.errorClass === 'TimeoutError' || outcome?.code === 'ETIMEDOUT')
+                ? 'NETWORK_TIMEOUT'
+                : outcome?.retryable
+                  ? 'RETRYABLE'
+                  : 'FAILED';
     console.info(
       'PUSH_OUTCOME_DIAGNOSTIC PROVIDER_STATUS_CATEGORY=' + statusCategory
       + ' code=' + (outcome?.statusCode ?? 'NONE')
       + ' tenant=' + String(row.tenant_id).slice(0, 8)
     );
-    console.info('PUSH_PROVIDER_RESULT = tenant=' + String(row.tenant_id).slice(0, 8) + ' status=' + (outcome?.status ?? 'FAILED') + ' code=' + (outcome?.statusCode ?? 'NONE'));
+    console.info('PUSH_PROVIDER_RESULT = tenant=' + String(row.tenant_id).slice(0, 8) + ' status=' + (isAccepted ? 'ACCEPTED_BY_PUSH_SERVICE' : 'FAILED') + ' code=' + (outcome?.statusCode ?? 'NONE'));
     if (outcome?.statusCode === 404 || outcome?.statusCode === 410) {
       await client.query(`UPDATE push_notification_subscriptions SET enabled = FALSE, failure_code='EXPIRED', updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND tenant_id=$2`, [row.subscription_id, row.tenant_id]);
       await client.query(`UPDATE push_notification_outbox SET status = 'FAILED', processing_started_at=NULL, failure_code='EXPIRED' WHERE id=$1 AND tenant_id=$2`, [row.id, row.tenant_id]);
@@ -268,7 +277,7 @@ export async function processPushNotificationOutbox({ database, deliver, tenantI
       await client.query(`UPDATE push_notification_outbox SET status = 'FAILED', processing_started_at=NULL, failure_code='AUTH_ERROR' WHERE id=$1 AND tenant_id=$2`, [row.id, row.tenant_id]);
       console.info('PUSH_INVALIDATION_DIAGNOSTIC SUBSCRIPTION_AUTH_ERROR=1 subscription_id=' + String(row.subscription_id).slice(0, 8) + ' tenant=' + String(row.tenant_id).slice(0, 8));
       result.failed++;
-    } else if (outcome?.status === 'DELIVERED') {
+    } else if (isAccepted) {
       await client.query(`UPDATE push_notification_outbox SET status='DELIVERED', processing_started_at=NULL, delivered_at=CURRENT_TIMESTAMP WHERE id=$1 AND tenant_id=$2`, [row.id, row.tenant_id]);
       await client.query(`UPDATE push_notification_subscriptions SET last_delivered_at=CURRENT_TIMESTAMP, failure_code=NULL WHERE id=$1 AND tenant_id=$2`, [row.subscription_id, row.tenant_id]);
       result.delivered++;

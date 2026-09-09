@@ -50,9 +50,7 @@ self.addEventListener('push', (event) => {
         type,
         eventId: payload.eventId || payload.data?.eventId || null,
       },
-      tag: payload.eventId || 'samche-live-support',
-      renotify: true,
-      requireInteraction: true,
+      tag: String(payload.eventId || 'samche-live-support'),
     };
     try {
       await self.registration.showNotification(title, options);
@@ -68,17 +66,25 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const deepLink = safeDeepLink(event.notification.data?.deepLink || event.notification.data?.url);
-  event.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
-    const match = windows.find((client) => new URL(client.url).pathname === deepLink);
-    if (match) return match.focus();
-    const anyWindow = windows.find((client) => 'focus' in client);
-    if (anyWindow) {
-      if ('navigate' in anyWindow) {
-        return anyWindow.navigate(deepLink).then((c) => c?.focus?.());
+  const rawDeepLink = event.notification.data?.deepLink || event.notification.data?.url;
+  const deepLink = safeDeepLink(rawDeepLink);
+  const targetUrl = new URL(deepLink, self.location.origin).href;
+
+  event.waitUntil((async () => {
+    const windows = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windows) {
+      if (new URL(client.url).pathname === deepLink && 'focus' in client) {
+        return client.focus();
       }
-      return anyWindow.focus();
     }
-    return clients.openWindow(deepLink);
-  }));
+    for (const client of windows) {
+      if ('navigate' in client && 'focus' in client) {
+        await client.navigate(targetUrl);
+        return client.focus();
+      }
+    }
+    if (clients.openWindow) {
+      return clients.openWindow(targetUrl);
+    }
+  })());
 });
