@@ -122,3 +122,57 @@ test('WhatsApp native typing indicator: supports multi-tenant phone ID without m
     typing_indicator: { type: 'text' },
   });
 });
+
+test('WhatsApp tenant resolution: co-existing inactive source (Blue Dune) and active target (Yeşil Vadi) resolves exclusively to Yeşil Vadi', async () => {
+  const queries = [];
+  const fakeClient = {
+    async query(sql, params) {
+      queries.push({ sql, params });
+
+      // The query in resolveWhatsAppIntegration filters by tc.status = 'active'.
+      // If the database has both Blue Dune (status = 'inactive') and Yeşil Vadi (status = 'active')
+      // for the same external phone number '948536645017374', only Yeşil Vadi is returned.
+      if (sql.includes('FROM tenant_channels tc')) {
+        return {
+          rowCount: 1,
+          rows: [
+            {
+              tenant_id: 'yesil-vadi-tenant-id-0001',
+              channel_id: 'yesil-vadi-channel-id-0001',
+              assistant_id: 'yesil-vadi-assistant-id-0001',
+              channel_assistant_id: 'yesil-vadi-assistant-id-0001',
+              channel_type: 'WHATSAPP',
+              channel_status: 'active',
+              assistant_status: 'active',
+              tenant_name: 'Yeşil Vadi',
+              assistant_name: 'Yeşil Vadi Asistanı',
+              assistant_system_prompt: 'Yeşil Vadi canonical master policy.',
+              assistant_whatsapp_response_templates: { first_contact: { tr: 'Merhaba, Yeşil Vadiye hoş geldiniz.' } },
+            },
+          ],
+        };
+      }
+
+      if (sql.includes('INSERT INTO channel_integrations')) {
+        return { rowCount: 1, rows: [{ id: 'int-yesil-vadi' }] };
+      }
+
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  const integration = await resolveWhatsAppIntegration(fakeClient, '948536645017374');
+
+  assert.ok(integration, 'Yeşil Vadi must resolve successfully');
+  assert.equal(integration.tenant_id, 'yesil-vadi-tenant-id-0001');
+  assert.equal(integration.tenant_name, 'Yeşil Vadi');
+  assert.notEqual(integration.tenant_name, 'Blue Dune');
+
+  const upsertQuery = queries.find((q) => q.sql.includes('INSERT INTO channel_integrations'));
+  assert.ok(upsertQuery, 'channel_integrations convergence upsert must target Yeşil Vadi');
+  assert.equal(upsertQuery.params[0], 'whatsapp:948536645017374');
+  assert.equal(upsertQuery.params[1], 'yesil-vadi-tenant-id-0001');
+  assert.equal(upsertQuery.params[2], 'yesil-vadi-channel-id-0001');
+  assert.equal(upsertQuery.params[3], 'yesil-vadi-assistant-id-0001');
+});
+
