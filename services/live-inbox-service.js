@@ -138,7 +138,7 @@ export async function getSamcheguidePublicHistory({ externalSessionId, integrati
   }));
 }
 
-export async function persistSamcheguideInbound({ externalSessionId, content, idempotencyKey = null, integration: suppliedIntegration = null }) {
+export async function persistSamcheguideInbound({ externalSessionId, content, idempotencyKey = null, integration: suppliedIntegration = null, visitorContext = null }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -210,6 +210,12 @@ export async function persistSamcheguideInbound({ externalSessionId, content, id
         WHERE id = $1 AND tenant_id = $2`,
       [conversationId, integration.tenant_id]
     );
+    if (visitorContext) {
+      await client.query(
+        'UPDATE conversations SET visitor_context = $1::jsonb WHERE id = $2 AND tenant_id = $3',
+        [JSON.stringify(visitorContext), conversationId, integration.tenant_id]
+      ).catch(() => {});
+    }
     await notify(client, integration.tenant_id, conversationId, 'CUSTOMER_MESSAGE');
     await client.query('COMMIT');
     queueLeadQualification({ tenantId: integration.tenant_id, conversationId });
@@ -225,6 +231,72 @@ export async function persistSamcheguideInbound({ externalSessionId, content, id
     };
   } catch (error) {
     await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function persistWebChatInbound({ externalSessionId, content, idempotencyKey = null, integration, visitorContext = null, database = pool }) {
+  if (!integration || integration.channel_status !== 'active') return null;
+  const client = await database.connect();
+  try {
+    await client.query('BEGIN');
+    const externalConversationId = publicConversationKey(externalSessionId);
+    const conversationResult = await client.query(
+      `INSERT INTO conversations
+        (tenant_id, channel_id, external_conversation_id, customer_external_id, last_activity_at, visitor_context)
+       VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5::jsonb)
+       ON CONFLICT (channel_id, external_conversation_id)
+       DO UPDATE SET last_activity_at = CURRENT_TIMESTAMP,
+                     visitor_context = COALESCE($5::jsonb, conversations.visitor_context)
+       RETURNING *`,
+      [integration.tenant_id, integration.channel_id, externalConversationId, customerReference(externalSessionId), visitorContext ? JSON.stringify(visitorContext) : null]
+    );
+
+    const conversationId = conversationResult.rows[0].id;
+    const locked = await client.query(
+      'SELECT * FROM conversations WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
+      [conversationId, integration.tenant_id]
+    );
+    const conversation = locked.rows[0];
+
+    await ensureConversationCrmIdentity(client, {
+      tenantId: integration.tenant_id,
+      conversationId,
+      source: 'WEB_CHAT',
+      externalCustomerId: conversation.customer_external_id,
+    });
+
+    const customerMessage = await insertMessage(client, {
+      tenantId: integration.tenant_id,
+      conversationId,
+      senderType: 'CUSTOMER',
+      content,
+      idempotencyKey,
+    });
+
+    await client.query(
+      `UPDATE conversations
+          SET last_activity_at = CURRENT_TIMESTAMP,
+              human_support_last_activity_at = CASE
+                WHEN handling_mode = 'HUMAN' AND human_attention_state = 'ACKNOWLEDGED'
+                  THEN CURRENT_TIMESTAMP
+                ELSE human_support_last_activity_at
+              END,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $1 AND tenant_id = $2`,
+      [conversationId, integration.tenant_id]
+    );
+    await notify(client, integration.tenant_id, conversationId, 'CUSTOMER_MESSAGE');
+    await client.query('COMMIT');
+    return {
+      integration,
+      conversation,
+      customerMessage,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
     throw error;
   } finally {
     client.release();

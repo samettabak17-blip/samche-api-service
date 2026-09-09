@@ -32,6 +32,21 @@ export interface ConversationRecord {
   handoff_reason: string | null;
   handling_version: number;
   last_activity_at: string;
+  visitor_context?: {
+    current_entity?: {
+      name: string;
+      type: string;
+      url?: string;
+      attributes?: Record<string, any>;
+    } | null;
+    previous_entities?: Array<{
+      name: string;
+      type: string;
+      url?: string;
+    }>;
+    summary_text?: string;
+  } | null;
+
 }
 export interface HumanAttentionSummary { unresolvedCount: number; }
 export interface Conversation extends ConversationRecord {

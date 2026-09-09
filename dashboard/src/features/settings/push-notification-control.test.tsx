@@ -56,7 +56,7 @@ describe('PushNotificationControl', () => {
     Object.defineProperty(window.Notification, 'permission', { configurable: true, value: 'granted' });
     vi.mocked(pushNotificationApi.getCapability).mockResolvedValue({ configured: true, publicKey: 'AQ' });
     vi.mocked(pushNotificationApi.getPreference).mockResolvedValue({ push_enabled: true, categories: {} });
-    vi.mocked(pushNotificationApi.getSubscriptionStatus).mockResolvedValue({ registered: false, enabled: false, failureCode: 'EXPIRED' });
+    vi.mocked(pushNotificationApi.getSubscriptionStatus).mockResolvedValue({ registered: false, enabled: false, failureCode: 'EXPIRED', lastDeliveredAt: null, hasActiveSubscription: false, activeSubscriptionCount: 0 });
     render(<PushNotificationControl tenantId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(await screen.findByRole('button', { name: 'Reconnect notifications' })).toBeVisible();
     expect(await screen.findByText('Re-enable notifications')).toBeVisible();
@@ -77,7 +77,7 @@ describe('PushNotificationControl', () => {
     Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { ready: Promise.resolve(registration), getRegistration: vi.fn().mockResolvedValue(registration) } });
     vi.mocked(pushNotificationApi.getCapability).mockResolvedValue({ configured: true, publicKey: 'AQ' });
     vi.mocked(pushNotificationApi.getPreference).mockResolvedValue({ push_enabled: true, categories: {} });
-    vi.mocked(pushNotificationApi.getSubscriptionStatus).mockResolvedValue({ registered: true, enabled: true, failureCode: null });
+    vi.mocked(pushNotificationApi.getSubscriptionStatus).mockResolvedValue({ registered: true, enabled: true, failureCode: null, lastDeliveredAt: null, hasActiveSubscription: true, activeSubscriptionCount: 1 });
     render(<PushNotificationControl tenantId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
     expect(await screen.findByText('Enabled')).toBeVisible();
     expect(await screen.findByRole('button', { name: 'Disable phone notifications' })).toBeVisible();

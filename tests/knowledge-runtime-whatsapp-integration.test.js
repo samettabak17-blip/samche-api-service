@@ -6,7 +6,7 @@ const appSource = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8')
 
 test('WhatsApp model path resolves active tenant persona after human-handoff gating and before provider invocation', () => {
   assert.match(appSource, /resolveChannelAssistantRuntime/);
-  const humanGate = appSource.indexOf('if (whatsappInbox.duplicate || !whatsappInbox.shouldInvokeAi) return;');
+  const humanGate = appSource.indexOf('if (!whatsappInbox.shouldInvokeAi) return;');
   assert.ok(humanGate >= 0);
   const resolveRuntime = appSource.indexOf('resolveChannelAssistantRuntime({', humanGate);
   assert.ok(resolveRuntime > humanGate);

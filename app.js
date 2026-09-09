@@ -79,6 +79,17 @@ import { isSharedPublicGuideAssetPath } from './services/guide-public-asset-rout
 import { GuideSessionContextError, buildGuideSessionContextSummary, calculateGuideToolResult, guideSessionStatePatch, loadGuideSessionContext, saveGuideSessionContext } from './services/guide-session-context-service.js';
 import { verifyGuidePreviewToken, GuidePreviewError } from './services/guide-preview-service.js';
 import { appendGuideModuleMessage, canonicalGuideResponseEvents, canonicalGuideResponseText, GuideConversationError, issueGuideResumeSession, loadGuideResumeState, normalizeGuideConversationRequest, patchGuideResumeState, resolveGuideResumeSession, resolveGuideResumeSessionByToken, saveGuideResumeState } from './services/guide-conversation-service.js';
+import {
+  buildContextualIntelligencePromptSection,
+  buildGuidePageContextSummary,
+  ContextualIntelligenceError,
+  formatVisitorContextForHandoff,
+  loadWebChatSessionBrowsingState,
+  logContextualObservability,
+  saveWebChatSessionBrowsingState,
+  updateSessionBrowsingState,
+} from './services/contextual-intelligence-service.js';
+
 
 dotenv.config();
 
@@ -401,6 +412,10 @@ app.use(['/guide', '/:slug/guide'], async (req, res, next) => {
   if (!integration) return res.sendStatus(404);
   return next();
 }, sharedGuideStatic);
+
+app.use('/public', express.static('public'));
+app.get('/web-chat.js', (req, res) => res.sendFile(path.resolve('public', 'web-chat.js')));
+
 
 // ==========================================
 // V1 ROUTES
@@ -1462,10 +1477,12 @@ app.post("/chat", chatPostHandler = async (req, res) => {
     }
 
     const contents = conversationHistory.length ? conversationHistory : [{ role: 'user', parts: [{ text: cleanText }] }];
+    const guidePageContextSummary = buildGuidePageContextSummary(guideSessionState?.sharedContext?.page_context || guideSessionState?.page_context);
     const runtimeSystemInstruction = buildTenantRuntimeSystemInstruction({
       persona: runtime.persona,
       knowledgeContext: [guideContextSummary, runtime.knowledge.knowledgeContext].filter(Boolean).join('\n\n'),
-      channelRules: "Return safe, readable HTML suitable for the AI Guide interface."
+      channelRules: "Return safe, readable HTML suitable for the AI Guide interface.",
+      contextualIntelligence: guidePageContextSummary,
     });
 
     let originalText;
@@ -1603,6 +1620,107 @@ app.post("/api/chat/bootstrap", async (req, res) => {
   }
 });
 
+app.post("/api/chat/page-context", async (req, res) => {
+  const suppliedWebChatSession = req.get('X-Samche-Web-Chat-Session');
+  if (!suppliedWebChatSession) {
+    return res.status(401).json({ error: 'Web Chat session is required.' });
+  }
+
+  let webChatSession = null;
+  let webChatIntegration = null;
+  try {
+    webChatSession = verifyPublicWebChatSession(suppliedWebChatSession, {
+      secret: configuredPublicWebChatSessionSecret(),
+    });
+    webChatIntegration = await resolvePublicWebChatIntegration({
+      database: pool,
+      widgetKey: webChatSession.widgetKey,
+    });
+  } catch (error) {
+    if (error instanceof PublicWebChatSessionError) {
+      return res.status(401).json({ error: 'Web Chat session is invalid.' });
+    }
+  }
+
+  if (!webChatIntegration) {
+    return res.status(401).json({ error: 'Web Chat session is invalid.' });
+  }
+
+  const rawPayload = req.body?.page_context;
+  if (!rawPayload || typeof rawPayload !== 'object') {
+    return res.status(400).json({ error: 'A valid page_context object is required.' });
+  }
+
+  const rawBytes = Buffer.byteLength(JSON.stringify(rawPayload), 'utf8');
+  logContextualObservability('PAGE_CONTEXT_RECEIVED', {
+    tenant_id: webChatIntegration.tenant_id,
+    session_id: webChatSession.sessionId,
+    bytes: rawBytes,
+  });
+
+  try {
+    const currentState = await loadWebChatSessionBrowsingState({
+      database: pool,
+      tenantId: webChatIntegration.tenant_id,
+      sessionId: webChatSession.sessionId,
+    });
+
+    const updatedState = updateSessionBrowsingState({
+      currentState,
+      rawPageContext: rawPayload,
+    });
+
+    await saveWebChatSessionBrowsingState({
+      database: pool,
+      tenantId: webChatIntegration.tenant_id,
+      assistantId: webChatIntegration.assistant_id,
+      channelId: webChatIntegration.channel_id,
+      widgetKey: webChatSession.widgetKey,
+      sessionId: webChatSession.sessionId,
+      browsingState: updatedState,
+    });
+
+    logContextualObservability('PAGE_CONTEXT_VALIDATED', {
+      entity_type: updatedState.currentEntity?.entity_type ?? 'PAGE',
+      entity_id: updatedState.currentEntity?.entity_id ?? 'none',
+    });
+    logContextualObservability('CURRENT_ENTITY_RESOLVED', {
+      entity_name: updatedState.currentEntity?.entity_name ?? 'none',
+    });
+    logContextualObservability('PREVIOUS_ENTITY_COUNT', {
+      count: updatedState.previousEntities?.length ?? 0,
+    });
+    logContextualObservability('TENANT_RESOLUTION', {
+      tenant_id: webChatIntegration.tenant_id,
+      channel_id: webChatIntegration.channel_id,
+    });
+    logContextualObservability('ASSISTANT_RESOLUTION', {
+      assistant_id: webChatIntegration.assistant_id,
+    });
+
+    return res.json({
+      status: 'ok',
+      current_entity: updatedState.currentEntity ? {
+        entity_type: updatedState.currentEntity.entity_type,
+        entity_id: updatedState.currentEntity.entity_id,
+        entity_name: updatedState.currentEntity.entity_name,
+        canonical_url: updatedState.currentEntity.canonical_url,
+      } : null,
+      previous_entities_count: updatedState.previousEntities.length,
+    });
+  } catch (error) {
+    const reason = error?.code ?? error?.message ?? 'PAGE_CONTEXT_ERROR';
+    logContextualObservability('CONTEXT_DROPPED_REASON', { reason });
+    if (error instanceof ContextualIntelligenceError) {
+      const status = error.code === 'CONTEXT_PAYLOAD_TOO_LARGE' ? 413 : 400;
+      return res.status(status).json({ error: error.message, code: error.code });
+    }
+    console.error('PAGE_CONTEXT_UPDATE_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    return res.status(500).json({ error: 'Failed to update page context.' });
+  }
+});
+
+
 app.post("/api/chat", async (req, res) => {
   try {
     const userMessage = req.body.message;
@@ -1680,6 +1798,59 @@ app.post("/api/chat", async (req, res) => {
         console.error('KNOWLEDGE_RUNTIME_CONTEXT_UNAVAILABLE channel=WEB_CHAT code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
       }
     }
+    let webChatBrowsingState = null;
+    let webChatContextualSection = '';
+    if (webChatIntegration && webChatSession?.sessionId) {
+      if (req.body?.page_context) {
+        try {
+          const currentState = await loadWebChatSessionBrowsingState({
+            database: pool,
+            tenantId: webChatIntegration.tenant_id,
+            sessionId: webChatSession.sessionId,
+          });
+          webChatBrowsingState = updateSessionBrowsingState({
+            currentState,
+            rawPageContext: req.body.page_context,
+          });
+          await saveWebChatSessionBrowsingState({
+            database: pool,
+            tenantId: webChatIntegration.tenant_id,
+            assistantId: webChatIntegration.assistant_id,
+            channelId: webChatIntegration.channel_id,
+            widgetKey: webChatSession.widgetKey,
+            sessionId: webChatSession.sessionId,
+            browsingState: webChatBrowsingState,
+          });
+        } catch (contextError) {
+          logContextualObservability('CONTEXT_DROPPED_REASON', {
+            reason: contextError?.code ?? contextError?.message ?? 'INVALID_CONTEXT',
+          });
+        }
+      } else {
+        webChatBrowsingState = await loadWebChatSessionBrowsingState({
+          database: pool,
+          tenantId: webChatIntegration.tenant_id,
+          sessionId: webChatSession.sessionId,
+        });
+      }
+
+      if (webChatBrowsingState?.currentEntity || (webChatBrowsingState?.previousEntities && webChatBrowsingState.previousEntities.length > 0)) {
+        webChatContextualSection = buildContextualIntelligencePromptSection({
+          currentEntity: webChatBrowsingState.currentEntity,
+          previousEntities: webChatBrowsingState.previousEntities,
+          channelType: 'WEB_CHAT',
+        });
+        logContextualObservability('PAGE_CONTEXT_USED', {
+          entity: webChatBrowsingState.currentEntity?.entity_name ?? 'none',
+          attributes_count: Object.keys(webChatBrowsingState.currentEntity?.attributes ?? {}).length,
+          previous_count: webChatBrowsingState.previousEntities?.length ?? 0,
+        });
+        logContextualObservability('CONTEXT_BYTES', {
+          bytes: Buffer.byteLength(webChatContextualSection, 'utf8'),
+        });
+      }
+    }
+
 
     const messages = [
       {
@@ -2047,9 +2218,13 @@ If the user already provided sector info, NEVER ask again.`
         persona: webChatRuntimePersona,
         knowledgeContext: webChatRuntimeKnowledge?.knowledgeContext ?? '',
         channelRules: 'Return safe HTML suitable for Web Chat. Do not reveal internal metadata.',
+        contextualIntelligence: webChatContextualSection,
       });
     } else if (webChatRuntimeKnowledge) {
       messages[0].content = appendRuntimeKnowledgeToSystemInstruction(messages[0].content, webChatRuntimeKnowledge);
+      if (webChatContextualSection) {
+        messages[0].content = messages[0].content + '\n\n' + webChatContextualSection;
+      }
     }
 
     const completion = await openaiClient.chat.completions.create({
