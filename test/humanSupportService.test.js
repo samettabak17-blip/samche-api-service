@@ -183,3 +183,33 @@ test('support request binds only its tenant active escalation policy', async () 
   assert.match(escalation?.sql ?? '', /SELECT id FROM human_support_escalation_policies/);
   assert.deepEqual(escalation?.params?.slice(0, 2), [tenantId, conversationId]);
 });
+test('support request sets AI suppression and logs mandatory observability fields', async () => {
+  const fixture = database();
+  const logs = [];
+  const originalInfo = console.info;
+  console.info = (...args) => { logs.push(args.join(' ')); originalInfo(...args); };
+
+  try {
+    const result = await requestCustomerHumanSupport({
+      tenantId,
+      conversationId,
+      acknowledgement: 'Canlı temsilciye aktarılıyorsunuz.',
+      topicSummary: 'Genel destek',
+      database: fixture.database,
+    });
+
+    assert.equal(result.duplicate, false);
+    const updateCall = fixture.calls.find(({ sql }) => sql.includes('UPDATE conversations'));
+    assert.ok(updateCall, 'conversation must be updated to HUMAN handling mode');
+    assert.match(updateCall.sql, /handling_mode = 'HUMAN'/);
+    assert.match(updateCall.sql, /human_attention_state = 'REQUESTED'/);
+
+    const logText = logs.join('\n');
+    assert.match(logText, /SUPPORT_REQUEST_CREATED =/);
+    assert.match(logText, /AI_SUPPRESSION_SET =/);
+    assert.match(logText, /ESCALATION_SCHEDULED =/);
+  } finally {
+    console.info = originalInfo;
+  }
+});
+

@@ -169,7 +169,7 @@ test('cumulative old-tenant and two-fresh-tenant provisioning parity is canonica
     [tenantIds],
   );
   assert.equal(escalation.rows.length, 3);
-  assert.ok(escalation.rows.every((row) => row.policies === 1 && row.levels === 1));
+  assert.ok(escalation.rows.every((row) => row.policies === 1 && row.levels === 2));
 
   const accidentalFeatureRows = await database.query(
     `SELECT
@@ -197,7 +197,7 @@ test('cumulative old-tenant and two-fresh-tenant provisioning parity is canonica
        (SELECT count(*) FROM human_support_escalation_levels WHERE tenant_id=$1)::integer AS levels`,
     [freshA.tenant.id],
   );
-  assert.deepEqual(noDuplicates.rows[0], { provisioning_rows: 1, policies: 1, levels: 1 });
+  assert.deepEqual(noDuplicates.rows[0], { provisioning_rows: 1, policies: 1, levels: 2 });
 
   const crossTenant = await database.query(
     `SELECT count(*)::integer AS visible

@@ -37,3 +37,22 @@ test('TEAM remains fail-closed without a canonical team schema', async () => {
   const recipients = await resolveHumanSupportRecipients({ database: db, tenantId: 'tenant-a', conversationId: 'conversation-a', rule: 'TEAM' });
   assert.deepEqual(recipients, []);
 });
+test('ROLE rule resolves active tenant ADMIN users authorized for takeover', async () => {
+  const db = database({ assigned: null, users: [{ id: 'admin-1', system_role: 'CUSTOMER', tenant_role: 'ADMIN' }] });
+  const recipients = await resolveHumanSupportRecipients({
+    database: db, tenantId: 'tenant-a', conversationId: 'conv-1', rule: 'ROLE', target: { role: 'ADMIN' },
+  });
+  assert.equal(recipients.length, 1);
+  assert.equal(recipients[0].id, 'admin-1');
+  assert.deepEqual(db.calls[1].params, ['tenant-a', 'ROLE', null, null, 'ADMIN']);
+});
+
+test('ASSIGNED_OWNER returns empty when conversation has no assigned agent', async () => {
+  const db = database({ assigned: null, users: [] });
+  const recipients = await resolveHumanSupportRecipients({
+    database: db, tenantId: 'tenant-a', conversationId: 'conv-1', rule: 'ASSIGNED_OWNER',
+  });
+  assert.deepEqual(recipients, []);
+  assert.deepEqual(db.calls[1].params.slice(0, 3), ['tenant-a', 'ASSIGNED_OWNER', null]);
+});
+

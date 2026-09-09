@@ -88,6 +88,9 @@ export async function requestCustomerHumanSupport({
     await client.query('COMMIT');
     console.info('HUMAN_SUPPORT_REQUEST persisted=1 attention=REQUESTED tenant=' + String(tenantId).slice(0, 8));
     console.info('DASHBOARD_SSE_PUBLISH event_type=HUMAN_SUPPORT_REQUESTED tenant=' + String(tenantId).slice(0, 8));
+    console.info('SUPPORT_REQUEST_CREATED = tenant=' + String(tenantId).slice(0, 8) + ' conversation=' + String(conversationId).slice(0, 8));
+    console.info('AI_SUPPRESSION_SET = tenant=' + String(tenantId).slice(0, 8) + ' conversation=' + String(conversationId).slice(0, 8) + ' handling_mode=HUMAN');
+    console.info('ESCALATION_SCHEDULED = tenant=' + String(tenantId).slice(0, 8) + ' level=1 timeout_sec=300');
     return { duplicate: false, conversation: updated.rows[0] };
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
@@ -156,6 +159,7 @@ export async function claimDueCustomerSupportLifecycle({ database = null, now = 
         await notify(client, conversation.tenant_id, conversation.id, 'HUMAN_SUPPORT_TIMEOUT');
         timeouts += 1;
         console.info('HUMAN_SUPPORT_TIMEOUT status=CLAIMED tenant=' + String(conversation.tenant_id).slice(0, 8));
+        console.info('LIFECYCLE_MESSAGE_SENT = tenant=' + String(conversation.tenant_id).slice(0, 8) + ' conversation=' + String(conversation.id).slice(0, 8) + ' event_type=return_to_ai');
         actions.push({ type: 'TIMEOUT_CLOSE', tenantId: conversation.tenant_id, conversationId: conversation.id, recipient: conversation.customer_external_id, phoneNumberId: conversation.external_channel_id, content });
       } else if (elapsed >= 5 * 60 * 1000 && !conversation.human_support_warning_sent_at) {
         const content = renderPlatformLifecycleMessage({ templates: lifecycleTemplates, key: 'human_session_warning', locale: conversation.communication_language });
@@ -169,6 +173,7 @@ export async function claimDueCustomerSupportLifecycle({ database = null, now = 
         await notify(client, conversation.tenant_id, conversation.id, 'HUMAN_SUPPORT_WARNING');
         warnings += 1;
         console.info('HUMAN_SUPPORT_WARNING status=CLAIMED tenant=' + String(conversation.tenant_id).slice(0, 8));
+        console.info('LIFECYCLE_MESSAGE_SENT = tenant=' + String(conversation.tenant_id).slice(0, 8) + ' conversation=' + String(conversation.id).slice(0, 8) + ' event_type=human_session_warning');
         actions.push({ type: 'WARNING_5M', tenantId: conversation.tenant_id, conversationId: conversation.id, recipient: conversation.customer_external_id, phoneNumberId: conversation.external_channel_id, content });
       }
     }
@@ -208,9 +213,10 @@ export async function claimDueHumanSupportEscalations({ database = null, now = n
       if (!inserted.rowCount) continue;
       await client.query(
         `UPDATE human_support_escalations SET status = 'ACTIVE', current_level = $1,
-          next_due_at = $2 + make_interval(secs => $3), updated_at = $2 WHERE id = $4 AND tenant_id = $5`,
+          next_due_at = $2::timestamptz + make_interval(secs => $3::double precision), updated_at = $2::timestamptz WHERE id = $4 AND tenant_id = $5`,
         [row.level_order, now, row.acknowledgement_timeout_seconds, row.escalation_id, row.tenant_id]
       );
+            console.info('ESCALATION_SCHEDULED = tenant=' + String(row.tenant_id).slice(0, 8) + ' level=' + row.level_order + ' timeout_sec=' + row.acknowledgement_timeout_seconds);
       actions.push({ tenantId: row.tenant_id, conversationId: row.conversation_id, escalationId: row.escalation_id, level: row.level_order, recipientRule: row.recipient_rule });
     }
     await client.query('COMMIT');

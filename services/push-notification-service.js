@@ -76,6 +76,7 @@ export async function createPushNotificationIntent({ database, tenantId, eventId
     [tenant, String(eventId), eventType, validateInternalDashboardDeepLink(deepLink, tenant)],
   );
   const intent = result.rows[0];
+  console.info('PUSH_EVENT_CREATED = tenant=' + String(tenant).slice(0, 8) + ' event_id=' + (intent?.event_id ?? eventId) + ' event_type=' + (intent?.event_type ?? eventType));
   const outbox = await database.query(
     `INSERT INTO push_notification_outbox (tenant_id, intent_id, recipient_user_id, subscription_id, event_type, deep_link)
      SELECT intent.tenant_id, intent.id, subscription.user_id, subscription.id, intent.event_type, intent.deep_link
@@ -164,12 +165,14 @@ export async function processPushNotificationOutbox({ database, deliver, tenantI
     const row = claimed.rows[0];
     if (!row) { await client.query('COMMIT'); return result; }
     await client.query(`UPDATE push_notification_outbox SET status='PROCESSING', attempts=attempts+1, processing_started_at=CURRENT_TIMESTAMP WHERE id=$1 AND tenant_id=$2`, [row.id, row.tenant_id]);
+    console.info('PUSH_SEND_ATTEMPTED = tenant=' + String(row.tenant_id).slice(0, 8) + ' outbox_id=' + String(row.id).slice(0, 8));
     let outcome;
     try {
       outcome = await deliver({ subscription: { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } }, notification: { type: row.event_type, deepLink: row.deep_link, eventId: row.id } });
     } catch {
       outcome = { retryable: true };
     }
+    console.info('PUSH_PROVIDER_RESULT = tenant=' + String(row.tenant_id).slice(0, 8) + ' status=' + (outcome?.status ?? 'FAILED') + ' code=' + (outcome?.statusCode ?? 'NONE'));
     if (outcome?.statusCode === 404 || outcome?.statusCode === 410) {
       await client.query(`UPDATE push_notification_subscriptions SET enabled = FALSE, failure_code='EXPIRED', updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND tenant_id=$2`, [row.subscription_id, row.tenant_id]);
       await client.query(`UPDATE push_notification_outbox SET status = 'FAILED', processing_started_at=NULL, failure_code='EXPIRED' WHERE id=$1 AND tenant_id=$2`, [row.id, row.tenant_id]);

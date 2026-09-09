@@ -335,8 +335,8 @@ export async function recordWhatsAppAssistantProviderAcceptance({
   }
 }
 
-export async function operateConversation({ tenantId, conversationId, actor, action }) {
-  const client = await pool.connect();
+export async function operateConversation({ database = pool, tenantId, conversationId, actor, action, reason = null } = {}) {
+  const client = await (database ?? pool).connect();
   try {
     await client.query('BEGIN');
     const result = await client.query(
@@ -399,6 +399,7 @@ export async function operateConversation({ tenantId, conversationId, actor, act
         `UPDATE human_support_notification_outbox SET status = 'CANCELLED'
          WHERE tenant_id = $1 AND conversation_id = $2 AND status = 'PENDING'`, [tenantId, conversationId]
       );
+      console.info('TAKEOVER_CANCELLED_ESCALATION = tenant=' + String(tenantId).slice(0, 8) + ' conversation=' + String(conversationId).slice(0, 8));
       console.info('TAKEOVER_STAGE stage=ASSIGNED tenant=' + String(tenantId).slice(0, 8));
       // The customer-request transfer has already been delivered. Only a voluntary
       // manual takeover receives the separate deterministic manual-takeover notice.
@@ -431,6 +432,7 @@ export async function operateConversation({ tenantId, conversationId, actor, act
 
     if (action === 'return_to_ai') {
       const updated = await client.query(
+
         `UPDATE conversations
             SET handling_mode = 'AI',
                 assigned_agent_user_id = NULL,
@@ -480,6 +482,8 @@ export async function operateConversation({ tenantId, conversationId, actor, act
       }
       await writeAuditEvent(client, { tenantId, conversationId, actorUserId, eventType: 'RETURN_TO_AI' });
       await notify(client, tenantId, conversationId, 'RETURN_TO_AI');
+      console.info('TAKEOVER_CANCELLED_ESCALATION = tenant=' + String(tenantId).slice(0, 8) + ' conversation=' + String(conversationId).slice(0, 8));
+      console.info('LIFECYCLE_MESSAGE_SENT = tenant=' + String(tenantId).slice(0, 8) + ' conversation=' + String(conversationId).slice(0, 8) + ' event_type=return_to_ai');
       await client.query('COMMIT');
       return returned;
     }

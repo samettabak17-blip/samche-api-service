@@ -2,7 +2,7 @@
 
 This is the canonical repository-level instruction for every coding or
 execution agent working in SamChe. It applies without exception to every
-current and future agent, including Codex, Cline, Aider, and successors. An
+current and future coding agents, including Codex, Cline, Aider, and successors. An
 agent name in this file or in historical repository guidance is illustrative
 only; it never narrows, waives, or changes this contract.
 

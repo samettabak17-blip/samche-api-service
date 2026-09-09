@@ -108,3 +108,86 @@ test('Return to AI restores typing on the next eligible inbound message', async 
   assert.equal(typingCalls, 1);
   assert.equal(result.outboundProceeded, true);
 });
+test('native typing executes repeatedly on every turn of a multi-turn conversation', async () => {
+  const typingAttempts = [];
+  const logs = [];
+  const customLogger = { info(msg) { logs.push(msg); } };
+
+  // Turn 1: First AI reply (greeting)
+  const turn1 = await orchestrateWhatsAppInboundAiResponse({
+    whatsappInbox: eligibleInbox({ isFirstAssistantResponse: true }),
+    incomingMessageId: 'wamid.TURN_1',
+    sendTyping: async ({ incomingMessageId }) => {
+      typingAttempts.push(incomingMessageId);
+      return { ok: true, providerStatus: 200 };
+    },
+    typingAttemptNumber: 1,
+    processAiResponse: async () => ({ delivered: true, aiResponsePath: 'DETERMINISTIC_GREETING' }),
+    logger: customLogger,
+  });
+  assert.equal(turn1.typing.attempted, true);
+  assert.equal(turn1.typing.succeeded, true);
+  assert.equal(turn1.aiResponsePath, 'DETERMINISTIC_GREETING');
+
+  // Turn 2: Second AI reply (knowledge response)
+  const turn2 = await orchestrateWhatsAppInboundAiResponse({
+    whatsappInbox: eligibleInbox({
+      isFirstAssistantResponse: false,
+      conversationHistory: [
+        { sender_type: 'CUSTOMER', content: 'Merhaba' },
+        { sender_type: 'ASSISTANT', content: 'Merhaba! Nasıl yardımcı olabilirim?' },
+      ],
+    }),
+    incomingMessageId: 'wamid.TURN_2',
+    sendTyping: async ({ incomingMessageId }) => {
+      typingAttempts.push(incomingMessageId);
+      return { ok: true, providerStatus: 200 };
+    },
+    typingAttemptNumber: 2,
+    processAiResponse: async () => ({ delivered: true, aiResponsePath: 'KNOWLEDGE_INTELLIGENCE' }),
+    logger: customLogger,
+  });
+  assert.equal(turn2.typing.attempted, true);
+  assert.equal(turn2.typing.succeeded, true);
+  assert.equal(turn2.aiResponsePath, 'KNOWLEDGE_INTELLIGENCE');
+
+  // Turn 3: Third AI reply (contextual multi-turn)
+  const turn3 = await orchestrateWhatsAppInboundAiResponse({
+    whatsappInbox: eligibleInbox({
+      isFirstAssistantResponse: false,
+      conversationHistory: [
+        { sender_type: 'CUSTOMER', content: 'Merhaba' },
+        { sender_type: 'ASSISTANT', content: 'Merhaba! Nasıl yardımcı olabilirim?' },
+        { sender_type: 'CUSTOMER', content: 'Peyzaj projesi ne kadar sürer?' },
+        { sender_type: 'ASSISTANT', content: 'Proje büyüklüğüne göre 2-4 hafta sürebilir.' },
+      ],
+    }),
+    incomingMessageId: 'wamid.TURN_3',
+    sendTyping: async ({ incomingMessageId }) => {
+      typingAttempts.push(incomingMessageId);
+      return { ok: true, providerStatus: 200 };
+    },
+    typingAttemptNumber: 3,
+    processAiResponse: async () => ({ delivered: true, aiResponsePath: 'CONTEXTUAL_MULTI_TURN' }),
+    logger: customLogger,
+  });
+  assert.equal(turn3.typing.attempted, true);
+  assert.equal(turn3.typing.succeeded, true);
+  assert.equal(turn3.aiResponsePath, 'CONTEXTUAL_MULTI_TURN');
+
+  // Verify all 3 turns independently executed typing
+  assert.deepEqual(typingAttempts, ['wamid.TURN_1', 'wamid.TURN_2', 'wamid.TURN_3']);
+
+  // Verify secret-safe diagnostics captured required fields
+  const logOutput = logs.join('\n');
+  assert.match(logOutput, /INBOUND_MESSAGE_ID=wamid\.TURN_1/);
+  assert.match(logOutput, /TYPING_ATTEMPT_NUMBER=1/);
+  assert.match(logOutput, /AI_RESPONSE_PATH=DETERMINISTIC_GREETING/);
+  assert.match(logOutput, /INBOUND_MESSAGE_ID=wamid\.TURN_2/);
+  assert.match(logOutput, /TYPING_ATTEMPT_NUMBER=2/);
+  assert.match(logOutput, /AI_RESPONSE_PATH=KNOWLEDGE_INTELLIGENCE/);
+  assert.match(logOutput, /INBOUND_MESSAGE_ID=wamid\.TURN_3/);
+  assert.match(logOutput, /TYPING_ATTEMPT_NUMBER=3/);
+  assert.match(logOutput, /AI_RESPONSE_PATH=CONTEXTUAL_MULTI_TURN/);
+});
+

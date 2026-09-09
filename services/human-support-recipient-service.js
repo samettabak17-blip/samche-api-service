@@ -4,11 +4,12 @@ export async function resolveHumanSupportRecipients({ database, tenantId, conver
   const conversation = await database.query('SELECT assigned_agent_user_id FROM conversations WHERE id = $1 AND tenant_id = $2', [conversationId, tenantId]);
   if (!conversation.rowCount) return [];
   const assigned = conversation.rows[0].assigned_agent_user_id;
+  const targetRole = target?.role ?? (rule === 'ROLE' ? 'ADMIN' : null);
   const result = await database.query(
     `SELECT u.id, u.system_role, tu.tenant_role FROM users u JOIN tenant_users tu ON tu.user_id = u.id
-      WHERE tu.tenant_id = $1 AND u.status = 'active'
+      WHERE tu.tenant_id = $1 AND (u.status = 'active' OR u.status = 'ACTIVE')
         AND (($2 = 'ASSIGNED_OWNER' AND u.id = $3) OR ($2 = 'USER' AND u.id = $4) OR ($2 = 'ROLE' AND tu.tenant_role = $5))`,
-    [tenantId, rule, assigned, target?.userId ?? null, target?.role ?? null]
+    [tenantId, rule, assigned, target?.userId ?? null, targetRole]
   );
   if (rule === 'TEAM') return [];
   return [...new Map(result.rows.filter((user) => canOperateConversation({

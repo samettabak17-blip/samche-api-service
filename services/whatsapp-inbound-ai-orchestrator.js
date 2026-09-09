@@ -16,7 +16,7 @@ function failureCategory(error) {
   return 'TRANSPORT';
 }
 
-function logDiagnostic(logger, context, typing, outboundProceeded) {
+function logDiagnostic(logger, context, typing, outboundProceeded, inboundMessageId, typingAttemptNumber, aiResponsePath) {
   logger.info(
     'WHATSAPP_TYPING_DIAGNOSTIC'
     + ' tenant=' + shortId(context.tenantId)
@@ -28,6 +28,10 @@ function logDiagnostic(logger, context, typing, outboundProceeded) {
     + ' provider_code=' + (typing.providerCode ?? 'UNKNOWN')
     + ' failure_category=' + (typing.failureCategory ?? 'NONE')
     + ' outbound_proceeded=' + (outboundProceeded ? '1' : '0')
+    + ' INBOUND_MESSAGE_ID=' + (inboundMessageId ?? 'unavailable')
+    + ' TYPING_ATTEMPT_NUMBER=' + (typingAttemptNumber ?? 1)
+    + ' TYPING_PROVIDER_STATUS=' + (typing.providerStatus ?? 'UNKNOWN')
+    + ' AI_RESPONSE_PATH=' + (aiResponsePath ?? 'UNKNOWN')
   );
 }
 
@@ -36,6 +40,8 @@ export async function orchestrateWhatsAppInboundAiResponse({
   incomingMessageId,
   sendTyping,
   processAiResponse,
+  typingAttemptNumber = 1,
+  aiResponsePath = 'LLM_GENERATION',
   logger = console,
 }) {
   const eligible = Boolean(
@@ -90,10 +96,11 @@ export async function orchestrateWhatsAppInboundAiResponse({
   try {
     const response = await processAiResponse({ typing });
     const outboundProceeded = Boolean(response?.delivered);
-    logDiagnostic(logger, context, typing, outboundProceeded);
-    return { suppressed: false, typing, outboundProceeded, response };
+    const resolvedPath = response?.aiResponsePath ?? aiResponsePath;
+    logDiagnostic(logger, context, typing, outboundProceeded, incomingMessageId, typingAttemptNumber, resolvedPath);
+    return { suppressed: false, typing, outboundProceeded, response, aiResponsePath: resolvedPath };
   } catch (error) {
-    logDiagnostic(logger, context, typing, false);
+    logDiagnostic(logger, context, typing, false, incomingMessageId, typingAttemptNumber, aiResponsePath);
     throw error;
   }
 }

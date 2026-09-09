@@ -6,7 +6,7 @@ test('WhatsApp policy module cannot become a competing lifecycle-message authori
   assert.deepEqual(Object.keys(policyModule), ['summarizeWhatsAppHumanSupportTopic']);
 });
 
-test('uses the most recent known customer topic when the human request itself has no topic', () => {
+test('previous unrelated customer question is NOT injected into acknowledgement when human request has no topic', () => {
   const topic = policyModule.summarizeWhatsAppHumanSupportTopic({
     text: 'canlı destek istiyorum',
     conversationHistory: [
@@ -16,7 +16,17 @@ test('uses the most recent known customer topic when the human request itself ha
     ],
     fallback: 'Genel destek',
   });
-  assert.equal(topic, 'Şirket kuruluşu hakkında bilgi almak istiyorum.');
+  assert.equal(topic, 'Genel destek');
+  assert.notEqual(topic, 'Şirket kuruluşu hakkında bilgi almak istiyorum.');
+});
+
+test('uses meaningful context from the human support request itself when present', () => {
+  const topic = policyModule.summarizeWhatsAppHumanSupportTopic({
+    text: 'Şirket kuruluşu hakkında canlı destek istiyorum',
+    conversationHistory: [],
+    fallback: 'Genel destek',
+  });
+  assert.equal(topic, 'Şirket kuruluşu hakkında canlı destek istiyorum');
 });
 
 test('uses the safe canonical fallback without inventing a topic when no customer topic exists', () => {

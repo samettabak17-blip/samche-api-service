@@ -832,10 +832,16 @@ async function processContextualFollowUpJobs() {
 async function processConfiguredPushNotifications() {
   const pushAdapter = await createWebPushDeliveryAdapter();
   if (!pushAdapter) return { status: 'NOT_CONFIGURED' };
-  return processPushNotificationOutbox({
-    database: pool,
-    deliver: (input) => pushAdapter.deliver(input),
-  });
+  let processed = 0;
+  for (let pass = 0; pass < 10; pass++) {
+    const outcome = await processPushNotificationOutbox({
+      database: pool,
+      deliver: (input) => pushAdapter.deliver(input),
+    });
+    if (!outcome.delivered && !outcome.failed && !outcome.expired && !outcome.retried) break;
+    processed += outcome.delivered;
+  }
+  return { status: 'OK', processed };
 }
 
 function corporateFallback(lang) {
@@ -2208,14 +2214,20 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         });
         if (!handoff.duplicate) {
           await sendMessage(cleanFrom, acknowledgement, whatsappInbox.integration.external_channel_id);
+          console.info('LIFECYCLE_MESSAGE_SENT = tenant=' + String(whatsappInbox.integration.tenant_id).slice(0, 8) + ' conversation=' + String(whatsappInbox.conversation.id).slice(0, 8) + ' event_type=human_support_request');
+          claimDueHumanSupportEscalations({ database: pool }).catch(() => {});
         }
         return;
       }
+
+      const assistantMessageCount = (whatsappInbox?.conversationHistory ?? []).filter((m) => m.sender_type === 'ASSISTANT').length;
+      const typingAttemptNumber = assistantMessageCount + 1;
 
       return orchestrateWhatsAppInboundAiResponse({
         whatsappInbox,
         incomingMessageId: wpMessageId,
         sendTyping: sendWhatsAppTypingIndicator,
+        typingAttemptNumber,
         processAiResponse: async () => {
           const aiResponseStartedAt = Date.now();
 
@@ -2248,7 +2260,8 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         console.error('KNOWLEDGE_RUNTIME_CONTEXT_UNAVAILABLE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
         const unavailableFallback = resolveWhatsAppPersonaUnavailableResponse(tenantContext.communicationLanguage);
         await applyWhatsAppAdaptivePacing({ generationStartedAt: aiResponseStartedAt, content: unavailableFallback });
-        return persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, unavailableFallback);
+        const result = await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, unavailableFallback);
+        return { ...result, aiResponsePath: 'UNAVAILABLE_FALLBACK' };
       }
 
       const currentIntent = classifyWhatsAppCurrentCustomerIntent(text);
@@ -2272,8 +2285,9 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           ' persisted_language=' + tenantContext.communicationLanguage
         );
         await applyWhatsAppAdaptivePacing({ generationStartedAt: aiResponseStartedAt, content: deterministicSocialResponse.content });
-        await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, deterministicSocialResponse.content);
-        return;
+        const result = await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, deterministicSocialResponse.content);
+        const kindPath = deterministicSocialResponse.kind === 'FIRST_CONTACT_GREETING' ? 'DETERMINISTIC_GREETING' : 'DETERMINISTIC_SOCIAL';
+        return { ...result, aiResponsePath: kindPath };
       }
 
       // --------------------------------------
@@ -2337,7 +2351,14 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       logWhatsAppTiming('model_response_complete');
       const outgoingAssistantContent = aiResponse || corporateFallback(expectedLanguage);
       await applyWhatsAppAdaptivePacing({ generationStartedAt: aiResponseStartedAt, content: outgoingAssistantContent });
-      return persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, outgoingAssistantContent);
+      const result = await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, outgoingAssistantContent);
+      let responsePath = 'LLM_GENERATION';
+      if ((whatsappInbox?.conversationHistory?.length ?? 0) > 0) responsePath = 'CONTEXTUAL_MULTI_TURN';
+      if (runtime?.knowledge?.activeConfiguration && (runtime?.knowledge?.knowledge?.length ?? 0) > 0) responsePath = 'KNOWLEDGE_INTELLIGENCE';
+      if (whatsappInbox.conversation?.human_support_closed_at && !whatsappInbox.conversationHistory.some((m) => m.sender_type === 'ASSISTANT' && new Date(m.created_at) > new Date(whatsappInbox.conversation.human_support_closed_at))) {
+        responsePath = 'POST_RETURN_TO_AI';
+      }
+      return { ...result, aiResponsePath: responsePath };
         },
       });
 
@@ -2368,21 +2389,24 @@ cron.schedule("* * * * *", async () => {
       lifecycleActions = [];
     }
     try {
-      await claimDueHumanSupportEscalations({ database: pool });
-      await processHumanSupportNotificationOutbox({
-        database: pool,
-        resolveRecipients: (input) => resolveHumanSupportRecipients({ database: pool, ...input }),
-        deliver: async ({ recipients, tenantId, conversationId, outboxId }) => {
-          await enqueueHumanHandoffPushNotification({
-            database: pool,
-            tenantId,
-            conversationId,
-            handoffOutboxId: outboxId,
-            recipients,
-          });
-          return { status: 'DELIVERED' };
-        },
-      });
+      for (let pass = 0; pass < 3; pass++) {
+        await claimDueHumanSupportEscalations({ database: pool });
+        const outboxResult = await processHumanSupportNotificationOutbox({
+          database: pool,
+          resolveRecipients: (input) => resolveHumanSupportRecipients({ database: pool, ...input }),
+          deliver: async ({ recipients, tenantId, conversationId, outboxId }) => {
+            await enqueueHumanHandoffPushNotification({
+              database: pool,
+              tenantId,
+              conversationId,
+              handoffOutboxId: outboxId,
+              recipients,
+            });
+            return { status: 'DELIVERED' };
+          },
+        });
+        if (!outboxResult.delivered && !outboxResult.noRecipients) break;
+      }
     } catch (error) {
       console.error('HUMAN_SUPPORT_NOTIFICATION_WORKER status=FAIL reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     }

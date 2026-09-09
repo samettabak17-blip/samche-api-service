@@ -89,3 +89,97 @@ test('the transport receives only the eligible recipients resolved for the outbo
   });
   assert.deepEqual(payload.recipients, [{ id: 'user-a' }]);
 });
+test('unassigned conversation with ASSIGNED_OWNER rule safely records no recipients and continues escalation immediately', async () => {
+  const sqlStatements = [];
+  const db = {
+    async connect() {
+      return {
+        async query(sql, params = []) {
+          sqlStatements.push({ sql, params });
+          if (sql.includes('SELECT o.status')) {
+            return { rows: [{ status: 'PROCESSING', escalation_status: 'ACTIVE' }] };
+          }
+          if (sql.includes('FROM human_support_notification_outbox')) {
+            return {
+              rows: [{
+                id: 'outbox-1',
+                tenant_id: 'tenant-1',
+                conversation_id: 'conv-1',
+                escalation_id: 'esc-1',
+                level_order: 1,
+                recipient_rule: 'ASSIGNED_OWNER',
+                recipient_target: {},
+              }],
+            };
+          }
+          return { rowCount: 1, rows: [] };
+        },
+        release() {},
+      };
+    },
+  };
+
+  const result = await processHumanSupportNotificationOutbox({
+    database: db,
+    resolveRecipients: async () => [],
+    deliver: async () => ({ status: 'DELIVERED' }),
+  });
+
+  assert.equal(result.noRecipients, 1);
+  const escalationAdvance = sqlStatements.find((c) =>
+    c.sql.includes('UPDATE human_support_escalations') && c.sql.includes('next_due_at = CURRENT_TIMESTAMP')
+  );
+  assert.ok(escalationAdvance, 'escalation next_due_at must be updated to CURRENT_TIMESTAMP to continue immediately');
+  assert.equal(escalationAdvance.params[0], 'esc-1');
+  assert.equal(escalationAdvance.params[1], 'tenant-1');
+});
+
+test('escalation level 2 with ROLE resolves admin recipients and triggers delivery', async () => {
+  const sqlStatements = [];
+  let deliveredPayload = null;
+  const db = {
+    async connect() {
+      return {
+        async query(sql, params = []) {
+          sqlStatements.push({ sql, params });
+          if (sql.includes('SELECT o.status')) {
+            return { rows: [{ status: 'PROCESSING', escalation_status: 'ACTIVE' }] };
+          }
+          if (sql.includes('FROM human_support_notification_outbox')) {
+            return {
+              rows: [{
+                id: 'outbox-2',
+                tenant_id: 'tenant-1',
+                conversation_id: 'conv-1',
+                escalation_id: 'esc-1',
+                level_order: 2,
+                recipient_rule: 'ROLE',
+                recipient_target: { role: 'ADMIN' },
+              }],
+            };
+          }
+          return { rowCount: 1, rows: [] };
+        },
+        release() {},
+      };
+    },
+  };
+
+  const result = await processHumanSupportNotificationOutbox({
+    database: db,
+    resolveRecipients: async ({ rule, target }) => {
+      assert.equal(rule, 'ROLE');
+      assert.deepEqual(target, { role: 'ADMIN' });
+      return [{ id: 'admin-user-1' }];
+    },
+    deliver: async (payload) => {
+      deliveredPayload = payload;
+      return { status: 'DELIVERED' };
+    },
+  });
+
+  assert.equal(result.delivered, 1);
+  assert.deepEqual(deliveredPayload.recipients, [{ id: 'admin-user-1' }]);
+  assert.equal(deliveredPayload.recipientRule, 'ROLE');
+});
+
