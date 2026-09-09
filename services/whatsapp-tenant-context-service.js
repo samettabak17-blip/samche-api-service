@@ -15,7 +15,13 @@ export function resolveWhatsAppPersonaUnavailableResponse(language) {
   return 'The assistant configuration is temporarily unavailable. Please try again later.';
 }
 
-export function buildWhatsAppActivePersonaTenantContext({ persona, knowledgeContext = '', communicationLanguage = 'und', deterministicTemplates = null }) {
+export function buildWhatsAppActivePersonaTenantContext({
+  persona,
+  knowledgeContext = '',
+  communicationLanguage = 'und',
+  deterministicTemplates = null,
+  contextualIntelligence = '',
+}) {
   if (!persona?.available) throw new WhatsAppTenantContextError('WHATSAPP_TENANT_PERSONA_NOT_ACTIVE');
   const activeConfigurationTemplates = persona.configuration?.channel_adaptations?.whatsapp?.deterministic_templates ?? null;
   return {
@@ -25,6 +31,7 @@ export function buildWhatsAppActivePersonaTenantContext({ persona, knowledgeCont
       persona,
       knowledgeContext,
       channelRules: 'Use concise conversational plain text suitable for WhatsApp. Do not expose internal metadata.',
+      contextualIntelligence,
     }),
     // Legacy Assistant templates can contain a different tenant's business
     // identity. Mapped V2 traffic accepts deterministic wording only from the

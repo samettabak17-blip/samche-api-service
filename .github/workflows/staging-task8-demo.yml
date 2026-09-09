@@ -27,6 +27,9 @@ on:
       - 'scripts/verify_staging_task8_demo.js'
       - 'services/tenant-web-chat-provisioning-service.js'
       - 'services/public-web-chat-integration-service.js'
+      - 'services/url-intelligence-service.js'
+      - 'services/contextual-intelligence-service.js'
+      - 'app.js'
 
 permissions:
   contents: read
@@ -55,6 +58,8 @@ jobs:
           tests/public-web-chat-integration-service.test.js
           tests/public-web-chat-runtime-integration.test.js
           tests/web-chat-page-context-runtime.test.js
+          tests/url-intelligence-service.test.js
+          tests/contextual-intelligence-service.test.js
 
   staging_bootstrap_and_verification:
     name: Staging Bootstrap and Live Runtime Verification

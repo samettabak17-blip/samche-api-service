@@ -88,7 +88,11 @@ import {
   logContextualObservability,
   saveWebChatSessionBrowsingState,
   updateSessionBrowsingState,
+  updateSessionBrowsingStateWithEntity,
+  updateConversationVisitorContext,
+  loadConversationVisitorContext,
 } from './services/contextual-intelligence-service.js';
+import { extractUrlsFromText, processMessageUrlIntelligence } from './services/url-intelligence-service.js';
 
 
 dotenv.config();
@@ -1840,6 +1844,42 @@ app.post("/api/chat", async (req, res) => {
         });
       }
 
+      // Check for public URL in customer message for Web Chat
+      const messageUrls = extractUrlsFromText(normalizedMessage);
+      if (messageUrls.length > 0) {
+        try {
+          const urlResult = await processMessageUrlIntelligence({ text: normalizedMessage });
+          if (urlResult.success && urlResult.entity) {
+            webChatBrowsingState = updateSessionBrowsingStateWithEntity({
+              currentState: webChatBrowsingState,
+              newEntity: urlResult.entity,
+            });
+            await saveWebChatSessionBrowsingState({
+              database: pool,
+              tenantId: webChatIntegration.tenant_id,
+              assistantId: webChatIntegration.assistant_id,
+              channelId: webChatIntegration.channel_id,
+              widgetKey: webChatSession.widgetKey,
+              sessionId: webChatSession.sessionId,
+              browsingState: webChatBrowsingState,
+            });
+            logContextualObservability('EXTERNAL_URL_CONTEXT_USED', {
+              url: urlResult.url,
+              entity: urlResult.entity.entity_name,
+            });
+          } else if (urlResult.error) {
+            logContextualObservability('URL_INTELLIGENCE_FAILED', {
+              url: urlResult.url,
+              reason: urlResult.code || urlResult.error,
+            });
+          }
+        } catch (urlErr) {
+          logContextualObservability('URL_INTELLIGENCE_ERROR', {
+            reason: urlErr?.code ?? urlErr?.message ?? 'URL_ERROR',
+          });
+        }
+      }
+
       if (webChatBrowsingState?.currentEntity || (webChatBrowsingState?.previousEntities && webChatBrowsingState.previousEntities.length > 0)) {
         webChatContextualSection = buildContextualIntelligencePromptSection({
           currentEntity: webChatBrowsingState.currentEntity,
@@ -1854,6 +1894,22 @@ app.post("/api/chat", async (req, res) => {
         logContextualObservability('CONTEXT_BYTES', {
           bytes: Buffer.byteLength(webChatContextualSection, 'utf8'),
         });
+      }
+    } else {
+      // Legacy Web Chat without signed session
+      const messageUrls = extractUrlsFromText(normalizedMessage);
+      if (messageUrls.length > 0) {
+        try {
+          const urlResult = await processMessageUrlIntelligence({ text: normalizedMessage });
+          if (urlResult.success && urlResult.entity) {
+            webChatContextualSection = buildContextualIntelligencePromptSection({
+              currentEntity: urlResult.entity,
+              channelType: 'WEB_CHAT',
+            });
+          }
+        } catch {
+          // Ignore in legacy fallback
+        }
       }
     }
 
@@ -2231,6 +2287,8 @@ If the user already provided sector info, NEVER ask again.`
       if (webChatContextualSection) {
         messages[0].content = messages[0].content + '\n\n' + webChatContextualSection;
       }
+    } else if (webChatContextualSection) {
+      messages[0].content = messages[0].content + '\n\n' + webChatContextualSection;
     }
 
     const completion = await openaiClient.chat.completions.create({
@@ -2510,6 +2568,44 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
 
       let runtimeTenantContext;
       let runtime;
+      let urlProcessingSucceeded = false;
+      let whatsappVisitorContext = whatsappInbox?.conversation?.visitor_context || null;
+      const wpUrls = extractUrlsFromText(text);
+      if (wpUrls.length > 0) {
+        try {
+          const urlResult = await processMessageUrlIntelligence({ text });
+          if (urlResult.success && urlResult.entity) {
+            whatsappVisitorContext = updateSessionBrowsingStateWithEntity({
+              currentState: whatsappVisitorContext,
+              newEntity: urlResult.entity,
+            });
+            urlProcessingSucceeded = true;
+            if (whatsappInbox?.conversation?.id && whatsappInbox?.integration?.tenant_id) {
+              await updateConversationVisitorContext({
+                database: pool,
+                tenantId: whatsappInbox.integration.tenant_id,
+                conversationId: whatsappInbox.conversation.id,
+                visitorContext: whatsappVisitorContext,
+              });
+            }
+            console.info('WHATSAPP_URL_INTELLIGENCE_APPLIED url=' + urlResult.url + ' entity=' + (urlResult.entity.entity_name || 'unnamed'));
+          } else if (urlResult.error) {
+            console.warn('WHATSAPP_URL_INTELLIGENCE_FAILED url=' + urlResult.url + ' reason=' + (urlResult.code || urlResult.error));
+          }
+        } catch (urlErr) {
+          console.error('WHATSAPP_URL_INTELLIGENCE_ERROR reason=' + (urlErr?.code ?? urlErr?.message ?? 'UNKNOWN'));
+        }
+      }
+
+      let whatsappContextualSection = '';
+      if (whatsappVisitorContext?.currentEntity || (whatsappVisitorContext?.previousEntities && whatsappVisitorContext.previousEntities.length > 0)) {
+        whatsappContextualSection = buildContextualIntelligencePromptSection({
+          currentEntity: whatsappVisitorContext.currentEntity,
+          previousEntities: whatsappVisitorContext.previousEntities,
+          channelType: 'WHATSAPP',
+        });
+      }
+
       try {
         runtime = await resolveChannelAssistantRuntime({
           database: pool,
@@ -2525,6 +2621,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           persona: runtime.persona,
           knowledgeContext: runtime.knowledge.knowledgeContext,
           communicationLanguage: tenantContext.communicationLanguage,
+          contextualIntelligence: whatsappContextualSection,
         });
         console.info(
           'KNOWLEDGE_RUNTIME_CONTEXT channel=WHATSAPP active_configuration=' + (runtime.knowledge.activeConfiguration ? '1' : '0') +
@@ -2630,8 +2727,9 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       await applyWhatsAppAdaptivePacing({ generationStartedAt: aiResponseStartedAt, content: outgoingAssistantContent });
       const result = await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, outgoingAssistantContent);
       let responsePath = 'LLM_GENERATION';
-      if ((whatsappInbox?.conversationHistory?.length ?? 0) > 0) responsePath = 'CONTEXTUAL_MULTI_TURN';
-      if (runtime?.knowledge?.activeConfiguration && (runtime?.knowledge?.knowledge?.length ?? 0) > 0) responsePath = 'KNOWLEDGE_INTELLIGENCE';
+      if (urlProcessingSucceeded) responsePath = 'URL_INTELLIGENCE';
+      else if ((whatsappInbox?.conversationHistory?.length ?? 0) > 0) responsePath = 'CONTEXTUAL_MULTI_TURN';
+      else if (runtime?.knowledge?.activeConfiguration && (runtime?.knowledge?.knowledge?.length ?? 0) > 0) responsePath = 'KNOWLEDGE_INTELLIGENCE';
       if (whatsappInbox.conversation?.human_support_closed_at && !whatsappInbox.conversationHistory.some((m) => m.sender_type === 'ASSISTANT' && new Date(m.created_at) > new Date(whatsappInbox.conversation.human_support_closed_at))) {
         responsePath = 'POST_RETURN_TO_AI';
       }

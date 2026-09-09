@@ -46,7 +46,7 @@ async function bootstrapTask8Demo(options = {}) {
     } else {
       const inserted = await client.query(
         `INSERT INTO tenants (name, plan_code, status)
-         VALUES ($1, 'PRO', 'active')
+         VALUES ($1, 'BUSINESS', 'active')
          RETURNING id, name, status, plan_code`,
         [TARGET_TENANT_NAME]
       );
