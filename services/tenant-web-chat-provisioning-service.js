@@ -226,7 +226,8 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
     }
   }
 
-  const cleanDisplayName = typeof displayName === 'string' && displayName.trim() ? displayName.trim() : 'Web Chat';
+  const explicitDisplayName = typeof displayName === 'string' && displayName.trim() ? displayName.trim() : null;
+  const cleanDisplayName = explicitDisplayName || 'Web Chat';
 
   return runInTransaction(database, async (client) => {
     // 1. Verify tenant existence and active status
@@ -329,23 +330,30 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
 
       if (existingChannel.rowCount > 0) {
         resolvedChannel = existingChannel.rows[0];
-        if (resolvedChannel.status !== 'active' || resolvedChannel.assistant_id !== resolvedAssistant.id) {
+        const targetStatus = status && (status === 'active' || status === 'inactive') ? status : resolvedChannel.status;
+        const targetName = explicitDisplayName || resolvedChannel.display_name;
+        if (
+          resolvedChannel.status !== targetStatus ||
+          resolvedChannel.assistant_id !== resolvedAssistant.id ||
+          (explicitDisplayName && resolvedChannel.display_name !== explicitDisplayName)
+        ) {
           const updated = await client.query(
             `UPDATE tenant_channels
-                SET assistant_id = $1, status = 'active', updated_at = CURRENT_TIMESTAMP
-              WHERE id = $2 AND tenant_id = $3
+                SET assistant_id = $1, status = $2, display_name = $3, updated_at = CURRENT_TIMESTAMP
+              WHERE id = $4 AND tenant_id = $5
               RETURNING id, tenant_id, channel_type, display_name, external_channel_id, assistant_id, status`,
-            [resolvedAssistant.id, resolvedChannel.id, validTenantId]
+            [resolvedAssistant.id, targetStatus, targetName, resolvedChannel.id, validTenantId]
           );
           resolvedChannel = updated.rows[0];
         }
       } else {
+        const targetStatus = status && (status === 'active' || status === 'inactive') ? status : 'active';
         const newExternalId = `webchat:${validTenantId}:${randomUUID()}`;
         const inserted = await client.query(
           `INSERT INTO tenant_channels (tenant_id, channel_type, display_name, external_channel_id, assistant_id, status)
-           VALUES ($1, 'WEB_CHAT', $2, $3, $4, 'active')
+           VALUES ($1, 'WEB_CHAT', $2, $3, $4, $5)
            RETURNING id, tenant_id, channel_type, display_name, external_channel_id, assistant_id, status`,
-          [validTenantId, cleanDisplayName, newExternalId, resolvedAssistant.id]
+          [validTenantId, cleanDisplayName, newExternalId, resolvedAssistant.id, targetStatus]
         );
         resolvedChannel = inserted.rows[0];
       }
@@ -410,16 +418,16 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
                updated_at = CURRENT_TIMESTAMP
              RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`
           : `INSERT INTO channel_integrations (integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled)
-             VALUES ($1, 'WEB_CHAT', $2, $3, $4, TRUE)
+             VALUES ($1, 'WEB_CHAT', $2, $3, $4, $5)
              ON CONFLICT (integration_key) DO UPDATE SET
                channel_id = EXCLUDED.channel_id,
                assistant_id = EXCLUDED.assistant_id,
-               enabled = TRUE,
+               enabled = EXCLUDED.enabled,
                updated_at = CURRENT_TIMESTAMP
              RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`;
         const insertParams = hasConfig
           ? [normalizedWidgetKey, validTenantId, resolvedChannel.id, resolvedAssistant.id, isChannelActive, configPayload]
-          : [normalizedWidgetKey, validTenantId, resolvedChannel.id, resolvedAssistant.id];
+          : [normalizedWidgetKey, validTenantId, resolvedChannel.id, resolvedAssistant.id, isChannelActive];
         const inserted = await client.query(insertSql, insertParams);
         resolvedIntegration = inserted.rows[0];
       }
@@ -427,26 +435,31 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
       const tenantIntegration = await client.query(
         `SELECT id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled
            FROM channel_integrations
-          WHERE tenant_id = $1 AND integration_type = 'WEB_CHAT' AND enabled = TRUE
-          ORDER BY created_at ASC LIMIT 1 FOR UPDATE`,
+          WHERE tenant_id = $1 AND integration_type = 'WEB_CHAT'
+          ORDER BY enabled DESC, created_at ASC LIMIT 1 FOR UPDATE`,
         [validTenantId]
       );
 
       if (tenantIntegration.rowCount > 0) {
         const row = tenantIntegration.rows[0];
-        if (row.channel_id !== resolvedChannel.id || row.assistant_id !== resolvedAssistant.id || (hasConfig && configPayload)) {
+        if (
+          row.channel_id !== resolvedChannel.id ||
+          row.assistant_id !== resolvedAssistant.id ||
+          row.enabled !== isChannelActive ||
+          (hasConfig && configPayload)
+        ) {
           const updateSql = hasConfig
             ? `UPDATE channel_integrations
                   SET channel_id = $1, assistant_id = $2, enabled = $3, config = $4, updated_at = CURRENT_TIMESTAMP
                 WHERE id = $5 AND tenant_id = $6
                 RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`
             : `UPDATE channel_integrations
-                  SET channel_id = $1, assistant_id = $2, updated_at = CURRENT_TIMESTAMP
-                WHERE id = $3 AND tenant_id = $4
+                  SET channel_id = $1, assistant_id = $2, enabled = $3, updated_at = CURRENT_TIMESTAMP
+                WHERE id = $4 AND tenant_id = $5
                 RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`;
           const updateParams = hasConfig
             ? [resolvedChannel.id, resolvedAssistant.id, isChannelActive, configPayload, row.id, validTenantId]
-            : [resolvedChannel.id, resolvedAssistant.id, row.id, validTenantId];
+            : [resolvedChannel.id, resolvedAssistant.id, isChannelActive, row.id, validTenantId];
           const updated = await client.query(updateSql, updateParams);
           resolvedIntegration = updated.rows[0];
         } else {
@@ -459,11 +472,11 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
              VALUES ($1, 'WEB_CHAT', $2, $3, $4, $5, $6)
              RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`
           : `INSERT INTO channel_integrations (integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled)
-             VALUES ($1, 'WEB_CHAT', $2, $3, $4, TRUE)
+             VALUES ($1, 'WEB_CHAT', $2, $3, $4, $5)
              RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`;
         const insertParams = hasConfig
           ? [autoKey, validTenantId, resolvedChannel.id, resolvedAssistant.id, isChannelActive, configPayload]
-          : [autoKey, validTenantId, resolvedChannel.id, resolvedAssistant.id];
+          : [autoKey, validTenantId, resolvedChannel.id, resolvedAssistant.id, isChannelActive];
         const inserted = await client.query(insertSql, insertParams);
         resolvedIntegration = inserted.rows[0];
       }
@@ -473,6 +486,7 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
 
     return {
       tenant_id: validTenantId,
+      configured: true,
       widget_key: resolvedIntegration.integration_key,
       channel_id: resolvedChannel.id,
       integration_id: resolvedIntegration.id,
@@ -519,6 +533,8 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
 
 /**
  * Retrieves the current Web Chat integration status and details for a given tenant.
+ * Supports both configured and unconfigured tenants, returning canonical setup state
+ * instead of 404 for valid tenants that have not yet enabled Web Chat.
  */
 export async function getWebChatIntegrationForTenant({ database, tenantId }) {
   if (!database || typeof database.query !== 'function') {
@@ -526,6 +542,18 @@ export async function getWebChatIntegrationForTenant({ database, tenantId }) {
   }
 
   const validTenantId = validateUUID(tenantId, 'WEB_CHAT_PROVISIONING_TENANT_INVALID', 'Invalid tenant ID format');
+
+  // 1. Verify tenant exists in system
+  const tenantResult = await database.query(
+    'SELECT id, name, status, plan_code FROM tenants WHERE id = $1',
+    [validTenantId]
+  );
+
+  if (tenantResult.rowCount === 0) {
+    return null; // Tenant does not exist -> true 404
+  }
+
+  const tenant = tenantResult.rows[0];
   const hasConfig = await checkConfigColumn(database);
   const configSelect = hasConfig ? ', ci.config' : '';
 
@@ -536,27 +564,101 @@ export async function getWebChatIntegrationForTenant({ database, tenantId }) {
             ${configSelect}
        FROM channel_integrations ci
        JOIN tenant_channels tc ON tc.id = ci.channel_id AND tc.tenant_id = ci.tenant_id
-       JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
+       LEFT JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
       WHERE ci.tenant_id = $1
         AND ci.integration_type = 'WEB_CHAT'
-        AND ci.enabled = TRUE
-      ORDER BY ci.created_at ASC
+      ORDER BY ci.enabled DESC, ci.created_at ASC
       LIMIT 1`,
     [validTenantId]
   );
 
   if (result.rowCount === 0) {
-    return null;
+    // 3. Unconfigured canonical state:
+    // Tenant exists, but Web Chat integration has not been provisioned yet.
+    const existingChannel = await database.query(
+      `SELECT id, channel_type, display_name, external_channel_id, assistant_id, status
+         FROM tenant_channels
+        WHERE tenant_id = $1 AND channel_type = 'WEB_CHAT'
+        ORDER BY created_at ASC LIMIT 1`,
+      [validTenantId]
+    );
+
+    let defaultAssistant = null;
+    if (existingChannel.rowCount > 0 && existingChannel.rows[0].assistant_id) {
+      const linkedAssistant = await database.query(
+        `SELECT id, name, model, status FROM ai_assistants
+          WHERE id = $1 AND tenant_id = $2 AND status = 'active'`,
+        [existingChannel.rows[0].assistant_id, validTenantId]
+      );
+      if (linkedAssistant.rowCount > 0) {
+        defaultAssistant = linkedAssistant.rows[0];
+      }
+    }
+
+    if (!defaultAssistant) {
+      const candidateAssistants = await database.query(
+        `SELECT id, name, model, status FROM ai_assistants
+          WHERE tenant_id = $1 AND status = 'active'
+          ORDER BY created_at ASC LIMIT 1`,
+        [validTenantId]
+      );
+      if (candidateAssistants.rowCount > 0) {
+        defaultAssistant = candidateAssistants.rows[0];
+      }
+    }
+
+    const channelName = existingChannel.rowCount > 0 && existingChannel.rows[0].display_name
+      ? existingChannel.rows[0].display_name
+      : `${tenant.name} Web Chat`;
+    const channelStatus = existingChannel.rowCount > 0
+      ? existingChannel.rows[0].status
+      : 'inactive';
+
+    const appearance = normalizeWebChatAppearance({}, tenant.name);
+    const behavior = normalizeWebChatBehavior({});
+
+    return {
+      tenant_id: validTenantId,
+      configured: false,
+      widget_key: '',
+      channel: {
+        id: existingChannel.rowCount > 0 ? existingChannel.rows[0].id : null,
+        channel_type: 'WEB_CHAT',
+        display_name: channelName,
+        status: channelStatus,
+      },
+      assistant: defaultAssistant ? {
+        id: defaultAssistant.id,
+        name: defaultAssistant.name,
+        model: defaultAssistant.model,
+        status: defaultAssistant.status,
+      } : null,
+      integration: null,
+      appearance,
+      behavior,
+      embed_snippet: '',
+      installation: {
+        widget_key: '',
+        embed_snippet: '',
+        status: 'unconfigured',
+        guidance: [
+          'Web Chat is not enabled yet for this tenant.',
+          'Select an assistant and enable Web Chat in the General tab to generate your production embed snippet.',
+        ],
+      },
+      bootstrap_config: null,
+    };
   }
 
   const row = result.rows[0];
   const rawConfig = row.config || {};
-  const appearance = normalizeWebChatAppearance(rawConfig.appearance, row.channel_name);
+  const appearance = normalizeWebChatAppearance(rawConfig.appearance, row.channel_name || tenant.name);
   const behavior = normalizeWebChatBehavior(rawConfig.behavior);
   const embedSnippet = generateWebChatEmbedSnippet(row.integration_key);
 
   return {
     tenant_id: validTenantId,
+    configured: true,
     widget_key: row.integration_key,
     channel: {
       id: row.channel_id,
@@ -564,12 +666,12 @@ export async function getWebChatIntegrationForTenant({ database, tenantId }) {
       display_name: row.channel_name,
       status: row.channel_status,
     },
-    assistant: {
+    assistant: row.assistant_id ? {
       id: row.assistant_id,
       name: row.assistant_name,
       model: row.assistant_model,
       status: row.assistant_status,
-    },
+    } : null,
     integration: {
       id: row.integration_id,
       integration_key: row.integration_key,

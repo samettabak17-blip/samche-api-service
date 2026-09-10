@@ -58,7 +58,13 @@ export function ChannelForm({ canManage, assistants, initial, onSubmit, isPendin
     if (channelType === 'WHATSAPP' && !externalChannelId.trim()) return setValidationError('External channel ID is required for WhatsApp.');
     if (channelType === 'WHATSAPP' && status === 'active' && !assistantId) return setValidationError('An active assistant is required for an active WhatsApp channel.');
     setValidationError(undefined);
-    onSubmit({ channel_type: channelType, display_name: displayName.trim(), external_channel_id: externalChannelId.trim() || null, assistant_id: assistantId || null, status });
+    onSubmit({
+      channel_type: channelType,
+      display_name: displayName.trim(),
+      external_channel_id: channelType === 'WHATSAPP' ? (externalChannelId.trim() || null) : null,
+      assistant_id: assistantId || null,
+      status,
+    });
   }
   function changeChannelType(value: TenantChannel['channel_type']) {
     setChannelType(value);
@@ -67,7 +73,15 @@ export function ChannelForm({ canManage, assistants, initial, onSubmit, isPendin
   return <form onSubmit={submit} className="space-y-4">
     <label className="block text-sm font-medium">Channel type<select aria-label="Channel type" value={channelType} onChange={(event) => changeChannelType(event.target.value as TenantChannel['channel_type'])} className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm"><option value="WEB_CHAT">Web Chat</option><option value="WHATSAPP">WhatsApp</option></select></label>
     <label className="block text-sm font-medium">Display name<input aria-label="Display name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm" /></label>
-    <label className="block text-sm font-medium">External channel ID<input aria-label="External channel ID" value={externalChannelId ?? ''} onChange={(event) => setExternalChannelId(event.target.value)} className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm" /></label>
+    {channelType === 'WHATSAPP' && (
+      <label className="block text-sm font-medium">External channel ID<input aria-label="External channel ID" value={externalChannelId ?? ''} onChange={(event) => setExternalChannelId(event.target.value)} className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm" /></label>
+    )}
+    {channelType === 'WEB_CHAT' && (
+      <div className="rounded-lg border border-line/60 bg-canvas/30 p-3 text-xs text-stone-400">
+        <span>Integration key and embed snippet are generated automatically. Manage full appearance, behavior, and preview in the </span>
+        <span className="text-signal font-medium">Web Chat Experience</span>.
+      </div>
+    )}
     <label className="block text-sm font-medium">Assigned assistant<select aria-label="Assigned assistant" value={assistantId ?? ''} onChange={(event) => setAssistantId(event.target.value)} className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm">{channelType !== 'WHATSAPP' && <option value="">No assistant assigned</option>}{channelType === 'WHATSAPP' && !eligibleAssistants.length && <option value="">No active assistant available</option>}{eligibleAssistants.map((assistant) => <option key={assistant.id} value={assistant.id}>{assistant.name}</option>)}</select></label>
     <label className="block text-sm font-medium">Status<select aria-label="Status" value={status} onChange={(event) => setStatus(event.target.value as TenantChannel['status'])} className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm"><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
     {validationError && <p role="alert" className="text-sm text-red-700">{validationError}</p>}<button type="submit" disabled={isPending} className="rounded-lg bg-ink px-4 py-2 text-sm font-semibold text-white disabled:opacity-60">{isPending ? 'Saving…' : initial ? 'Save changes' : 'Create channel'}</button>

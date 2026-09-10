@@ -79,9 +79,10 @@ export function WebChatManagement() {
   useEffect(() => {
     if (webChatQuery.data) {
       const d: WebChatChannelResponse = webChatQuery.data;
-      setDisplayName(d.channel.display_name || 'Web Chat');
-      setAssistantId(d.channel.assistant_id || d.assistant?.id || '');
-      setStatus(d.channel.status || 'active');
+      setDisplayName(d.channel?.display_name || 'Web Chat');
+      const fallbackAssistantId = d.channel?.assistant_id || d.assistant?.id || (tenantAssistants.length > 0 ? tenantAssistants[0].id : '');
+      setAssistantId(fallbackAssistantId);
+      setStatus(d.configured ? (d.channel?.status || 'active') : 'active');
 
       if (d.appearance) {
         setBrandName(d.appearance.brand_name || '');
@@ -184,6 +185,9 @@ export function WebChatManagement() {
     return <EmptyState title="Web Chat not available" description="Please configure Web Chat channel." />;
   }
 
+  const isConfigured = Boolean(data.configured && data.widget_key);
+  const isChannelActive = status === 'active';
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-5">
@@ -195,10 +199,14 @@ export function WebChatManagement() {
           </div>
           <h1 className="page-title mt-2 flex items-center gap-2">
             Web Chat Management
-            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
-              status === 'active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-stone-500/10 text-stone-400 border border-stone-500/20'
+            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+              !isConfigured
+                ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                : isChannelActive
+                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                : 'bg-stone-500/10 text-stone-400 border border-stone-500/20'
             }`}>
-              {status}
+              {!isConfigured ? 'Not Configured' : isChannelActive ? 'Active' : 'Inactive'}
             </span>
           </h1>
           <p className="mt-1 text-sm text-stone-400">
@@ -213,7 +221,7 @@ export function WebChatManagement() {
             disabled={saveMutation.isPending}
             className="inline-flex items-center gap-2 rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-white shadow hover:opacity-95 disabled:opacity-60"
           >
-            {saveMutation.isPending ? 'Saving...' : 'Save changes'}
+            {saveMutation.isPending ? 'Saving...' : !isConfigured ? 'Save & Enable Web Chat' : 'Save changes'}
           </button>
         )}
       </div>
@@ -275,6 +283,18 @@ export function WebChatManagement() {
 
       {activeTab === 'general' && (
         <div className="panel max-w-2xl p-6 space-y-5">
+          {!isConfigured && (
+            <div className="rounded-xl border border-blue-500/30 bg-blue-950/20 p-4 text-blue-200">
+              <div className="flex items-center gap-2 font-semibold text-blue-100">
+                <Sparkles size={16} />
+                <span>Web Chat Setup</span>
+              </div>
+              <p className="mt-1 text-xs text-blue-200/80">
+                Web Chat is ready to be configured for this tenant. Select an AI Assistant and click &quot;Save &amp; Enable Web Chat&quot; to activate the channel and generate your live website embed code.
+              </p>
+            </div>
+          )}
+
           <label className="block text-sm font-medium">
             Channel Display Name
             <input
@@ -326,6 +346,19 @@ export function WebChatManagement() {
               <option value="ar">Arabic (العربية - RTL layout enabled)</option>
             </select>
           </label>
+
+          {canManage && (
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => saveMutation.mutate()}
+                disabled={saveMutation.isPending}
+                className="inline-flex items-center gap-2 rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-white shadow hover:opacity-95 disabled:opacity-60"
+              >
+                {saveMutation.isPending ? 'Saving...' : !isConfigured ? 'Save & Enable Web Chat' : 'Save changes'}
+              </button>
+            </div>
+          )}
         </div>
       )}
       {activeTab === 'appearance' && (
@@ -572,29 +605,52 @@ export function WebChatManagement() {
       {/* Tab 4: Live Preview */}
       {activeTab === 'preview' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-stone-400">
-              Live preview rendered with active brand colors and frosted glass styling.
-            </p>
-            <div className="flex items-center gap-2 rounded-lg border border-line p-1">
-              <button
-                type="button"
-                onClick={() => setPreviewViewport('desktop')}
-                className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition ${
-                  previewViewport === 'desktop' ? 'bg-signal text-white' : 'text-stone-400 hover:text-white'
-                }`}
-              >
-                <Laptop size={14} /> Desktop
-              </button>
-              <button
-                type="button"
-                onClick={() => setPreviewViewport('mobile')}
-                className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition ${
-                  previewViewport === 'mobile' ? 'bg-signal text-white' : 'text-stone-400 hover:text-white'
-                }`}
-              >
-                <Smartphone size={14} /> Mobile
-              </button>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm text-stone-400">
+                Live preview rendered with active brand colors and frosted glass styling.
+              </p>
+              {isConfigured && data.widget_key ? (
+                <p className="mt-1 text-xs text-emerald-400">
+                  Canonical widget runtime active with key <code className="font-mono text-emerald-300">{data.widget_key}</code>
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-amber-300">
+                  Initial theme preview. Save &amp; enable Web Chat in General tab to activate live runtime.
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {isConfigured && data.widget_key && (
+                <a
+                  href={`https://samche-api-staging.onrender.com/task8-demo/?widget_key=${encodeURIComponent(data.widget_key)}`}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-canvas/60 px-3 py-1 text-xs font-semibold text-stone-200 hover:text-white"
+                >
+                  <Laptop size={14} /> Open Live Storefront
+                </a>
+              )}
+              <div className="flex items-center gap-1 rounded-lg border border-line p-1">
+                <button
+                  type="button"
+                  onClick={() => setPreviewViewport('desktop')}
+                  className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition ${
+                    previewViewport === 'desktop' ? 'bg-signal text-white' : 'text-stone-400 hover:text-white'
+                  }`}
+                >
+                  <Laptop size={14} /> Desktop
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewViewport('mobile')}
+                  className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition ${
+                    previewViewport === 'mobile' ? 'bg-signal text-white' : 'text-stone-400 hover:text-white'
+                  }`}
+                >
+                  <Smartphone size={14} /> Mobile
+                </button>
+              </div>
             </div>
           </div>
 
@@ -694,31 +750,49 @@ export function WebChatManagement() {
       {/* Tab 5: Embed & Installation */}
       {activeTab === 'installation' && (
         <div className="panel max-w-3xl p-6 space-y-6">
-          <div>
-            <h2 className="text-base font-semibold">Production Embed Snippet</h2>
-            <p className="mt-1 text-sm text-stone-400">
-              Deploy this single asynchronous script tag to your website or eCommerce store.
-            </p>
-          </div>
+          {!isConfigured ? (
+            <div className="rounded-xl border border-amber-400/30 bg-amber-950/20 p-5 text-amber-200 space-y-3">
+              <h3 className="font-semibold text-amber-100">Web Chat is not yet enabled</h3>
+              <p className="text-sm text-amber-200/80">
+                Configure your assistant and branding in the General tab, then enable Web Chat to generate your production embed snippet and public widget key.
+              </p>
+              <button
+                type="button"
+                onClick={() => setActiveTab('general')}
+                className="inline-flex items-center gap-2 rounded-lg bg-amber-400 px-4 py-2 text-xs font-semibold text-black hover:bg-amber-300"
+              >
+                Go to General Setup
+              </button>
+            </div>
+          ) : (
+            <>
+              <div>
+                <h2 className="text-base font-semibold">Production Embed Snippet</h2>
+                <p className="mt-1 text-sm text-stone-400">
+                  Deploy this single asynchronous script tag to your website or eCommerce store.
+                </p>
+              </div>
 
-          <div className="relative">
-            <pre className="overflow-x-auto rounded-xl border border-line/80 bg-black/60 p-4 font-mono text-xs text-stone-200">
-              <code>{data.embed_snippet}</code>
-            </pre>
-            <button
-              type="button"
-              onClick={handleCopySnippet}
-              className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-lg bg-ink/80 px-3 py-1.5 text-xs font-semibold text-white hover:bg-ink shadow"
-            >
-              {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-              {copied ? 'Copied!' : 'Copy snippet'}
-            </button>
-          </div>
+              <div className="relative">
+                <pre className="overflow-x-auto rounded-xl border border-line/80 bg-black/60 p-4 font-mono text-xs text-stone-200">
+                  <code>{data.embed_snippet}</code>
+                </pre>
+                <button
+                  type="button"
+                  onClick={handleCopySnippet}
+                  className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-lg bg-ink/80 px-3 py-1.5 text-xs font-semibold text-white hover:bg-ink shadow"
+                >
+                  {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                  {copied ? 'Copied!' : 'Copy snippet'}
+                </button>
+              </div>
 
-          <div className="rounded-xl border border-line/70 bg-canvas/30 p-4 space-y-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-stone-300">Public Widget Key</h3>
-            <p className="font-mono text-xs text-amber-200/90 break-all">{data.widget_key}</p>
-          </div>
+              <div className="rounded-xl border border-line/70 bg-canvas/30 p-4 space-y-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-stone-300">Public Widget Key</h3>
+                <p className="font-mono text-xs text-amber-200/90 break-all">{data.widget_key}</p>
+              </div>
+            </>
+          )}
 
           <div className="space-y-3">
             <h3 className="text-sm font-semibold">Deployment Guidance</h3>

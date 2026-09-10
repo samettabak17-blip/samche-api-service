@@ -92,6 +92,22 @@ describe('ChannelForm', () => {
     }));
   });
 
+  it('hides External channel ID input for Web Chat channels and submits null external ID', () => {
+    const onSubmit = vi.fn();
+    render(<ChannelForm canManage assistants={[]} onSubmit={onSubmit} />);
+    // Default is WEB_CHAT
+    expect(screen.queryByLabelText(/External channel ID/i)).toBeNull();
+    expect(screen.getByText(/Integration key and embed snippet are generated automatically/i)).toBeTruthy();
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Display name' }), { target: { value: 'My Web Chat' } });
+    fireEvent.click(screen.getByRole('button', { name: /create channel/i }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      channel_type: 'WEB_CHAT',
+      display_name: 'My Web Chat',
+      external_channel_id: null,
+    }));
+  });
+
   it('blocks an active WhatsApp channel when no eligible assistant exists', () => {
     const onSubmit = vi.fn();
     render(<ChannelForm canManage assistants={[]} onSubmit={onSubmit} />);

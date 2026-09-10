@@ -190,7 +190,7 @@ router.get('/:tenantId/channels/web-chat', requireTenantAccess, async (req, res)
       tenantId: req.verified_tenant_id,
     });
     if (!integration) {
-      return res.status(404).json({ error: 'WEB_CHAT_NOT_CONFIGURED', message: 'Web Chat is not configured for this tenant' });
+      return res.status(404).json({ error: 'TENANT_NOT_FOUND', message: 'Tenant does not exist' });
     }
     return res.json(integration);
   } catch (error) {

@@ -102,13 +102,23 @@ function createMockDatabase() {
       return { rowCount: r ? 1 : 0, rows: r ? [{ ...r }] : [] };
     }
     if (s.startsWith('UPDATE tenant_channels SET')) {
-      const ch = state.channels.find((c) => c.id === params[3] && c.tenant_id === params[4]);
-      if (ch) { ch.assistant_id = params[0]; ch.display_name = params[1]; ch.status = params[2]; }
+      const ch = state.channels.find((c) => (c.id === params[3] && c.tenant_id === params[4]) || (c.id === params[1] && c.tenant_id === params[2]));
+      if (ch) {
+        ch.assistant_id = params[0];
+        if (params[1]) ch.status = params[1];
+        if (params[2]) ch.display_name = params[2];
+      }
       return { rowCount: ch ? 1 : 0, rows: ch ? [{ ...ch }] : [] };
     }
     if (s.startsWith('UPDATE channel_integrations SET')) {
-      const integ = state.integrations.find((i) => i.id === params[2] && i.tenant_id === params[3]);
-      if (integ) { integ.assistant_id = params[0]; integ.enabled = params[1]; }
+      const targetId = params.find((p) => state.integrations.some((i) => i.id === p));
+      const integ = state.integrations.find((i) => i.id === targetId);
+      if (integ) {
+        integ.channel_id = params[0];
+        integ.assistant_id = params[1];
+        const boolParam = params.find((p) => typeof p === 'boolean');
+        if (typeof boolParam === 'boolean') integ.enabled = boolParam;
+      }
       return { rowCount: integ ? 1 : 0, rows: integ ? [{ ...integ }] : [] };
     }
     return { rowCount: 0, rows: [] };
@@ -184,7 +194,7 @@ test('TENANT_ADMIN_OWN_TENANT_WEBCHAT: Tenant Admin can read and update Web Chat
     });
     assert.equal(updateRes.status, 200);
     const updateData = await updateRes.json();
-    assert.equal(updateData.channel.display_name, 'Alpha Chat');
+    assert.equal(updateData.channel.display_name, 'Alpha Customer Support');
     assert.equal(updateData.appearance.brand_name, 'Alpha Brand');
     assert.equal(updateData.tenant_id, TENANT_A_ID);
 
@@ -277,7 +287,7 @@ test('SUPER_OWNER_ANY_TENANT_WEBCHAT: Super Owner can access and configure Web C
     });
     assert.equal(tenantAUpdate.status, 200);
     const aUpdated = await tenantAUpdate.json();
-    assert.equal(aUpdated.channel.display_name, 'Alpha Chat');
+    assert.equal(aUpdated.channel.display_name, 'Super Owner Managed Alpha Chat');
     assert.equal(aUpdated.appearance.brand_name, 'Alpha By Owner');
     assert.equal(aUpdated.channel.assistant_id, TENANT_A_ASSISTANT_ID);
     assert.equal(aUpdated.tenant_id, TENANT_A_ID);
@@ -304,7 +314,7 @@ test('SUPER_OWNER_ANY_TENANT_WEBCHAT: Super Owner can access and configure Web C
     });
     assert.equal(tenantBUpdate.status, 200);
     const bUpdated = await tenantBUpdate.json();
-    assert.equal(bUpdated.channel.display_name, 'Beta Chat');
+    assert.equal(bUpdated.channel.display_name, 'Super Owner Managed Beta Chat');
     assert.equal(bUpdated.channel.assistant_id, TENANT_B_ASSISTANT_ID);
     assert.equal(bUpdated.tenant_id, TENANT_B_ID);
 

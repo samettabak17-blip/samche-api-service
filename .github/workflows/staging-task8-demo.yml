@@ -75,7 +75,7 @@ jobs:
           cd dashboard
           npm install --ignore-scripts
           npx tsc -b --noEmit
-          npx vitest run src/lib/permissions.test.ts src/features/channels/channels-page.test.tsx
+          npx vitest run src/lib/permissions.test.ts src/features/channels/channels-page.test.tsx src/features/channels/web-chat-management.test.tsx
           npx vite build
 
   staging_bootstrap_and_verification:

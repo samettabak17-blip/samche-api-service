@@ -57,24 +57,36 @@ export interface WebChatBehaviorConfig {
 
 export interface WebChatChannelResponse {
   tenant_id: string;
+  configured?: boolean;
   widget_key: string;
-  channel: TenantChannel;
-  assistant: Assistant;
+  channel: {
+    id: string | null;
+    channel_type: string;
+    display_name: string;
+    status: 'active' | 'inactive';
+    external_channel_id?: string | null;
+    assistant_id?: string | null;
+  };
+  assistant: Assistant | null;
   integration: {
     id: string;
     integration_key: string;
     integration_type: string;
     enabled: boolean;
-  };
+  } | null;
   appearance: WebChatAppearanceConfig;
   behavior: WebChatBehaviorConfig;
   embed_snippet: string;
   installation: {
     widget_key: string;
     embed_snippet: string;
-    status: 'active' | 'inactive';
+    status: 'active' | 'inactive' | 'unconfigured';
     guidance: string[];
   };
+  bootstrap_config?: {
+    widget_key: string;
+    api_endpoint: string;
+  } | null;
 }
 
 export interface WebChatThemePreviewResponse {
