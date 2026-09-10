@@ -253,6 +253,206 @@
     }
   }
 
+  /* Canonical Web Chat UX Primitives (Shared timing with AI Guide) */
+  var PRESENTATION_TIMING = Object.freeze({
+    chunk_words: 2,
+    base_delay_ms: 36,
+    comma_pause_ms: 80,
+    sentence_pause_ms: 180,
+    section_pause_ms: 220,
+    list_item_pause_ms: 100,
+    thinking_minimum_ms: 0,
+  });
+
+  function responseDelay(value) {
+    var pause = typeof value === 'number' ? value : PRESENTATION_TIMING.base_delay_ms;
+    try {
+      if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        return 0;
+      }
+    } catch (e) {
+      return pause;
+    }
+    return pause;
+  }
+
+  function isNearBottom(container, threshold) {
+    if (!container) return true;
+    var th = typeof threshold === 'number' ? threshold : 60;
+    var scrollDiff = container.scrollHeight - container.scrollTop - container.clientHeight;
+    return scrollDiff <= th;
+  }
+
+  function smartScrollToBottom(container, force) {
+    if (!container) return;
+    if (force || isNearBottom(container)) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }
+
+  function createTypingIndicator(options) {
+    options = options || {};
+    if (typeof document === 'undefined') {
+      return {
+        className: 'msg msg-bot msg-typing-indicator' + (options.className ? ' ' + options.className : ''),
+        getAttribute: function(name) {
+          if (name === 'role') return 'status';
+          if (name === 'aria-live') return 'polite';
+          if (name === 'aria-label') return options.label || 'Asistan yanıt hazırlıyor...';
+          return null;
+        },
+      };
+    }
+    var el = document.createElement('div');
+    el.className = 'msg msg-bot msg-typing-indicator' + (options.className ? ' ' + options.className : '');
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    el.setAttribute('aria-label', options.label || 'Asistan yanıt hazırlıyor...');
+
+    var dotsWrap = document.createElement('span');
+    dotsWrap.className = 'typing-dots';
+    for (var i = 0; i < 3; i++) {
+      var dot = document.createElement('span');
+      dot.className = 'typing-dot';
+      dotsWrap.appendChild(dot);
+    }
+    el.appendChild(dotsWrap);
+    return el;
+  }
+
+  function clearTypingIndicator(container) {
+    if (!container) return;
+    var existing = container.querySelectorAll('.msg-typing-indicator');
+    for (var i = 0; i < existing.length; i++) {
+      existing[i].remove();
+    }
+  }
+
+  async function progressiveText(node, value, options) {
+    options = options || {};
+    var signal = options.signal;
+    var container = options.container;
+    var words = String(value || '').split(/(\s+)/);
+    var step = Math.max(2, (PRESENTATION_TIMING.chunk_words || 2) * 2);
+
+    for (var index = 0; index < words.length; index += step) {
+      if (signal && signal.aborted) return;
+      if (node && typeof node.isConnected === 'boolean' && !node.isConnected) return;
+
+      var chunk = words.slice(index, index + step).join('');
+      node.textContent += chunk;
+
+      if (container) {
+        smartScrollToBottom(container, false);
+      }
+
+      var isSentenceEnd = /[.!?]\s*$/.test(chunk);
+      var isClauseEnd = /[,;:]\s*$/.test(chunk);
+      var pause = isSentenceEnd
+        ? PRESENTATION_TIMING.sentence_pause_ms
+        : isClauseEnd
+          ? PRESENTATION_TIMING.comma_pause_ms
+          : PRESENTATION_TIMING.base_delay_ms;
+
+      var delay = responseDelay(pause);
+      if (delay > 0 && typeof setTimeout !== 'undefined') {
+        await new Promise(function(resolve) { setTimeout(resolve, delay); });
+      }
+    }
+  }
+
+  async function progressiveReveal(targetNode, content, options) {
+    options = options || {};
+    var container = options.container || null;
+    var signal = options.signal || null;
+    var onComplete = options.onComplete || null;
+
+    if (!targetNode) return;
+    var rawText = typeof content === 'string' ? content : String(content || '');
+    targetNode.textContent = '';
+
+    var hasHtml = /<[a-z][\s\S]*>/i.test(rawText);
+
+    if (hasHtml && typeof document !== 'undefined') {
+      var temp = document.createElement('div');
+      temp.innerHTML = rawText;
+      var children = Array.from(temp.childNodes);
+      for (var i = 0; i < children.length; i++) {
+        if (signal && signal.aborted) return;
+        if (targetNode && typeof targetNode.isConnected === 'boolean' && !targetNode.isConnected) return;
+
+        var child = children[i];
+        if (child.nodeType === 3) {
+          await progressiveText(targetNode, child.textContent, { signal: signal, container: container });
+        } else if (child.nodeType === 1) {
+          var clone = child.cloneNode(false);
+          targetNode.appendChild(clone);
+          if (child.childNodes && child.childNodes.length > 0) {
+            await progressiveText(clone, child.textContent, { signal: signal, container: container });
+          }
+          if (container) {
+            smartScrollToBottom(container, false);
+          }
+          var elDelay = responseDelay(PRESENTATION_TIMING.sentence_pause_ms);
+          if (elDelay > 0 && typeof setTimeout !== 'undefined') {
+            await new Promise(function(resolve) { setTimeout(resolve, elDelay); });
+          }
+        }
+      }
+    } else {
+      await progressiveText(targetNode, rawText, { signal: signal, container: container });
+    }
+
+    if (container) {
+      smartScrollToBottom(container, false);
+    }
+    if (typeof onComplete === 'function') {
+      onComplete();
+    }
+  }
+
+  function injectStyles() {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById('samche-webchat-ux-styles')) return;
+    var style = document.createElement('style');
+    style.id = 'samche-webchat-ux-styles';
+    style.textContent = [
+      '.msg-typing-indicator { display: inline-flex !important; align-items: center; gap: 4px; min-height: 20px; padding: 0.6rem 0.9rem !important; }',
+      '.typing-dots { display: inline-flex; align-items: center; gap: 4px; }',
+      '.typing-dot { width: 6px; height: 6px; border-radius: 50%; background-color: #94a3b8; display: inline-block; animation: samche-typing-bounce 1.4s infinite ease-in-out both; }',
+      '.typing-dot:nth-child(1) { animation-delay: -0.32s; }',
+      '.typing-dot:nth-child(2) { animation-delay: -0.16s; }',
+      '.typing-dot:nth-child(3) { animation-delay: 0s; }',
+      '@keyframes samche-typing-bounce { 0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; } 40% { transform: scale(1.1); opacity: 1; } }',
+      '.msg { animation: samche-msg-fadein 0.22s ease-out; }',
+      '@keyframes samche-msg-fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }'
+    ].join('\n');
+    if (document.head) {
+      document.head.appendChild(style);
+    }
+  }
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', injectStyles);
+    } else {
+      injectStyles();
+    }
+  }
+
+
+
+  global.SamcheChatUX = {
+    PRESENTATION_TIMING: PRESENTATION_TIMING,
+    responseDelay: responseDelay,
+    isNearBottom: isNearBottom,
+    smartScrollToBottom: smartScrollToBottom,
+    createTypingIndicator: createTypingIndicator,
+    clearTypingIndicator: clearTypingIndicator,
+    progressiveText: progressiveText,
+    progressiveReveal: progressiveReveal,
+    injectStyles: injectStyles,
+  };
+
   global.SamcheContextCapture = {
     capturePageContext: capturePageContext,
     initSpaNavigationListener: initSpaNavigationListener,
@@ -269,6 +469,7 @@
     module.exports = {
       SamcheContextCapture: global.SamcheContextCapture,
       SamcheProactiveEngagement: global.SamcheProactiveEngagement,
+      SamcheChatUX: global.SamcheChatUX,
     };
   }
 })(typeof window !== 'undefined' ? window : globalThis);

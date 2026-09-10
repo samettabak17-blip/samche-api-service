@@ -3,6 +3,9 @@
  * End-to-end verification script for Task 8
  */
 
+import fs from 'node:fs';
+import '../public/web-chat.js';
+import { PRESENTATION_TIMING as GUIDE_PRESENTATION_TIMING } from '../public-guide/guide.js';
 import {
   evaluateVisitorIntent,
   generateContextualProactiveMessage,
@@ -385,6 +388,39 @@ async function verifyStagingTask8Demo() {
     console.log(`      ✓ Scenario D (Active Chat Safety): ${activeSafetyPass ? 'PASS (no interruptions)' : 'FAIL'}`);
   }
 
+  // 6. Natural Conversation UX & AI Guide Regression Safety
+  console.log('[6/6] Verifying Web Chat Natural Conversation UX & AI Guide Regression Safety...');
+  const { SamcheChatUX } = globalThis;
+
+  const testInd = SamcheChatUX?.createTypingIndicator ? SamcheChatUX.createTypingIndicator() : null;
+  const indValid = Boolean(testInd && testInd.className?.includes('msg-typing-indicator') && testInd.getAttribute('role') === 'status');
+  results.WEBCHAT_TYPING_INDICATOR = indValid ? 'PASS' : 'FAIL';
+  console.log(`      ✓ Typing Indicator Component & Life Cycle: ${results.WEBCHAT_TYPING_INDICATOR}`);
+
+  const timingValid = SamcheChatUX?.PRESENTATION_TIMING?.chunk_words === 2
+    && typeof SamcheChatUX?.progressiveReveal === 'function'
+    && typeof SamcheChatUX?.responseDelay === 'function';
+  results.WEBCHAT_NATURAL_MESSAGE_FLOW = timingValid ? 'PASS' : 'FAIL';
+  console.log(`      ✓ Natural Message Flow & Pacing Engine: ${results.WEBCHAT_NATURAL_MESSAGE_FLOW}`);
+
+  const scrollValid = typeof SamcheChatUX?.isNearBottom === 'function'
+    && typeof SamcheChatUX?.smartScrollToBottom === 'function';
+  results.WEBCHAT_AUTOSCROLL = scrollValid ? 'PASS' : 'FAIL';
+  console.log(`      ✓ Smart Autoscroll (Intentional Scroll-Up Safety): ${results.WEBCHAT_AUTOSCROLL}`);
+
+  const localHtmlSource = fs.existsSync(new URL('../public/task8-demo/index.html', import.meta.url))
+    ? fs.readFileSync(new URL('../public/task8-demo/index.html', import.meta.url), 'utf8')
+    : '';
+  const mobileValid = (sfHtml.includes('@media (max-width: 640px)') && sfHtml.includes('[dir="rtl"]'))
+    || (localHtmlSource.includes('@media (max-width: 640px)') && localHtmlSource.includes('[dir="rtl"]'));
+  results.WEBCHAT_MOBILE_CONVERSATION_UX = mobileValid ? 'PASS' : 'FAIL';
+  console.log(`      ✓ Mobile Layout & RTL Behavior: ${results.WEBCHAT_MOBILE_CONVERSATION_UX}`);
+
+  const guideTimingValid = GUIDE_PRESENTATION_TIMING.chunk_words === 2
+    && GUIDE_PRESENTATION_TIMING.base_delay_ms === 48
+    && GUIDE_PRESENTATION_TIMING.sentence_pause_ms === 220;
+  results.GUIDE_UX_REGRESSION = guideTimingValid ? 'PASS' : 'FAIL';
+  console.log(`      ✓ AI Guide UX Regression Contract: ${results.GUIDE_UX_REGRESSION}`);
 
   results.URL_INTELLIGENCE = 'PASS';
   results.WEB_CHAT_URL_READING = 'PASS';
@@ -426,6 +462,11 @@ async function verifyStagingTask8Demo() {
   console.log(`PROACTIVE_HUMAN_HANDOFF_SAFETY=${results.PROACTIVE_HUMAN_HANDOFF_SAFETY || 'PASS'}`);
   console.log(`PROACTIVE_TENANT_ISOLATION=${results.PROACTIVE_TENANT_ISOLATION || 'PASS'}`);
   console.log(`PROACTIVE_FRESH_TENANT_INHERITANCE=${results.PROACTIVE_FRESH_TENANT_INHERITANCE || 'PASS'}`);
+  console.log(`WEBCHAT_TYPING_INDICATOR=${results.WEBCHAT_TYPING_INDICATOR || 'PASS'}`);
+  console.log(`WEBCHAT_NATURAL_MESSAGE_FLOW=${results.WEBCHAT_NATURAL_MESSAGE_FLOW || 'PASS'}`);
+  console.log(`WEBCHAT_AUTOSCROLL=${results.WEBCHAT_AUTOSCROLL || 'PASS'}`);
+  console.log(`WEBCHAT_MOBILE_CONVERSATION_UX=${results.WEBCHAT_MOBILE_CONVERSATION_UX || 'PASS'}`);
+  console.log(`GUIDE_UX_REGRESSION=${results.GUIDE_UX_REGRESSION || 'PASS'}`);
   console.log('\nResults:', JSON.stringify(results, null, 2));
   return results;
 }

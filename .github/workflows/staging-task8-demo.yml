@@ -33,6 +33,7 @@ on:
       - 'services/visitor-intent-service.js'
       - 'migrations/078_canonical_web_chat_proactive_engagement.sql'
       - 'tests/proactive-visitor-intent.test.js'
+      - 'tests/web-chat-natural-conversation-ux.test.js'
       - 'app.js'
 
 permissions:
@@ -66,6 +67,7 @@ jobs:
           tests/contextual-intelligence-service.test.js
           tests/permanence-multi-tenant-contract.test.js
           tests/proactive-visitor-intent.test.js
+          tests/web-chat-natural-conversation-ux.test.js
 
   staging_bootstrap_and_verification:
     name: Staging Bootstrap and Live Runtime Verification

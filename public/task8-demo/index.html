@@ -108,6 +108,64 @@
     .chat-send-btn:hover { background: var(--primary-dark); }
     .chat-send-btn svg { width: 18px; height: 18px; fill: currentColor; }
 
+    /* Animated Typing Indicator & Natural Flow Styles */
+    .msg-typing-indicator { display: inline-flex !important; align-items: center; gap: 4px; min-height: 22px; padding: 0.65rem 1rem !important; }
+    .typing-dots { display: inline-flex; align-items: center; gap: 4px; }
+    .typing-dot { width: 6px; height: 6px; border-radius: 50%; background-color: #94a3b8; display: inline-block; animation: typing-bounce 1.4s infinite ease-in-out both; }
+    .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+    .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+    .typing-dot:nth-child(3) { animation-delay: 0s; }
+    @keyframes typing-bounce {
+      0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+      40% { transform: scale(1.15); opacity: 1; }
+    }
+    .msg { animation: msg-appear 0.22s ease-out; }
+    @keyframes msg-appear {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Mobile Conversation UX */
+    @media (max-width: 640px) {
+      .chat-window {
+        width: calc(100vw - 32px);
+        right: 16px;
+        bottom: 84px;
+        height: calc(100vh - 110px);
+        max-height: calc(100vh - 110px);
+        border-radius: 14px;
+      }
+      .chat-widget-btn {
+        bottom: 16px;
+        right: 16px;
+        width: 52px;
+        height: 52px;
+      }
+      .msg {
+        max-width: 90%;
+        font-size: 0.85rem;
+      }
+    }
+
+    /* RTL Preservation */
+    [dir="rtl"] .chat-window {
+      direction: rtl;
+      text-align: right;
+    }
+    [dir="rtl"] .msg-bot {
+      align-self: flex-start;
+      border-bottom-left-radius: 14px;
+      border-bottom-right-radius: 4px;
+    }
+    [dir="rtl"] .msg-user {
+      align-self: flex-end;
+      border-bottom-left-radius: 4px;
+      border-bottom-right-radius: 14px;
+    }
+    [dir="rtl"] .chat-input-area {
+      flex-direction: row-reverse;
+    }
+
   </style>
 </head>
 <body>
@@ -575,15 +633,63 @@
     let hasProactiveShown = false;
     window.hasUserMessaged = false;
 
-    function triggerProactiveOpen(message) {
+    function smartScroll(force) {
+      if (window.SamcheChatUX && typeof window.SamcheChatUX.smartScrollToBottom === 'function') {
+        window.SamcheChatUX.smartScrollToBottom(chatMessages, Boolean(force));
+      } else if (force || (chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight <= 60)) {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+    }
+
+    function showTypingIndicator() {
+      clearTypingIndicator();
+      let indicator;
+      if (window.SamcheChatUX && typeof window.SamcheChatUX.createTypingIndicator === 'function') {
+        indicator = window.SamcheChatUX.createTypingIndicator();
+      } else {
+        indicator = document.createElement('div');
+        indicator.className = 'msg msg-bot msg-typing-indicator';
+        indicator.innerHTML = '<span class="typing-dots"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></span>';
+      }
+      chatMessages.appendChild(indicator);
+      smartScroll(true);
+      return indicator;
+    }
+
+    function clearTypingIndicator() {
+      if (window.SamcheChatUX && typeof window.SamcheChatUX.clearTypingIndicator === 'function') {
+        window.SamcheChatUX.clearTypingIndicator(chatMessages);
+      } else {
+        const existing = chatMessages.querySelectorAll('.msg-typing-indicator');
+        for (let i = 0; i < existing.length; i++) existing[i].remove();
+      }
+    }
+
+    async function revealAssistantResponse(bubble, text) {
+      if (window.SamcheChatUX && typeof window.SamcheChatUX.progressiveReveal === 'function') {
+        await window.SamcheChatUX.progressiveReveal(bubble, text, {
+          container: chatMessages,
+        });
+      } else {
+        bubble.textContent = text;
+        smartScroll(false);
+      }
+    }
+
+    async function triggerProactiveOpen(message) {
       if (window.hasUserMessaged || hasProactiveShown) return;
       hasProactiveShown = true;
       chatWindow.style.display = 'flex';
-      const typingIndicator = appendMessage('bot', 'TeknoStore Asistanı yazıyor...');
-      setTimeout(() => {
-        typingIndicator.textContent = message;
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-      }, 700);
+
+      showTypingIndicator();
+      const thinkingDelay = window.SamcheChatUX ? window.SamcheChatUX.responseDelay(420) : 400;
+      if (thinkingDelay > 0) {
+        await new Promise((r) => setTimeout(r, thinkingDelay));
+      }
+      clearTypingIndicator();
+
+      const botBubble = appendMessage('bot', '');
+      await revealAssistantResponse(botBubble, message);
     }
 
     chatToggleBtn.addEventListener('click', () => {
@@ -629,9 +735,15 @@
     function appendMessage(role, text) {
       const msgDiv = document.createElement('div');
       msgDiv.className = `msg ${role === 'user' ? 'msg-user' : 'msg-bot'}`;
-      msgDiv.textContent = text;
+      if (text !== undefined && text !== null) {
+        msgDiv.textContent = text;
+      }
       chatMessages.appendChild(msgDiv);
-      chatMessages.scrollTop = chatMessages.scrollHeight;
+      if (role === 'user') {
+        smartScroll(true);
+      } else {
+        smartScroll(false);
+      }
       return msgDiv;
     }
 
@@ -643,12 +755,15 @@
       }
       const cleanText = text.trim();
 
+      // Immediate user message render
       appendMessage('user', cleanText);
       chatInput.value = '';
+      smartScroll(true);
 
       await initChatSession();
 
-      const loadingMsg = appendMessage('bot', 'Yanıt hazırlanıyor...');
+      // Real assistant pending state: animated typing indicator
+      showTypingIndicator();
 
       try {
         const bodyPayload = {
@@ -670,24 +785,44 @@
           body: JSON.stringify(bodyPayload)
         });
 
+        // Typing indicator clears on success and error
+        clearTypingIndicator();
+
         if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          loadingMsg.textContent = 'Hata: ' + (errData.error || 'Yanıt alınamadı.');
+          let errText = 'Yanıt alınamadı.';
+          try {
+            const errData = await res.json();
+            errText = errData.error || errText;
+          } catch (e) {
+            errText = (await res.text().catch(() => '')) || errText;
+          }
+          appendMessage('bot', 'Hata: ' + errText);
+          smartScroll(true);
           return;
         }
 
-        const data = await res.json();
-        if (data.conversation_session) {
-          webChatSessionToken = data.conversation_session;
+        let reply = '';
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await res.json();
+          if (data.conversation_session) {
+            webChatSessionToken = data.conversation_session;
+          }
+          reply = data.reply
+            || data.candidates?.[0]?.content?.parts?.[0]?.text
+            || (typeof data === 'string' ? data : JSON.stringify(data));
+        } else {
+          reply = await res.text();
         }
 
-        const reply = data.reply
-          || data.candidates?.[0]?.content?.parts?.[0]?.text
-          || (typeof data === 'string' ? data : JSON.stringify(data));
-
-        loadingMsg.textContent = reply;
+        // Real assistant response enters naturally into the conversation
+        const botBubble = appendMessage('bot', '');
+        await revealAssistantResponse(botBubble, reply);
       } catch (err) {
-        loadingMsg.textContent = 'Bağlantı hatası: Asistana ulaşılamadı.';
+        // Typing clears on error
+        clearTypingIndicator();
+        appendMessage('bot', 'Bağlantı hatası: Asistana ulaşılamadı.');
+        smartScroll(true);
       }
     }
 
@@ -699,6 +834,13 @@
       e.preventDefault();
       sendMessage(chatInput.value);
     });
+
+    if (window.SamcheProactiveEngagement) {
+      window.SamcheProactiveEngagement.configure({
+        onAutoOpen: triggerProactiveOpen,
+        onProactiveMessage: triggerProactiveOpen,
+      });
+    }
 
     // Initial page route execution
     handleRouting();
