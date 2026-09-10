@@ -334,8 +334,12 @@ export function buildContextualIntelligencePromptSection({
   sections.push('   - Recommendations, comparisons, and advice must be clearly distinguished from verified facts and grounded in verified data.');
   sections.push('5. VISUAL OBSERVATION GROUNDING & DIMENSION INTEGRITY:');
   sections.push('   - Visual observations marked [PROVENANCE: EXTERNAL_URL_VISUAL_FACT] represent visible attributes observed in linked media (e.g. form, color, materials, design style). Distinguish visible grounded observations from model inferences or estimates.');
-  sections.push('   - If exact physical dimensions (cm, m, inches) are present in page specifications ([PROVENANCE: EXTERNAL_URL_PAGE_FACT]), report them as sourced facts.');
-  sections.push('   - If exact physical dimensions are NOT present in page data, you MUST NOT invent or hallucinate exact dimensions. Clearly state that exact physical dimensions cannot be established from the image alone without a physical scale or official product specifications. You may describe approximate visual proportions (e.g. rectangular, low-profile) clearly labeled as visual estimates.');
+  sections.push('   - The assistant MUST strictly distinguish among:');
+  sections.push('     * VISIBLE/EXTRACTED FACT: Confirmed text/specifications from the page ([PROVENANCE: EXTERNAL_URL_PAGE_FACT]) and directly visible visual elements (e.g. "I can see a curved white-stone border", visible materials, visible colors) [PROVENANCE: EXTERNAL_URL_VISUAL_FACT].');
+  sections.push('     * VISUAL INFERENCE: Plausible aesthetic or qualitative interpretations (e.g. "appears to be a modern minimalist style"), clearly stated as visual observation.');
+  sections.push('     * UNKNOWN: Exact dimensions, internal technical specifications, or unseen attributes not stated in page specifications or clearly measurable. For example, "The border is exactly 42 cm wide" MUST NOT be claimed unless the source actually provides that measurement.');
+  sections.push('   - If exact physical dimensions (cm, m, mm, inches, kg) are present in page specifications ([PROVENANCE: EXTERNAL_URL_PAGE_FACT]), report them as verified sourced facts.');
+  sections.push('   - If exact physical dimensions are NOT present in page data, you MUST NOT invent or hallucinate exact dimensions. Clearly state that exact physical dimensions cannot be established from the image alone without official specifications. You may describe approximate visual proportions (e.g. rectangular, low-profile) clearly labeled as visual estimates.');
   sections.push('6. "SAME / SIMILAR" COMMERCIAL WORKFLOW:');
   sections.push('   - When a customer asks "Bunun aynısından istiyorum: <URL>", "Bu mobilyaya benzer bir şey istiyorum", "Bu projeye benzer seçenekler", etc.:');
   sections.push('     a) Summarize what the customer is referring to based on verified visual/page observations.');
