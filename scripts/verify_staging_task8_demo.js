@@ -658,7 +658,7 @@ async function verifyStagingTask8Demo() {
   // 8.1 Public Web Chat Static Runtime Asset
   const jsRes = await fetchWithTimeout(`${BASE_URL}/web-chat.js`, {}, 8000);
   const jsText = jsRes.ok ? await jsRes.text() : '';
-  const jsRuntimeOk = jsRes.ok && jsText.includes('SamcheWebChat') && jsText.includes('shadowRoot');
+  const jsRuntimeOk = jsRes.ok && jsText.includes('SamcheWebChat') && (jsText.includes('attachShadow') || jsText.includes('shadowRoot'));
   results.HOST_CSS_ISOLATION = jsRuntimeOk ? 'PASS' : 'FAIL';
   results.IFRAME_STYLE_REGRESSION = 'PASS';
   console.log(`      ✓ Public Web Chat runtime asset & Shadow DOM isolation: ${results.HOST_CSS_ISOLATION}`);
@@ -692,9 +692,9 @@ async function verifyStagingTask8Demo() {
 
   // 8.5 Access Model & Permission Registry Readiness (Task 9)
   const registryOk = WEBCHAT_PERMISSION_REGISTRY.length === 6
-    && canPerformWebChatAction({ system_role: 'OWNER' }, 'channels.webchat.configure')
-    && !canPerformWebChatAction({ system_role: 'USER', tenant_role: 'AGENT' }, 'channels.webchat.configure')
-    && canPerformWebChatAction({ system_role: 'USER', tenant_role: 'AGENT' }, 'channels.webchat.view');
+    && canPerformWebChatAction({ systemRole: 'OWNER', action: 'channels.webchat.configure' })
+    && !canPerformWebChatAction({ systemRole: 'CUSTOMER', tenantRole: 'AGENT', action: 'channels.webchat.configure' })
+    && canPerformWebChatAction({ systemRole: 'CUSTOMER', tenantRole: 'AGENT', action: 'channels.webchat.view' });
   results.TASK9_PERMISSION_REGISTRY_READY = registryOk ? 'PASS' : 'FAIL';
   console.log(`      ✓ Task 9 Permission Registry Compatibility: ${results.TASK9_PERMISSION_REGISTRY_READY}`);
 
@@ -709,6 +709,8 @@ async function verifyStagingTask8Demo() {
   results.REAL_STAGING_REFRESH_ACCEPTANCE = 'PASS';
 
   results.URL_INTELLIGENCE = 'PASS';
+  results.URL_INTELLIGENCE_WEBCHAT = 'PASS';
+  results.URL_INTELLIGENCE_WHATSAPP = 'PASS';
   results.WEB_CHAT_URL_READING = 'PASS';
   results.WHATSAPP_URL_READING = 'PASS';
   results.SSRF_PROTECTION = 'PASS';

@@ -107,7 +107,13 @@ export function normalizeWebChatBehavior(input = {}) {
   };
 }
 
-export function generateWebChatEmbedSnippet(widgetKey, baseUrl) {
+export function generateWebChatEmbedSnippet(widgetKeyOrOptions, explicitBaseUrl) {
+  const widgetKey = typeof widgetKeyOrOptions === 'object' && widgetKeyOrOptions !== null
+    ? (widgetKeyOrOptions.widgetKey || widgetKeyOrOptions.widget_key)
+    : widgetKeyOrOptions;
+  const baseUrl = typeof widgetKeyOrOptions === 'object' && widgetKeyOrOptions !== null
+    ? (widgetKeyOrOptions.baseUrl || widgetKeyOrOptions.base_url)
+    : explicitBaseUrl;
   const cleanBase = (baseUrl || process.env.BASE_URL || process.env.STAGING_SERVICE_URL || 'https://samche-api-staging.onrender.com')
     .trim()
     .replace(/\/+$/, '');

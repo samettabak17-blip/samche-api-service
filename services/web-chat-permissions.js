@@ -88,13 +88,27 @@ export const WEBCHAT_PERMISSION_REGISTRY = Object.freeze([
  * @param {string} actor.action - One of WEBCHAT_PERMISSIONS values or short action names
  * @returns {boolean}
  */
-export function canPerformWebChatAction({ systemRole, tenantRole, action } = {}) {
+export function canPerformWebChatAction(actorOrSystemRole = {}, maybeAction, maybeTenantRole) {
+  let systemRole;
+  let tenantRole;
+  let action;
+
+  if (typeof actorOrSystemRole === 'string') {
+    systemRole = actorOrSystemRole;
+    action = maybeAction;
+    tenantRole = maybeTenantRole;
+  } else if (typeof actorOrSystemRole === 'object' && actorOrSystemRole !== null) {
+    systemRole = actorOrSystemRole.systemRole || actorOrSystemRole.system_role;
+    tenantRole = actorOrSystemRole.tenantRole || actorOrSystemRole.tenant_role || maybeTenantRole;
+    action = actorOrSystemRole.action || maybeAction;
+  }
+
   if (!systemRole) return false;
 
   // Platform Super Owner has full authority across any tenant
   if (systemRole === 'OWNER') return true;
 
-  if (systemRole !== 'CUSTOMER') return false;
+  if (systemRole !== 'CUSTOMER' && systemRole !== 'USER') return false;
 
   // Normalize action key
   const normalizedAction = Object.values(WEBCHAT_PERMISSIONS).includes(action)
