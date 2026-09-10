@@ -60,6 +60,7 @@ jobs:
           tests/public-web-chat-runtime-integration.test.js
           tests/web-chat-page-context-runtime.test.js
           tests/url-intelligence-service.test.js
+          tests/universal-public-link-intelligence.test.js
           tests/contextual-intelligence-service.test.js
           tests/permanence-multi-tenant-contract.test.js
           tests/proactive-visitor-intent.test.js

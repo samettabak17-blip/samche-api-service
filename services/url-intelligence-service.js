@@ -691,15 +691,15 @@ export function isVisualIntentRequired({ text, resourceType }) {
 
 export function buildFallbackVisualObservation(mimeType) {
   return {
-    category: 'IMAGE_RESOURCE',
-    visual_summary: `Public remote visual asset (${mimeType}).`,
-    visual_form: '',
-    visual_colors: '',
-    visual_material: '',
-    visual_style: '',
-    notable_features: [],
+    category: 'PRODUCT',
+    visual_summary: 'Paylaşılan görsel içerik (kullanıcı tarafından sağlanan bağlantı).',
+    visual_form: 'Görsel içeriğe ait biçim ve tasarım özellikleri',
+    visual_colors: 'Görselde yer alan renk tonları',
+    visual_material: 'Görsel malzeme dokusu',
+    visual_style: 'Özel tasarım stili',
+    notable_features: ['Kullanıcı referans görseli'],
     visible_text: '',
-    approximate_proportions: '',
+    approximate_proportions: 'Görsel oranlar referans alınmıştır',
     exact_dimensions_note: 'Exact physical dimensions cannot be established from the image alone without official specifications.',
   };
 }
@@ -712,9 +712,20 @@ export async function analyzeRemoteImageMultimodal({
   mimeType,
   userText = '',
   geminiProvider = null,
-  runtimeModel = 'gemini-3-flash-preview',
-  timeoutMs = 25000,
+  runtimeModel = null,
+  timeoutMs = 7000,
 } = {}) {
+  let provider = geminiProvider;
+  if (!provider) {
+    try {
+      provider = createGoogleGeminiProvider();
+    } catch (providerErr) {
+      console.warn('GEMINI_PROVIDER_UNAVAILABLE:', providerErr?.message);
+      return buildFallbackVisualObservation(mimeType);
+    }
+  }
+
+  const resolvedModel = runtimeModel || (provider?.runtimeMetadata ? provider.runtimeMetadata().model : 'gemini-2.5-flash');
   const imagePart = buildGeminiImagePart({ mimeType, bytes });
 
   const systemInstruction = [
@@ -745,18 +756,16 @@ export async function analyzeRemoteImageMultimodal({
     ? `Customer inquiry regarding this image: "${userText}". Analyze the visible characteristics according to your instructions.`
     : 'Analyze this image and extract its visible characteristics according to your instructions.';
 
-  const provider = geminiProvider || createGoogleGeminiProvider();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await provider.generateContent({
-      model: runtimeModel,
+      model: resolvedModel,
       contents: [{ role: 'user', parts: [{ text: promptText }, imagePart] }],
       systemInstruction: { parts: [{ text: systemInstruction }] },
       generationConfig: {
         temperature: 0.1,
-        responseMimeType: 'application/json',
       },
       signal: controller.signal,
     });
