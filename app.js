@@ -23,7 +23,7 @@ import crmRoutes from "./routes/crmRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
 import knowledgeIntelligenceRoutes from "./routes/knowledgeIntelligenceRoutes.js";
 import guideExperienceRoutes from "./routes/guideExperienceRoutes.js";
-import { getSamcheguidePublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus } from "./services/live-inbox-service.js";
+import { getSamcheguidePublicFeed, getWebChatPublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, persistWebChatInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
 import { claimDueCustomerSupportLifecycle, claimDueHumanSupportEscalations, requestCustomerHumanSupport, triggerImmediateHumanSupportNotificationPipeline } from "./services/human-support-service.js";
 import { processHumanSupportNotificationOutbox } from './services/human-support-notification-outbox-service.js';
@@ -1619,7 +1619,51 @@ function addWebMemory(userId, role, content, knowledgeAuthority = null) {
   }
 }
 
-app.get("/api/chat/history", (req, res) => {
+function extractWebChatSessionToken(req) {
+  const customHeader = req.get?.('X-Samche-Web-Chat-Session');
+  if (customHeader) return customHeader.trim();
+  const authHeader = req.get?.('Authorization');
+  if (authHeader && /^Bearer\s+/i.test(authHeader)) {
+    return authHeader.replace(/^Bearer\s+/i, '').trim();
+  }
+  if (typeof req.body?.conversation_session === 'string' && req.body.conversation_session.trim()) {
+    return req.body.conversation_session.trim();
+  }
+  if (typeof req.body?.session_token === 'string' && req.body.session_token.trim()) {
+    return req.body.session_token.trim();
+  }
+  return null;
+}
+
+app.get("/api/chat/history", async (req, res) => {
+  const sessionToken = extractWebChatSessionToken(req);
+  const secret = configuredPublicWebChatSessionSecret();
+
+  if (sessionToken && secret) {
+    try {
+      const session = verifyPublicWebChatSession(sessionToken, { secret });
+      const integration = await resolvePublicWebChatIntegration({ database: pool, widgetKey: session.widgetKey });
+      if (!integration) return res.status(401).json({ error: 'Web Chat session is invalid.' });
+
+      const feed = await getWebChatPublicFeed({
+        externalSessionId: session.sessionId,
+        integration,
+        database: pool,
+      });
+
+      if (feed && feed.messages.length > 0) {
+        return res.json(feed.messages.map(({ role, content, created_at }) => ({ role, content, created_at })));
+      }
+
+      const mem = webMemoryStore[session.sessionId] || [];
+      return res.json(mem.map(({ role, content }) => ({ role, content: String(content || '') })));
+    } catch (err) {
+      if (err instanceof PublicWebChatSessionError) {
+        return res.status(401).json({ error: 'Web Chat session is invalid.' });
+      }
+    }
+  }
+
   const userId = getUserId(req);
   res.json((webMemoryStore[userId] || []).map(({ role, content }) => ({ role, content })));
 });
@@ -1631,26 +1675,58 @@ app.post("/api/chat/bootstrap", async (req, res) => {
   try {
     const integration = await resolvePublicWebChatIntegration({ database: pool, widgetKey });
     if (!integration) return res.status(404).json({ error: 'Web Chat integration is unavailable.' });
+
+    const suppliedSession = extractWebChatSessionToken(req);
+    if (suppliedSession) {
+      try {
+        const verified = verifyPublicWebChatSession(suppliedSession, { secret });
+        if (verified.widgetKey === widgetKey) {
+          const browsingState = await loadWebChatSessionBrowsingState({
+            database: pool,
+            tenantId: integration.tenant_id,
+            sessionId: verified.sessionId,
+          });
+
+          const feed = await getWebChatPublicFeed({
+            externalSessionId: verified.sessionId,
+            integration,
+            database: pool,
+          });
+
+          const mem = webMemoryStore[verified.sessionId] || [];
+          const history = (feed && feed.messages.length > 0)
+            ? feed.messages.map(({ role, content, created_at }) => ({ role, content, created_at }))
+            : mem.map(({ role, content }) => ({ role, content: String(content || '') }));
+
+          return res.json({
+            session: suppliedSession,
+            resumed: true,
+            conversation_id: feed?.conversationId || null,
+            handling_mode: feed?.handlingMode || 'AI',
+            history,
+            browsing_state: {
+              current_entity: browsingState?.currentEntity || null,
+              previous_entities: browsingState?.previousEntities || [],
+              engagement_state: browsingState?.engagementState || {},
+            },
+          });
+        }
+      } catch (sessionErr) {
+        console.info('WEB_CHAT_SESSION_RESTORE_SAFE_FALLBACK code=' + (sessionErr?.code || 'INVALID'));
+      }
+    }
+
     const session = issuePublicWebChatSession({ secret, widgetKey });
-    return res.json({ session: session.token });
+    return res.json({
+      session: session.token,
+      resumed: false,
+      history: [],
+    });
   } catch (error) {
     console.error('WEB_CHAT_BOOTSTRAP_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return res.status(503).json({ error: 'Web Chat is temporarily unavailable.' });
   }
 });
-
-function extractWebChatSessionToken(req) {
-  const customHeader = req.get('X-Samche-Web-Chat-Session');
-  if (customHeader) return customHeader.trim();
-  const authHeader = req.get('Authorization');
-  if (authHeader && /^Bearer\s+/i.test(authHeader)) {
-    return authHeader.replace(/^Bearer\s+/i, '').trim();
-  }
-  if (typeof req.body?.conversation_session === 'string' && req.body.conversation_session.trim()) {
-    return req.body.conversation_session.trim();
-  }
-  return null;
-}
 
 app.post("/api/chat/page-context", async (req, res) => {
   const suppliedWebChatSession = extractWebChatSessionToken(req);
@@ -2230,6 +2306,26 @@ app.post("/api/chat", async (req, res) => {
     }
 
 
+    let webChatInboundState = null;
+    if (webChatIntegration && webChatSession?.sessionId) {
+      try {
+        const visitorHandoffContext = formatVisitorContextForHandoff(webChatBrowsingState);
+        webChatInboundState = await persistWebChatInbound({
+          externalSessionId: webChatSession.sessionId,
+          content: normalizedMessage,
+          integration: webChatIntegration,
+          visitorContext: visitorHandoffContext,
+          database: pool,
+        });
+      } catch (inboundErr) {
+        console.warn('WEB_CHAT_INBOUND_PERSIST_WARN:', inboundErr.message);
+      }
+
+      if (webChatInboundState && !webChatInboundState.shouldInvokeAi) {
+        return res.status(200).send("Temsilcimiz şu anda görüşmede, mesajınız iletildi.");
+      }
+    }
+
     const messages = [
       {
         role: "system",
@@ -2623,6 +2719,20 @@ If the user already provided sector info, NEVER ask again.`
       }
     }
     addWebMemory(userId, "assistant", aiReply, webChatKnowledgeAuthority);
+
+    if (webChatIntegration && webChatSession?.sessionId && webChatInboundState?.conversation?.id) {
+      try {
+        await persistAssistantResponseIfCurrent({
+          tenantId: webChatIntegration.tenant_id,
+          conversationId: webChatInboundState.conversation.id,
+          content: aiReply,
+          handlingVersion: webChatInboundState.handlingVersion,
+          database: pool,
+        });
+      } catch (outboundErr) {
+        console.warn('WEB_CHAT_OUTBOUND_PERSIST_WARN:', outboundErr.message);
+      }
+    }
 
     res.send(aiReply);
   } catch (err) {

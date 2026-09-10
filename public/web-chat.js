@@ -441,6 +441,74 @@
 
 
 
+  var memStore = {};
+  var SamcheChatPersistence = {
+    getStorageKey: function(widgetKey) {
+      return 'samche_webchat_session_' + encodeURIComponent(widgetKey || 'default');
+    },
+    getStoredSession: function(widgetKey) {
+      var key = this.getStorageKey(widgetKey);
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          var val = window.localStorage.getItem(key);
+          if (val) return val;
+        }
+      } catch (e) {}
+      try {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          var sVal = window.sessionStorage.getItem(key);
+          if (sVal) return sVal;
+        }
+      } catch (e) {}
+      return memStore[key] || null;
+    },
+    storeSession: function(widgetKey, token) {
+      if (!token) return;
+      var key = this.getStorageKey(widgetKey);
+      memStore[key] = String(token);
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem(key, String(token));
+        }
+      } catch (e) {}
+      try {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          window.sessionStorage.setItem(key, String(token));
+        }
+      } catch (e) {}
+    },
+    clearStoredSession: function(widgetKey) {
+      var key = this.getStorageKey(widgetKey);
+      delete memStore[key];
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.removeItem(key);
+        }
+      } catch (e) {}
+      try {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          window.sessionStorage.removeItem(key);
+        }
+      } catch (e) {}
+    },
+    hydrateHistory: function(container, messages, appendFn) {
+      if (!container || !Array.isArray(messages)) return 0;
+      var count = 0;
+      for (var i = 0; i < messages.length; i++) {
+        var item = messages[i];
+        if (!item) continue;
+        var role = (item.role === 'user' || item.sender_type === 'CUSTOMER') ? 'user' : 'bot';
+        var text = typeof item.content === 'string' ? item.content : (item.text || '');
+        if (typeof appendFn === 'function') {
+          appendFn(role, text);
+          count++;
+        }
+      }
+      return count;
+    }
+  };
+
+  global.SamcheChatPersistence = SamcheChatPersistence;
   global.SamcheChatUX = {
     PRESENTATION_TIMING: PRESENTATION_TIMING,
     responseDelay: responseDelay,
@@ -470,6 +538,7 @@
       SamcheContextCapture: global.SamcheContextCapture,
       SamcheProactiveEngagement: global.SamcheProactiveEngagement,
       SamcheChatUX: global.SamcheChatUX,
+      SamcheChatPersistence: global.SamcheChatPersistence,
     };
   }
 })(typeof window !== 'undefined' ? window : globalThis);

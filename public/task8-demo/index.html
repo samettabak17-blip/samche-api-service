@@ -695,6 +695,7 @@
     chatToggleBtn.addEventListener('click', () => {
       const isVisible = chatWindow.style.display === 'flex';
       chatWindow.style.display = isVisible ? 'none' : 'flex';
+      try { sessionStorage.setItem('samche_chat_open', isVisible ? 'false' : 'true'); } catch (e) {}
       if (!isVisible) {
         initChatSession();
         chatInput.focus();
@@ -703,6 +704,7 @@
 
     chatCloseBtn.addEventListener('click', () => {
       chatWindow.style.display = 'none';
+      try { sessionStorage.setItem('samche_chat_open', 'false'); } catch (e) {}
       if (window.SamcheProactiveEngagement) {
         window.SamcheProactiveEngagement.recordDismissal();
       }
@@ -712,17 +714,55 @@
       if (webChatSessionToken) return;
 
       const widgetKey = new URLSearchParams(window.location.search).get('widget_key') || DEFAULT_WIDGET_KEY;
+      const storedSession = window.SamcheChatPersistence
+        ? window.SamcheChatPersistence.getStoredSession(widgetKey)
+        : null;
 
       try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (storedSession) {
+          headers['X-Samche-Web-Chat-Session'] = storedSession;
+        }
+
         const res = await fetch('/api/chat/bootstrap', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ widget_key: widgetKey })
+          headers,
+          body: JSON.stringify({
+            widget_key: widgetKey,
+            session_token: storedSession || undefined,
+          })
         });
 
         if (res.ok) {
           const data = await res.json();
           webChatSessionToken = data.conversation_session || data.token || data.session;
+          if (window.SamcheChatPersistence && webChatSessionToken) {
+            window.SamcheChatPersistence.storeSession(widgetKey, webChatSessionToken);
+          }
+
+          if (data.resumed && Array.isArray(data.history) && data.history.length > 0) {
+            if (chatMessages.querySelectorAll('.msg').length === 0) {
+              window.SamcheChatPersistence.hydrateHistory(chatMessages, data.history, function(role, text) {
+                appendMessage(role, text);
+              });
+              smartScroll(true);
+            }
+            window.hasUserMessaged = true;
+            hasProactiveShown = true;
+            try {
+              if (sessionStorage.getItem('samche_chat_open') === 'true') {
+                chatWindow.style.display = 'flex';
+              }
+            } catch (e) {}
+          }
+
+          if (data.handling_mode === 'HUMAN') {
+            const badge = document.getElementById('chat-context-badge');
+            if (badge) {
+              badge.textContent = 'Canlı Destek: Temsilci Görüşmesi Aktif';
+            }
+          }
+
           syncPageContext(currentProduct);
         } else {
           console.warn('Bootstrap returned status', res.status);
@@ -750,6 +790,7 @@
     async function sendMessage(text) {
       if (!text || !text.trim()) return;
       window.hasUserMessaged = true;
+      try { sessionStorage.setItem('samche_chat_open', 'true'); } catch (e) {}
       if (window.SamcheProactiveEngagement) {
         window.SamcheProactiveEngagement.recordUserMessage();
       }
@@ -807,6 +848,10 @@
           const data = await res.json();
           if (data.conversation_session) {
             webChatSessionToken = data.conversation_session;
+            if (window.SamcheChatPersistence) {
+              const widgetKey = new URLSearchParams(window.location.search).get('widget_key') || DEFAULT_WIDGET_KEY;
+              window.SamcheChatPersistence.storeSession(widgetKey, webChatSessionToken);
+            }
           }
           reply = data.reply
             || data.candidates?.[0]?.content?.parts?.[0]?.text

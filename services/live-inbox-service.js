@@ -237,29 +237,79 @@ export async function persistSamcheguideInbound({ externalSessionId, content, id
   }
 }
 
+export async function getWebChatPublicFeed({ externalSessionId, integration, database = pool }) {
+  if (!integration || integration.channel_status !== 'active') return null;
+  const client = await database.connect();
+  try {
+    const result = await client.query(
+      `SELECT c.id AS conversation_id, c.handling_mode, m.id, m.sender_type, m.content, m.created_at
+         FROM conversations c
+         JOIN conversation_messages m ON m.conversation_id = c.id AND m.tenant_id = c.tenant_id
+        WHERE c.tenant_id = $1 AND c.channel_id = $2
+          AND (c.external_conversation_id = $3 OR c.external_conversation_id = $4)
+        ORDER BY m.created_at ASC, m.id ASC
+        LIMIT 100`,
+      [integration.tenant_id, integration.channel_id, String(externalSessionId), publicConversationKey(externalSessionId)]
+    );
+    return {
+      tenantId: integration.tenant_id,
+      conversationId: result.rows[0]?.conversation_id ?? null,
+      handlingMode: result.rows[0]?.handling_mode ?? 'AI',
+      messages: result.rows.map(({ id, sender_type, content, created_at }) => ({
+        id,
+        role: sender_type === 'CUSTOMER' ? 'user' : 'assistant',
+        sender_type,
+        content,
+        created_at,
+      })),
+    };
+  } finally {
+    client.release();
+  }
+}
+
 export async function persistWebChatInbound({ externalSessionId, content, idempotencyKey = null, integration, visitorContext = null, database = pool }) {
   if (!integration || integration.channel_status !== 'active') return null;
   const client = await database.connect();
   try {
     await client.query('BEGIN');
-    const externalConversationId = publicConversationKey(externalSessionId);
-    const conversationResult = await client.query(
-      `INSERT INTO conversations
-        (tenant_id, channel_id, external_conversation_id, customer_external_id, last_activity_at, visitor_context)
-       VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5::jsonb)
-       ON CONFLICT (channel_id, external_conversation_id)
-       DO UPDATE SET last_activity_at = CURRENT_TIMESTAMP,
-                     visitor_context = COALESCE($5::jsonb, conversations.visitor_context)
-       RETURNING *`,
-      [integration.tenant_id, integration.channel_id, externalConversationId, customerReference(externalSessionId), visitorContext ? JSON.stringify(visitorContext) : null]
+    const directKey = String(externalSessionId);
+    const hashedKey = publicConversationKey(externalSessionId);
+
+    const existingCheck = await client.query(
+      `SELECT * FROM conversations
+        WHERE tenant_id = $1 AND channel_id = $2
+          AND (external_conversation_id = $3 OR external_conversation_id = $4)
+        LIMIT 1 FOR UPDATE`,
+      [integration.tenant_id, integration.channel_id, directKey, hashedKey]
     );
 
-    const conversationId = conversationResult.rows[0].id;
-    const locked = await client.query(
-      'SELECT * FROM conversations WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
-      [conversationId, integration.tenant_id]
-    );
-    const conversation = locked.rows[0];
+    let conversation;
+    let conversationId;
+    if (existingCheck.rowCount > 0) {
+      conversation = existingCheck.rows[0];
+      conversationId = conversation.id;
+      await client.query(
+        `UPDATE conversations
+            SET last_activity_at = CURRENT_TIMESTAMP,
+                visitor_context = COALESCE($1::jsonb, conversations.visitor_context)
+          WHERE id = $2 AND tenant_id = $3`,
+        [visitorContext ? JSON.stringify(visitorContext) : null, conversationId, integration.tenant_id]
+      );
+    } else {
+      const insertResult = await client.query(
+        `INSERT INTO conversations
+          (tenant_id, channel_id, external_conversation_id, customer_external_id, last_activity_at, visitor_context)
+         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5::jsonb)
+         ON CONFLICT (channel_id, external_conversation_id)
+         DO UPDATE SET last_activity_at = CURRENT_TIMESTAMP,
+                       visitor_context = COALESCE($5::jsonb, conversations.visitor_context)
+         RETURNING *`,
+        [integration.tenant_id, integration.channel_id, directKey, customerReference(externalSessionId), visitorContext ? JSON.stringify(visitorContext) : null]
+      );
+      conversation = insertResult.rows[0];
+      conversationId = conversation.id;
+    }
 
     await ensureConversationCrmIdentity(client, {
       tenantId: integration.tenant_id,
@@ -276,6 +326,19 @@ export async function persistWebChatInbound({ externalSessionId, content, idempo
       idempotencyKey,
     });
 
+    if (!customerMessage && idempotencyKey) {
+      await client.query('COMMIT');
+      return {
+        integration,
+        conversation,
+        customerMessage: null,
+        duplicate: true,
+        shouldInvokeAi: false,
+        handlingMode: conversation.handling_mode,
+        handlingVersion: conversation.handling_version,
+      };
+    }
+
     await client.query(
       `UPDATE conversations
           SET last_activity_at = CURRENT_TIMESTAMP,
@@ -290,10 +353,16 @@ export async function persistWebChatInbound({ externalSessionId, content, idempo
     );
     await notify(client, integration.tenant_id, conversationId, 'CUSTOMER_MESSAGE');
     await client.query('COMMIT');
+
+    const shouldInvoke = conversation.status === 'open' && conversation.handling_mode === 'AI';
     return {
       integration,
       conversation,
       customerMessage,
+      duplicate: false,
+      shouldInvokeAi: shouldInvoke,
+      handlingMode: conversation.handling_mode,
+      handlingVersion: conversation.handling_version,
     };
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});

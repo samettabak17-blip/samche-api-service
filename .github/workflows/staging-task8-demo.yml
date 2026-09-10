@@ -31,9 +31,11 @@ on:
       - 'services/url-intelligence-service.js'
       - 'services/contextual-intelligence-service.js'
       - 'services/visitor-intent-service.js'
+      - 'services/live-inbox-service.js'
       - 'migrations/078_canonical_web_chat_proactive_engagement.sql'
       - 'tests/proactive-visitor-intent.test.js'
       - 'tests/web-chat-natural-conversation-ux.test.js'
+      - 'tests/web-chat-conversation-persistence.test.js'
       - 'app.js'
 
 permissions:
@@ -68,6 +70,7 @@ jobs:
           tests/permanence-multi-tenant-contract.test.js
           tests/proactive-visitor-intent.test.js
           tests/web-chat-natural-conversation-ux.test.js
+          tests/web-chat-conversation-persistence.test.js
 
   staging_bootstrap_and_verification:
     name: Staging Bootstrap and Live Runtime Verification
