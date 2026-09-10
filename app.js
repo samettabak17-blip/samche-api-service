@@ -2216,6 +2216,7 @@ app.post("/api/chat", async (req, res) => {
     }
     let webChatBrowsingState = null;
     let webChatContextualSection = '';
+    let webChatUrlResult = null;
     if (webChatIntegration && webChatSession?.sessionId) {
       if (req.body?.page_context) {
         try {
@@ -2268,7 +2269,6 @@ app.post("/api/chat", async (req, res) => {
       }
 
       // Check for public URL in customer message for Web Chat
-      let webChatUrlResult = null;
       const messageUrls = extractUrlsFromText(normalizedMessage);
       if (messageUrls.length > 0) {
         try {
@@ -2325,10 +2325,10 @@ app.post("/api/chat", async (req, res) => {
       const messageUrls = extractUrlsFromText(normalizedMessage);
       if (messageUrls.length > 0) {
         try {
-          const urlResult = await processMessageUrlIntelligence({ text: normalizedMessage });
-          if (urlResult.success && urlResult.entity) {
+          webChatUrlResult = await processMessageUrlIntelligence({ text: normalizedMessage });
+          if (webChatUrlResult.success && webChatUrlResult.entity) {
             webChatContextualSection = buildContextualIntelligencePromptSection({
-              currentEntity: urlResult.entity,
+              currentEntity: webChatUrlResult.entity,
               channelType: 'WEB_CHAT',
             });
           }
