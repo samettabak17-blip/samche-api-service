@@ -74,6 +74,8 @@ jobs:
           tests/web-chat-configuration-migration.test.js
           tests/web-chat-productization.test.js
           tests/web-chat-access-model.test.js
+          tests/web-chat-canonical-runtime-turn.test.js
+          tests/browsing-memory-simulation.test.js
 
       - name: Run Dashboard checks
         run: |

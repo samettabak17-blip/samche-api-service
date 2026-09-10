@@ -2218,7 +2218,20 @@ app.post("/api/chat", async (req, res) => {
     let webChatContextualSection = '';
     let webChatUrlResult = null;
     if (webChatIntegration && webChatSession?.sessionId) {
-      if (req.body?.page_context) {
+      const rawContextPayload = req.body?.page_context || (
+        (req.body?.current_url || req.body?.entity_id || req.body?.entity_name)
+          ? {
+              url: req.body.current_url,
+              canonical_url: req.body.canonical_url,
+              entity_id: req.body.entity_id,
+              entity_type: req.body.entity_type,
+              entity_name: req.body.entity_name,
+              summary: req.body.summary,
+              attributes: req.body.attributes || {},
+            }
+          : null
+      );
+      if (rawContextPayload) {
         try {
           const currentState = await loadWebChatSessionBrowsingState({
             database: pool,
@@ -2227,7 +2240,7 @@ app.post("/api/chat", async (req, res) => {
           });
           webChatBrowsingState = updateSessionBrowsingState({
             currentState,
-            rawPageContext: req.body.page_context,
+            rawPageContext: rawContextPayload,
           });
           await saveWebChatSessionBrowsingState({
             database: pool,
@@ -2355,7 +2368,12 @@ app.post("/api/chat", async (req, res) => {
       }
 
       if (webChatInboundState && !webChatInboundState.shouldInvokeAi) {
-        return res.status(200).send("Temsilcimiz şu anda görüşmede, mesajınız iletildi.");
+        return res.status(200).json({
+          reply: "Temsilcimiz şu anda görüşmede, mesajınız iletildi.",
+          response: "Temsilcimiz şu anda görüşmede, mesajınız iletildi.",
+          text: "Temsilcimiz şu anda görüşmede, mesajınız iletildi.",
+          session: webChatSession?.sessionId || null,
+        });
       }
     }
 
@@ -2376,7 +2394,12 @@ app.post("/api/chat", async (req, res) => {
         }
       }
       addWebMemory(userId, "assistant", limitationReply, webChatKnowledgeAuthority);
-      return res.send(limitationReply);
+      return res.status(200).json({
+        reply: limitationReply,
+        response: limitationReply,
+        text: limitationReply,
+        session: webChatSession?.sessionId || null,
+      });
     }
 
     const messages = [
@@ -2787,10 +2810,18 @@ If the user already provided sector info, NEVER ask again.`
       }
     }
 
-    res.send(aiReply);
+    res.json({
+      reply: aiReply,
+      response: aiReply,
+      text: aiReply,
+      session: webChatSession?.sessionId || null,
+    });
   } catch (err) {
     console.error("OpenAI Web Chatbot error:", err);
-    res.status(500).send("AI error, please try again.");
+    res.status(500).json({
+      error: "AI error, please try again.",
+      reply: "Üzgünüm, şu anda yanıt verilemiyor. Lütfen tekrar deneyin.",
+    });
   }
 });
 

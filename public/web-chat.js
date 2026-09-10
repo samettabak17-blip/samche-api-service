@@ -41,6 +41,15 @@
         if (item.address && typeof item.address === 'object') {
           attributes.location = safeString(item.address.addressLocality || item.address.streetAddress, 150);
         }
+        if ((type === 'ItemList' || Array.isArray(item.itemListElement)) && Array.isArray(item.itemListElement)) {
+          var itemsList = item.itemListElement.map(function(el) {
+            var itemObj = (el && typeof el === 'object') ? (el.item || el) : el;
+            return safeString(itemObj.name || itemObj.title || itemObj, 120);
+          }).filter(Boolean);
+          if (itemsList.length > 0) {
+            attributes.catalog_items = itemsList.slice(0, 10);
+          }
+        }
 
         return {
           entity_type: type || 'ENTITY',
@@ -66,7 +75,7 @@
     var canonicalEl = document.querySelector('link[rel="canonical"]');
     var canonicalUrl = canonicalEl ? safeString(canonicalEl.getAttribute('href'), 2048) : '';
     var currentUrl = safeString(window.location.href, 2048);
-    var currentPath = safeString(window.location.pathname, 1024);
+    var currentPath = safeString(window.location.pathname + (window.location.hash || ''), 1024);
     var docTitle = safeString(document.title, 300);
     var lang = safeString(document.documentElement.lang || navigator.language, 16);
 
@@ -90,6 +99,27 @@
       }
     }
 
+    if (!safeAttributes.visible_products && !safeAttributes.catalog_items && typeof document !== 'undefined') {
+      try {
+        var productEls = document.querySelectorAll('.product-card .product-title, .product-title, [itemprop="name"]');
+        if (productEls && productEls.length > 0) {
+          var foundNames = [];
+          for (var p = 0; p < productEls.length && foundNames.length < 10; p++) {
+            var pText = safeString(productEls[p].textContent, 120);
+            if (pText && foundNames.indexOf(pText) === -1) {
+              foundNames.push(pText);
+            }
+          }
+          if (foundNames.length > 0) {
+            safeAttributes.visible_products = foundNames;
+            if (!summary || summary === 'PAGE' || summary === 'Catalog') {
+              summary = 'Bu sayfada görüntülenen ürünler: ' + foundNames.join(', ');
+            }
+          }
+        }
+      } catch (domErr) {}
+    }
+
     return {
       url: currentUrl,
       path: currentPath,
@@ -109,11 +139,14 @@
   function initSpaNavigationListener(onNavigate) {
     if (typeof window === 'undefined' || typeof onNavigate !== 'function') return;
 
-    var lastPath = window.location.pathname;
+    var lastUrl = (window.location)
+      ? (window.location.pathname + window.location.search + window.location.hash)
+      : '';
     function checkNavigation() {
-      var currentPath = window.location.pathname;
-      if (currentPath !== lastPath) {
-        lastPath = currentPath;
+      if (!window.location) return;
+      var currentUrl = window.location.pathname + window.location.search + window.location.hash;
+      if (currentUrl !== lastUrl) {
+        lastUrl = currentUrl;
         setTimeout(function() { onNavigate(capturePageContext()); }, 60);
       }
     }
@@ -841,6 +874,7 @@
             body: JSON.stringify({
               message: text,
               conversation_session: sessionToken,
+              page_context: ctx,
               current_url: ctx.url,
               canonical_url: ctx.canonical_url,
               entity_id: ctx.entity_id,
@@ -848,8 +882,19 @@
               entity_name: ctx.entity_name,
             }),
           });
-          var data = await res.json();
+          var rawText = await res.text();
+          var data;
+          try {
+            data = JSON.parse(rawText);
+          } catch (e) {
+            data = { reply: rawText };
+          }
           clearTypingIndicator(messages);
+
+          if (!res.ok && !data.reply && !data.response && !data.text) {
+            appendMessage('bot', data.error || 'Üzgünüm, şu anda yanıt verilemiyor. Lütfen tekrar deneyin.');
+            return;
+          }
 
           var reply = data.reply || data.response || data.text || 'Anlaşıldı, size nasıl yardımcı olabilirim?';
           var botBubble = document.createElement('div');

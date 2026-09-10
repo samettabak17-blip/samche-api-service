@@ -670,6 +670,51 @@ test('REAL BROWSER E2E: Open Panel Bounds & Host Area Non-Interception', async (
   assert.ok(hitTestOpen.heroReceivedHit, `When panel is open in bottom-right, top-left page elements must still receive hit events directly (got ${hitTestOpen.hitTagName})`);
 });
 
+test('REAL BROWSER E2E: Real Web Chat Message Turn Completes and Renders Without Error', async () => {
+  if (!browser) return;
+
+  const chatResult = await browser.evaluate(`
+    (async () => {
+      const host = document.getElementById('samche-webchat-container');
+      const shadow = host.shadowRoot;
+      const launcher = shadow.querySelector('.samche-launcher');
+      const panel = shadow.querySelector('.samche-panel');
+      if (!panel.classList.contains('samche-open')) {
+        launcher.click();
+        await new Promise(r => setTimeout(r, 200));
+      }
+
+      const textarea = shadow.querySelector('.samche-composer-input');
+      const sendBtn = shadow.querySelector('.samche-send-btn');
+
+      textarea.value = 'Bu sayfada hangi ürünler var?';
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      sendBtn.click();
+
+      // Wait for reply to arrive and render
+      let attempts = 0;
+      let botMessages = [];
+      while (attempts < 30) {
+        await new Promise(r => setTimeout(r, 100));
+        botMessages = Array.from(shadow.querySelectorAll('.samche-msg-bot')).map(el => el.textContent);
+        if (botMessages.length >= 2) break;
+        attempts++;
+      }
+
+      return {
+        botMessagesCount: botMessages.length,
+        lastBotMessage: botMessages[botMessages.length - 1] || null,
+        hasError: botMessages.some(m => m.includes('Üzgünüm, şu anda yanıt verilemiyor'))
+      };
+    })()
+  `);
+
+  console.log('REAL BROWSER CHAT TURN RESULT:', chatResult);
+  assert.ok(chatResult.botMessagesCount >= 2, 'Bot must reply to user message in widget');
+  assert.ok(!chatResult.hasError, 'Bot response must NOT be generic error "Üzgünüm, şu anda yanıt verilemiyor"');
+  assert.ok(chatResult.lastBotMessage.includes('Titan Akıllı Saat Pro'), 'Bot response must include the expected reply');
+});
+
 test('Browser E2E Teardown: Close browser and mock server', async () => {
   if (browser) await browser.close();
   if (server) await new Promise((resolve) => server.close(resolve));

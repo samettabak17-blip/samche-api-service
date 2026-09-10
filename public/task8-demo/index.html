@@ -418,14 +418,15 @@
       if (!product) {
         scriptTag.textContent = JSON.stringify({
           "@context": "https://schema.org",
-          "@type": "WebSite",
-          "name": "SamChe Teknoloji Mağazası",
+          "@type": "ItemList",
+          "name": "SamChe Teknoloji Mağazası Ürün Kataloğu",
           "url": window.location.origin + "/task8-demo/",
-          "potentialAction": {
-            "@type": "SearchAction",
-            "target": window.location.origin + "/task8-demo/#/arama?q={search_term_string}",
-            "query-input": "required name=search_term_string"
-          }
+          "itemListElement": PRODUCTS.map((p, idx) => ({
+            "@type": "ListItem",
+            "position": idx + 1,
+            "name": p.name,
+            "url": window.location.origin + "/task8-demo/#/urun/" + p.slug
+          }))
         }, null, 2);
         return;
       }
@@ -467,18 +468,29 @@
     function syncPageContext(product, pageType, customTitle) {
       const isProduct = Boolean(product);
       const title = customTitle || (isProduct ? `${product.name} - SamChe Teknoloji` : document.title);
+      const isCatalog = !isProduct && (pageType === 'catalog' || !pageType);
+      const catalogSummary = isCatalog
+        ? 'SamChe Teknoloji Mağazası Ürün Kataloğu: ' + PRODUCTS.map(p => `${p.name} (${p.formattedPrice})`).join(', ')
+        : (pageType === 'pricing' ? 'Kurumsal ve bireysel teknoloji paketi fiyatları, FIDO2 kurumsal kit ve giyilebilir setler' : (pageType === 'security' ? 'SamChe çoklu kiracı güvenlik ve izolasyon mimarisi' : (pageType === 'about' ? 'SamChe Teknoloji kurumsal şirket ve iletişim bilgileri' : 'SamChe Teknoloji Mağazası')));
+
+      const catalogAttributes = isCatalog ? {
+        visible_products: PRODUCTS.map(p => `${p.name} (${p.formattedPrice})`),
+        catalog_categories: Array.from(new Set(PRODUCTS.map(p => p.category))),
+        total_products: PRODUCTS.length,
+      } : {};
+
       const contextData = {
         entity_type: isProduct ? 'Product' : (pageType === 'pricing' ? 'PricingPage' : (pageType === 'security' ? 'SecurityPage' : (pageType === 'about' ? 'AboutPage' : 'Catalog'))),
         entity_name: isProduct ? product.name : (pageType === 'pricing' ? 'Kurumsal & Bireysel Paket Fiyatları' : (pageType === 'security' ? 'Güvenlik & Test Laboratuvarı' : (pageType === 'about' ? 'Hakkımızda' : 'SamChe Teknoloji Mağazası'))),
         entity_id: isProduct ? product.id : (pageType ? `/task8-demo/#/${pageType}` : '/task8-demo/'),
-        summary: isProduct ? product.description : (pageType === 'pricing' ? 'Kurumsal ve bireysel teknoloji paketi fiyatları, FIDO2 kurumsal kit ve giyilebilir setler' : (pageType === 'security' ? 'SamChe çoklu kiracı güvenlik ve izolasyon mimarisi' : (pageType === 'about' ? 'SamChe Teknoloji kurumsal şirket ve iletişim bilgileri' : 'SamChe Teknoloji Ürün Kataloğu'))),
+        summary: isProduct ? product.description : catalogSummary,
         attributes: isProduct ? {
           price: product.price,
           currency: product.currency,
           category: product.category,
           wireless_charging: product.attributes.wireless_charging !== undefined ? product.attributes.wireless_charging : null,
           ...product.attributes
-        } : {},
+        } : catalogAttributes,
         page_type: isProduct ? 'product_detail' : (pageType || 'catalog'),
         page_title: title,
         url: window.location.href,
