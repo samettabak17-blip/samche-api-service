@@ -24,18 +24,10 @@ on:
       - '.github/workflows/staging-task8-demo.yml'
       - 'public/task8-demo/**'
       - 'public/web-chat.js'
-      - 'scripts/bootstrap_task8_demo.js'
-      - 'scripts/verify_staging_task8_demo.js'
-      - 'services/tenant-web-chat-provisioning-service.js'
-      - 'services/public-web-chat-integration-service.js'
-      - 'services/url-intelligence-service.js'
-      - 'services/contextual-intelligence-service.js'
-      - 'services/visitor-intent-service.js'
-      - 'services/live-inbox-service.js'
-      - 'migrations/078_canonical_web_chat_proactive_engagement.sql'
-      - 'tests/proactive-visitor-intent.test.js'
-      - 'tests/web-chat-natural-conversation-ux.test.js'
-      - 'tests/web-chat-conversation-persistence.test.js'
+      - 'scripts/**'
+      - 'services/**'
+      - 'migrations/**'
+      - 'tests/**'
       - 'app.js'
 
 permissions:
@@ -71,6 +63,7 @@ jobs:
           tests/proactive-visitor-intent.test.js
           tests/web-chat-natural-conversation-ux.test.js
           tests/web-chat-conversation-persistence.test.js
+          tests/web-chat-channel-integration-migration.test.js
 
   staging_bootstrap_and_verification:
     name: Staging Bootstrap and Live Runtime Verification
@@ -101,4 +94,5 @@ jobs:
           STAGING_SERVICE_URL: ${{ inputs.staging_url || 'https://samche-api-staging.onrender.com' }}
           TASK8_DEMO_WIDGET_KEY: 'wch_staging_task8_demo'
           RUN_AI_PROBES: ${{ inputs.run_ai_probes != false }}
+          EXPECTED_COMMIT: ${{ github.sha }}
         run: node scripts/verify_staging_task8_demo.js

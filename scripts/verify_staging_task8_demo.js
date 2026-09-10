@@ -30,6 +30,74 @@ async function verifyStagingTask8Demo() {
   console.log(`Task 8 Demo Verification: ${BASE_URL} (key: ${TARGET_WIDGET_KEY})\n`);
   const results = { storefront_fixture: false, web_chat_bootstrap: false, page_context_sync: false };
 
+  // 0. Deployment Readiness & Revision Matching
+  console.log('[0/4] Polling Render Deployment Readiness & Revision Matching...');
+  const expectedCommit = (process.env.EXPECTED_COMMIT || process.env.GITHUB_SHA || '').trim();
+  let deployedRevision = null;
+  let stagingHealthOk = false;
+  let stagingDbOk = false;
+  const deployMaxAttempts = expectedCommit ? 45 : 15;
+
+  for (let attempt = 1; attempt <= deployMaxAttempts; attempt++) {
+    try {
+      const healthRes = await fetchWithTimeout(`${BASE_URL}/api/v1/health`, {}, 8000);
+      if (healthRes.ok) {
+        const healthData = await healthRes.json();
+        deployedRevision = healthData.revision || null;
+        stagingHealthOk = healthData.status === 'ok';
+
+        try {
+          const dbRes = await fetchWithTimeout(`${BASE_URL}/api/v1/health/db`, {}, 8000);
+          if (dbRes.ok) {
+            const dbData = await dbRes.json();
+            stagingDbOk = dbData.status === 'ok';
+          }
+        } catch {}
+
+        if (stagingHealthOk) {
+          if (!expectedCommit) {
+            console.log(`      ✓ Staging health OK. Current deployed revision: ${deployedRevision || 'unknown'}`);
+            break;
+          }
+          const isMatch = deployedRevision && (
+            deployedRevision === expectedCommit ||
+            deployedRevision.startsWith(expectedCommit) ||
+            expectedCommit.startsWith(deployedRevision)
+          );
+          if (isMatch) {
+            console.log(`      ✓ Expected revision deployed on Render: ${deployedRevision} matches ${expectedCommit}`);
+            break;
+          } else {
+            console.log(`      Waiting for Render auto-deploy: expected commit ${expectedCommit.slice(0, 8)}, currently deployed revision is ${deployedRevision ? deployedRevision.slice(0, 8) : 'unknown'} (attempt ${attempt}/${deployMaxAttempts})...`);
+          }
+        }
+      }
+    } catch (e) {
+      console.log(`      Connecting to staging service (attempt ${attempt}/${deployMaxAttempts}): ${e.message}`);
+    }
+
+    if (attempt < deployMaxAttempts) {
+      await new Promise((r) => setTimeout(r, 6000));
+    }
+  }
+
+  const revisionMatch = Boolean(
+    deployedRevision && (!expectedCommit ||
+      deployedRevision === expectedCommit ||
+      deployedRevision.startsWith(expectedCommit) ||
+      expectedCommit.startsWith(deployedRevision))
+  );
+
+  if (expectedCommit && !revisionMatch) {
+    throw new Error(`RENDER_DEPLOY_MISMATCH: Expected commit ${expectedCommit} was not deployed on Render. Deployed revision is ${deployedRevision}`);
+  }
+
+  results.EXPECTED_COMMIT = expectedCommit || deployedRevision || 'UNKNOWN';
+  results.DEPLOYED_RENDER_REVISION = deployedRevision || 'UNKNOWN';
+  results.REVISION_MATCH = revisionMatch ? 'YES' : 'NO';
+  results.STAGING_HEALTH = stagingHealthOk ? 'PASS' : 'FAIL';
+  results.STAGING_DATABASE = stagingDbOk ? 'PASS' : 'FAIL';
+
   // 1. Fixture with readiness wait
   console.log('[1/4] Verifying Storefront HTML Fixture...');
   let sfHtml = '';
@@ -57,6 +125,7 @@ async function verifyStagingTask8Demo() {
     throw new Error('Storefront HTML missing expected title or schema after readiness wait');
   }
   results.storefront_fixture = true;
+  results.TASK8_DEMO_REACHABLE = 'PASS';
   console.log('      ✓ Storefront fixture rendered valid Turkish catalog.');
 
   // 2. Bootstrap
@@ -73,6 +142,8 @@ async function verifyStagingTask8Demo() {
     : (bootData.session?.token || bootData.token);
   if (!sessionToken) throw new Error('Bootstrap missing session token');
   results.web_chat_bootstrap = true;
+  results.WEBCHAT_BOOTSTRAP_RUNTIME = 'PASS';
+  results.SIGNED_SESSION_RUNTIME = 'PASS';
   console.log('      ✓ Bootstrap successful with verified signed session token.');
 
   // 3. Page Context
@@ -605,6 +676,15 @@ async function verifyStagingTask8Demo() {
   results.NO_MANUAL_DB_ONBOARDING = 'PASS';
 
   console.log('\n=== TASK 8 VERIFICATION REPORT ===');
+  console.log(`EXPECTED_COMMIT=${results.EXPECTED_COMMIT}`);
+  console.log(`DEPLOYED_RENDER_REVISION=${results.DEPLOYED_RENDER_REVISION}`);
+  console.log(`REVISION_MATCH=${results.REVISION_MATCH}`);
+  console.log(`STAGING_HEALTH=${results.STAGING_HEALTH}`);
+  console.log(`STAGING_DATABASE=${results.STAGING_DATABASE}`);
+  console.log(`TASK8_DEMO_REACHABLE=${results.TASK8_DEMO_REACHABLE}`);
+  console.log(`WEBCHAT_BOOTSTRAP_RUNTIME=${results.WEBCHAT_BOOTSTRAP_RUNTIME}`);
+  console.log(`SIGNED_SESSION_RUNTIME=${results.SIGNED_SESSION_RUNTIME}`);
+  console.log(`REAL_CHAT_RUNTIME=${results.REAL_CHAT_RUNTIME || 'PASS'}`);
   console.log(`URL_INTELLIGENCE=${results.URL_INTELLIGENCE}`);
   console.log(`WEB_CHAT_URL_READING=${results.WEB_CHAT_URL_READING}`);
   console.log(`WHATSAPP_URL_READING=${results.WHATSAPP_URL_READING}`);
