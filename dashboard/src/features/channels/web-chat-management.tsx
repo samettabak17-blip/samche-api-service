@@ -139,7 +139,7 @@ export function WebChatManagement() {
     },
   });
 
-  const primaryFg = contrastResult?.tokens?.primary_foreground || getAccessibleForeground(primaryColor);
+  const primaryFg = contrastResult?.primary_foreground || getAccessibleForeground(primaryColor);
 
   const saveMutation = useMutation({
     mutationFn: () => {
