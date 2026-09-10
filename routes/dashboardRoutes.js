@@ -14,6 +14,16 @@ import {
   getWebChatIntegrationForTenant,
   TenantWebChatProvisioningError,
 } from '../services/tenant-web-chat-provisioning-service.js';
+import {
+  analyzeLogoPalette,
+  deriveWebChatThemeTokens,
+} from '../services/web-chat-theme-service.js';
+import {
+  canPerformWebChatAction,
+  WEBCHAT_PERMISSIONS,
+} from '../services/web-chat-permissions.js';
+
+
 
 
 const router = express.Router();
@@ -170,6 +180,10 @@ router.post('/:tenantId/channels', requireTenantAccess, requireTenantAdmin, asyn
 });
 router.get('/:tenantId/channels/web-chat', requireTenantAccess, async (req, res) => {
   if (!tenant(req, res)) return;
+  if (!canPerformWebChatAction({ systemRole: req.user?.system_role, tenantRole: req.verified_tenant_role, action: WEBCHAT_PERMISSIONS.VIEW })) {
+    return res.status(403).json({ error: 'Web Chat view access required' });
+  }
+
   try {
     const integration = await getWebChatIntegrationForTenant({
       database: req.app?.locals?.database || pool,
@@ -187,7 +201,18 @@ router.get('/:tenantId/channels/web-chat', requireTenantAccess, async (req, res)
 });
 router.post('/:tenantId/channels/web-chat', requireTenantAccess, requireTenantAdmin, async (req, res) => {
   if (!tenant(req, res)) return;
-  const { assistant_id: assistantId = null, widget_key: widgetKey = null, display_name: displayName = null } = req.body ?? {};
+  if (!canPerformWebChatAction({ systemRole: req.user?.system_role, tenantRole: req.verified_tenant_role, action: WEBCHAT_PERMISSIONS.CONFIGURE })) {
+    return res.status(403).json({ error: 'Web Chat configure access required' });
+  }
+
+  const {
+    assistant_id: assistantId = null,
+    widget_key: widgetKey = null,
+    display_name: displayName = null,
+    status = null,
+    appearance = null,
+    behavior = null,
+  } = req.body ?? {};
   try {
     const integration = await ensureWebChatIntegration({
       database: req.app?.locals?.database || pool,
@@ -195,6 +220,9 @@ router.post('/:tenantId/channels/web-chat', requireTenantAccess, requireTenantAd
       assistantId,
       widgetKey,
       displayName,
+      status,
+      appearance,
+      behavior,
     });
     return res.status(200).json(integration);
   } catch (error) {
@@ -203,6 +231,72 @@ router.post('/:tenantId/channels/web-chat', requireTenantAccess, requireTenantAd
     return res.status(500).json({ error: 'Server error' });
   }
 });
+
+router.put('/:tenantId/channels/web-chat', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  if (!tenant(req, res)) return;
+  if (!canPerformWebChatAction({ systemRole: req.user?.system_role, tenantRole: req.verified_tenant_role, action: WEBCHAT_PERMISSIONS.CONFIGURE })) {
+    return res.status(403).json({ error: 'Web Chat configure access required' });
+  }
+
+  const {
+    assistant_id: assistantId = null,
+    widget_key: widgetKey = null,
+    display_name: displayName = null,
+    status = null,
+    appearance = null,
+    behavior = null,
+  } = req.body ?? {};
+  try {
+    const integration = await ensureWebChatIntegration({
+      database: req.app?.locals?.database || pool,
+      tenantId: req.verified_tenant_id,
+      assistantId,
+      widgetKey,
+      displayName,
+      status,
+      appearance,
+      behavior,
+    });
+    return res.status(200).json(integration);
+  } catch (error) {
+    if (webChatProvisioningErrorResponse(req, res, error)) return;
+    console.error('Update web chat channel error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/:tenantId/channels/web-chat/theme-preview', requireTenantAccess, async (req, res) => {
+  if (!tenant(req, res)) return;
+  if (!canPerformWebChatAction({ systemRole: req.user?.system_role, tenantRole: req.verified_tenant_role, action: WEBCHAT_PERMISSIONS.VIEW })) {
+    return res.status(403).json({ error: 'Web Chat preview access required' });
+  }
+
+  const {
+    primary_color: primaryColor = null,
+    accent_color: accentColor = null,
+    base_color: baseColor = null,
+    candidates = [],
+    mode = 'dark',
+  } = req.body ?? {};
+
+  try {
+    let result;
+    if (Array.isArray(candidates) && candidates.length > 0) {
+      result = analyzeLogoPalette({ candidates, baseColor: primaryColor || baseColor, mode });
+    } else {
+      result = deriveWebChatThemeTokens({
+        primaryColor: primaryColor || baseColor || '#2563EB',
+        accentColor,
+        mode,
+      });
+    }
+    return res.json(result);
+  } catch (error) {
+    console.error('Theme preview generation error:', error);
+    return res.status(400).json({ error: 'Failed to generate theme preview' });
+  }
+});
+
 // Cross-tenant channel transfer requires canonical platform-level administrative authority.
 // A tenant-level owner or admin (system_role === 'CUSTOMER') must NEVER be able to transfer
 // a physical channel owned by another tenant. Privilege escalation via request body is rejected.

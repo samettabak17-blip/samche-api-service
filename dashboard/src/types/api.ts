@@ -15,6 +15,90 @@ export type GuideDomainStatus = 'PENDING' | 'VERIFIED' | 'ACTIVE' | 'FAILED' | '
 export interface GuideDomain { id: string; tenant_id: string; assistant_id: string; channel_id: string; hostname: string; slug?: string | null; status: GuideDomainStatus; domain_mode?: 'MANAGED' | 'CUSTOM'; verification_record_type: 'CNAME'; verification_target: string; verified_at?: string | null; activated_at?: string | null; archived_at?: string | null; created_at?: string; }
 export type ConversationChannelType = 'WEB_CHAT' | 'WHATSAPP' | 'SAMCHEGUIDE';
 export interface TenantChannel { id: string; tenant_id: string; assistant_id?: string | null; channel_type: ConversationChannelType; display_name: string; external_channel_id?: string | null; status: 'active' | 'inactive'; created_at?: string; updated_at?: string; }
+export interface WebChatThemeConfig {
+  primary_color: string;
+  accent_color: string;
+  surface_tint?: string;
+  surface_glass?: string;
+  surface_solid?: string;
+  glow_color?: string;
+  text_color?: string;
+  muted_color?: string;
+  border_color?: string;
+  primary_foreground?: string;
+  accent_foreground?: string;
+}
+
+export interface WebChatAppearanceConfig {
+  brand_name: string;
+  title: string;
+  subtitle: string;
+  logo_url: string | null;
+  launcher_position: 'right' | 'left';
+  launcher_icon: 'chat' | 'logo';
+  theme_mode: 'dark' | 'light' | 'auto';
+  theme: WebChatThemeConfig;
+  contrast?: {
+    primary_button?: number;
+    accent_button?: number;
+    text_surface?: number;
+    muted_surface?: number;
+  };
+  is_accessible?: boolean;
+}
+
+export interface WebChatBehaviorConfig {
+  proactive_enabled: boolean;
+  high_intent_activation: boolean;
+  dwell_threshold_seconds: number;
+  cooldown_seconds: number;
+  language: 'auto' | 'tr' | 'en' | 'ar';
+}
+
+export interface WebChatChannelResponse {
+  tenant_id: string;
+  widget_key: string;
+  channel: TenantChannel;
+  assistant: Assistant;
+  integration: {
+    id: string;
+    integration_key: string;
+    integration_type: string;
+    enabled: boolean;
+  };
+  appearance: WebChatAppearanceConfig;
+  behavior: WebChatBehaviorConfig;
+  embed_snippet: string;
+  installation: {
+    widget_key: string;
+    embed_snippet: string;
+    status: 'active' | 'inactive';
+    guidance: string[];
+  };
+}
+
+export interface WebChatThemePreviewResponse {
+  mode: string;
+  primary: string;
+  primary_foreground: string;
+  accent: string;
+  accent_foreground: string;
+  surface_tint: string;
+  surface_solid: string;
+  surface_glass: string;
+  glow: string;
+  text: string;
+  muted: string;
+  border: string;
+  contrast: {
+    primary_button: number;
+    accent_button: number;
+    text_surface: number;
+    muted_surface: number;
+  };
+  is_accessible: boolean;
+}
+
 export type ConversationStatus = 'open' | 'closed' | 'archived';
 export type ConversationHandlingMode = 'AI' | 'HUMAN' | 'PAUSED';
 export interface ConversationRecord {

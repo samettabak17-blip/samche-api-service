@@ -132,6 +132,26 @@ test('Migration 078 applies cleanly and idempotently', async () => {
   }
 });
 
+test('Migration 079 applies cleanly and idempotently', async () => {
+  const client = await database.connect();
+  try {
+    const migrationSql = fs.readFileSync(
+      new URL('../migrations/079_canonical_web_chat_configuration.sql', import.meta.url),
+      'utf8',
+    );
+    await client.query(migrationSql);
+    await client.query(migrationSql);
+
+    const checkTable = await client.query(
+      `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'channel_integrations' AND column_name = 'config'`,
+    );
+    assert.equal(checkTable.rowCount, 1);
+    assert.equal(checkTable.rows[0].data_type, 'jsonb');
+  } finally {
+    client.release();
+  }
+});
+
 
 
 test('Real PostgreSQL: session storage, loading, updating, tenant isolation, and TTL cleanup', async () => {

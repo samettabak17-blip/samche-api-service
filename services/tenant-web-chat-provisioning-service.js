@@ -1,5 +1,119 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { resolveTenantProactiveConfig } from './visitor-intent-service.js';
+import { deriveWebChatThemeTokens } from './web-chat-theme-service.js';
+
+export const DEFAULT_WEB_CHAT_APPEARANCE = Object.freeze({
+  brand_name: 'SamChe',
+  title: 'Canlı Destek',
+  subtitle: 'Çevrimiçi | SamChe AI',
+  logo_url: null,
+  launcher_position: 'right',
+  launcher_icon: 'chat',
+  theme_mode: 'dark',
+  theme: {
+    primary_color: '#2563EB',
+    accent_color: '#3B82F6',
+    surface_tint: '#111827',
+    surface_glass: 'rgba(17, 24, 39, 0.85)',
+    surface_solid: '#111827',
+    glow_color: 'rgba(37, 99, 235, 0.35)',
+    text_color: '#F8FAFC',
+    muted_color: '#94A3B8',
+    border_color: 'rgba(255, 255, 255, 0.12)',
+  },
+});
+
+export const DEFAULT_WEB_CHAT_BEHAVIOR = Object.freeze({
+  proactive_enabled: false,
+  high_intent_activation: true,
+  dwell_threshold_seconds: 15,
+  cooldown_seconds: 300,
+  language: 'auto',
+});
+
+export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamChe') {
+  const brandName = typeof input?.brand_name === 'string' && input.brand_name.trim()
+    ? input.brand_name.trim()
+    : (fallbackBrandName || 'SamChe');
+
+  const title = typeof input?.title === 'string' && input.title.trim()
+    ? input.title.trim()
+    : 'Canlı Destek';
+
+  const subtitle = typeof input?.subtitle === 'string' && input.subtitle.trim()
+    ? input.subtitle.trim()
+    : 'Çevrimiçi';
+
+  const logoUrl = typeof input?.logo_url === 'string' && input.logo_url.trim()
+    ? input.logo_url.trim()
+    : null;
+
+  const launcherPosition = input?.launcher_position === 'left' ? 'left' : 'right';
+  const launcherIcon = input?.launcher_icon === 'logo' ? 'logo' : 'chat';
+  const themeMode = ['light', 'auto'].includes(String(input?.theme_mode).toLowerCase())
+    ? String(input.theme_mode).toLowerCase()
+    : 'dark';
+
+  const primaryCandidate = input?.theme?.primary_color || input?.primary_color || '#2563EB';
+  const accentCandidate = input?.theme?.accent_color || input?.accent_color || null;
+
+  const tokens = deriveWebChatThemeTokens({
+    primaryColor: primaryCandidate,
+    accentColor: accentCandidate,
+    mode: themeMode === 'auto' ? 'dark' : themeMode,
+  });
+
+  return {
+    brand_name: brandName,
+    title,
+    subtitle,
+    logo_url: logoUrl,
+    launcher_position: launcherPosition,
+    launcher_icon: launcherIcon,
+    theme_mode: themeMode,
+    theme: {
+      primary_color: tokens.primary,
+      accent_color: tokens.accent,
+      surface_tint: tokens.surface_tint,
+      surface_glass: tokens.surface_glass,
+      surface_solid: tokens.surface_solid,
+      glow_color: tokens.glow,
+      text_color: tokens.text,
+      muted_color: tokens.muted,
+      border_color: tokens.border,
+      primary_foreground: tokens.primary_foreground,
+      accent_foreground: tokens.accent_foreground,
+    },
+    contrast: tokens.contrast,
+    is_accessible: tokens.is_accessible,
+  };
+}
+
+export function normalizeWebChatBehavior(input = {}) {
+  const proactiveEnabled = Boolean(input?.proactive_enabled);
+  const highIntentActivation = input?.high_intent_activation !== false;
+  const dwellThreshold = Math.max(5, Math.min(120, Number(input?.dwell_threshold_seconds) || 15));
+  const cooldown = Math.max(30, Math.min(3600, Number(input?.cooldown_seconds) || 300));
+  const language = ['tr', 'en', 'ar'].includes(String(input?.language).toLowerCase())
+    ? String(input.language).toLowerCase()
+    : 'auto';
+
+  return {
+    proactive_enabled: proactiveEnabled,
+    high_intent_activation: highIntentActivation,
+    dwell_threshold_seconds: dwellThreshold,
+    cooldown_seconds: cooldown,
+    language,
+  };
+}
+
+export function generateWebChatEmbedSnippet(widgetKey, baseUrl) {
+  const cleanBase = (baseUrl || process.env.BASE_URL || process.env.STAGING_SERVICE_URL || 'https://samche-api-staging.onrender.com')
+    .trim()
+    .replace(/\/+$/, '');
+  return `<script src="${cleanBase}/web-chat.js" data-widget-key="${widgetKey}"></script>`;
+}
+
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const WIDGET_KEY_REGEX = /^[a-zA-Z0-9_\-\.:]{3,100}$/;
@@ -51,6 +165,20 @@ async function runInTransaction(database, operation) {
 
   throw new TenantWebChatProvisioningError('WEB_CHAT_PROVISIONING_DATABASE_INVALID', 'A valid database connection or pool is required');
 }
+let hasConfigColumn = null;
+async function checkConfigColumn(client) {
+  if (hasConfigColumn !== null) return hasConfigColumn;
+  try {
+    const res = await client.query(
+      `SELECT 1 FROM information_schema.columns WHERE table_name = 'channel_integrations' AND column_name = 'config' LIMIT 1`
+    );
+    hasConfigColumn = res.rowCount > 0;
+  } catch (e) {
+    hasConfigColumn = false;
+  }
+  return hasConfigColumn;
+}
+
 
 /**
  * Idempotently provisions or updates a Web Chat channel and integration mapping for any tenant.
@@ -66,6 +194,9 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
     channelId = opts.channelId ?? null,
     widgetKey = opts.widgetKey ?? null,
     displayName = opts.displayName ?? opts.channelName ?? null,
+    appearance = opts.appearance ?? null,
+    behavior = opts.behavior ?? null,
+    status = opts.status ?? null,
   } = opts;
 
   if (!database || (typeof database.query !== 'function' && typeof database.connect !== 'function')) {
@@ -214,6 +345,26 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
       }
     }
     // 4. Resolve or create channel_integrations record
+    const normalizedAppearance = normalizeWebChatAppearance(appearance, tenant.name);
+    const normalizedBehavior = normalizeWebChatBehavior(behavior);
+    const configPayload = JSON.stringify({
+      appearance: normalizedAppearance,
+      behavior: normalizedBehavior,
+    });
+    const hasConfig = await checkConfigColumn(client);
+    const isChannelActive = status ? status === 'active' : resolvedChannel.status === 'active';
+
+    if (status && (status === 'active' || status === 'inactive') && resolvedChannel.status !== status) {
+      const updatedChannel = await client.query(
+        `UPDATE tenant_channels
+            SET status = $1, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2 AND tenant_id = $3
+          RETURNING id, tenant_id, channel_type, display_name, external_channel_id, assistant_id, status`,
+        [status, resolvedChannel.id, validTenantId]
+      );
+      resolvedChannel = updatedChannel.rows[0];
+    }
+
     let resolvedIntegration = null;
 
     if (normalizedWidgetKey) {
@@ -227,26 +378,43 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
         if (existingRow.tenant_id !== validTenantId) {
           throw new TenantWebChatProvisioningError('WEB_CHAT_INTEGRATION_KEY_CONFLICT', 'Integration key is already claimed by another tenant');
         }
-        const updated = await client.query(
-          `UPDATE channel_integrations
-              SET channel_id = $1, assistant_id = $2, integration_type = 'WEB_CHAT', enabled = TRUE, updated_at = CURRENT_TIMESTAMP
-            WHERE id = $3 AND tenant_id = $4
-            RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`,
-          [resolvedChannel.id, resolvedAssistant.id, existingRow.id, validTenantId]
-        );
+        const updateSql = hasConfig
+          ? `UPDATE channel_integrations
+                SET channel_id = $1, assistant_id = $2, integration_type = 'WEB_CHAT', enabled = $3, config = $4, updated_at = CURRENT_TIMESTAMP
+              WHERE id = $5 AND tenant_id = $6
+              RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`
+          : `UPDATE channel_integrations
+                SET channel_id = $1, assistant_id = $2, integration_type = 'WEB_CHAT', enabled = TRUE, updated_at = CURRENT_TIMESTAMP
+              WHERE id = $3 AND tenant_id = $4
+              RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`;
+        const updateParams = hasConfig
+          ? [resolvedChannel.id, resolvedAssistant.id, isChannelActive, configPayload, existingRow.id, validTenantId]
+          : [resolvedChannel.id, resolvedAssistant.id, existingRow.id, validTenantId];
+        const updated = await client.query(updateSql, updateParams);
         resolvedIntegration = updated.rows[0];
       } else {
-        const inserted = await client.query(
-          `INSERT INTO channel_integrations (integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled)
-           VALUES ($1, 'WEB_CHAT', $2, $3, $4, TRUE)
-           ON CONFLICT (integration_key) DO UPDATE SET
-             channel_id = EXCLUDED.channel_id,
-             assistant_id = EXCLUDED.assistant_id,
-             enabled = TRUE,
-             updated_at = CURRENT_TIMESTAMP
-           RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`,
-          [normalizedWidgetKey, validTenantId, resolvedChannel.id, resolvedAssistant.id]
-        );
+        const insertSql = hasConfig
+          ? `INSERT INTO channel_integrations (integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled, config)
+             VALUES ($1, 'WEB_CHAT', $2, $3, $4, $5, $6)
+             ON CONFLICT (integration_key) DO UPDATE SET
+               channel_id = EXCLUDED.channel_id,
+               assistant_id = EXCLUDED.assistant_id,
+               enabled = EXCLUDED.enabled,
+               config = EXCLUDED.config,
+               updated_at = CURRENT_TIMESTAMP
+             RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`
+          : `INSERT INTO channel_integrations (integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled)
+             VALUES ($1, 'WEB_CHAT', $2, $3, $4, TRUE)
+             ON CONFLICT (integration_key) DO UPDATE SET
+               channel_id = EXCLUDED.channel_id,
+               assistant_id = EXCLUDED.assistant_id,
+               enabled = TRUE,
+               updated_at = CURRENT_TIMESTAMP
+             RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`;
+        const insertParams = hasConfig
+          ? [normalizedWidgetKey, validTenantId, resolvedChannel.id, resolvedAssistant.id, isChannelActive, configPayload]
+          : [normalizedWidgetKey, validTenantId, resolvedChannel.id, resolvedAssistant.id];
+        const inserted = await client.query(insertSql, insertParams);
         resolvedIntegration = inserted.rows[0];
       }
     } else {
@@ -260,29 +428,42 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
 
       if (tenantIntegration.rowCount > 0) {
         const row = tenantIntegration.rows[0];
-        if (row.channel_id !== resolvedChannel.id || row.assistant_id !== resolvedAssistant.id) {
-          const updated = await client.query(
-            `UPDATE channel_integrations
-                SET channel_id = $1, assistant_id = $2, updated_at = CURRENT_TIMESTAMP
-              WHERE id = $3 AND tenant_id = $4
-              RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`,
-            [resolvedChannel.id, resolvedAssistant.id, row.id, validTenantId]
-          );
+        if (row.channel_id !== resolvedChannel.id || row.assistant_id !== resolvedAssistant.id || (hasConfig && configPayload)) {
+          const updateSql = hasConfig
+            ? `UPDATE channel_integrations
+                  SET channel_id = $1, assistant_id = $2, enabled = $3, config = $4, updated_at = CURRENT_TIMESTAMP
+                WHERE id = $5 AND tenant_id = $6
+                RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`
+            : `UPDATE channel_integrations
+                  SET channel_id = $1, assistant_id = $2, updated_at = CURRENT_TIMESTAMP
+                WHERE id = $3 AND tenant_id = $4
+                RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`;
+          const updateParams = hasConfig
+            ? [resolvedChannel.id, resolvedAssistant.id, isChannelActive, configPayload, row.id, validTenantId]
+            : [resolvedChannel.id, resolvedAssistant.id, row.id, validTenantId];
+          const updated = await client.query(updateSql, updateParams);
           resolvedIntegration = updated.rows[0];
         } else {
           resolvedIntegration = row;
         }
       } else {
         const autoKey = generateWidgetKey();
-        const inserted = await client.query(
-          `INSERT INTO channel_integrations (integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled)
-           VALUES ($1, 'WEB_CHAT', $2, $3, $4, TRUE)
-           RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`,
-          [autoKey, validTenantId, resolvedChannel.id, resolvedAssistant.id]
-        );
+        const insertSql = hasConfig
+          ? `INSERT INTO channel_integrations (integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled, config)
+             VALUES ($1, 'WEB_CHAT', $2, $3, $4, $5, $6)
+             RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`
+          : `INSERT INTO channel_integrations (integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled)
+             VALUES ($1, 'WEB_CHAT', $2, $3, $4, TRUE)
+             RETURNING id, integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled`;
+        const insertParams = hasConfig
+          ? [autoKey, validTenantId, resolvedChannel.id, resolvedAssistant.id, isChannelActive, configPayload]
+          : [autoKey, validTenantId, resolvedChannel.id, resolvedAssistant.id];
+        const inserted = await client.query(insertSql, insertParams);
         resolvedIntegration = inserted.rows[0];
       }
     }
+
+    const embedSnippet = generateWebChatEmbedSnippet(resolvedIntegration.integration_key);
 
     return {
       tenant_id: validTenantId,
@@ -309,6 +490,19 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
         integration_type: resolvedIntegration.integration_type,
         enabled: resolvedIntegration.enabled,
       },
+      appearance: normalizedAppearance,
+      behavior: normalizedBehavior,
+      embed_snippet: embedSnippet,
+      installation: {
+        widget_key: resolvedIntegration.integration_key,
+        embed_snippet: embedSnippet,
+        status: resolvedIntegration.enabled && resolvedChannel.status === 'active' ? 'active' : 'inactive',
+        guidance: [
+          'Copy the generated embed snippet above.',
+          'Paste the snippet into your website HTML before the closing </body> tag.',
+          'The Web Chat widget will automatically initialize with your brand colors and assistant persona.',
+        ],
+      },
       bootstrap_config: {
         widget_key: resolvedIntegration.integration_key,
         api_endpoint: '/api/chat/bootstrap',
@@ -326,11 +520,14 @@ export async function getWebChatIntegrationForTenant({ database, tenantId }) {
   }
 
   const validTenantId = validateUUID(tenantId, 'WEB_CHAT_PROVISIONING_TENANT_INVALID', 'Invalid tenant ID format');
+  const hasConfig = await checkConfigColumn(database);
+  const configSelect = hasConfig ? ', ci.config' : '';
 
   const result = await database.query(
     `SELECT ci.id AS integration_id, ci.integration_key, ci.integration_type, ci.enabled AS integration_enabled,
             tc.id AS channel_id, tc.channel_type, tc.display_name AS channel_name, tc.status AS channel_status,
             a.id AS assistant_id, a.name AS assistant_name, a.model AS assistant_model, a.status AS assistant_status
+            ${configSelect}
        FROM channel_integrations ci
        JOIN tenant_channels tc ON tc.id = ci.channel_id AND tc.tenant_id = ci.tenant_id
        JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
@@ -347,6 +544,11 @@ export async function getWebChatIntegrationForTenant({ database, tenantId }) {
   }
 
   const row = result.rows[0];
+  const rawConfig = row.config || {};
+  const appearance = normalizeWebChatAppearance(rawConfig.appearance, row.channel_name);
+  const behavior = normalizeWebChatBehavior(rawConfig.behavior);
+  const embedSnippet = generateWebChatEmbedSnippet(row.integration_key);
+
   return {
     tenant_id: validTenantId,
     widget_key: row.integration_key,
@@ -367,6 +569,19 @@ export async function getWebChatIntegrationForTenant({ database, tenantId }) {
       integration_key: row.integration_key,
       integration_type: row.integration_type,
       enabled: row.integration_enabled,
+    },
+    appearance,
+    behavior,
+    embed_snippet: embedSnippet,
+    installation: {
+      widget_key: row.integration_key,
+      embed_snippet: embedSnippet,
+      status: row.integration_enabled && row.channel_status === 'active' ? 'active' : 'inactive',
+      guidance: [
+        'Copy the generated embed snippet above.',
+        'Paste the snippet into your website HTML before the closing </body> tag.',
+        'The Web Chat widget will automatically initialize with your brand colors and assistant persona.',
+      ],
     },
     bootstrap_config: {
       widget_key: row.integration_key,

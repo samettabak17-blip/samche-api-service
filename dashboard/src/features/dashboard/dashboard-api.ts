@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { AgentMessageResponse, HumanAttentionSummary, DashboardOverview, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmContact, CrmContactList, CrmDeal, CrmDealList, CrmLead, CrmLeadList, CrmOverviewMetrics, CrmPipelineStage, CrmPipelineSummary, KnowledgeDocument, KnowledgeOverview, KnowledgeSource, KnowledgeCandidate, KnowledgeCandidateEvidence, KnowledgeGap, KnowledgeGapSignal, BusinessIdentity, BusinessIdentityScopeAnalysis, BusinessProfileGenerationJob, BusinessProfileGenerationResult, BusinessProfileVersion, KnowledgeRecommendation, AssistantConfigurationVersion, AssistantRecommendationGenerationJob, AssistantConfigurationGenerationJob, ConfigurationGenerationResult, KnowledgeRetrievalPreview, TeamMember, TenantChannel, Tenant, TenantRole } from '../../types/api';
+import type { AgentMessageResponse, HumanAttentionSummary, DashboardOverview, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmContact, CrmContactList, CrmDeal, CrmDealList, CrmLead, CrmLeadList, CrmOverviewMetrics, CrmPipelineStage, CrmPipelineSummary, KnowledgeDocument, KnowledgeOverview, KnowledgeSource, KnowledgeCandidate, KnowledgeCandidateEvidence, KnowledgeGap, KnowledgeGapSignal, BusinessIdentity, BusinessIdentityScopeAnalysis, BusinessProfileGenerationJob, BusinessProfileGenerationResult, BusinessProfileVersion, KnowledgeRecommendation, AssistantConfigurationVersion, AssistantRecommendationGenerationJob, AssistantConfigurationGenerationJob, ConfigurationGenerationResult, KnowledgeRetrievalPreview, TeamMember, TenantChannel, Tenant, TenantRole, WebChatAppearanceConfig, WebChatBehaviorConfig, WebChatChannelResponse, WebChatThemePreviewResponse } from '../../types/api';
 
 const tenantRoot = (tenantId: string) => `/api/v1/tenants/${tenantId}`;
 type CustomerDirectoryUser = Pick<TeamMember, 'id' | 'email' | 'system_role'>;
@@ -86,6 +86,8 @@ export const tenantKeys = {
   assistant: (tenantId: string, assistantId: string) => ['tenant', tenantId, 'assistant', assistantId] as const,
   channels: (tenantId: string) => ['tenant', tenantId, 'channels'] as const,
   channel: (tenantId: string, channelId: string) => ['tenant', tenantId, 'channel', channelId] as const,
+  webChatChannel: (tenantId: string) => ['tenant', tenantId, 'channel', 'web-chat'] as const,
+
   knowledgeBase: (tenantId: string) => ['tenant', tenantId, 'knowledge-base'] as const,
   knowledgeDocument: (tenantId: string, documentId: string) => ['tenant', tenantId, 'knowledge-document', documentId] as const,
   team: (tenantId: string) => ['tenant', tenantId, 'team'] as const,
@@ -157,6 +159,22 @@ export const tenantApi = {
   updateChannel: (tenantId: string, channelId: string, body: Partial<Omit<TenantChannel, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>>) => apiClient.put<TenantChannel>(`${tenantRoot(tenantId)}/channels/${channelId}`, body),
   transferWhatsAppChannel: (tenantId: string, body: { external_channel_id: string; expected_source_channel_id: string; target_assistant_id: string; display_name: string; confirmation: 'TRANSFER' }) => apiClient.post<{ channel: TenantChannel; transfer: { source_channel_id: string; source_tenant_id: string; audit_event_id: string; external_channel_id: string } }>(`${tenantRoot(tenantId)}/channels/transfer-whatsapp`, body),
   deleteChannel: (tenantId: string, channelId: string) => apiClient.delete<{ message: string }>(`${tenantRoot(tenantId)}/channels/${channelId}`),
+  getWebChatChannel: (tenantId: string) => apiClient.get<WebChatChannelResponse>(`${tenantRoot(tenantId)}/channels/web-chat`),
+  updateWebChatChannel: (tenantId: string, body: {
+    display_name?: string;
+    assistant_id?: string | null;
+    status?: 'active' | 'inactive';
+    appearance?: Partial<WebChatAppearanceConfig>;
+    behavior?: Partial<WebChatBehaviorConfig>;
+  }) => apiClient.put<WebChatChannelResponse>(`${tenantRoot(tenantId)}/channels/web-chat`, body),
+  previewWebChatTheme: (tenantId: string, body: {
+    primary_color?: string;
+    accent_color?: string;
+    base_color?: string;
+    candidates?: string[];
+    mode?: 'dark' | 'light';
+  }) => apiClient.post<WebChatThemePreviewResponse>(`${tenantRoot(tenantId)}/channels/web-chat/theme-preview`, body),
+
   listKnowledgeBase: (tenantId: string) => apiClient.get<KnowledgeDocument[]>(`${tenantRoot(tenantId)}/knowledge-base`),
   getKnowledgeDocument: (tenantId: string, documentId: string) => apiClient.get<KnowledgeDocument>(`${tenantRoot(tenantId)}/knowledge-base/${documentId}`),
   createKnowledgeDocument: (tenantId: string, body: Omit<KnowledgeDocument, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>) => apiClient.post<KnowledgeDocument>(`${tenantRoot(tenantId)}/knowledge-base`, body),

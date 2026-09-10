@@ -17,6 +17,7 @@ import { GuideExperiencePage } from '../features/guide-experience/guide-experien
 import { LeadsPage } from '../features/leads/leads-page';
 import { PipelinePage } from '../features/pipeline/pipeline-page';
 import { KnowledgeIntelligencePage } from '../features/knowledge-intelligence/knowledge-intelligence-page';
+import { WebChatManagement } from '../features/channels/web-chat-management';
 
 function LoadingScreen() { return <div className="grid min-h-screen place-items-center bg-canvas text-sm text-stone-500">Loading workspace…</div>; }
 function RequireAuth({ children }: { children: ReactNode }) { const { status } = useAuth(); if (status === 'checking') return <LoadingScreen />; return status === 'authenticated' ? <>{children}</> : <Navigate to="/login" replace />; }
@@ -62,7 +63,9 @@ export function AppRouter() {
       <Route path="assistants" element={<AssistantsPage />} />
       <Route path="assistants/:assistantId" element={<AssistantsPage />} />
       <Route path="channels" element={<ChannelsPage />} />
+      <Route path="channels/web-chat" element={<WebChatManagement />} />
       <Route path="channels/:channelId" element={<ChannelsPage />} />
+      <Route path="web-chat-experience" element={<WebChatManagement />} />
       <Route path="guide-experience" element={<GuideExperiencePage />} />
       <Route path="knowledge-base" element={<KnowledgeBasePage />} />
       <Route path="knowledge-base/:documentId" element={<KnowledgeBasePage />} />

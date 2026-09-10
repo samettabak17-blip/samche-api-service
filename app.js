@@ -72,7 +72,11 @@ import { buildTenantFollowUpRequest, resolveTenantFollowUpPolicy } from "./servi
 import { isSameKnowledgeAuthority, resolveAssistantKnowledgeAuthority } from "./services/knowledge-authority-service.js";
 import { filterProviderMemoryByAuthority, stampProviderMemoryEntry } from "./services/channel-knowledge-authority-memory.js";
 import { configuredPublicWebChatSessionSecret, issuePublicWebChatSession, PublicWebChatSessionError, verifyPublicWebChatSession } from "./services/public-web-chat-session.js";
-import { resolvePublicWebChatIntegration } from "./services/public-web-chat-integration-service.js";
+import {
+  resolvePublicWebChatIntegration,
+  normalizeWebChatAppearance,
+  normalizeWebChatBehavior,
+} from "./services/public-web-chat-integration-service.js";
 import { createCustomerInvitationOutboxStartup } from './services/customer-invitation-outbox-bootstrap.js';
 import { isAllowedGuideCorsOrigin } from './services/guide-public-cors-service.js';
 import { isSharedPublicGuideAssetPath } from './services/guide-public-asset-route-service.js';
@@ -1676,6 +1680,13 @@ app.post("/api/chat/bootstrap", async (req, res) => {
     const integration = await resolvePublicWebChatIntegration({ database: pool, widgetKey });
     if (!integration) return res.status(404).json({ error: 'Web Chat integration is unavailable.' });
 
+    const rawConfig = integration.config || {};
+    const appearance = normalizeWebChatAppearance(rawConfig.appearance, integration.channel_name);
+    const behavior = normalizeWebChatBehavior(rawConfig.behavior);
+    const publicAssistant = {
+      name: integration.assistant_name || appearance.title,
+    };
+
     const suppliedSession = extractWebChatSessionToken(req);
     if (suppliedSession) {
       try {
@@ -1704,6 +1715,9 @@ app.post("/api/chat/bootstrap", async (req, res) => {
             conversation_id: feed?.conversationId || null,
             handling_mode: feed?.handlingMode || 'AI',
             history,
+            appearance,
+            behavior,
+            assistant: publicAssistant,
             browsing_state: {
               current_entity: browsingState?.currentEntity || null,
               previous_entities: browsingState?.previousEntities || [],
@@ -1721,6 +1735,9 @@ app.post("/api/chat/bootstrap", async (req, res) => {
       session: session.token,
       resumed: false,
       history: [],
+      appearance,
+      behavior,
+      assistant: publicAssistant,
     });
   } catch (error) {
     console.error('WEB_CHAT_BOOTSTRAP_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));

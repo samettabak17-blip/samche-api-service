@@ -26,6 +26,8 @@ on:
       - 'public/web-chat.js'
       - 'scripts/**'
       - 'services/**'
+      - 'routes/**'
+      - 'dashboard/**'
       - 'migrations/**'
       - 'tests/**'
       - 'app.js'
@@ -64,6 +66,17 @@ jobs:
           tests/web-chat-natural-conversation-ux.test.js
           tests/web-chat-conversation-persistence.test.js
           tests/web-chat-channel-integration-migration.test.js
+          tests/web-chat-configuration-migration.test.js
+          tests/web-chat-productization.test.js
+          tests/web-chat-access-model.test.js
+
+      - name: Run Dashboard checks
+        run: |
+          cd dashboard
+          npm ci --ignore-scripts
+          npx tsc -b --noEmit
+          npx vitest run src/lib/permissions.test.ts src/features/channels/channels-page.test.tsx
+          npx vite build
 
   staging_bootstrap_and_verification:
     name: Staging Bootstrap and Live Runtime Verification
