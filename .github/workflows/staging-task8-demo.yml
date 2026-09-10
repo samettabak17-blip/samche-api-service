@@ -61,6 +61,7 @@ jobs:
           tests/web-chat-page-context-runtime.test.js
           tests/url-intelligence-service.test.js
           tests/universal-public-link-intelligence.test.js
+          tests/whatsapp-share-link-runtime.test.js
           tests/contextual-intelligence-service.test.js
           tests/permanence-multi-tenant-contract.test.js
           tests/proactive-visitor-intent.test.js

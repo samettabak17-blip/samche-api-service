@@ -534,6 +534,11 @@ export function extractContentFromHtml(html, pageUrl) {
     || html.match(/<meta\b[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i);
   const ogTitle = ogTitleMatch ? sanitizeText(ogTitleMatch[1], URL_INTELLIGENCE_LIMITS.MAX_TITLE_LENGTH) : null;
 
+  const GENERIC_WRAPPER_TITLES = /^(?:google\s+(?:image\s+)?result|image\s+result|share\s+preview|redirecting\b|301\s+moved|302\s+moved)/i;
+  if ((!title || GENERIC_WRAPPER_TITLES.test(title)) && ogTitle) {
+    title = ogTitle;
+  }
+
   const ogDescMatch = html.match(/<meta\b[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i)
     || html.match(/<meta\b[^>]*content=["']([^"']+)["'][^>]*property=["']og:description["']/i);
   const ogDesc = ogDescMatch ? sanitizeText(ogDescMatch[1], URL_INTELLIGENCE_LIMITS.MAX_SUMMARY_LENGTH) : null;
@@ -588,14 +593,36 @@ export function extractContentFromHtml(html, pageUrl) {
   let primaryImageUrl = null;
   const candidateImages = [];
 
+  // 1. Image URLs encoded directly in share or search query parameters (e.g. Google Images imgurl, Pinterest image_url, etc.)
+  if (pageUrl) {
+    try {
+      const parsedPageUrl = new URL(pageUrl);
+      const imgParams = ['imgurl', 'image_url', 'img_url', 'mediaurl', 'media_url', 'picture', 'photo_url', 'src'];
+      for (const p of imgParams) {
+        const val = parsedPageUrl.searchParams.get(p);
+        if (val && (val.startsWith('http://') || val.startsWith('https://') || val.startsWith('//'))) {
+          candidateImages.push(val);
+        }
+      }
+    } catch {}
+  }
+
+  // 2. OpenGraph Image
   const ogImgMatch = html.match(/<meta\b[^>]*property=["'](?:og:image|og:image:url|og:image:secure_url)["'][^>]*content=["']([^"']+)["']/i)
     || html.match(/<meta\b[^>]*content=["']([^"']+)["'][^>]*property=["'](?:og:image|og:image:url|og:image:secure_url)["']/i);
   if (ogImgMatch && ogImgMatch[1]) candidateImages.push(ogImgMatch[1]);
 
+  // 3. Twitter Image
   const twImgMatch = html.match(/<meta\b[^>]*name=["'](?:twitter:image|twitter:image:src)["'][^>]*content=["']([^"']+)["']/i)
     || html.match(/<meta\b[^>]*content=["']([^"']+)["'][^>]*name=["'](?:twitter:image|twitter:image:src)["']/i);
   if (twImgMatch && twImgMatch[1]) candidateImages.push(twImgMatch[1]);
 
+  // 4. Schema.org Microdata Image (e.g. <meta itemprop="image" content="...">)
+  const itemPropImgMatch = html.match(/<meta\b[^>]*itemprop=["']image["'][^>]*content=["']([^"']+)["']/i)
+    || html.match(/<meta\b[^>]*content=["']([^"']+)["'][^>]*itemprop=["']image["']/i);
+  if (itemPropImgMatch && itemPropImgMatch[1]) candidateImages.push(itemPropImgMatch[1]);
+
+  // 5. Schema.org JSON-LD image
   if (schemaEntity?.image) {
     if (typeof schemaEntity.image === 'string') {
       candidateImages.push(schemaEntity.image);
@@ -603,23 +630,35 @@ export function extractContentFromHtml(html, pageUrl) {
       for (const item of schemaEntity.image) {
         if (typeof item === 'string') candidateImages.push(item);
         else if (item?.url && typeof item.url === 'string') candidateImages.push(item.url);
+        else if (item?.contentUrl && typeof item.contentUrl === 'string') candidateImages.push(item.contentUrl);
       }
-    } else if (typeof schemaEntity.image === 'object' && schemaEntity.image.url) {
-      candidateImages.push(schemaEntity.image.url);
+    } else if (typeof schemaEntity.image === 'object') {
+      if (schemaEntity.image.url) candidateImages.push(schemaEntity.image.url);
+      else if (schemaEntity.image.contentUrl) candidateImages.push(schemaEntity.image.contentUrl);
     }
   }
 
   if (schemaEntity?.primaryImageOfPage) {
     if (typeof schemaEntity.primaryImageOfPage === 'string') candidateImages.push(schemaEntity.primaryImageOfPage);
     else if (schemaEntity.primaryImageOfPage?.url) candidateImages.push(schemaEntity.primaryImageOfPage.url);
+    else if (schemaEntity.primaryImageOfPage?.contentUrl) candidateImages.push(schemaEntity.primaryImageOfPage.contentUrl);
   }
 
-  const linkImgMatch = html.match(/<link\b[^>]*rel=["']image_src["'][^>]*href=["']([^"']+)["']/i);
+  // 6. Link image_src
+  const linkImgMatch = html.match(/<link\b[^>]*rel=["']image_src["'][^>]*href=["']([^"']+)["']/i)
+    || html.match(/<link\b[^>]*href=["']([^"']+)["'][^>]*rel=["']image_src["']/i);
   if (linkImgMatch && linkImgMatch[1]) candidateImages.push(linkImgMatch[1]);
 
+  // 7. Bounded relevant <img> with class (hero, main, primary, product, featured, preview, share)
+  const heroImgMatch = html.match(/<img\b[^>]*class=["'][^"']*(?:main|primary|hero|featured|product|preview|share|detail)[^"']*["'][^>]*src=["']([^"']+)["']/i)
+    || html.match(/<img\b[^>]*src=["']([^"']+)["'][^>]*class=["'][^"']*(?:main|primary|hero|featured|product|preview|share|detail)[^"']*["']/i);
+  if (heroImgMatch && heroImgMatch[1]) candidateImages.push(heroImgMatch[1]);
+
+  // 8. Article / Main <img>
   const articleImgMatch = html.match(/<(?:article|main)\b[^>]*>[\s\S]*?<img\b[^>]*src=["']([^"']+)["']/i);
   if (articleImgMatch && articleImgMatch[1]) candidateImages.push(articleImgMatch[1]);
 
+  // 9. First standard <img>
   const firstImgMatch = html.match(/<img\b[^>]*src=["']([^"']+)["']/i);
   if (firstImgMatch && firstImgMatch[1]) candidateImages.push(firstImgMatch[1]);
 
@@ -679,22 +718,65 @@ export async function safeFetchRemoteImage(imageUrl, {
   };
 }
 
-const VISUAL_INTENT_PATTERN = new RegExp(
-  '\\b(?:' +
-  'şekil|boyut|görsel|resim|fotoğraf|renk|nasıl görünüyor|benzer|tasarım|tarifi?|neye benziyor|aynısı|model|görünüm|çizim|peyzaj|mobilya|stil|kombin|karşılaştır|seçenek|' +
-  'look like|looks like|describe|visual|shape|color|appearance|similar|same|design|image|photo|picture|style|compare|what is in this|what does.*look' +
-  ')\\b|' +
-  '[شكل|صورة|لون|مظهر|يشبه|تصميم|مقارنة]',
+export function isVisualWrapperUrl(urlString) {
+  if (typeof urlString !== 'string') return false;
+  try {
+    const parsed = new URL(urlString);
+    const path = parsed.pathname.toLowerCase();
+    if (path.includes('/imgres') || path.includes('/pin/') || path.includes('/photos/') || path.includes('/images/')) {
+      return true;
+    }
+    const params = parsed.searchParams;
+    if (params.has('imgurl') || params.has('image_url') || params.has('img_url') || params.has('mediaurl') || params.has('media_url')) {
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+function isMinimalOrGreetingText(text, url) {
+  if (typeof text !== 'string') return true;
+  let remaining = text;
+  if (url) {
+    remaining = remaining.replace(url, '');
+  }
+  remaining = remaining.replace(/https?:\/\/[^\s]+/gi, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  if (remaining.length === 0) return true;
+  const GREETING_PATTERN = /^(?:merhaba|selam|selamlar|iyi\s*(?:günler|akşamlar)|kolay\s*gelsin|hi|hello|hey|link|bakar\s*mısınız)\b/i;
+  return GREETING_PATTERN.test(remaining) && remaining.split(/\s+/).length <= 4;
+}
+
+const VISUAL_SALES_INTENT_PATTERN = new RegExp(
+  '(?:' +
+  // Turkish visual, form, style, model, similarity roots with agglutinative suffixes:
+  '\\b(?:şekil\\w*|şekl\\w*|tarz\\w*|stil\\w*|model\\w*|tasarım\\w*|tip\\w*|görün\\w*|görsel\\w*|resim\\w*|resm\\w*|foto\\w*|çizim\\w*|renk\\w*|reng\\w*|desen\\w*|doku\\w*|ebat\\w*|ölçü\\w*|boyut\\w*)\\b|' +
+  // Turkish similarity, exemplar, comparison:
+  '\\b(?:aynı\\w*|benzer\\w*|gibi\\b|böyle\\w*|kombin\\w*|karşılaştır\\w*|seçenek\\w*)\\b|' +
+  // Turkish natural commercial requests referencing demonstrative / exemplar:
+  '(?:bunun|buna|bunu|şunun|şuna|şunu|bu|şu|böyle)\\s+(?:aynı\\w*|benzer\\w*|gibi|şekil\\w*|tarz\\w*|tasarım\\w*|model\\w*|ürün\\w*|şey\\w*)|' +
+  // Turkish requests for creation or availability of referenced item:
+  '(?:yapabilir\\s*mi\\w*|yapılabilir\\s*mi\\w*|yapıyor\\s*musunuz|yapar\\s*mısınız|yapalım|yaparsınız)|' +
+  // Turkish express liking / finding:
+  '(?:hoşuma\\s+gitti|beğendim|beğeniyorum)|' +
+  // Turkish domain references accompanied by commercial or visual verbs:
+  '\\b(?:peyzaj\\w*|bahçe\\w*|mobilya\\w*|dekor\\w*)\\b|' +
+  // English equivalents:
+  '\\b(?:look(?:s)?\\s*like|describe|visual|shape|color|appearance|similar|same|design|image|photo|picture|style|compare|what\\s+is\\s+in\\s+this|what\\s+does.*look|something\\s+like\\s+(?:this|that)|like\\s+(?:this|that)|can\\s+you\\s+(?:make|do|build|provide)|do\\s+you\\s+have\\s+(?:this|something)|how\\s+much\\s+for\\s+(?:this|something)|landscaping|furniture)\\b|' +
+  // Arabic equivalents:
+  '(?:مثل|يشبه|شكل|صورة|تصميم|مظهر|طراز|نمط|أريد\\s+مثل|هل\\s+يمكن\\s+عمل|هل\\s+لديكم\\s+مثل|مقارنة|حديقة)' +
+  ')',
   'i'
 );
 
 /**
  * Checks whether user intent requires visual multimodal analysis of linked media.
  */
-export function isVisualIntentRequired({ text, resourceType }) {
+export function isVisualIntentRequired({ text, resourceType, url = null, pageData = null }) {
   if (resourceType === 'DIRECT_IMAGE') return true;
+  if (url && isVisualWrapperUrl(url)) return true;
+  if (pageData?.primaryImageUrl && isMinimalOrGreetingText(text, url)) return true;
   if (typeof text !== 'string') return false;
-  return VISUAL_INTENT_PATTERN.test(text);
+  return VISUAL_SALES_INTENT_PATTERN.test(text);
 }
 
 export function buildFallbackVisualObservation(mimeType) {
@@ -721,7 +803,7 @@ export async function analyzeRemoteImageMultimodal({
   userText = '',
   geminiProvider = null,
   runtimeModel = null,
-  timeoutMs = 4000,
+  timeoutMs = 6000,
 } = {}) {
   let provider = geminiProvider;
   if (!provider) {
@@ -879,12 +961,19 @@ export function normalizeExternalUrlEntity({
     }
   }
 
+  const hasPageFacts = Object.keys(rawAttrs).length > 0;
   const isDirectImage = resourceType === 'DIRECT_IMAGE' || !pageData?.html;
-  const primarySource = isDirectImage && visualObservations
+  const primarySource = (visualObservations && (isDirectImage || !hasPageFacts))
     ? PROVENANCE_SOURCES.EXTERNAL_URL_VISUAL_FACT
     : PROVENANCE_SOURCES.EXTERNAL_URL_PAGE_FACT;
 
-  const cleanName = sanitizeText(pageData?.entityName || pageData?.title || primaryUrl, 255);
+  const isGenericEntityName = !pageData?.entityName
+    || /^(?:google\s+(?:image\s+)?result|image\s+result|share\s+preview|redirecting\b|https?:\/\/|www\.)/i.test(pageData.entityName);
+  const resolvedEntityName = (isGenericEntityName && visualObservations?.visual_summary)
+    ? `${visualObservations.category || 'VISUAL_ASSET'}: ${visualObservations.visual_form || visualObservations.visual_summary}`
+    : (pageData?.entityName || pageData?.title || primaryUrl);
+
+  const cleanName = sanitizeText(resolvedEntityName, 255);
   const cleanType = sanitizeText(
     pageData?.entityType || (visualObservations?.category ? visualObservations.category : (isDirectImage ? 'IMAGE_RESOURCE' : 'EXTERNAL_WEBPAGE')),
     64
@@ -969,7 +1058,6 @@ export async function processMessageUrlIntelligence({
       lookupImpl,
     });
 
-    const visualIntent = isVisualIntentRequired({ text, resourceType: fetchResult.resourceType });
     let visualObservations = null;
     let imagePart = null;
 
@@ -1031,6 +1119,12 @@ export async function processMessageUrlIntelligence({
 
     // HTML_PAGE
     const pageData = extractContentFromHtml(fetchResult.html, fetchResult.finalUrl);
+    const visualIntent = isVisualIntentRequired({
+      text,
+      resourceType: fetchResult.resourceType,
+      url: fetchResult.finalUrl,
+      pageData,
+    });
 
     // If visual intent is true AND page has a primary image, safely fetch and analyze it
     if (visualIntent && pageData.primaryImageUrl) {
