@@ -2275,6 +2275,7 @@ app.post("/api/chat", async (req, res) => {
             logContextualObservability('EXTERNAL_URL_CONTEXT_USED', {
               url: urlResult.url,
               entity: urlResult.entity.entity_name,
+              resource_type: urlResult.resourceType,
             });
           } else if (urlResult.error) {
             logContextualObservability('URL_INTELLIGENCE_FAILED', {
@@ -3013,11 +3014,15 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       let runtime;
       let urlProcessingSucceeded = false;
       let whatsappVisitorContext = whatsappInbox?.conversation?.visitor_context || null;
+      let wpUrlImagePart = null;
       const wpUrls = extractUrlsFromText(text);
       if (wpUrls.length > 0) {
         try {
           const urlResult = await processMessageUrlIntelligence({ text });
           if (urlResult.success && urlResult.entity) {
+            if (urlResult.imagePart) {
+              wpUrlImagePart = urlResult.imagePart;
+            }
             whatsappVisitorContext = updateSessionBrowsingStateWithEntity({
               currentState: whatsappVisitorContext,
               newEntity: urlResult.entity,
@@ -3031,7 +3036,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
                 visitorContext: whatsappVisitorContext,
               });
             }
-            console.info('WHATSAPP_URL_INTELLIGENCE_APPLIED url=' + urlResult.url + ' entity=' + (urlResult.entity.entity_name || 'unnamed'));
+            console.info('WHATSAPP_URL_INTELLIGENCE_APPLIED url=' + urlResult.url + ' entity=' + (urlResult.entity.entity_name || 'unnamed') + ' resource_type=' + (urlResult.resourceType || 'UNKNOWN'));
           } else if (urlResult.error) {
             console.warn('WHATSAPP_URL_INTELLIGENCE_FAILED url=' + urlResult.url + ' reason=' + (urlResult.code || urlResult.error));
           }
@@ -3135,9 +3140,13 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       // YAPAY ZEKA API ÇAĞRISI
       // --------------------------------------
       logWhatsAppTiming('model_request_started');
+      const combinedAiContextParts = [
+        ...(whatsappInbox?.aiContextParts ?? (whatsappInbox?.aiContextPart ? [whatsappInbox.aiContextPart] : [])),
+        ...(wpUrlImagePart ? [wpUrlImagePart] : []),
+      ];
       let aiResponse = await callWpGemini(
         modelContext.userPrompt,
-        whatsappInbox?.aiContextParts ?? (whatsappInbox?.aiContextPart ? [whatsappInbox.aiContextPart] : []),
+        combinedAiContextParts,
         modelContext.systemInstruction,
         runtime.model,
       );
@@ -3152,7 +3161,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         const firstResponseLanguage = responseLanguage;
         aiResponse = await callWpGemini(
           modelContext.userPrompt + '\n\nLANGUAGE_COMPLIANCE_RETRY: The prior response violated the required output language. Respond only in ' + expectedLanguage + ' while preserving the same tenant business policy and answer.',
-          whatsappInbox?.aiContextParts ?? (whatsappInbox?.aiContextPart ? [whatsappInbox.aiContextPart] : []),
+          combinedAiContextParts,
           modelContext.systemInstruction,
           runtime.model,
         );
