@@ -61,7 +61,7 @@ async function runStagingVerification() {
 
   // 4. Scenario B: Direct Public Image URL with Visual Description & Dimension Grounding
   console.log('[4/5] Scenario B: Testing Direct Public Image URL + Grounded Visual Description...');
-  const directImageUrl = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/1.png';
+  const directImageUrl = `${BASE_URL}/task8-demo/sample-product.png`;
   const imgRes = await fetchWithTimeout(`${BASE_URL}/api/chat`, {
     method: 'POST',
     headers: {
@@ -86,7 +86,7 @@ async function runStagingVerification() {
 
   // 5. Scenario C: Public Redirect / Share URL that Resolves to Media
   console.log('[5/5] Scenario C: Testing Safe Public Redirect / Share URL...');
-  const redirectShareUrl = 'https://github.com/PokeAPI/sprites/raw/master/sprites/pokemon/other/official-artwork/1.png';
+  const redirectShareUrl = `${BASE_URL}/task8-demo`;
   const redirectRes = await fetchWithTimeout(`${BASE_URL}/api/chat`, {
     method: 'POST',
     headers: {

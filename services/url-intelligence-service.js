@@ -293,7 +293,7 @@ export async function safeFetchUrl(urlString, {
           signal: controller.signal,
           redirect: 'manual',
           headers: {
-            'User-Agent': 'Mozilla/5.0 (compatible; SamCheBot/1.0; +https://samchecompany.com)',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 (compatible; SamCheBot/1.0; +https://samchecompany.com)',
             'Accept': 'text/html,application/xhtml+xml,image/jpeg,image/png,image/webp;q=0.9,*/*;q=0.8',
             'Accept-Language': 'tr,en;q=0.9',
             'Sec-Fetch-Dest': 'document',
