@@ -52,6 +52,37 @@ function renderComponent({
   );
 }
 
+const mockAppearance = {
+  brand_name: 'Yeşil Vadi Peyzaj',
+  title: 'Destek',
+  subtitle: 'Çevrimiçi',
+  logo_url: null,
+  launcher_position: 'right' as const,
+  launcher_icon: 'chat' as const,
+  theme_mode: 'dark' as const,
+  theme: {
+    primary_color: '#0B5FFF',
+    accent_color: '#10B981',
+    surface_tint: '#111827',
+    surface_glass: 'rgba(17,24,39,0.85)',
+    surface_solid: '#111827',
+    glow_color: '#0B5FFF22',
+    text_color: '#FFFFFF',
+    muted_color: '#9CA3AF',
+    border_color: 'rgba(255,255,255,0.1)',
+    primary_foreground: '#FFFFFF',
+    accent_foreground: '#FFFFFF',
+  },
+};
+
+const mockBehavior = {
+  proactive_enabled: false,
+  high_intent_activation: false,
+  dwell_threshold_seconds: 15,
+  cooldown_seconds: 300,
+  language: 'tr' as const,
+};
+
 describe('WebChatManagement Component', () => {
   afterEach(() => {
     cleanup();
@@ -69,10 +100,10 @@ describe('WebChatManagement Component', () => {
         display_name: 'Yeşil Vadi Peyzaj Web Chat',
         status: 'inactive',
       },
-      assistant: { id: 'ast-1', name: 'Yeşil Vadi Rehberi', model: 'gpt-4o-mini', status: 'active' },
+      assistant: { id: 'ast-1', tenant_id: 'test-tenant-123', name: 'Yeşil Vadi Rehberi', model: 'gpt-4o-mini', status: 'active' },
       integration: null,
-      appearance: { brand_name: 'Yeşil Vadi Peyzaj', title: 'Destek' },
-      behavior: { proactive_enabled: false },
+      appearance: mockAppearance,
+      behavior: mockBehavior,
       embed_snippet: '',
       installation: {
         widget_key: '',
@@ -113,6 +144,7 @@ describe('WebChatManagement Component', () => {
       },
       assistant: {
         id: 'ast-1',
+        tenant_id: 'test-tenant-123',
         name: 'Yeşil Vadi Rehberi',
         model: 'gpt-4o-mini',
         status: 'active',
@@ -123,8 +155,8 @@ describe('WebChatManagement Component', () => {
         integration_type: 'WEB_CHAT',
         enabled: true,
       },
-      appearance: { brand_name: 'Yeşil Vadi Peyzaj', title: 'Destek' },
-      behavior: { proactive_enabled: true },
+      appearance: mockAppearance,
+      behavior: { ...mockBehavior, proactive_enabled: true, high_intent_activation: true },
       embed_snippet: '<script src="https://samche-api-staging.onrender.com/web-chat.js" data-widget-key="wch_live_fixture1234567890123456789012"></script>',
       installation: {
         widget_key: 'wch_live_fixture1234567890123456789012',
