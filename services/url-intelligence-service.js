@@ -24,7 +24,7 @@ export const SUPPORTED_IMAGE_MIME_TYPES = Object.freeze([
 export const URL_INTELLIGENCE_LIMITS = Object.freeze({
   MAX_URL_LENGTH: 2048,
   MAX_REDIRECTS: MAX_REDIRECT_HOPS,
-  DEFAULT_TIMEOUT_MS: 10000,
+  DEFAULT_TIMEOUT_MS: 5000,
   MAX_RESPONSE_BYTES: 524288, // 512 KB
   MAX_REMOTE_IMAGE_BYTES: MAX_REMOTE_IMAGE_BYTES,
   MAX_TITLE_LENGTH: 255,
@@ -285,121 +285,129 @@ export async function safeFetchUrl(urlString, {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    let res;
     try {
-      res = await clientFetch(currentUrl, {
-        method: 'GET',
-        signal: controller.signal,
-        redirect: 'manual',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; SamCheBot/1.0; +https://samchecompany.com)',
-          'Accept': 'text/html,application/xhtml+xml,image/jpeg,image/png,image/webp;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'tr,en;q=0.9',
-          'Sec-Fetch-Dest': 'document',
-          'Sec-Fetch-Mode': 'navigate',
-        },
-      });
-    } catch (fetchErr) {
-      if (fetchErr.name === 'AbortError' || controller.signal.aborted) {
-        throw new UrlIntelligenceError('FETCH_TIMEOUT', `Fetch timed out after ${timeoutMs}ms.`);
+      let res;
+      try {
+        res = await clientFetch(currentUrl, {
+          method: 'GET',
+          signal: controller.signal,
+          redirect: 'manual',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; SamCheBot/1.0; +https://samchecompany.com)',
+            'Accept': 'text/html,application/xhtml+xml,image/jpeg,image/png,image/webp;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'tr,en;q=0.9',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+          },
+        });
+      } catch (fetchErr) {
+        if (fetchErr.name === 'AbortError' || controller.signal.aborted) {
+          throw new UrlIntelligenceError('FETCH_TIMEOUT', `Fetch timed out after ${timeoutMs}ms.`);
+        }
+        throw new UrlIntelligenceError('FETCH_FAILED', `Failed to connect to ${currentUrl}: ${fetchErr.message}`);
       }
-      throw new UrlIntelligenceError('FETCH_FAILED', `Failed to connect to ${currentUrl}: ${fetchErr.message}`);
+
+      if ([301, 302, 303, 307, 308].includes(res.status)) {
+        const location = res.headers.get('location');
+        if (!location) {
+          throw new UrlIntelligenceError('INVALID_REDIRECT', `HTTP ${res.status} redirect received without Location header.`);
+        }
+        if (redirectCount >= maxRedirects) {
+          throw new UrlIntelligenceError('TOO_MANY_REDIRECTS', `Exceeded maximum redirect limit (${maxRedirects}).`);
+        }
+        const nextUrl = new URL(location, currentUrl).toString();
+        currentUrl = nextUrl;
+        continue;
+      }
+
+      if (!res.ok) {
+        throw new UrlIntelligenceError(`HTTP_${res.status}`, `Remote server returned HTTP ${res.status}.`);
+      }
+
+      const rawContentType = res.headers.get('content-type') || '';
+      const contentType = normalizeContentType(rawContentType);
+
+      // 1. Direct Image Handling (image/jpeg, image/png, image/webp)
+      if (isSupportedImageMime(contentType)) {
+        const contentLengthHeader = res.headers.get('content-length');
+        if (contentLengthHeader && Number(contentLengthHeader) > maxRemoteImageBytes) {
+          throw new UrlIntelligenceError('IMAGE_TOO_LARGE', `Remote image exceeds maximum permitted size of ${maxRemoteImageBytes} bytes.`);
+        }
+
+        let arrayBuffer;
+        try {
+          arrayBuffer = await res.arrayBuffer();
+        } catch (readErr) {
+          if (controller.signal.aborted) {
+            throw new UrlIntelligenceError('FETCH_TIMEOUT', `Fetch timed out after ${timeoutMs}ms.`);
+          }
+          throw new UrlIntelligenceError('READ_FAILED', `Failed to read image body: ${readErr.message}`);
+        }
+
+        const bytes = Buffer.from(arrayBuffer);
+        if (bytes.length > maxRemoteImageBytes) {
+          throw new UrlIntelligenceError('IMAGE_TOO_LARGE', `Remote image exceeds maximum permitted size of ${maxRemoteImageBytes} bytes.`);
+        }
+        if (bytes.length === 0) {
+          throw new UrlIntelligenceError('MALFORMED_IMAGE', 'Received empty image payload.');
+        }
+        if (!validateImageSignature(bytes, contentType)) {
+          throw new UrlIntelligenceError('MALFORMED_IMAGE', `Image binary signature does not match declared type "${contentType}".`);
+        }
+
+        return {
+          resourceType: 'DIRECT_IMAGE',
+          finalUrl: currentUrl,
+          status: res.status,
+          contentType,
+          bytes,
+          size: bytes.length,
+        };
+      }
+
+      // 2. HTML Page Handling
+      if (isHtmlContentType(contentType)) {
+        let text;
+        try {
+          text = await res.text();
+        } catch (readErr) {
+          if (controller.signal.aborted) {
+            throw new UrlIntelligenceError('FETCH_TIMEOUT', `Fetch timed out after ${timeoutMs}ms.`);
+          }
+          throw new UrlIntelligenceError('READ_FAILED', `Failed to read response body: ${readErr.message}`);
+        }
+
+        // Check for HTML meta refresh redirect if within redirect limit
+        const metaRefreshMatch = text.match(/<meta\s+[^>]*http-equiv=["']?refresh["']?[^>]*content=["']?[^"'>]*url=([^"'>\s]+)["']?/i);
+        if (metaRefreshMatch && metaRefreshMatch[1] && redirectCount < maxRedirects) {
+          let metaRedirectUrl = metaRefreshMatch[1].trim();
+          try {
+            const resolvedMetaUrl = new URL(metaRedirectUrl, currentUrl).toString();
+            if (resolvedMetaUrl !== currentUrl && !visitedUrls.has(resolvedMetaUrl.toLowerCase().replace(/#.*$/, ''))) {
+              currentUrl = resolvedMetaUrl;
+              continue;
+            }
+          } catch {
+            // Ignore invalid meta refresh and proceed with current HTML
+          }
+        }
+
+        const boundedHtml = text.slice(0, maxSizeBytes);
+        return {
+          resourceType: 'HTML_PAGE',
+          finalUrl: currentUrl,
+          status: res.status,
+          contentType,
+          html: boundedHtml,
+          truncated: text.length > maxSizeBytes,
+        };
+      }
+
+      // 3. Reject unsupported content types (SVG, PDF, audio, video, binary, executables)
+      throw new UrlIntelligenceError('UNSUPPORTED_CONTENT_TYPE', `Content type "${rawContentType}" is not supported. Only public HTML pages and safe images (JPEG, PNG, WebP) are permitted.`);
     } finally {
       clearTimeout(timer);
     }
-
-    if ([301, 302, 303, 307, 308].includes(res.status)) {
-      const location = res.headers.get('location');
-      if (!location) {
-        throw new UrlIntelligenceError('INVALID_REDIRECT', `HTTP ${res.status} redirect received without Location header.`);
-      }
-      if (redirectCount >= maxRedirects) {
-        throw new UrlIntelligenceError('TOO_MANY_REDIRECTS', `Exceeded maximum redirect limit (${maxRedirects}).`);
-      }
-      const nextUrl = new URL(location, currentUrl).toString();
-      currentUrl = nextUrl;
-      continue;
-    }
-
-    if (!res.ok) {
-      throw new UrlIntelligenceError(`HTTP_${res.status}`, `Remote server returned HTTP ${res.status}.`);
-    }
-
-    const rawContentType = res.headers.get('content-type') || '';
-    const contentType = normalizeContentType(rawContentType);
-
-    // 1. Direct Image Handling (image/jpeg, image/png, image/webp)
-    if (isSupportedImageMime(contentType)) {
-      const contentLengthHeader = res.headers.get('content-length');
-      if (contentLengthHeader && Number(contentLengthHeader) > maxRemoteImageBytes) {
-        throw new UrlIntelligenceError('IMAGE_TOO_LARGE', `Remote image exceeds maximum permitted size of ${maxRemoteImageBytes} bytes.`);
-      }
-
-      let arrayBuffer;
-      try {
-        arrayBuffer = await res.arrayBuffer();
-      } catch (readErr) {
-        throw new UrlIntelligenceError('READ_FAILED', `Failed to read image body: ${readErr.message}`);
-      }
-
-      const bytes = Buffer.from(arrayBuffer);
-      if (bytes.length > maxRemoteImageBytes) {
-        throw new UrlIntelligenceError('IMAGE_TOO_LARGE', `Remote image exceeds maximum permitted size of ${maxRemoteImageBytes} bytes.`);
-      }
-      if (bytes.length === 0) {
-        throw new UrlIntelligenceError('MALFORMED_IMAGE', 'Received empty image payload.');
-      }
-      if (!validateImageSignature(bytes, contentType)) {
-        throw new UrlIntelligenceError('MALFORMED_IMAGE', `Image binary signature does not match declared type "${contentType}".`);
-      }
-
-      return {
-        resourceType: 'DIRECT_IMAGE',
-        finalUrl: currentUrl,
-        status: res.status,
-        contentType,
-        bytes,
-        size: bytes.length,
-      };
-    }
-
-    // 2. HTML Page Handling
-    if (isHtmlContentType(contentType)) {
-      let text;
-      try {
-        text = await res.text();
-      } catch (readErr) {
-        throw new UrlIntelligenceError('READ_FAILED', `Failed to read response body: ${readErr.message}`);
-      }
-
-      // Check for HTML meta refresh redirect if within redirect limit
-      const metaRefreshMatch = text.match(/<meta\s+[^>]*http-equiv=["']?refresh["']?[^>]*content=["']?[^"'>]*url=([^"'>\s]+)["']?/i);
-      if (metaRefreshMatch && metaRefreshMatch[1] && redirectCount < maxRedirects) {
-        let metaRedirectUrl = metaRefreshMatch[1].trim();
-        try {
-          const resolvedMetaUrl = new URL(metaRedirectUrl, currentUrl).toString();
-          if (resolvedMetaUrl !== currentUrl && !visitedUrls.has(resolvedMetaUrl.toLowerCase().replace(/#.*$/, ''))) {
-            currentUrl = resolvedMetaUrl;
-            continue;
-          }
-        } catch {
-          // Ignore invalid meta refresh and proceed with current HTML
-        }
-      }
-
-      const boundedHtml = text.slice(0, maxSizeBytes);
-      return {
-        resourceType: 'HTML_PAGE',
-        finalUrl: currentUrl,
-        status: res.status,
-        contentType,
-        html: boundedHtml,
-        truncated: text.length > maxSizeBytes,
-      };
-    }
-
-    // 3. Reject unsupported content types (SVG, PDF, audio, video, binary, executables)
-    throw new UrlIntelligenceError('UNSUPPORTED_CONTENT_TYPE', `Content type "${rawContentType}" is not supported. Only public HTML pages and safe images (JPEG, PNG, WebP) are permitted.`);
   }
 
   throw new UrlIntelligenceError('TOO_MANY_REDIRECTS', 'Exceeded maximum redirect count.');
