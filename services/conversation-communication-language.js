@@ -10,8 +10,8 @@ const ARABIC_GREETING_OR_SOCIAL = /^[\u0600-\u06FF\s،؟!.]+$/u;
  * scoring path, while short/weak messages remain unresolved for continuity.
  */
 const LANGUAGE_EVIDENCE = [
-  { code: 'tr', terms: ['şirket', 'kurmak', 'istiyorum', 'hakkında', 'fiyatı', 'nedir', 'maliyetleri', 'vize', 'hizmet', 'hizmetleri', 'veriyorsunuz', 'sunuyorsunuz', 'sağlıyorsunuz', 'hangi', 'siz', 'kimsiniz', 'ofisiniz', 'nerede', 'destek', 'süreciniz', 'nasıl', 'çalışıyor', 'çalışma', 'saatleriniz'] },
-  { code: 'en', terms: ['the', 'and', 'with', 'company', 'setup', 'costs', 'visa', 'options', 'please', 'explain', 'does', 'document', 'who', 'are', 'you', 'what', 'services', 'do', 'provide', 'where', 'is', 'your', 'office', 'how', 'support', 'process', 'work', 'business', 'hours'] },
+  { code: 'tr', terms: ['şirket', 'kurmak', 'istiyorum', 'hakkında', 'fiyatı', 'nedir', 'maliyetleri', 'vize', 'hizmet', 'hizmetleri', 'veriyorsunuz', 'sunuyorsunuz', 'sağlıyorsunuz', 'hangi', 'siz', 'kimsiniz', 'ofisiniz', 'nerede', 'destek', 'süreciniz', 'nasıl', 'çalışıyor', 'çalışma', 'saatleriniz', 'bu', 'şu', 'tarz', 'stil', 'gibi', 'benzer', 'şekilde', 'bahçe', 'yapabilir', 'tasarım', 'model', 'için', 'bir', 'şey', 'lazım', 'gerek', 'var', 'mı'] },
+  { code: 'en', terms: ['the', 'and', 'with', 'company', 'setup', 'costs', 'visa', 'options', 'please', 'explain', 'does', 'document', 'who', 'are', 'you', 'what', 'services', 'do', 'provide', 'where', 'is', 'your', 'office', 'how', 'support', 'process', 'work', 'business', 'hours', 'this', 'that', 'style', 'design', 'garden', 'like', 'something', 'can', 'we', 'make', 'want', 'need', 'for', 'have', 'look', 'from', 'about'] },
   { code: 'es', terms: ['quiero', 'obtener', 'trabajador', 'independiente', 'responde', 'español', 'empresa', 'visado', 'visa', 'costes'] },
   { code: 'fr', terms: ['je', 'souhaite', 'créer', 'entreprise', 'répondez', 'français', 'visa', 'coûts', 'options'] },
   { code: 'de', terms: ['ich', 'möchte', 'kosten', 'firmengründung', 'unternehmen', 'visum', 'bitte', 'deutsch'] },
@@ -81,14 +81,17 @@ export function inferConservativeWhatsAppLanguage(content) {
   const normalized = text.toLocaleLowerCase('tr-TR');
   if (
     TURKISH_GREETING.test(normalized)
-    || /[ığşİĞŞ]/u.test(text)
+
     || /\b(şirket|kurmak|lazım|istiyorum|hakkında|fiyatı|nedir)\b/u.test(normalized)
   ) return 'tr';
   if (
     ENGLISH_GREETING.test(text)
     || /\b(i want|i need|information about|can you|could you|please|price|company setup)\b/i.test(text)
   ) return 'en';
-  return bestEvidenceLanguage(text);
+  const best = bestEvidenceLanguage(text);
+  if (best) return best;
+  if (/[ığşİĞŞ]/u.test(text)) return 'tr';
+  return null;
 }
 
 export function isClearlySubstantiveWhatsAppMessage(content) {

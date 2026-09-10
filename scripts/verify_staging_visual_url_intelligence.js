@@ -85,7 +85,7 @@ async function runStagingVerification() {
   console.log(`      Result: ${noGenericRefusal && noInventedDimensions ? 'PASS' : 'FAIL'}\n`);
 
   // 5. Scenario C: Public Redirect / Share URL that Resolves to Media
-  console.log('[5/5] Scenario C: Testing Safe Public Redirect / Share URL...');
+  console.log('[5/7] Scenario C: Testing Safe Public Redirect / Share URL...');
   const redirectShareUrl = `${BASE_URL}/task8-demo`;
   const redirectRes = await fetchWithTimeout(`${BASE_URL}/api/chat`, {
     method: 'POST',
@@ -102,6 +102,61 @@ async function runStagingVerification() {
   console.log(`      ✓ Scenario C Response (sample): ${redirectReply.replace(/\s+/g, ' ').slice(0, 300)}...`);
   const scenarioCPass = !/link açılamıyor|yönlendirme hatası/i.test(redirectReply);
   console.log(`      Result: ${scenarioCPass ? 'PASS' : 'FAIL'}\n`);
+
+  // 6. Scenario D: Multilingual Visual Analysis (English & Arabic)
+  console.log('[6/7] Scenario D: Testing Multilingual Visual Intelligence (English & Arabic)...');
+  const enRes = await fetchWithTimeout(`${BASE_URL}/api/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Samche-Web-Chat-Session': sessionToken,
+    },
+    body: JSON.stringify({
+      message: `I want something like this. Describe the style and features: ${directImageUrl}`,
+    }),
+  });
+  if (!enRes.ok) throw new Error(`Scenario D (EN) HTTP error: ${enRes.status}`);
+  const enReply = await enRes.text();
+  console.log(`      ✓ Scenario D (EN) Response (sample): ${enReply.replace(/\s+/g, ' ').slice(0, 300)}...`);
+  const enNoFallback = !enReply.includes('clarify your request a little further');
+  console.log(`      - EN avoided generic clarification fallback: ${enNoFallback ? 'YES' : 'NO'}`);
+
+  const arRes = await fetchWithTimeout(`${BASE_URL}/api/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Samche-Web-Chat-Session': sessionToken,
+    },
+    body: JSON.stringify({
+      message: `أريد شيئاً مثل هذا. صف لي التصميم والمظهر: ${directImageUrl}`,
+    }),
+  });
+  if (!arRes.ok) throw new Error(`Scenario D (AR) HTTP error: ${arRes.status}`);
+  const arReply = await arRes.text();
+  console.log(`      ✓ Scenario D (AR) Response (sample): ${arReply.replace(/\s+/g, ' ').slice(0, 300)}...`);
+  const arNoFallback = !arReply.includes('هل يمكن توضيح طلبكم');
+  console.log(`      - AR avoided generic clarification fallback: ${arNoFallback ? 'YES' : 'NO'}`);
+  console.log(`      Result: ${enNoFallback && arNoFallback ? 'PASS' : 'FAIL'}\n`);
+
+  // 7. Scenario E: Protected Destination / Authentication Barrier Limitation
+  console.log('[7/7] Scenario E: Testing Protected URL / Authentication Limitation...');
+  const authWallUrl = `${BASE_URL}/api/v1/admin/login`;
+  const authRes = await fetchWithTimeout(`${BASE_URL}/api/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Samche-Web-Chat-Session': sessionToken,
+    },
+    body: JSON.stringify({
+      message: `I want something like this: ${authWallUrl}`,
+    }),
+  });
+  if (!authRes.ok) throw new Error(`Scenario E HTTP error: ${authRes.status}`);
+  const authReply = await authRes.text();
+  console.log(`      ✓ Scenario E Response (sample): ${authReply.replace(/\s+/g, ' ').slice(0, 300)}...`);
+  const authAccurateLimitation = !authReply.includes('clarify your request a little further');
+  console.log(`      - Avoided generic clarification fallback: ${authAccurateLimitation ? 'YES' : 'NO'}`);
+  console.log(`      Result: ${authAccurateLimitation ? 'PASS' : 'FAIL'}\n`);
 
   console.log('================================================================');
   console.log('ALL STAGING RUNTIME ACCEPTANCE PROBES COMPLETED SUCCESSFULLY');

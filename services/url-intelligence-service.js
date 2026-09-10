@@ -448,6 +448,45 @@ export function extractCanonicalRedirectUrl(html, pageUrl) {
   return null;
 }
 
+export function isAuthenticationRequiredUrl(urlString) {
+  if (typeof urlString !== 'string') return false;
+  try {
+    const parsed = new URL(urlString);
+    const pathname = parsed.pathname.toLowerCase();
+    const hostname = parsed.hostname.toLowerCase();
+    // 1. Generic login / signin / auth paths
+    const authPathPattern = /(?:^|\/)(?:accounts?|auth|users?|members?|session|security|checkpoint|identity)?\/?(?:login|signin|sign-in|authenticate|checkpoint)(?:\/|$|\?)/i;
+    if (authPathPattern.test(pathname)) return true;
+    // 2. Query param indicates login redirect: ?next= / ?redirect= / ?return_to= on auth path
+    if (/[?&](?:next|redirect|continue|return_to|dest|goto)=/i.test(parsed.search) && /login|signin|auth/i.test(pathname)) return true;
+    // 3. Known SSO / auth hostnames
+    if (/^(?:accounts\.google\.com|login\.microsoftonline\.com|login\.live\.com|auth\.apple\.com|id\.apple\.com)$/i.test(hostname)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export function isAuthenticationPageHtml(html, currentUrl = '') {
+  if (!html || typeof html !== 'string') return false;
+  if (currentUrl && isAuthenticationRequiredUrl(currentUrl)) return true;
+
+  // Title-based detection of dedicated login / authentication pages:
+  const titleMatch = html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+  const title = titleMatch ? sanitizeText(titleMatch[1], 100).toLowerCase() : '';
+  const isAuthTitle = /^(?:(?:log\s*in|sign\s*in|giriş\s*yap|تسجيل\s*الدخول|connexion|anmelden|iniciar\s*sesi[oó]n|accedi)(?:\s*[-•|–:]\s*|\s*$))/i.test(title);
+  if (isAuthTitle) {
+    return true;
+  }
+
+  // Anti-bot challenge / Cloudflare CAPTCHA blocks
+  if (/cf-browser-verification|challenge-platform|captcha-delivery|please\s+(?:enable\s+cookies|verify\s+you\s+are\s+a\s+human)/i.test(html) && html.length < 15000) {
+    return true;
+  }
+
+  return false;
+}
+
 /**
  * Safely fetches a public webpage or image URL with full SSRF protection, DNS check,
  * re-validation of each redirect target, loop detection, bounded size, and request timeout.
@@ -508,11 +547,22 @@ export async function safeFetchUrl(urlString, {
           throw new UrlIntelligenceError('TOO_MANY_REDIRECTS', `Exceeded maximum redirect limit (${maxRedirects}).`);
         }
         const nextUrl = new URL(location, currentUrl).toString();
+
+        if (isAuthenticationRequiredUrl(nextUrl)) {
+          throw new UrlIntelligenceError('HTTP_401', `The destination URL requires authentication or login credentials: ${nextUrl}`);
+        }
+
         currentUrl = nextUrl;
         continue;
       }
 
       if (!res.ok) {
+        if (res.status === 401) {
+          throw new UrlIntelligenceError('HTTP_401', 'The destination URL requires authentication or login credentials.');
+        }
+        if (res.status === 403 || res.status === 429) {
+          throw new UrlIntelligenceError('HTTP_403', `Remote server returned HTTP ${res.status} (access restricted).`);
+        }
         throw new UrlIntelligenceError(`HTTP_${res.status}`, `Remote server returned HTTP ${res.status}.`);
       }
 
@@ -582,13 +632,21 @@ export async function safeFetchUrl(urlString, {
               const resolvedCandidate = new URL(redirectCandidate, currentUrl).toString();
               const normalizedCandidate = resolvedCandidate.toLowerCase().replace(/#.*$/, '');
               if (resolvedCandidate !== currentUrl && !visitedUrls.has(normalizedCandidate)) {
+                if (isAuthenticationRequiredUrl(resolvedCandidate)) {
+                  throw new UrlIntelligenceError('HTTP_401', `The destination URL requires authentication or login credentials: ${resolvedCandidate}`);
+                }
                 currentUrl = resolvedCandidate;
                 continue;
               }
-            } catch {
+            } catch (err) {
+              if (err instanceof UrlIntelligenceError) throw err;
               // Ignore invalid redirect and proceed with current HTML
             }
           }
+        }
+
+        if (isAuthenticationPageHtml(text, currentUrl)) {
+          throw new UrlIntelligenceError('HTTP_401', 'The destination page requires authentication or login credentials.');
         }
 
         const boundedHtml = text.slice(0, maxSizeBytes);
@@ -1055,6 +1113,17 @@ export function isVisualIntentRequired({ text, resourceType, url = null, pageDat
     return true;
   }
 
+  // If page has a primary image, any customer inquiry referencing the item, sharing it,
+  // or asking for information/proposals/estimates is visually eligible unless explicitly text-only:
+  if (pageData?.primaryImageUrl) {
+    const raw = String(text ?? '').replace(/https?:\/\/[^\s]+/gi, '').trim();
+    if (!raw || isMinimalOrGreetingText(text, url)) return true;
+    if (/\b(?:text\s+only|sadece\s+metin|privacy\s+policy|terms|hüküm|gizlilik)\b/i.test(raw)) {
+      return false;
+    }
+    return true;
+  }
+
   if (typeof text !== 'string') return false;
   return VISUAL_SALES_INTENT_PATTERN.test(text);
 }
@@ -1483,7 +1552,7 @@ export async function processMessageUrlIntelligence({
  * Formats an accurate, human-readable limitation/fallback explanation
  * when a real technical or security boundary prevents inspecting a URL.
  */
-export function formatUrlIntelligenceFailureExplanation(urlResult, language = 'tr') {
+export function formatUrlIntelligenceFailureExplanation(urlResult, language = 'tr', { conversational = false } = {}) {
   const code = urlResult?.code || 'FETCH_FAILED';
   const lang = ['tr', 'en', 'ar'].includes(language) ? language : 'tr';
 
@@ -1491,7 +1560,9 @@ export function formatUrlIntelligenceFailureExplanation(urlResult, language = 't
     tr: {
       SSRF_BLOCKED_TARGET: 'Paylaşılan bağlantı güvenlik politikası nedeniyle erişime kapalıdır (özel veya yerel ağ adresi).',
       HTTP_401: 'Paylaşılan bağlantı oturum açma veya kimlik doğrulama gerektirmektedir.',
+      AUTHENTICATION_REQUIRED: 'Paylaşılan bağlantı oturum açma veya kimlik doğrulama gerektirmektedir.',
       HTTP_403: 'Paylaşılan bağlantı erişim kısıtlaması nedeniyle görüntülenememektedir.',
+      ACCESS_RESTRICTED: 'Paylaşılan bağlantı erişim kısıtlaması nedeniyle görüntülenememektedir.',
       HTTP_404: 'Paylaşılan bağlantıdaki sayfa veya içerik bulunamadı (404 Not Found).',
       FETCH_TIMEOUT: 'Paylaşılan bağlantıya erişim zaman aşımına uğradı.',
       IMAGE_ANALYSIS_TIMEOUT: 'Görsel analiz işlemi zaman aşımına uğradı.',
@@ -1505,7 +1576,9 @@ export function formatUrlIntelligenceFailureExplanation(urlResult, language = 't
     en: {
       SSRF_BLOCKED_TARGET: 'The shared URL is blocked by security policy (private or local network destination).',
       HTTP_401: 'The shared URL requires authentication or login credentials.',
+      AUTHENTICATION_REQUIRED: 'The shared URL requires authentication or login credentials.',
       HTTP_403: 'The shared URL is restricted and cannot be accessed publicly.',
+      ACCESS_RESTRICTED: 'The shared URL is restricted and cannot be accessed publicly.',
       HTTP_404: 'The shared URL destination was not found (404 Not Found).',
       FETCH_TIMEOUT: 'Connection to the shared URL timed out.',
       IMAGE_ANALYSIS_TIMEOUT: 'Visual analysis timed out.',
@@ -1519,7 +1592,9 @@ export function formatUrlIntelligenceFailureExplanation(urlResult, language = 't
     ar: {
       SSRF_BLOCKED_TARGET: 'الرابط المشارك محظور بموجب سياسة الأمان (عنوان شبكة خاصة أو محلية).',
       HTTP_401: 'الرابط المشارك يتطلب تسجيل الدخول أو تصريح وصول.',
+      AUTHENTICATION_REQUIRED: 'الرابط المشارك يتطلب تسجيل الدخول أو تصريح وصول.',
       HTTP_403: 'الرابط المشارك مقيد الوصول ولا يمكن عرضه للعامة.',
+      ACCESS_RESTRICTED: 'الرابط المشارك مقيد الوصول ولا يمكن عرضه للعامة.',
       HTTP_404: 'لم يتم العثور على محتوى الرابط المشارك (404 Not Found).',
       FETCH_TIMEOUT: 'انتهت مهلة الاتصال بالرابط المشارك.',
       IMAGE_ANALYSIS_TIMEOUT: 'انتهت مهلة التحليل البصري.',
@@ -1533,6 +1608,17 @@ export function formatUrlIntelligenceFailureExplanation(urlResult, language = 't
   };
 
   const map = explanations[lang] || explanations.tr;
-  return map[code] || map.DEFAULT;
+  const base = map[code] || map.DEFAULT;
+
+  if (!conversational) {
+    return base;
+  }
+
+  const suggestions = {
+    tr: ' Mümkünse içeriğin bir ekran görüntüsünü veya görselini doğrudan iletebilir ya da istediğiniz tarzı tarif edebilirsiniz, size memnuniyetle yardımcı olmak isteriz.',
+    en: ' If possible, please share a screenshot or image directly, or describe what you are looking for, and we will be glad to assist you!',
+    ar: ' إذا كان ذلك ممكناً، يرجى مشاركة لقطة شاشة أو صورة مباشرة، أو وصف ما تبحث عنه وسنكون سعداء بمساعدتكم!',
+  };
+  return base + (suggestions[lang] || suggestions.en);
 }
 

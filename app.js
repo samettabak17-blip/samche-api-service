@@ -106,6 +106,7 @@ import {
   generateContextualProactiveMessage,
 } from './services/visitor-intent-service.js';
 import { extractUrlsFromText, processMessageUrlIntelligence } from './services/url-intelligence-service.js';
+import { formatUrlIntelligenceFailureExplanation } from './services/url-intelligence-service.js';
 
 
 dotenv.config();
@@ -2267,14 +2268,15 @@ app.post("/api/chat", async (req, res) => {
       }
 
       // Check for public URL in customer message for Web Chat
+      let webChatUrlResult = null;
       const messageUrls = extractUrlsFromText(normalizedMessage);
       if (messageUrls.length > 0) {
         try {
-          const urlResult = await processMessageUrlIntelligence({ text: normalizedMessage });
-          if (urlResult.success && urlResult.entity) {
+          webChatUrlResult = await processMessageUrlIntelligence({ text: normalizedMessage });
+          if (webChatUrlResult.success && webChatUrlResult.entity) {
             webChatBrowsingState = updateSessionBrowsingStateWithEntity({
               currentState: webChatBrowsingState,
-              newEntity: urlResult.entity,
+              newEntity: webChatUrlResult.entity,
             });
             await saveWebChatSessionBrowsingState({
               database: pool,
@@ -2286,14 +2288,14 @@ app.post("/api/chat", async (req, res) => {
               browsingState: webChatBrowsingState,
             });
             logContextualObservability('EXTERNAL_URL_CONTEXT_USED', {
-              url: urlResult.url,
-              entity: urlResult.entity.entity_name,
-              resource_type: urlResult.resourceType,
+              url: webChatUrlResult.url,
+              entity: webChatUrlResult.entity.entity_name,
+              resource_type: webChatUrlResult.resourceType,
             });
-          } else if (urlResult.error) {
+          } else if (webChatUrlResult.error) {
             logContextualObservability('URL_INTELLIGENCE_FAILED', {
-              url: urlResult.url,
-              reason: urlResult.code || urlResult.error,
+              url: webChatUrlResult.url,
+              reason: webChatUrlResult.code || webChatUrlResult.error,
             });
           }
         } catch (urlErr) {
@@ -2355,6 +2357,26 @@ app.post("/api/chat", async (req, res) => {
       if (webChatInboundState && !webChatInboundState.shouldInvokeAi) {
         return res.status(200).send("Temsilcimiz şu anda görüşmede, mesajınız iletildi.");
       }
+    }
+
+    if (webChatUrlResult && !webChatUrlResult.success) {
+      const webChatLang = inferWhatsAppDeterministicInboundLanguage(normalizedMessage) || 'en';
+      const limitationReply = formatUrlIntelligenceFailureExplanation(webChatUrlResult, webChatLang, { conversational: true });
+      if (webChatIntegration && webChatSession?.sessionId && webChatInboundState?.conversation?.id) {
+        try {
+          await persistAssistantResponseIfCurrent({
+            tenantId: webChatIntegration.tenant_id,
+            conversationId: webChatInboundState.conversation.id,
+            content: limitationReply,
+            handlingVersion: webChatInboundState.handlingVersion,
+            database: pool,
+          });
+        } catch (outboundErr) {
+          console.warn('WEB_CHAT_OUTBOUND_PERSIST_WARN:', outboundErr.message);
+        }
+      }
+      addWebMemory(userId, "assistant", limitationReply, webChatKnowledgeAuthority);
+      return res.send(limitationReply);
     }
 
     const messages = [
@@ -3028,17 +3050,18 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       let urlProcessingSucceeded = false;
       let whatsappVisitorContext = whatsappInbox?.conversation?.visitor_context || null;
       let wpUrlImagePart = null;
+      let urlIntelligenceResult = null;
       const wpUrls = extractUrlsFromText(text);
       if (wpUrls.length > 0) {
         try {
-          const urlResult = await processMessageUrlIntelligence({ text });
-          if (urlResult.success && urlResult.entity) {
-            if (urlResult.imagePart) {
-              wpUrlImagePart = urlResult.imagePart;
+          urlIntelligenceResult = await processMessageUrlIntelligence({ text });
+          if (urlIntelligenceResult.success && urlIntelligenceResult.entity) {
+            if (urlIntelligenceResult.imagePart) {
+              wpUrlImagePart = urlIntelligenceResult.imagePart;
             }
             whatsappVisitorContext = updateSessionBrowsingStateWithEntity({
               currentState: whatsappVisitorContext,
-              newEntity: urlResult.entity,
+              newEntity: urlIntelligenceResult.entity,
             });
             urlProcessingSucceeded = true;
             if (whatsappInbox?.conversation?.id && whatsappInbox?.integration?.tenant_id) {
@@ -3049,13 +3072,21 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
                 visitorContext: whatsappVisitorContext,
               });
             }
-            console.info('WHATSAPP_URL_INTELLIGENCE_APPLIED url=' + urlResult.url + ' entity=' + (urlResult.entity.entity_name || 'unnamed') + ' resource_type=' + (urlResult.resourceType || 'UNKNOWN'));
-          } else if (urlResult.error) {
-            console.warn('WHATSAPP_URL_INTELLIGENCE_FAILED url=' + urlResult.url + ' reason=' + (urlResult.code || urlResult.error));
+            console.info('WHATSAPP_URL_INTELLIGENCE_APPLIED url=' + urlIntelligenceResult.url + ' entity=' + (urlIntelligenceResult.entity.entity_name || 'unnamed') + ' resource_type=' + (urlIntelligenceResult.resourceType || 'UNKNOWN'));
+          } else if (urlIntelligenceResult.error) {
+            console.warn('WHATSAPP_URL_INTELLIGENCE_FAILED url=' + urlIntelligenceResult.url + ' reason=' + (urlIntelligenceResult.code || urlIntelligenceResult.error));
           }
         } catch (urlErr) {
           console.error('WHATSAPP_URL_INTELLIGENCE_ERROR reason=' + (urlErr?.code ?? urlErr?.message ?? 'UNKNOWN'));
         }
+      }
+
+      if (wpUrls.length > 0 && urlIntelligenceResult && !urlIntelligenceResult.success) {
+        console.info('WHATSAPP_URL_INTELLIGENCE_LIMITATION url=' + urlIntelligenceResult.url + ' code=' + (urlIntelligenceResult.code || 'URL_FAILED') + ' lang=' + lang);
+        const limitationResponse = formatUrlIntelligenceFailureExplanation(urlIntelligenceResult, lang, { conversational: true });
+        await applyWhatsAppAdaptivePacing({ generationStartedAt: aiResponseStartedAt, content: limitationResponse });
+        const result = await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, limitationResponse);
+        return { ...result, aiResponsePath: 'URL_LIMITATION_FALLBACK' };
       }
 
       let whatsappContextualSection = '';
