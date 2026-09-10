@@ -25,7 +25,7 @@ test('task8-demo fixture exists and has valid Turkish e-commerce structure', () 
   assert.match(html, /https:\/\/schema\.org/);
 
   // Verify canonical Web Chat script
-  assert.match(html, /<script\s+src=["']\/web-chat\.js["']>/);
+  assert.match(html, /<script\s+src=["']\/web-chat\.js["']/);
 });
 
 test('task8-demo fixture contains required catalog products and edge-case fixtures', () => {
@@ -52,19 +52,72 @@ test('task8-demo fixture contains required catalog products and edge-case fixtur
   assert.match(html, /HACKED99/);
 });
 
-test('task8-demo fixture contains embedded Web Chat widget and context chips', () => {
+test('task8-demo fixture uses canonical Web Chat runtime with zero duplicate embedded widget in host document', () => {
   const html = fs.readFileSync(fixturePath, 'utf8');
 
-  // Floating widget button & modal container
-  assert.match(html, /id=["']chat-toggle-btn["']/);
-  assert.match(html, /id=["']chat-window["']/);
-  assert.match(html, /id=["']chat-messages["']/);
-  assert.match(html, /id=["']chat-context-badge["']/);
+  // Verify canonical Web Chat script embed with staging widget key
+  assert.match(html, /<script\s+src=["']\/web-chat\.js["']\s+data-widget-key=["']wch_staging_task8_demo["']>/);
 
-  // Prompt chips & wireless charging test chip
-  assert.match(html, /id=["']chat-chips["']/);
+  // Assert NO duplicate legacy chat widget HTML elements in host light DOM
+  assert.doesNotMatch(html, /id=["']chat-toggle-btn["']/, 'Obsolete chat-toggle-btn must NOT exist in host DOM');
+  assert.doesNotMatch(html, /id=["']chat-window["']/, 'Obsolete chat-window must NOT exist in host DOM');
+  assert.doesNotMatch(html, /class=["']chat-widget-btn["']/, 'Obsolete chat-widget-btn class must NOT exist in host DOM');
+
+  // Prompt chips & wireless charging test chip defined in page runtime
   assert.match(html, /Bu powerbank kablosuz şarj destekliyor mu\?/);
   assert.match(html, /wch_staging_task8_demo/);
+});
+
+test('task8-demo fixture has zero leaked CSS source text in body', () => {
+  const html = fs.readFileSync(fixturePath, 'utf8');
+
+  // Verify head style tag boundary
+  const styleMatch = html.match(/<head>[\s\S]*?<style>([\s\S]*?)<\/style>[\s\S]*?<\/head>/i);
+  assert.ok(styleMatch, 'All page styles must be strictly enclosed inside head <style>...</style>');
+
+  // Body content must not leak raw CSS rules
+  const bodyMatch = html.match(/<body[\s\S]*?>([\s\S]*?)<\/body>/i);
+  assert.ok(bodyMatch, 'Body tag must exist');
+  const bodyContent = bodyMatch[1];
+
+  const forbiddenLeakedStrings = [
+    '.chat-window {',
+    '.chat-widget-btn {',
+    '@media (max-width',
+    '/* Embedded Web Chat Styles */',
+    '.hero-banner {',
+    'main { max-width',
+    '.msg-typing-indicator {',
+    'typing-bounce',
+  ];
+
+  for (const s of forbiddenLeakedStrings) {
+    assert.ok(
+      !bodyContent.includes(s),
+      `CSS source fragment "${s}" was detected leaked as visible content in body!`
+    );
+  }
+});
+
+test('task8-demo fixture implements all intended navigation views (catalog, security, about, detail)', () => {
+  const html = fs.readFileSync(fixturePath, 'utf8');
+
+  // Top nav controls
+  assert.match(html, /id=["']nav-catalog["']/);
+  assert.match(html, /id=["']nav-security["']/);
+  assert.match(html, /id=["']nav-about["']/);
+
+  // View containers
+  assert.match(html, /id=["']catalog-view["']/);
+  assert.match(html, /id=["']detail-view["']/);
+  assert.match(html, /id=["']security-view["']/);
+  assert.match(html, /id=["']about-view["']/);
+
+  // Routing functions
+  assert.match(html, /function\s+renderCatalog/);
+  assert.match(html, /function\s+renderDetail/);
+  assert.match(html, /function\s+renderSecurity/);
+  assert.match(html, /function\s+renderAbout/);
 });
 
 test('task8-demo fixture implements SPA routing and dynamic page context synchronization', () => {

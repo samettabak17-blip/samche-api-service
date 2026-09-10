@@ -510,9 +510,10 @@
   /* Canonical Shared Web Chat Runtime & Isolated Shadow DOM Renderer */
   var CANONICAL_WIDGET_CSS_A = [
     '*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }',
-    ':host { display: block; }',
-    '.samche-wrap { position: fixed; z-index: 2147483640; pointer-events: none; inset: 0; overflow: hidden; }',
-    '.samche-launcher { position: fixed; bottom: 24px; right: 24px; width: 60px; height: 60px; border-radius: 50%; background: var(--chat-primary, #2563EB); color: var(--chat-primary-foreground, #FFF); border: 1px solid var(--chat-border, rgba(255,255,255,0.15)); box-shadow: 0 8px 28px -4px var(--chat-glow, rgba(37,99,235,0.4)), 0 4px 12px rgba(0,0,0,0.25); cursor: pointer; display: flex; align-items: center; justify-content: center; pointer-events: auto; transition: transform .2s cubic-bezier(.16,1,.3,1), box-shadow .2s ease; outline: none; animation: samche-glow-breathe 4s infinite ease-in-out; }',
+    ':host { position: fixed; bottom: 0; right: 0; width: 0; height: 0; z-index: 2147483640; pointer-events: none; overflow: visible; display: block; }',
+    '.samche-wrap { position: fixed; bottom: 0; right: 0; width: 0; height: 0; z-index: 2147483640; pointer-events: none; overflow: visible; }',
+    '.samche-pos-left.samche-wrap { right: auto; left: 0; }',
+    '.samche-launcher { position: fixed; bottom: 24px; right: 24px; width: 60px; height: 60px; border-radius: 50%; background: var(--chat-primary, #2563EB); color: var(--chat-primary-foreground, #FFF); border: 1px solid var(--chat-border, rgba(255,255,255,0.15)); box-shadow: 0 8px 28px -4px var(--chat-glow, rgba(37,99,235,0.4)), 0 4px 12px rgba(0,0,0,0.25); cursor: pointer; display: flex; align-items: center; justify-content: center; pointer-events: auto; transition: transform .2s cubic-bezier(.16,1,.3,1), box-shadow .2s ease; outline: none; animation: samche-glow-breathe 4s infinite ease-in-out; z-index: 2147483641; }',
     '.samche-pos-left .samche-launcher { right: auto; left: 24px; }',
     '.samche-launcher:hover { transform: scale(1.05); }',
     '.samche-launcher:focus-visible { outline: 2px solid var(--chat-accent, #60A5FA); outline-offset: 3px; }',
@@ -522,9 +523,9 @@
     '.samche-intent-pulse { animation: samche-intent-pulse 2s infinite ease-in-out !important; }',
     '@keyframes samche-glow-breathe { 0%, 100% { box-shadow: 0 8px 28px -4px var(--chat-glow, rgba(37,99,235,0.3)), 0 4px 12px rgba(0,0,0,0.2); } 50% { box-shadow: 0 12px 36px -2px var(--chat-glow, rgba(37,99,235,0.55)), 0 4px 16px rgba(0,0,0,0.3); } }',
     '@keyframes samche-intent-pulse { 0% { transform: scale(1); } 50% { transform: scale(1.08); box-shadow: 0 0 0 10px rgba(37,99,235,0.25); } 100% { transform: scale(1); } }',
-    '.samche-panel { position: fixed; bottom: 96px; right: 24px; width: 400px; max-width: calc(100vw - 32px); height: 600px; max-height: calc(100vh - 120px); border-radius: 20px; background: var(--chat-surface-glass, rgba(18,20,26,0.85)); backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%); border: 1px solid var(--chat-border, rgba(255,255,255,0.12)); box-shadow: 0 24px 64px -12px rgba(0,0,0,0.55), 0 0 0 1px var(--chat-border, rgba(255,255,255,0.08)); display: flex; flex-direction: column; overflow: hidden; pointer-events: auto; opacity: 0; transform: translateY(16px) scale(0.96); visibility: hidden; transition: transform .28s cubic-bezier(.16,1,.3,1), opacity .25s ease-out, visibility .28s; }',
+    '.samche-panel { position: fixed; bottom: 96px; right: 24px; width: 400px; max-width: calc(100vw - 32px); height: 600px; max-height: calc(100vh - 120px); border-radius: 20px; background: var(--chat-surface-glass, rgba(18,20,26,0.92)); backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%); border: 1px solid var(--chat-border, rgba(255,255,255,0.12)); box-shadow: 0 24px 64px -12px rgba(0,0,0,0.55), 0 0 0 1px var(--chat-border, rgba(255,255,255,0.08)); display: flex; flex-direction: column; overflow: hidden; pointer-events: none; opacity: 0; transform: translateY(16px) scale(0.96); visibility: hidden; transition: transform .28s cubic-bezier(.16,1,.3,1), opacity .25s ease-out; z-index: 2147483642; }',
     '.samche-pos-left .samche-panel { right: auto; left: 24px; }',
-    '.samche-panel.samche-open { opacity: 1; transform: translateY(0) scale(1); visibility: visible; }',
+    '.samche-panel.samche-open { opacity: 1; transform: translateY(0) scale(1); visibility: visible !important; pointer-events: auto; }',
     '@supports not (backdrop-filter: blur(10px)) { .samche-panel { background: var(--chat-surface-solid, #12141a) !important; } }'
   ].join('\n');
 
@@ -539,7 +540,8 @@
     '.samche-header-title { font-size: 15px; font-weight: 600; color: var(--chat-text, #F8FAFC); line-height: 1.25; }',
     '.samche-header-status { font-size: 12px; color: var(--chat-muted, #94A3B8); display: flex; align-items: center; gap: 5px; margin-top: 2px; }',
     '.samche-status-dot { width: 7px; height: 7px; border-radius: 50%; background: #22C55E; box-shadow: 0 0 8px #22C55E; display: inline-block; }',
-    '.samche-close-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--chat-border, rgba(255,255,255,0.1)); background: rgba(255,255,255,0.05); color: var(--chat-muted, #94A3B8); cursor: pointer; display: flex; align-items: center; justify-content: center; outline: none; transition: background .15s ease, color .15s ease; }',
+    '.samche-header-context-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; background: rgba(96,165,250,0.15); color: var(--chat-accent, #60A5FA); font-size: 11px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }',
+    '.samche-close-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--chat-border, rgba(255,255,255,0.1)); background: rgba(255,255,255,0.05); color: var(--chat-muted, #94A3B8); cursor: pointer; display: flex; align-items: center; justify-content: center; outline: none; transition: background .15s ease, color .15s ease; flex-shrink: 0; }',
     '.samche-close-btn:hover { background: rgba(255,255,255,0.12); color: var(--chat-text, #F8FAFC); }',
     '.samche-close-btn:focus-visible { outline: 2px solid var(--chat-accent, #60A5FA); }',
     '.samche-messages { flex: 1; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }',
@@ -547,8 +549,8 @@
     '.samche-msg-user { align-self: flex-end; background: var(--chat-primary, #2563EB); color: var(--chat-primary-foreground, #FFF); padding: 10px 14px; border-radius: 16px 16px 4px 16px; box-shadow: 0 4px 14px -3px var(--chat-glow, rgba(37,99,235,0.3)); }',
     '.samche-msg-bot { align-self: flex-start; background: rgba(255,255,255,0.06); color: var(--chat-text, #F8FAFC); border: 1px solid var(--chat-border, rgba(255,255,255,0.08)); padding: 12px 16px; border-radius: 16px 16px 16px 4px; }',
     '.samche-msg-bot a { color: var(--chat-accent, #60A5FA); text-decoration: underline; }',
-    '.samche-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }',
-    '.samche-chip { font-size: 12px; padding: 6px 12px; border-radius: 9999px; background: rgba(255,255,255,0.08); color: var(--chat-text, #F8FAFC); border: 1px solid var(--chat-border, rgba(255,255,255,0.12)); cursor: pointer; transition: background .15s ease, transform .15s ease; outline: none; }',
+    '.samche-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; border-top: 1px solid var(--chat-border, rgba(255,255,255,0.06)); background: rgba(0,0,0,0.1); max-height: 90px; overflow-y: auto; flex-shrink: 0; }',
+    '.samche-chip { font-size: 12px; padding: 6px 12px; border-radius: 9999px; background: rgba(255,255,255,0.08); color: var(--chat-text, #F8FAFC); border: 1px solid var(--chat-border, rgba(255,255,255,0.12)); cursor: pointer; transition: background .15s ease, transform .15s ease; outline: none; white-space: nowrap; }',
     '.samche-chip:hover { background: rgba(255,255,255,0.15); transform: translateY(-1px); }',
     '.samche-composer { padding: 14px 16px; border-top: 1px solid var(--chat-border, rgba(255,255,255,0.08)); background: rgba(0,0,0,0.15); display: flex; align-items: flex-end; gap: 10px; flex-shrink: 0; }',
     '.samche-composer-input { flex: 1; background: var(--chat-input-bg, rgba(255,255,255,0.06)); border: 1px solid var(--chat-input-border, rgba(255,255,255,0.14)); border-radius: 12px; color: var(--chat-text, #F8FAFC); padding: 10px 14px; font-size: 14px; line-height: 1.4; resize: none; max-height: 110px; min-height: 42px; outline: none; }',
@@ -558,7 +560,8 @@
     '.samche-send-btn:hover:not(:disabled) { transform: scale(1.05); }',
     '.samche-send-btn:disabled { opacity: 0.45; cursor: not-allowed; }',
     '.samche-send-btn svg { width: 18px; height: 18px; fill: currentColor; }',
-    '@media (max-width: 640px) { .samche-panel { inset: 0 !important; width: 100vw !important; height: 100dvh !important; max-height: 100dvh !important; max-width: 100vw !important; border-radius: 0 !important; border: none !important; padding-top: env(safe-area-inset-top, 0); padding-bottom: env(safe-area-inset-bottom, 0); } }',
+    '@media (max-width: 640px), (max-height: 500px) and (orientation: landscape) { .samche-launcher { bottom: 16px; right: 16px; width: 52px; height: 52px; } .samche-pos-left .samche-launcher { right: auto; left: 16px; } .samche-panel.samche-open { inset: 0 !important; width: 100vw !important; height: 100% !important; height: 100dvh !important; max-height: 100dvh !important; max-width: 100vw !important; border-radius: 0 !important; border: none !important; padding-top: env(safe-area-inset-top, 0); padding-bottom: env(safe-area-inset-bottom, 0); } }',
+    '@media (max-height: 500px) and (orientation: landscape) { .samche-panel.samche-open { inset: 0 !important; width: 100vw !important; height: 100vh !important; max-height: 100vh !important; border-radius: 0 !important; border: none !important; } }',
     '.samche-panel[dir="rtl"] { direction: rtl; text-align: right; }',
     '.samche-panel[dir="rtl"] .samche-msg-user { align-self: flex-start; border-radius: 16px 16px 16px 4px; }',
     '.samche-panel[dir="rtl"] .samche-msg-bot { align-self: flex-end; border-radius: 16px 16px 4px 16px; }',
@@ -580,8 +583,17 @@
         var scriptTag = document.querySelector('script[data-widget-key]');
         if (scriptTag) widgetKey = scriptTag.getAttribute('data-widget-key');
       }
+      if (!widgetKey && typeof window !== 'undefined' && window.location) {
+        try {
+          var urlKey = new URLSearchParams(window.location.search).get('widget_key');
+          if (urlKey) widgetKey = urlKey.trim();
+        } catch (e) {}
+      }
       if (!widgetKey && typeof window !== 'undefined' && window.__SAMCHE_WEB_CHAT_KEY__) {
         widgetKey = window.__SAMCHE_WEB_CHAT_KEY__;
+      }
+      if (!widgetKey && typeof window !== 'undefined' && window.location && window.location.pathname && window.location.pathname.indexOf('/task8-demo') !== -1) {
+        widgetKey = 'wch_staging_task8_demo';
       }
       if (!widgetKey) return null;
       if (this.instances[widgetKey]) return this.instances[widgetKey];
@@ -589,6 +601,14 @@
       var host = document.createElement('div');
       host.id = 'samche-webchat-container';
       host.className = 'samche-widget-host';
+      host.style.position = 'fixed';
+      host.style.bottom = '0';
+      host.style.right = '0';
+      host.style.width = '0';
+      host.style.height = '0';
+      host.style.overflow = 'visible';
+      host.style.pointerEvents = 'none';
+      host.style.zIndex = '2147483640';
       var shadow = host.attachShadow ? host.attachShadow({ mode: 'open' }) : host;
 
       var styleEl = document.createElement('style');
@@ -621,6 +641,7 @@
         '  <div class="samche-header-titles">',
         '    <span class="samche-header-title">Canlı Destek</span>',
         '    <span class="samche-header-status"><span class="samche-status-dot"></span><span class="samche-status-text">Çevrimiçi</span></span>',
+        '    <span class="samche-header-context-badge" style="display: none;"></span>',
         '  </div>',
         '</div>',
         '<button class="samche-close-btn" aria-label="Kapat">' + CLOSE_ICON_SVG + '</button>'
@@ -632,6 +653,11 @@
       messages.setAttribute('role', 'log');
       messages.setAttribute('aria-live', 'polite');
       panel.appendChild(messages);
+
+      var chipsContainer = document.createElement('div');
+      chipsContainer.className = 'samche-chips';
+      chipsContainer.style.display = 'none';
+      panel.appendChild(chipsContainer);
 
       var composer = document.createElement('div');
       composer.className = 'samche-composer';
@@ -645,6 +671,7 @@
       document.body.appendChild(host);
       var isOpen = false;
       var sessionToken = null;
+      var contextBadgeEl = header.querySelector('.samche-header-context-badge');
       var textarea = composer.querySelector('.samche-composer-input');
       var sendBtn = composer.querySelector('.samche-send-btn');
       var closeBtn = header.querySelector('.samche-close-btn');
@@ -755,6 +782,7 @@
             headers: headers,
             body: JSON.stringify({
               message: text,
+              conversation_session: sessionToken,
               current_url: ctx.url,
               canonical_url: ctx.canonical_url,
               entity_id: ctx.entity_id,
@@ -778,6 +806,38 @@
         }
       }
 
+      function setChips(chipList) {
+        chipsContainer.innerHTML = '';
+        if (!chipList || !Array.isArray(chipList) || chipList.length === 0) {
+          chipsContainer.style.display = 'none';
+          return;
+        }
+        chipsContainer.style.display = 'flex';
+        chipList.forEach(function(prompt) {
+          var btn = document.createElement('button');
+          btn.className = 'samche-chip';
+          btn.type = 'button';
+          btn.textContent = prompt;
+          btn.addEventListener('click', function(ev) {
+            ev.preventDefault();
+            textarea.value = prompt;
+            handleSend();
+          });
+          chipsContainer.appendChild(btn);
+        });
+      }
+
+      function setContextBadge(text) {
+        if (!contextBadgeEl) return;
+        if (!text) {
+          contextBadgeEl.style.display = 'none';
+          contextBadgeEl.textContent = '';
+        } else {
+          contextBadgeEl.style.display = 'inline-flex';
+          contextBadgeEl.textContent = text;
+        }
+      }
+
       sendBtn.addEventListener('click', handleSend);
       textarea.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -793,7 +853,7 @@
       fetch('/api/chat/bootstrap', {
         method: 'POST',
         headers: bHeaders,
-        body: JSON.stringify({ widget_key: widgetKey }),
+        body: JSON.stringify({ widget_key: widgetKey, session_token: storedSession || undefined }),
       })
       .then(function(res) { return res.json(); })
       .then(function(data) {
@@ -809,6 +869,15 @@
           SamcheChatPersistence.hydrateHistory(messages, data.history, function(role, text) {
             appendMessage(role, text);
           });
+        } else if (messages.querySelectorAll('.samche-msg').length === 0) {
+          var welcome = (data.appearance && data.appearance.greeting)
+            || (data.assistant && data.assistant.greeting)
+            || 'Merhaba! SamChe Mağaza Asistanıyım. Ürün özellikleri, kablosuz şarj desteği, su geçirmezlik veya sipariş süreçleri hakkında bana danışabilirsiniz. Nasıl yardımcı olabilirim?';
+          appendMessage('bot', welcome);
+        }
+
+        if (data.browsing_state && data.browsing_state.current_entity && data.browsing_state.current_entity.entity_name) {
+          setContextBadge('Gözatılan: ' + data.browsing_state.current_entity.entity_name);
         }
 
         if (data.behavior && data.behavior.proactive_enabled) {
@@ -830,6 +899,13 @@
       .catch(function() {});
 
       initSpaNavigationListener(function(newContext) {
+        if (newContext) {
+          if (newContext.entity_name && newContext.entity_name !== 'SamChe Teknoloji Mağazası') {
+            setContextBadge('Gözatılan: ' + newContext.entity_name);
+          } else {
+            setContextBadge(null);
+          }
+        }
         if (sessionToken && newContext) {
           fetch('/api/chat/page-context', {
             method: 'POST',
@@ -837,8 +913,19 @@
               'Content-Type': 'application/json',
               'X-Samche-Web-Chat-Session': sessionToken,
             },
-            body: JSON.stringify(newContext),
-          }).catch(function() {});
+            body: JSON.stringify({ page_context: newContext }),
+          })
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            if (data && data.proactive_engagement && data.proactive_engagement.should_open && data.proactive_engagement.message) {
+              if (!isOpen && !proactiveState.hasUserMessaged) {
+                openPanel();
+                var botBubble = appendMessage('bot', '');
+                progressiveReveal(botBubble, data.proactive_engagement.message, { container: messages });
+              }
+            }
+          })
+          .catch(function() {});
         }
       });
 
@@ -847,24 +934,75 @@
         shadow: shadow,
         open: openPanel,
         close: closePanel,
+        toggle: function() { if (isOpen) closePanel(); else openPanel(); },
         applyTheme: applyTheme,
         appendMessage: appendMessage,
+        setChips: setChips,
+        setContextBadge: setContextBadge,
+        sendMessage: function(text) {
+          textarea.value = text;
+          handleSend();
+        },
+        isOpen: function() { return isOpen; },
+        getSessionToken: function() { return sessionToken; },
       };
       this.instances[widgetKey] = inst;
       return inst;
     }
   };
 
-  global.SamcheWebChat = SamcheCanonicalWidget;
+  global.SamcheWebChat = {
+    mount: SamcheCanonicalWidget.mount.bind(SamcheCanonicalWidget),
+    instances: SamcheCanonicalWidget.instances,
+    getInstance: function(key) {
+      if (key) return SamcheCanonicalWidget.instances[key] || null;
+      var keys = Object.keys(SamcheCanonicalWidget.instances);
+      return keys.length > 0 ? SamcheCanonicalWidget.instances[keys[0]] : null;
+    },
+    open: function(key) {
+      var i = this.getInstance(key);
+      if (i) i.open();
+    },
+    close: function(key) {
+      var i = this.getInstance(key);
+      if (i) i.close();
+    },
+    toggle: function(key) {
+      var i = this.getInstance(key);
+      if (i) i.toggle();
+    },
+    setChips: function(chips, key) {
+      var i = this.getInstance(key);
+      if (i) i.setChips(chips);
+    },
+    setContextBadge: function(text, key) {
+      var i = this.getInstance(key);
+      if (i) i.setContextBadge(text);
+    },
+    sendMessage: function(text, key) {
+      var i = this.getInstance(key);
+      if (i) i.sendMessage(text);
+    },
+  };
 
   if (typeof document !== 'undefined') {
     function autoInit() {
-      var companionEl = document.getElementById('chat-window');
-      if (companionEl) return;
       var scriptTag = document.querySelector('script[data-widget-key]');
-      if (scriptTag) {
-        var key = scriptTag.getAttribute('data-widget-key');
-        if (key) SamcheCanonicalWidget.mount({ widgetKey: key });
+      var key = scriptTag ? scriptTag.getAttribute('data-widget-key') : null;
+      if (!key && typeof window !== 'undefined' && window.location) {
+        try {
+          var urlKey = new URLSearchParams(window.location.search).get('widget_key');
+          if (urlKey) key = urlKey.trim();
+        } catch (e) {}
+      }
+      if (!key && typeof window !== 'undefined' && window.__SAMCHE_WEB_CHAT_KEY__) {
+        key = window.__SAMCHE_WEB_CHAT_KEY__;
+      }
+      if (!key && typeof window !== 'undefined' && window.location && window.location.pathname && window.location.pathname.indexOf('/task8-demo') !== -1) {
+        key = 'wch_staging_task8_demo';
+      }
+      if (key) {
+        SamcheCanonicalWidget.mount({ widgetKey: key });
       }
     }
     if (document.readyState === 'loading') {

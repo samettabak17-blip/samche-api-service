@@ -55,6 +55,7 @@ jobs:
         run: >
           node --test
           tests/task8-demo-fixture.test.js
+          tests/web-chat-e2e-browser.test.js
           tests/tenant-web-chat-provisioning-service.test.js
           tests/public-web-chat-integration-service.test.js
           tests/public-web-chat-runtime-integration.test.js
