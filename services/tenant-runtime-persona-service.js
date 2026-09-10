@@ -36,7 +36,12 @@ export async function resolveTenantRuntimePersona({ database, tenantId, assistan
   const companyIdentity = text(profile?.company_identity || profile?.company_display_name, 255);
   const assistantIdentity = text(configuration?.assistant_identity, 255);
   const platformAssistantMetadata = text(active?.assistant_metadata_name, 255);
-  const isPlatformMetadataLeak = Boolean(platformAssistantMetadata && assistantIdentity === platformAssistantMetadata);
+  const isPlatformMetadataLeak = Boolean(
+    platformAssistantMetadata &&
+    assistantIdentity === platformAssistantMetadata &&
+    platformAssistantMetadata.toLowerCase().includes('samche') &&
+    !companyIdentity.toLowerCase().includes('samche')
+  );
   if (!active?.id || !active?.active_business_profile_version_id || profileVersion !== 2 || configurationVersion !== 2 || !companyIdentity || !assistantIdentity || isPlatformMetadataLeak) {
     return { available: false, code: 'TENANT_PERSONA_NOT_ACTIVE' };
   }

@@ -75,11 +75,12 @@ async function bootstrapTask8Demo(options = {}) {
     let assistantId;
     if (assistantResult.rowCount > 0) {
       assistantId = assistantResult.rows[0].id;
+      await client.query("UPDATE ai_assistants SET name = 'Web Chat Core' WHERE id = $1", [assistantId]);
       console.log(`[3/4] AI Assistant resolved: ${assistantId} (${assistantResult.rows[0].name})`);
     } else {
       const created = await client.query(
         `INSERT INTO ai_assistants (tenant_id, name, model, status)
-         VALUES ($1, 'SamChe Teknoloji Danışmanı', 'gemini-2.5-flash', 'active')
+         VALUES ($1, 'Web Chat Core', 'gemini-2.5-flash', 'active')
          RETURNING id, name, model, status`,
         [tenantId]
       );
