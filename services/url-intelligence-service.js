@@ -713,7 +713,7 @@ export async function analyzeRemoteImageMultimodal({
   userText = '',
   geminiProvider = null,
   runtimeModel = null,
-  timeoutMs = 7000,
+  timeoutMs = 4000,
 } = {}) {
   let provider = geminiProvider;
   if (!provider) {
@@ -757,10 +757,16 @@ export async function analyzeRemoteImageMultimodal({
     : 'Analyze this image and extract its visible characteristics according to your instructions.';
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timer = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new UrlIntelligenceError('IMAGE_ANALYSIS_TIMEOUT', 'Remote image analysis timed out.'));
+    }, timeoutMs);
+  });
 
   try {
-    const response = await provider.generateContent({
+    const generatePromise = provider.generateContent({
       model: resolvedModel,
       contents: [{ role: 'user', parts: [{ text: promptText }, imagePart] }],
       systemInstruction: { parts: [{ text: systemInstruction }] },
@@ -769,6 +775,8 @@ export async function analyzeRemoteImageMultimodal({
       },
       signal: controller.signal,
     });
+
+    const response = await Promise.race([generatePromise, timeoutPromise]);
 
     const rawText = response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
     if (!rawText) {
@@ -807,12 +815,12 @@ export async function analyzeRemoteImageMultimodal({
       };
     }
   } catch (err) {
-    if (controller.signal.aborted || err?.name === 'AbortError') {
+    if (controller.signal.aborted || err?.name === 'AbortError' || err?.code === 'IMAGE_ANALYSIS_TIMEOUT') {
       throw new UrlIntelligenceError('IMAGE_ANALYSIS_TIMEOUT', 'Remote image analysis timed out.');
     }
     throw err;
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
   }
 }
 
