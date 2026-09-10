@@ -390,25 +390,6 @@ async function verifyStagingTask8Demo() {
     const bootHighData = await bootHighRes.json();
     const sessionHigh = bootHighData.session || bootHighData.conversation_session || bootHighData.token;
 
-    await fetchWithTimeout(`${BASE_URL}/api/chat/page-context`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Samche-Web-Chat-Session': sessionHigh,
-      },
-      body: JSON.stringify({
-        page_context: {
-          title: 'Titan Akıllı Saat Pro | SamChe Teknoloji',
-          url: `${BASE_URL}/task8-demo/#/urun/titan-akilli-saat-pro`,
-          entity_type: 'product',
-          entity_id: 'prod-watch-titan',
-          entity_name: 'Titan Akıllı Saat Pro',
-          attributes: { price: 2499, category: 'Smartwatch' },
-        },
-        dwell_seconds: 5,
-      }),
-    });
-
     const highCtxRes = await fetchWithTimeout(`${BASE_URL}/api/chat/page-context`, {
       method: 'POST',
       headers: {
