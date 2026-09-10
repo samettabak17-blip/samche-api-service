@@ -98,6 +98,13 @@ async function bootstrapTask8Demo(options = {}) {
       displayName: 'SamChe Teknoloji Web Chat',
       allowedOrigins: ['*'],
       welcomeMessage: 'Merhaba! SamChe Teknoloji Mağazasına hoş geldiniz. Size nasıl yardımcı olabilirim?',
+      behavior: {
+        proactive_enabled: true,
+        high_intent_activation: true,
+        dwell_threshold_seconds: 15,
+        cooldown_seconds: 300,
+        language: 'tr'
+      },
       metadata: {
         environment: 'staging',
         fixture: 'task8-demo',

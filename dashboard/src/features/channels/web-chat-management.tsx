@@ -28,6 +28,25 @@ import type {
 
 type TabKey = 'general' | 'appearance' | 'behavior' | 'preview' | 'installation';
 
+function getAccessibleForeground(bgColor: string): string {
+  try {
+    const hex = (bgColor || '').replace('#', '').trim();
+    if (hex.length !== 6 && hex.length !== 3) return '#FFFFFF';
+    const r = parseInt(hex.length === 3 ? hex[0] + hex[0] : hex.slice(0, 2), 16);
+    const g = parseInt(hex.length === 3 ? hex[1] + hex[1] : hex.slice(2, 4), 16);
+    const b = parseInt(hex.length === 3 ? hex[2] + hex[2] : hex.slice(4, 6), 16);
+    const sRGB = [r, g, b].map((v) => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    });
+    const lum = 0.2126 * sRGB[0] + 0.7152 * sRGB[1] + 0.0722 * sRGB[2];
+    const whiteRatio = (1.0 + 0.05) / (lum + 0.05);
+    return whiteRatio >= 4.5 ? '#FFFFFF' : '#0F172A';
+  } catch {
+    return '#FFFFFF';
+  }
+}
+
 export function WebChatManagement() {
   const { tenantId } = useParams();
   const { canManage } = useTenant();
@@ -119,6 +138,8 @@ export function WebChatManagement() {
       setContrastResult(res);
     },
   });
+
+  const primaryFg = contrastResult?.tokens?.primary_foreground || getAccessibleForeground(primaryColor);
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -678,14 +699,14 @@ export function WebChatManagement() {
                 >
                   <div className="flex items-center gap-3">
                     <div
-                      className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold text-white shadow"
-                      style={{ background: primaryColor }}
+                      className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shadow"
+                      style={{ background: primaryColor, color: primaryFg }}
                     >
                       {brandName ? brandName.charAt(0).toUpperCase() : 'S'}
                     </div>
                     <div>
                       <h3 className="text-sm font-semibold text-white">{title || brandName || 'Web Chat'}</h3>
-                      <p className="text-[11px] text-stone-400">{subtitle || 'Online • Active now'}</p>
+                      <p className="text-[11px] text-stone-300">{subtitle || 'Online • Active now'}</p>
                     </div>
                   </div>
                 </div>
@@ -693,10 +714,11 @@ export function WebChatManagement() {
                 <div className="p-4 space-y-3 h-48 overflow-y-auto text-xs">
                   <div className="flex flex-col items-start">
                     <div
-                      className="max-w-[85%] rounded-2xl px-3.5 py-2 text-stone-100"
+                      className="max-w-[85%] rounded-2xl px-3.5 py-2 font-normal"
                       style={{
                         background: 'rgba(255, 255, 255, 0.08)',
-                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        color: '#F8FAFC',
                       }}
                     >
                       Merhaba! Size nasıl yardımcı olabilirim?
@@ -705,8 +727,8 @@ export function WebChatManagement() {
 
                   <div className="flex flex-col items-end">
                     <div
-                      className="max-w-[85%] rounded-2xl px-3.5 py-2 font-medium text-white"
-                      style={{ background: primaryColor }}
+                      className="max-w-[85%] rounded-2xl px-3.5 py-2 font-medium"
+                      style={{ background: primaryColor, color: primaryFg }}
                     >
                       Kargo ve teslimat süreleri hakkında bilgi alabilir miyim?
                     </div>
@@ -721,12 +743,12 @@ export function WebChatManagement() {
                     type="text"
                     disabled
                     placeholder="Bir mesaj yazın..."
-                    className="flex-1 bg-white/[0.06] border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-stone-500 focus:outline-none"
+                    className="flex-1 bg-white/[0.06] border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-stone-400 focus:outline-none"
                   />
                   <button
                     type="button"
-                    className="h-8 w-8 rounded-xl flex items-center justify-center text-white shadow"
-                    style={{ background: primaryColor }}
+                    className="h-8 w-8 rounded-xl flex items-center justify-center shadow"
+                    style={{ background: primaryColor, color: primaryFg }}
                   >
                     <Send size={13} />
                   </button>
@@ -734,9 +756,10 @@ export function WebChatManagement() {
               </div>
 
               <div
-                className="h-14 w-14 rounded-full flex items-center justify-center text-white shadow-xl cursor-pointer"
+                className="h-14 w-14 rounded-full flex items-center justify-center shadow-xl cursor-pointer"
                 style={{
                   background: primaryColor,
+                  color: primaryFg,
                   boxShadow: `0 10px 25px -4px ${primaryColor}77`,
                 }}
               >

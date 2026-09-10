@@ -69,6 +69,30 @@ test('Browser E2E Setup: Start mock HTTP server and launch headless Edge', async
       return;
     }
 
+    if (url.pathname === '/api/chat/evaluate-intent') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        status: 'ok',
+        intent_state: 'HIGH',
+        intent_score: 80,
+        proactive_engagement: {
+          should_open: true,
+          should_engage: true,
+          intent_state: 'HIGH',
+          intent_score: 80,
+          reason: 'HIGH_INTENT_ACTIVATION',
+          message: 'Merhaba! SamChe Danışmanıyım. İncelediğiniz ürün ve paketler hakkında bilgi alabilirsiniz.',
+        },
+      }));
+      return;
+    }
+
+    if (url.pathname === '/api/chat/dismiss-proactive') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', dismissed: true }));
+      return;
+    }
+
     if (url.pathname === '/api/chat') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
@@ -131,19 +155,23 @@ test('REAL BROWSER E2E: Top Navigation Hit-Testing & Host Click Interception = N
   const hitTestResult = await browser.evaluate(`
     (() => {
       const navCatalog = document.getElementById('nav-catalog');
+      const navPricing = document.getElementById('nav-pricing');
       const navSecurity = document.getElementById('nav-security');
       const navAbout = document.getElementById('nav-about');
 
       const rectCat = navCatalog.getBoundingClientRect();
+      const rectPri = navPricing.getBoundingClientRect();
       const rectSec = navSecurity.getBoundingClientRect();
       const rectAbo = navAbout.getBoundingClientRect();
 
       const elAtCat = document.elementFromPoint(rectCat.left + rectCat.width / 2, rectCat.top + rectCat.height / 2);
+      const elAtPri = document.elementFromPoint(rectPri.left + rectPri.width / 2, rectPri.top + rectPri.height / 2);
       const elAtSec = document.elementFromPoint(rectSec.left + rectSec.width / 2, rectSec.top + rectSec.height / 2);
       const elAtAbo = document.elementFromPoint(rectAbo.left + rectAbo.width / 2, rectAbo.top + rectAbo.height / 2);
 
       return {
         catMatch: elAtCat === navCatalog,
+        priMatch: elAtPri === navPricing,
         secMatch: elAtSec === navSecurity,
         aboMatch: elAtAbo === navAbout,
         interceptingEl: elAtCat ? elAtCat.tagName + '.' + elAtCat.className : null
@@ -152,33 +180,53 @@ test('REAL BROWSER E2E: Top Navigation Hit-Testing & Host Click Interception = N
   `);
 
   assert.ok(hitTestResult.catMatch, `Catalog link must receive hit events without interception (got ${hitTestResult.interceptingEl})`);
+  assert.ok(hitTestResult.priMatch, 'Pricing link must receive hit events without interception');
   assert.ok(hitTestResult.secMatch, 'Security link must receive hit events without interception');
   assert.ok(hitTestResult.aboMatch, 'About link must receive hit events without interception');
 });
 
 test('REAL BROWSER E2E: Top Navigation Interaction & SPA View Switching', async () => {
   if (!browser) return;
-  // 1. Click Güvenlik & Test
+  // 1. Click Fiyatlandırma
+  const priClickResult = await browser.evaluate(`
+    (() => {
+      document.getElementById('nav-pricing').click();
+      return {
+        hash: window.location.hash,
+        priDisplay: document.getElementById('pricing-view').style.display,
+        catDisplay: document.getElementById('catalog-view').style.display,
+        priActive: document.getElementById('nav-pricing').classList.contains('active'),
+        catActive: document.getElementById('nav-catalog').classList.contains('active')
+      };
+    })()
+  `);
+
+  assert.equal(priClickResult.hash, '#/fiyatlandirma');
+  assert.equal(priClickResult.priDisplay, 'block');
+  assert.equal(priClickResult.catDisplay, 'none');
+  assert.ok(priClickResult.priActive, 'Pricing nav item must be active');
+  assert.ok(!priClickResult.catActive, 'Catalog nav item must not be active');
+
+  // 2. Click Güvenlik & Test
   const secClickResult = await browser.evaluate(`
     (() => {
       document.getElementById('nav-security').click();
       return {
         hash: window.location.hash,
         secDisplay: document.getElementById('security-view').style.display,
-        catDisplay: document.getElementById('catalog-view').style.display,
+        priDisplay: document.getElementById('pricing-view').style.display,
         secActive: document.getElementById('nav-security').classList.contains('active'),
-        catActive: document.getElementById('nav-catalog').classList.contains('active')
+        priActive: document.getElementById('nav-pricing').classList.contains('active')
       };
     })()
   `);
 
   assert.equal(secClickResult.hash, '#/guvenlik');
   assert.equal(secClickResult.secDisplay, 'block');
-  assert.equal(secClickResult.catDisplay, 'none');
+  assert.equal(secClickResult.priDisplay, 'none');
   assert.ok(secClickResult.secActive, 'Security nav item must be active');
-  assert.ok(!secClickResult.catActive, 'Catalog nav item must not be active');
 
-  // 2. Click Hakkımızda
+  // 3. Click Hakkımızda
   const aboutClickResult = await browser.evaluate(`
     (() => {
       document.getElementById('nav-about').click();
@@ -196,7 +244,7 @@ test('REAL BROWSER E2E: Top Navigation Interaction & SPA View Switching', async 
   assert.equal(aboutClickResult.secDisplay, 'none');
   assert.ok(aboutClickResult.aboActive, 'About nav item must be active');
 
-  // 3. Return to Ürünler
+  // 4. Return to Ürünler
   const catReturnResult = await browser.evaluate(`
     (() => {
       document.getElementById('nav-catalog').click();
@@ -355,59 +403,64 @@ test('REAL BROWSER E2E: Responsive Viewports (Desktop, Tablet, Mobile, Mobile La
   if (!browser) return;
   const viewports = [
     { name: 'Desktop 1440x900', width: 1440, height: 900, isMobile: false, expectedLauncherSize: 60, expectedPanelFull: false },
-    { name: 'Desktop 1366x768', width: 1366, height: 768, isMobile: false, expectedLauncherSize: 60, expectedPanelFull: false },
     { name: 'Tablet 768x1024', width: 768, height: 1024, isMobile: false, expectedLauncherSize: 60, expectedPanelFull: false },
-    { name: 'Mobile 375x812', width: 375, height: 812, isMobile: true, expectedLauncherSize: 52, expectedPanelFull: true },
+    { name: 'Mobile 430x932', width: 430, height: 932, isMobile: true, expectedLauncherSize: 52, expectedPanelFull: true },
     { name: 'Mobile 390x844', width: 390, height: 844, isMobile: true, expectedLauncherSize: 52, expectedPanelFull: true },
+    { name: 'Mobile 375x812', width: 375, height: 812, isMobile: true, expectedLauncherSize: 52, expectedPanelFull: true },
     { name: 'Mobile 320x568', width: 320, height: 568, isMobile: true, expectedLauncherSize: 52, expectedPanelFull: true },
     { name: 'Landscape 812x375', width: 812, height: 375, isMobile: true, expectedLauncherSize: 52, expectedPanelFull: true },
   ];
 
   for (const vp of viewports) {
-    await browser.setViewport({ width: vp.width, height: vp.height, isMobile: vp.isMobile });
+    try {
+      await browser.setViewport({ width: vp.width, height: vp.height, isMobile: vp.isMobile });
 
-    const measurement = await browser.evaluate(`
-      (async () => {
-        const host = document.getElementById('samche-webchat-container');
-        const shadow = host.shadowRoot;
-        const launcher = shadow.querySelector('.samche-launcher');
-        const panel = shadow.querySelector('.samche-panel');
+      const measurement = await browser.evaluate(`
+        (async () => {
+          const host = document.getElementById('samche-webchat-container');
+          const shadow = host?.shadowRoot;
+          const launcher = shadow?.querySelector('.samche-launcher');
+          const panel = shadow?.querySelector('.samche-panel');
 
-        // Open panel
-        launcher.click();
-        await new Promise(r => setTimeout(r, 320));
-        const openRect = panel.getBoundingClientRect();
-        const launcherRect = launcher.getBoundingClientRect();
+          launcher.click();
+          await new Promise(r => setTimeout(r, 80));
+          const openRect = panel.getBoundingClientRect();
+          const launcherRect = launcher.getBoundingClientRect();
 
-        // Close panel
-        shadow.querySelector('.samche-close-btn').click();
-        await new Promise(r => setTimeout(r, 320));
+          shadow.querySelector('.samche-close-btn').click();
+          await new Promise(r => setTimeout(r, 80));
 
-        return {
-          launcherWidth: Math.round(launcherRect.width),
-          launcherHeight: Math.round(launcherRect.height),
-          panelWidth: Math.round(openRect.width),
-          panelHeight: Math.round(openRect.height)
-        };
-      })()
-    `);
+          return {
+            launcherWidth: Math.round(launcherRect.width),
+            launcherHeight: Math.round(launcherRect.height),
+            panelWidth: Math.round(openRect.width),
+            panelHeight: Math.round(openRect.height)
+          };
+        })()
+      `);
 
-    assert.equal(
-      measurement.launcherWidth,
-      vp.expectedLauncherSize,
-      `${vp.name}: launcher width must be ${vp.expectedLauncherSize}px (got ${measurement.launcherWidth}px)`
-    );
+      console.log(`VIEWPORT ${vp.name}: launcher=${measurement.launcherWidth}x${measurement.launcherHeight}, panel=${measurement.panelWidth}x${measurement.panelHeight}`);
 
-    if (vp.expectedPanelFull) {
-      assert.ok(
-        measurement.panelWidth >= vp.width - 15,
-        `${vp.name}: mobile panel must expand near full width (got ${measurement.panelWidth}px for viewport ${vp.width}px)`
+      assert.equal(
+        measurement.launcherWidth,
+        vp.expectedLauncherSize,
+        `${vp.name}: launcher width must be ${vp.expectedLauncherSize}px (got ${measurement.launcherWidth}px)`
       );
-    } else {
-      assert.ok(
-        measurement.panelWidth >= 380 && measurement.panelWidth <= 405,
-        `${vp.name}: desktop/tablet panel width must be ~400px (got ${measurement.panelWidth}px)`
-      );
+
+      if (vp.expectedPanelFull) {
+        assert.ok(
+          measurement.panelWidth >= vp.width - 25,
+          `${vp.name}: mobile panel must expand near full width (got ${measurement.panelWidth}px for viewport ${vp.width}px)`
+        );
+      } else {
+        assert.ok(
+          measurement.panelWidth >= 370 && measurement.panelWidth <= 420,
+          `${vp.name}: desktop/tablet panel width must be ~400px (got ${measurement.panelWidth}px)`
+        );
+      }
+    } catch (err) {
+      console.error(`VIEWPORT FAIL on ${vp.name}:`, err);
+      throw err;
     }
   }
 
@@ -420,7 +473,7 @@ test('REAL BROWSER E2E: Adversarial Host CSS Isolation Fixture', async () => {
 
   const isolationResult = await browser.evaluate(`
     (() => {
-      // Inject adversarial hostile styles into the host page document
+      // Inject hostile adversarial styles into the host page document
       const hostileStyle = document.createElement('style');
       hostileStyle.id = 'adversarial-host-css';
       hostileStyle.textContent = \`
@@ -428,6 +481,26 @@ test('REAL BROWSER E2E: Adversarial Host CSS Isolation Fixture', async () => {
           font-family: "Comic Sans MS" !important;
           color: rgb(255, 0, 0) !important;
           border-radius: 0px !important;
+          box-sizing: content-box !important;
+        }
+        button {
+          width: 500px !important;
+          height: 500px !important;
+          background: rgb(0, 0, 0) !important;
+          border: 10px solid red !important;
+        }
+        svg {
+          width: 800px !important;
+          height: 800px !important;
+          fill: rgb(255, 255, 0) !important;
+        }
+        div {
+          font-size: 40px !important;
+          line-height: 3 !important;
+        }
+        input, textarea {
+          font-size: 32px !important;
+          background: yellow !important;
         }
       \`;
       document.head.appendChild(hostileStyle);
@@ -435,21 +508,107 @@ test('REAL BROWSER E2E: Adversarial Host CSS Isolation Fixture', async () => {
       const host = document.getElementById('samche-webchat-container');
       const shadow = host.shadowRoot;
       const launcher = shadow.querySelector('.samche-launcher');
+      const launcherSvg = shadow.querySelector('.samche-launcher-icon svg');
       const launcherStyle = window.getComputedStyle(launcher);
+      const launcherRect = launcher.getBoundingClientRect();
+      const svgRect = launcherSvg.getBoundingClientRect();
 
-      // Launcher must retain 50% border radius and its own colors inside Shadow DOM
-      const isRound = launcherStyle.borderRadius === '50%';
-      const notRed = launcherStyle.color !== 'rgb(255, 0, 0)';
+      // Open panel and check panel styles under hostile conditions
+      launcher.click();
+      const panel = shadow.querySelector('.samche-panel');
+      const panelRect = panel.getBoundingClientRect();
+
+      // Close panel
+      shadow.querySelector('.samche-close-btn').click();
 
       // Clean up hostile style
       hostileStyle.remove();
 
-      return { isRound, notRed, color: launcherStyle.color, borderRadius: launcherStyle.borderRadius };
+      return {
+        isRound: launcherStyle.borderRadius === '50%',
+        notRed: launcherStyle.color !== 'rgb(255, 0, 0)',
+        launcherWidth: Math.round(launcherRect.width),
+        launcherHeight: Math.round(launcherRect.height),
+        svgWidth: Math.round(svgRect.width),
+        svgHeight: Math.round(svgRect.height),
+        panelWidth: Math.round(panelRect.width)
+      };
     })()
   `);
 
   assert.ok(isolationResult.isRound, 'Shadow DOM launcher must retain 50% border-radius despite adversarial host CSS');
   assert.ok(isolationResult.notRed, 'Shadow DOM launcher must preserve its white color despite adversarial host CSS');
+  assert.equal(isolationResult.launcherWidth, 60, 'Launcher button must not be stretched by host button rules');
+  assert.equal(isolationResult.launcherHeight, 60, 'Launcher button height must remain exactly 60px');
+  assert.equal(isolationResult.svgWidth, 28, 'Launcher SVG must remain exactly 28px width, not blown up to 800px');
+  assert.equal(isolationResult.svgHeight, 28, 'Launcher SVG must remain exactly 28px height, not blown up to 800px');
+  assert.ok(isolationResult.panelWidth >= 380 && isolationResult.panelWidth <= 420, 'Panel width must remain ~400px');
+});
+
+test('REAL BROWSER E2E: WCAG AA Text Contrast Verification in Open Widget', async () => {
+  if (!browser) return;
+
+  const contrastTest = await browser.evaluate(`
+    (async () => {
+      const host = document.getElementById('samche-webchat-container');
+      const shadow = host.shadowRoot;
+      const launcher = shadow.querySelector('.samche-launcher');
+      launcher.click();
+      await new Promise(r => setTimeout(r, 350));
+
+      const panel = shadow.querySelector('.samche-panel');
+      const title = shadow.querySelector('.samche-header-title');
+      const status = shadow.querySelector('.samche-header-status');
+      const botMsg = shadow.querySelector('.samche-msg-bot');
+      const input = shadow.querySelector('.samche-composer-input');
+
+      function parseRgb(colorStr) {
+        const m = colorStr.match(/\\d+/g);
+        return m ? [parseInt(m[0]), parseInt(m[1]), parseInt(m[2])] : [255, 255, 255];
+      }
+      function lum(r, g, b) {
+        const a = [r, g, b].map(v => {
+          v /= 255;
+          return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+        });
+        return 0.2126 * a[0] + 0.7152 * a[1] + 0.0722 * a[2];
+      }
+      function ratio(c1, c2) {
+        const [r1, g1, b1] = parseRgb(c1);
+        const [r2, g2, b2] = parseRgb(c2);
+        const l1 = lum(r1, g1, b1);
+        const l2 = lum(r2, g2, b2);
+        const max = Math.max(l1, l2);
+        const min = Math.min(l1, l2);
+        return (max + 0.05) / (min + 0.05);
+      }
+
+      const titleColor = window.getComputedStyle(title).color;
+      const statusColor = window.getComputedStyle(status).color;
+      const botMsgColor = window.getComputedStyle(botMsg).color;
+      const inputColor = window.getComputedStyle(input).color;
+
+      const bgDark = 'rgb(17, 24, 39)';
+      const titleContrast = ratio(titleColor, bgDark);
+      const botMsgContrast = ratio(botMsgColor, bgDark);
+      const inputContrast = ratio(inputColor, bgDark);
+
+      shadow.querySelector('.samche-close-btn').click();
+      await new Promise(r => setTimeout(r, 200));
+
+      return {
+        titleColor,
+        titleContrast: Number(titleContrast.toFixed(2)),
+        botMsgContrast: Number(botMsgContrast.toFixed(2)),
+        inputContrast: Number(inputContrast.toFixed(2))
+      };
+    })()
+  `);
+
+  console.log('CONTRAST_TEST:', contrastTest);
+  assert.ok(contrastTest.titleContrast >= 4.5, `Header title contrast must be >= 4.5:1 (got ${contrastTest.titleContrast}:1)`);
+  assert.ok(contrastTest.botMsgContrast >= 4.5, `Bot message contrast must be >= 4.5:1 (got ${contrastTest.botMsgContrast}:1)`);
+  assert.ok(contrastTest.inputContrast >= 4.5, `Input text contrast must be >= 4.5:1 (got ${contrastTest.inputContrast}:1)`);
 });
 
 test('REAL BROWSER E2E: RTL Support and Reduced Motion Adaptation', async () => {

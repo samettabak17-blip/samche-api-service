@@ -431,9 +431,22 @@ app.use(['/guide', '/:slug/guide'], async (req, res, next) => {
 }, sharedGuideStatic);
 
 app.use('/public', express.static('public'));
-app.get('/web-chat.js', (req, res) => res.sendFile(path.resolve('public', 'web-chat.js')));
-app.use('/task8-demo', express.static(path.resolve('public', 'task8-demo')));
-app.get(['/task8-demo', '/task8-demo/*'], (req, res) => res.sendFile(path.resolve('public', 'task8-demo', 'index.html')));
+app.get('/web-chat.js', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  return res.sendFile(path.resolve('public', 'web-chat.js'));
+});
+app.use('/task8-demo', express.static(path.resolve('public', 'task8-demo'), {
+  setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  }
+}));
+app.get(['/task8-demo', '/task8-demo/*'], (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  return res.sendFile(path.resolve('public', 'task8-demo', 'index.html'));
+});
 
 
 

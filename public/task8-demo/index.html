@@ -120,6 +120,7 @@
       </a>
       <nav>
         <a href="#/" class="active" id="nav-catalog" onclick="navigateTo('#/')">Ürünler</a>
+        <a href="#/fiyatlandirma" id="nav-pricing" onclick="navigateTo('#/fiyatlandirma')">Fiyatlandırma</a>
         <a href="#/guvenlik" id="nav-security" onclick="navigateTo('#/guvenlik')">Güvenlik & Test</a>
         <a href="#/hakkimizda" id="nav-about" onclick="navigateTo('#/hakkimizda')">Hakkımızda</a>
       </nav>
@@ -156,6 +157,61 @@
       <button class="btn-back" id="btn-back-to-catalog">← Tüm Ürünlere Dön</button>
       <div class="detail-grid" id="detail-content">
         <!-- Injected via JavaScript -->
+      </div>
+    </div>
+
+    <!-- Pricing View (High Intent Commercial Surface) -->
+    <div id="pricing-view" class="about-view" style="display: none;">
+      <div class="section-header">
+        <h2>Kurumsal & Bireysel Paket Fiyatları</h2>
+        <p>İhtiyacınıza uygun teknoloji paketini seçin, anında sipariş verin veya uzman danışmanımızdan özel teklif alın.</p>
+      </div>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <span style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: var(--primary); letter-spacing: 0.05em;">Bireysel Paket</span>
+          <h3 style="margin-top: 0.25rem;">Giyilebilir Pro Set</h3>
+          <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary); margin: 0.5rem 0;">3.899 TL</div>
+          <p>SamChe Titan Akıllı Saat Pro + Ses Pro ANC Kulaklık avantajlı ikili set.</p>
+          <ul class="product-specs" style="margin: 0.75rem 0; font-size: 0.85rem;">
+            <li>✓ 14 Gün AMOLED Akıllı Saat</li>
+            <li>✓ 40dB Aktif Gürültü Engelleme</li>
+            <li>✓ Ücretsiz Aynı Gün Hızlı Kargo</li>
+          </ul>
+          <button class="btn-action" style="margin-top: 0.75rem; width: 100%; justify-content: center;" onclick="openAssistantWithPrompt('Giyilebilir Pro Set paket avantajları ve satın alma süreci hakkında bilgi verir misiniz?')">
+            💬 Paketi Asistana Sor
+          </button>
+        </div>
+
+        <div class="feature-card" style="border: 2px solid var(--primary); background: #ffffff;">
+          <span style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: var(--accent); letter-spacing: 0.05em;">⭐ ÇOK SATAN</span>
+          <h3 style="margin-top: 0.25rem;">FIDO2 5'li Kurumsal Kit</h3>
+          <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary); margin: 0.5rem 0;">2.799 TL</div>
+          <p>Şirket çalışanları ve BT ekipleri için 5 adet FIDO2/WebAuthn donanım anahtarı + kurulum kılavuzu.</p>
+          <ul class="product-specs" style="margin: 0.75rem 0; font-size: 0.85rem;">
+            <li>✓ 5 Adet Common Criteria EAL6+ Anahtar</li>
+            <li>✓ Kurumsal E-Fatura ve Toplu Alım</li>
+            <li>✓ 7/24 Öncelikli Canlı Asistan Desteği</li>
+          </ul>
+          <button class="btn-action" style="margin-top: 0.75rem; width: 100%; justify-content: center;" onclick="openAssistantWithPrompt('FIDO2 5li Kurumsal Kit için kurumsal fatura ve toplu alım şartları nelerdir?')">
+            💬 Kurumsal Teklif İste
+          </button>
+        </div>
+
+        <div class="feature-card">
+          <span style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: var(--primary); letter-spacing: 0.05em;">Seyahat & Mobil</span>
+          <h3 style="margin-top: 0.25rem;">Power & Go Paketi</h3>
+          <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary); margin: 0.5rem 0;">1.449 TL</div>
+          <p>Ultra 20.000 mAh 65W PD Hızlı Güç Bankası + Type-C 100W Hızlı Şarj Kablosu.</p>
+          <ul class="product-specs" style="margin: 0.75rem 0; font-size: 0.85rem;">
+            <li>✓ 20.000 mAh Laptop Destekli Güç</li>
+            <li>✓ 65W Çift Yönlü PD Hızlı Şarj</li>
+            <li>✓ Uçak Kabinine Uygun 74Wh Kapasite</li>
+          </ul>
+          <button class="btn-action" style="margin-top: 0.75rem; width: 100%; justify-content: center;" onclick="openAssistantWithPrompt('Power & Go paketi uçak seyahati ve laptop şarjı için uygun mu?')">
+            💬 Paketi Asistana Sor
+          </button>
+        </div>
       </div>
     </div>
 
@@ -230,6 +286,12 @@
   </footer>
 
   <!-- Load canonical web-chat widget runtime -->
+  <script>
+    (function() {
+      var k = new URLSearchParams(window.location.search).get('widget_key');
+      if (k && k.trim()) window.__SAMCHE_WEB_CHAT_KEY__ = k.trim();
+    })();
+  </script>
   <script src="/web-chat.js" data-widget-key="wch_staging_task8_demo"></script>
 
   <script>
@@ -345,6 +407,9 @@
     let currentProduct = null;
     let webChatSessionToken = null;
     const DEFAULT_WIDGET_KEY = 'wch_staging_task8_demo';
+    const activeWidgetKey = (typeof window !== 'undefined' && window.location)
+      ? (new URLSearchParams(window.location.search).get('widget_key')?.trim() || DEFAULT_WIDGET_KEY)
+      : DEFAULT_WIDGET_KEY;
 
     function updateJsonLd(product) {
       const scriptTag = document.getElementById('samche-schema-jsonld');
@@ -403,10 +468,10 @@
       const isProduct = Boolean(product);
       const title = customTitle || (isProduct ? `${product.name} - SamChe Teknoloji` : document.title);
       const contextData = {
-        entity_type: isProduct ? 'Product' : (pageType === 'security' ? 'SecurityPage' : (pageType === 'about' ? 'AboutPage' : 'Catalog')),
-        entity_name: isProduct ? product.name : (pageType === 'security' ? 'Güvenlik & Test Laboratuvarı' : (pageType === 'about' ? 'Hakkımızda' : 'SamChe Teknoloji Mağazası')),
+        entity_type: isProduct ? 'Product' : (pageType === 'pricing' ? 'PricingPage' : (pageType === 'security' ? 'SecurityPage' : (pageType === 'about' ? 'AboutPage' : 'Catalog'))),
+        entity_name: isProduct ? product.name : (pageType === 'pricing' ? 'Kurumsal & Bireysel Paket Fiyatları' : (pageType === 'security' ? 'Güvenlik & Test Laboratuvarı' : (pageType === 'about' ? 'Hakkımızda' : 'SamChe Teknoloji Mağazası'))),
         entity_id: isProduct ? product.id : (pageType ? `/task8-demo/#/${pageType}` : '/task8-demo/'),
-        summary: isProduct ? product.description : (pageType === 'security' ? 'SamChe çoklu kiracı güvenlik ve izolasyon mimarisi' : (pageType === 'about' ? 'SamChe Teknoloji kurumsal şirket ve iletişim bilgileri' : 'SamChe Teknoloji Ürün Kataloğu')),
+        summary: isProduct ? product.description : (pageType === 'pricing' ? 'Kurumsal ve bireysel teknoloji paketi fiyatları, FIDO2 kurumsal kit ve giyilebilir setler' : (pageType === 'security' ? 'SamChe çoklu kiracı güvenlik ve izolasyon mimarisi' : (pageType === 'about' ? 'SamChe Teknoloji kurumsal şirket ve iletişim bilgileri' : 'SamChe Teknoloji Ürün Kataloğu'))),
         attributes: isProduct ? {
           price: product.price,
           currency: product.currency,
@@ -446,7 +511,7 @@
       // Sessions are provisioned and restored via canonical /api/chat/bootstrap
       const sessionToken = (window.SamcheWebChat && typeof window.SamcheWebChat.getInstance === 'function')
         ? window.SamcheWebChat.getInstance()?.getSessionToken?.()
-        : (window.SamcheChatPersistence ? window.SamcheChatPersistence.getStoredSession('wch_staging_task8_demo') : null);
+        : (window.SamcheChatPersistence ? window.SamcheChatPersistence.getStoredSession(activeWidgetKey) : null);
 
       if (sessionToken) {
         fetch('/api/chat/page-context', {
@@ -465,6 +530,7 @@
       setActiveNav('nav-catalog');
       document.getElementById('catalog-view').style.display = 'block';
       document.getElementById('detail-view').style.display = 'none';
+      document.getElementById('pricing-view').style.display = 'none';
       document.getElementById('security-view').style.display = 'none';
       document.getElementById('about-view').style.display = 'none';
 
@@ -506,6 +572,7 @@
       document.title = `${product.name} - SamChe Teknoloji`;
       setActiveNav('nav-catalog');
       document.getElementById('catalog-view').style.display = 'none';
+      document.getElementById('pricing-view').style.display = 'none';
       document.getElementById('security-view').style.display = 'none';
       document.getElementById('about-view').style.display = 'none';
       document.getElementById('detail-view').style.display = 'block';
@@ -536,12 +603,27 @@
       syncPageContext(product, 'product_detail');
     }
 
+    function renderPricing() {
+      currentProduct = null;
+      document.title = "Paket Fiyatları & Teklif - SamChe Teknoloji";
+      setActiveNav('nav-pricing');
+      document.getElementById('catalog-view').style.display = 'none';
+      document.getElementById('detail-view').style.display = 'none';
+      document.getElementById('pricing-view').style.display = 'block';
+      document.getElementById('security-view').style.display = 'none';
+      document.getElementById('about-view').style.display = 'none';
+
+      updateJsonLd(null);
+      syncPageContext(null, 'pricing', 'Paket Fiyatları & Teklif - SamChe Teknoloji');
+    }
+
     function renderSecurity() {
       currentProduct = null;
       document.title = "Güvenlik & Test - SamChe Teknoloji";
       setActiveNav('nav-security');
       document.getElementById('catalog-view').style.display = 'none';
       document.getElementById('detail-view').style.display = 'none';
+      document.getElementById('pricing-view').style.display = 'none';
       document.getElementById('about-view').style.display = 'none';
       document.getElementById('security-view').style.display = 'block';
 
@@ -555,6 +637,7 @@
       setActiveNav('nav-about');
       document.getElementById('catalog-view').style.display = 'none';
       document.getElementById('detail-view').style.display = 'none';
+      document.getElementById('pricing-view').style.display = 'none';
       document.getElementById('security-view').style.display = 'none';
       document.getElementById('about-view').style.display = 'block';
 
@@ -595,6 +678,13 @@
             "Bunu önce baktığım ürünle karşılaştır"
           ];
         }
+      } else if (pageType === 'pricing') {
+        chips = [
+          "Bireysel ve kurumsal paket farkları nelerdir?",
+          "FIDO2 5'li Kurumsal Kit faturalandırması nasıl yapılır?",
+          "Toplu alımlarda indirim veya özel teklif alabilir miyim?",
+          "500 TL üzeri kargo ücretsiz mi?"
+        ];
       } else if (pageType === 'security') {
         chips = [
           "Kiracı veri izolasyonu nasıl sağlanıyor?",
@@ -631,6 +721,8 @@
       if (hash.startsWith('#/urun/')) {
         const slug = hash.replace('#/urun/', '').trim();
         renderDetail(slug);
+      } else if (hash.startsWith('#/fiyatlandirma')) {
+        renderPricing();
       } else if (hash.startsWith('#/guvenlik')) {
         renderSecurity();
       } else if (hash.startsWith('#/hakkimizda')) {

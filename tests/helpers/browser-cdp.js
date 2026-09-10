@@ -157,6 +157,11 @@ export class BrowserCdp {
     return res?.result?.value;
   }
 
+  async screenshot() {
+    const res = await this.send('Page.captureScreenshot', { format: 'png' });
+    return Buffer.from(res.data, 'base64');
+  }
+
   async setViewport({ width, height, deviceScaleFactor = 1, isMobile = false }) {
     await this.send('Emulation.setDeviceMetricsOverride', {
       width,
@@ -164,7 +169,7 @@ export class BrowserCdp {
       deviceScaleFactor,
       mobile: isMobile,
     });
-    await new Promise((r) => setTimeout(r, 150));
+    await new Promise((r) => setTimeout(r, 40));
   }
 
   async close() {

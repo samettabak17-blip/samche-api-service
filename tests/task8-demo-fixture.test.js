@@ -99,22 +99,25 @@ test('task8-demo fixture has zero leaked CSS source text in body', () => {
   }
 });
 
-test('task8-demo fixture implements all intended navigation views (catalog, security, about, detail)', () => {
+test('task8-demo fixture implements all intended navigation views (catalog, pricing, security, about, detail)', () => {
   const html = fs.readFileSync(fixturePath, 'utf8');
 
   // Top nav controls
   assert.match(html, /id=["']nav-catalog["']/);
+  assert.match(html, /id=["']nav-pricing["']/);
   assert.match(html, /id=["']nav-security["']/);
   assert.match(html, /id=["']nav-about["']/);
 
   // View containers
   assert.match(html, /id=["']catalog-view["']/);
+  assert.match(html, /id=["']pricing-view["']/);
   assert.match(html, /id=["']detail-view["']/);
   assert.match(html, /id=["']security-view["']/);
   assert.match(html, /id=["']about-view["']/);
 
   // Routing functions
   assert.match(html, /function\s+renderCatalog/);
+  assert.match(html, /function\s+renderPricing/);
   assert.match(html, /function\s+renderDetail/);
   assert.match(html, /function\s+renderSecurity/);
   assert.match(html, /function\s+renderAbout/);

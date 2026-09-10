@@ -282,15 +282,23 @@ export function evaluateVisitorIntent({
 
   // 7. Threshold Check
   const isHigh = intentState === INTENT_STATES.HIGH;
-  const shouldProactivelyEngage = isHigh;
-  const shouldAutoOpen = shouldProactivelyEngage && config.auto_open;
+  const isMedium = intentState === INTENT_STATES.MEDIUM;
+  const shouldProactivelyEngage = isHigh || isMedium;
+  const shouldAutoOpen = isHigh && config.auto_open;
+
+  let reason = 'BELOW_INTENT_THRESHOLD';
+  if (isHigh) {
+    reason = 'HIGH_INTENT_ACTIVATION';
+  } else if (isMedium) {
+    reason = 'MEDIUM_INTENT_NUDGE';
+  }
 
   return {
     score,
     intentState,
     shouldProactivelyEngage,
     shouldAutoOpen,
-    reason: isHigh ? 'HIGH_INTENT_ACTIVATION' : 'BELOW_INTENT_THRESHOLD',
+    reason,
     signals,
   };
 }
