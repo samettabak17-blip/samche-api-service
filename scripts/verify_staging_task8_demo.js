@@ -381,7 +381,7 @@ async function verifyStagingTask8Demo() {
     console.log(`      ✓ Scenario A (Low Intent): ${lowPass ? 'PASS (launcher remains closed)' : 'FAIL'}`);
 
     // Scenario B: High Intent
-    console.log('      Executing Scenario B (High Intent Activation)...');
+    console.log('      Executing Scenario B (High Intent via Browsing Sequence & Dwell)...');
     const bootHighRes = await fetchWithTimeout(`${BASE_URL}/api/chat/bootstrap`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -390,7 +390,8 @@ async function verifyStagingTask8Demo() {
     const bootHighData = await bootHighRes.json();
     const sessionHigh = bootHighData.session || bootHighData.conversation_session || bootHighData.token;
 
-    const highCtxRes = await fetchWithTimeout(`${BASE_URL}/api/chat/page-context`, {
+    // Step 1: Navigates to product (dwell = 0): should NOT auto-open prematurely
+    const navCtxRes = await fetchWithTimeout(`${BASE_URL}/api/chat/page-context`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -398,23 +399,39 @@ async function verifyStagingTask8Demo() {
       },
       body: JSON.stringify({
         page_context: {
-          title: 'Ultra Güç Bankası 20000mAh | SamChe Teknoloji',
-          url: `${BASE_URL}/task8-demo/#/urun/ultra-guc-bankasi-20000mah`,
-          entity_type: 'product',
-          entity_id: 'prod-powerbank-20k',
-          entity_name: 'Ultra Güç Bankası 20000mAh',
-          attributes: { price: 899, category: 'Power' },
+          title: 'Titan Akıllı Saat Pro | SamChe Teknoloji',
+          url: `${BASE_URL}/task8-demo/#/urun/titan-akilli-saat-pro`,
+          entity_type: 'Product',
+          entity_id: 'prod-watch-titan',
+          entity_name: 'Titan Akıllı Saat Pro',
+          attributes: { price: 2499, category: 'Giyilebilir Teknoloji' },
+          page_type: 'product_detail',
         },
-        dwell_seconds: 22,
+        dwell_seconds: 0,
       }),
     });
-    const highCtxData = await highCtxRes.json();
-    const highPass = highCtxData.proactive_engagement?.should_open === true
-      && Boolean(highCtxData.proactive_engagement?.message);
+    const navCtxData = await navCtxRes.json();
+    const navOk = navCtxData.proactive_engagement?.should_open === false;
+
+    // Step 2: Dwells for configured dwell threshold (>= 15s): evaluate-intent reaches HIGH intent and auto-opens
+    const evalIntentRes = await fetchWithTimeout(`${BASE_URL}/api/chat/evaluate-intent`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Samche-Web-Chat-Session': sessionHigh,
+      },
+      body: JSON.stringify({
+        dwell_seconds: 16,
+      }),
+    });
+    const evalIntentData = await evalIntentRes.json();
+    const highPass = navOk && evalIntentData.proactive_engagement?.should_open === true
+      && Boolean(evalIntentData.proactive_engagement?.message)
+      && evalIntentData.intent_state === 'HIGH';
     results.HIGH_INTENT_AUTO_OPEN = highPass ? 'PASS' : 'FAIL';
     results.CONTEXTUAL_PROACTIVE_MESSAGE = highPass ? 'PASS' : 'FAIL';
     results.PROACTIVE_CHAT_ENGINE = highPass ? 'PASS' : 'FAIL';
-    console.log(`      ✓ Scenario B (High Intent): ${highPass ? 'PASS (auto-opened with proactive copy)' : 'FAIL'}`);
+    console.log(`      ✓ Scenario B (High Intent): ${highPass ? 'PASS (arrival preserved medium, dwell auto-opened with grounded copy)' : 'FAIL'}`);
 
     // Scenario C: Dismissal - Close chat, continue navigation -> Cooldown suppressed
     console.log('      Executing Scenario C (Dismissal & Frequency Capping)...');
@@ -451,8 +468,24 @@ async function verifyStagingTask8Demo() {
     results.PROACTIVE_FREQUENCY_CAP = dismissPass ? 'PASS' : 'FAIL';
     console.log(`      ✓ Scenario C (Dismissal): ${dismissPass ? 'PASS (cooldown respected)' : 'FAIL'}`);
 
-    // Scenario D: Active Conversation Safety
-    console.log('      Executing Scenario D (Active Conversation Safety)...');
+    // Scenario D: Refresh Persistence
+    console.log('      Executing Scenario D (Refresh & Resumption Deduplication)...');
+    const refreshRes = await fetchWithTimeout(`${BASE_URL}/api/chat/bootstrap`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Samche-Web-Chat-Session': sessionHigh,
+      },
+      body: JSON.stringify({ widget_key: TARGET_WIDGET_KEY }),
+    });
+    const refreshData = await refreshRes.json();
+    const refreshPass = refreshData.resumed === true
+      && Boolean(refreshData.browsing_state?.engagement_state?.proactiveMessageSent);
+    results.REFRESH_DEDUPLICATION = refreshPass ? 'PASS' : 'FAIL';
+    console.log(`      ✓ Scenario D (Refresh Deduplication): ${refreshPass ? 'PASS (resumed with proactive state preserved)' : 'FAIL'}`);
+
+    // Scenario E: Active Conversation Safety
+    console.log('      Executing Scenario E (Active Conversation Safety)...');
     const bootConvRes = await fetchWithTimeout(`${BASE_URL}/api/chat/bootstrap`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

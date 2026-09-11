@@ -47,7 +47,7 @@ const HIGH_INTENT_PAGE_TYPES = new Set([
   'tier',
 ]);
 
-const HIGH_INTENT_PATH_PATTERN = /(?:urun|product|item|service|hizmet|project|proje|pricing|fiyat|paket|package|booking|randevu|rezervasyon|contact|iletisim|teklif|quote|demo)/i;
+const HIGH_INTENT_PATH_PATTERN = /(?:(?:\/|^|#)(?:ur(?:un|unler)|products?|items?|services?|hizmet(?:ler)?|projects?|projeler|pricing|fiyat(?:lar)?|paket(?:ler)?|packages?|bookings?|randevu|rezervasyon|contacts?|iletisim|teklif|quotes?)(?:\/|$|#|\?|-|_)|(?:\/|^|#)demo(?:\/|$|#|\?))/i;
 
 const HIGH_INTENT_ENTITY_TYPES = new Set([
   'PRODUCT',
@@ -214,6 +214,7 @@ export function evaluateVisitorIntent({
       intentState: INTENT_STATES.LOW,
       shouldProactivelyEngage: false,
       shouldAutoOpen: false,
+      shouldNudge: false,
       reason: 'PROACTIVE_DISABLED_BY_TENANT',
       signals: [],
     };
@@ -235,6 +236,7 @@ export function evaluateVisitorIntent({
       intentState,
       shouldProactivelyEngage: false,
       shouldAutoOpen: false,
+      shouldNudge: false,
       reason: 'ACTIVE_CONVERSATION',
       signals,
     };
@@ -247,6 +249,7 @@ export function evaluateVisitorIntent({
       intentState,
       shouldProactivelyEngage: false,
       shouldAutoOpen: false,
+      shouldNudge: false,
       reason: 'HUMAN_TAKEOVER_ACTIVE',
       signals,
     };
@@ -259,6 +262,7 @@ export function evaluateVisitorIntent({
       intentState,
       shouldProactivelyEngage: false,
       shouldAutoOpen: false,
+      shouldNudge: false,
       reason: 'ALREADY_ENGAGED',
       signals,
     };
@@ -274,6 +278,7 @@ export function evaluateVisitorIntent({
         intentState,
         shouldProactivelyEngage: false,
         shouldAutoOpen: false,
+        shouldNudge: false,
         reason: 'DISMISSAL_COOLDOWN',
         signals,
       };
@@ -283,8 +288,9 @@ export function evaluateVisitorIntent({
   // 7. Threshold Check
   const isHigh = intentState === INTENT_STATES.HIGH;
   const isMedium = intentState === INTENT_STATES.MEDIUM;
-  const shouldProactivelyEngage = isHigh || isMedium;
   const shouldAutoOpen = isHigh && config.auto_open;
+  const shouldProactivelyEngage = isHigh;
+  const shouldNudge = isMedium;
 
   let reason = 'BELOW_INTENT_THRESHOLD';
   if (isHigh) {
@@ -298,6 +304,7 @@ export function evaluateVisitorIntent({
     intentState,
     shouldProactivelyEngage,
     shouldAutoOpen,
+    shouldNudge,
     reason,
     signals,
   };

@@ -335,4 +335,105 @@ test('15. RTL behavior and multi-language support (TR, EN, AR) are verified', as
   assert.doesNotMatch(arProactive, /I know you want|satın al/i);
 });
 
+test('16. Catalog page arrival does not trigger auto-open even after 15s dwell (LOW intent gate)', () => {
+  const catalogContext = {
+    url: 'https://samche-api-staging.onrender.com/task8-demo/',
+    path: '/task8-demo/',
+    page_type: 'catalog',
+  };
+
+  const initialResult = evaluateVisitorIntent({
+    pageContext: catalogContext,
+    currentEntity: null,
+    previousEntities: [],
+    sessionBrowsing: { dwellSeconds: 0 },
+  });
+  assert.equal(initialResult.intentState, INTENT_STATES.LOW);
+  assert.equal(initialResult.shouldAutoOpen, false);
+  assert.equal(initialResult.shouldProactivelyEngage, false);
+  assert.equal(initialResult.shouldNudge, false);
+
+  const dwellResult = evaluateVisitorIntent({
+    pageContext: catalogContext,
+    currentEntity: null,
+    previousEntities: [],
+    sessionBrowsing: { dwellSeconds: 15 },
+  });
+  // Dwell alone without entity detail or commercial path is 25 points < 40 (LOW)
+  assert.equal(dwellResult.intentState, INTENT_STATES.LOW);
+  assert.equal(dwellResult.shouldAutoOpen, false);
+  assert.equal(dwellResult.shouldProactivelyEngage, false);
+  assert.equal(dwellResult.shouldNudge, false);
+});
+
+test('17. Product page arrival starts at MEDIUM (nudge only) and reaches HIGH on qualified dwell', () => {
+  const productContext = {
+    url: 'https://samche-api-staging.onrender.com/task8-demo/#/urun/titan-akilli-saat-pro',
+    path: '/task8-demo/#/urun/titan-akilli-saat-pro',
+    page_type: 'product_detail',
+  };
+  const currentEntity = {
+    entity_id: 'prod-smartwatch-titan',
+    entity_name: 'Titan Akıllı Saat Pro',
+    entity_type: 'PRODUCT',
+    attributes: { price: 2499, category: 'Giyilebilir Teknoloji' },
+  };
+
+  // Immediate arrival (dwell = 0): Detail (25) + Commercial Path (30) = 55 (MEDIUM)
+  const arrivalResult = evaluateVisitorIntent({
+    pageContext: productContext,
+    currentEntity,
+    previousEntities: [],
+    sessionBrowsing: { dwellSeconds: 0 },
+  });
+  assert.equal(arrivalResult.intentState, INTENT_STATES.MEDIUM);
+  assert.equal(arrivalResult.shouldAutoOpen, false);
+  assert.equal(arrivalResult.shouldProactivelyEngage, false);
+  assert.equal(arrivalResult.shouldNudge, true);
+
+  // Qualified dwell (15s): 55 + 25 = 80 (HIGH)
+  const dwellResult = evaluateVisitorIntent({
+    pageContext: productContext,
+    currentEntity,
+    previousEntities: [],
+    sessionBrowsing: { dwellSeconds: 15 },
+  });
+  assert.equal(dwellResult.intentState, INTENT_STATES.HIGH);
+  assert.equal(dwellResult.shouldAutoOpen, true);
+  assert.equal(dwellResult.shouldProactivelyEngage, true);
+  assert.equal(dwellResult.reason, 'HIGH_INTENT_ACTIVATION');
+});
+
+test('18. Product comparison sequence (A -> B) reaches HIGH intent deterministically without dwell', () => {
+  const entityA = {
+    entity_id: 'prod-smartwatch-titan',
+    entity_name: 'Titan Akıllı Saat Pro',
+    entity_type: 'PRODUCT',
+    attributes: { price: 2499, category: 'Giyilebilir Teknoloji' },
+  };
+  const entityB = {
+    entity_id: 'prod-powerbank-20k',
+    entity_name: 'Ultra Güç Bankası 20.000 mAh',
+    entity_type: 'PRODUCT',
+    attributes: { price: 899, category: 'Giyilebilir Teknoloji' },
+  };
+
+  const comparisonResult = evaluateVisitorIntent({
+    pageContext: {
+      url: 'https://samche-api-staging.onrender.com/task8-demo/#/urun/ultra-guc-bankasi-20000mah',
+      path: '/task8-demo/#/urun/ultra-guc-bankasi-20000mah',
+      page_type: 'product_detail',
+    },
+    currentEntity: entityB,
+    previousEntities: [entityA],
+    sessionBrowsing: { dwellSeconds: 0 },
+  });
+
+  // Detail (25) + Commercial (30) + Multi-Entity (20) + Same-Type Comparison (20) = 95 -> HIGH
+  assert.equal(comparisonResult.intentState, INTENT_STATES.HIGH);
+  assert.equal(comparisonResult.shouldAutoOpen, true);
+  assert.equal(comparisonResult.shouldProactivelyEngage, true);
+  assert.equal(comparisonResult.reason, 'HIGH_INTENT_ACTIVATION');
+});
+
 

@@ -1867,10 +1867,13 @@ app.post("/api/chat/page-context", async (req, res) => {
         language: updatedState.currentPage?.language || webChatRuntimePersona?.configuration?.language || 'tr',
       });
 
+      addWebMemory(webChatSession.sessionId, 'assistant', proactiveMessage);
+
       updatedState.engagementState = {
         ...(updatedState.engagementState || {}),
         proactiveMessageSent: true,
         proactiveEngagedAt: new Date().toISOString(),
+        proactiveMessage,
         intentState: intentEvaluation.intentState,
         intentScore: intentEvaluation.score,
       };
@@ -1881,6 +1884,13 @@ app.post("/api/chat/page-context", async (req, res) => {
         score: intentEvaluation.score,
         reason: intentEvaluation.reason,
       });
+    } else if (intentEvaluation.intentState === 'MEDIUM') {
+      updatedState.engagementState = {
+        ...(updatedState.engagementState || {}),
+        nudgedAt: new Date().toISOString(),
+        intentState: intentEvaluation.intentState,
+        intentScore: intentEvaluation.score,
+      };
     }
 
     await saveWebChatSessionBrowsingState({
@@ -1925,6 +1935,7 @@ app.post("/api/chat/page-context", async (req, res) => {
       proactive_engagement: {
         should_open: intentEvaluation.shouldAutoOpen,
         should_engage: intentEvaluation.shouldProactivelyEngage,
+        should_nudge: intentEvaluation.shouldNudge || false,
         intent_state: intentEvaluation.intentState,
         intent_score: intentEvaluation.score,
         reason: intentEvaluation.reason,
@@ -2035,10 +2046,13 @@ app.post("/api/chat/evaluate-intent", async (req, res) => {
         language: currentState.currentPage?.language || webChatRuntimePersona?.configuration?.language || 'tr',
       });
 
+      addWebMemory(webChatSession.sessionId, 'assistant', proactiveMessage);
+
       const updatedEngagementState = {
         ...(currentState.engagementState || {}),
         proactiveMessageSent: true,
         proactiveEngagedAt: new Date().toISOString(),
+        proactiveMessage,
         intentState: intentEvaluation.intentState,
         intentScore: intentEvaluation.score,
       };
@@ -2056,6 +2070,20 @@ app.post("/api/chat/evaluate-intent", async (req, res) => {
         score: intentEvaluation.score,
         reason: intentEvaluation.reason,
       });
+    } else if (intentEvaluation.intentState === 'MEDIUM') {
+      const updatedEngagementState = {
+        ...(currentState.engagementState || {}),
+        nudgedAt: new Date().toISOString(),
+        intentState: intentEvaluation.intentState,
+        intentScore: intentEvaluation.score,
+      };
+
+      await updateWebChatSessionEngagementState({
+        database: pool,
+        tenantId: webChatIntegration.tenant_id,
+        sessionId: webChatSession.sessionId,
+        engagementState: updatedEngagementState,
+      });
     }
 
     return res.json({
@@ -2065,6 +2093,7 @@ app.post("/api/chat/evaluate-intent", async (req, res) => {
       proactive_engagement: {
         should_open: intentEvaluation.shouldAutoOpen,
         should_engage: intentEvaluation.shouldProactivelyEngage,
+        should_nudge: intentEvaluation.shouldNudge || false,
         intent_state: intentEvaluation.intentState,
         intent_score: intentEvaluation.score,
         reason: intentEvaluation.reason,

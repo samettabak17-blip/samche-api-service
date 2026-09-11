@@ -76,6 +76,8 @@ jobs:
           tests/web-chat-access-model.test.js
           tests/web-chat-canonical-runtime-turn.test.js
           tests/browsing-memory-simulation.test.js
+          tests/proactive-high-intent-real-browser.test.js
+
 
       - name: Run Dashboard checks
         run: |

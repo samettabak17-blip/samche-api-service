@@ -193,6 +193,8 @@
     if (opts.sessionToken) proactiveState.sessionToken = opts.sessionToken;
     if (typeof opts.cooldownSeconds === 'number') proactiveState.cooldownSeconds = opts.cooldownSeconds;
     if (typeof opts.dwellThresholdSeconds === 'number') proactiveState.dwellThresholdSeconds = opts.dwellThresholdSeconds;
+    if (typeof opts.hasProactivelyEngaged === 'boolean') proactiveState.hasProactivelyEngaged = opts.hasProactivelyEngaged;
+    if (typeof opts.dismissedAt === 'number') proactiveState.dismissedAt = opts.dismissedAt;
     if (typeof opts.onAutoOpen === 'function') proactiveState.onAutoOpen = opts.onAutoOpen;
     if (typeof opts.onNudge === 'function') proactiveState.onNudge = opts.onNudge;
     if (typeof opts.onProactiveMessage === 'function') proactiveState.onProactiveMessage = opts.onProactiveMessage;
@@ -234,24 +236,32 @@
       return;
     }
 
-    clearTimers();
+    if (proactiveState.intervalTimer) clearInterval(proactiveState.intervalTimer);
+    proactiveState.intervalTimer = null;
     var threshold = customDwellSeconds || proactiveState.dwellThresholdSeconds;
 
     proactiveState.intervalTimer = setInterval(function() {
+      if (proactiveState.hasUserMessaged || proactiveState.hasProactivelyEngaged) {
+        clearTimers();
+        return;
+      }
       proactiveState.dwellSeconds += 1;
       if (proactiveState.dwellSeconds >= threshold) {
-        clearTimers();
-        checkDwellIntent();
+        checkDwellIntent(proactiveState.dwellSeconds);
       }
     }, 1000);
   }
 
-  function checkDwellIntent() {
+  function checkDwellIntent(seconds) {
     if (!proactiveState.sessionToken || proactiveState.hasUserMessaged || proactiveState.hasProactivelyEngaged) return;
     var cooldownMs = proactiveState.cooldownSeconds * 1000;
     if (proactiveState.dismissedAt && (Date.now() - proactiveState.dismissedAt < cooldownMs)) {
       return;
     }
+
+    var dwellToSend = typeof seconds === 'number' && seconds > 0
+      ? seconds
+      : (proactiveState.dwellSeconds || proactiveState.dwellThresholdSeconds);
 
     fetch('/api/chat/evaluate-intent', {
       method: 'POST',
@@ -260,7 +270,7 @@
         'X-Samche-Web-Chat-Session': proactiveState.sessionToken,
       },
       body: JSON.stringify({
-        dwell_seconds: proactiveState.dwellSeconds || proactiveState.dwellThresholdSeconds,
+        dwell_seconds: dwellToSend,
       }),
     })
     .then(function(res) { return res.json(); })
@@ -282,19 +292,16 @@
 
     if (pe.should_open && pe.message) {
       proactiveState.hasProactivelyEngaged = true;
+      clearTimers();
       if (typeof proactiveState.onAutoOpen === 'function') {
         proactiveState.onAutoOpen(pe.message, pe);
       }
       if (typeof proactiveState.onProactiveMessage === 'function') {
         proactiveState.onProactiveMessage(pe.message, pe);
       }
-    } else if (pe.should_engage && (pe.message || pe.intent_state === 'MEDIUM')) {
-      proactiveState.hasProactivelyEngaged = true;
+    } else if (pe.should_nudge || pe.intent_state === 'MEDIUM') {
       if (typeof proactiveState.onNudge === 'function') {
         proactiveState.onNudge(pe.message, pe);
-      }
-      if (typeof proactiveState.onProactiveMessage === 'function') {
-        proactiveState.onProactiveMessage(pe.message, pe);
       }
     }
   }
@@ -995,11 +1002,24 @@
           setContextBadge('Gözatılan: ' + data.browsing_state.current_entity.entity_name);
         }
 
-        if (data.behavior && data.behavior.proactive_enabled) {
+        var engagementState = (data.browsing_state && data.browsing_state.engagement_state) || {};
+        var alreadyEngaged = Boolean(engagementState.proactiveMessageSent || engagementState.proactiveEngagedAt);
+        var dismissedTime = engagementState.dismissedAt ? new Date(engagementState.dismissedAt).getTime() : 0;
+
+        if (alreadyEngaged) {
+          proactiveState.hasProactivelyEngaged = true;
+        }
+        if (dismissedTime > 0) {
+          proactiveState.dismissedAt = dismissedTime;
+        }
+
+        if (data.behavior && data.behavior.proactive_enabled && !alreadyEngaged) {
           configureProactive({
             sessionToken: sessionToken,
             dwellThresholdSeconds: data.behavior.dwell_threshold_seconds || 15,
             cooldownSeconds: data.behavior.cooldown_seconds || 300,
+            hasProactivelyEngaged: alreadyEngaged,
+            dismissedAt: dismissedTime,
             onAutoOpen: function(msg) {
               launcher.classList.add('samche-intent-pulse');
               if (data.behavior.high_intent_activation) {
@@ -1035,16 +1055,32 @@
             body: JSON.stringify({ page_context: newContext }),
           })
           .then(function(res) { return res.json(); })
-          .then(function(data) {
-            if (data && data.proactive_engagement && data.proactive_engagement.should_open && data.proactive_engagement.message) {
-              if (!isOpen && !proactiveState.hasUserMessaged) {
-                openPanel();
-                var botBubble = appendMessage('bot', '');
-                progressiveReveal(botBubble, data.proactive_engagement.message, { container: messages });
+          .then(function(respData) {
+            if (respData && respData.proactive_engagement) {
+              var pe = respData.proactive_engagement;
+              if (pe.should_open && pe.message) {
+                if (!isOpen && !proactiveState.hasUserMessaged && !proactiveState.hasProactivelyEngaged) {
+                  proactiveState.hasProactivelyEngaged = true;
+                  clearTimers();
+                  launcher.classList.add('samche-intent-pulse');
+                  openPanel();
+                  var botBubble = appendMessage('bot', '');
+                  progressiveReveal(botBubble, pe.message, { container: messages });
+                }
+              } else if (pe.should_nudge || pe.intent_state === 'MEDIUM') {
+                launcher.classList.add('samche-intent-pulse');
               }
             }
           })
           .catch(function() {});
+        }
+
+        // Reset and restart dwell tracking for the newly navigated page context
+        if (!isOpen && !proactiveState.hasUserMessaged && !proactiveState.hasProactivelyEngaged) {
+          proactiveState.dwellSeconds = 0;
+          if (proactiveState.dwellThresholdSeconds) {
+            startDwellTracker(sessionToken, proactiveState.dwellThresholdSeconds);
+          }
         }
       });
 

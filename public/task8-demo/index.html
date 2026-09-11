@@ -521,11 +521,8 @@
 
       // Synchronize live browsing context with server (/api/chat/page-context) for active session
       // Sessions are provisioned and restored via canonical /api/chat/bootstrap
-      const sessionToken = (window.SamcheWebChat && typeof window.SamcheWebChat.getInstance === 'function')
-        ? window.SamcheWebChat.getInstance()?.getSessionToken?.()
-        : (window.SamcheChatPersistence ? window.SamcheChatPersistence.getStoredSession(activeWidgetKey) : null);
-
-      if (sessionToken) {
+      const sessionToken = (window.SamcheChatPersistence ? window.SamcheChatPersistence.getStoredSession(activeWidgetKey) : null);
+      if (sessionToken && (!window.SamcheWebChat || typeof window.SamcheWebChat.getInstance !== 'function')) {
         fetch('/api/chat/page-context', {
           method: 'POST',
           headers: {
