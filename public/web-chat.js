@@ -1110,8 +1110,8 @@
           });
 
           // 5. Notify persistence for multi-tab sync
-          lastKnownResetTime = Date.now();
-          SamcheChatPersistence.recordConversationReset(widgetKey);
+          var resetTs = SamcheChatPersistence.recordConversationReset(widgetKey);
+          lastKnownResetTime = parseInt(resetTs, 10) || Date.now();
 
           // 6. Context badge remains current entity badge
           if (currentCtx && currentCtx.entity_name && isDiscreteContext(currentCtx)) {
