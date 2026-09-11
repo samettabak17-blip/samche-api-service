@@ -575,6 +575,27 @@
         }
       } catch (e) {}
     },
+    recordConversationReset: function(widgetKey) {
+      var key = 'samche_webchat_reset_' + encodeURIComponent(widgetKey || 'default');
+      var ts = String(Date.now());
+      memStore[key] = ts;
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem(key, ts);
+        }
+      } catch (e) {}
+      return ts;
+    },
+    getLastResetTime: function(widgetKey) {
+      var key = 'samche_webchat_reset_' + encodeURIComponent(widgetKey || 'default');
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          var val = window.localStorage.getItem(key);
+          if (val) return parseInt(val, 10);
+        }
+      } catch (e) {}
+      return memStore[key] ? parseInt(memStore[key], 10) : 0;
+    },
     hydrateHistory: function(container, messages, appendFn) {
       if (!container || !Array.isArray(messages)) return 0;
       var count = 0;
@@ -685,6 +706,25 @@
     '.samche-close-btn:hover { background: rgba(255,255,255,0.12); color: var(--chat-text, #F8FAFC); }',
     '.samche-close-btn:focus-visible { outline: 2px solid var(--chat-accent, #60A5FA); }',
     '.samche-close-btn svg { width: 14px !important; height: 14px !important; max-width: 14px !important; max-height: 14px !important; }',
+    '.samche-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }',
+    '.samche-clear-btn { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--chat-border, rgba(255,255,255,0.1)); background: rgba(255,255,255,0.05); color: var(--chat-muted, #94A3B8); cursor: pointer; display: flex; align-items: center; justify-content: center; outline: none; transition: background .15s ease, color .15s ease, opacity .15s ease; flex-shrink: 0; padding: 0; }',
+    '.samche-clear-btn:hover:not(:disabled) { background: rgba(255,255,255,0.12); color: var(--chat-text, #F8FAFC); }',
+    '.samche-clear-btn:focus-visible { outline: 2px solid var(--chat-accent, #60A5FA); }',
+    '.samche-clear-btn:disabled { opacity: 0.35; cursor: not-allowed; }',
+    '.samche-clear-btn svg { width: 15px !important; height: 15px !important; max-width: 15px !important; max-height: 15px !important; }',
+    '.samche-confirm-dialog { position: absolute; inset: 0; background: rgba(10, 12, 16, 0.78); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 100; animation: samche-msg-fadein .18s ease-out; }',
+    '.samche-confirm-content { background: var(--chat-surface-solid, #1E2330); border: 1px solid var(--chat-border, rgba(255,255,255,0.15)); border-radius: 16px; padding: 20px 18px 16px; width: 100%; max-width: 300px; box-shadow: 0 16px 36px rgba(0,0,0,0.5); display: flex; flex-direction: column; align-items: center; text-align: center; gap: 14px; }',
+    '.samche-confirm-message { font-size: 13.5px; font-weight: 500; color: var(--chat-text, #F8FAFC); line-height: 1.45; margin: 0; }',
+    '.samche-confirm-buttons { display: flex; gap: 10px; width: 100%; margin-top: 4px; }',
+    '.samche-confirm-btn { flex: 1; padding: 9px 12px; font-size: 13px; font-weight: 600; border-radius: 10px; cursor: pointer; transition: all .15s ease; display: inline-flex; align-items: center; justify-content: center; outline: none; }',
+    '.samche-confirm-cancel { background: rgba(255,255,255,0.08); border: 1px solid var(--chat-border, rgba(255,255,255,0.12)); color: var(--chat-muted, #94A3B8); }',
+    '.samche-confirm-cancel:hover:not(:disabled) { background: rgba(255,255,255,0.14); color: var(--chat-text, #F8FAFC); }',
+    '.samche-confirm-proceed { background: #DC2626; border: 1px solid rgba(220, 38, 38, 0.4); color: #FFFFFF; }',
+    '.samche-confirm-proceed:hover:not(:disabled) { background: #B91C1C; }',
+    '.samche-confirm-btn:focus-visible { outline: 2px solid var(--chat-accent, #60A5FA); outline-offset: 2px; }',
+    '.samche-confirm-btn:disabled { opacity: 0.5; cursor: not-allowed; }',
+    '.samche-panel[dir="rtl"] .samche-confirm-buttons { flex-direction: row-reverse; }',
+    '.samche-panel[dir="rtl"] .samche-header-actions { flex-direction: row-reverse; }',
     '.samche-messages { flex: 1; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }',
     '.samche-msg { animation: samche-msg-fadein .24s cubic-bezier(.16,1,.3,1); max-width: 85%; font-size: 14px; line-height: 1.5; word-break: break-word; }',
     '.samche-msg-user { align-self: flex-end; background: var(--chat-primary, #2563EB); color: var(--chat-primary-foreground, #FFFFFF) !important; padding: 10px 14px; border-radius: 16px 16px 4px 16px; box-shadow: 0 4px 14px -3px var(--chat-glow, rgba(37,99,235,0.3)); font-weight: 500; }',
@@ -724,6 +764,47 @@
   var CHAT_ICON_SVG = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 1.821.487 3.53 1.338 5L2.5 21.5l4.646-.82A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 01-4.07-1.11l-.29-.17-2.76.49.5-2.69-.19-.3A7.963 7.963 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z"/></svg>';
   var CLOSE_ICON_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
   var SEND_ICON_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>';
+  var TRASH_ICON_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>';
+
+  var I18N = {
+    tr: {
+      clearBtnLabel: 'Sohbeti Temizle',
+      confirmText: 'Sohbet geçmişini temizlemek istediğinize emin misiniz?',
+      cancelBtn: 'İptal',
+      clearBtn: 'Temizle',
+      clearingText: 'Temizleniyor...',
+      cannotClearHuman: 'Canlı destek temsilcisi görüşmesinde sohbet temizlenemez.',
+      cannotClearSending: 'Mesaj iletilirken sohbet temizlenemez.',
+      browsingPrefix: 'Gözatılan: ',
+    },
+    en: {
+      clearBtnLabel: 'Clear Conversation',
+      confirmText: 'Are you sure you want to clear this conversation?',
+      cancelBtn: 'Cancel',
+      clearBtn: 'Clear',
+      clearingText: 'Clearing...',
+      cannotClearHuman: 'Cannot clear conversation while human support is active.',
+      cannotClearSending: 'Cannot clear conversation while sending a message.',
+      browsingPrefix: 'Viewing: ',
+    },
+    ar: {
+      clearBtnLabel: 'مسح المحادثة',
+      confirmText: 'هل أنت متأكد أنك تريد مسح هذه المحادثة؟',
+      cancelBtn: 'إلغاء',
+      clearBtn: 'مسح',
+      clearingText: 'جارٍ المسح...',
+      cannotClearHuman: 'لا يمكن مسح المحادثة أثناء اتصال الدعم البشري.',
+      cannotClearSending: 'لا يمكن مسح المحادثة أثناء إرسال الرسالة.',
+      browsingPrefix: 'المعروض: ',
+    },
+  };
+
+  function isDiscreteContext(ctx) {
+    if (!ctx || !ctx.entity_type) return false;
+    var isNonDiscrete = /^(?:PAGE|GENERIC_PAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ)/i.test(ctx.entity_type)
+      || /^(?:catalog|home|pricing|security|about)/i.test(ctx.page_type || '');
+    return !isNonDiscrete && Boolean(ctx.entity_id);
+  }
 
   var SamcheCanonicalWidget = {
     instances: {},
@@ -812,9 +893,31 @@
         '    <span class="samche-header-context-badge" style="display: none;"></span>',
         '  </div>',
         '</div>',
-        '<button class="samche-close-btn" aria-label="Kapat">' + CLOSE_ICON_SVG + '</button>'
+        '<div class="samche-header-actions">',
+        '  <button type="button" class="samche-clear-btn" aria-label="Sohbeti Temizle" title="Sohbeti Temizle">' + TRASH_ICON_SVG + '</button>',
+        '  <button type="button" class="samche-close-btn" aria-label="Kapat" title="Kapat">' + CLOSE_ICON_SVG + '</button>',
+        '</div>'
       ].join('');
       panel.appendChild(header);
+
+      var confirmDialog = document.createElement('div');
+      confirmDialog.className = 'samche-confirm-dialog';
+      confirmDialog.setAttribute('role', 'alertdialog');
+      confirmDialog.setAttribute('aria-modal', 'true');
+      confirmDialog.setAttribute('aria-describedby', 'samche-confirm-desc');
+      confirmDialog.style.display = 'none';
+      confirmDialog.innerHTML = [
+        '<div class="samche-confirm-content">',
+        '  <div class="samche-confirm-text">',
+        '    <p id="samche-confirm-desc" class="samche-confirm-message">Sohbet geçmişini temizlemek istediğinize emin misiniz?</p>',
+        '  </div>',
+        '  <div class="samche-confirm-buttons">',
+        '    <button type="button" class="samche-confirm-btn samche-confirm-cancel">İptal</button>',
+        '    <button type="button" class="samche-confirm-btn samche-confirm-proceed">Temizle</button>',
+        '  </div>',
+        '</div>'
+      ].join('');
+      panel.appendChild(confirmDialog);
 
       var messages = document.createElement('div');
       messages.className = 'samche-messages';
@@ -843,21 +946,229 @@
       }
       var isOpen = false;
       var sessionToken = null;
+      var isSending = false;
+      var isResetting = false;
+      var isHumanTakeoverActive = false;
+      var currentLang = 'tr';
+      var lastKnownResetTime = SamcheChatPersistence.getLastResetTime(widgetKey);
       var contextBadgeEl = header.querySelector('.samche-header-context-badge');
       var textarea = composer.querySelector('.samche-composer-input');
       var sendBtn = composer.querySelector('.samche-send-btn');
       var closeBtn = header.querySelector('.samche-close-btn');
+      var clearBtn = header.querySelector('.samche-clear-btn');
+      var confirmDescEl = confirmDialog.querySelector('.samche-confirm-message');
+      var confirmCancelBtn = confirmDialog.querySelector('.samche-confirm-cancel');
+      var confirmProceedBtn = confirmDialog.querySelector('.samche-confirm-proceed');
+
+      function setLanguage(lang) {
+        if (!lang || typeof lang !== 'string') return;
+        var l = lang.toLowerCase();
+        if (l.startsWith('ar')) currentLang = 'ar';
+        else if (l.startsWith('en')) currentLang = 'en';
+        else currentLang = 'tr';
+
+        var dict = I18N[currentLang] || I18N.tr;
+        clearBtn.setAttribute('aria-label', dict.clearBtnLabel);
+        clearBtn.setAttribute('title', isHumanTakeoverActive ? dict.cannotClearHuman : dict.clearBtnLabel);
+        confirmDescEl.textContent = dict.confirmText;
+        confirmCancelBtn.textContent = dict.cancelBtn;
+        confirmProceedBtn.textContent = dict.clearBtn;
+
+        if (currentLang === 'ar') {
+          panel.setAttribute('dir', 'rtl');
+        } else {
+          panel.removeAttribute('dir');
+        }
+      }
+
+      clearBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isResetting || isSending || isHumanTakeoverActive) return;
+        confirmDialog.style.display = 'flex';
+        confirmCancelBtn.focus();
+      });
+
+      confirmCancelBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        confirmDialog.style.display = 'none';
+        clearBtn.focus();
+      });
+
+      confirmDialog.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          confirmDialog.style.display = 'none';
+          clearBtn.focus();
+        } else if (e.key === 'Tab') {
+          var focusable = [confirmCancelBtn, confirmProceedBtn];
+          var activeEl = shadow.activeElement || document.activeElement;
+          var idx = focusable.indexOf(activeEl);
+          if (e.shiftKey) {
+            if (idx <= 0) {
+              e.preventDefault();
+              focusable[focusable.length - 1].focus();
+            }
+          } else {
+            if (idx >= focusable.length - 1) {
+              e.preventDefault();
+              focusable[0].focus();
+            }
+          }
+        }
+      });
+
+      confirmProceedBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        handleClearConversation();
+      });
+
+      function handleClearConversation() {
+        if (isResetting || isSending || isHumanTakeoverActive) return Promise.resolve(null);
+        isResetting = true;
+        var dict = I18N[currentLang] || I18N.tr;
+        confirmProceedBtn.textContent = dict.clearingText;
+        confirmProceedBtn.disabled = true;
+        confirmCancelBtn.disabled = true;
+        clearBtn.disabled = true;
+        sendBtn.disabled = true;
+        textarea.disabled = true;
+
+        var currentCtx = capturePageContext();
+        var rHeaders = { 'Content-Type': 'application/json' };
+        if (sessionToken) rHeaders['X-Samche-Web-Chat-Session'] = sessionToken;
+
+        return fetch('/api/chat/reset', {
+          method: 'POST',
+          headers: rHeaders,
+          body: JSON.stringify({
+            page_context: currentCtx || undefined,
+          }),
+        })
+        .then(function(res) {
+          if (!res.ok) {
+            if (res.status === 409) {
+              throw new Error('HUMAN_TAKEOVER_ACTIVE');
+            }
+            throw new Error('RESET_FAILED');
+          }
+          return res.json();
+        })
+        .then(function(data) {
+          confirmDialog.style.display = 'none';
+          confirmProceedBtn.textContent = dict.clearBtn;
+          confirmProceedBtn.disabled = false;
+          confirmCancelBtn.disabled = false;
+          isResetting = false;
+          clearBtn.disabled = false;
+          textarea.disabled = false;
+          sendBtn.disabled = !textarea.value.trim();
+
+          if (!data || data.status !== 'ok') return data;
+
+          // 1. Clear visible messages
+          messages.innerHTML = '';
+
+          // 2. Reset message deduplication state
+          proactiveState.renderedMessageIds = {};
+          proactiveState.hasUserMessaged = false;
+          proactiveState.isContextualOpeningInProgress = false;
+
+          // 3. Keep current entity acknowledged so we do NOT trigger an immediate loop on current entity
+          if (proactiveState.currentEntityId) {
+            proactiveState.acknowledgedEntityIds[proactiveState.currentEntityId] = true;
+            proactiveState.lastAcknowledgedEntityId = proactiveState.currentEntityId;
+          }
+
+          // 4. Append exactly the single new greeting from server
+          var newGreeting = (data.history && data.history[0]) ? data.history[0] : null;
+          var greetingText = (newGreeting && newGreeting.content)
+            || (data.appearance && data.appearance.greeting)
+            || (data.assistant && data.assistant.greeting)
+            || 'Merhaba! Size nasıl yardımcı olabilirim?';
+
+          appendMessage('bot', greetingText, {
+            message_type: 'INITIAL_GREETING',
+            is_greeting: true,
+            id: (newGreeting && newGreeting.id) || ('greeting_' + (sessionToken || 'reset')),
+          });
+
+          // 5. Notify persistence for multi-tab sync
+          lastKnownResetTime = Date.now();
+          SamcheChatPersistence.recordConversationReset(widgetKey);
+
+          // 6. Context badge remains current entity badge
+          if (currentCtx && currentCtx.entity_name && isDiscreteContext(currentCtx)) {
+            setContextBadge(dict.browsingPrefix + currentCtx.entity_name);
+          }
+
+          // 7. Focus textarea
+          setTimeout(function() { textarea.focus(); }, 80);
+          smartScrollToBottom(messages, false);
+          return data;
+        })
+        .catch(function(err) {
+          confirmDialog.style.display = 'none';
+          confirmProceedBtn.textContent = dict.clearBtn;
+          confirmProceedBtn.disabled = false;
+          confirmCancelBtn.disabled = false;
+          isResetting = false;
+          textarea.disabled = false;
+          sendBtn.disabled = !textarea.value.trim();
+
+          if (err && err.message === 'HUMAN_TAKEOVER_ACTIVE') {
+            isHumanTakeoverActive = true;
+            clearBtn.disabled = true;
+            clearBtn.setAttribute('title', dict.cannotClearHuman);
+          } else {
+            clearBtn.disabled = false;
+          }
+          throw err;
+        });
+      }
+
+      function syncResetIfOccurred() {
+        var latestReset = SamcheChatPersistence.getLastResetTime(widgetKey);
+        if (latestReset > lastKnownResetTime) {
+          lastKnownResetTime = latestReset;
+          var bSyncHeaders = { 'Content-Type': 'application/json' };
+          if (sessionToken) bSyncHeaders['X-Samche-Web-Chat-Session'] = sessionToken;
+          fetch('/api/chat/bootstrap', {
+            method: 'POST',
+            headers: bSyncHeaders,
+            body: JSON.stringify({ widget_key: widgetKey, session_token: sessionToken || undefined }),
+          })
+          .then(function(res) { return res.json(); })
+          .then(function(bData) {
+            if (!bData || bData.error) return;
+            messages.innerHTML = '';
+            proactiveState.renderedMessageIds = {};
+            proactiveState.hasUserMessaged = false;
+            var cleanHistory = Array.isArray(bData.history) ? bData.history : [];
+            SamcheChatPersistence.hydrateHistory(messages, cleanHistory, function(role, text, item) {
+              appendMessage(role, text, item);
+            });
+            smartScrollToBottom(messages, false);
+          })
+          .catch(function() {});
+        }
+      }
+
+      if (typeof window !== 'undefined') {
+        window.addEventListener('storage', function(e) {
+          if (e.key === 'samche_webchat_reset_' + encodeURIComponent(widgetKey)) {
+            syncResetIfOccurred();
+          }
+        });
+        window.addEventListener('focus', function() {
+          syncResetIfOccurred();
+        });
+      }
 
       function handleManualContextualOpen() {
         if (proactiveState.isContextualOpeningInProgress) return;
         var currentCtx = capturePageContext();
-        if (!currentCtx) return;
-
-        var isNonDiscrete = !currentCtx.entity_type
-          || /^(?:PAGE|GENERIC_PAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ)/i.test(currentCtx.entity_type)
-          || /^(?:catalog|home|pricing|security|about)/i.test(currentCtx.page_type || '');
-
-        if (isNonDiscrete || !currentCtx.entity_id) return;
+        if (!currentCtx || !isDiscreteContext(currentCtx)) return;
 
         var currentEntityId = String(currentCtx.entity_id);
 
@@ -1033,7 +1344,9 @@
 
       async function handleSend() {
         var text = textarea.value.trim();
-        if (!text) return;
+        if (!text || isSending || isResetting) return;
+        isSending = true;
+        clearBtn.disabled = true;
         textarea.value = '';
         textarea.style.height = 'auto';
         sendBtn.disabled = true;
@@ -1077,6 +1390,12 @@
             return;
           }
 
+          if (data && (data.handling_mode === 'HUMAN' || (data.reply && data.reply.indexOf('Temsilcimiz şu anda görüşmede') !== -1))) {
+            isHumanTakeoverActive = true;
+            clearBtn.disabled = true;
+            clearBtn.setAttribute('title', (I18N[currentLang] || I18N.tr).cannotClearHuman);
+          }
+
           var reply = data.reply || data.response || data.text || 'Anlaşıldı, size nasıl yardımcı olabilirim?';
           var botBubble = appendMessage('bot', '', { message_type: 'ASSISTANT' });
           await progressiveReveal(botBubble, reply, { container: messages });
@@ -1084,7 +1403,11 @@
           clearTypingIndicator(messages);
           appendMessage('bot', 'Üzgünüm, şu anda yanıt verilemiyor. Lütfen tekrar deneyin.', { message_type: 'ASSISTANT' });
         } finally {
+          isSending = false;
           sendBtn.disabled = !textarea.value.trim();
+          if (!isHumanTakeoverActive && !isResetting) {
+            clearBtn.disabled = false;
+          }
         }
       }
 
@@ -1157,7 +1480,18 @@
           }
         }
         if (data.appearance) applyTheme(data.appearance);
-        if (data.behavior && data.behavior.language === 'ar') panel.setAttribute('dir', 'rtl');
+        if (data.behavior && data.behavior.language) {
+          setLanguage(data.behavior.language);
+        }
+        if (data.handling_mode === 'HUMAN') {
+          isHumanTakeoverActive = true;
+          clearBtn.disabled = true;
+          clearBtn.setAttribute('title', (I18N[currentLang] || I18N.tr).cannotClearHuman);
+        } else {
+          isHumanTakeoverActive = false;
+          clearBtn.disabled = false;
+          clearBtn.setAttribute('title', (I18N[currentLang] || I18N.tr).clearBtnLabel);
+        }
 
         var historyList = Array.isArray(data.history) ? data.history.slice() : [];
         var hasGreetingInHistory = historyList.some(function(item) {
@@ -1204,11 +1538,7 @@
         }
 
         var initCtx = capturePageContext();
-        var isInitNonDiscrete = !initCtx || !initCtx.entity_type
-          || /^(?:PAGE|GENERIC_PAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ)/i.test(initCtx.entity_type)
-          || /^(?:catalog|home|pricing|security|about)/i.test(initCtx.page_type || '');
-
-        if (initCtx && !isInitNonDiscrete && initCtx.entity_id) {
+        if (initCtx && isDiscreteContext(initCtx) && initCtx.entity_id) {
           proactiveState.currentEntityId = String(initCtx.entity_id);
           proactiveState.entityDwellStartedAt = Date.now();
           proactiveState.entityDwellStartPerf = (typeof performance !== 'undefined') ? performance.now() : Date.now();
@@ -1219,14 +1549,12 @@
         }
 
         var initialBadge = null;
-        if (initCtx && !isInitNonDiscrete && initCtx.entity_name) {
-          initialBadge = 'Gözatılan: ' + initCtx.entity_name;
+        if (initCtx && isDiscreteContext(initCtx) && initCtx.entity_name) {
+          initialBadge = (I18N[currentLang] || I18N.tr).browsingPrefix + initCtx.entity_name;
         } else if (data.browsing_state && data.browsing_state.current_entity && data.browsing_state.current_entity.entity_name) {
           var initEnt = data.browsing_state.current_entity;
-          var isInitEntityNonDiscrete = !initEnt.entity_type
-            || /^(?:PAGE|GENERIC_PAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ)/i.test(initEnt.entity_type);
-          if (!isInitEntityNonDiscrete) {
-            initialBadge = 'Gözatılan: ' + initEnt.entity_name;
+          if (isDiscreteContext(initEnt)) {
+            initialBadge = (I18N[currentLang] || I18N.tr).browsingPrefix + initEnt.entity_name;
           }
         }
         if (initialBadge) {
@@ -1300,15 +1628,12 @@
       .catch(function() {});
 
       initSpaNavigationListener(function(newContext) {
-        var isNonDiscrete = !newContext || !newContext.entity_type
-          || /^(?:PAGE|GENERIC_PAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ)/i.test(newContext.entity_type)
-          || /^(?:catalog|home|pricing|security|about)/i.test(newContext.page_type || '');
-
-        var newEntityId = (!isNonDiscrete && newContext.entity_id) ? String(newContext.entity_id) : null;
+        var isDiscrete = isDiscreteContext(newContext);
+        var newEntityId = isDiscrete ? String(newContext.entity_id) : null;
         var entityChanged = newEntityId !== proactiveState.currentEntityId;
 
-        if (newEntityId && !isNonDiscrete) {
-          setContextBadge('Gözatılan: ' + newContext.entity_name);
+        if (newEntityId && isDiscrete) {
+          setContextBadge((I18N[currentLang] || I18N.tr).browsingPrefix + newContext.entity_name);
         } else {
           setContextBadge(null);
         }
@@ -1384,6 +1709,22 @@
           textarea.value = text;
           handleSend();
         },
+        clearConversation: function() { return handleClearConversation(); },
+        showClearConfirmation: function() {
+          if (isResetting || isSending || isHumanTakeoverActive) return false;
+          confirmDialog.style.display = 'flex';
+          confirmCancelBtn.focus();
+          return true;
+        },
+        hideClearConfirmation: function() {
+          confirmDialog.style.display = 'none';
+          clearBtn.focus();
+        },
+        isResetting: function() { return isResetting; },
+        isSending: function() { return isSending; },
+        isHumanTakeoverActive: function() { return isHumanTakeoverActive; },
+        getLanguage: function() { return currentLang; },
+        setLanguage: function(l) { setLanguage(l); },
         isOpen: function() { return isOpen; },
         getSessionToken: function() { return sessionToken; },
       };
@@ -1420,6 +1761,14 @@
     toggle: function(key) {
       var i = this.getInstance(key);
       if (i) i.toggle();
+    },
+    clearConversation: function(key) {
+      var i = this.getInstance(key);
+      if (i) return i.clearConversation();
+    },
+    showClearConfirmation: function(key) {
+      var i = this.getInstance(key);
+      if (i) return i.showClearConfirmation();
     },
     setChips: function(chips, key) {
       var i = this.getInstance(key);
@@ -1489,6 +1838,7 @@
     progressiveText: progressiveText,
     progressiveReveal: progressiveReveal,
     injectStyles: injectStyles,
+    I18N: I18N,
   };
 
   global.SamcheContextCapture = {

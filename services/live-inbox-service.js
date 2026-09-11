@@ -268,6 +268,60 @@ export async function getWebChatPublicFeed({ externalSessionId, integration, dat
   }
 }
 
+export async function resetWebChatConversation({ externalSessionId, integration, database = pool }) {
+  if (!integration || !externalSessionId) return { reset: false, reason: 'INVALID_ARGUMENTS' };
+  if (!database || typeof database.connect !== 'function') {
+    return { reset: true, humanTakeoverActive: false };
+  }
+  const client = await database.connect();
+  try {
+    await client.query('BEGIN');
+    const directKey = String(externalSessionId);
+    const existingCheck = await client.query(
+      `SELECT id, status, handling_mode, handling_version
+         FROM conversations
+        WHERE tenant_id = $1 AND channel_id = $2
+          AND (external_conversation_id = $3 OR external_conversation_id = $4)
+        LIMIT 1 FOR UPDATE`,
+      [integration.tenant_id, integration.channel_id, directKey, publicConversationKey(externalSessionId)]
+    );
+
+    if (existingCheck.rowCount > 0) {
+      const conv = existingCheck.rows[0];
+      if (conv.handling_mode === 'HUMAN') {
+        await client.query('ROLLBACK');
+        return {
+          reset: false,
+          humanTakeoverActive: true,
+          conversationId: conv.id,
+        };
+      }
+
+      // Detach the conversation by archiving external_conversation_id and marking closed
+      const archivedKey = `${directKey}_reset_${Date.now()}`;
+      await client.query(
+        `UPDATE conversations
+            SET status = 'closed',
+                external_conversation_id = $1,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2 AND tenant_id = $3`,
+        [archivedKey, conv.id, integration.tenant_id]
+      );
+    }
+
+    await client.query('COMMIT');
+    return {
+      reset: true,
+      humanTakeoverActive: false,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function persistWebChatInbound({ externalSessionId, content, idempotencyKey = null, integration, visitorContext = null, database = pool }) {
   if (!integration || integration.channel_status !== 'active') return null;
   const client = await database.connect();

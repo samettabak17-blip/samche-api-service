@@ -23,7 +23,7 @@ import crmRoutes from "./routes/crmRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
 import knowledgeIntelligenceRoutes from "./routes/knowledgeIntelligenceRoutes.js";
 import guideExperienceRoutes from "./routes/guideExperienceRoutes.js";
-import { getSamcheguidePublicFeed, getWebChatPublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, persistWebChatInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus } from "./services/live-inbox-service.js";
+import { getSamcheguidePublicFeed, getWebChatPublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, persistWebChatInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus, resetWebChatConversation } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
 import { claimDueCustomerSupportLifecycle, claimDueHumanSupportEscalations, requestCustomerHumanSupport, triggerImmediateHumanSupportNotificationPipeline } from "./services/human-support-service.js";
 import { processHumanSupportNotificationOutbox } from './services/human-support-notification-outbox-service.js';
@@ -2565,6 +2565,160 @@ app.post("/api/chat/contextual-open", async (req, res) => {
   } catch (error) {
     console.error('CONTEXTUAL_OPEN_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return res.status(500).json({ error: 'Failed to evaluate contextual open.' });
+  }
+});
+
+app.post("/api/chat/reset", async (req, res) => {
+  const sessionToken = extractWebChatSessionToken(req);
+  if (!sessionToken) {
+    return res.status(401).json({ error: 'Web Chat session is required.' });
+  }
+
+  let webChatSession = null;
+  let webChatIntegration = null;
+  try {
+    webChatSession = verifyPublicWebChatSession(sessionToken, {
+      secret: configuredPublicWebChatSessionSecret(),
+    });
+    webChatIntegration = await resolvePublicWebChatIntegration({
+      database: pool,
+      widgetKey: webChatSession.widgetKey,
+    });
+  } catch (error) {
+    if (error instanceof PublicWebChatSessionError) {
+      return res.status(401).json({ error: 'Web Chat session is invalid.' });
+    }
+  }
+
+  if (!webChatIntegration) {
+    return res.status(401).json({ error: 'Web Chat session is invalid.' });
+  }
+
+  try {
+    // 1. Transactional DB conversation detach & human takeover check
+    const resetResult = await resetWebChatConversation({
+      externalSessionId: webChatSession.sessionId,
+      integration: webChatIntegration,
+      database: pool,
+    });
+
+    if (resetResult.humanTakeoverActive) {
+      return res.status(409).json({
+        error: 'Cannot clear conversation while human support is active.',
+        code: 'HUMAN_TAKEOVER_ACTIVE',
+      });
+    }
+
+    // 2. Clear in-flight proactive / contextual locks
+    sessionProactiveLocks.delete(webChatSession.sessionId);
+    for (const key of sessionContextualLocks) {
+      if (key.startsWith(webChatSession.sessionId)) {
+        sessionContextualLocks.delete(key);
+      }
+    }
+
+    // 3. Resolve initial greeting
+    const rawConfig = webChatIntegration.config || {};
+    const appearance = normalizeWebChatAppearance(rawConfig.appearance, webChatIntegration.channel_name);
+    const behavior = normalizeWebChatBehavior(rawConfig.behavior);
+
+    let personaGreeting = null;
+    try {
+      const persona = await resolveTenantRuntimePersona({
+        database: pool,
+        tenantId: webChatIntegration.tenant_id,
+        assistantId: webChatIntegration.assistant_id,
+      });
+      if (persona?.available) {
+        personaGreeting = persona.configuration?.greeting || null;
+      }
+    } catch {}
+
+    const resolvedGreeting = resolveInitialWebChatGreeting({
+      configuredGreeting: appearance.greeting || personaGreeting || null,
+      brandName: appearance.brand_name || webChatIntegration.channel_name || 'Asistan',
+      assistantName: webChatIntegration.assistant_name || appearance.title,
+      language: behavior.language,
+    });
+
+    appearance.greeting = resolvedGreeting;
+    const publicAssistant = {
+      name: webChatIntegration.assistant_name || appearance.title,
+      greeting: resolvedGreeting,
+    };
+
+    const newGreetingItem = {
+      role: 'assistant',
+      content: resolvedGreeting,
+      message_type: 'INITIAL_GREETING',
+      is_greeting: true,
+      id: 'greeting_' + webChatSession.sessionId + '_' + Date.now(),
+    };
+
+    // 4. Reset webMemoryStore to strictly contain ONLY the single new greeting
+    webMemoryStore[webChatSession.sessionId] = [
+      stampProviderMemoryEntry(newGreetingItem, null),
+    ];
+
+    // 5. Preserve current browsing state (page/entity awareness) and proactive cooldown bounds
+    let currentState = await loadWebChatSessionBrowsingState({
+      database: pool,
+      tenantId: webChatIntegration.tenant_id,
+      sessionId: webChatSession.sessionId,
+    });
+
+    const rawPayload = req.body?.page_context;
+    if (rawPayload && typeof rawPayload === 'object') {
+      currentState = updateSessionBrowsingState({
+        currentState,
+        rawPageContext: rawPayload,
+      });
+    }
+
+    const currentEngagement = currentState?.engagementState || {};
+    const updatedEngagement = {
+      ...currentEngagement,
+      hasConversation: false,
+      messageCount: 0,
+      clearedAt: new Date().toISOString(),
+    };
+
+    if (currentState) {
+      currentState.engagementState = updatedEngagement;
+      await saveWebChatSessionBrowsingState({
+        database: pool,
+        tenantId: webChatIntegration.tenant_id,
+        assistantId: webChatIntegration.assistant_id,
+        channelId: webChatIntegration.channel_id,
+        widgetKey: webChatSession.widgetKey,
+        sessionId: webChatSession.sessionId,
+        browsingState: currentState,
+      });
+    }
+
+    logContextualObservability('CONVERSATION_CLEARED', {
+      tenant_id: webChatIntegration.tenant_id,
+      session_id: webChatSession.sessionId,
+      current_entity: currentState?.currentEntity?.entity_id || null,
+    });
+
+    return res.json({
+      status: 'ok',
+      cleared: true,
+      session: sessionToken,
+      history: [newGreetingItem],
+      browsing_state: {
+        current_entity: currentState?.currentEntity || null,
+        previous_entities: currentState?.previousEntities || [],
+        engagement_state: updatedEngagement,
+      },
+      appearance,
+      behavior,
+      assistant: publicAssistant,
+    });
+  } catch (error) {
+    console.error('CHAT_RESET_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    return res.status(500).json({ error: 'Failed to reset conversation.' });
   }
 });
 
