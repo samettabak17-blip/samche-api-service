@@ -185,6 +185,7 @@
     hasUserMessaged: false,
     hasProactivelyEngaged: false,
     dismissedAt: 0,
+    dismissedEntityId: null,
     dwellTimer: null,
     dwellSeconds: 0,
     lastCheckedDwell: -1,
@@ -220,11 +221,11 @@
 
   function recordUserMessage() {
     proactiveState.hasUserMessaged = true;
-    clearTimers();
   }
 
   function recordDismissal() {
     proactiveState.dismissedAt = Date.now();
+    proactiveState.dismissedEntityId = proactiveState.currentEntityId || null;
     clearTimers();
     if (proactiveState.sessionToken && typeof fetch === 'function') {
       fetch('/api/chat/dismiss-proactive', {
@@ -233,32 +234,32 @@
           'Content-Type': 'application/json',
           'X-Samche-Web-Chat-Session': proactiveState.sessionToken,
         },
+        body: JSON.stringify({
+          entity_id: proactiveState.currentEntityId || undefined,
+        }),
       }).catch(function() {});
     }
   }
 
   function startDwellTracker(token, customDwellSeconds) {
     if (token) proactiveState.sessionToken = token;
-    if (proactiveState.hasUserMessaged || proactiveState.hasProactivelyEngaged) return;
+    var currId = proactiveState.currentEntityId;
+    if (!currId) return;
+
+    if (proactiveState.acknowledgedEntityIds[currId]) return;
 
     var cooldownMs = proactiveState.cooldownSeconds * 1000;
-    if (proactiveState.dismissedAt && (Date.now() - proactiveState.dismissedAt < cooldownMs)) {
+    if (proactiveState.dismissedAt && proactiveState.dismissedEntityId === currId && (Date.now() - proactiveState.dismissedAt < cooldownMs)) {
       return;
     }
-
-    // Only run discrete entity dwell tracker if on a discrete entity
-    if (!proactiveState.currentEntityId) return;
 
     if (proactiveState.intervalTimer) clearInterval(proactiveState.intervalTimer);
     proactiveState.intervalTimer = null;
     var threshold = customDwellSeconds || proactiveState.dwellThresholdSeconds;
 
     proactiveState.intervalTimer = setInterval(function() {
-      if (proactiveState.hasUserMessaged || proactiveState.hasProactivelyEngaged) {
-        clearTimers();
-        return;
-      }
-      if (!proactiveState.currentEntityId || !proactiveState.entityDwellStartedAt) {
+      var activeId = proactiveState.currentEntityId;
+      if (!activeId || proactiveState.acknowledgedEntityIds[activeId] || !proactiveState.entityDwellStartedAt) {
         clearTimers();
         return;
       }
@@ -270,7 +271,7 @@
       proactiveState.dwellSeconds = elapsedSec;
 
       if (elapsedSec >= threshold) {
-        // Qualified threshold reached! Clear interval immediately so no concurrent requests fire!
+        // Qualified threshold reached! Clear interval immediately
         clearInterval(proactiveState.intervalTimer);
         proactiveState.intervalTimer = null;
         checkDwellIntent(elapsedSec);
@@ -282,11 +283,13 @@
   }
 
   function checkDwellIntent(seconds) {
-    if (!proactiveState.sessionToken || proactiveState.hasUserMessaged || proactiveState.hasProactivelyEngaged) return;
+    var currId = proactiveState.currentEntityId;
+    if (!proactiveState.sessionToken || !currId) return;
+    if (proactiveState.acknowledgedEntityIds[currId]) return;
     if (proactiveState.isEvaluating) return; // In-flight mutex!
 
     var cooldownMs = proactiveState.cooldownSeconds * 1000;
-    if (proactiveState.dismissedAt && (Date.now() - proactiveState.dismissedAt < cooldownMs)) {
+    if (proactiveState.dismissedAt && proactiveState.dismissedEntityId === currId && (Date.now() - proactiveState.dismissedAt < cooldownMs)) {
       return;
     }
 
@@ -319,19 +322,25 @@
   function handleProactiveResult(data) {
     if (!data || !data.proactive_engagement) return;
     var pe = data.proactive_engagement;
-    if (proactiveState.hasUserMessaged || proactiveState.hasProactivelyEngaged) return;
+    var currId = proactiveState.currentEntityId;
+
+    if (currId && proactiveState.acknowledgedEntityIds[currId]) return;
 
     var cooldownMs = proactiveState.cooldownSeconds * 1000;
-    if (proactiveState.dismissedAt && (Date.now() - proactiveState.dismissedAt < cooldownMs)) {
+    if (proactiveState.dismissedAt && proactiveState.dismissedEntityId === currId && (Date.now() - proactiveState.dismissedAt < cooldownMs)) {
       return;
     }
 
     if (pe.should_open && pe.message) {
-      var eventId = pe.event_id || ('pe_' + (proactiveState.currentEntityId || 'entity'));
+      var eventId = pe.event_id || ('pe_' + (currId || 'entity'));
       if (proactiveState.renderedMessageIds[eventId]) {
         return; // Idempotency: Already rendered!
       }
       proactiveState.renderedMessageIds[eventId] = true;
+      if (currId) {
+        proactiveState.acknowledgedEntityIds[currId] = true;
+        proactiveState.lastAcknowledgedEntityId = currId;
+      }
       proactiveState.hasProactivelyEngaged = true;
       clearTimers();
       if (typeof proactiveState.onAutoOpen === 'function') {
@@ -616,7 +625,7 @@
           seenGreeting = true;
         }
         if (isProactive) {
-          var pKey = item.proactive_event_id || 'proactive_history';
+          var pKey = item.proactive_event_id || (item.entity_id ? ('pe_' + item.entity_id) : ('proactive_' + i));
           if (seenProactive[pKey]) continue;
           seenProactive[pKey] = true;
           proactiveState.hasProactivelyEngaged = true;
@@ -1069,15 +1078,22 @@
           // 1. Clear visible messages
           messages.innerHTML = '';
 
-          // 2. Reset message deduplication state
+          // 2. Reset message deduplication state & entity acknowledgements for new conversation
           proactiveState.renderedMessageIds = {};
+          proactiveState.acknowledgedEntityIds = {};
+          proactiveState.lastAcknowledgedEntityId = null;
           proactiveState.hasUserMessaged = false;
+          proactiveState.hasProactivelyEngaged = false;
           proactiveState.isContextualOpeningInProgress = false;
 
-          // 3. Keep current entity acknowledged so we do NOT trigger an immediate loop on current entity
+          // 3. Restart dwell for current entity from 0 in the new conversation
+          clearTimers();
+          proactiveState.dwellSeconds = 0;
+          proactiveState.lastCheckedDwell = -1;
           if (proactiveState.currentEntityId) {
-            proactiveState.acknowledgedEntityIds[proactiveState.currentEntityId] = true;
-            proactiveState.lastAcknowledgedEntityId = proactiveState.currentEntityId;
+            proactiveState.entityDwellStartedAt = Date.now();
+            proactiveState.entityDwellStartPerf = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+            startDwellTracker(sessionToken, proactiveState.dwellThresholdSeconds);
           }
 
           // 4. Append exactly the single new greeting from server
@@ -1590,28 +1606,29 @@
           proactiveState.dismissedAt = dismissedTime;
         }
 
-        if (data.behavior && data.behavior.proactive_enabled && !alreadyEngaged) {
+        if (data.behavior && data.behavior.proactive_enabled) {
           configureProactive({
             sessionToken: sessionToken,
             dwellThresholdSeconds: data.behavior.dwell_threshold_seconds || 15,
             cooldownSeconds: data.behavior.cooldown_seconds || 300,
-            hasProactivelyEngaged: alreadyEngaged,
             dismissedAt: dismissedTime,
             onAutoOpen: function(msg, pe) {
               launcher.classList.add('samche-intent-pulse');
-              if (data.behavior.high_intent_activation) {
-                openPanel();
+              if (data.behavior.high_intent_activation !== false) {
+                if (!isOpen) {
+                  openPanel();
+                }
                 var eventId = (pe && pe.event_id) || ('pe_' + (proactiveState.currentEntityId || 'entity'));
-                if (proactiveState.renderedMessageIds[eventId]) {
+                var existingBubble = messages.querySelector('.samche-msg-bot[data-proactive-event-id="' + eventId + '"]');
+                if (existingBubble) {
                   return;
                 }
-                proactiveState.renderedMessageIds[eventId] = true;
-                proactiveState.hasProactivelyEngaged = true;
 
                 var botBubble = appendMessage('bot', '', {
                   message_type: 'PROACTIVE',
                   is_proactive: true,
                   proactive_event_id: eventId,
+                  entity_id: proactiveState.currentEntityId || (pe && pe.entity_id) || undefined,
                 });
                 progressiveReveal(botBubble, msg, { container: messages });
               }
@@ -1620,7 +1637,7 @@
               launcher.classList.add('samche-intent-pulse');
             },
           });
-          if (proactiveState.currentEntityId) {
+          if (proactiveState.currentEntityId && !proactiveState.acknowledgedEntityIds[proactiveState.currentEntityId]) {
             startDwellTracker(sessionToken, data.behavior.dwell_threshold_seconds || 15);
           }
         }
@@ -1647,7 +1664,7 @@
           if (newEntityId) {
             proactiveState.entityDwellStartedAt = Date.now();
             proactiveState.entityDwellStartPerf = (typeof performance !== 'undefined') ? performance.now() : Date.now();
-            if (!isOpen && !proactiveState.hasUserMessaged && !proactiveState.hasProactivelyEngaged) {
+            if (!proactiveState.acknowledgedEntityIds[newEntityId]) {
               startDwellTracker(sessionToken, proactiveState.dwellThresholdSeconds);
             }
           } else {
@@ -1668,27 +1685,7 @@
           .then(function(res) { return res.json(); })
           .then(function(respData) {
             if (respData && respData.proactive_engagement) {
-              var pe = respData.proactive_engagement;
-              if (pe.should_open && pe.message) {
-                var cooldownMs = proactiveState.cooldownSeconds * 1000;
-                var isCooldown = proactiveState.dismissedAt && (Date.now() - proactiveState.dismissedAt < cooldownMs);
-                var eventId = pe.event_id || ('pe_' + (proactiveState.currentEntityId || 'entity'));
-                if (!isOpen && !proactiveState.hasUserMessaged && !proactiveState.hasProactivelyEngaged && !isCooldown && !proactiveState.renderedMessageIds[eventId]) {
-                  proactiveState.renderedMessageIds[eventId] = true;
-                  proactiveState.hasProactivelyEngaged = true;
-                  clearTimers();
-                  launcher.classList.add('samche-intent-pulse');
-                  openPanel();
-                  var botBubble = appendMessage('bot', '', {
-                    message_type: 'PROACTIVE',
-                    is_proactive: true,
-                    proactive_event_id: eventId,
-                  });
-                  progressiveReveal(botBubble, pe.message, { container: messages });
-                }
-              } else if (pe.should_nudge || pe.intent_state === 'MEDIUM') {
-                launcher.classList.add('samche-intent-pulse');
-              }
+              handleProactiveResult(respData);
             }
           })
           .catch(function() {});
@@ -1868,7 +1865,10 @@
         return proactiveState.currentEntityId;
       },
       hasProactivelyEngaged: function() {
-        return proactiveState.hasProactivelyEngaged;
+        return Boolean(proactiveState.currentEntityId && proactiveState.acknowledgedEntityIds[proactiveState.currentEntityId]);
+      },
+      getAcknowledgedEntityIds: function() {
+        return Object.keys(proactiveState.acknowledgedEntityIds);
       },
       isEvaluating: function() {
         return proactiveState.isEvaluating;

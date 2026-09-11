@@ -431,9 +431,24 @@ test('18. Product comparison sequence (A -> B) reaches HIGH intent deterministic
 
   // Detail (25) + Commercial (30) + Multi-Entity (20) + Same-Type Comparison (20) = 95 -> HIGH
   assert.equal(comparisonResult.intentState, INTENT_STATES.HIGH);
-  assert.equal(comparisonResult.shouldAutoOpen, true);
-  assert.equal(comparisonResult.shouldProactivelyEngage, true);
-  assert.equal(comparisonResult.reason, 'HIGH_INTENT_ACTIVATION');
+  assert.equal(comparisonResult.shouldAutoOpen, false, 'Without qualified dwell, auto-open must remain false');
+  assert.equal(comparisonResult.shouldProactivelyEngage, false, 'Without qualified dwell, proactive engagement must be false');
+  assert.equal(comparisonResult.reason, 'AWAITING_QUALIFIED_DWELL');
+
+  // Once qualified dwell (>= 15s) is achieved on the current entity:
+  const comparisonResultWithDwell = evaluateVisitorIntent({
+    pageContext: {
+      url: 'https://samche-api-staging.onrender.com/task8-demo/#/urun/ultra-guc-bankasi-20000mah',
+      path: '/task8-demo/#/urun/ultra-guc-bankasi-20000mah',
+      page_type: 'product_detail',
+    },
+    currentEntity: entityB,
+    previousEntities: [entityA],
+    sessionBrowsing: { dwellSeconds: 15 },
+  });
+  assert.equal(comparisonResultWithDwell.shouldAutoOpen, true);
+  assert.equal(comparisonResultWithDwell.shouldProactivelyEngage, true);
+  assert.equal(comparisonResultWithDwell.reason, 'HIGH_INTENT_ACTIVATION');
 });
 
 

@@ -46,9 +46,16 @@ const HIGH_INTENT_PAGE_TYPES = new Set([
   'demo',
   'checkout',
   'tier',
+  'property',
+  'property_detail',
+  'hotel',
+  'hotel_detail',
+  'course',
+  'course_detail',
+  'offer',
 ]);
 
-const HIGH_INTENT_PATH_PATTERN = /(?:(?:\/|^|#)(?:ur(?:un|unler)|products?|items?|services?|hizmet(?:ler)?|projects?|projeler|pricing|fiyat(?:lar)?|paket(?:ler)?|packages?|bookings?|randevu|rezervasyon|contacts?|iletisim|teklif|quotes?)(?:\/|$|#|\?|-|_)|(?:\/|^|#)demo(?:\/|$|#|\?))/i;
+const HIGH_INTENT_PATH_PATTERN = /(?:(?:\/|^|#)(?:ur(?:un|unler)|products?|items?|services?|hizmet(?:ler)?|projects?|projeler|properties?|emlak|pricing|fiyat(?:lar)?|paket(?:ler)?|packages?|bookings?|randevu|rezervasyon|contacts?|iletisim|teklif|quotes?|hotels?|courses?|offers?)(?:\/|$|#|\?|-|_)|(?:\/|^|#)demo(?:\/|$|#|\?))/i;
 
 const HIGH_INTENT_ENTITY_TYPES = new Set([
   'PRODUCT',
@@ -116,7 +123,8 @@ export function computeVisitorIntentScore({
     || rawType === 'pricing'
     || rawType === 'booking'
     || rawType === 'contact'
-    || rawType === 'quote';
+    || rawType === 'quote'
+    || isDiscreteEntity(currentEntity);
 
   if (isHighIntentPage) {
     score += 30;
@@ -265,21 +273,7 @@ export function evaluateVisitorIntent({
     config,
   });
 
-  // 3. Existing Conversation Safety: Suppress if visitor already chatted in this session
-  if (engagementState.hasConversation || Number(engagementState.messageCount || 0) > 0) {
-    return {
-      score,
-      intentState,
-      shouldProactivelyEngage: false,
-      shouldAutoOpen: false,
-      shouldNudge: false,
-      reason: 'ACTIVE_CONVERSATION',
-      signals,
-      timing,
-    };
-  }
-
-  // 4. Human Handoff Safety: Suppress if human support/takeover is active
+  // 3. Human Handoff Safety: Suppress if human support/takeover is active
   if (engagementState.humanHandoffActive) {
     return {
       score,
@@ -293,11 +287,75 @@ export function evaluateVisitorIntent({
     };
   }
 
-  // 5. Dismissal Cooldown: Suppress if user explicitly closed the chat recently
+  // 4. Resolve current entity identity for entity-scoped policy
+  const currentEntityId = currentEntity?.entity_id
+    || currentEntity?.id
+    || currentEntity?.canonical_url
+    || currentEntity?.entity_name
+    || pageContext?.entity_id
+    || pageContext?.path
+    || null;
+
+  // Discrete entity qualification check: non-discrete pages (catalog, home, about, etc.)
+  // must never trigger proactive auto-open
+  if (!isDiscrete) {
+    let nonDiscreteReason = 'BELOW_INTENT_THRESHOLD';
+    if (intentState === INTENT_STATES.MEDIUM) nonDiscreteReason = 'MEDIUM_INTENT_NUDGE';
+    return {
+      score,
+      intentState: INTENT_STATES.LOW,
+      shouldProactivelyEngage: false,
+      shouldAutoOpen: false,
+      shouldNudge: false,
+      reason: nonDiscreteReason,
+      signals,
+      timing,
+    };
+  }
+
+  // 5. Entity-Scoped Frequency Capping:
+  // Suppress if proactive message was already sent for THIS entity in the conversation
+  const acknowledgedList = Array.isArray(engagementState.acknowledgedEntityIds)
+    ? engagementState.acknowledgedEntityIds.map(String)
+    : (engagementState.proactiveEntityId ? [String(engagementState.proactiveEntityId)] : []);
+
+  const isCurrentEntityAcknowledged = currentEntityId && acknowledgedList.includes(String(currentEntityId));
+  if (isCurrentEntityAcknowledged) {
+    return {
+      score,
+      intentState,
+      shouldProactivelyEngage: false,
+      shouldAutoOpen: false,
+      shouldNudge: false,
+      reason: 'ALREADY_ENGAGED',
+      signals,
+      timing,
+    };
+  }
+
+  // Fallback for legacy test contexts without entity list where proactiveMessageSent is explicitly set
+  if (!Array.isArray(engagementState.acknowledgedEntityIds) && !engagementState.proactiveEntityId && engagementState.proactiveMessageSent) {
+    return {
+      score,
+      intentState,
+      shouldProactivelyEngage: false,
+      shouldAutoOpen: false,
+      shouldNudge: false,
+      reason: 'ALREADY_ENGAGED',
+      signals,
+      timing,
+    };
+  }
+
+  // 6. Dismissal Cooldown: Suppress if user explicitly closed the chat recently ON THIS ENTITY
   if (engagementState.dismissedAt) {
     const dismissedTime = new Date(engagementState.dismissedAt).getTime();
     const cooldownMs = config.dismissal_cooldown_seconds * 1000;
-    if (Date.now() - dismissedTime < cooldownMs) {
+    const isWithinCooldown = (Date.now() - dismissedTime) < cooldownMs;
+    const dismissedEntityId = engagementState.dismissedEntityId ? String(engagementState.dismissedEntityId) : null;
+    const appliesToEntity = !dismissedEntityId || (currentEntityId && dismissedEntityId === String(currentEntityId));
+
+    if (isWithinCooldown && appliesToEntity) {
       return {
         score,
         intentState,
@@ -311,30 +369,39 @@ export function evaluateVisitorIntent({
     }
   }
 
-  // 6. Frequency Capping: Suppress if proactive message was already sent in this session
-  if (engagementState.proactiveMessageSent || engagementState.proactiveEngagedAt) {
-    return {
-      score,
-      intentState,
-      shouldProactivelyEngage: false,
-      shouldAutoOpen: false,
-      shouldNudge: false,
-      reason: 'ALREADY_ENGAGED',
-      signals,
-      timing,
-    };
+  // 7. Active Conversation Safety: If the user explicitly has an active conversation ongoing on this entity,
+  // protect against proactive auto-open interruptions.
+  if (engagementState.hasConversation || Number(engagementState.messageCount || 0) > 0) {
+    const convEntityId = engagementState.conversationEntityId ? String(engagementState.conversationEntityId) : null;
+    const isNewEntityTransition = Boolean(convEntityId && currentEntityId && convEntityId !== String(currentEntityId));
+    if (!isNewEntityTransition) {
+      return {
+        score,
+        intentState,
+        shouldProactivelyEngage: false,
+        shouldAutoOpen: false,
+        shouldNudge: false,
+        reason: 'ACTIVE_CONVERSATION',
+        signals,
+        timing,
+      };
+    }
   }
 
-  // 7. Threshold Check
+  // 7. Threshold and Qualified Dwell Check
   const isHigh = intentState === INTENT_STATES.HIGH;
   const isMedium = intentState === INTENT_STATES.MEDIUM;
-  const shouldAutoOpen = isHigh && config.auto_open;
-  const shouldProactivelyEngage = isHigh;
-  const shouldNudge = isMedium;
+  const isQualifiedDwell = timing.is_qualified_dwell;
+
+  const shouldProactivelyEngage = isHigh && isQualifiedDwell;
+  const shouldAutoOpen = shouldProactivelyEngage && config.auto_open;
+  const shouldNudge = isMedium || (isHigh && !isQualifiedDwell);
 
   let reason = 'BELOW_INTENT_THRESHOLD';
-  if (isHigh) {
+  if (shouldProactivelyEngage) {
     reason = 'HIGH_INTENT_ACTIVATION';
+  } else if (isHigh && !isQualifiedDwell) {
+    reason = 'AWAITING_QUALIFIED_DWELL';
   } else if (isMedium) {
     reason = 'MEDIUM_INTENT_NUDGE';
   }

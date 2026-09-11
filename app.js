@@ -1636,9 +1636,15 @@ const sessionContextualLocks = new Set();
 function addWebMemory(userId, role, content, knowledgeAuthority = null, metadata = null) {
   if (!webMemoryStore[userId]) webMemoryStore[userId] = [];
   if (metadata?.is_proactive || metadata?.message_type === 'PROACTIVE') {
-    const existing = webMemoryStore[userId].find(m => m.is_proactive || m.message_type === 'PROACTIVE' || (metadata.proactive_event_id && m.proactive_event_id === metadata.proactive_event_id));
+    const existing = webMemoryStore[userId].find(m => 
+      (m.is_proactive || m.message_type === 'PROACTIVE') && (
+        (metadata.proactive_event_id && m.proactive_event_id === metadata.proactive_event_id) ||
+        (metadata.entity_id && m.entity_id === metadata.entity_id) ||
+        (!metadata.proactive_event_id && !metadata.entity_id)
+      )
+    );
     if (existing) {
-      return existing; // Idempotent: same proactive event cannot persist twice!
+      return existing; // Idempotent: same entity proactive event cannot persist twice!
     }
   }
   if (metadata?.message_type === 'CONTEXTUAL_OPEN') {
@@ -2006,16 +2012,31 @@ app.post("/api/chat/page-context", async (req, res) => {
 
     let proactiveMessage = null;
     let proactiveEventId = updatedState.engagementState?.proactiveEventId || null;
-    const existingProactiveInMemory = (webMemoryStore[webChatSession.sessionId] || []).find(m => m.is_proactive);
-    const alreadySentInEngagement = Boolean(updatedState.engagementState?.proactiveMessageSent);
+    const currentEntityId = updatedState.currentEntity?.entity_id
+      || updatedState.currentEntity?.id
+      || updatedState.currentEntity?.canonical_url
+      || null;
+
+    const acknowledgedList = Array.isArray(updatedState.engagementState?.acknowledgedEntityIds)
+      ? updatedState.engagementState.acknowledgedEntityIds.map(String)
+      : (updatedState.engagementState?.proactiveEntityId ? [String(updatedState.engagementState.proactiveEntityId)] : []);
+
+    const isCurrentEntityAcknowledged = Boolean(currentEntityId && acknowledgedList.includes(String(currentEntityId)));
+    const existingEntityProactive = (webMemoryStore[webChatSession.sessionId] || []).find(
+      m => (m.is_proactive || m.message_type === 'PROACTIVE') && (
+        (currentEntityId && m.entity_id === currentEntityId) ||
+        (currentEntityId && m.proactive_event_id === ("pe_" + webChatSession.sessionId + "_" + currentEntityId))
+      )
+    );
 
     if (intentEvaluation.shouldProactivelyEngage) {
-      if (existingProactiveInMemory || alreadySentInEngagement) {
-        proactiveMessage = existingProactiveInMemory?.content || updatedState.engagementState?.proactiveMessage || null;
-      } else if (sessionProactiveLocks.has(webChatSession.sessionId)) {
-        // In-flight lock: another concurrent generation is active for this session
+      if (isCurrentEntityAcknowledged || existingEntityProactive) {
+        proactiveMessage = existingEntityProactive?.content || updatedState.engagementState?.proactiveMessage || null;
+      } else if (sessionProactiveLocks.has(webChatSession.sessionId + ":" + currentEntityId)) {
+        // In-flight lock: another concurrent generation is active for this session + entity
       } else {
-        sessionProactiveLocks.add(webChatSession.sessionId);
+        const lockKey = webChatSession.sessionId + ":" + currentEntityId;
+        sessionProactiveLocks.add(lockKey);
         try {
           proactiveMessage = await generateContextualProactiveMessage({
             persona: webChatRuntimePersona,
@@ -2026,14 +2047,13 @@ app.post("/api/chat/page-context", async (req, res) => {
             language: updatedState.currentPage?.language || webChatRuntimePersona?.configuration?.language || 'tr',
           });
 
-          proactiveEventId = "pe_" + webChatSession.sessionId + "_" + (updatedState.currentEntity?.entity_id || 'entity');
-          const pEntityId = updatedState.currentEntity?.entity_id || null;
+          proactiveEventId = "pe_" + webChatSession.sessionId + "_" + (currentEntityId || 'entity');
 
           addWebMemory(webChatSession.sessionId, 'assistant', proactiveMessage, null, {
             is_proactive: true,
             proactive_event_id: proactiveEventId,
             message_type: 'PROACTIVE',
-            entity_id: pEntityId,
+            entity_id: currentEntityId,
             entity_name: updatedState.currentEntity?.entity_name || null,
             entity_type: updatedState.currentEntity?.entity_type || null,
           });
@@ -2041,15 +2061,15 @@ app.post("/api/chat/page-context", async (req, res) => {
           const currentAck = Array.isArray(updatedState.engagementState?.acknowledgedEntityIds)
             ? updatedState.engagementState.acknowledgedEntityIds
             : (updatedState.engagementState?.proactiveEntityId ? [updatedState.engagementState.proactiveEntityId] : []);
-          const updatedAck = Array.from(new Set([...currentAck, pEntityId].filter(Boolean)));
+          const updatedAck = Array.from(new Set([...currentAck, currentEntityId].filter(Boolean)));
 
           updatedState.engagementState = {
             ...(updatedState.engagementState || {}),
             proactiveMessageSent: true,
             proactiveEngagedAt: new Date().toISOString(),
             proactiveEventId,
-            proactiveEntityId: pEntityId,
-            lastAcknowledgedEntityId: pEntityId,
+            proactiveEntityId: currentEntityId,
+            lastAcknowledgedEntityId: currentEntityId,
             acknowledgedEntityIds: updatedAck,
             proactiveMessage,
             intentState: intentEvaluation.intentState,
@@ -2062,9 +2082,10 @@ app.post("/api/chat/page-context", async (req, res) => {
             score: intentEvaluation.score,
             reason: intentEvaluation.reason,
             event_id: proactiveEventId,
+            entity_id: currentEntityId,
           });
         } finally {
-          sessionProactiveLocks.delete(webChatSession.sessionId);
+          sessionProactiveLocks.delete(lockKey);
         }
       }
     } else if (intentEvaluation.intentState === 'MEDIUM') {
@@ -2116,14 +2137,15 @@ app.post("/api/chat/page-context", async (req, res) => {
       intent_state: intentEvaluation.intentState,
       intent_score: intentEvaluation.score,
       proactive_engagement: {
-        should_open: Boolean(intentEvaluation.shouldAutoOpen && !existingProactiveInMemory && !alreadySentInEngagement),
-        should_engage: Boolean(intentEvaluation.shouldProactivelyEngage && !existingProactiveInMemory && !alreadySentInEngagement),
+        should_open: Boolean(intentEvaluation.shouldAutoOpen && !isCurrentEntityAcknowledged && !existingEntityProactive),
+        should_engage: Boolean(intentEvaluation.shouldProactivelyEngage && !isCurrentEntityAcknowledged && !existingEntityProactive),
         should_nudge: intentEvaluation.shouldNudge || false,
         intent_state: intentEvaluation.intentState,
         intent_score: intentEvaluation.score,
-        reason: (existingProactiveInMemory || alreadySentInEngagement) ? 'ALREADY_ENGAGED' : intentEvaluation.reason,
+        reason: (isCurrentEntityAcknowledged || existingEntityProactive) ? 'ALREADY_ENGAGED' : intentEvaluation.reason,
         message: proactiveMessage,
         event_id: proactiveEventId,
+        entity_id: currentEntityId,
       },
       timing: intentEvaluation.timing,
     });
@@ -2224,16 +2246,31 @@ app.post("/api/chat/evaluate-intent", async (req, res) => {
 
     let proactiveMessage = null;
     let proactiveEventId = currentState.engagementState?.proactiveEventId || null;
-    const existingProactiveInMemory = (webMemoryStore[webChatSession.sessionId] || []).find(m => m.is_proactive);
-    const alreadySentInEngagement = Boolean(currentState.engagementState?.proactiveMessageSent);
+    const currentEntityId = currentState.currentEntity?.entity_id
+      || currentState.currentEntity?.id
+      || currentState.currentEntity?.canonical_url
+      || null;
+
+    const acknowledgedList = Array.isArray(currentState.engagementState?.acknowledgedEntityIds)
+      ? currentState.engagementState.acknowledgedEntityIds.map(String)
+      : (currentState.engagementState?.proactiveEntityId ? [String(currentState.engagementState.proactiveEntityId)] : []);
+
+    const isCurrentEntityAcknowledged = Boolean(currentEntityId && acknowledgedList.includes(String(currentEntityId)));
+    const existingEntityProactive = (webMemoryStore[webChatSession.sessionId] || []).find(
+      m => (m.is_proactive || m.message_type === 'PROACTIVE') && (
+        (currentEntityId && m.entity_id === currentEntityId) ||
+        (currentEntityId && m.proactive_event_id === ("pe_" + webChatSession.sessionId + "_" + currentEntityId))
+      )
+    );
 
     if (intentEvaluation.shouldProactivelyEngage) {
-      if (existingProactiveInMemory || alreadySentInEngagement) {
-        proactiveMessage = existingProactiveInMemory?.content || currentState.engagementState?.proactiveMessage || null;
-      } else if (sessionProactiveLocks.has(webChatSession.sessionId)) {
-        // In-flight lock: another concurrent generation is active for this session
+      if (isCurrentEntityAcknowledged || existingEntityProactive) {
+        proactiveMessage = existingEntityProactive?.content || currentState.engagementState?.proactiveMessage || null;
+      } else if (sessionProactiveLocks.has(webChatSession.sessionId + ":" + currentEntityId)) {
+        // In-flight lock: another concurrent generation is active for this session + entity
       } else {
-        sessionProactiveLocks.add(webChatSession.sessionId);
+        const lockKey = webChatSession.sessionId + ":" + currentEntityId;
+        sessionProactiveLocks.add(lockKey);
         try {
           proactiveMessage = await generateContextualProactiveMessage({
             persona: webChatRuntimePersona,
@@ -2244,14 +2281,13 @@ app.post("/api/chat/evaluate-intent", async (req, res) => {
             language: currentState.currentPage?.language || webChatRuntimePersona?.configuration?.language || 'tr',
           });
 
-          proactiveEventId = "pe_" + webChatSession.sessionId + "_" + (currentState.currentEntity?.entity_id || 'entity');
-          const pEntityId = currentState.currentEntity?.entity_id || null;
+          proactiveEventId = "pe_" + webChatSession.sessionId + "_" + (currentEntityId || 'entity');
 
           addWebMemory(webChatSession.sessionId, 'assistant', proactiveMessage, null, {
             is_proactive: true,
             proactive_event_id: proactiveEventId,
             message_type: 'PROACTIVE',
-            entity_id: pEntityId,
+            entity_id: currentEntityId,
             entity_name: currentState.currentEntity?.entity_name || null,
             entity_type: currentState.currentEntity?.entity_type || null,
           });
@@ -2259,15 +2295,15 @@ app.post("/api/chat/evaluate-intent", async (req, res) => {
           const currentAck = Array.isArray(currentState.engagementState?.acknowledgedEntityIds)
             ? currentState.engagementState.acknowledgedEntityIds
             : (currentState.engagementState?.proactiveEntityId ? [currentState.engagementState.proactiveEntityId] : []);
-          const updatedAck = Array.from(new Set([...currentAck, pEntityId].filter(Boolean)));
+          const updatedAck = Array.from(new Set([...currentAck, currentEntityId].filter(Boolean)));
 
           const updatedEngagementState = {
             ...(currentState.engagementState || {}),
             proactiveMessageSent: true,
             proactiveEngagedAt: new Date().toISOString(),
             proactiveEventId,
-            proactiveEntityId: pEntityId,
-            lastAcknowledgedEntityId: pEntityId,
+            proactiveEntityId: currentEntityId,
+            lastAcknowledgedEntityId: currentEntityId,
             acknowledgedEntityIds: updatedAck,
             proactiveMessage,
             intentState: intentEvaluation.intentState,
@@ -2287,9 +2323,10 @@ app.post("/api/chat/evaluate-intent", async (req, res) => {
             score: intentEvaluation.score,
             reason: intentEvaluation.reason,
             event_id: proactiveEventId,
+            entity_id: currentEntityId,
           });
         } finally {
-          sessionProactiveLocks.delete(webChatSession.sessionId);
+          sessionProactiveLocks.delete(lockKey);
         }
       }
     } else if (intentEvaluation.intentState === 'MEDIUM') {
@@ -2313,14 +2350,16 @@ app.post("/api/chat/evaluate-intent", async (req, res) => {
       intent_state: intentEvaluation.intentState,
       intent_score: intentEvaluation.score,
       proactive_engagement: {
-        should_open: Boolean(intentEvaluation.shouldAutoOpen && !existingProactiveInMemory && !alreadySentInEngagement),
-        should_engage: Boolean(intentEvaluation.shouldProactivelyEngage && !existingProactiveInMemory && !alreadySentInEngagement),
+        should_open: Boolean(intentEvaluation.shouldAutoOpen && !isCurrentEntityAcknowledged && !existingEntityProactive),
+        should_engage: Boolean(intentEvaluation.shouldProactivelyEngage && !isCurrentEntityAcknowledged && !existingEntityProactive),
         should_nudge: intentEvaluation.shouldNudge || false,
         intent_state: intentEvaluation.intentState,
         intent_score: intentEvaluation.score,
-        reason: (existingProactiveInMemory || alreadySentInEngagement) ? 'ALREADY_ENGAGED' : intentEvaluation.reason,
+        reason: (isCurrentEntityAcknowledged || existingEntityProactive) ? 'ALREADY_ENGAGED' : intentEvaluation.reason,
         message: proactiveMessage,
         event_id: proactiveEventId,
+        entity_id: currentEntityId,
+      },
       },
       timing: intentEvaluation.timing,
     });
@@ -2364,9 +2403,11 @@ app.post("/api/chat/dismiss-proactive", async (req, res) => {
     });
 
     const currentEngagement = currentState?.engagementState || {};
+    const dismissedEntityId = req.body?.entity_id || currentState?.currentEntity?.entity_id || null;
     const updatedEngagement = {
       ...currentEngagement,
       dismissedAt: new Date().toISOString(),
+      dismissedEntityId,
     };
 
     if (!currentState) {
@@ -2611,6 +2652,11 @@ app.post("/api/chat/reset", async (req, res) => {
 
     // 2. Clear in-flight proactive / contextual locks
     sessionProactiveLocks.delete(webChatSession.sessionId);
+    for (const key of sessionProactiveLocks) {
+      if (key.startsWith(webChatSession.sessionId)) {
+        sessionProactiveLocks.delete(key);
+      }
+    }
     for (const key of sessionContextualLocks) {
       if (key.startsWith(webChatSession.sessionId)) {
         sessionContextualLocks.delete(key);
@@ -2678,12 +2724,20 @@ app.post("/api/chat/reset", async (req, res) => {
     const currentEngagement = currentState?.engagementState || {};
     const updatedEngagement = {
       ...currentEngagement,
+      acknowledgedEntityIds: [],
+      proactiveMessageSent: false,
+      proactiveEngagedAt: null,
+      proactiveEntityId: null,
+      proactiveEventId: null,
+      proactiveMessage: null,
+      lastAcknowledgedEntityId: null,
       hasConversation: false,
       messageCount: 0,
       clearedAt: new Date().toISOString(),
     };
 
     if (currentState) {
+      currentState.currentEntityFirstSeenAt = new Date().toISOString();
       currentState.engagementState = updatedEngagement;
       await saveWebChatSessionBrowsingState({
         database: pool,
