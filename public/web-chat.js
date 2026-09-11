@@ -176,6 +176,9 @@
   var proactiveState = {
     sessionToken: null,
     currentEntityId: null,
+    lastAcknowledgedEntityId: null,
+    acknowledgedEntityIds: {},
+    isContextualOpeningInProgress: false,
     entityDwellStartedAt: null,
     entityDwellStartPerf: null,
     isEvaluating: false,
@@ -577,6 +580,7 @@
       var count = 0;
       var seenGreeting = false;
       var seenProactive = {};
+      var seenContextual = {};
       for (var i = 0; i < messages.length; i++) {
         var item = messages[i];
         if (!item) continue;
@@ -584,6 +588,7 @@
         var text = typeof item.content === 'string' ? item.content : (item.text || '');
         var isGreeting = Boolean(item.message_type === 'INITIAL_GREETING' || item.is_greeting);
         var isProactive = Boolean(item.message_type === 'PROACTIVE' || item.is_proactive || item.proactive_event_id);
+        var isContextual = Boolean(item.message_type === 'CONTEXTUAL_OPEN');
 
         if (isGreeting) {
           if (seenGreeting) continue;
@@ -594,8 +599,24 @@
           if (seenProactive[pKey]) continue;
           seenProactive[pKey] = true;
           proactiveState.hasProactivelyEngaged = true;
+          if (item.entity_id) {
+            proactiveState.acknowledgedEntityIds[String(item.entity_id)] = true;
+            proactiveState.lastAcknowledgedEntityId = String(item.entity_id);
+          }
           if (item.proactive_event_id) {
             proactiveState.renderedMessageIds[item.proactive_event_id] = true;
+          }
+        }
+        if (isContextual) {
+          var cKey = item.contextual_event_id || item.id || ('ctx_open_' + item.entity_id);
+          if (seenContextual[cKey]) continue;
+          seenContextual[cKey] = true;
+          if (item.entity_id) {
+            proactiveState.acknowledgedEntityIds[String(item.entity_id)] = true;
+            proactiveState.lastAcknowledgedEntityId = String(item.entity_id);
+          }
+          if (cKey) {
+            proactiveState.renderedMessageIds[cKey] = true;
           }
         }
         if (typeof appendFn === 'function') {
@@ -827,7 +848,76 @@
       var sendBtn = composer.querySelector('.samche-send-btn');
       var closeBtn = header.querySelector('.samche-close-btn');
 
-      function openPanel() {
+      function handleManualContextualOpen() {
+        if (proactiveState.isContextualOpeningInProgress) return;
+        var currentCtx = capturePageContext();
+        if (!currentCtx) return;
+
+        var isNonDiscrete = !currentCtx.entity_type
+          || /^(?:PAGE|GENERIC_PAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ)/i.test(currentCtx.entity_type)
+          || /^(?:catalog|home|pricing|security|about)/i.test(currentCtx.page_type || '');
+
+        if (isNonDiscrete || !currentCtx.entity_id) return;
+
+        var currentEntityId = String(currentCtx.entity_id);
+
+        if (proactiveState.lastAcknowledgedEntityId === currentEntityId) return;
+        if (proactiveState.acknowledgedEntityIds[currentEntityId]) return;
+
+        var hasPriorContextual = Boolean(proactiveState.lastAcknowledgedEntityId) ||
+          Boolean(messages.querySelector('.samche-msg[data-message-type="PROACTIVE"], .samche-msg[data-message-type="CONTEXTUAL_OPEN"]'));
+        if (!hasPriorContextual) return;
+
+        proactiveState.isContextualOpeningInProgress = true;
+        var indicator = createTypingIndicator({ className: 'samche-msg samche-msg-bot' });
+        messages.appendChild(indicator);
+        smartScrollToBottom(messages, true);
+
+        var headers = { 'Content-Type': 'application/json' };
+        if (sessionToken) headers['X-Samche-Web-Chat-Session'] = sessionToken;
+
+        fetch('/api/chat/contextual-open', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify({
+            page_context: currentCtx,
+            entity_id: currentEntityId,
+            entity_name: currentCtx.entity_name,
+            entity_type: currentCtx.entity_type,
+          }),
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+          clearTypingIndicator(messages);
+          proactiveState.isContextualOpeningInProgress = false;
+          if (!data || data.status === 'noop' || !data.message) {
+            return;
+          }
+          var eventId = data.event_id || ('ctx_open_' + (sessionToken || 'init') + '_' + currentEntityId);
+          if (proactiveState.renderedMessageIds[eventId]) {
+            return;
+          }
+          proactiveState.renderedMessageIds[eventId] = true;
+          proactiveState.lastAcknowledgedEntityId = currentEntityId;
+          proactiveState.acknowledgedEntityIds[currentEntityId] = true;
+
+          var botBubble = appendMessage('bot', '', {
+            message_type: 'CONTEXTUAL_OPEN',
+            contextual_event_id: eventId,
+            entity_id: currentEntityId,
+            entity_name: data.entity_name || currentCtx.entity_name,
+            entity_type: data.entity_type || currentCtx.entity_type,
+            id: eventId,
+          });
+          progressiveReveal(botBubble, data.message, { container: messages });
+        })
+        .catch(function() {
+          clearTypingIndicator(messages);
+          proactiveState.isContextualOpeningInProgress = false;
+        });
+      }
+
+      function openPanel(isManual) {
         if (isOpen) return;
         isOpen = true;
         panel.classList.add('samche-open');
@@ -836,6 +926,9 @@
         launcher.classList.remove('samche-intent-pulse');
         setTimeout(function() { textarea.focus(); }, 120);
         smartScrollToBottom(messages, true);
+        if (isManual) {
+          handleManualContextualOpen();
+        }
       }
 
       function closePanel() {
@@ -848,7 +941,7 @@
       }
 
       launcher.addEventListener('click', function() {
-        if (isOpen) closePanel(); else openPanel();
+        if (isOpen) closePanel(); else openPanel(true);
       });
       closeBtn.addEventListener('click', closePanel);
 
@@ -911,11 +1004,18 @@
         var msgType = (meta && meta.message_type) || (role === 'user' ? 'USER' : 'ASSISTANT');
         if (meta && (meta.is_greeting || meta.message_type === 'INITIAL_GREETING')) msgType = 'INITIAL_GREETING';
         if (meta && (meta.is_proactive || meta.proactive_event_id || meta.message_type === 'PROACTIVE')) msgType = 'PROACTIVE';
+        if (meta && meta.message_type === 'CONTEXTUAL_OPEN') msgType = 'CONTEXTUAL_OPEN';
 
         msg.className = 'samche-msg ' + (role === 'user' ? 'samche-msg-user' : 'samche-msg-bot');
         msg.setAttribute('data-message-type', msgType);
         if (meta && meta.proactive_event_id) {
           msg.setAttribute('data-proactive-event-id', meta.proactive_event_id);
+        }
+        if (meta && meta.contextual_event_id) {
+          msg.setAttribute('data-contextual-event-id', meta.contextual_event_id);
+        }
+        if (meta && meta.entity_id) {
+          msg.setAttribute('data-entity-id', meta.entity_id);
         }
         if (meta && meta.id) {
           msg.setAttribute('data-message-id', meta.id);
@@ -1081,12 +1181,16 @@
         SamcheChatPersistence.hydrateHistory(messages, historyList, function(role, text, item) {
           var msgType = (item && item.message_type)
             || (item && (item.is_proactive || item.proactive_event_id) ? 'PROACTIVE' : (item && item.is_greeting ? 'INITIAL_GREETING' : (role === 'user' ? 'USER' : 'ASSISTANT')));
-          var eventId = item && (item.proactive_event_id || item.event_id);
+          var eventId = item && (item.proactive_event_id || item.contextual_event_id || item.event_id || item.id);
           appendMessage(role, text, {
             message_type: msgType,
             is_greeting: msgType === 'INITIAL_GREETING',
             is_proactive: msgType === 'PROACTIVE',
-            proactive_event_id: eventId,
+            proactive_event_id: (msgType === 'PROACTIVE') ? eventId : undefined,
+            contextual_event_id: (msgType === 'CONTEXTUAL_OPEN') ? (item.contextual_event_id || eventId) : undefined,
+            entity_id: item && item.entity_id,
+            entity_name: item && item.entity_name,
+            entity_type: item && item.entity_type,
             id: item && item.id,
           });
         });
@@ -1138,6 +1242,21 @@
           if (engagementState.proactiveEventId) {
             proactiveState.renderedMessageIds[engagementState.proactiveEventId] = true;
           }
+        }
+        if (engagementState.lastAcknowledgedEntityId) {
+          proactiveState.lastAcknowledgedEntityId = String(engagementState.lastAcknowledgedEntityId);
+          proactiveState.acknowledgedEntityIds[String(engagementState.lastAcknowledgedEntityId)] = true;
+        }
+        if (engagementState.proactiveEntityId) {
+          proactiveState.acknowledgedEntityIds[String(engagementState.proactiveEntityId)] = true;
+          if (!proactiveState.lastAcknowledgedEntityId) {
+            proactiveState.lastAcknowledgedEntityId = String(engagementState.proactiveEntityId);
+          }
+        }
+        if (Array.isArray(engagementState.acknowledgedEntityIds)) {
+          engagementState.acknowledgedEntityIds.forEach(function(id) {
+            if (id) proactiveState.acknowledgedEntityIds[String(id)] = true;
+          });
         }
         if (dismissedTime > 0) {
           proactiveState.dismissedAt = dismissedTime;
@@ -1254,9 +1373,9 @@
       var inst = {
         host: host,
         shadow: shadow,
-        open: openPanel,
+        open: function() { openPanel(true); },
         close: closePanel,
-        toggle: function() { if (isOpen) closePanel(); else openPanel(); },
+        toggle: function() { if (isOpen) closePanel(); else openPanel(true); },
         applyTheme: applyTheme,
         appendMessage: appendMessage,
         setChips: setChips,

@@ -97,6 +97,7 @@ import {
   updateConversationVisitorContext,
   loadConversationVisitorContext,
   updateWebChatSessionEngagementState,
+  isDiscreteEntity,
 } from './services/contextual-intelligence-service.js';
 import {
   INTENT_STATES,
@@ -105,6 +106,7 @@ import {
   computeVisitorIntentScore,
   evaluateVisitorIntent,
   generateContextualProactiveMessage,
+  generateContextualOpeningMessage,
 } from './services/visitor-intent-service.js';
 import { extractUrlsFromText, processMessageUrlIntelligence } from './services/url-intelligence-service.js';
 import { formatUrlIntelligenceFailureExplanation } from './services/url-intelligence-service.js';
@@ -1627,8 +1629,9 @@ app.post("/:slug/chat", (req, res, next) => {
 // B) WEB CHATBOT (OPENAI) - /api/chat ve /api/chat/history
 // ----------------------------------------------------------------------------
 const webMemoryStore = {};
-const MAX_WEB_MEMORY = 10;
+const MAX_WEB_MEMORY = 50;
 const sessionProactiveLocks = new Set();
+const sessionContextualLocks = new Set();
 
 function addWebMemory(userId, role, content, knowledgeAuthority = null, metadata = null) {
   if (!webMemoryStore[userId]) webMemoryStore[userId] = [];
@@ -1636,6 +1639,18 @@ function addWebMemory(userId, role, content, knowledgeAuthority = null, metadata
     const existing = webMemoryStore[userId].find(m => m.is_proactive || m.message_type === 'PROACTIVE' || (metadata.proactive_event_id && m.proactive_event_id === metadata.proactive_event_id));
     if (existing) {
       return existing; // Idempotent: same proactive event cannot persist twice!
+    }
+  }
+  if (metadata?.message_type === 'CONTEXTUAL_OPEN') {
+    const existing = webMemoryStore[userId].find(m => 
+      m.message_type === 'CONTEXTUAL_OPEN' && (
+        (metadata.entity_id && m.entity_id === metadata.entity_id) ||
+        (metadata.contextual_event_id && m.contextual_event_id === metadata.contextual_event_id) ||
+        (metadata.id && m.id === metadata.id)
+      )
+    );
+    if (existing) {
+      return existing; // Idempotent: same contextual opening cannot persist twice!
     }
   }
   if (metadata?.is_greeting || metadata?.message_type === 'INITIAL_GREETING') {
@@ -1762,7 +1777,7 @@ app.post("/api/chat/bootstrap", async (req, res) => {
 
           const mem = webMemoryStore[verified.sessionId] || [];
           const rawHistory = (feed && feed.messages.length > 0)
-            ? feed.messages.map(({ role, content, created_at, is_proactive, proactive_event_id, message_type, is_greeting, id }) => ({
+            ? feed.messages.map(({ role, content, created_at, is_proactive, proactive_event_id, message_type, is_greeting, id, entity_id, entity_name, entity_type, contextual_event_id }) => ({
                 role,
                 content: String(content || ''),
                 created_at,
@@ -1771,8 +1786,12 @@ app.post("/api/chat/bootstrap", async (req, res) => {
                 is_greeting: Boolean(is_greeting),
                 message_type: message_type || (is_greeting ? 'INITIAL_GREETING' : (is_proactive ? 'PROACTIVE' : (role === 'user' ? 'USER' : 'ASSISTANT'))),
                 id: id || null,
+                entity_id: entity_id || null,
+                entity_name: entity_name || null,
+                entity_type: entity_type || null,
+                contextual_event_id: contextual_event_id || null,
               }))
-            : mem.map(({ role, content, is_proactive, proactive_event_id, message_type, is_greeting, id }) => ({
+            : mem.map(({ role, content, is_proactive, proactive_event_id, message_type, is_greeting, id, entity_id, entity_name, entity_type, contextual_event_id }) => ({
                 role,
                 content: String(content || ''),
                 is_proactive: Boolean(is_proactive),
@@ -1780,11 +1799,16 @@ app.post("/api/chat/bootstrap", async (req, res) => {
                 is_greeting: Boolean(is_greeting),
                 message_type: message_type || (is_greeting ? 'INITIAL_GREETING' : (is_proactive ? 'PROACTIVE' : (role === 'user' ? 'USER' : 'ASSISTANT'))),
                 id: id || null,
+                entity_id: entity_id || null,
+                entity_name: entity_name || null,
+                entity_type: entity_type || null,
+                contextual_event_id: contextual_event_id || null,
               }));
 
           const deduplicatedHistory = [];
           let hasGreetingInHistory = false;
           const seenProactiveInHistory = new Set();
+          const seenContextualInHistory = new Set();
           for (const item of rawHistory) {
             if (item.message_type === 'INITIAL_GREETING' || item.is_greeting) {
               if (hasGreetingInHistory) continue;
@@ -1802,6 +1826,11 @@ app.post("/api/chat/bootstrap", async (req, res) => {
               seenProactiveInHistory.add(pKey);
               item.message_type = 'PROACTIVE';
               item.is_proactive = true;
+            }
+            if (item.message_type === 'CONTEXTUAL_OPEN') {
+              const cKey = item.contextual_event_id || item.id || ('ctx_open_' + item.entity_id);
+              if (seenContextualInHistory.has(cKey)) continue;
+              seenContextualInHistory.add(cKey);
             }
             deduplicatedHistory.push(item);
           }
@@ -1998,20 +2027,30 @@ app.post("/api/chat/page-context", async (req, res) => {
           });
 
           proactiveEventId = "pe_" + webChatSession.sessionId + "_" + (updatedState.currentEntity?.entity_id || 'entity');
+          const pEntityId = updatedState.currentEntity?.entity_id || null;
 
           addWebMemory(webChatSession.sessionId, 'assistant', proactiveMessage, null, {
             is_proactive: true,
             proactive_event_id: proactiveEventId,
             message_type: 'PROACTIVE',
-            entity_id: updatedState.currentEntity?.entity_id || null,
+            entity_id: pEntityId,
+            entity_name: updatedState.currentEntity?.entity_name || null,
+            entity_type: updatedState.currentEntity?.entity_type || null,
           });
+
+          const currentAck = Array.isArray(updatedState.engagementState?.acknowledgedEntityIds)
+            ? updatedState.engagementState.acknowledgedEntityIds
+            : (updatedState.engagementState?.proactiveEntityId ? [updatedState.engagementState.proactiveEntityId] : []);
+          const updatedAck = Array.from(new Set([...currentAck, pEntityId].filter(Boolean)));
 
           updatedState.engagementState = {
             ...(updatedState.engagementState || {}),
             proactiveMessageSent: true,
             proactiveEngagedAt: new Date().toISOString(),
             proactiveEventId,
-            proactiveEntityId: updatedState.currentEntity?.entity_id || null,
+            proactiveEntityId: pEntityId,
+            lastAcknowledgedEntityId: pEntityId,
+            acknowledgedEntityIds: updatedAck,
             proactiveMessage,
             intentState: intentEvaluation.intentState,
             intentScore: intentEvaluation.score,
@@ -2206,20 +2245,30 @@ app.post("/api/chat/evaluate-intent", async (req, res) => {
           });
 
           proactiveEventId = "pe_" + webChatSession.sessionId + "_" + (currentState.currentEntity?.entity_id || 'entity');
+          const pEntityId = currentState.currentEntity?.entity_id || null;
 
           addWebMemory(webChatSession.sessionId, 'assistant', proactiveMessage, null, {
             is_proactive: true,
             proactive_event_id: proactiveEventId,
             message_type: 'PROACTIVE',
-            entity_id: currentState.currentEntity?.entity_id || null,
+            entity_id: pEntityId,
+            entity_name: currentState.currentEntity?.entity_name || null,
+            entity_type: currentState.currentEntity?.entity_type || null,
           });
+
+          const currentAck = Array.isArray(currentState.engagementState?.acknowledgedEntityIds)
+            ? currentState.engagementState.acknowledgedEntityIds
+            : (currentState.engagementState?.proactiveEntityId ? [currentState.engagementState.proactiveEntityId] : []);
+          const updatedAck = Array.from(new Set([...currentAck, pEntityId].filter(Boolean)));
 
           const updatedEngagementState = {
             ...(currentState.engagementState || {}),
             proactiveMessageSent: true,
             proactiveEngagedAt: new Date().toISOString(),
             proactiveEventId,
-            proactiveEntityId: currentState.currentEntity?.entity_id || null,
+            proactiveEntityId: pEntityId,
+            lastAcknowledgedEntityId: pEntityId,
+            acknowledgedEntityIds: updatedAck,
             proactiveMessage,
             intentState: intentEvaluation.intentState,
             intentScore: intentEvaluation.score,
@@ -2354,6 +2403,168 @@ app.post("/api/chat/dismiss-proactive", async (req, res) => {
   } catch (error) {
     console.error('DISMISS_PROACTIVE_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return res.status(500).json({ error: 'Failed to record dismissal.' });
+  }
+});
+
+app.post("/api/chat/contextual-open", async (req, res) => {
+  const sessionToken = extractWebChatSessionToken(req);
+  if (!sessionToken) {
+    return res.status(401).json({ error: 'Web Chat session is required.' });
+  }
+
+  let webChatSession = null;
+  let webChatIntegration = null;
+  try {
+    webChatSession = verifyPublicWebChatSession(sessionToken, {
+      secret: configuredPublicWebChatSessionSecret(),
+    });
+    webChatIntegration = await resolvePublicWebChatIntegration({
+      database: pool,
+      widgetKey: webChatSession.widgetKey,
+    });
+  } catch (error) {
+    if (error instanceof PublicWebChatSessionError) {
+      return res.status(401).json({ error: 'Web Chat session is invalid.' });
+    }
+  }
+
+  if (!webChatIntegration) {
+    return res.status(401).json({ error: 'Web Chat session is invalid.' });
+  }
+
+  try {
+    let currentState = await loadWebChatSessionBrowsingState({
+      database: pool,
+      tenantId: webChatIntegration.tenant_id,
+      sessionId: webChatSession.sessionId,
+    });
+
+    const rawPayload = req.body?.page_context;
+    if (rawPayload && typeof rawPayload === 'object') {
+      currentState = updateSessionBrowsingState({
+        currentState,
+        rawPageContext: rawPayload,
+      });
+
+      await saveWebChatSessionBrowsingState({
+        database: pool,
+        tenantId: webChatIntegration.tenant_id,
+        assistantId: webChatIntegration.assistant_id,
+        channelId: webChatIntegration.channel_id,
+        widgetKey: webChatSession.widgetKey,
+        sessionId: webChatSession.sessionId,
+        browsingState: currentState,
+      });
+    }
+
+    const currentEntity = currentState?.currentEntity;
+    if (!currentEntity || !currentEntity.entity_id || !isDiscreteEntity(currentEntity)) {
+      return res.json({ status: 'noop', reason: 'NO_DISCRETE_ENTITY' });
+    }
+
+    const entityId = String(currentEntity.entity_id);
+    const mem = webMemoryStore[webChatSession.sessionId] || [];
+
+    const alreadyAcknowledgedInMemory = mem.some(m =>
+      (m.message_type === 'CONTEXTUAL_OPEN' || m.message_type === 'PROACTIVE' || m.is_proactive) &&
+      String(m.entity_id) === entityId
+    );
+
+    const engagementState = currentState?.engagementState || {};
+    const acknowledgedEntityIds = Array.isArray(engagementState.acknowledgedEntityIds)
+      ? engagementState.acknowledgedEntityIds.map(String)
+      : (engagementState.proactiveEntityId ? [String(engagementState.proactiveEntityId)] : []);
+
+    if (alreadyAcknowledgedInMemory || acknowledgedEntityIds.includes(entityId)) {
+      return res.json({ status: 'noop', reason: 'ALREADY_ACKNOWLEDGED_IN_SESSION', entity_id: entityId });
+    }
+
+    const contextualMessages = mem.filter(m =>
+      m.message_type === 'CONTEXTUAL_OPEN' || m.message_type === 'PROACTIVE' || m.is_proactive
+    );
+    const lastContextualMsg = contextualMessages.length > 0
+      ? contextualMessages[contextualMessages.length - 1]
+      : null;
+
+    if (lastContextualMsg && String(lastContextualMsg.entity_id) === entityId) {
+      return res.json({ status: 'noop', reason: 'ALREADY_ACKNOWLEDGED', entity_id: entityId });
+    }
+
+    const lockKey = `${webChatSession.sessionId}_${entityId}`;
+    if (sessionContextualLocks.has(lockKey)) {
+      return res.json({ status: 'noop', reason: 'GENERATION_IN_PROGRESS', entity_id: entityId });
+    }
+    sessionContextualLocks.add(lockKey);
+
+    try {
+      let webChatRuntimePersona = null;
+      try {
+        webChatRuntimePersona = await resolveTenantRuntimePersona({
+          database: pool,
+          tenantId: webChatIntegration.tenant_id,
+          assistantId: webChatIntegration.assistant_id,
+        });
+      } catch {}
+
+      const contextualOpeningMessage = await generateContextualOpeningMessage({
+        persona: webChatRuntimePersona,
+        currentEntity: currentEntity,
+        previousEntities: currentState.previousEntities || [],
+        channelRules: 'Return a short, natural, friendly contextual opening suitable for Web Chat. No HTML wrapping.',
+        openaiClient,
+        language: currentState.currentPage?.language || webChatRuntimePersona?.configuration?.language || 'tr',
+      });
+
+      const eventId = `ctx_open_${webChatSession.sessionId}_${entityId}`;
+
+      addWebMemory(webChatSession.sessionId, 'assistant', contextualOpeningMessage, null, {
+        id: eventId,
+        message_type: 'CONTEXTUAL_OPEN',
+        contextual_event_id: eventId,
+        entity_id: entityId,
+        entity_name: currentEntity.entity_name || null,
+        entity_type: currentEntity.entity_type || 'Product',
+        source: 'manual_open',
+        reason: 'NEW_ENTITY_CONTEXTUAL_OPEN',
+      });
+
+      const updatedAcknowledged = Array.from(new Set([...acknowledgedEntityIds, entityId]));
+      const updatedEngagementState = {
+        ...engagementState,
+        lastAcknowledgedEntityId: entityId,
+        acknowledgedEntityIds: updatedAcknowledged,
+      };
+
+      await updateWebChatSessionEngagementState({
+        database: pool,
+        tenantId: webChatIntegration.tenant_id,
+        sessionId: webChatSession.sessionId,
+        engagementState: updatedEngagementState,
+      });
+
+      logContextualObservability('CONTEXTUAL_OPEN_TRIGGERED', {
+        tenant_id: webChatIntegration.tenant_id,
+        session_id: webChatSession.sessionId,
+        entity_id: entityId,
+        entity_name: currentEntity.entity_name,
+        event_id: eventId,
+      });
+
+      return res.json({
+        status: 'ok',
+        message: contextualOpeningMessage,
+        event_id: eventId,
+        entity_id: entityId,
+        entity_name: currentEntity.entity_name,
+        entity_type: currentEntity.entity_type,
+        message_type: 'CONTEXTUAL_OPEN',
+      });
+    } finally {
+      sessionContextualLocks.delete(lockKey);
+    }
+  } catch (error) {
+    console.error('CONTEXTUAL_OPEN_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    return res.status(500).json({ error: 'Failed to evaluate contextual open.' });
   }
 });
 

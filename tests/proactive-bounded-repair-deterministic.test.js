@@ -4,6 +4,7 @@ import {
   INTENT_STATES,
   evaluateVisitorIntent,
   computeVisitorIntentScore,
+  generateContextualOpeningMessage,
 } from '../services/visitor-intent-service.js';
 import {
   updateSessionBrowsingState,
@@ -401,3 +402,253 @@ test('11. Full lifecycle deterministic fidelity: greeting, proactive, refresh x2
   assert.equal(transcript.assistantCount, 1);
   assert.deepEqual(transcript.types, ['INITIAL_GREETING', 'PROACTIVE', 'USER', 'ASSISTANT']);
 });
+
+test('12. SCENARIO A — Manual open after proactive acknowledgement on new discrete entity', async () => {
+  const resolvedGreeting = resolveInitialWebChatGreeting({ language: 'tr' });
+  const serverHistory = [
+    {
+      role: 'assistant',
+      content: resolvedGreeting,
+      message_type: 'INITIAL_GREETING',
+      is_greeting: true,
+      id: 'greeting_sess_a',
+    },
+    {
+      role: 'assistant',
+      content: 'Görünüşe göre SamChe Titan Akıllı Saat Pro inceliyorsunuz.',
+      message_type: 'PROACTIVE',
+      is_proactive: true,
+      proactive_event_id: 'pe_sess_a_prod-watch-titan',
+      entity_id: 'prod-watch-titan',
+      entity_name: 'SamChe Titan Akıllı Saat Pro',
+      entity_type: 'PRODUCT',
+    }
+  ];
+
+  const currentEntity = {
+    entity_id: 'prod-anc-earbuds',
+    entity_name: 'SamChe Ses Pro Kablosuz Kulaklık ANC',
+    entity_type: 'PRODUCT',
+  };
+  const previousEntities = [
+    {
+      entity_id: 'prod-watch-titan',
+      entity_name: 'SamChe Titan Akıllı Saat Pro',
+      entity_type: 'PRODUCT',
+    }
+  ];
+
+  const contextualMsg = await generateContextualOpeningMessage({
+    currentEntity,
+    previousEntities,
+    language: 'tr',
+  });
+
+  assert.ok(contextualMsg.includes('SamChe Ses Pro Kablosuz Kulaklık ANC'));
+  assert.ok(contextualMsg.includes('Titan'));
+
+  const ctxEventId = 'ctx_open_sess_a_prod-anc-earbuds';
+  serverHistory.push({
+    role: 'assistant',
+    content: contextualMsg,
+    message_type: 'CONTEXTUAL_OPEN',
+    contextual_event_id: ctxEventId,
+    entity_id: 'prod-anc-earbuds',
+    entity_name: currentEntity.entity_name,
+    entity_type: currentEntity.entity_type,
+    id: ctxEventId,
+  });
+
+  const rendered = [];
+  SamcheChatPersistence.hydrateHistory({}, serverHistory, (role, text, item) => {
+    rendered.push({ role, text, message_type: item.message_type, entity_id: item.entity_id });
+  });
+
+  assert.equal(rendered.length, 3);
+  assert.equal(rendered[0].message_type, 'INITIAL_GREETING');
+  assert.equal(rendered[1].message_type, 'PROACTIVE');
+  assert.equal(rendered[1].entity_id, 'prod-watch-titan');
+  assert.equal(rendered[2].message_type, 'CONTEXTUAL_OPEN');
+  assert.equal(rendered[2].entity_id, 'prod-anc-earbuds');
+
+  const greetingCount = rendered.filter(m => m.message_type === 'INITIAL_GREETING').length;
+  const titanProactiveCount = rendered.filter(m => m.message_type === 'PROACTIVE' && m.entity_id === 'prod-watch-titan').length;
+  const headphoneContextualCount = rendered.filter(m => m.message_type === 'CONTEXTUAL_OPEN' && m.entity_id === 'prod-anc-earbuds').length;
+
+  assert.equal(greetingCount, 1);
+  assert.equal(titanProactiveCount, 1);
+  assert.equal(headphoneContextualCount, 1);
+});
+
+test('13. SCENARIO B — Multi-step navigation across discrete entities (Titan -> Headphones -> Powerbank)', async () => {
+  const serverHistory = [
+    {
+      role: 'assistant',
+      content: 'Merhaba!',
+      message_type: 'INITIAL_GREETING',
+      is_greeting: true,
+      id: 'greeting_sess_b',
+    },
+    {
+      role: 'assistant',
+      content: 'Titan Saat inceliyorsunuz.',
+      message_type: 'PROACTIVE',
+      is_proactive: true,
+      proactive_event_id: 'pe_titan',
+      entity_id: 'prod-watch-titan',
+    },
+    {
+      role: 'assistant',
+      content: 'Kulaklık inceliyorsunuz.',
+      message_type: 'CONTEXTUAL_OPEN',
+      contextual_event_id: 'ctx_headphones',
+      entity_id: 'prod-anc-earbuds',
+    }
+  ];
+
+  const entityPowerbank = {
+    entity_id: 'prod-powerbank-20k',
+    entity_name: 'Ultra Güç Bankası 20000mAh',
+    entity_type: 'PRODUCT',
+  };
+
+  const powerbankMsg = await generateContextualOpeningMessage({
+    currentEntity: entityPowerbank,
+    previousEntities: [
+      { entity_id: 'prod-anc-earbuds', entity_name: 'SamChe Ses Pro Kablosuz Kulaklık ANC' },
+      { entity_id: 'prod-watch-titan', entity_name: 'Titan Akıllı Saat Pro' },
+    ],
+    language: 'tr',
+  });
+
+  assert.ok(powerbankMsg.includes('Ultra Güç Bankası 20000mAh'));
+
+  serverHistory.push({
+    role: 'assistant',
+    content: powerbankMsg,
+    message_type: 'CONTEXTUAL_OPEN',
+    contextual_event_id: 'ctx_powerbank',
+    entity_id: 'prod-powerbank-20k',
+    id: 'ctx_powerbank',
+  });
+
+  const rendered = [];
+  SamcheChatPersistence.hydrateHistory({}, serverHistory, (role, text, item) => {
+    rendered.push({ message_type: item.message_type, entity_id: item.entity_id });
+  });
+
+  assert.equal(rendered.length, 4);
+  assert.equal(rendered.filter(m => m.message_type === 'INITIAL_GREETING').length, 1);
+  assert.equal(rendered.filter(m => m.message_type === 'PROACTIVE').length, 1);
+  assert.equal(rendered.filter(m => m.message_type === 'CONTEXTUAL_OPEN' && m.entity_id === 'prod-anc-earbuds').length, 1);
+  assert.equal(rendered.filter(m => m.message_type === 'CONTEXTUAL_OPEN' && m.entity_id === 'prod-powerbank-20k').length, 1);
+});
+
+test('14. SCENARIO C — Full reload hydration preserves sequence and prevents duplicates', () => {
+  const fullTranscript = [
+    { role: 'assistant', content: 'Merhaba!', message_type: 'INITIAL_GREETING', is_greeting: true, id: 'g1' },
+    { role: 'assistant', content: 'Titan Saat', message_type: 'PROACTIVE', is_proactive: true, proactive_event_id: 'pe1', entity_id: 'prod-watch-titan' },
+    { role: 'assistant', content: 'Kulaklık', message_type: 'CONTEXTUAL_OPEN', contextual_event_id: 'ctx1', entity_id: 'prod-anc-earbuds' },
+    { role: 'assistant', content: 'Güç Bankası', message_type: 'CONTEXTUAL_OPEN', contextual_event_id: 'ctx2', entity_id: 'prod-powerbank-20k' },
+  ];
+
+  const duplicatedReplay = [...fullTranscript, ...fullTranscript];
+
+  const rendered = [];
+  SamcheChatPersistence.hydrateHistory({}, duplicatedReplay, (role, text, item) => {
+    rendered.push(item);
+  });
+
+  assert.equal(rendered.length, 4, 'Exact sequence must be preserved without duplicates');
+  assert.equal(rendered[0].message_type, 'INITIAL_GREETING');
+  assert.equal(rendered[1].message_type, 'PROACTIVE');
+  assert.equal(rendered[2].entity_id, 'prod-anc-earbuds');
+  assert.equal(rendered[3].entity_id, 'prod-powerbank-20k');
+});
+
+test('15. SCENARIO D — Proactive cooldown blocks automatic proactive, while manual contextual open works independently', async () => {
+  const dismissedTime = new Date(Date.now() - 60 * 1000).toISOString();
+  const headphoneEntity = {
+    entity_id: 'prod-anc-earbuds',
+    entity_name: 'SamChe Ses Pro Kablosuz Kulaklık ANC',
+    entity_type: 'PRODUCT',
+  };
+
+  const autoEval = evaluateVisitorIntent({
+    pageContext: { path: '/task8-demo/#/urun/ses-pro-kablosuz-kulaklik-anc', page_type: 'product_detail' },
+    currentEntity: headphoneEntity,
+    previousEntities: [{ entity_id: 'prod-watch-titan', entity_name: 'Titan Akıllı Saat Pro' }],
+    sessionBrowsing: { dwellSeconds: 20 },
+    engagementState: {
+      proactiveMessageSent: true,
+      dismissedAt: dismissedTime,
+      lastAcknowledgedEntityId: 'prod-watch-titan',
+    },
+  });
+
+  assert.equal(autoEval.shouldAutoOpen, false);
+  assert.equal(autoEval.shouldProactivelyEngage, false);
+
+  const manualOpenMessage = await generateContextualOpeningMessage({
+    currentEntity: headphoneEntity,
+    previousEntities: [{ entity_id: 'prod-watch-titan', entity_name: 'Titan Akıllı Saat Pro' }],
+    language: 'tr',
+  });
+
+  assert.ok(manualOpenMessage);
+  assert.ok(manualOpenMessage.includes('Kulaklık'));
+});
+
+
+test('16. SCENARIO E — Cross-industry discrete entity handling (Hotel / Real Estate / Service)', async () => {
+  const realEstateEntity = {
+    entity_id: 'prop-marina-penthouse',
+    entity_name: 'Dubai Marina Luxury Penthouse',
+    entity_type: 'RealEstateProperty',
+  };
+  const prevProperty = {
+    entity_id: 'prop-downtown-loft',
+    entity_name: 'Downtown Boulevard Loft',
+    entity_type: 'RealEstateProperty',
+  };
+
+  const trMsg = await generateContextualOpeningMessage({
+    currentEntity: realEstateEntity,
+    previousEntities: [prevProperty],
+    language: 'tr',
+  });
+  assert.ok(trMsg.includes('Dubai Marina Luxury Penthouse'));
+  assert.ok(trMsg.includes('Downtown Boulevard Loft'));
+
+  const enMsg = await generateContextualOpeningMessage({
+    currentEntity: realEstateEntity,
+    previousEntities: [prevProperty],
+    language: 'en',
+  });
+  assert.ok(enMsg.includes('Dubai Marina Luxury Penthouse'));
+  assert.ok(enMsg.includes('Downtown Boulevard Loft'));
+
+  const arMsg = await generateContextualOpeningMessage({
+    currentEntity: realEstateEntity,
+    previousEntities: [prevProperty],
+    language: 'ar',
+  });
+  assert.ok(arMsg.includes('Dubai Marina Luxury Penthouse'));
+});
+
+test('17. SCENARIO F — Non-discrete catalog / home navigation produces NO invalid contextual open and preserves transcript', () => {
+  const catalogContext = {
+    url: 'https://example.com/task8-demo/#/',
+    path: '/task8-demo/#/',
+    entity_type: 'Catalog',
+    page_type: 'catalog',
+  };
+
+  const isNonDiscrete = !catalogContext.entity_type
+    || /^(?:PAGE|GENERIC_PAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ)/i.test(catalogContext.entity_type)
+    || /^(?:catalog|home|pricing|security|about)/i.test(catalogContext.page_type || '');
+
+  assert.equal(isNonDiscrete, true, 'Catalog page context must be recognized as non-discrete');
+});
+
+

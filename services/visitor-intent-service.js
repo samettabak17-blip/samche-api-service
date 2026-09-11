@@ -455,3 +455,107 @@ export async function generateContextualProactiveMessage({
   return deterministicFallback();
 }
 
+/**
+ * Generate a contextual opening assistant message for manual chat opening
+ * on a discrete entity using active persona/LLM, or deterministic fallback.
+ */
+export async function generateContextualOpeningMessage({
+  persona = null,
+  currentEntity = null,
+  previousEntities = [],
+  channelRules = '',
+  openaiClient = null,
+  language = 'tr',
+}) {
+  const normLang = (language || persona?.profile?.language || 'tr').toLowerCase().slice(0, 2);
+  const contextualSection = buildContextualIntelligencePromptSection({
+    currentEntity,
+    previousEntities,
+    channelType: 'WEB_CHAT',
+  });
+
+  const entityName = currentEntity?.entity_name || null;
+  const prevName = (Array.isArray(previousEntities) && previousEntities.length > 0)
+    ? previousEntities[0].entity_name
+    : null;
+
+  const deterministicFallback = () => {
+    if (normLang === 'en') {
+      if (entityName && prevName) {
+        return `You are currently viewing ${entityName}. If you have questions about its details or how it compares with ${prevName}, feel free to ask.`;
+      }
+      if (entityName) {
+        return `You are currently viewing ${entityName}. If you would like more details or have any questions, I'm here to help.`;
+      }
+      return `Hello! Feel free to ask any questions about what you're viewing or our offerings.`;
+    }
+    if (normLang === 'ar') {
+      if (entityName && prevName) {
+        return `أنت تتصفح حالياً تفاصيل ${entityName}. يسعدني مساعدتك في الإجابة عن أي استفسار أو مقارنتها مع ${prevName}.`;
+      }
+      if (entityName) {
+        return `أنت تتصفح حالياً تفاصيل ${entityName}. يسعدني تقديم المساعدة والإجابة عن أي استفسارات تود معرفتها.`;
+      }
+      return `مرحباً! يسعدني تقديم المساعدة والإجابة عن أي استفسار.`;
+    }
+    // Default Turkish
+    if (entityName && prevName) {
+      return `Şu anda ${entityName} detaylarını inceliyorsunuz. Özellikleri veya daha önce baktığınız ${prevName} ile farkları hakkında yardımcı olabilir miyim?`;
+    }
+    if (entityName) {
+      return `Şu anda ${entityName} detaylarını inceliyorsunuz. Merak ettiğiniz teknik özellikleri, detayları veya aklınıza takılan soruları yanıtlayabilirim.`;
+    }
+    return `Merhaba! İncelediğiniz konu hakkında merak ettiğiniz tüm soruları memnuniyetle yanıtlayabilirim.`;
+  };
+
+  // If OpenAI client is available and configured, call assistant model
+  if (openaiClient && typeof openaiClient.chat?.completions?.create === 'function' && process.env.OPENAI_API_KEY) {
+    try {
+      const systemInstruction = persona?.available
+        ? buildTenantRuntimeSystemInstruction({
+            persona,
+            channelRules: channelRules || 'Return a short, natural, friendly greeting suitable for Web Chat. No HTML wrapping required.',
+            contextualIntelligence: contextualSection,
+          })
+        : [
+            'You are an AI assistant for this business website.',
+            contextualSection,
+          ].join('\n\n');
+
+      const contextualDirective = [
+        `\n# CONTEXTUAL CHAT OPENING INSTRUCTION:`,
+        `The visitor manually opened the chat widget while viewing ${entityName || 'the current item'} (${currentEntity?.entity_type || 'Entity'}).`,
+        `Generate ONE friendly, professional, concise, qualified contextual opening message (1-2 sentences maximum).`,
+        `Acknowledge that they are viewing ${entityName || 'this item'} and offer assistance or comparison with previously viewed items if applicable.`,
+        `STRICT GUARDRAILS:`,
+        `- DO NOT HALLUCINATE USER INTENT: Never say "I know you want to buy" or make assumptions about private intent.`,
+        `- CONTEXTUAL RELEVANCE: Mention the current item (${entityName || 'current page'}) and, if previous items were viewed (${prevName || 'earlier items'}), offer comparison or guidance.`,
+        `- FACTUAL GROUNDING: Rely strictly on approved business details. Do not invent unconfirmed claims.`,
+        `- LANGUAGE: Respond strictly in ${normLang === 'en' ? 'English' : (normLang === 'ar' ? 'Arabic' : 'Turkish')}.`,
+        `- LENGTH: Strictly 1 to 2 sentences.`,
+      ].join('\n');
+
+      const messages = [
+        { role: 'system', content: systemInstruction + '\n' + contextualDirective },
+        { role: 'user', content: `[CONTEXTUAL_OPEN_TRIGGER: Visitor manually opened chat while viewing ${entityName || 'entity'}. Generate contextual opening message.]` },
+      ];
+
+      const completion = await openaiClient.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages,
+        max_tokens: 120,
+        temperature: 0.6,
+      });
+
+      const reply = completion.choices?.[0]?.message?.content?.trim();
+      if (reply && reply.length > 10) {
+        return reply;
+      }
+    } catch (err) {
+      console.warn('CONTEXTUAL_OPEN_OPENAI_FALLBACK:', err?.message || err);
+    }
+  }
+
+  return deterministicFallback();
+}
+
