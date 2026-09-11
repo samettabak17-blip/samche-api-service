@@ -411,6 +411,7 @@ test('DUPLICATE_ADMIN_IMPLEMENTATION: Zero duplicated tables, controllers, or em
     'public-web-chat-integration-service.js',
     'public-web-chat-session.js',
     'tenant-web-chat-provisioning-service.js',
+    'web-chat-asset-service.js',
     'web-chat-permissions.js',
     'web-chat-theme-service.js',
   ]);
