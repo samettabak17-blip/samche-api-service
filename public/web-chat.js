@@ -1109,7 +1109,6 @@
                   existingBot[0].remove();
                 }
                 var eventId = (pe && pe.event_id) || ('pe_' + (proactiveState.currentEntityId || 'entity'));
-                if (proactiveState.renderedMessageIds[eventId]) return;
                 proactiveState.renderedMessageIds[eventId] = true;
                 var botBubble = appendMessage('bot', '');
                 botBubble.setAttribute('data-proactive-event-id', eventId);
