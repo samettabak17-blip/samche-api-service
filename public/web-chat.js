@@ -1069,13 +1069,19 @@
           proactiveState.entityDwellStartPerf = null;
         }
 
-        if (data.browsing_state && data.browsing_state.current_entity && data.browsing_state.current_entity.entity_name) {
+        var initialBadge = null;
+        if (initCtx && !isInitNonDiscrete && initCtx.entity_name) {
+          initialBadge = 'Gözatılan: ' + initCtx.entity_name;
+        } else if (data.browsing_state && data.browsing_state.current_entity && data.browsing_state.current_entity.entity_name) {
           var initEnt = data.browsing_state.current_entity;
           var isInitEntityNonDiscrete = !initEnt.entity_type
             || /^(?:PAGE|GENERIC_PAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ)/i.test(initEnt.entity_type);
           if (!isInitEntityNonDiscrete) {
-            setContextBadge('Gözatılan: ' + initEnt.entity_name);
+            initialBadge = 'Gözatılan: ' + initEnt.entity_name;
           }
+        }
+        if (initialBadge) {
+          setContextBadge(initialBadge);
         }
 
         var engagementState = (data.browsing_state && data.browsing_state.engagement_state) || {};
@@ -1217,9 +1223,18 @@
         getSessionToken: function() { return sessionToken; },
       };
       this.instances[widgetKey] = inst;
+      if (pendingChips) {
+        inst.setChips(pendingChips);
+      }
+      if (pendingContextBadge) {
+        inst.setContextBadge(pendingContextBadge);
+      }
       return inst;
     }
   };
+
+  var pendingChips = null;
+  var pendingContextBadge = null;
 
   global.SamcheWebChat = {
     mount: SamcheCanonicalWidget.mount.bind(SamcheCanonicalWidget),
@@ -1243,11 +1258,19 @@
     },
     setChips: function(chips, key) {
       var i = this.getInstance(key);
-      if (i) i.setChips(chips);
+      if (i) {
+        i.setChips(chips);
+      } else {
+        pendingChips = chips;
+      }
     },
     setContextBadge: function(text, key) {
       var i = this.getInstance(key);
-      if (i) i.setContextBadge(text);
+      if (i) {
+        i.setContextBadge(text);
+      } else {
+        pendingContextBadge = text;
+      }
     },
     sendMessage: function(text, key) {
       var i = this.getInstance(key);
