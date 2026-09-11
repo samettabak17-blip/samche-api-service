@@ -124,13 +124,18 @@ export function computeVisitorIntentScore({
   }
 
   // 3. Meaningful Dwell Time
-  if (dwellSeconds >= config.deep_dwell_threshold_seconds) {
+  // Must be measured strictly on a qualified discrete entity!
+  // Catalog, home, and non-discrete page dwell MUST NOT contribute.
+  const isDiscrete = isDiscreteEntity(currentEntity);
+  const effectiveDwell = isDiscrete ? dwellSeconds : 0;
+
+  if (effectiveDwell >= config.deep_dwell_threshold_seconds) {
     score += 35;
     signals.push('DEEP_DWELL_TIME');
-  } else if (dwellSeconds >= config.dwell_time_threshold_seconds) {
+  } else if (effectiveDwell >= config.dwell_time_threshold_seconds) {
     score += 25;
     signals.push('QUALIFIED_DWELL_TIME');
-  } else if (dwellSeconds >= 5) {
+  } else if (effectiveDwell >= 5) {
     score += 10;
     signals.push('MINIMAL_DWELL_TIME');
   }
@@ -210,8 +215,29 @@ export function evaluateVisitorIntent({
   sessionBrowsing = {},
   tenantConfig = null,
   engagementState = {},
+  currentEntityFirstSeenAt = null,
 }) {
   const config = resolveTenantProactiveConfig(tenantConfig);
+
+  // Calculate qualified discrete entity dwell:
+  // QUALIFIED_DWELL must be measured from the CURRENT DISCRETE ENTITY becoming active.
+  // Catalog/home/category dwell MUST NOT contribute.
+  const isDiscrete = isDiscreteEntity(currentEntity);
+  const rawDwell = Number(sessionBrowsing.dwellSeconds || sessionBrowsing.dwell_seconds || 0);
+  const qualifiedDwellSeconds = isDiscrete ? Math.max(0, rawDwell) : 0;
+
+  const entityFirstSeen = currentEntityFirstSeenAt
+    || engagementState.entityFirstSeenAt
+    || pageContext?.first_seen_at
+    || null;
+
+  const timing = {
+    entity_first_seen_at: entityFirstSeen,
+    server_timestamp: new Date().toISOString(),
+    qualified_dwell_seconds: qualifiedDwellSeconds,
+    dwell_threshold_seconds: config.dwell_time_threshold_seconds,
+    is_qualified_dwell: qualifiedDwellSeconds >= config.dwell_time_threshold_seconds,
+  };
 
   // 1. Tenant enable/disable switch
   if (!config.enabled) {
@@ -223,15 +249,19 @@ export function evaluateVisitorIntent({
       shouldNudge: false,
       reason: 'PROACTIVE_DISABLED_BY_TENANT',
       signals: [],
+      timing,
     };
   }
 
-  // 2. Compute intent score
+  // 2. Compute intent score with qualified discrete dwell
   const { score, intentState, signals } = computeVisitorIntentScore({
     pageContext,
     currentEntity,
     previousEntities,
-    sessionBrowsing,
+    sessionBrowsing: {
+      ...sessionBrowsing,
+      dwellSeconds: qualifiedDwellSeconds,
+    },
     config,
   });
 
@@ -245,6 +275,7 @@ export function evaluateVisitorIntent({
       shouldNudge: false,
       reason: 'ACTIVE_CONVERSATION',
       signals,
+      timing,
     };
   }
 
@@ -258,6 +289,7 @@ export function evaluateVisitorIntent({
       shouldNudge: false,
       reason: 'HUMAN_TAKEOVER_ACTIVE',
       signals,
+      timing,
     };
   }
 
@@ -274,6 +306,7 @@ export function evaluateVisitorIntent({
         shouldNudge: false,
         reason: 'DISMISSAL_COOLDOWN',
         signals,
+        timing,
       };
     }
   }
@@ -288,6 +321,7 @@ export function evaluateVisitorIntent({
       shouldNudge: false,
       reason: 'ALREADY_ENGAGED',
       signals,
+      timing,
     };
   }
 
@@ -313,6 +347,7 @@ export function evaluateVisitorIntent({
     shouldNudge,
     reason,
     signals,
+    timing,
   };
 }
 

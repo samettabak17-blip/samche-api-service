@@ -279,6 +279,7 @@ export function updateSessionBrowsingState({
     currentEntity: currentState?.currentEntity ?? null,
     previousEntities: Array.isArray(currentState?.previousEntities) ? [...currentState.previousEntities] : [],
     engagementState: currentState?.engagementState ?? {},
+    currentEntityFirstSeenAt: currentState?.currentEntityFirstSeenAt ?? null,
     lastSeenAt: new Date().toISOString(),
   };
 
@@ -290,7 +291,29 @@ export function updateSessionBrowsingState({
   const newEntity = resolvePageEntity(normalized);
   if (!newEntity) {
     base.currentPage = normalized;
+    base.currentEntityFirstSeenAt = null;
     return base;
+  }
+
+  const isNewDiscrete = isDiscreteEntity(newEntity);
+  const prevIsDiscrete = isDiscreteEntity(base.currentEntity);
+  const isSameEntity = prevIsDiscrete && areEntitiesEqual(base.currentEntity, newEntity);
+
+  if (isNewDiscrete) {
+    if (isSameEntity) {
+      base.currentEntityFirstSeenAt = currentState?.currentEntityFirstSeenAt
+        || currentState?.currentPage?.first_seen_at
+        || currentState?.engagementState?.entityFirstSeenAt
+        || base.currentEntityFirstSeenAt
+        || new Date().toISOString();
+    } else {
+      // Discrete entity changed (or transitioned from catalog to discrete entity)!
+      // Current discrete dwell MUST strictly start at 0s from this exact moment!
+      base.currentEntityFirstSeenAt = new Date().toISOString();
+    }
+  } else {
+    // Non-discrete page (catalog, home, pricing, etc.): dwell MUST NOT contribute to discrete entity dwell!
+    base.currentEntityFirstSeenAt = null;
   }
 
   if (base.currentEntity && isDiscreteEntity(base.currentEntity) && (!newEntity || !areEntitiesEqual(base.currentEntity, newEntity))) {
@@ -301,8 +324,15 @@ export function updateSessionBrowsingState({
   }
 
   base.currentEntity = newEntity;
-  base.currentPage = normalized;
+  base.currentPage = {
+    ...normalized,
+    first_seen_at: base.currentEntityFirstSeenAt,
+  };
   base.lastSeenAt = new Date().toISOString();
+  base.engagementState = {
+    ...(base.engagementState || {}),
+    entityFirstSeenAt: base.currentEntityFirstSeenAt,
+  };
 
   return base;
 }
@@ -316,10 +346,30 @@ export function updateSessionBrowsingStateWithEntity({
     currentPage: currentState?.currentPage ?? null,
     currentEntity: currentState?.currentEntity ?? null,
     previousEntities: Array.isArray(currentState?.previousEntities) ? [...currentState.previousEntities] : [],
+    engagementState: currentState?.engagementState ?? {},
+    currentEntityFirstSeenAt: currentState?.currentEntityFirstSeenAt ?? null,
     lastSeenAt: new Date().toISOString(),
   };
 
   if (!newEntity) return base;
+
+  const isNewDiscrete = isDiscreteEntity(newEntity);
+  const prevIsDiscrete = isDiscreteEntity(base.currentEntity);
+  const isSameEntity = prevIsDiscrete && areEntitiesEqual(base.currentEntity, newEntity);
+
+  if (isNewDiscrete) {
+    if (isSameEntity) {
+      base.currentEntityFirstSeenAt = currentState?.currentEntityFirstSeenAt
+        || currentState?.currentPage?.first_seen_at
+        || currentState?.engagementState?.entityFirstSeenAt
+        || base.currentEntityFirstSeenAt
+        || new Date().toISOString();
+    } else {
+      base.currentEntityFirstSeenAt = new Date().toISOString();
+    }
+  } else {
+    base.currentEntityFirstSeenAt = null;
+  }
 
   if (base.currentEntity && isDiscreteEntity(base.currentEntity) && !areEntitiesEqual(base.currentEntity, newEntity)) {
     const filtered = base.previousEntities.filter(
@@ -340,8 +390,13 @@ export function updateSessionBrowsingStateWithEntity({
     attributes: newEntity.attributes || {},
     attribute_provenance: newEntity.attribute_provenance || {},
     captured_at: newEntity.freshness || new Date().toISOString(),
+    first_seen_at: base.currentEntityFirstSeenAt,
   };
   base.lastSeenAt = new Date().toISOString();
+  base.engagementState = {
+    ...(base.engagementState || {}),
+    entityFirstSeenAt: base.currentEntityFirstSeenAt,
+  };
 
   return base;
 }
@@ -604,12 +659,14 @@ export async function loadWebChatSessionBrowsingState({ database, tenantId, sess
       : {};
 
     const currentEntity = rawCurrent?.entity_type ? rawCurrent : resolvePageEntity(rawCurrent);
+    const currentEntityFirstSeenAt = rawCurrent?.first_seen_at || rawEngagement?.entityFirstSeenAt || null;
 
     return {
       currentPage: rawCurrent,
       currentEntity,
       previousEntities: rawHistory,
       engagementState: rawEngagement,
+      currentEntityFirstSeenAt,
       expiresAt: row.expires_at,
     };
   } catch (error) {

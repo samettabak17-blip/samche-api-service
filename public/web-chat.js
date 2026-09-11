@@ -175,14 +175,20 @@
 
   var proactiveState = {
     sessionToken: null,
+    currentEntityId: null,
+    entityDwellStartedAt: null,
+    entityDwellStartPerf: null,
+    isEvaluating: false,
     hasUserMessaged: false,
     hasProactivelyEngaged: false,
     dismissedAt: 0,
     dwellTimer: null,
     dwellSeconds: 0,
+    lastCheckedDwell: -1,
     intervalTimer: null,
     cooldownSeconds: 300,
     dwellThresholdSeconds: 15,
+    renderedMessageIds: {},
     onAutoOpen: null,
     onNudge: null,
     onProactiveMessage: null,
@@ -206,6 +212,7 @@
     proactiveState.dwellTimer = null;
     proactiveState.intervalTimer = null;
     proactiveState.dwellSeconds = 0;
+    proactiveState.lastCheckedDwell = -1;
   }
 
   function recordUserMessage() {
@@ -236,6 +243,9 @@
       return;
     }
 
+    // Only run discrete entity dwell tracker if on a discrete entity
+    if (!proactiveState.currentEntityId) return;
+
     if (proactiveState.intervalTimer) clearInterval(proactiveState.intervalTimer);
     proactiveState.intervalTimer = null;
     var threshold = customDwellSeconds || proactiveState.dwellThresholdSeconds;
@@ -245,23 +255,43 @@
         clearTimers();
         return;
       }
-      proactiveState.dwellSeconds += 1;
-      if (proactiveState.dwellSeconds >= threshold) {
-        checkDwellIntent(proactiveState.dwellSeconds);
+      if (!proactiveState.currentEntityId || !proactiveState.entityDwellStartedAt) {
+        clearTimers();
+        return;
       }
-    }, 1000);
+
+      if (proactiveState.isEvaluating) return; // In-flight lock!
+
+      var elapsedMs = Date.now() - proactiveState.entityDwellStartedAt;
+      var elapsedSec = Math.floor(elapsedMs / 1000);
+      proactiveState.dwellSeconds = elapsedSec;
+
+      if (elapsedSec >= threshold) {
+        // Qualified threshold reached! Clear interval immediately so no concurrent requests fire!
+        clearInterval(proactiveState.intervalTimer);
+        proactiveState.intervalTimer = null;
+        checkDwellIntent(elapsedSec);
+      } else if (elapsedSec > 0 && elapsedSec % 5 === 0 && elapsedSec !== proactiveState.lastCheckedDwell) {
+        proactiveState.lastCheckedDwell = elapsedSec;
+        checkDwellIntent(elapsedSec);
+      }
+    }, 500);
   }
 
   function checkDwellIntent(seconds) {
     if (!proactiveState.sessionToken || proactiveState.hasUserMessaged || proactiveState.hasProactivelyEngaged) return;
+    if (proactiveState.isEvaluating) return; // In-flight mutex!
+
     var cooldownMs = proactiveState.cooldownSeconds * 1000;
     if (proactiveState.dismissedAt && (Date.now() - proactiveState.dismissedAt < cooldownMs)) {
       return;
     }
 
-    var dwellToSend = typeof seconds === 'number' && seconds > 0
+    var dwellToSend = typeof seconds === 'number' && seconds >= 0
       ? seconds
-      : (proactiveState.dwellSeconds || proactiveState.dwellThresholdSeconds);
+      : (proactiveState.dwellSeconds || 0);
+
+    proactiveState.isEvaluating = true;
 
     fetch('/api/chat/evaluate-intent', {
       method: 'POST',
@@ -275,9 +305,12 @@
     })
     .then(function(res) { return res.json(); })
     .then(function(data) {
+      proactiveState.isEvaluating = false;
       handleProactiveResult(data);
     })
-    .catch(function() {});
+    .catch(function() {
+      proactiveState.isEvaluating = false;
+    });
   }
 
   function handleProactiveResult(data) {
@@ -291,6 +324,11 @@
     }
 
     if (pe.should_open && pe.message) {
+      var eventId = pe.event_id || ('pe_' + (proactiveState.currentEntityId || 'entity'));
+      if (proactiveState.renderedMessageIds[eventId]) {
+        return; // Idempotency: Already rendered!
+      }
+      proactiveState.renderedMessageIds[eventId] = true;
       proactiveState.hasProactivelyEngaged = true;
       clearTimers();
       if (typeof proactiveState.onAutoOpen === 'function') {
@@ -537,13 +575,24 @@
     hydrateHistory: function(container, messages, appendFn) {
       if (!container || !Array.isArray(messages)) return 0;
       var count = 0;
+      var seenProactive = {};
       for (var i = 0; i < messages.length; i++) {
         var item = messages[i];
         if (!item) continue;
         var role = (item.role === 'user' || item.sender_type === 'CUSTOMER') ? 'user' : 'bot';
         var text = typeof item.content === 'string' ? item.content : (item.text || '');
+        var isProactive = Boolean(item.is_proactive || item.proactive_event_id);
+        if (isProactive) {
+          var pKey = item.proactive_event_id || 'proactive_history';
+          if (seenProactive[pKey]) continue;
+          seenProactive[pKey] = true;
+          proactiveState.hasProactivelyEngaged = true;
+          if (item.proactive_event_id) {
+            proactiveState.renderedMessageIds[item.proactive_event_id] = true;
+          }
+        }
         if (typeof appendFn === 'function') {
-          appendFn(role, text);
+          appendFn(role, text, item);
           count++;
         }
       }
@@ -1005,11 +1054,26 @@
           appendMessage('bot', welcome);
         }
 
+        var initCtx = capturePageContext();
+        var isInitNonDiscrete = !initCtx || !initCtx.entity_type
+          || /^(?:PAGE|GENERIC_PAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ)/i.test(initCtx.entity_type)
+          || /^(?:catalog|home|pricing|security|about)/i.test(initCtx.page_type || '');
+
+        if (initCtx && !isInitNonDiscrete && initCtx.entity_id) {
+          proactiveState.currentEntityId = String(initCtx.entity_id);
+          proactiveState.entityDwellStartedAt = Date.now();
+          proactiveState.entityDwellStartPerf = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+        } else {
+          proactiveState.currentEntityId = null;
+          proactiveState.entityDwellStartedAt = null;
+          proactiveState.entityDwellStartPerf = null;
+        }
+
         if (data.browsing_state && data.browsing_state.current_entity && data.browsing_state.current_entity.entity_name) {
           var initEnt = data.browsing_state.current_entity;
-          var isInitNonDiscrete = !initEnt.entity_type
+          var isInitEntityNonDiscrete = !initEnt.entity_type
             || /^(?:PAGE|GENERIC_PAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ)/i.test(initEnt.entity_type);
-          if (!isInitNonDiscrete) {
+          if (!isInitEntityNonDiscrete) {
             setContextBadge('Gözatılan: ' + initEnt.entity_name);
           }
         }
@@ -1020,6 +1084,9 @@
 
         if (alreadyEngaged) {
           proactiveState.hasProactivelyEngaged = true;
+          if (engagementState.proactiveEventId) {
+            proactiveState.renderedMessageIds[engagementState.proactiveEventId] = true;
+          }
         }
         if (dismissedTime > 0) {
           proactiveState.dismissedAt = dismissedTime;
@@ -1032,11 +1099,12 @@
             cooldownSeconds: data.behavior.cooldown_seconds || 300,
             hasProactivelyEngaged: alreadyEngaged,
             dismissedAt: dismissedTime,
-            onAutoOpen: function(msg) {
+            onAutoOpen: function(msg, pe) {
               launcher.classList.add('samche-intent-pulse');
               if (data.behavior.high_intent_activation) {
                 openPanel();
                 var botBubble = appendMessage('bot', '');
+                if (pe && pe.event_id) botBubble.setAttribute('data-proactive-event-id', pe.event_id);
                 progressiveReveal(botBubble, msg, { container: messages });
               }
             },
@@ -1044,22 +1112,45 @@
               launcher.classList.add('samche-intent-pulse');
             },
           });
-          startDwellTracker(sessionToken, data.behavior.dwell_threshold_seconds || 15);
+          if (proactiveState.currentEntityId) {
+            startDwellTracker(sessionToken, data.behavior.dwell_threshold_seconds || 15);
+          }
         }
       })
       .catch(function() {});
 
       initSpaNavigationListener(function(newContext) {
-        if (newContext) {
-          var isNonDiscrete = !newContext.entity_type
-            || /^(?:PAGE|GENERIC_PAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ)/i.test(newContext.entity_type)
-            || /^(?:catalog|home|pricing|security|about)/i.test(newContext.page_type || '');
-          if (newContext.entity_name && !isNonDiscrete) {
-            setContextBadge('Gözatılan: ' + newContext.entity_name);
+        var isNonDiscrete = !newContext || !newContext.entity_type
+          || /^(?:PAGE|GENERIC_PAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ)/i.test(newContext.entity_type)
+          || /^(?:catalog|home|pricing|security|about)/i.test(newContext.page_type || '');
+
+        var newEntityId = (!isNonDiscrete && newContext.entity_id) ? String(newContext.entity_id) : null;
+        var entityChanged = newEntityId !== proactiveState.currentEntityId;
+
+        if (newEntityId && !isNonDiscrete) {
+          setContextBadge('Gözatılan: ' + newContext.entity_name);
+        } else {
+          setContextBadge(null);
+        }
+
+        if (entityChanged) {
+          proactiveState.currentEntityId = newEntityId;
+          clearTimers();
+          proactiveState.dwellSeconds = 0;
+          proactiveState.lastCheckedDwell = -1;
+
+          if (newEntityId) {
+            proactiveState.entityDwellStartedAt = Date.now();
+            proactiveState.entityDwellStartPerf = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+            if (!isOpen && !proactiveState.hasUserMessaged && !proactiveState.hasProactivelyEngaged) {
+              startDwellTracker(sessionToken, proactiveState.dwellThresholdSeconds);
+            }
           } else {
-            setContextBadge(null);
+            proactiveState.entityDwellStartedAt = null;
+            proactiveState.entityDwellStartPerf = null;
           }
         }
+
         if (sessionToken && newContext) {
           fetch('/api/chat/page-context', {
             method: 'POST',
@@ -1076,12 +1167,15 @@
               if (pe.should_open && pe.message) {
                 var cooldownMs = proactiveState.cooldownSeconds * 1000;
                 var isCooldown = proactiveState.dismissedAt && (Date.now() - proactiveState.dismissedAt < cooldownMs);
-                if (!isOpen && !proactiveState.hasUserMessaged && !proactiveState.hasProactivelyEngaged && !isCooldown) {
+                var eventId = pe.event_id || ('pe_' + (proactiveState.currentEntityId || 'entity'));
+                if (!isOpen && !proactiveState.hasUserMessaged && !proactiveState.hasProactivelyEngaged && !isCooldown && !proactiveState.renderedMessageIds[eventId]) {
+                  proactiveState.renderedMessageIds[eventId] = true;
                   proactiveState.hasProactivelyEngaged = true;
                   clearTimers();
                   launcher.classList.add('samche-intent-pulse');
                   openPanel();
                   var botBubble = appendMessage('bot', '');
+                  botBubble.setAttribute('data-proactive-event-id', eventId);
                   progressiveReveal(botBubble, pe.message, { container: messages });
                 }
               } else if (pe.should_nudge || pe.intent_state === 'MEDIUM') {
@@ -1090,14 +1184,6 @@
             }
           })
           .catch(function() {});
-        }
-
-        // Reset and restart dwell tracking for the newly navigated page context
-        if (!isOpen && !proactiveState.hasUserMessaged && !proactiveState.hasProactivelyEngaged) {
-          proactiveState.dwellSeconds = 0;
-          if (proactiveState.dwellThresholdSeconds) {
-            startDwellTracker(sessionToken, proactiveState.dwellThresholdSeconds);
-          }
         }
       });
 
@@ -1217,6 +1303,39 @@
     recordDismissal: recordDismissal,
     getState: function() { return Object.assign({}, proactiveState); },
   };
+  if (typeof window !== 'undefined') {
+    window.__SAMCHE_PROACTIVE_TIMING__ = {
+      getElapsedMs: function() {
+        return proactiveState.entityDwellStartedAt ? (Date.now() - proactiveState.entityDwellStartedAt) : 0;
+      },
+      getElapsedSec: function() {
+        return Math.floor(this.getElapsedMs() / 1000);
+      },
+      getEntityFirstSeenAt: function() {
+        return proactiveState.entityDwellStartedAt;
+      },
+      getCurrentEntityId: function() {
+        return proactiveState.currentEntityId;
+      },
+      hasProactivelyEngaged: function() {
+        return proactiveState.hasProactivelyEngaged;
+      },
+      isEvaluating: function() {
+        return proactiveState.isEvaluating;
+      },
+      getProactiveCount: function() {
+        var container = document.querySelector('samche-web-chat')?.shadowRoot?.querySelector('.samche-messages');
+        if (!container) return 0;
+        return container.querySelectorAll('.samche-msg-bot[data-proactive-event-id]').length;
+      },
+      getAllBotMessageCount: function() {
+        var container = document.querySelector('samche-web-chat')?.shadowRoot?.querySelector('.samche-messages');
+        if (!container) return 0;
+        return container.querySelectorAll('.samche-msg-bot').length;
+      },
+    };
+  }
+
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       SamcheContextCapture: global.SamcheContextCapture,
