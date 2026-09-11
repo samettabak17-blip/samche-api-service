@@ -6,7 +6,7 @@ import { BrowserCdp } from '../tests/helpers/browser-cdp.js';
 
 const STAGING_URL = 'https://samche-api-staging.onrender.com';
 const DEMO_URL = `${STAGING_URL}/task8-demo/`;
-const EXPECTED_SHA = '18618ba';
+const EXPECTED_SHA = process.env.EXPECTED_SHA || '27df286';
 
 async function run() {
   console.log('=== TASK 8 LIVE STAGING VERIFICATION: ENTITY-SCOPED PROACTIVE ENGAGEMENT ===');
