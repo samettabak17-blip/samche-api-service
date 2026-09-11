@@ -1085,11 +1085,16 @@
           proactiveState.hasUserMessaged = false;
           proactiveState.hasProactivelyEngaged = false;
           proactiveState.isContextualOpeningInProgress = false;
+          proactiveState.dismissedAt = 0;
+          proactiveState.dismissedEntityId = null;
 
           // 3. Restart dwell for current entity from 0 in the new conversation
           clearTimers();
           proactiveState.dwellSeconds = 0;
           proactiveState.lastCheckedDwell = -1;
+          if (currentCtx && isDiscreteContext(currentCtx) && currentCtx.entity_id) {
+            proactiveState.currentEntityId = String(currentCtx.entity_id);
+          }
           if (proactiveState.currentEntityId) {
             proactiveState.entityDwellStartedAt = Date.now();
             proactiveState.entityDwellStartPerf = (typeof performance !== 'undefined') ? performance.now() : Date.now();

@@ -2733,6 +2733,8 @@ app.post("/api/chat/reset", async (req, res) => {
       hasConversation: false,
       messageCount: 0,
       clearedAt: new Date().toISOString(),
+      dismissedAt: null,
+      dismissedEntityId: null,
     };
 
     if (currentState) {
