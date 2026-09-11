@@ -1103,8 +1103,16 @@
               launcher.classList.add('samche-intent-pulse');
               if (data.behavior.high_intent_activation) {
                 openPanel();
+                var existingBot = messages.querySelectorAll('.samche-msg-bot');
+                var existingUser = messages.querySelectorAll('.samche-msg-user');
+                if (existingUser.length === 0 && existingBot.length === 1 && !existingBot[0].getAttribute('data-proactive-event-id')) {
+                  existingBot[0].remove();
+                }
+                var eventId = (pe && pe.event_id) || ('pe_' + (proactiveState.currentEntityId || 'entity'));
+                if (proactiveState.renderedMessageIds[eventId]) return;
+                proactiveState.renderedMessageIds[eventId] = true;
                 var botBubble = appendMessage('bot', '');
-                if (pe && pe.event_id) botBubble.setAttribute('data-proactive-event-id', pe.event_id);
+                botBubble.setAttribute('data-proactive-event-id', eventId);
                 progressiveReveal(botBubble, msg, { container: messages });
               }
             },
@@ -1174,6 +1182,11 @@
                   clearTimers();
                   launcher.classList.add('samche-intent-pulse');
                   openPanel();
+                  var existingBot = messages.querySelectorAll('.samche-msg-bot');
+                  var existingUser = messages.querySelectorAll('.samche-msg-user');
+                  if (existingUser.length === 0 && existingBot.length === 1 && !existingBot[0].getAttribute('data-proactive-event-id')) {
+                    existingBot[0].remove();
+                  }
                   var botBubble = appendMessage('bot', '');
                   botBubble.setAttribute('data-proactive-event-id', eventId);
                   progressiveReveal(botBubble, pe.message, { container: messages });
