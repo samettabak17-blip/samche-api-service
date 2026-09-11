@@ -2360,7 +2360,6 @@ app.post("/api/chat/evaluate-intent", async (req, res) => {
         event_id: proactiveEventId,
         entity_id: currentEntityId,
       },
-      },
       timing: intentEvaluation.timing,
     });
   } catch (error) {
