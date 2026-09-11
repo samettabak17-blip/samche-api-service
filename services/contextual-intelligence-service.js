@@ -255,8 +255,11 @@ export const NON_DISCRETE_ENTITY_TYPES = Object.freeze(new Set([
 export function isDiscreteEntity(entity) {
   if (!entity || typeof entity !== 'object') return false;
   const rawType = String(entity.entity_type || '').toUpperCase().trim();
-  if (!rawType || NON_DISCRETE_ENTITY_TYPES.has(rawType)) {
+  if (rawType && NON_DISCRETE_ENTITY_TYPES.has(rawType)) {
     return false;
+  }
+  if (!rawType) {
+    return Boolean(entity.entity_id || entity.entity_name || (entity.attributes && Object.keys(entity.attributes).length > 0));
   }
   return true;
 }

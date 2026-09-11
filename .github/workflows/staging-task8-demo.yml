@@ -78,6 +78,8 @@ jobs:
           tests/browsing-memory-simulation.test.js
           tests/proactive-bounded-repair-deterministic.test.js
           tests/proactive-high-intent-real-browser.test.js
+          tests/web-chat-clear-conversation.test.js
+          tests/web-chat-entity-scoped-proactive.test.js
 
 
       - name: Run Dashboard checks
