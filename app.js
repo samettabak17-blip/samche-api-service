@@ -1632,10 +1632,16 @@ const sessionProactiveLocks = new Set();
 
 function addWebMemory(userId, role, content, knowledgeAuthority = null, metadata = null) {
   if (!webMemoryStore[userId]) webMemoryStore[userId] = [];
-  if (metadata?.is_proactive) {
-    const existing = webMemoryStore[userId].find(m => m.is_proactive || (metadata.proactive_event_id && m.proactive_event_id === metadata.proactive_event_id));
+  if (metadata?.is_proactive || metadata?.message_type === 'PROACTIVE') {
+    const existing = webMemoryStore[userId].find(m => m.is_proactive || m.message_type === 'PROACTIVE' || (metadata.proactive_event_id && m.proactive_event_id === metadata.proactive_event_id));
     if (existing) {
       return existing; // Idempotent: same proactive event cannot persist twice!
+    }
+  }
+  if (metadata?.is_greeting || metadata?.message_type === 'INITIAL_GREETING') {
+    const existing = webMemoryStore[userId].find(m => m.is_greeting || m.message_type === 'INITIAL_GREETING');
+    if (existing) {
+      return existing; // Idempotent: initial greeting cannot persist twice!
     }
   }
   const stamped = stampProviderMemoryEntry({
@@ -1756,29 +1762,69 @@ app.post("/api/chat/bootstrap", async (req, res) => {
 
           const mem = webMemoryStore[verified.sessionId] || [];
           const rawHistory = (feed && feed.messages.length > 0)
-            ? feed.messages.map(({ role, content, created_at, is_proactive, proactive_event_id }) => ({
+            ? feed.messages.map(({ role, content, created_at, is_proactive, proactive_event_id, message_type, is_greeting, id }) => ({
                 role,
                 content: String(content || ''),
                 created_at,
                 is_proactive: Boolean(is_proactive),
                 proactive_event_id: proactive_event_id || null,
+                is_greeting: Boolean(is_greeting),
+                message_type: message_type || (is_greeting ? 'INITIAL_GREETING' : (is_proactive ? 'PROACTIVE' : (role === 'user' ? 'USER' : 'ASSISTANT'))),
+                id: id || null,
               }))
-            : mem.map(({ role, content, is_proactive, proactive_event_id }) => ({
+            : mem.map(({ role, content, is_proactive, proactive_event_id, message_type, is_greeting, id }) => ({
                 role,
                 content: String(content || ''),
                 is_proactive: Boolean(is_proactive),
                 proactive_event_id: proactive_event_id || null,
+                is_greeting: Boolean(is_greeting),
+                message_type: message_type || (is_greeting ? 'INITIAL_GREETING' : (is_proactive ? 'PROACTIVE' : (role === 'user' ? 'USER' : 'ASSISTANT'))),
+                id: id || null,
               }));
 
           const deduplicatedHistory = [];
+          let hasGreetingInHistory = false;
           const seenProactiveInHistory = new Set();
           for (const item of rawHistory) {
-            if (item.is_proactive || item.proactive_event_id) {
+            if (item.message_type === 'INITIAL_GREETING' || item.is_greeting) {
+              if (hasGreetingInHistory) continue;
+              hasGreetingInHistory = true;
+              deduplicatedHistory.push({
+                ...item,
+                message_type: 'INITIAL_GREETING',
+                is_greeting: true,
+              });
+              continue;
+            }
+            if (item.is_proactive || item.proactive_event_id || item.message_type === 'PROACTIVE') {
               const pKey = item.proactive_event_id || 'proactive_msg';
               if (seenProactiveInHistory.has(pKey)) continue;
               seenProactiveInHistory.add(pKey);
+              item.message_type = 'PROACTIVE';
+              item.is_proactive = true;
             }
             deduplicatedHistory.push(item);
+          }
+
+          if (!hasGreetingInHistory && resolvedGreeting) {
+            deduplicatedHistory.unshift({
+              role: 'assistant',
+              content: resolvedGreeting,
+              message_type: 'INITIAL_GREETING',
+              is_greeting: true,
+              id: 'greeting_' + verified.sessionId,
+            });
+          }
+
+          if (!mem.some(m => m.is_greeting || m.message_type === 'INITIAL_GREETING') && resolvedGreeting) {
+            mem.unshift(stampProviderMemoryEntry({
+              role: 'assistant',
+              content: resolvedGreeting,
+              message_type: 'INITIAL_GREETING',
+              is_greeting: true,
+              id: 'greeting_' + verified.sessionId,
+            }, null));
+            webMemoryStore[verified.sessionId] = mem;
           }
 
           return res.json({
@@ -1803,10 +1849,23 @@ app.post("/api/chat/bootstrap", async (req, res) => {
     }
 
     const session = issuePublicWebChatSession({ secret, widgetKey });
+    addWebMemory(session.sessionId, 'assistant', resolvedGreeting, null, {
+      message_type: 'INITIAL_GREETING',
+      is_greeting: true,
+      id: 'greeting_' + session.sessionId,
+    });
     return res.json({
       session: session.token,
       resumed: false,
-      history: [],
+      history: [
+        {
+          role: 'assistant',
+          content: resolvedGreeting,
+          message_type: 'INITIAL_GREETING',
+          is_greeting: true,
+          id: 'greeting_' + session.sessionId,
+        }
+      ],
       appearance,
       behavior,
       assistant: publicAssistant,
@@ -1943,6 +2002,7 @@ app.post("/api/chat/page-context", async (req, res) => {
           addWebMemory(webChatSession.sessionId, 'assistant', proactiveMessage, null, {
             is_proactive: true,
             proactive_event_id: proactiveEventId,
+            message_type: 'PROACTIVE',
             entity_id: updatedState.currentEntity?.entity_id || null,
           });
 
@@ -2150,6 +2210,7 @@ app.post("/api/chat/evaluate-intent", async (req, res) => {
           addWebMemory(webChatSession.sessionId, 'assistant', proactiveMessage, null, {
             is_proactive: true,
             proactive_event_id: proactiveEventId,
+            message_type: 'PROACTIVE',
             entity_id: currentState.currentEntity?.entity_id || null,
           });
 
@@ -2335,7 +2396,9 @@ app.post("/api/chat", async (req, res) => {
       return res.status(503).json({ error: 'Web Chat knowledge authority is temporarily unavailable.' });
     }
 
-    addWebMemory(userId, "user", normalizedMessage, webChatKnowledgeAuthority);
+    addWebMemory(userId, "user", normalizedMessage, webChatKnowledgeAuthority, {
+      message_type: 'USER',
+    });
 
     const rawMemory = webMemoryStore[userId] || [];
     const authorityMemory = webChatIntegration
@@ -2553,7 +2616,9 @@ app.post("/api/chat", async (req, res) => {
           console.warn('WEB_CHAT_OUTBOUND_PERSIST_WARN:', outboundErr.message);
         }
       }
-      addWebMemory(userId, "assistant", limitationReply, webChatKnowledgeAuthority);
+      addWebMemory(userId, "assistant", limitationReply, webChatKnowledgeAuthority, {
+        message_type: 'ASSISTANT',
+      });
       return res.status(200).json({
         reply: limitationReply,
         response: limitationReply,
@@ -2954,7 +3019,9 @@ If the user already provided sector info, NEVER ask again.`
         return res.status(409).json({ error: 'Knowledge changed while generating the response. Please retry.' });
       }
     }
-    addWebMemory(userId, "assistant", aiReply, webChatKnowledgeAuthority);
+    addWebMemory(userId, "assistant", aiReply, webChatKnowledgeAuthority, {
+      message_type: 'ASSISTANT',
+    });
 
     if (webChatIntegration && webChatSession?.sessionId && webChatInboundState?.conversation?.id) {
       try {

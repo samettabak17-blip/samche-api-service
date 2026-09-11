@@ -575,13 +575,20 @@
     hydrateHistory: function(container, messages, appendFn) {
       if (!container || !Array.isArray(messages)) return 0;
       var count = 0;
+      var seenGreeting = false;
       var seenProactive = {};
       for (var i = 0; i < messages.length; i++) {
         var item = messages[i];
         if (!item) continue;
         var role = (item.role === 'user' || item.sender_type === 'CUSTOMER') ? 'user' : 'bot';
         var text = typeof item.content === 'string' ? item.content : (item.text || '');
-        var isProactive = Boolean(item.is_proactive || item.proactive_event_id);
+        var isGreeting = Boolean(item.message_type === 'INITIAL_GREETING' || item.is_greeting);
+        var isProactive = Boolean(item.message_type === 'PROACTIVE' || item.is_proactive || item.proactive_event_id);
+
+        if (isGreeting) {
+          if (seenGreeting) continue;
+          seenGreeting = true;
+        }
         if (isProactive) {
           var pKey = item.proactive_event_id || 'proactive_history';
           if (seenProactive[pKey]) continue;
@@ -899,9 +906,20 @@
         openPanel();
       }
 
-      function appendMessage(role, text) {
+      function appendMessage(role, text, meta) {
         var msg = document.createElement('div');
+        var msgType = (meta && meta.message_type) || (role === 'user' ? 'USER' : 'ASSISTANT');
+        if (meta && (meta.is_greeting || meta.message_type === 'INITIAL_GREETING')) msgType = 'INITIAL_GREETING';
+        if (meta && (meta.is_proactive || meta.proactive_event_id || meta.message_type === 'PROACTIVE')) msgType = 'PROACTIVE';
+
         msg.className = 'samche-msg ' + (role === 'user' ? 'samche-msg-user' : 'samche-msg-bot');
+        msg.setAttribute('data-message-type', msgType);
+        if (meta && meta.proactive_event_id) {
+          msg.setAttribute('data-proactive-event-id', meta.proactive_event_id);
+        }
+        if (meta && meta.id) {
+          msg.setAttribute('data-message-id', meta.id);
+        }
         if (role === 'user') {
           msg.textContent = text;
         } else {
@@ -921,7 +939,7 @@
         sendBtn.disabled = true;
         recordUserMessage();
 
-        appendMessage('user', text);
+        appendMessage('user', text, { message_type: 'USER' });
         var indicator = createTypingIndicator({ className: 'samche-msg samche-msg-bot' });
         messages.appendChild(indicator);
         smartScrollToBottom(messages, true);
@@ -955,18 +973,16 @@
           clearTypingIndicator(messages);
 
           if (!res.ok && !data.reply && !data.response && !data.text) {
-            appendMessage('bot', data.error || 'Üzgünüm, şu anda yanıt verilemiyor. Lütfen tekrar deneyin.');
+            appendMessage('bot', data.error || 'Üzgünüm, şu anda yanıt verilemiyor. Lütfen tekrar deneyin.', { message_type: 'ASSISTANT' });
             return;
           }
 
           var reply = data.reply || data.response || data.text || 'Anlaşıldı, size nasıl yardımcı olabilirim?';
-          var botBubble = document.createElement('div');
-          botBubble.className = 'samche-msg samche-msg-bot';
-          messages.appendChild(botBubble);
+          var botBubble = appendMessage('bot', '', { message_type: 'ASSISTANT' });
           await progressiveReveal(botBubble, reply, { container: messages });
         } catch (err) {
           clearTypingIndicator(messages);
-          appendMessage('bot', 'Üzgünüm, şu anda yanıt verilemiyor. Lütfen tekrar deneyin.');
+          appendMessage('bot', 'Üzgünüm, şu anda yanıt verilemiyor. Lütfen tekrar deneyin.', { message_type: 'ASSISTANT' });
         } finally {
           sendBtn.disabled = !textarea.value.trim();
         }
@@ -1043,15 +1059,44 @@
         if (data.appearance) applyTheme(data.appearance);
         if (data.behavior && data.behavior.language === 'ar') panel.setAttribute('dir', 'rtl');
 
-        if (data.history && data.history.length > 0) {
-          SamcheChatPersistence.hydrateHistory(messages, data.history, function(role, text) {
-            appendMessage(role, text);
+        var historyList = Array.isArray(data.history) ? data.history.slice() : [];
+        var hasGreetingInHistory = historyList.some(function(item) {
+          return item && (item.message_type === 'INITIAL_GREETING' || item.is_greeting);
+        });
+
+        var welcomeText = (data.appearance && data.appearance.greeting)
+          || (data.assistant && data.assistant.greeting)
+          || buildSafeDefaultGreeting(data);
+
+        if (!hasGreetingInHistory && welcomeText) {
+          historyList.unshift({
+            role: 'assistant',
+            content: welcomeText,
+            message_type: 'INITIAL_GREETING',
+            is_greeting: true,
+            id: 'greeting_' + (sessionToken || 'init'),
           });
-        } else if (messages.querySelectorAll('.samche-msg').length === 0) {
-          var welcome = (data.appearance && data.appearance.greeting)
-            || (data.assistant && data.assistant.greeting)
-            || buildSafeDefaultGreeting(data);
-          appendMessage('bot', welcome);
+        }
+
+        SamcheChatPersistence.hydrateHistory(messages, historyList, function(role, text, item) {
+          var msgType = (item && item.message_type)
+            || (item && (item.is_proactive || item.proactive_event_id) ? 'PROACTIVE' : (item && item.is_greeting ? 'INITIAL_GREETING' : (role === 'user' ? 'USER' : 'ASSISTANT')));
+          var eventId = item && (item.proactive_event_id || item.event_id);
+          appendMessage(role, text, {
+            message_type: msgType,
+            is_greeting: msgType === 'INITIAL_GREETING',
+            is_proactive: msgType === 'PROACTIVE',
+            proactive_event_id: eventId,
+            id: item && item.id,
+          });
+        });
+
+        if (messages.querySelectorAll('.samche-msg').length === 0 && welcomeText) {
+          appendMessage('bot', welcomeText, {
+            message_type: 'INITIAL_GREETING',
+            is_greeting: true,
+            id: 'greeting_' + (sessionToken || 'init'),
+          });
         }
 
         var initCtx = capturePageContext();
@@ -1109,15 +1154,18 @@
               launcher.classList.add('samche-intent-pulse');
               if (data.behavior.high_intent_activation) {
                 openPanel();
-                var existingBot = messages.querySelectorAll('.samche-msg-bot');
-                var existingUser = messages.querySelectorAll('.samche-msg-user');
-                if (existingUser.length === 0 && existingBot.length === 1 && !existingBot[0].getAttribute('data-proactive-event-id')) {
-                  existingBot[0].remove();
-                }
                 var eventId = (pe && pe.event_id) || ('pe_' + (proactiveState.currentEntityId || 'entity'));
+                if (proactiveState.renderedMessageIds[eventId]) {
+                  return;
+                }
                 proactiveState.renderedMessageIds[eventId] = true;
-                var botBubble = appendMessage('bot', '');
-                botBubble.setAttribute('data-proactive-event-id', eventId);
+                proactiveState.hasProactivelyEngaged = true;
+
+                var botBubble = appendMessage('bot', '', {
+                  message_type: 'PROACTIVE',
+                  is_proactive: true,
+                  proactive_event_id: eventId,
+                });
                 progressiveReveal(botBubble, msg, { container: messages });
               }
             },
@@ -1187,13 +1235,11 @@
                   clearTimers();
                   launcher.classList.add('samche-intent-pulse');
                   openPanel();
-                  var existingBot = messages.querySelectorAll('.samche-msg-bot');
-                  var existingUser = messages.querySelectorAll('.samche-msg-user');
-                  if (existingUser.length === 0 && existingBot.length === 1 && !existingBot[0].getAttribute('data-proactive-event-id')) {
-                    existingBot[0].remove();
-                  }
-                  var botBubble = appendMessage('bot', '');
-                  botBubble.setAttribute('data-proactive-event-id', eventId);
+                  var botBubble = appendMessage('bot', '', {
+                    message_type: 'PROACTIVE',
+                    is_proactive: true,
+                    proactive_event_id: eventId,
+                  });
                   progressiveReveal(botBubble, pe.message, { container: messages });
                 }
               } else if (pe.should_nudge || pe.intent_state === 'MEDIUM') {

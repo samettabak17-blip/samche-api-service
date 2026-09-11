@@ -298,3 +298,106 @@ test('10. Fresh Headphone session: generic/configured greeting grounded, suggest
   assert.equal(resolveInitialWebChatGreeting({ language: 'en' }), 'Hello! How can I help you today?');
   assert.equal(resolveInitialWebChatGreeting({ language: 'ar' }), 'مرحباً! كيف يمكنني مساعدتك اليوم؟');
 });
+
+test('11. Full lifecycle deterministic fidelity: greeting, proactive, refresh x2, navigation, user message, refresh x3', () => {
+  const resolvedGreeting = resolveInitialWebChatGreeting({ language: 'tr' });
+  const serverHistoryStore = [
+    {
+      role: 'assistant',
+      content: resolvedGreeting,
+      message_type: 'INITIAL_GREETING',
+      is_greeting: true,
+      id: 'greeting_session_001',
+    }
+  ];
+
+  class MockTranscript {
+    constructor() { this.messages = []; }
+    append(role, text, meta) {
+      let msgType = meta?.message_type || (role === 'user' ? 'USER' : 'ASSISTANT');
+      if (meta?.is_greeting || meta?.message_type === 'INITIAL_GREETING') msgType = 'INITIAL_GREETING';
+      if (meta?.is_proactive || meta?.message_type === 'PROACTIVE') msgType = 'PROACTIVE';
+      const msg = { role, text, messageType: msgType, proactiveEventId: meta?.proactive_event_id || null };
+      this.messages.push(msg);
+      return msg;
+    }
+    get greetingCount() { return this.messages.filter(m => m.messageType === 'INITIAL_GREETING').length; }
+    get proactiveCount() { return this.messages.filter(m => m.messageType === 'PROACTIVE').length; }
+    get userCount() { return this.messages.filter(m => m.messageType === 'USER').length; }
+    get assistantCount() { return this.messages.filter(m => m.messageType === 'ASSISTANT').length; }
+    get types() { return this.messages.map(m => m.messageType); }
+  }
+
+  // 1 & 2: Direct/open product. Open widget before proactive.
+  let transcript = new MockTranscript();
+  SamcheChatPersistence.hydrateHistory(transcript, serverHistoryStore, (role, text, item) => {
+    transcript.append(role, text, item);
+  });
+
+  assert.equal(transcript.greetingCount, 1, 'Initial greeting must be present');
+  assert.equal(transcript.proactiveCount, 0, 'Proactive message must not exist yet');
+  assert.deepEqual(transcript.types, ['INITIAL_GREETING']);
+
+  // 3 & 4: Qualified HIGH proactive occurs.
+  const proactiveEventId = 'pe_session_001_prod-watch-titan';
+  const proactiveText = 'Görünüşe göre SamChe Titan Akıllı Saat Pro\'yu inceliyorsunuz.';
+
+  serverHistoryStore.push({
+    role: 'assistant',
+    content: proactiveText,
+    message_type: 'PROACTIVE',
+    is_proactive: true,
+    proactive_event_id: proactiveEventId,
+  });
+
+  transcript.append('bot', proactiveText, {
+    message_type: 'PROACTIVE',
+    is_proactive: true,
+    proactive_event_id: proactiveEventId,
+  });
+
+  assert.equal(transcript.greetingCount, 1, 'Greeting must not be removed on proactive engagement');
+  assert.equal(transcript.proactiveCount, 1, 'Proactive count must be exactly 1');
+  assert.deepEqual(transcript.types, ['INITIAL_GREETING', 'PROACTIVE'], 'Order must be GREETING before PROACTIVE');
+
+  // 5: Refresh 1
+  transcript = new MockTranscript();
+  SamcheChatPersistence.hydrateHistory(transcript, serverHistoryStore, (role, text, item) => {
+    transcript.append(role, text, item);
+  });
+  assert.equal(transcript.greetingCount, 1, 'Refresh 1: Greeting count must be 1');
+  assert.equal(transcript.proactiveCount, 1, 'Refresh 1: Proactive count must be 1');
+  assert.deepEqual(transcript.types, ['INITIAL_GREETING', 'PROACTIVE']);
+
+  // 6: Refresh 2
+  transcript = new MockTranscript();
+  SamcheChatPersistence.hydrateHistory(transcript, serverHistoryStore, (role, text, item) => {
+    transcript.append(role, text, item);
+  });
+  assert.equal(transcript.greetingCount, 1, 'Refresh 2: Greeting count must be 1');
+  assert.equal(transcript.proactiveCount, 1, 'Refresh 2: Proactive count must be 1');
+  assert.deepEqual(transcript.types, ['INITIAL_GREETING', 'PROACTIVE']);
+
+  // 7: Navigate during cooldown: counts unchanged
+  assert.equal(transcript.greetingCount, 1);
+  assert.equal(transcript.proactiveCount, 1);
+
+  // 8: Send user message and assistant reply
+  serverHistoryStore.push({ role: 'user', content: 'Fiyatı nedir?', message_type: 'USER' });
+  serverHistoryStore.push({ role: 'assistant', content: '2.499 TL', message_type: 'ASSISTANT' });
+  transcript.append('user', 'Fiyatı nedir?', { message_type: 'USER' });
+  transcript.append('bot', '2.499 TL', { message_type: 'ASSISTANT' });
+
+  assert.deepEqual(transcript.types, ['INITIAL_GREETING', 'PROACTIVE', 'USER', 'ASSISTANT']);
+
+  // 9: Refresh again after conversation turns
+  transcript = new MockTranscript();
+  SamcheChatPersistence.hydrateHistory(transcript, serverHistoryStore, (role, text, item) => {
+    transcript.append(role, text, item);
+  });
+  assert.equal(transcript.greetingCount, 1);
+  assert.equal(transcript.proactiveCount, 1);
+  assert.equal(transcript.userCount, 1);
+  assert.equal(transcript.assistantCount, 1);
+  assert.deepEqual(transcript.types, ['INITIAL_GREETING', 'PROACTIVE', 'USER', 'ASSISTANT']);
+});
