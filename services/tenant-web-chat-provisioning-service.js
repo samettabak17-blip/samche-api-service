@@ -57,6 +57,12 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
   const primaryCandidate = input?.theme?.primary_color || input?.primary_color || '#2563EB';
   const accentCandidate = input?.theme?.accent_color || input?.accent_color || null;
 
+  const greeting = typeof input?.greeting === 'string' && input.greeting.trim()
+    ? input.greeting.trim()
+    : (typeof input?.welcome_message === 'string' && input.welcome_message.trim()
+        ? input.welcome_message.trim()
+        : null);
+
   const tokens = deriveWebChatThemeTokens({
     primaryColor: primaryCandidate,
     accentColor: accentCandidate,
@@ -68,6 +74,7 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
     title,
     subtitle,
     logo_url: logoUrl,
+    greeting,
     launcher_position: launcherPosition,
     launcher_icon: launcherIcon,
     theme_mode: themeMode,
@@ -106,6 +113,30 @@ export function normalizeWebChatBehavior(input = {}) {
     language,
   };
 }
+
+export function resolveInitialWebChatGreeting({
+  configuredGreeting = null,
+  brandName = 'Asistan',
+  assistantName = null,
+  language = 'tr',
+} = {}) {
+  if (typeof configuredGreeting === 'string' && configuredGreeting.trim()) {
+    return configuredGreeting.trim();
+  }
+
+  const lang = ['tr', 'en', 'ar'].includes(String(language).toLowerCase())
+    ? String(language).toLowerCase()
+    : 'tr';
+
+  if (lang === 'en') {
+    return 'Hello! How can I help you today?';
+  }
+  if (lang === 'ar') {
+    return 'مرحباً! كيف يمكنني مساعدتك اليوم؟';
+  }
+  return 'Merhaba! Size nasıl yardımcı olabilirim?';
+}
+
 
 export function generateWebChatEmbedSnippet(widgetKeyOrOptions, explicitBaseUrl) {
   const widgetKey = typeof widgetKeyOrOptions === 'object' && widgetKeyOrOptions !== null
@@ -359,7 +390,11 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
       }
     }
     // 4. Resolve or create channel_integrations record
-    const normalizedAppearance = normalizeWebChatAppearance(appearance, tenant.name);
+    const appearanceInput = Object.assign({}, appearance || {});
+    if (!appearanceInput.greeting && (opts.greeting || opts.welcomeMessage)) {
+      appearanceInput.greeting = String(opts.greeting || opts.welcomeMessage).trim();
+    }
+    const normalizedAppearance = normalizeWebChatAppearance(appearanceInput, tenant.name);
     const normalizedBehavior = normalizeWebChatBehavior(behavior);
     const configPayload = JSON.stringify({
       appearance: normalizedAppearance,

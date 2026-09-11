@@ -342,6 +342,13 @@
       container.scrollTop = container.scrollHeight;
     }
   }
+  function buildSafeDefaultGreeting(data) {
+    var lang = (data && data.behavior && data.behavior.language) || 'tr';
+    if (lang === 'en') return 'Hello! How can I help you today?';
+    if (lang === 'ar') return 'مرحباً! كيف يمكنني مساعدتك اليوم؟';
+    return 'Merhaba! Size nasıl yardımcı olabilirim?';
+  }
+
 
   function createTypingIndicator(options) {
     options = options || {};
@@ -994,12 +1001,17 @@
         } else if (messages.querySelectorAll('.samche-msg').length === 0) {
           var welcome = (data.appearance && data.appearance.greeting)
             || (data.assistant && data.assistant.greeting)
-            || 'Merhaba! SamChe Mağaza Asistanıyım. Ürün özellikleri, kablosuz şarj desteği, su geçirmezlik veya sipariş süreçleri hakkında bana danışabilirsiniz. Nasıl yardımcı olabilirim?';
+            || buildSafeDefaultGreeting(data);
           appendMessage('bot', welcome);
         }
 
         if (data.browsing_state && data.browsing_state.current_entity && data.browsing_state.current_entity.entity_name) {
-          setContextBadge('Gözatılan: ' + data.browsing_state.current_entity.entity_name);
+          var initEnt = data.browsing_state.current_entity;
+          var isInitNonDiscrete = !initEnt.entity_type
+            || /^(?:PAGE|GENERIC_PAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ)/i.test(initEnt.entity_type);
+          if (!isInitNonDiscrete) {
+            setContextBadge('Gözatılan: ' + initEnt.entity_name);
+          }
         }
 
         var engagementState = (data.browsing_state && data.browsing_state.engagement_state) || {};
@@ -1039,7 +1051,10 @@
 
       initSpaNavigationListener(function(newContext) {
         if (newContext) {
-          if (newContext.entity_name && newContext.entity_name !== 'SamChe Teknoloji Mağazası') {
+          var isNonDiscrete = !newContext.entity_type
+            || /^(?:PAGE|GENERIC_PAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ)/i.test(newContext.entity_type)
+            || /^(?:catalog|home|pricing|security|about)/i.test(newContext.page_type || '');
+          if (newContext.entity_name && !isNonDiscrete) {
             setContextBadge('Gözatılan: ' + newContext.entity_name);
           } else {
             setContextBadge(null);
@@ -1059,7 +1074,9 @@
             if (respData && respData.proactive_engagement) {
               var pe = respData.proactive_engagement;
               if (pe.should_open && pe.message) {
-                if (!isOpen && !proactiveState.hasUserMessaged && !proactiveState.hasProactivelyEngaged) {
+                var cooldownMs = proactiveState.cooldownSeconds * 1000;
+                var isCooldown = proactiveState.dismissedAt && (Date.now() - proactiveState.dismissedAt < cooldownMs);
+                if (!isOpen && !proactiveState.hasUserMessaged && !proactiveState.hasProactivelyEngaged && !isCooldown) {
                   proactiveState.hasProactivelyEngaged = true;
                   clearTimers();
                   launcher.classList.add('samche-intent-pulse');

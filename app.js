@@ -77,6 +77,7 @@ import {
   normalizeWebChatAppearance,
   normalizeWebChatBehavior,
 } from "./services/public-web-chat-integration-service.js";
+import { resolveInitialWebChatGreeting } from "./services/tenant-web-chat-provisioning-service.js";
 import { createCustomerInvitationOutboxStartup } from './services/customer-invitation-outbox-bootstrap.js';
 import { isAllowedGuideCorsOrigin } from './services/guide-public-cors-service.js';
 import { isSharedPublicGuideAssetPath } from './services/guide-public-asset-route-service.js';
@@ -1697,8 +1698,30 @@ app.post("/api/chat/bootstrap", async (req, res) => {
     const rawConfig = integration.config || {};
     const appearance = normalizeWebChatAppearance(rawConfig.appearance, integration.channel_name);
     const behavior = normalizeWebChatBehavior(rawConfig.behavior);
+
+    let personaGreeting = null;
+    try {
+      const persona = await resolveTenantRuntimePersona({
+        database: pool,
+        tenantId: integration.tenant_id,
+        assistantId: integration.assistant_id,
+      });
+      if (persona?.available) {
+        personaGreeting = persona.configuration?.greeting || null;
+      }
+    } catch {}
+
+    const resolvedGreeting = resolveInitialWebChatGreeting({
+      configuredGreeting: appearance.greeting || personaGreeting || null,
+      brandName: appearance.brand_name || integration.channel_name || 'Asistan',
+      assistantName: integration.assistant_name || appearance.title,
+      language: behavior.language,
+    });
+
+    appearance.greeting = resolvedGreeting;
     const publicAssistant = {
       name: integration.assistant_name || appearance.title,
+      greeting: resolvedGreeting,
     };
 
     const suppliedSession = extractWebChatSessionToken(req);

@@ -224,6 +224,43 @@ export function resolvePageEntity(normalizedContext) {
   };
 }
 
+export const NON_DISCRETE_ENTITY_TYPES = Object.freeze(new Set([
+  'PAGE',
+  'GENERIC_PAGE',
+  'CATALOG',
+  'CATALOGUE',
+  'HOME',
+  'HOMEPAGE',
+  'LANDING',
+  'SEARCH',
+  'SEARCH_RESULTS',
+  'CATEGORY',
+  'CATEGORIES',
+  'COLLECTION',
+  'COLLECTIONS',
+  'ABOUT',
+  'ABOUT_US',
+  'ABOUTPAGE',
+  'SECURITY',
+  'SECURITYPAGE',
+  'PRICING_PAGE',
+  'PRICINGPAGE',
+  'CONTACT',
+  'CONTACT_US',
+  'TERMS',
+  'PRIVACY',
+  'FAQ',
+]));
+
+export function isDiscreteEntity(entity) {
+  if (!entity || typeof entity !== 'object') return false;
+  const rawType = String(entity.entity_type || '').toUpperCase().trim();
+  if (!rawType || NON_DISCRETE_ENTITY_TYPES.has(rawType)) {
+    return false;
+  }
+  return true;
+}
+
 export function areEntitiesEqual(a, b) {
   if (!a || !b) return false;
   if (a.entity_id && b.entity_id && a.entity_id === b.entity_id) return true;
@@ -256,11 +293,11 @@ export function updateSessionBrowsingState({
     return base;
   }
 
-  if (base.currentEntity && !areEntitiesEqual(base.currentEntity, newEntity)) {
-    const filtered = base.previousEntities.filter((item) => !areEntitiesEqual(item, base.currentEntity) && !areEntitiesEqual(item, newEntity));
+  if (base.currentEntity && isDiscreteEntity(base.currentEntity) && (!newEntity || !areEntitiesEqual(base.currentEntity, newEntity))) {
+    const filtered = base.previousEntities.filter((item) => isDiscreteEntity(item) && !areEntitiesEqual(item, base.currentEntity) && (!newEntity || !areEntitiesEqual(item, newEntity)));
     base.previousEntities = [base.currentEntity, ...filtered].slice(0, maxHistory);
-  } else if (base.previousEntities.length > 0) {
-    base.previousEntities = base.previousEntities.filter((item) => !areEntitiesEqual(item, newEntity)).slice(0, maxHistory);
+  } else if (newEntity && base.previousEntities.length > 0) {
+    base.previousEntities = base.previousEntities.filter((item) => isDiscreteEntity(item) && !areEntitiesEqual(item, newEntity)).slice(0, maxHistory);
   }
 
   base.currentEntity = newEntity;
@@ -284,13 +321,13 @@ export function updateSessionBrowsingStateWithEntity({
 
   if (!newEntity) return base;
 
-  if (base.currentEntity && !areEntitiesEqual(base.currentEntity, newEntity)) {
+  if (base.currentEntity && isDiscreteEntity(base.currentEntity) && !areEntitiesEqual(base.currentEntity, newEntity)) {
     const filtered = base.previousEntities.filter(
-      (item) => !areEntitiesEqual(item, base.currentEntity) && !areEntitiesEqual(item, newEntity)
+      (item) => isDiscreteEntity(item) && !areEntitiesEqual(item, base.currentEntity) && !areEntitiesEqual(item, newEntity)
     );
     base.previousEntities = [base.currentEntity, ...filtered].slice(0, maxHistory);
   } else if (base.previousEntities.length > 0) {
-    base.previousEntities = base.previousEntities.filter((item) => !areEntitiesEqual(item, newEntity)).slice(0, maxHistory);
+    base.previousEntities = base.previousEntities.filter((item) => isDiscreteEntity(item) && !areEntitiesEqual(item, newEntity)).slice(0, maxHistory);
   }
 
   base.currentEntity = newEntity;

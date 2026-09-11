@@ -244,6 +244,18 @@ test('SCENARIO B — HIGH INTENT: Visitor navigates to product and dwells -> aut
     })()
   `);
 
+  // Assert NEGATIVE TIMING: immediately upon arrival (<1s, well before dwell threshold), widget MUST remain closed
+  await new Promise(r => setTimeout(r, 500));
+  const earlyCheck = await browser.evaluate(`
+    (() => {
+      const host = document.getElementById('samche-webchat-container');
+      const shadow = host?.shadowRoot;
+      const panel = shadow?.querySelector('.samche-panel');
+      return panel ? panel.classList.contains('samche-open') : false;
+    })()
+  `);
+  assert.equal(earlyCheck, false, 'NEGATIVE TIMING: Widget must NOT auto-open prematurely upon product arrival');
+
   let opened = false;
   let botMessage = '';
   for (let attempt = 0; attempt < 35; attempt++) {

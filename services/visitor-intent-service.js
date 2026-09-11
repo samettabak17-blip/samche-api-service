@@ -3,6 +3,7 @@ import {
 } from './tenant-runtime-persona-service.js';
 import {
   buildContextualIntelligencePromptSection,
+  isDiscreteEntity,
 } from './contextual-intelligence-service.js';
 
 /**
@@ -135,7 +136,12 @@ export function computeVisitorIntentScore({
   }
 
   // 4. Multi-Entity Browsing (Exploration / Comparison)
-  const prevCount = Array.isArray(previousEntities) ? previousEntities.length : 0;
+  const validPrev = Array.isArray(previousEntities)
+    ? previousEntities.filter((item) => isDiscreteEntity(item))
+    : [];
+  const currentIsDiscrete = isDiscreteEntity(currentEntity);
+  const prevCount = currentIsDiscrete ? validPrev.length : 0;
+
   if (prevCount >= 2) {
     score += 30;
     signals.push('MULTI_ENTITY_EXPLORATION_DEEP');
@@ -146,7 +152,7 @@ export function computeVisitorIntentScore({
 
   // 5. Revisit to the same entity
   const isRevisit = revisitCount > 0
-    || (currentEntity && Array.isArray(previousEntities) && previousEntities.some(
+    || (currentIsDiscrete && validPrev.some(
       (prev) => prev.entity_id === currentEntity.entity_id || prev.canonical_url === currentEntity.canonical_url
     ));
 
@@ -156,8 +162,8 @@ export function computeVisitorIntentScore({
   }
 
   // 6. Same-Category Comparison
-  if (currentEntity && Array.isArray(previousEntities) && previousEntities.length > 0) {
-    const lastPrev = previousEntities[0];
+  if (currentIsDiscrete && validPrev.length > 0) {
+    const lastPrev = validPrev[0];
     const sameCategory = lastPrev.attributes?.category && currentEntity.attributes?.category &&
       String(lastPrev.attributes.category).toLowerCase() === String(currentEntity.attributes.category).toLowerCase();
     const sameType = lastPrev.entity_type && currentEntity.entity_type &&
