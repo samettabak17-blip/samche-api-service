@@ -22,6 +22,8 @@ export interface WebChatThemeConfig {
   surface_glass?: string;
   surface_solid?: string;
   glow_color?: string;
+  glow_soft?: string;
+  launcher_text?: string;
   text_color?: string;
   muted_color?: string;
   border_color?: string;
@@ -34,6 +36,8 @@ export interface WebChatAppearanceConfig {
   title: string;
   subtitle: string;
   logo_url: string | null;
+  logo_asset_id?: string | null;
+  launcher_label?: string;
   launcher_position: 'right' | 'left';
   launcher_icon: 'chat' | 'logo';
   theme_mode: 'dark' | 'light' | 'auto';
@@ -99,6 +103,8 @@ export interface WebChatThemePreviewResponse {
   surface_solid: string;
   surface_glass: string;
   glow: string;
+  glow_soft?: string;
+  launcher_text?: string;
   text: string;
   muted: string;
   border: string;
@@ -109,6 +115,27 @@ export interface WebChatThemePreviewResponse {
     muted_surface: number;
   };
   is_accessible: boolean;
+}
+
+export interface WebChatLogoUploadResponse {
+  asset: {
+    id: string;
+    tenant_id: string;
+    original_filename: string;
+    mime_type: string;
+    size_bytes: number;
+    public_url: string;
+    created_at: string;
+  };
+  integration?: WebChatChannelResponse | null;
+  appearance: WebChatAppearanceConfig;
+  theme?: WebChatThemeConfig;
+  palette?: {
+    dominant: string | null;
+    primary: string;
+    accent: string;
+    candidates: string[];
+  };
 }
 
 export type ConversationStatus = 'open' | 'closed' | 'archived';

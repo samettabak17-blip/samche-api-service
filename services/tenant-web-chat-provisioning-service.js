@@ -7,6 +7,8 @@ export const DEFAULT_WEB_CHAT_APPEARANCE = Object.freeze({
   title: 'Canlı Destek',
   subtitle: 'Çevrimiçi | SamChe AI',
   logo_url: null,
+  logo_asset_id: null,
+  launcher_label: 'Canlı Destek',
   launcher_position: 'right',
   launcher_icon: 'chat',
   theme_mode: 'dark',
@@ -17,9 +19,13 @@ export const DEFAULT_WEB_CHAT_APPEARANCE = Object.freeze({
     surface_glass: 'rgba(17, 24, 39, 0.85)',
     surface_solid: '#111827',
     glow_color: 'rgba(37, 99, 235, 0.35)',
+    glow_soft: 'rgba(37, 99, 235, 0.18)',
+    launcher_text: '#FFFFFF',
     text_color: '#F8FAFC',
     muted_color: '#94A3B8',
     border_color: 'rgba(255, 255, 255, 0.12)',
+    primary_foreground: '#FFFFFF',
+    accent_foreground: '#FFFFFF',
   },
 });
 
@@ -30,6 +36,13 @@ export const DEFAULT_WEB_CHAT_BEHAVIOR = Object.freeze({
   cooldown_seconds: 300,
   language: 'auto',
 });
+
+function sanitizeLauncherLabel(label, fallback = 'Canlı Destek') {
+  if (typeof label !== 'string') return fallback;
+  const cleaned = label.replace(/<[^>]*>?/gm, '').trim();
+  if (!cleaned) return fallback;
+  return cleaned.slice(0, 50);
+}
 
 export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamChe') {
   const brandName = typeof input?.brand_name === 'string' && input.brand_name.trim()
@@ -47,6 +60,12 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
   const logoUrl = typeof input?.logo_url === 'string' && input.logo_url.trim()
     ? input.logo_url.trim()
     : null;
+
+  const logoAssetId = typeof input?.logo_asset_id === 'string' && input.logo_asset_id.trim()
+    ? input.logo_asset_id.trim()
+    : null;
+
+  const launcherLabel = sanitizeLauncherLabel(input?.launcher_label, title || 'Canlı Destek');
 
   const launcherPosition = input?.launcher_position === 'left' ? 'left' : 'right';
   const launcherIcon = input?.launcher_icon === 'logo' ? 'logo' : 'chat';
@@ -74,6 +93,8 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
     title,
     subtitle,
     logo_url: logoUrl,
+    logo_asset_id: logoAssetId,
+    launcher_label: launcherLabel,
     greeting,
     launcher_position: launcherPosition,
     launcher_icon: launcherIcon,
@@ -85,6 +106,8 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
       surface_glass: tokens.surface_glass,
       surface_solid: tokens.surface_solid,
       glow_color: tokens.glow,
+      glow_soft: tokens.glow_soft,
+      launcher_text: tokens.launcher_text,
       text_color: tokens.text,
       muted_color: tokens.muted,
       border_color: tokens.border,
@@ -571,7 +594,10 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
  * Supports both configured and unconfigured tenants, returning canonical setup state
  * instead of 404 for valid tenants that have not yet enabled Web Chat.
  */
-export async function getWebChatIntegrationForTenant({ database, tenantId }) {
+export async function getWebChatIntegrationForTenant(databaseOrOptions, maybeTenantId) {
+  const isPositional = databaseOrOptions && (typeof databaseOrOptions.query === 'function' || typeof databaseOrOptions.connect === 'function');
+  const database = isPositional ? databaseOrOptions : databaseOrOptions?.database;
+  const tenantId = isPositional ? maybeTenantId : databaseOrOptions?.tenantId;
   if (!database || typeof database.query !== 'function') {
     throw new TenantWebChatProvisioningError('WEB_CHAT_PROVISIONING_DATABASE_INVALID', 'Database connection is invalid');
   }

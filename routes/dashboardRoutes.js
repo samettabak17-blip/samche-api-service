@@ -22,6 +22,19 @@ import {
   canPerformWebChatAction,
   WEBCHAT_PERMISSIONS,
 } from '../services/web-chat-permissions.js';
+import multer from 'multer';
+import {
+  WebChatAssetError,
+  storeWebChatAsset,
+  deleteWebChatAsset,
+  getPublicWebChatAsset,
+} from '../services/web-chat-asset-service.js';
+import { createConversationResourceStorage } from '../services/conversation-resource-storage.js';
+
+const webChatLogoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { files: 1, fileSize: 2 * 1024 * 1024 },
+});
 
 
 
@@ -296,6 +309,144 @@ router.post('/:tenantId/channels/web-chat/theme-preview', requireTenantAccess, a
     return res.status(400).json({ error: 'Failed to generate theme preview' });
   }
 });
+router.post(
+  '/:tenantId/channels/web-chat/logo',
+  requireTenantAccess,
+  requireTenantAdmin,
+  (req, res, next) => {
+    webChatLogoUpload.single('file')(req, res, (error) => {
+      if (error) {
+        return res.status(error.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({
+          error: 'Web Chat branding asset is invalid: ' + error.message,
+          code: error.code || 'ASSET_UPLOAD_FAILED',
+        });
+      }
+      return next();
+    });
+  },
+  async (req, res) => {
+    if (!tenant(req, res)) return;
+    if (!canPerformWebChatAction({ systemRole: req.user?.system_role, tenantRole: req.verified_tenant_role, action: WEBCHAT_PERMISSIONS.CONFIGURE })) {
+      return res.status(403).json({ error: 'Web Chat configure access required' });
+    }
+
+    try {
+      const database = req.app?.locals?.database || pool;
+      let storage = null;
+      try {
+        storage = req.app?.locals?.storage || createConversationResourceStorage();
+      } catch (e) {
+        storage = null;
+      }
+
+      const asset = await storeWebChatAsset({
+        database,
+        storage,
+        tenantId: req.verified_tenant_id,
+        actorUserId: req.user?.id || null,
+        file: req.file,
+      });
+
+      const current = await getWebChatIntegrationForTenant({ database, tenantId: req.verified_tenant_id });
+      let updatedIntegration = null;
+      if (current) {
+        const nextAppearance = {
+          ...(current.appearance || {}),
+          logo_url: asset.public_url,
+          logo_asset_id: asset.id,
+        };
+        updatedIntegration = await ensureWebChatIntegration({
+          database,
+          tenantId: req.verified_tenant_id,
+          appearance: nextAppearance,
+        });
+      }
+
+      return res.status(200).json({
+        asset,
+        integration: updatedIntegration,
+        appearance: updatedIntegration?.appearance || {
+          logo_url: asset.public_url,
+          logo_asset_id: asset.id,
+        },
+        theme: asset.theme,
+        palette: asset.palette,
+      });
+    } catch (error) {
+      if (error instanceof WebChatAssetError) {
+        const isClientError = /UNSUPPORTED|MISMATCH|INVALID|REQUIRED|SVG/.test(error.code);
+        return res.status(isClientError ? 400 : (error.code.includes('SIZE') ? 413 : 503)).json({
+          error: error.message,
+          code: error.code,
+        });
+      }
+      console.error('Web chat logo upload error:', error);
+      return res.status(500).json({ error: error.message || 'Server error' });
+    }
+  }
+);
+
+router.delete(
+  '/:tenantId/channels/web-chat/logo',
+  requireTenantAccess,
+  requireTenantAdmin,
+  async (req, res) => {
+    if (!tenant(req, res)) return;
+    if (!canPerformWebChatAction({ systemRole: req.user?.system_role, tenantRole: req.verified_tenant_role, action: WEBCHAT_PERMISSIONS.CONFIGURE })) {
+      return res.status(403).json({ error: 'Web Chat configure access required' });
+    }
+
+    try {
+      const database = req.app?.locals?.database || pool;
+      let storage = null;
+      try {
+        storage = req.app?.locals?.storage || createConversationResourceStorage();
+      } catch (e) {
+        storage = null;
+      }
+
+      const current = await getWebChatIntegrationForTenant({ database, tenantId: req.verified_tenant_id });
+      const assetId = current?.appearance?.logo_asset_id || req.body?.asset_id || null;
+
+      if (assetId) {
+        await deleteWebChatAsset({
+          database,
+          storage,
+          tenantId: req.verified_tenant_id,
+          assetId,
+        }).catch(() => {});
+      }
+
+      let updatedIntegration = null;
+      if (current) {
+        const nextAppearance = {
+          ...(current.appearance || {}),
+          logo_url: null,
+          logo_asset_id: null,
+        };
+        updatedIntegration = await ensureWebChatIntegration({
+          database,
+          tenantId: req.verified_tenant_id,
+          appearance: nextAppearance,
+        });
+      }
+
+      return res.status(200).json({
+        ok: true,
+        integration: updatedIntegration,
+        appearance: updatedIntegration?.appearance || {
+          logo_url: null,
+          logo_asset_id: null,
+        },
+      });
+    } catch (error) {
+      console.error('Web chat logo delete error:', error);
+      return res.status(500).json({ error: 'Server error' });
+    }
+  }
+);
+
+
 
 // Cross-tenant channel transfer requires canonical platform-level administrative authority.
 // A tenant-level owner or admin (system_role === 'CUSTOMER') must NEVER be able to transfer

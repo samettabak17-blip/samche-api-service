@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, Link } from 'react-router-dom';
 import {
   Check,
   Copy,
+  Image as ImageIcon,
   Laptop,
   MessageSquare,
   Palette,
@@ -13,6 +14,9 @@ import {
   Sliders,
   Smartphone,
   Sparkles,
+  Trash2,
+  Upload,
+  X,
 } from 'lucide-react';
 import { EmptyState, QueryErrorState, SkeletonBlock } from '../../components/ui/async-state';
 import { MutationFeedback } from '../../components/ui/mutation-feedback';
@@ -67,11 +71,24 @@ export function WebChatManagement() {
   const [title, setTitle] = useState('');
   const [subtitle, setSubtitle] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
+  const [launcherLabel, setLauncherLabel] = useState('Canlı Destek');
   const [launcherPosition, setLauncherPosition] = useState<'right' | 'left'>('right');
   const [launcherIcon, setLauncherIcon] = useState<'chat' | 'logo'>('chat');
   const [themeMode, setThemeMode] = useState<'dark' | 'light' | 'auto'>('dark');
   const [primaryColor, setPrimaryColor] = useState('#0B5FFF');
   const [accentColor, setAccentColor] = useState('#10B981');
+
+  const [previewOpen, setPreviewOpen] = useState(true);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [logoUploadError, setLogoUploadError] = useState<string | null>(null);
+  const [extractedPalette, setExtractedPalette] = useState<{
+    dominant: string | null;
+    primary: string;
+    accent: string;
+    candidates: string[];
+  } | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [proactiveEnabled, setProactiveEnabled] = useState(false);
   const [highIntentActivation, setHighIntentActivation] = useState(false);
@@ -108,6 +125,7 @@ export function WebChatManagement() {
         setTitle(d.appearance.title || '');
         setSubtitle(d.appearance.subtitle || '');
         setLogoUrl(d.appearance.logo_url || '');
+        setLauncherLabel(d.appearance.launcher_label !== undefined && d.appearance.launcher_label !== null ? d.appearance.launcher_label : 'Canlı Destek');
         setLauncherPosition(d.appearance.launcher_position || 'right');
         setLauncherIcon(d.appearance.launcher_icon || 'chat');
         setThemeMode(d.appearance.theme_mode || 'dark');
@@ -139,6 +157,66 @@ export function WebChatManagement() {
     },
   });
 
+  const handleLogoFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      setLogoUploadError('Logo file size exceeds the 2MB limit.');
+      return;
+    }
+
+    const validTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'];
+    if (!validTypes.includes(file.type)) {
+      setLogoUploadError('Unsupported file type. Please upload PNG, JPEG, WEBP, or SVG.');
+      return;
+    }
+
+    try {
+      setLogoUploading(true);
+      setLogoUploadError(null);
+      const res = await tenantApi.uploadWebChatLogo(tenantId!, file);
+      if (res.asset?.public_url) {
+        setLogoUrl(res.asset.public_url);
+      }
+      if (res.palette) {
+        setExtractedPalette(res.palette);
+      }
+      if (res.theme?.primary_color) {
+        setPrimaryColor(res.theme.primary_color);
+      }
+      if (res.theme?.accent_color) {
+        setAccentColor(res.theme.accent_color);
+      }
+      queryClient.invalidateQueries({ queryKey: tenantKeys.webChatChannel(tenantId!) });
+      setNotice('Logo uploaded and brand palette extracted successfully.');
+      previewMutation.mutate();
+    } catch (err: any) {
+      setLogoUploadError(err?.message || 'Failed to upload logo.');
+    } finally {
+      setLogoUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleLogoDelete = async () => {
+    try {
+      setLogoUploading(true);
+      setLogoUploadError(null);
+      await tenantApi.deleteWebChatLogo(tenantId!);
+      setLogoUrl('');
+      setExtractedPalette(null);
+      queryClient.invalidateQueries({ queryKey: tenantKeys.webChatChannel(tenantId!) });
+      setNotice('Logo removed.');
+    } catch (err: any) {
+      setLogoUploadError(err?.message || 'Failed to remove logo.');
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+
   const primaryFg = contrastResult?.primary_foreground || getAccessibleForeground(primaryColor);
 
   const saveMutation = useMutation({
@@ -148,6 +226,7 @@ export function WebChatManagement() {
         title,
         subtitle,
         logo_url: logoUrl || null,
+        launcher_label: launcherLabel,
         launcher_position: launcherPosition,
         launcher_icon: launcherIcon,
         theme_mode: themeMode,
@@ -422,16 +501,63 @@ export function WebChatManagement() {
               </label>
             </div>
 
-            <label className="block text-sm font-medium">
-              Brand Logo URL (optional)
+            {/* Brand Logo & Upload */}
+            <div className="space-y-2 rounded-xl border border-line/70 bg-canvas/30 p-4">
+              <label className="block text-sm font-medium text-white">
+                Brand Logo
+              </label>
               <input
-                type="url"
-                value={logoUrl}
-                onChange={(e) => setLogoUrl(e.target.value)}
-                placeholder="https://yourbrand.com/logo.png"
-                className="mt-1.5 w-full rounded-lg border border-line bg-canvas/40 px-3 py-2 text-sm text-white"
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                onChange={handleLogoFileSelect}
               />
-            </label>
+              <div className="flex flex-wrap items-center gap-3">
+                {logoUrl ? (
+                  <div className="relative h-12 w-12 rounded-lg border border-line/80 bg-stone-900/80 p-1 flex items-center justify-center overflow-hidden">
+                    <img src={logoUrl} alt="Brand Logo" className="max-h-full max-w-full object-contain" />
+                  </div>
+                ) : (
+                  <div className="h-12 w-12 rounded-lg border border-dashed border-line bg-stone-900/40 flex items-center justify-center text-stone-500">
+                    <ImageIcon size={20} />
+                  </div>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={logoUploading}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-canvas/60 px-3 py-1.5 text-xs font-semibold text-stone-200 hover:text-white hover:border-signal disabled:opacity-50"
+                  >
+                    <Upload size={13} className={logoUploading ? 'animate-spin' : ''} />
+                    {logoUploading ? 'Uploading & Analyzing...' : logoUrl ? 'Change Logo' : 'Upload Image'}
+                  </button>
+                  {logoUrl && (
+                    <button
+                      type="button"
+                      onClick={handleLogoDelete}
+                      disabled={logoUploading}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-line/60 bg-red-950/20 px-3 py-1.5 text-xs font-semibold text-red-400 hover:bg-red-900/30 hover:border-red-500/50 disabled:opacity-50"
+                    >
+                      <Trash2 size={13} /> Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+              {logoUploadError && (
+                <p className="text-xs text-red-400 mt-1">{logoUploadError}</p>
+              )}
+              <div className="pt-1">
+                <input
+                  type="url"
+                  value={logoUrl}
+                  onChange={(e) => setLogoUrl(e.target.value)}
+                  placeholder="Or enter logo URL: https://example.com/logo.png"
+                  className="w-full rounded-lg border border-line bg-canvas/40 px-3 py-1.5 text-xs text-white"
+                />
+              </div>
+            </div>
 
             <div className="grid grid-cols-2 gap-4">
               <label className="block text-sm font-medium">
@@ -460,6 +586,20 @@ export function WebChatManagement() {
             </div>
 
             <label className="block text-sm font-medium">
+              Launcher Label
+              <input
+                type="text"
+                value={launcherLabel}
+                onChange={(e) => setLauncherLabel(e.target.value)}
+                placeholder="Canlı Destek"
+                className="mt-1.5 w-full rounded-lg border border-line bg-canvas/40 px-3 py-2 text-sm text-white"
+              />
+              <span className="mt-1 block text-xs text-stone-400">
+                Text shown in the launcher pill button (e.g. &quot;Canlı Destek&quot; or &quot;Chat with us&quot;). Leave blank for circular icon only.
+              </span>
+            </label>
+
+            <label className="block text-sm font-medium">
               Theme Mode
               <select
                 value={themeMode}
@@ -471,6 +611,19 @@ export function WebChatManagement() {
                 <option value="auto">Follow Visitor System Mode</option>
               </select>
             </label>
+
+            {canManage && (
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => saveMutation.mutate()}
+                  disabled={saveMutation.isPending}
+                  className="inline-flex items-center gap-2 rounded-lg bg-ink px-5 py-2.5 text-sm font-semibold text-white shadow hover:opacity-95 disabled:opacity-60"
+                >
+                  {saveMutation.isPending ? 'Saving...' : 'Save Appearance'}
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="panel p-6 space-y-5">
@@ -522,6 +675,78 @@ export function WebChatManagement() {
                     className="w-full rounded-lg border border-line bg-canvas/40 px-3 py-1.5 text-sm uppercase text-white font-mono"
                   />
                 </div>
+              </div>
+            </div>
+
+            {/* Extracted Palette Suggestions */}
+            {extractedPalette && (
+              <div className="rounded-xl border border-signal/30 bg-signal/10 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-signal">
+                    <Sparkles size={14} /> Recommended Palette from Logo
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPrimaryColor(extractedPalette.primary);
+                      setAccentColor(extractedPalette.accent);
+                      previewMutation.mutate();
+                    }}
+                    className="rounded-md bg-signal px-2.5 py-1 text-xs font-semibold text-white shadow hover:opacity-90"
+                  >
+                    Apply Recommendations
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-xs text-stone-300">Candidates:</span>
+                  {extractedPalette.candidates.map((hex, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setPrimaryColor(hex);
+                        previewMutation.mutate();
+                      }}
+                      className="group flex items-center gap-1.5 rounded-lg border border-line/60 bg-black/40 px-2.5 py-1 text-xs font-mono text-stone-300 hover:border-white"
+                      title={`Click to set ${hex} as primary`}
+                    >
+                      <span className="h-3.5 w-3.5 rounded-full border border-white/20" style={{ backgroundColor: hex }} />
+                      <span>{hex}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Preset Palettes */}
+            <div className="space-y-2">
+              <span className="block text-xs font-medium text-stone-400">Curated Presets</span>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {[
+                  { name: 'Indigo Modern', primary: '#0B5FFF', accent: '#10B981' },
+                  { name: 'Emerald Commerce', primary: '#059669', accent: '#F59E0B' },
+                  { name: 'Sunset Violet', primary: '#7C3AED', accent: '#EC4899' },
+                  { name: 'Midnight Luxe', primary: '#0F172A', accent: '#38BDF8' },
+                  { name: 'Amber Warmth', primary: '#D97706', accent: '#3B82F6' },
+                  { name: 'Rose Velvet', primary: '#E11D48', accent: '#10B981' },
+                ].map((preset) => (
+                  <button
+                    key={preset.name}
+                    type="button"
+                    onClick={() => {
+                      setPrimaryColor(preset.primary);
+                      setAccentColor(preset.accent);
+                      previewMutation.mutate();
+                    }}
+                    className="flex items-center gap-2 rounded-lg border border-line bg-canvas/30 px-2.5 py-1.5 text-xs text-stone-300 hover:border-signal hover:text-white"
+                  >
+                    <div className="flex -space-x-1">
+                      <span className="h-3 w-3 rounded-full border border-stone-800" style={{ backgroundColor: preset.primary }} />
+                      <span className="h-3 w-3 rounded-full border border-stone-800" style={{ backgroundColor: preset.accent }} />
+                    </div>
+                    <span className="truncate">{preset.name}</span>
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -677,94 +902,161 @@ export function WebChatManagement() {
 
           <div
             className={`relative mx-auto rounded-2xl border border-line bg-gradient-to-br from-stone-900 to-black p-6 overflow-hidden ${
-              previewViewport === 'mobile' ? 'max-w-sm h-[600px]' : 'w-full h-[500px]'
+              previewViewport === 'mobile' ? 'max-w-sm h-[600px]' : 'w-full h-[520px]'
             }`}
           >
-            <div className="relative h-full flex flex-col justify-end items-end">
-              <div
-                className="w-full max-w-[340px] rounded-2xl overflow-hidden shadow-2xl flex flex-col mb-4"
-                style={{
-                  background: 'rgba(17, 24, 39, 0.88)',
-                  backdropFilter: 'blur(20px)',
-                  border: '1px solid rgba(255, 255, 255, 0.12)',
-                  boxShadow: `0 20px 45px -10px rgba(0, 0, 0, 0.7), 0 0 25px ${primaryColor}22`,
-                }}
-              >
+            <div className={`relative h-full flex flex-col justify-end ${
+              launcherPosition === 'left' ? 'items-start' : 'items-end'
+            }`}>
+              {previewOpen && (
                 <div
-                  className="flex items-center justify-between px-4 py-3 border-b"
+                  className="w-full max-w-[340px] rounded-2xl overflow-hidden shadow-2xl flex flex-col mb-4 transition-all duration-200"
                   style={{
-                    borderColor: 'rgba(255, 255, 255, 0.1)',
-                    background: `linear-gradient(135deg, ${primaryColor}22, rgba(255, 255, 255, 0.03))`,
+                    background: themeMode === 'light' ? 'rgba(255, 255, 255, 0.94)' : 'rgba(17, 24, 39, 0.90)',
+                    backdropFilter: 'blur(20px)',
+                    border: themeMode === 'light' ? '1px solid rgba(0, 0, 0, 0.1)' : '1px solid rgba(255, 255, 255, 0.12)',
+                    boxShadow: `0 20px 45px -10px rgba(0, 0, 0, 0.7), 0 0 25px ${primaryColor}22`,
                   }}
                 >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shadow"
-                      style={{ background: primaryColor, color: primaryFg }}
-                    >
-                      {brandName ? brandName.charAt(0).toUpperCase() : 'S'}
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-semibold text-white">{title || brandName || 'Web Chat'}</h3>
-                      <p className="text-[11px] text-stone-300">{subtitle || 'Online • Active now'}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-4 space-y-3 h-48 overflow-y-auto text-xs">
-                  <div className="flex flex-col items-start">
-                    <div
-                      className="max-w-[85%] rounded-2xl px-3.5 py-2 font-normal"
-                      style={{
-                        background: 'rgba(255, 255, 255, 0.08)',
-                        border: '1px solid rgba(255, 255, 255, 0.12)',
-                        color: '#F8FAFC',
-                      }}
-                    >
-                      Merhaba! Size nasıl yardımcı olabilirim?
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col items-end">
-                    <div
-                      className="max-w-[85%] rounded-2xl px-3.5 py-2 font-medium"
-                      style={{ background: primaryColor, color: primaryFg }}
-                    >
-                      Kargo ve teslimat süreleri hakkında bilgi alabilir miyim?
-                    </div>
-                  </div>
-                </div>
-
-                <div
-                  className="p-3 border-t flex items-center gap-2"
-                  style={{ borderColor: 'rgba(255, 255, 255, 0.08)' }}
-                >
-                  <input
-                    type="text"
-                    disabled
-                    placeholder="Bir mesaj yazın..."
-                    className="flex-1 bg-white/[0.06] border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-stone-400 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    className="h-8 w-8 rounded-xl flex items-center justify-center shadow"
-                    style={{ background: primaryColor, color: primaryFg }}
+                  <div
+                    className="flex items-center justify-between px-4 py-3 border-b"
+                    style={{
+                      borderColor: themeMode === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.1)',
+                      background: `linear-gradient(135deg, ${primaryColor}22, ${themeMode === 'light' ? 'rgba(0, 0, 0, 0.02)' : 'rgba(255, 255, 255, 0.03)'})`,
+                    }}
                   >
-                    <Send size={13} />
-                  </button>
-                </div>
-              </div>
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shadow overflow-hidden"
+                        style={{ background: primaryColor, color: primaryFg }}
+                      >
+                        {logoUrl ? (
+                          <img src={logoUrl} alt={brandName || 'Brand'} className="h-full w-full object-contain p-0.5" />
+                        ) : (
+                          brandName ? brandName.charAt(0).toUpperCase() : 'S'
+                        )}
+                      </div>
+                      <div>
+                        <h3 className={`text-sm font-semibold ${themeMode === 'light' ? 'text-stone-900' : 'text-white'}`}>
+                          {title || brandName || 'Web Chat'}
+                        </h3>
+                        <p className={`text-[11px] ${themeMode === 'light' ? 'text-stone-500' : 'text-stone-300'}`}>
+                          {subtitle || 'Online • Active now'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewOpen(false)}
+                      className="rounded p-1 text-stone-400 hover:text-white"
+                      title="Minimize chat preview"
+                    >
+                      <X size={15} />
+                    </button>
+                  </div>
 
-              <div
-                className="h-14 w-14 rounded-full flex items-center justify-center shadow-xl cursor-pointer"
-                style={{
-                  background: primaryColor,
-                  color: primaryFg,
-                  boxShadow: `0 10px 25px -4px ${primaryColor}77`,
-                }}
-              >
-                <MessageSquare size={24} />
-              </div>
+                  <div className="p-4 space-y-3 h-48 overflow-y-auto text-xs">
+                    <div className="flex flex-col items-start">
+                      <div
+                        className="max-w-[85%] rounded-2xl px-3.5 py-2 font-normal"
+                        style={{
+                          background: themeMode === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.08)',
+                          border: themeMode === 'light' ? '1px solid rgba(0, 0, 0, 0.08)' : '1px solid rgba(255, 255, 255, 0.12)',
+                          color: themeMode === 'light' ? '#1E293B' : '#F8FAFC',
+                        }}
+                      >
+                        Merhaba! Size nasıl yardımcı olabilirim?
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-end">
+                      <div
+                        className="max-w-[85%] rounded-2xl px-3.5 py-2 font-medium"
+                        style={{ background: primaryColor, color: primaryFg }}
+                      >
+                        Kargo ve teslimat süreleri hakkında bilgi alabilir miyim?
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    className="p-3 border-t flex items-center gap-2"
+                    style={{ borderColor: themeMode === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)' }}
+                  >
+                    <input
+                      type="text"
+                      disabled
+                      placeholder="Bir mesaj yazın..."
+                      className={`flex-1 rounded-xl px-3 py-1.5 text-xs focus:outline-none ${
+                        themeMode === 'light'
+                          ? 'bg-black/[0.04] border border-black/10 text-stone-900 placeholder-stone-400'
+                          : 'bg-white/[0.06] border border-white/10 text-white placeholder-stone-400'
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      className="h-8 w-8 rounded-xl flex items-center justify-center shadow"
+                      style={{ background: primaryColor, color: primaryFg }}
+                    >
+                      <Send size={13} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Launcher Button / Pill */}
+              {previewOpen ? (
+                <button
+                  type="button"
+                  onClick={() => setPreviewOpen(false)}
+                  className="h-12 w-12 rounded-full flex items-center justify-center shadow-xl cursor-pointer hover:scale-105 transition-transform"
+                  style={{
+                    background: primaryColor,
+                    color: primaryFg,
+                    boxShadow: `0 10px 25px -4px ${primaryColor}77`,
+                  }}
+                  title="Close chat preview"
+                >
+                  <X size={20} />
+                </button>
+              ) : launcherLabel ? (
+                <button
+                  type="button"
+                  onClick={() => setPreviewOpen(true)}
+                  className="inline-flex items-center gap-2.5 rounded-full px-5 py-3 shadow-2xl cursor-pointer font-semibold text-sm transition-transform hover:scale-105 active:scale-95"
+                  style={{
+                    background: primaryColor,
+                    color: primaryFg,
+                    boxShadow: `0 10px 30px -4px ${primaryColor}77`,
+                  }}
+                  title="Open chat preview"
+                >
+                  {launcherIcon === 'logo' && logoUrl ? (
+                    <img src={logoUrl} alt="Logo" className="h-5 w-5 rounded-full object-contain" />
+                  ) : (
+                    <MessageSquare size={18} />
+                  )}
+                  <span>{launcherLabel}</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setPreviewOpen(true)}
+                  className="h-14 w-14 rounded-full flex items-center justify-center shadow-xl cursor-pointer hover:scale-105 transition-transform"
+                  style={{
+                    background: primaryColor,
+                    color: primaryFg,
+                    boxShadow: `0 10px 25px -4px ${primaryColor}77`,
+                  }}
+                  title="Open chat preview"
+                >
+                  {launcherIcon === 'logo' && logoUrl ? (
+                    <img src={logoUrl} alt="Logo" className="h-6 w-6 rounded-full object-contain" />
+                  ) : (
+                    <MessageSquare size={22} />
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>

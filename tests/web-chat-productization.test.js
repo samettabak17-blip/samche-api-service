@@ -14,6 +14,12 @@ import {
   DEFAULT_WEB_CHAT_APPEARANCE,
   DEFAULT_WEB_CHAT_BEHAVIOR,
 } from '../services/tenant-web-chat-provisioning-service.js';
+import {
+  validateWebChatAssetUpload,
+  sanitizeSvgBuffer,
+  MAX_WEB_CHAT_ASSET_BYTES,
+} from '../services/web-chat-asset-service.js';
+
 
 const appSource = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 const webChatJsSource = fs.readFileSync(new URL('../public/web-chat.js', import.meta.url), 'utf8');
@@ -166,4 +172,252 @@ test('dashboard WebChatManagement component supports branding, contrast preview,
   assert.match(dashboardWebChatManagementSource, /Public Widget Key/);
   assert.match(dashboardWebChatManagementSource, /Proactive Engagement/);
 });
+
+test('dashboardRoutes.js exposes tenant Web Chat logo upload and delete REST endpoints', () => {
+  // POST /:tenantId/channels/web-chat/logo
+  assert.match(dashboardRoutesSource, /router\.post\(\s*['"]\/:tenantId\/channels\/web-chat\/logo['"]/);
+  assert.match(dashboardRoutesSource, /webChatLogoUpload\.single\(['"]file['"]\)/);
+  assert.match(dashboardRoutesSource, /storeWebChatAsset/);
+  assert.match(dashboardRoutesSource, /getWebChatIntegrationForTenant/);
+  assert.match(dashboardRoutesSource, /ensureWebChatIntegration/);
+  assert.match(dashboardRoutesSource, /theme:\s*asset\.theme/);
+  assert.match(dashboardRoutesSource, /palette:\s*asset\.palette/);
+
+  // DELETE /:tenantId/channels/web-chat/logo
+  assert.match(dashboardRoutesSource, /router\.delete\(\s*['"]\/:tenantId\/channels\/web-chat\/logo['"]/);
+  assert.match(dashboardRoutesSource, /deleteWebChatAsset/);
+  assert.match(dashboardRoutesSource, /logo_url:\s*null/);
+  assert.match(dashboardRoutesSource, /logo_asset_id:\s*null/);
+});
+
+test('dashboard API exposes tenant Web Chat logo upload and delete endpoints', () => {
+  assert.match(dashboardApiSource, /uploadWebChatLogo:\s*\(tenantId:\s*string,\s*file:\s*File\)/);
+  assert.match(dashboardApiSource, /deleteWebChatLogo:\s*\(tenantId:\s*string\)/);
+});
+
+test('dashboard WebChatManagement component integrates logo upload, launcher label, palette suggestions, and live pill preview', () => {
+  const updatedSource = fs.readFileSync(new URL('../dashboard/src/features/channels/web-chat-management.tsx', import.meta.url), 'utf8');
+
+  // Logo upload and delete bindings
+  assert.match(updatedSource, /tenantApi\.uploadWebChatLogo/);
+  assert.match(updatedSource, /tenantApi\.deleteWebChatLogo/);
+  assert.match(updatedSource, /handleLogoFileSelect/);
+  assert.match(updatedSource, /handleLogoDelete/);
+  assert.match(updatedSource, /fileInputRef/);
+
+  // Launcher label control
+  assert.match(updatedSource, /launcherLabel/);
+  assert.match(updatedSource, /setLauncherLabel/);
+  assert.match(updatedSource, /Launcher Label/);
+  assert.match(updatedSource, /launcher_label:\s*launcherLabel/);
+
+  // Palette recommendation prompts and curated presets
+  assert.match(updatedSource, /extractedPalette/);
+  assert.match(updatedSource, /Recommended Palette from Logo/);
+  assert.match(updatedSource, /Apply Recommendations/);
+  assert.match(updatedSource, /Curated Presets/);
+
+  // Interactive live launcher pill preview
+  assert.match(updatedSource, /previewOpen/);
+  assert.match(updatedSource, /setPreviewOpen/);
+  assert.match(updatedSource, /launcherLabel \?/);
+  assert.match(updatedSource, /launcherIcon === 'logo' && logoUrl/);
+});
+
+test('Theme glow derivation is dynamic, restrained, and tenant-specific without hardcoded colors', () => {
+  // Gold/Amber theme -> warm glow
+  const goldTokens = deriveWebChatThemeTokens({
+    primaryColor: '#D97706',
+    accentColor: '#F59E0B',
+    mode: 'dark',
+  });
+  assert.equal(goldTokens.glow, 'rgba(217, 119, 6, 0.35)');
+  assert.equal(goldTokens.glow_soft, 'rgba(217, 119, 6, 0.18)');
+  assert.ok(goldTokens.contrast.primary_button >= 4.5);
+
+  // Emerald theme -> distinct green glow
+  const emeraldTokens = deriveWebChatThemeTokens({
+    primaryColor: '#059669',
+    accentColor: '#10B981',
+    mode: 'dark',
+  });
+  assert.equal(emeraldTokens.glow, 'rgba(5, 150, 105, 0.35)');
+  assert.equal(emeraldTokens.glow_soft, 'rgba(5, 150, 105, 0.18)');
+  assert.notEqual(emeraldTokens.glow, goldTokens.glow);
+  assert.ok(emeraldTokens.contrast.primary_button >= 4.5);
+
+  // Purple/Violet theme -> distinct purple glow
+  const violetTokens = deriveWebChatThemeTokens({
+    primaryColor: '#7C3AED',
+    accentColor: '#A78BFA',
+    mode: 'dark',
+  });
+  assert.equal(violetTokens.glow, 'rgba(124, 58, 237, 0.35)');
+  assert.notEqual(violetTokens.glow, goldTokens.glow);
+  assert.notEqual(violetTokens.glow, emeraldTokens.glow);
+});
+
+test('public/web-chat.js enforces prefers-reduced-motion clean static fallback', () => {
+  assert.match(webChatJsSource, /@media \(prefers-reduced-motion:\s*reduce\)/);
+  assert.match(webChatJsSource, /\.samche-launcher.*animation:\s*none !important/);
+});
+
+test('Two-tenant branding isolation on shared runtime ensures zero config/asset leakage', () => {
+  // Tenant A: Amber, custom logo, custom label
+  const tenantAAppearance = normalizeWebChatAppearance({
+    brand_name: 'Tenant Alpha Jewelry',
+    title: 'Alpha Concierge',
+    launcher_label: 'Sipariş Destek',
+    logo_url: 'https://cdn.samche.com/tenants/alpha/logo.png',
+    primary_color: '#D97706',
+    theme_mode: 'dark',
+  });
+
+  // Tenant B: Emerald, distinct logo, distinct label
+  const tenantBAppearance = normalizeWebChatAppearance({
+    brand_name: 'Tenant Beta Logistics',
+    title: 'Beta Freight Assist',
+    launcher_label: 'Track Package',
+    logo_url: 'https://cdn.samche.com/tenants/beta/badge.svg',
+    primary_color: '#059669',
+    theme_mode: 'light',
+  });
+
+  // Strict isolation checks
+  assert.notEqual(tenantAAppearance.brand_name, tenantBAppearance.brand_name);
+  assert.notEqual(tenantAAppearance.title, tenantBAppearance.title);
+  assert.notEqual(tenantAAppearance.launcher_label, tenantBAppearance.launcher_label);
+  assert.notEqual(tenantAAppearance.logo_url, tenantBAppearance.logo_url);
+  assert.notEqual(tenantAAppearance.theme.primary_color, tenantBAppearance.theme.primary_color);
+  assert.notEqual(tenantAAppearance.theme.glow_color, tenantBAppearance.theme.glow_color);
+
+  // Tenant A must not leak into Tenant B
+  assert.equal(tenantAAppearance.theme.primary_color, '#D97706');
+  assert.equal(tenantAAppearance.theme.glow_color, 'rgba(217, 119, 6, 0.35)');
+  assert.equal(tenantBAppearance.theme.primary_color, '#059669');
+  assert.equal(tenantBAppearance.theme.glow_color, 'rgba(5, 150, 105, 0.35)');
+
+  // Both preserve WCAG AA contrast
+  assert.ok(tenantAAppearance.contrast.primary_button >= 4.5);
+  assert.ok(tenantBAppearance.contrast.primary_button >= 4.5);
+});
+
+test('Authorization and scoping prevent cross-tenant Web Chat logo management', () => {
+  // Routes use requireTenantAccess and requireTenantAdmin
+  assert.match(dashboardRoutesSource, /requireTenantAccess/);
+  assert.match(dashboardRoutesSource, /requireTenantAdmin/);
+  assert.match(dashboardRoutesSource, /canPerformWebChatAction/);
+  assert.match(dashboardRoutesSource, /WEBCHAT_PERMISSIONS\.CONFIGURE/);
+
+  // Endpoint explicitly validates tenant(req, res) before processing logo
+  const logoUploadRouteMatch = dashboardRoutesSource.match(/router\.post\(\s*'\/:\w+\/channels\/web-chat\/logo'[\s\S]*?async \(req, res\) => \{([\s\S]*?)\n\s*\}\n\);/);
+  assert.ok(logoUploadRouteMatch, 'Logo upload route body must be identifiable');
+  assert.match(logoUploadRouteMatch[1], /if \(!tenant\(req, res\)\) return;/);
+
+  const logoDeleteRouteMatch = dashboardRoutesSource.match(/router\.delete\(\s*'\/:\w+\/channels\/web-chat\/logo'[\s\S]*?async \(req, res\) => \{([\s\S]*?)\n\s*\}\n\);/);
+  assert.ok(logoDeleteRouteMatch, 'Logo delete route body must be identifiable');
+  assert.match(logoDeleteRouteMatch[1], /if \(!tenant\(req, res\)\) return;/);
+});
+
+test('Backward compatibility: historical integration without new branding fields renders safely using defaults', () => {
+  // Historical configuration missing logo_url, launcher_label, theme, etc.
+  const historicalConfig = {
+    title: 'Customer Helpdesk',
+    subtitle: 'Agents online',
+    launcher_position: 'right',
+  };
+
+  const normalized = normalizeWebChatAppearance(historicalConfig);
+  assert.equal(normalized.title, 'Customer Helpdesk');
+  assert.equal(normalized.subtitle, 'Agents online');
+  assert.equal(normalized.logo_url, null);
+  assert.equal(normalized.logo_asset_id, null);
+  assert.ok(normalized.theme);
+  assert.ok(normalized.theme.primary_color);
+  assert.ok(normalized.contrast.primary_button >= 4.5);
+  assert.equal(normalized.is_accessible, true);
+});
+
+test('Fresh-tenant default configuration initializes cleanly without manual SQL or storage manipulation', () => {
+  assert.ok(DEFAULT_WEB_CHAT_APPEARANCE.brand_name);
+  assert.ok(DEFAULT_WEB_CHAT_APPEARANCE.title);
+  assert.ok(DEFAULT_WEB_CHAT_APPEARANCE.launcher_label);
+  assert.ok(DEFAULT_WEB_CHAT_APPEARANCE.theme.primary_color);
+  assert.ok(DEFAULT_WEB_CHAT_APPEARANCE.theme.glow_color);
+
+  assert.equal(DEFAULT_WEB_CHAT_BEHAVIOR.high_intent_activation, true);
+  assert.equal(DEFAULT_WEB_CHAT_BEHAVIOR.dwell_threshold_seconds, 15);
+  assert.equal(DEFAULT_WEB_CHAT_BEHAVIOR.cooldown_seconds, 300);
+});
+
+test('Web Chat logo asset validation enforces magic bytes, format whitelist, and SVG sanitization', () => {
+  // Valid PNG magic bytes
+  const validPng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
+  const pngResult = validateWebChatAssetUpload({
+    buffer: validPng,
+    mimetype: 'image/png',
+    size: validPng.length,
+  });
+  assert.equal(pngResult.mimeType, 'image/png');
+  assert.equal(pngResult.extension, 'png');
+
+  // Valid safe SVG
+  const safeSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40"/></svg>');
+  const svgResult = validateWebChatAssetUpload({
+    buffer: safeSvg,
+    mimetype: 'image/svg+xml',
+    size: safeSvg.length,
+  });
+  assert.equal(svgResult.mimeType, 'image/svg+xml');
+
+  // Reject malicious SVG with script tag
+  const scriptSvg = Buffer.from('<svg><script>alert(1)</script></svg>');
+  assert.throws(() => {
+    validateWebChatAssetUpload({
+      buffer: scriptSvg,
+      mimetype: 'image/svg+xml',
+      size: scriptSvg.length,
+    });
+  }, { code: 'WEB_CHAT_ASSET_SVG_UNSAFE' });
+
+  // Reject malicious SVG with inline event handler
+  const onloadSvg = Buffer.from('<svg onload="alert(1)"><circle r="1"/></svg>');
+  assert.throws(() => {
+    validateWebChatAssetUpload({
+      buffer: onloadSvg,
+      mimetype: 'image/svg+xml',
+      size: onloadSvg.length,
+    });
+  }, { code: 'WEB_CHAT_ASSET_SVG_UNSAFE' });
+
+  // Reject malicious SVG with javascript: URI
+  const jsUriSvg = Buffer.from('<svg><a href="javascript:alert(1)"><circle r="1"/></a></svg>');
+  assert.throws(() => {
+    validateWebChatAssetUpload({
+      buffer: jsUriSvg,
+      mimetype: 'image/svg+xml',
+      size: jsUriSvg.length,
+    });
+  }, { code: 'WEB_CHAT_ASSET_SVG_UNSAFE' });
+
+  // Reject oversized file
+  assert.throws(() => {
+    validateWebChatAssetUpload({
+      buffer: Buffer.alloc(MAX_WEB_CHAT_ASSET_BYTES + 10),
+      mimetype: 'image/png',
+      size: MAX_WEB_CHAT_ASSET_BYTES + 10,
+    });
+  }, { code: 'WEB_CHAT_ASSET_SIZE_INVALID' });
+
+  // Reject unsupported mime type (e.g. executable or text)
+  assert.throws(() => {
+    validateWebChatAssetUpload({
+      buffer: Buffer.from('hello'),
+      mimetype: 'text/plain',
+      size: 5,
+    });
+  }, { code: 'WEB_CHAT_ASSET_TYPE_UNSUPPORTED' });
+});
+
+
 

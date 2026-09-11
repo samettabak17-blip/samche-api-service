@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { AgentMessageResponse, HumanAttentionSummary, DashboardOverview, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmContact, CrmContactList, CrmDeal, CrmDealList, CrmLead, CrmLeadList, CrmOverviewMetrics, CrmPipelineStage, CrmPipelineSummary, KnowledgeDocument, KnowledgeOverview, KnowledgeSource, KnowledgeCandidate, KnowledgeCandidateEvidence, KnowledgeGap, KnowledgeGapSignal, BusinessIdentity, BusinessIdentityScopeAnalysis, BusinessProfileGenerationJob, BusinessProfileGenerationResult, BusinessProfileVersion, KnowledgeRecommendation, AssistantConfigurationVersion, AssistantRecommendationGenerationJob, AssistantConfigurationGenerationJob, ConfigurationGenerationResult, KnowledgeRetrievalPreview, TeamMember, TenantChannel, Tenant, TenantRole, WebChatAppearanceConfig, WebChatBehaviorConfig, WebChatChannelResponse, WebChatThemePreviewResponse } from '../../types/api';
+import type { AgentMessageResponse, HumanAttentionSummary, DashboardOverview, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmContact, CrmContactList, CrmDeal, CrmDealList, CrmLead, CrmLeadList, CrmOverviewMetrics, CrmPipelineStage, CrmPipelineSummary, KnowledgeDocument, KnowledgeOverview, KnowledgeSource, KnowledgeCandidate, KnowledgeCandidateEvidence, KnowledgeGap, KnowledgeGapSignal, BusinessIdentity, BusinessIdentityScopeAnalysis, BusinessProfileGenerationJob, BusinessProfileGenerationResult, BusinessProfileVersion, KnowledgeRecommendation, AssistantConfigurationVersion, AssistantRecommendationGenerationJob, AssistantConfigurationGenerationJob, ConfigurationGenerationResult, KnowledgeRetrievalPreview, TeamMember, TenantChannel, Tenant, TenantRole, WebChatAppearanceConfig, WebChatBehaviorConfig, WebChatChannelResponse, WebChatThemePreviewResponse, WebChatLogoUploadResponse } from '../../types/api';
 
 const tenantRoot = (tenantId: string) => `/api/v1/tenants/${tenantId}`;
 type CustomerDirectoryUser = Pick<TeamMember, 'id' | 'email' | 'system_role'>;
@@ -174,6 +174,13 @@ export const tenantApi = {
     candidates?: string[];
     mode?: 'dark' | 'light';
   }) => apiClient.post<WebChatThemePreviewResponse>(`${tenantRoot(tenantId)}/channels/web-chat/theme-preview`, body),
+  uploadWebChatLogo: (tenantId: string, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return apiClient.postForm<WebChatLogoUploadResponse>(`${tenantRoot(tenantId)}/channels/web-chat/logo`, formData);
+  },
+  deleteWebChatLogo: (tenantId: string) => apiClient.delete<{ ok: boolean; appearance?: WebChatAppearanceConfig }>(`${tenantRoot(tenantId)}/channels/web-chat/logo`),
+
 
   listKnowledgeBase: (tenantId: string) => apiClient.get<KnowledgeDocument[]>(`${tenantRoot(tenantId)}/knowledge-base`),
   getKnowledgeDocument: (tenantId: string, documentId: string) => apiClient.get<KnowledgeDocument>(`${tenantRoot(tenantId)}/knowledge-base/${documentId}`),

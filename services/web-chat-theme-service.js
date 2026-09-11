@@ -130,6 +130,8 @@ export function deriveWebChatThemeTokens({
   const primaryForeground = accessibleForegroundFor(safePrimary, 4.5);
   const accentForeground = accessibleForegroundFor(safeAccent, 4.5);
   const glowColor = hexToRgba(safePrimary, 0.35);
+  const glowSoftColor = hexToRgba(safePrimary, 0.18);
+  const launcherText = primaryForeground;
 
   const inputBg = isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(15, 23, 42, 0.04)';
   const inputBorder = isDark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(15, 23, 42, 0.12)';
@@ -154,6 +156,8 @@ export function deriveWebChatThemeTokens({
     surface_solid: surfaceSolid,
     surface_glass: surfaceGlass,
     glow: glowColor,
+    glow_soft: glowSoftColor,
+    launcher_text: launcherText,
     text: textColor,
     muted: mutedColor,
     border: borderColor,

@@ -78,6 +78,8 @@ import {
   normalizeWebChatBehavior,
 } from "./services/public-web-chat-integration-service.js";
 import { resolveInitialWebChatGreeting } from "./services/tenant-web-chat-provisioning-service.js";
+import { getPublicWebChatAsset } from './services/web-chat-asset-service.js';
+
 import { createCustomerInvitationOutboxStartup } from './services/customer-invitation-outbox-bootstrap.js';
 import { isAllowedGuideCorsOrigin } from './services/guide-public-cors-service.js';
 import { isSharedPublicGuideAssetPath } from './services/guide-public-asset-route-service.js';
@@ -408,6 +410,40 @@ app.get(['/guide/assets/:assetId', '/:slug/guide/assets/:assetId'], async (req, 
     return res.sendStatus(404);
   }
 });
+app.get('/api/v1/public/web-chat/assets/:assetId', async (req, res) => {
+  const assetId = req.params.assetId;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(assetId))) {
+    return res.sendStatus(404);
+  }
+  try {
+    const database = req.app?.locals?.database || pool;
+    let storage = null;
+    try {
+      storage = req.app?.locals?.storage || createConversationResourceStorage();
+    } catch (e) {
+      storage = null;
+    }
+    const asset = await getPublicWebChatAsset({ database, assetId });
+    if (!asset || !storage) return res.sendStatus(404);
+    const stream = await storage.get({ key: asset.storage_key });
+    res.set({
+      'Content-Type': asset.mime_type,
+      'Content-Length': String(asset.size_bytes),
+      'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    stream.on('error', () => {
+      if (!res.headersSent) res.sendStatus(404);
+      else res.end();
+    });
+    return stream.pipe(res);
+  } catch (error) {
+    console.error('WEB_CHAT_ASSET_READ_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    return res.sendStatus(404);
+  }
+});
+
+
 
 const sharedGuideStatic = express.static('public-guide', {
   index: 'index.html',
