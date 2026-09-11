@@ -1821,8 +1821,9 @@ app.post("/api/chat/page-context", async (req, res) => {
 
     // Check active conversation & human handoff safety
     const rawMemory = webMemoryStore[webChatSession.sessionId] || [];
-    const hasConversation = rawMemory.length > 0;
-    const messageCount = rawMemory.length;
+    const userMessages = rawMemory.filter(m => m.role === 'user');
+    const hasConversation = userMessages.length > 0;
+    const messageCount = userMessages.length;
 
     let humanHandoffActive = false;
     try {
@@ -2001,8 +2002,9 @@ app.post("/api/chat/evaluate-intent", async (req, res) => {
     } catch {}
 
     const rawMemory = webMemoryStore[webChatSession.sessionId] || [];
-    const hasConversation = rawMemory.length > 0;
-    const messageCount = rawMemory.length;
+    const userMessages = rawMemory.filter(m => m.role === 'user');
+    const hasConversation = userMessages.length > 0;
+    const messageCount = userMessages.length;
 
     let humanHandoffActive = false;
     try {
@@ -2145,12 +2147,29 @@ app.post("/api/chat/dismiss-proactive", async (req, res) => {
       dismissedAt: new Date().toISOString(),
     };
 
-    await updateWebChatSessionEngagementState({
-      database: pool,
-      tenantId: webChatIntegration.tenant_id,
-      sessionId: webChatSession.sessionId,
-      engagementState: updatedEngagement,
-    });
+    if (!currentState) {
+      await saveWebChatSessionBrowsingState({
+        database: pool,
+        tenantId: webChatIntegration.tenant_id,
+        assistantId: webChatIntegration.assistant_id,
+        channelId: webChatIntegration.channel_id,
+        widgetKey: webChatSession.widgetKey,
+        sessionId: webChatSession.sessionId,
+        browsingState: {
+          currentPage: null,
+          currentEntity: null,
+          previousEntities: [],
+          engagementState: updatedEngagement,
+        },
+      });
+    } else {
+      await updateWebChatSessionEngagementState({
+        database: pool,
+        tenantId: webChatIntegration.tenant_id,
+        sessionId: webChatSession.sessionId,
+        engagementState: updatedEngagement,
+      });
+    }
 
     logContextualObservability('PROACTIVE_DISMISSAL_RECORDED', {
       tenant_id: webChatIntegration.tenant_id,

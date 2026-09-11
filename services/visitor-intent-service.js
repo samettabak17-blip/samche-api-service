@@ -255,20 +255,7 @@ export function evaluateVisitorIntent({
     };
   }
 
-  // 5. Frequency Capping: Suppress if proactive message was already sent in this session
-  if (engagementState.proactiveMessageSent || engagementState.proactiveEngagedAt) {
-    return {
-      score,
-      intentState,
-      shouldProactivelyEngage: false,
-      shouldAutoOpen: false,
-      shouldNudge: false,
-      reason: 'ALREADY_ENGAGED',
-      signals,
-    };
-  }
-
-  // 6. Dismissal Cooldown: Suppress if user explicitly closed the chat recently
+  // 5. Dismissal Cooldown: Suppress if user explicitly closed the chat recently
   if (engagementState.dismissedAt) {
     const dismissedTime = new Date(engagementState.dismissedAt).getTime();
     const cooldownMs = config.dismissal_cooldown_seconds * 1000;
@@ -283,6 +270,19 @@ export function evaluateVisitorIntent({
         signals,
       };
     }
+  }
+
+  // 6. Frequency Capping: Suppress if proactive message was already sent in this session
+  if (engagementState.proactiveMessageSent || engagementState.proactiveEngagedAt) {
+    return {
+      score,
+      intentState,
+      shouldProactivelyEngage: false,
+      shouldAutoOpen: false,
+      shouldNudge: false,
+      reason: 'ALREADY_ENGAGED',
+      signals,
+    };
   }
 
   // 7. Threshold Check
