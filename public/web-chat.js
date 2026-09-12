@@ -792,6 +792,39 @@
       } catch (e) {}
       return memStore[key] ? parseInt(memStore[key], 10) : 0;
     },
+    getAppearanceStorageKey: function(widgetKey) {
+      return 'samche_webchat_appearance_' + encodeURIComponent(widgetKey || 'default');
+    },
+    getStoredAppearance: function(widgetKey) {
+      var key = this.getAppearanceStorageKey(widgetKey);
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          var val = window.localStorage.getItem(key);
+          if (val) return JSON.parse(val);
+        }
+      } catch (e) {}
+      try {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          var sVal = window.sessionStorage.getItem(key);
+          if (sVal) return JSON.parse(sVal);
+        }
+      } catch (e) {}
+      return memStore[key] || null;
+    },
+    storeAppearance: function(widgetKey, appearance) {
+      if (!appearance || typeof appearance !== 'object') return;
+      var key = this.getAppearanceStorageKey(widgetKey);
+      memStore[key] = appearance;
+      try {
+        var str = JSON.stringify(appearance);
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem(key, str);
+        }
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          window.sessionStorage.setItem(key, str);
+        }
+      } catch (e) {}
+    },
     hydrateHistory: function(container, messages, appendFn) {
       if (!container || !Array.isArray(messages)) return 0;
       var count = 0;
@@ -863,15 +896,15 @@
 
   /* Canonical Shared Web Chat Runtime & Isolated Shadow DOM Renderer */
   var CANONICAL_WIDGET_CSS_A = [
-    ':host { all: initial; position: fixed; bottom: 0; right: 0; width: 0; height: 0; z-index: 2147483640; pointer-events: none; overflow: visible; display: block; }',
-    '.samche-wrap { all: initial; position: fixed; bottom: 0; right: 0; width: 0; height: 0; z-index: 2147483640; pointer-events: none; overflow: visible; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--chat-text, #F8FAFC); font-size: 14px; line-height: 1.5; text-align: left; letter-spacing: normal; direction: ltr; }',
-    '.samche-pos-left.samche-wrap { right: auto; left: 0; }',
+    ':host { all: initial; position: fixed !important; bottom: 0 !important; right: 0 !important; width: 0 !important; height: 0 !important; z-index: 2147483640 !important; pointer-events: none !important; overflow: visible !important; display: block !important; isolation: isolate !important; contain: none !important; }',
+    '.samche-wrap { all: initial; position: fixed !important; bottom: 0 !important; right: 0 !important; width: 0 !important; height: 0 !important; z-index: 2147483640 !important; pointer-events: none !important; overflow: visible !important; isolation: isolate !important; contain: none !important; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--chat-text, #F8FAFC); font-size: 14px; line-height: 1.5; text-align: left; letter-spacing: normal; direction: ltr; }',
+    '.samche-pos-left.samche-wrap { right: auto !important; left: 0 !important; }',
     '*, *::before, *::after { box-sizing: border-box !important; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }',
     'svg { display: block; flex-shrink: 0; box-sizing: content-box; }',
     'button { background: none; border: none; outline: none; cursor: pointer; padding: 0; margin: 0; font-family: inherit; color: inherit; line-height: 1; }',
     'textarea, input { font-family: inherit; font-size: 14px; line-height: 1.4; box-sizing: border-box; }',
-    '.samche-launcher { position: fixed; bottom: 24px; right: 24px; min-height: 54px; height: 54px; max-width: calc(100vw - 48px); border-radius: 9999px; cursor: pointer; display: inline-flex !important; align-items: center; justify-content: center; pointer-events: auto; transition: transform .22s cubic-bezier(.16,1,.3,1), box-shadow .22s ease, opacity .2s ease; outline: none; z-index: 2147483641; margin: 0 !important; user-select: none; direction: ltr; animation: samche-glow-breathe var(--chat-pulse-duration, 3.6s) infinite ease-in-out; }',
-    '.samche-launcher.samche-launcher-hidden { opacity: 0 !important; pointer-events: none !important; visibility: hidden !important; transform: scale(0.85) !important; transition: opacity .2s ease, transform .2s ease; }',
+    '.samche-launcher { position: fixed !important; bottom: 24px !important; right: 24px !important; min-height: 54px !important; height: 54px !important; max-width: calc(100vw - 48px) !important; border-radius: 9999px !important; cursor: pointer !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; pointer-events: auto !important; transition: transform .22s cubic-bezier(.16,1,.3,1), box-shadow .22s ease, opacity .2s ease !important; outline: none !important; z-index: 2147483641 !important; margin: 0 !important; user-select: none !important; direction: ltr !important; overflow: visible !important; contain: none !important; animation: samche-glow-breathe var(--chat-pulse-duration, 3.6s) infinite ease-in-out; }',
+    '.samche-launcher.samche-launcher-hidden { opacity: 0 !important; pointer-events: none !important; visibility: hidden !important; transform: scale(0.85) !important; transition: opacity .2s ease, transform .2s ease !important; }',
     '.samche-launcher.samche-style-pill { padding: 4px 18px 4px 6px !important; gap: 10px; background: linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%); border: 1.5px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.7)); color: #FFFFFF; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-ring, rgba(56, 189, 248, 0.7)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.4)), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.5); }',
     '.samche-launcher.samche-style-circular { width: 62px !important; height: 62px !important; min-width: 62px !important; min-height: 62px !important; max-width: 62px !important; max-height: 62px !important; border-radius: 50% !important; padding: 5px !important; background: radial-gradient(circle at center, rgba(30, 41, 59, 0.9) 0%, rgba(2, 6, 23, 0.98) 100%); border: 2px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.85)); box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.6) var(--chat-glow-ring, rgba(56, 189, 248, 0.8)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.45)), 0 10px 30px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.25)), 0 4px 18px rgba(0, 0, 0, 0.6); }',
     '.samche-launcher.samche-style-minimal { width: 52px !important; height: 52px !important; min-width: 52px !important; min-height: 52px !important; max-width: 52px !important; max-height: 52px !important; border-radius: 50% !important; padding: 4px !important; background: #111827; border: 1px solid var(--chat-border, rgba(255, 255, 255, 0.15)); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 0 calc(var(--chat-glow-spread, 24px) * 0.2) var(--chat-glow-soft, rgba(56, 189, 248, 0.2)); animation: none !important; }',
@@ -888,18 +921,18 @@
     '.samche-launcher.samche-launcher-circle .samche-launcher-badge { width: 100%; height: 100%; border: none; background: transparent; box-shadow: none; padding: 6px; }',
     '.samche-launcher-badge img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; user-select: none; pointer-events: none; }',
     '.samche-launcher-badge svg { width: 24px !important; height: 24px !important; max-width: 24px !important; max-height: 24px !important; fill: var(--chat-primary-foreground, #FFFFFF); }',
-    '.samche-pos-left .samche-launcher { right: auto; left: 24px; }',
+    '.samche-pos-left .samche-launcher { right: auto !important; left: 24px !important; }',
     '.samche-launcher:hover { transform: translateY(-2px) scale(1.02); }',
     '.samche-launcher:active { transform: translateY(0) scale(0.98); }',
     '.samche-launcher:focus-visible { outline: 2px solid var(--chat-accent, #60A5FA); outline-offset: 3px; }',
     '.samche-launcher-icon { width: 24px !important; height: 24px !important; display: flex; align-items: center; justify-content: center; fill: currentColor; flex-shrink: 0; }',
     '.samche-launcher-icon svg { width: 24px !important; height: 24px !important; max-width: 24px !important; max-height: 24px !important; fill: currentColor; }',
     '.samche-launcher-logo { max-width: 100%; max-height: 100%; object-fit: contain; flex-shrink: 0; }',
-    '.samche-intent-pulse { animation: samche-intent-pulse 2s infinite ease-in-out !important; }',
+    '.samche-launcher.samche-intent-pulse { animation: samche-intent-pulse 2s ease-in-out 3 !important; }',
     '@keyframes samche-glow-breathe { 0%, 100% { box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-ring, rgba(56, 189, 248, 0.7)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.4)), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.5); transform: scale(1); } 50% { box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.7) var(--chat-glow-ring, rgba(56, 189, 248, 0.9)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.3) var(--chat-glow, rgba(56, 189, 248, 0.55)), 0 12px 36px -2px var(--chat-glow-soft, rgba(56, 189, 248, 0.35)), 0 6px 20px rgba(0, 0, 0, 0.6); transform: scale(1.025); } }',
     '@keyframes samche-glow-pulse-strong { 0%, 100% { box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.5) var(--chat-glow-ring, rgba(56, 189, 248, 0.8)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.5)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.6) var(--chat-glow-soft, rgba(56, 189, 248, 0.3)), 0 8px 30px rgba(0, 0, 0, 0.6); transform: scale(1); } 50% { box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.9) var(--chat-glow-ring, rgba(56, 189, 248, 1)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.5) var(--chat-glow, rgba(56, 189, 248, 0.75)), 0 0 calc(var(--chat-glow-halo, 42px) * 2.2) var(--chat-glow-soft, rgba(56, 189, 248, 0.45)), 0 14px 40px rgba(0, 0, 0, 0.7); transform: scale(1.04); } }',
     '@keyframes samche-glow-pulse-subtle { 0%, 100% { box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.35) var(--chat-glow-ring, rgba(56, 189, 248, 0.6)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.3)), 0 6px 20px rgba(0, 0, 0, 0.4); transform: scale(1); } 50% { box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.5) var(--chat-glow-ring, rgba(56, 189, 248, 0.75)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.15) var(--chat-glow, rgba(56, 189, 248, 0.42)), 0 8px 24px rgba(0, 0, 0, 0.45); transform: scale(1.015); } }',
-    '@keyframes samche-intent-pulse { 0% { transform: scale(1); box-shadow: 0 0 0 0 var(--chat-glow, rgba(37,99,235,0.6)); } 50% { transform: scale(1.08); box-shadow: 0 0 0 14px rgba(37,99,235,0); } 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(37,99,235,0); } }',
+    '@keyframes samche-intent-pulse { 0% { transform: scale(1); box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.5) var(--chat-glow-ring, rgba(56, 189, 248, 0.8)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.5)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.6) var(--chat-glow-soft, rgba(56, 189, 248, 0.3)), 0 8px 30px rgba(0, 0, 0, 0.6), 0 0 0 0 var(--chat-glow-ring, rgba(56, 189, 248, 0.7)); } 50% { transform: scale(1.04); box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.9) var(--chat-glow-ring, rgba(56, 189, 248, 1)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.5) var(--chat-glow, rgba(56, 189, 248, 0.75)), 0 0 calc(var(--chat-glow-halo, 42px) * 2.2) var(--chat-glow-soft, rgba(56, 189, 248, 0.45)), 0 14px 40px rgba(0, 0, 0, 0.7), 0 0 0 16px rgba(56, 189, 248, 0); } 100% { transform: scale(1); box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.5) var(--chat-glow-ring, rgba(56, 189, 248, 0.8)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.5)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.6) var(--chat-glow-soft, rgba(56, 189, 248, 0.3)), 0 8px 30px rgba(0, 0, 0, 0.6), 0 0 0 0 rgba(56, 189, 248, 0); } }',
     '.samche-panel { position: fixed; bottom: 96px; right: 24px; width: 400px; max-width: calc(100vw - 32px); height: 600px; max-height: calc(100vh - 120px); border-radius: 20px; background: var(--chat-surface-glass, rgba(18,20,26,0.92)); color: var(--chat-text, #F8FAFC) !important; backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%); border: 1.5px solid var(--chat-border, rgba(255,255,255,0.12)); box-shadow: 0 24px 64px -12px rgba(0,0,0,0.55), 0 0 0 1px var(--chat-border, rgba(255,255,255,0.08)); display: flex; flex-direction: column; overflow: hidden; pointer-events: none; opacity: 0; transform: translateY(16px) scale(0.96); visibility: hidden; transition: transform .28s cubic-bezier(.16,1,.3,1), opacity .25s ease-out, border-color .2s ease; z-index: 2147483642; }',
     '.samche-pos-left .samche-panel { right: auto; left: 24px; }',
     '.samche-panel.samche-open { opacity: 1; transform: translateY(0) scale(1); visibility: visible !important; pointer-events: auto; border: 1.5px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.45)); box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.75) var(--chat-glow-soft, rgba(56, 189, 248, 0.25)), 0 24px 60px -12px rgba(0, 0, 0, 0.8), 0 12px 32px rgba(0, 0, 0, 0.5); }',
@@ -1054,9 +1087,37 @@
         widgetKey = 'wch_staging_task8_demo';
       }
       if (!widgetKey) return null;
-      if (this.instances[widgetKey]) return this.instances[widgetKey];
+
+      var storedAppearance = SamcheChatPersistence.getStoredAppearance(widgetKey);
+      var effectiveAppearance = options.appearance || storedAppearance || null;
 
       var isInline = Boolean(options.inline || options.container);
+      var containerTarget = options.container || (typeof document !== 'undefined' ? document.body : null);
+
+      if (this.instances[widgetKey]) {
+        var existingInst = this.instances[widgetKey];
+        if (existingInst.host && containerTarget) {
+          if (!existingInst.host.isConnected || !containerTarget.contains(existingInst.host)) {
+            containerTarget.appendChild(existingInst.host);
+          }
+          if (effectiveAppearance) {
+            existingInst.applyTheme(effectiveAppearance);
+          }
+          return existingInst;
+        }
+      }
+
+      // Clean up any stray/orphaned container for this widget or duplicate unmanaged hosts in document.body
+      if (!isInline && typeof document !== 'undefined') {
+        var existingHosts = document.querySelectorAll('#samche-webchat-container');
+        for (var ehIdx = 0; ehIdx < existingHosts.length; ehIdx++) {
+          var eh = existingHosts[ehIdx];
+          if (eh && eh.parentElement) {
+            eh.parentElement.removeChild(eh);
+          }
+        }
+      }
+
       var host = document.createElement('div');
       host.id = options.container ? 'samche-webchat-preview-container' : 'samche-webchat-container';
       host.className = 'samche-widget-host' + (isInline ? ' samche-widget-inline' : '');
@@ -1076,10 +1137,12 @@
         host.style.overflow = 'visible';
         host.style.pointerEvents = 'none';
         host.style.zIndex = '2147483640';
+        host.style.isolation = 'isolate';
       }
       host.style.overflow = 'visible';
       host.style.pointerEvents = 'none';
       host.style.zIndex = '2147483640';
+      host.style.isolation = 'isolate';
       var shadow = host.attachShadow ? host.attachShadow({ mode: 'open' }) : host;
 
       var styleEl = document.createElement('style');
@@ -1090,14 +1153,17 @@
       wrap.className = 'samche-wrap';
       shadow.appendChild(wrap);
 
+      var activeAppearance = effectiveAppearance || {};
       var launcher = document.createElement('button');
-      var initialHasLabel = Boolean(options.appearance && typeof options.appearance.launcher_label === 'string' && options.appearance.launcher_label.trim());
-      launcher.className = 'samche-launcher' + (initialHasLabel ? '' : ' samche-launcher-circle');
-      launcher.setAttribute('aria-label', (options.appearance && options.appearance.launcher_label) || 'Canlı Destek Asistanı');
+      var initialHasLabel = Boolean(activeAppearance && typeof activeAppearance.launcher_label === 'string' && activeAppearance.launcher_label.trim());
+      var initialStyle = String(activeAppearance.launcher_style || 'pill').toLowerCase();
+      var initialIsCircular = initialStyle === 'circular' || initialStyle === 'minimal' || (!activeAppearance.launcher_label && initialStyle !== 'pill');
+      launcher.className = 'samche-launcher samche-style-' + initialStyle + (initialIsCircular || !initialHasLabel ? ' samche-launcher-circle' : '');
+      launcher.setAttribute('aria-label', (activeAppearance && activeAppearance.launcher_label) || (activeAppearance && activeAppearance.title) || 'Canlı Destek Asistanı');
       launcher.setAttribute('aria-expanded', 'false');
       launcher.setAttribute('aria-haspopup', 'dialog');
-      launcher.innerHTML = initialHasLabel
-        ? '<span class="samche-launcher-icon">' + CHAT_ICON_SVG + '</span><span class="samche-launcher-label">' + escapeHtml(options.appearance.launcher_label.trim()) + '</span>'
+      launcher.innerHTML = (initialHasLabel && !initialIsCircular)
+        ? '<span class="samche-launcher-icon">' + CHAT_ICON_SVG + '</span><span class="samche-launcher-label">' + escapeHtml(activeAppearance.launcher_label.trim()) + '</span>'
         : '<span class="samche-launcher-icon">' + CHAT_ICON_SVG + '</span>';
       wrap.appendChild(launcher);
 
@@ -1177,6 +1243,7 @@
       var isHumanTakeoverActive = false;
       var currentLang = 'tr';
       var lastKnownResetTime = SamcheChatPersistence.getLastResetTime(widgetKey);
+      var nudgeTimer = null;
       var contextBadgeEl = header.querySelector('.samche-header-context-badge');
       var textarea = composer.querySelector('.samche-composer-input');
       var sendBtn = composer.querySelector('.samche-send-btn');
@@ -1567,7 +1634,7 @@
       });
 
       function applyTheme(appearance) {
-        if (!appearance) return;
+        if (!appearance || typeof appearance !== 'object') return;
         currentAppearance = appearance;
         if (appearance.launcher_position === 'left') {
           wrap.classList.add('samche-pos-left');
@@ -1591,29 +1658,33 @@
         }
         if (appearance.theme) {
           var t = appearance.theme;
-          var target = shadow.host || host;
-          if (t.primary_color) target.style.setProperty('--chat-primary', t.primary_color);
-          var fg = t.primary_foreground || (t.primary_color ? computeClientContrastForeground(t.primary_color) : '#FFFFFF');
-          target.style.setProperty('--chat-primary-foreground', fg);
-          if (t.accent_color) target.style.setProperty('--chat-accent', t.accent_color);
-          if (t.surface_tint) target.style.setProperty('--chat-surface-tint', t.surface_tint);
-          if (t.surface_glass) target.style.setProperty('--chat-surface-glass', t.surface_glass);
-          if (t.surface_solid) target.style.setProperty('--chat-surface-solid', t.surface_solid);
-          if (t.glow_color) target.style.setProperty('--chat-glow', t.glow_color);
-          if (t.glow_soft) target.style.setProperty('--chat-glow-soft', t.glow_soft);
-          if (t.glow_ring) target.style.setProperty('--chat-glow-ring', t.glow_ring);
-          if (t.glow_spread_px) target.style.setProperty('--chat-glow-spread', t.glow_spread_px + 'px');
-          if (t.glow_halo_px) target.style.setProperty('--chat-glow-halo', t.glow_halo_px + 'px');
-          if (t.pulse_duration) target.style.setProperty('--chat-pulse-duration', t.pulse_duration);
-          if (t.launcher_text) target.style.setProperty('--chat-launcher-text', t.launcher_text);
-          if (t.text_color) target.style.setProperty('--chat-text', t.text_color);
-          if (t.muted_color) target.style.setProperty('--chat-muted', t.muted_color);
-          if (t.border_color) target.style.setProperty('--chat-border', t.border_color);
+          var targets = [host, wrap, launcher];
+          for (var ti = 0; ti < targets.length; ti++) {
+            var target = targets[ti];
+            if (!target || !target.style) continue;
+            if (t.primary_color) target.style.setProperty('--chat-primary', t.primary_color);
+            var fg = t.primary_foreground || (t.primary_color ? computeClientContrastForeground(t.primary_color) : '#FFFFFF');
+            target.style.setProperty('--chat-primary-foreground', fg);
+            if (t.accent_color) target.style.setProperty('--chat-accent', t.accent_color);
+            if (t.surface_tint) target.style.setProperty('--chat-surface-tint', t.surface_tint);
+            if (t.surface_glass) target.style.setProperty('--chat-surface-glass', t.surface_glass);
+            if (t.surface_solid) target.style.setProperty('--chat-surface-solid', t.surface_solid);
+            if (t.glow_color) target.style.setProperty('--chat-glow', t.glow_color);
+            if (t.glow_soft) target.style.setProperty('--chat-glow-soft', t.glow_soft);
+            if (t.glow_ring) target.style.setProperty('--chat-glow-ring', t.glow_ring);
+            if (t.glow_spread_px) target.style.setProperty('--chat-glow-spread', t.glow_spread_px + 'px');
+            if (t.glow_halo_px) target.style.setProperty('--chat-glow-halo', t.glow_halo_px + 'px');
+            if (t.pulse_duration) target.style.setProperty('--chat-pulse-duration', t.pulse_duration);
+            if (t.launcher_text) target.style.setProperty('--chat-launcher-text', t.launcher_text);
+            if (t.text_color) target.style.setProperty('--chat-text', t.text_color);
+            if (t.muted_color) target.style.setProperty('--chat-muted', t.muted_color);
+            if (t.border_color) target.style.setProperty('--chat-border', t.border_color);
+          }
         }
       }
 
-      if (options.appearance) {
-        applyTheme(options.appearance);
+      if (effectiveAppearance) {
+        applyTheme(effectiveAppearance);
       } else {
         updateLauncher();
       }
@@ -1807,7 +1878,10 @@
             }, 1200);
           }
         }
-        if (data.appearance) applyTheme(data.appearance);
+        if (data.appearance) {
+          SamcheChatPersistence.storeAppearance(widgetKey, data.appearance);
+          applyTheme(data.appearance);
+        }
         if (data.behavior && data.behavior.language) {
           setLanguage(data.behavior.language);
         }
@@ -1947,6 +2021,10 @@
             },
             onNudge: function() {
               launcher.classList.add('samche-intent-pulse');
+              if (nudgeTimer) clearTimeout(nudgeTimer);
+              nudgeTimer = setTimeout(function() {
+                launcher.classList.remove('samche-intent-pulse');
+              }, 4000);
             },
           });
           if (proactiveState.currentEntityId && !proactiveState.acknowledgedEntityIds[proactiveState.currentEntityId]) {
@@ -1957,6 +2035,21 @@
       .catch(function() {});
 
       initSpaNavigationListener(function(newContext) {
+        if (!isInline && host && typeof document !== 'undefined' && document.body && (!host.isConnected || !document.body.contains(host))) {
+          document.body.appendChild(host);
+        }
+        if (nudgeTimer) {
+          clearTimeout(nudgeTimer);
+          nudgeTimer = null;
+        }
+        launcher.classList.remove('samche-intent-pulse');
+        var effApp = currentAppearance || SamcheChatPersistence.getStoredAppearance(widgetKey);
+        if (effApp) {
+          applyTheme(effApp);
+        } else {
+          updateLauncher();
+        }
+
         var isDiscrete = isDiscreteContext(newContext);
         var newEntityId = isDiscrete ? String(newContext.entity_id) : null;
         var entityChanged = newEntityId !== proactiveState.currentEntityId;
@@ -2003,6 +2096,16 @@
           .catch(function() {});
         }
       });
+
+      if (typeof window !== 'undefined') {
+        window.addEventListener('pageshow', function() {
+          if (!isInline && host && typeof document !== 'undefined' && document.body && (!host.isConnected || !document.body.contains(host))) {
+            document.body.appendChild(host);
+          }
+          var pApp = currentAppearance || SamcheChatPersistence.getStoredAppearance(widgetKey);
+          if (pApp) applyTheme(pApp);
+        });
+      }
 
       var inst = {
         host: host,
@@ -2123,7 +2226,12 @@
       if (!key && typeof window !== 'undefined' && window.location && window.location.pathname && window.location.pathname.indexOf('/task8-demo') !== -1) {
         key = 'wch_staging_task8_demo';
       }
+      if (!key) {
+        var existingKeys = Object.keys(SamcheCanonicalWidget.instances);
+        if (existingKeys.length > 0) key = existingKeys[0];
+      }
       if (key) {
+        if (typeof window !== 'undefined') window.__SAMCHE_WEB_CHAT_KEY__ = key;
         SamcheCanonicalWidget.mount({ widgetKey: key });
       }
     }
