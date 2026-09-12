@@ -358,7 +358,9 @@ async function verifyStagingTask8Demo() {
       body: JSON.stringify({ widget_key: TARGET_WIDGET_KEY }),
     });
     const bootLowData = await bootLowRes.json();
-    const sessionLow = bootLowData.session || bootLowData.conversation_session || bootLowData.token;
+    const sessionLow = typeof bootLowData.session === 'string'
+      ? bootLowData.session
+      : (bootLowData.session?.token || bootLowData.session?.session_token || bootLowData.token);
 
     const lowCtxRes = await fetchWithTimeout(`${BASE_URL}/api/chat/page-context`, {
       method: 'POST',
@@ -388,7 +390,9 @@ async function verifyStagingTask8Demo() {
       body: JSON.stringify({ widget_key: TARGET_WIDGET_KEY }),
     });
     const bootHighData = await bootHighRes.json();
-    const sessionHigh = bootHighData.session || bootHighData.conversation_session || bootHighData.token;
+    const sessionHigh = typeof bootHighData.session === 'string'
+      ? bootHighData.session
+      : (bootHighData.session?.token || bootHighData.session?.session_token || bootHighData.token);
 
     // Step 1: Navigates to product (dwell = 0): should NOT auto-open prematurely
     const navCtxRes = await fetchWithTimeout(`${BASE_URL}/api/chat/page-context`, {
@@ -443,7 +447,7 @@ async function verifyStagingTask8Demo() {
       },
     });
 
-    // Navigate to another product during cooldown
+    // Stay on or revisit product during cooldown: should remain closed with DISMISSAL_COOLDOWN or ALREADY_ENGAGED
     const dismissCtxRes = await fetchWithTimeout(`${BASE_URL}/api/chat/page-context`, {
       method: 'POST',
       headers: {
@@ -452,11 +456,13 @@ async function verifyStagingTask8Demo() {
       },
       body: JSON.stringify({
         page_context: {
-          title: 'SamChe Ses Pro Kablosuz Kulaklık ANC | SamChe Teknoloji',
-          url: `${BASE_URL}/task8-demo/#/urun/ses-pro-kablosuz-kulaklik-anc`,
-          entity_type: 'product',
-          entity_id: 'prod-anc-earbuds',
-          entity_name: 'SamChe Ses Pro Kablosuz Kulaklık ANC',
+          title: 'Titan Akıllı Saat Pro | SamChe Teknoloji',
+          url: `${BASE_URL}/task8-demo/#/urun/titan-akilli-saat-pro`,
+          entity_type: 'Product',
+          entity_id: 'prod-watch-titan',
+          entity_name: 'Titan Akıllı Saat Pro',
+          attributes: { price: 2499, category: 'Giyilebilir Teknoloji' },
+          page_type: 'product_detail',
         },
         dwell_seconds: 25,
       }),
