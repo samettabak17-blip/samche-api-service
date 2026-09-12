@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { resolveTenantProactiveConfig } from './visitor-intent-service.js';
-import { deriveWebChatThemeTokens } from './web-chat-theme-service.js';
+import { analyzeLogoPalette, deriveWebChatThemeTokens } from './web-chat-theme-service.js';
 
 export const DEFAULT_WEB_CHAT_APPEARANCE = Object.freeze({
   brand_name: 'SamChe',
@@ -748,6 +748,14 @@ export async function getWebChatIntegrationForTenant(databaseOrOptions, maybeTen
         const rawPalette = assetRes.rows[0].extracted_palette;
         if (rawPalette && typeof rawPalette === 'object' && Array.isArray(rawPalette.candidates)) {
           palette = rawPalette;
+        } else if (Array.isArray(rawPalette)) {
+          const theme = analyzeLogoPalette({ candidates: rawPalette, mode: appearance.theme_mode || 'dark' });
+          palette = {
+            dominant: rawPalette[0] || null,
+            primary: theme.primary,
+            accent: theme.accent,
+            candidates: rawPalette,
+          };
         }
       }
     } catch (e) {}

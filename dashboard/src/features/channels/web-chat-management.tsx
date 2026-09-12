@@ -23,6 +23,7 @@ import { MutationFeedback } from '../../components/ui/mutation-feedback';
 import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
 import { selectTenantAssistants } from '../resources/resource-utils';
 import { useTenant } from '../tenants/tenant-context';
+import { resolveWebChatAssetUrl } from '../../lib/branding';
 import type {
   WebChatAppearanceConfig,
   WebChatBehaviorConfig,
@@ -224,6 +225,7 @@ export function WebChatManagement() {
   };
 
   const primaryFg = contrastResult?.primary_foreground || getAccessibleForeground(primaryColor);
+  const displayLogoUrl = resolveWebChatAssetUrl(logoUrl);
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -534,7 +536,7 @@ export function WebChatManagement() {
                 {/* Current logo thumbnail when present */}
                 {logoUrl ? (
                   <div className="relative h-14 w-14 rounded-lg border border-line/80 bg-stone-900/90 p-1 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
-                    <img src={logoUrl} alt="Brand Logo Thumbnail" className="max-h-full max-w-full object-contain" />
+                    <img src={displayLogoUrl} alt="Brand Logo Thumbnail" className="max-h-full max-w-full object-contain" />
                   </div>
                 ) : (
                   <div className="h-14 w-14 rounded-lg border border-dashed border-line bg-stone-900/40 flex items-center justify-center text-stone-500 shrink-0">
@@ -735,7 +737,7 @@ export function WebChatManagement() {
               <div data-testid="logo-palette-recommendations" className="rounded-xl border border-signal/30 bg-signal/10 p-4 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-xs font-semibold text-signal">
-                    <Sparkles size={14} /> Logo-Derived Palette Recommendations
+                    <Sparkles size={14} /> Logo-Derived Palette Recommendations (Recommended Palette from Logo)
                   </div>
                   <button
                     type="button"
@@ -754,7 +756,7 @@ export function WebChatManagement() {
                 {logoUrl && (
                   <div className="flex items-center gap-3 py-1">
                     <div className="h-10 w-10 shrink-0 rounded border border-line bg-stone-900/80 p-0.5 flex items-center justify-center overflow-hidden">
-                      <img src={logoUrl} alt="Uploaded logo preview" className="max-h-full max-w-full object-contain" />
+                      <img src={displayLogoUrl} alt="Uploaded logo preview" className="max-h-full max-w-full object-contain" />
                     </div>
                     <div className="text-xs text-stone-300">
                       <span>Colors extracted from uploaded logo</span>
@@ -1025,7 +1027,7 @@ export function WebChatManagement() {
                         style={{ background: primaryColor, color: primaryFg }}
                       >
                         {logoUrl ? (
-                          <img src={logoUrl} alt={brandName || 'Brand'} className="h-full w-full object-contain p-0.5" />
+                          <img src={displayLogoUrl} alt={brandName || 'Brand'} className="h-full w-full object-contain p-0.5" />
                         ) : (
                           brandName ? brandName.charAt(0).toUpperCase() : 'S'
                         )}
@@ -1126,7 +1128,7 @@ export function WebChatManagement() {
                   title="Open chat preview"
                 >
                   {launcherIcon === 'logo' && logoUrl ? (
-                    <img src={logoUrl} alt="Logo" className="h-5 w-5 rounded-full object-contain" />
+                    <img src={displayLogoUrl} alt="Logo" className="h-5 w-5 rounded-full object-contain" />
                   ) : (
                     <MessageSquare size={18} />
                   )}
@@ -1145,7 +1147,7 @@ export function WebChatManagement() {
                   title="Open chat preview"
                 >
                   {launcherIcon === 'logo' && logoUrl ? (
-                    <img src={logoUrl} alt="Logo" className="h-6 w-6 rounded-full object-contain" />
+                    <img src={displayLogoUrl} alt="Logo" className="h-6 w-6 rounded-full object-contain" />
                   ) : (
                     <MessageSquare size={22} />
                   )}

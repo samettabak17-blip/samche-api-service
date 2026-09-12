@@ -309,6 +309,51 @@ router.post('/:tenantId/channels/web-chat/theme-preview', requireTenantAccess, a
     return res.status(400).json({ error: 'Failed to generate theme preview' });
   }
 });
+router.get(
+  '/:tenantId/channels/web-chat/logo',
+  requireTenantAccess,
+  async (req, res) => {
+    if (!tenant(req, res)) return;
+    try {
+      const database = req.app?.locals?.database || pool;
+      let storage = null;
+      try {
+        storage = req.app?.locals?.storage || createConversationResourceStorage();
+      } catch (e) {
+        storage = null;
+      }
+      const current = await getWebChatIntegrationForTenant({ database, tenantId: req.verified_tenant_id });
+      const assetId = current?.appearance?.logo_asset_id;
+      if (!assetId || !storage) return res.sendStatus(404);
+
+      const assetRes = await database.query(
+        `SELECT id, tenant_id, asset_kind, storage_key, mime_type, size_bytes
+           FROM tenant_web_chat_assets
+          WHERE id = $1 AND tenant_id = $2 AND status = 'ACTIVE'`,
+        [assetId, req.verified_tenant_id]
+      );
+      if (assetRes.rowCount === 0) return res.sendStatus(404);
+      const asset = assetRes.rows[0];
+      const stream = await storage.get({ key: asset.storage_key });
+      res.set({
+        'Content-Type': asset.mime_type,
+        'Content-Length': String(asset.size_bytes),
+        'Cache-Control': 'public, max-age=3600',
+        'X-Content-Type-Options': 'nosniff',
+        'Access-Control-Allow-Origin': '*',
+      });
+      stream.on('error', () => {
+        if (!res.headersSent) res.sendStatus(404);
+        else res.end();
+      });
+      return stream.pipe(res);
+    } catch (error) {
+      console.error('Tenant logo read error:', error);
+      return res.sendStatus(404);
+    }
+  }
+);
+
 router.post(
   '/:tenantId/channels/web-chat/logo',
   requireTenantAccess,

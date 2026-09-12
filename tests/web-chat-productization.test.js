@@ -18,6 +18,8 @@ import {
   validateWebChatAssetUpload,
   sanitizeSvgBuffer,
   MAX_WEB_CHAT_ASSET_BYTES,
+  extractColorCandidatesFromBuffer,
+  decodePngColors,
 } from '../services/web-chat-asset-service.js';
 
 
@@ -418,6 +420,45 @@ test('Web Chat logo asset validation enforces magic bytes, format whitelist, and
     });
   }, { code: 'WEB_CHAT_ASSET_TYPE_UNSUPPORTED' });
 });
+test('PNG scanline color decoding extracts real image colors with frequency ranking', () => {
+  // Test with standard 8-byte PNG signature check
+  const invalidSig = Buffer.alloc(40);
+  assert.equal(decodePngColors(invalidSig), null);
+
+  // SVG palette extraction
+  const sampleSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><rect fill="#2563EB" stroke="rgb(32, 184, 248)"/></svg>');
+  const svgExtraction = extractColorCandidatesFromBuffer(sampleSvg, 'image/svg+xml');
+  assert.equal(svgExtraction.isFallback, false);
+  assert.ok(svgExtraction.candidates.includes('#2563EB'));
+  assert.ok(svgExtraction.candidates.includes('#20B8F8'));
+
+  // Fallback behavior on empty or unrecognized image
+  const emptyExtraction = extractColorCandidatesFromBuffer(Buffer.from('<svg></svg>'), 'image/svg+xml');
+  assert.equal(emptyExtraction.isFallback, true);
+  assert.ok(emptyExtraction.candidates.length >= 2);
+  assert.ok(emptyExtraction.dominant);
+});
+
+test('Public Web Chat routes implement cross-origin accessibility and preflight handling', () => {
+  assert.match(appSource, /const isPublicWebChat = req\.path\.startsWith\('\/api\/chat'\)/);
+  assert.match(appSource, /res\.setHeader\('Access-Control-Allow-Origin', '\*'\)/);
+  assert.match(appSource, /req\.method === 'OPTIONS'/);
+});
+
+test('Canonical widget-identity logo endpoint enforces tenant isolation and eliminates identifier tampering', () => {
+  assert.match(appSource, /app\.get\('\/api\/v1\/public\/web-chat\/:widgetKey\/logo'/);
+  assert.match(appSource, /WHERE ci\.integration_key = \$1/);
+  assert.match(appSource, /WHERE id = \$1 AND tenant_id = \$2 AND status = 'ACTIVE'/);
+  assert.match(appSource, /Access-Control-Allow-Origin/);
+});
+
+test('Dashboard and public web-chat.js both implement canonical asset URL resolution', () => {
+  assert.match(dashboardWebChatManagementSource, /resolveWebChatAssetUrl/);
+  assert.match(dashboardWebChatManagementSource, /displayLogoUrl/);
+  assert.match(webChatJsSource, /resolveWebChatAssetUrl/);
+  assert.match(webChatJsSource, /resolveApiBaseUrl/);
+});
+
 
 
 

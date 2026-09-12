@@ -22,6 +22,41 @@
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
   }
+  function resolveApiBaseUrl(customBaseUrl) {
+    if (typeof customBaseUrl === 'string' && customBaseUrl.trim()) {
+      return customBaseUrl.trim().replace(/\/+$/, '');
+    }
+    if (typeof window !== 'undefined' && window.__SAMCHE_API_BASE_URL__) {
+      return String(window.__SAMCHE_API_BASE_URL__).trim().replace(/\/+$/, '');
+    }
+    if (typeof document !== 'undefined') {
+      var script = document.currentScript || document.querySelector('script[data-widget-key]') || document.querySelector('script[src*="web-chat"]');
+      if (script && script.src) {
+        try {
+          var parsed = new URL(script.src, window.location.href);
+          if (parsed.origin && parsed.origin !== window.location.origin) {
+            return parsed.origin;
+          }
+        } catch (e) {}
+      }
+    }
+    return '';
+  }
+
+  function resolveWebChatAssetUrl(url, baseUrl) {
+    if (!url || typeof url !== 'string') return '';
+    var trimmed = url.trim();
+    if (!trimmed) return '';
+    if (/^(https?:|\/\/|data:|blob:)/i.test(trimmed)) {
+      return trimmed;
+    }
+    var base = resolveApiBaseUrl(baseUrl);
+    if (trimmed.charAt(0) === '/') {
+      return base ? (base + trimmed) : trimmed;
+    }
+    return base ? (base + '/' + trimmed) : trimmed;
+  }
+
 
   function extractJsonLd() {
     if (typeof document === 'undefined') return null;
@@ -238,7 +273,7 @@
     proactiveState.dismissedEntityId = proactiveState.currentEntityId || null;
     clearTimers();
     if (proactiveState.sessionToken && typeof fetch === 'function') {
-      fetch('/api/chat/dismiss-proactive', {
+      fetch(resolveApiBaseUrl() + '/api/chat/dismiss-proactive', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -309,7 +344,7 @@
 
     proactiveState.isEvaluating = true;
 
-    fetch('/api/chat/evaluate-intent', {
+    fetch(resolveApiBaseUrl() + '/api/chat/evaluate-intent', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1066,7 +1101,7 @@
         var rHeaders = { 'Content-Type': 'application/json' };
         if (sessionToken) rHeaders['X-Samche-Web-Chat-Session'] = sessionToken;
 
-        return fetch('/api/chat/reset', {
+        return fetch(resolveApiBaseUrl() + '/api/chat/reset', {
           method: 'POST',
           headers: rHeaders,
           body: JSON.stringify({
@@ -1173,7 +1208,7 @@
           lastKnownResetTime = latestReset;
           var bSyncHeaders = { 'Content-Type': 'application/json' };
           if (sessionToken) bSyncHeaders['X-Samche-Web-Chat-Session'] = sessionToken;
-          fetch('/api/chat/bootstrap', {
+          fetch(resolveApiBaseUrl() + '/api/chat/bootstrap', {
             method: 'POST',
             headers: bSyncHeaders,
             body: JSON.stringify({ widget_key: widgetKey, session_token: sessionToken || undefined }),
@@ -1227,7 +1262,7 @@
         var headers = { 'Content-Type': 'application/json' };
         if (sessionToken) headers['X-Samche-Web-Chat-Session'] = sessionToken;
 
-        fetch('/api/chat/contextual-open', {
+        fetch(resolveApiBaseUrl() + '/api/chat/contextual-open', {
           method: 'POST',
           headers: headers,
           body: JSON.stringify({
@@ -1280,7 +1315,7 @@
 
         var labelText = typeof currentAppearance.launcher_label === 'string' ? currentAppearance.launcher_label.trim() : '';
         var iconHtml = (currentAppearance.launcher_icon === 'logo' && currentAppearance.logo_url)
-          ? '<img class="samche-launcher-logo" src="' + currentAppearance.logo_url + '" alt="' + (currentAppearance.brand_name || 'Logo') + '" />'
+          ? '<img class="samche-launcher-logo" src="' + resolveWebChatAssetUrl(currentAppearance.logo_url) + '" alt="' + (currentAppearance.brand_name || 'Logo') + '" />'
           : '<span class="samche-launcher-icon">' + CHAT_ICON_SVG + '</span>';
 
         if (labelText) {
@@ -1351,7 +1386,7 @@
 
         if (appearance.logo_url) {
           var avatarWrap = header.querySelector('.samche-header-avatar');
-          if (avatarWrap) avatarWrap.innerHTML = '<img src="' + appearance.logo_url + '" alt="' + (appearance.brand_name || 'Logo') + '" />';
+          if (avatarWrap) avatarWrap.innerHTML = '<img src="' + resolveWebChatAssetUrl(appearance.logo_url) + '" alt="' + (appearance.brand_name || 'Logo') + '" />';
         }
         if (appearance.theme) {
           var t = appearance.theme;
@@ -1431,7 +1466,7 @@
           var headers = { 'Content-Type': 'application/json' };
           if (sessionToken) headers['X-Samche-Web-Chat-Session'] = sessionToken;
 
-          var res = await fetch('/api/chat', {
+          var res = await fetch(resolveApiBaseUrl() + '/api/chat', {
             method: 'POST',
             headers: headers,
             body: JSON.stringify({
@@ -1524,7 +1559,7 @@
       var bHeaders = { 'Content-Type': 'application/json' };
       if (storedSession) bHeaders['X-Samche-Web-Chat-Session'] = storedSession;
 
-      fetch('/api/chat/bootstrap', {
+      fetch(resolveApiBaseUrl() + '/api/chat/bootstrap', {
         method: 'POST',
         headers: bHeaders,
         body: JSON.stringify({ widget_key: widgetKey, session_token: storedSession || undefined }),
@@ -1538,7 +1573,7 @@
 
           var initialCtx = capturePageContext();
           if (initialCtx) {
-            fetch('/api/chat/page-context', {
+            fetch(resolveApiBaseUrl() + '/api/chat/page-context', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -1727,7 +1762,7 @@
         }
 
         if (sessionToken && newContext) {
-          fetch('/api/chat/page-context', {
+          fetch(resolveApiBaseUrl() + '/api/chat/page-context', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

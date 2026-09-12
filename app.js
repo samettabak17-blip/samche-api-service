@@ -138,18 +138,35 @@ const allowedCorsOrigins = [
   .map((origin) => origin?.trim())
   .filter(Boolean);
 
-app.use((req, res, next) => cors({
-  origin(origin, callback) {
-    if (isAllowedGuideCorsOrigin({
-      origin,
-      requestHost: req.get('host'),
-      forwardedProtocol: req.get('x-forwarded-proto'),
-      allowedOrigins: allowedCorsOrigins,
-    })) return callback(null, true);
+app.use((req, res, next) => {
+  const isPublicWebChat = req.path.startsWith('/api/chat') ||
+    req.path.startsWith('/api/v1/public/web-chat') ||
+    req.path === '/web-chat.js' ||
+    req.path.startsWith('/task8-demo');
 
-    return callback(new Error('Origin is not allowed by CORS'));
-  },
-})(req, res, next));
+  if (isPublicWebChat) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Samche-Web-Chat-Session');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(204);
+    }
+    return next();
+  }
+
+  return cors({
+    origin(origin, callback) {
+      if (isAllowedGuideCorsOrigin({
+        origin,
+        requestHost: req.get('host'),
+        forwardedProtocol: req.get('x-forwarded-proto'),
+        allowedOrigins: allowedCorsOrigins,
+      })) return callback(null, true);
+
+      return callback(new Error('Origin is not allowed by CORS'));
+    },
+  })(req, res, next);
+});
 app.use(express.json({
   verify: (req, res, buffer) => {
     if (req.originalUrl?.split("?")[0] === "/webhook") {
@@ -431,6 +448,7 @@ app.get('/api/v1/public/web-chat/assets/:assetId', async (req, res) => {
       'Content-Length': String(asset.size_bytes),
       'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
       'X-Content-Type-Options': 'nosniff',
+      'Access-Control-Allow-Origin': '*',
     });
     stream.on('error', () => {
       if (!res.headersSent) res.sendStatus(404);
@@ -439,6 +457,75 @@ app.get('/api/v1/public/web-chat/assets/:assetId', async (req, res) => {
     return stream.pipe(res);
   } catch (error) {
     console.error('WEB_CHAT_ASSET_READ_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
+    return res.sendStatus(404);
+  }
+});
+
+app.get('/api/v1/public/web-chat/:widgetKey/logo', async (req, res) => {
+  const widgetKey = req.params.widgetKey;
+  if (!/^[a-zA-Z0-9_\-\.:]{3,100}$/.test(String(widgetKey))) {
+    return res.sendStatus(404);
+  }
+
+  try {
+    const database = req.app?.locals?.database || pool;
+    let storage = null;
+    try {
+      storage = req.app?.locals?.storage || createConversationResourceStorage();
+    } catch (e) {
+      storage = null;
+    }
+
+    const integrationRes = await database.query(
+      `SELECT ci.id, ci.tenant_id, ci.config
+         FROM channel_integrations ci
+        WHERE ci.integration_key = $1
+          AND ci.integration_type = 'WEB_CHAT'
+          AND ci.enabled = true
+        LIMIT 1`,
+      [widgetKey]
+    );
+
+    if (integrationRes.rowCount === 0) {
+      return res.sendStatus(404);
+    }
+
+    const integration = integrationRes.rows[0];
+    const appearance = integration.config?.appearance || {};
+
+    if (appearance.logo_asset_id) {
+      const assetRes = await database.query(
+        `SELECT id, tenant_id, asset_kind, storage_key, mime_type, size_bytes
+           FROM tenant_web_chat_assets
+          WHERE id = $1 AND tenant_id = $2 AND status = 'ACTIVE'`,
+        [appearance.logo_asset_id, integration.tenant_id]
+      );
+
+      if (assetRes.rowCount > 0 && storage) {
+        const asset = assetRes.rows[0];
+        const stream = await storage.get({ key: asset.storage_key });
+        res.set({
+          'Content-Type': asset.mime_type,
+          'Content-Length': String(asset.size_bytes),
+          'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
+          'X-Content-Type-Options': 'nosniff',
+          'Access-Control-Allow-Origin': '*',
+        });
+        stream.on('error', () => {
+          if (!res.headersSent) res.sendStatus(404);
+          else res.end();
+        });
+        return stream.pipe(res);
+      }
+    }
+
+    if (appearance.logo_url && /^https?:\/\//i.test(appearance.logo_url)) {
+      return res.redirect(302, appearance.logo_url);
+    }
+
+    return res.sendStatus(404);
+  } catch (error) {
+    console.error('WEB_CHAT_WIDGET_LOGO_READ_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return res.sendStatus(404);
   }
 });
