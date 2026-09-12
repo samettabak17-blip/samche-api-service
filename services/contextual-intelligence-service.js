@@ -34,7 +34,7 @@ export const CONTEXT_LIMITS = Object.freeze({
   MAX_ATTR_VAL_LENGTH: 300,
   MAX_ATTRIBUTES_COUNT: 20,
   MAX_HISTORY_ENTITIES: 5,
-  MAX_DEPTH: 3,
+  MAX_DEPTH: 5,
   DEFAULT_TTL_HOURS: 24,
 });
 
@@ -120,11 +120,11 @@ export function validateAndNormalizePageContext(rawPayload) {
   const path = sanitizeText(rawPath, CONTEXT_LIMITS.MAX_PATH_LENGTH);
   const title = sanitizeText(rawTitle, CONTEXT_LIMITS.MAX_TITLE_LENGTH);
   const language = sanitizeText(rawLanguage, 16).toLowerCase();
-  const pageType = sanitizeText(rawPageType, CONTEXT_LIMITS.MAX_ENTITY_TYPE_LENGTH);
-  const entityType = sanitizeText(rawEntityType, CONTEXT_LIMITS.MAX_ENTITY_TYPE_LENGTH).toUpperCase();
+  let pageType = sanitizeText(rawPageType, CONTEXT_LIMITS.MAX_ENTITY_TYPE_LENGTH);
+  let entityType = sanitizeText(rawEntityType, CONTEXT_LIMITS.MAX_ENTITY_TYPE_LENGTH).toUpperCase();
   const entityId = sanitizeText(rawEntityId, CONTEXT_LIMITS.MAX_ENTITY_ID_LENGTH);
-  const entityName = sanitizeText(rawEntityName, CONTEXT_LIMITS.MAX_ENTITY_NAME_LENGTH);
-  const summary = sanitizeText(rawSummary, CONTEXT_LIMITS.MAX_SUMMARY_LENGTH);
+  let entityName = sanitizeText(rawEntityName, CONTEXT_LIMITS.MAX_ENTITY_NAME_LENGTH);
+  let summary = sanitizeText(rawSummary, CONTEXT_LIMITS.MAX_SUMMARY_LENGTH);
   const referrer = sanitizeUrl(rawReferrer);
 
   const rawAttributes = (rawPayload.attributes && typeof rawPayload.attributes === 'object' && !Array.isArray(rawPayload.attributes))
@@ -159,16 +159,72 @@ export function validateAndNormalizePageContext(rawPayload) {
       }
     } else if (Array.isArray(value)) {
       const sanitizedArray = value
-        .filter((item) => typeof item === 'string' || (typeof item === 'number' && Number.isFinite(item)))
-        .map((item) => sanitizeText(String(item), 120))
+        .map((item) => {
+          if (typeof item === 'string' || (typeof item === 'number' && Number.isFinite(item))) {
+            return sanitizeText(String(item), 120);
+          }
+          if (item && typeof item === 'object') {
+            const cleanObj = {};
+            if (item.name) cleanObj.name = sanitizeText(String(item.name), 120);
+            if (item.price) cleanObj.price = sanitizeText(String(item.price), 50);
+            if (item.url) cleanObj.url = sanitizeUrl(String(item.url));
+            if (item.type) cleanObj.type = sanitizeText(String(item.type), 50);
+            if (item.summary) cleanObj.summary = sanitizeText(String(item.summary), 200);
+            return cleanObj.name ? cleanObj : null;
+          }
+          return null;
+        })
         .filter(Boolean)
-        .slice(0, 10);
+        .slice(0, 15);
       if (sanitizedArray.length > 0) {
         attributes[cleanKey] = sanitizedArray;
-        attributeProvenance[cleanKey] = PROVENANCE_SOURCES.SITE_STRUCTURED_DATA;
+        attributeProvenance[cleanKey] = PROVENANCE_SOURCES.PAGE_VISIBLE_FACT;
         attrCount += 1;
       }
     }
+  }
+
+  const topVisibleProducts = Array.isArray(rawPayload.visible_products)
+    ? rawPayload.visible_products
+    : (Array.isArray(rawPayload.visible_entities) ? rawPayload.visible_entities : null);
+
+  if (topVisibleProducts && !attributes.visible_products) {
+    const sanitizedTopProducts = topVisibleProducts
+      .map((item) => {
+        if (typeof item === 'string') return { name: sanitizeText(item, 120) };
+        if (item && typeof item === 'object') {
+          const cleanObj = {};
+          if (item.name) cleanObj.name = sanitizeText(String(item.name), 120);
+          if (item.price) cleanObj.price = sanitizeText(String(item.price), 50);
+          if (item.url) cleanObj.url = sanitizeUrl(String(item.url));
+          if (item.type) cleanObj.type = sanitizeText(String(item.type), 50);
+          if (item.summary) cleanObj.summary = sanitizeText(String(item.summary), 200);
+          return cleanObj.name ? cleanObj : null;
+        }
+        return null;
+      })
+      .filter(Boolean)
+      .slice(0, 15);
+
+    if (sanitizedTopProducts.length > 0) {
+      attributes.visible_products = sanitizedTopProducts;
+      attributeProvenance.visible_products = PROVENANCE_SOURCES.PAGE_VISIBLE_FACT;
+    }
+  }
+
+  const effectiveVisibleProducts = attributes.visible_products || [];
+  if (effectiveVisibleProducts.length > 1) {
+    if (!pageType || pageType === 'PAGE') pageType = 'PRODUCT_LIST';
+    if (!entityType || entityType === 'PAGE' || entityType === 'WebSite') entityType = 'PRODUCT_LIST';
+    if (!summary || summary === 'PAGE' || summary === 'WebSite') {
+      summary = `Bu sayfada görüntülenen ürünler (${effectiveVisibleProducts.length} adet): ` +
+        effectiveVisibleProducts.map((p) => p.name + (p.price ? ` (${p.price})` : '')).join(', ');
+    }
+  } else if (effectiveVisibleProducts.length === 1 && (!entityType || entityType === 'PAGE' || entityType === 'WebSite')) {
+    const single = effectiveVisibleProducts[0];
+    entityType = 'PRODUCT';
+    if (!entityName || entityName === 'Ana Sayfa' || entityName === 'Current Page') entityName = single.name;
+    if (single.price && !attributes.price) attributes.price = single.price;
   }
 
   const nowIso = new Date().toISOString();
@@ -204,6 +260,11 @@ export function resolvePageEntity(normalizedContext) {
   const primaryUrl = normalizedContext.url || normalizedContext.path || '';
   const nowIso = normalizedContext.captured_at || new Date().toISOString();
 
+  const visibleProducts = normalizedContext.attributes?.visible_products
+    || normalizedContext.visible_products
+    || normalizedContext.attributes?.catalog_items
+    || [];
+
   return {
     entity_type: entityType,
     entity_id: entityId ? String(entityId) : primaryUrl,
@@ -212,6 +273,7 @@ export function resolvePageEntity(normalizedContext) {
     attributes: normalizedContext.attributes || {},
     attribute_provenance: normalizedContext.attribute_provenance || {},
     summary: normalizedContext.summary || '',
+    visible_products: Array.isArray(visibleProducts) ? visibleProducts : [],
     source: PROVENANCE_SOURCES.PAGE_VISIBLE_FACT,
     freshness: nowIso,
     provenance: {
@@ -238,6 +300,13 @@ export const NON_DISCRETE_ENTITY_TYPES = Object.freeze(new Set([
   'CATEGORIES',
   'COLLECTION',
   'COLLECTIONS',
+  'PRODUCT_LIST',
+  'PRODUCTS',
+  'PRODUCT_LISTING',
+  'ITEM_LIST',
+  'ITEMLIST',
+  'SHOP',
+  'STORE',
   'ABOUT',
   'ABOUT_US',
   'ABOUTPAGE',
@@ -493,6 +562,45 @@ export function buildContextualIntelligencePromptSection({
       }
     } else {
       sections.push('Verified Attributes: None structured on current page.');
+    }
+
+    const visibleProducts = currentEntity.visible_products
+      || currentEntity.attributes?.visible_products
+      || currentEntity.attributes?.catalog_items
+      || [];
+
+    if (Array.isArray(visibleProducts) && visibleProducts.length > 0) {
+      sections.push('');
+      sections.push('[VISIBLE PRODUCTS ON CURRENT PAGE (PAGE_VISIBLE_FACT)]');
+      sections.push(`The visitor is currently viewing a page containing the following ${visibleProducts.length} visible products:`);
+      visibleProducts.forEach((prod, idx) => {
+        if (typeof prod === 'string') {
+          sections.push(`${idx + 1}. ${sanitizeText(prod, 120)}`);
+        } else if (prod && typeof prod === 'object') {
+          const pName = sanitizeText(prod.name || 'Product', 120);
+          const pPrice = prod.price ? ` — Price: ${sanitizeText(prod.price, 40)}` : '';
+          const pUrl = prod.url ? ` — URL: ${sanitizeUrl(prod.url)}` : '';
+          const pSummary = prod.summary ? ` (${sanitizeText(prod.summary, 120)})` : '';
+          sections.push(`${idx + 1}. ${pName}${pPrice}${pUrl}${pSummary}`);
+        }
+      });
+      sections.push('');
+      sections.push('GROUNDING DIRECTIVE FOR CURRENT PAGE PRODUCTS:');
+      sections.push('- When the visitor asks "bu sayfada hangi ürünler var", "buradaki ürünler neler", "ürünleri listele", "en uygun olan hangisi", "fiyatları nedir", or asks to compare products on this page, answer DIRECTLY using the verified visible products and prices listed above.');
+      sections.push('- Strictly ground names, prices, and specs in the confirmed list above. NEVER state that you cannot see the products on this page or suggest navigating to the products section when products are listed above.');
+      sections.push('- If the visitor asks for the cheapest / most affordable ("en uygun"), identify the product with the lowest price from the list above.');
+      sections.push('- If the visitor asks to compare them ("karşılaştır"), compare their confirmed prices and features from the list above.');
+      sections.push('');
+      sections.push('SUPPORT INTENT COEXISTENCE:');
+      sections.push('- If the visitor\'s question is about returns, cancellations, shipping times, warranty, or customer service (e.g. "ürünü iade etmek istiyorum", "kargo ne zaman gelir", "garanti şartları"), answer from tenant-approved support policies and knowledge context rather than assuming they only want product specs.');
+    } else if (isDiscreteEntity(currentEntity) && cleanType.toUpperCase() === 'PRODUCT') {
+      sections.push('');
+      sections.push('[CURRENT VISITOR PRODUCT / DETAIL PAGE (PAGE_VISIBLE_FACT)]');
+      sections.push(`Product Name: ${cleanName}`);
+      if (currentEntity.attributes?.price) sections.push(`Price: ${sanitizeText(String(currentEntity.attributes.price), 50)}`);
+      if (cleanUrl) sections.push(`Product URL: ${cleanUrl}`);
+      if (cleanSummary) sections.push(`Product Description: ${cleanSummary}`);
+      sections.push('DIRECTIVE: When the visitor asks "Şu anda hangi ürüne bakıyorum?", "Bu ürün nedir?", or "Bu ürünün özellikleri neler?", answer using the current product details above.');
     }
   }
 

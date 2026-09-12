@@ -114,6 +114,130 @@
     return el ? safeString(el.getAttribute('content'), 500) : '';
   }
 
+  var PRICE_DETECTION_REGEX = /(?:[\$€£₺]\s*\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?\s*(?:[\$€£₺]|TL|USD|EUR|TRY))/i;
+  var CTA_FILTER_REGEX = /^(?:sepete\s*ekle|add\s*to\s*cart|satın\s*al|buy\s*now|incele|view|detay|sepet|tüm\s*ürünler|satın\s*alın)$/i;
+
+  function extractVisibleProductsFromDom() {
+    if (typeof document === 'undefined') return [];
+    var visibleProducts = [];
+    var seenNames = [];
+
+    var cardSelectors = [
+      '[data-qa*="product-list-item"]',
+      '[data-qa*="product"]',
+      '[data-component*="product"]',
+      '[class*="product-list-item"]',
+      '[class*="product-list__item"]',
+      '[class*="product-card"]',
+      '[class*="product-item"]',
+      '[class*="products-item"]',
+      '[class*="product-grid-item"]',
+      '.product',
+      'article[class*="product"]',
+      '[itemtype*="Product"]'
+    ];
+
+    var rawCards = Array.prototype.slice.call(document.querySelectorAll(cardSelectors.join(', ')));
+    var candidateCards = rawCards.filter(function(c) {
+      return !rawCards.some(function(other) { return other !== c && other.contains(c); });
+    });
+
+    if (candidateCards.length === 0) {
+      var allAnchors = Array.prototype.slice.call(document.querySelectorAll('a'));
+      for (var a = 0; a < allAnchors.length; a++) {
+        var aEl = allAnchors[a];
+        var txt = aEl.innerText || aEl.textContent || '';
+        if (PRICE_DETECTION_REGEX.test(txt) && (aEl.href.indexOf('product') !== -1 || aEl.href.indexOf('urun') !== -1 || aEl.href.indexOf('item') !== -1 || txt.toLowerCase().indexOf('sepete') !== -1 || txt.toLowerCase().indexOf('cart') !== -1)) {
+          candidateCards.push(aEl);
+        }
+      }
+    }
+
+    for (var i = 0; i < candidateCards.length && visibleProducts.length < 15; i++) {
+      var card = candidateCards[i];
+      var cardText = card.innerText || card.textContent || '';
+      if (!cardText || !cardText.trim()) continue;
+
+      var linkEl = card.tagName === 'A' ? card : card.querySelector('a[href]');
+      var href = linkEl ? linkEl.getAttribute('href') || linkEl.href : '';
+
+      var name = '';
+      var heading = card.querySelector('h1, h2, h3, h4, h5, [class*="title"], [class*="name"], [itemprop="name"]');
+      if (heading && heading.textContent && heading.textContent.trim().length >= 3) {
+        name = safeString(heading.textContent.trim(), 120);
+      } else {
+        var lines = cardText.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
+        for (var l = 0; l < lines.length; l++) {
+          var line = lines[l];
+          if (!PRICE_DETECTION_REGEX.test(line) && !CTA_FILTER_REGEX.test(line) && line.length >= 3 && line.length <= 120) {
+            name = safeString(line, 120);
+            break;
+          }
+        }
+      }
+
+      if (!name) continue;
+      if (PRICE_DETECTION_REGEX.test(name) || CTA_FILTER_REGEX.test(name) || name.length < 3) continue;
+
+      var nameKey = name.toLowerCase();
+      if (seenNames.indexOf(nameKey) !== -1) continue;
+      seenNames.push(nameKey);
+
+      var price = '';
+      var priceEl = card.querySelector('[class*="price"], [itemprop="price"], .amount, [class*="cost"]');
+      if (priceEl && priceEl.textContent) {
+        var pm = priceEl.textContent.match(PRICE_DETECTION_REGEX);
+        if (pm) price = safeString(pm[0].trim(), 50);
+      }
+      if (!price) {
+        var cm = cardText.match(PRICE_DETECTION_REGEX);
+        if (cm) price = safeString(cm[0].trim(), 50);
+      }
+
+      visibleProducts.push({
+        type: 'PRODUCT',
+        name: name,
+        price: price || undefined,
+        url: href || undefined,
+      });
+    }
+
+    return visibleProducts;
+  }
+
+  function extractSingleProductDetail() {
+    if (typeof document === 'undefined') return null;
+
+    var jsonLd = extractJsonLd();
+    if (jsonLd && jsonLd.entity_type && jsonLd.entity_type.toLowerCase() === 'product' && jsonLd.entity_name) {
+      return {
+        name: jsonLd.entity_name,
+        price: jsonLd.attributes && jsonLd.attributes.price ? String(jsonLd.attributes.price) : undefined,
+        summary: jsonLd.summary || undefined,
+        attributes: jsonLd.attributes || {}
+      };
+    }
+
+    var h1 = document.querySelector('h1');
+    if (h1 && h1.textContent && h1.textContent.trim().length >= 3) {
+      var h1Text = safeString(h1.textContent.trim(), 150);
+      var priceEl = document.querySelector('[class*="product-price"], [class*="price"], [itemprop="price"]');
+      var priceMatch = priceEl ? (priceEl.textContent || '').match(PRICE_DETECTION_REGEX) : (document.body.innerText || '').match(PRICE_DETECTION_REGEX);
+      var buyBtn = document.querySelector('button[type="submit"], [class*="add-to-cart"], [class*="buy-button"], [data-qa*="buy"]');
+      var isDetailUrl = /\/(product|urun|p|item|dp)\/|-[a-z0-9]{6,}$/i.test(window.location.pathname);
+
+      if (buyBtn || isDetailUrl || (priceEl && !document.querySelector('[class*="product-list"], [class*="products-grid"]'))) {
+        return {
+          name: h1Text,
+          price: priceMatch ? safeString(priceMatch[0].trim(), 50) : undefined,
+          summary: extractMetaTag('og:description') || extractMetaTag('description') || undefined,
+          attributes: {}
+        };
+      }
+    }
+    return null;
+  }
+
   function capturePageContext() {
     if (typeof window === 'undefined' || typeof document === 'undefined') return null;
 
@@ -144,25 +268,37 @@
       }
     }
 
-    if (!safeAttributes.visible_products && !safeAttributes.catalog_items && typeof document !== 'undefined') {
-      try {
-        var productEls = document.querySelectorAll('.product-card .product-title, .product-title, [itemprop="name"]');
-        if (productEls && productEls.length > 0) {
-          var foundNames = [];
-          for (var p = 0; p < productEls.length && foundNames.length < 10; p++) {
-            var pText = safeString(productEls[p].textContent, 120);
-            if (pText && foundNames.indexOf(pText) === -1) {
-              foundNames.push(pText);
-            }
-          }
-          if (foundNames.length > 0) {
-            safeAttributes.visible_products = foundNames;
-            if (!summary || summary === 'PAGE' || summary === 'Catalog') {
-              summary = 'Bu sayfada görüntülenen ürünler: ' + foundNames.join(', ');
-            }
-          }
-        }
-      } catch (domErr) {}
+    var visibleProducts = extractVisibleProductsFromDom();
+    var singleProduct = (visibleProducts.length <= 1) ? extractSingleProductDetail() : null;
+
+    if (visibleProducts.length > 1) {
+      safeAttributes.page_type = 'PRODUCT_LIST';
+      safeAttributes.visible_products = visibleProducts;
+      safeAttributes.visible_product_names = visibleProducts.map(function(p) { return p.name; });
+      safeAttributes.visible_product_count = visibleProducts.length;
+      entityType = 'PRODUCT_LIST';
+      if (!summary || summary === 'PAGE' || summary === 'WebSite' || summary === 'Catalog') {
+        summary = 'Bu sayfada görüntülenen ürünler (' + visibleProducts.length + ' adet): ' +
+          visibleProducts.map(function(p) { return p.name + (p.price ? ' (' + p.price + ')' : ''); }).join(', ');
+      }
+    } else if (singleProduct) {
+      entityType = 'PRODUCT';
+      entityName = singleProduct.name;
+      if (singleProduct.price) safeAttributes.price = singleProduct.price;
+      if (singleProduct.summary && !summary) summary = singleProduct.summary;
+      for (var spK in (singleProduct.attributes || {})) {
+        if (!safeAttributes[spK]) safeAttributes[spK] = singleProduct.attributes[spK];
+      }
+      safeAttributes.visible_products = [singleProduct];
+      safeAttributes.visible_product_names = [singleProduct.name];
+    } else if (visibleProducts.length === 1) {
+      var singleP = visibleProducts[0];
+      entityType = 'PRODUCT';
+      entityName = singleP.name;
+      if (singleP.price) safeAttributes.price = singleP.price;
+      safeAttributes.visible_products = visibleProducts;
+      safeAttributes.visible_product_names = [singleP.name];
+      if (!summary || summary === 'PAGE') summary = singleP.name + (singleP.price ? ' (' + singleP.price + ')' : '');
     }
 
     return {
@@ -176,6 +312,7 @@
       entity_name: entityName,
       summary: summary,
       attributes: safeAttributes,
+      visible_products: visibleProducts.length > 0 ? visibleProducts : undefined,
       referrer: safeString(document.referrer, 2048) || null,
       timestamp: new Date().toISOString(),
     };
@@ -1381,6 +1518,19 @@
         launcher.classList.add('samche-launcher-hidden');
         panel.setAttribute('aria-modal', 'true');
         launcher.classList.remove('samche-intent-pulse');
+        try {
+          var openCtx = capturePageContext();
+          if (openCtx && sessionToken) {
+            fetch(resolveApiBaseUrl() + '/api/chat/page-context', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Samche-Web-Chat-Session': sessionToken,
+              },
+              body: JSON.stringify({ page_context: openCtx }),
+            }).catch(function() {});
+          }
+        } catch (e) {}
         setTimeout(function() { textarea.focus(); }, 120);
         smartScrollToBottom(messages, true);
         if (isManual) {
@@ -1633,6 +1783,23 @@
               },
               body: JSON.stringify({ page_context: initialCtx }),
             }).catch(function() {});
+          }
+
+          // Delayed check for client-rendered SPA / Nuxt / React hydration
+          if (typeof window !== 'undefined') {
+            setTimeout(function() {
+              var hydratedCtx = capturePageContext();
+              if (hydratedCtx && sessionToken && hydratedCtx.attributes && hydratedCtx.attributes.visible_products && hydratedCtx.attributes.visible_products.length > 0) {
+                fetch(resolveApiBaseUrl() + '/api/chat/page-context', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-Samche-Web-Chat-Session': sessionToken,
+                  },
+                  body: JSON.stringify({ page_context: hydratedCtx }),
+                }).catch(function() {});
+              }
+            }, 1200);
           }
         }
         if (data.appearance) applyTheme(data.appearance);

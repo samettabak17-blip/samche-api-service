@@ -2993,6 +2993,7 @@ app.post("/api/chat", async (req, res) => {
               entity_type: req.body.entity_type,
               entity_name: req.body.entity_name,
               summary: req.body.summary,
+              visible_products: req.body.visible_products || req.body.attributes?.visible_products,
               attributes: req.body.attributes || {},
             }
           : null
@@ -3084,10 +3085,11 @@ app.post("/api/chat", async (req, res) => {
         }
       }
 
-      if (webChatBrowsingState?.currentEntity || (webChatBrowsingState?.previousEntities && webChatBrowsingState.previousEntities.length > 0)) {
+      const activeBrowsingEntity = webChatBrowsingState?.currentEntity || (webChatBrowsingState?.currentPage ? resolvePageEntity(webChatBrowsingState.currentPage) : null);
+      if (activeBrowsingEntity || (webChatBrowsingState?.previousEntities && webChatBrowsingState.previousEntities.length > 0)) {
         webChatContextualSection = buildContextualIntelligencePromptSection({
-          currentEntity: webChatBrowsingState.currentEntity,
-          previousEntities: webChatBrowsingState.previousEntities,
+          currentEntity: activeBrowsingEntity,
+          previousEntities: webChatBrowsingState?.previousEntities || [],
           channelType: 'WEB_CHAT',
         });
         logContextualObservability('PAGE_CONTEXT_USED', {
