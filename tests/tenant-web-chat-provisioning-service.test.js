@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   ensureWebChatIntegration,
   getWebChatIntegrationForTenant,
+  normalizeWebChatAppearance,
   TenantWebChatProvisioningError,
 } from '../services/tenant-web-chat-provisioning-service.js';
 
@@ -415,4 +416,33 @@ test('Fresh tenant golden path: auto-provisions Web Chat Core assistant when ten
   assert.equal(db.state.assistants.length, 1);
   assert.equal(db.state.channels.length, 1);
   assert.equal(db.state.integrations.length, 1);
+});
+
+test('normalizeWebChatAppearance supports empty launcher_label and Unicode text (TR/EN/AR)', () => {
+  // Default when undefined
+  const defaultAppearance = normalizeWebChatAppearance({});
+  assert.equal(defaultAppearance.launcher_label, 'Canlı Destek');
+
+  // Empty string allows circular minimal launcher
+  const emptyAppearance = normalizeWebChatAppearance({ launcher_label: '' });
+  assert.equal(emptyAppearance.launcher_label, '');
+
+  const whitespaceAppearance = normalizeWebChatAppearance({ launcher_label: '   ' });
+  assert.equal(whitespaceAppearance.launcher_label, '');
+
+  // Turkish
+  const trAppearance = normalizeWebChatAppearance({ launcher_label: 'Müşteri Desteği 🇹🇷' });
+  assert.equal(trAppearance.launcher_label, 'Müşteri Desteği 🇹🇷');
+
+  // English
+  const enAppearance = normalizeWebChatAppearance({ launcher_label: 'Chat with us' });
+  assert.equal(enAppearance.launcher_label, 'Chat with us');
+
+  // Arabic
+  const arAppearance = normalizeWebChatAppearance({ launcher_label: 'محادثة مباشرة' });
+  assert.equal(arAppearance.launcher_label, 'محادثة مباشرة');
+
+  // Bounded safe length (max 50 chars)
+  const longAppearance = normalizeWebChatAppearance({ launcher_label: 'A'.repeat(80) });
+  assert.equal(longAppearance.launcher_label.length, 50);
 });

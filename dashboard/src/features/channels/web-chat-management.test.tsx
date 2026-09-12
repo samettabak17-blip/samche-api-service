@@ -13,6 +13,8 @@ vi.mock('../dashboard/dashboard-api', () => ({
     listAssistants: vi.fn(),
     updateWebChatChannel: vi.fn(),
     previewWebChatTheme: vi.fn(),
+    uploadWebChatLogo: vi.fn(),
+    deleteWebChatLogo: vi.fn(),
   },
   tenantKeys: {
     webChatChannel: (id: string) => ['tenant', id, 'channel', 'web-chat'],
@@ -186,5 +188,208 @@ describe('WebChatManagement Component', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Live Preview/i }));
     expect(await screen.findByText(/Live preview rendered with active brand colors/i)).toBeTruthy();
+  });
+
+  it('visibly provides direct tenant logo management, launcher label, and supported specs in Appearance & Theme', async () => {
+    const payload: WebChatChannelResponse = {
+      tenant_id: 'test-tenant-123',
+      configured: true,
+      widget_key: 'wch_test_key_123',
+      channel: { id: 'ch-1', channel_type: 'WEB_CHAT', display_name: 'Test Web Chat', status: 'active' },
+      assistant: { id: 'ast-1', tenant_id: 'test-tenant-123', name: 'Test Assistant', model: 'gpt-4o-mini', status: 'active' },
+      integration: { id: 'int-1', integration_key: 'wch_test_key_123', integration_type: 'WEB_CHAT', enabled: true },
+      appearance: {
+        ...mockAppearance,
+        logo_url: null,
+        launcher_label: 'Canlı Destek',
+      },
+      behavior: mockBehavior,
+      embed_snippet: '<script></script>',
+      installation: { widget_key: 'wch_test_key_123', embed_snippet: '', status: 'active', guidance: [] },
+    };
+
+    vi.mocked(tenantApi.getWebChatChannel).mockResolvedValue(payload);
+    vi.mocked(tenantApi.listAssistants).mockResolvedValue([]);
+
+    renderComponent();
+
+    // Navigate to Appearance & Theme
+    fireEvent.click(await screen.findByRole('button', { name: /Appearance & Theme/i }));
+
+    // 1. Brand Logo section
+    expect(await screen.findByTestId('brand-logo-section')).toBeTruthy();
+    expect(screen.getAllByText('Brand Logo').length).toBeGreaterThan(0);
+
+    // 2. Direct upload button
+    expect(screen.getByRole('button', { name: /Upload Logo \/ Choose File/i })).toBeTruthy();
+
+    // 3. Supported formats text
+    expect(screen.getByText(/Supported: PNG \/ JPEG \/ WEBP \/ SVG · Max 2 MB/i)).toBeTruthy();
+
+    // 4. Launcher Label control with saved tenant value
+    const launcherLabelInput = screen.getByLabelText(/Launcher Label/i) as HTMLInputElement;
+    expect(launcherLabelInput).toBeTruthy();
+    expect(launcherLabelInput.value).toBe('Canlı Destek');
+
+    // 5. Advanced external URL fallback is in collapsible details, NOT primary input
+    expect(screen.getByText(/Advanced: Use external image URL/i)).toBeTruthy();
+  });
+
+  it('supports direct file upload, reveals thumbnail, Replace Logo, Remove Logo, and palette recommendations with Apply', async () => {
+    const payload: WebChatChannelResponse = {
+      tenant_id: 'test-tenant-123',
+      configured: true,
+      widget_key: 'wch_test_key_123',
+      channel: { id: 'ch-1', channel_type: 'WEB_CHAT', display_name: 'Test Web Chat', status: 'active' },
+      assistant: { id: 'ast-1', tenant_id: 'test-tenant-123', name: 'Test Assistant', model: 'gpt-4o-mini', status: 'active' },
+      integration: { id: 'int-1', integration_key: 'wch_test_key_123', integration_type: 'WEB_CHAT', enabled: true },
+      appearance: {
+        ...mockAppearance,
+        logo_url: null,
+      },
+      behavior: mockBehavior,
+      embed_snippet: '<script></script>',
+      installation: { widget_key: 'wch_test_key_123', embed_snippet: '', status: 'active', guidance: [] },
+    };
+
+    vi.mocked(tenantApi.getWebChatChannel).mockResolvedValue(payload);
+    vi.mocked(tenantApi.listAssistants).mockResolvedValue([]);
+    vi.mocked(tenantApi.previewWebChatTheme).mockResolvedValue({
+      mode: 'dark',
+      primary: '#3B82F6',
+      primary_foreground: '#FFFFFF',
+      accent: '#10B981',
+      accent_foreground: '#FFFFFF',
+      surface_tint: '#111827',
+      surface_glass: 'rgba(17,24,39,0.85)',
+      surface_solid: '#111827',
+      glow: 'rgba(59,130,246,0.35)',
+      glow_soft: 'rgba(59,130,246,0.18)',
+      text: '#FFFFFF',
+      muted: '#9CA3AF',
+      border: 'rgba(255,255,255,0.1)',
+      contrast: { primary_button: 4.8, accent_button: 4.5, text_surface: 7.2, muted_surface: 4.5 },
+      is_accessible: true,
+    });
+    vi.mocked(tenantApi.uploadWebChatLogo).mockResolvedValue({
+      asset: {
+        id: 'asset-1',
+        tenant_id: 'test-tenant-123',
+        original_filename: 'logo.png',
+        public_url: '/api/v1/public/web-chat/assets/asset-1',
+        mime_type: 'image/png',
+        size_bytes: 1024,
+        created_at: new Date().toISOString(),
+      },
+      appearance: mockAppearance,
+      theme: {
+        primary_color: '#3B82F6',
+        accent_color: '#10B981',
+      },
+      palette: {
+        dominant: '#1E3A8A',
+        primary: '#3B82F6',
+        accent: '#10B981',
+        candidates: ['#3B82F6', '#1E3A8A', '#10B981'],
+      },
+    });
+
+    renderComponent();
+    fireEvent.click(await screen.findByRole('button', { name: /Appearance & Theme/i }));
+
+    const fileInput = screen.getByLabelText('Upload logo file') as HTMLInputElement;
+    const testFile = new File(['dummy logo png'], 'logo.png', { type: 'image/png' });
+
+    fireEvent.change(fileInput, { target: { files: [testFile] } });
+
+    // Expect uploadWebChatLogo to be called
+    expect(tenantApi.uploadWebChatLogo).toHaveBeenCalledWith('test-tenant-123', testFile);
+
+    // After upload, logo thumbnail, Replace Logo, and Remove Logo must be visible
+    expect(await screen.findByAltText('Brand Logo Thumbnail')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Replace Logo/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Remove Logo/i })).toBeTruthy();
+
+    // Palette recommendations card must be visible
+    expect(await screen.findByTestId('logo-palette-recommendations')).toBeTruthy();
+    expect(screen.getByText(/Logo-Derived Palette Recommendations/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Apply Recommendations/i })).toBeTruthy();
+    expect(screen.getAllByText('#1E3A8A').length).toBeGreaterThan(0);
+
+    // Click Apply Recommendations
+    fireEvent.click(screen.getByRole('button', { name: /Apply Recommendations/i }));
+    expect(tenantApi.previewWebChatTheme).toHaveBeenCalled();
+  });
+
+  it('persists logo thumbnail, Replace/Remove controls, and palette recommendations on page refresh', async () => {
+    const persistedPayload: WebChatChannelResponse = {
+      tenant_id: 'test-tenant-123',
+      configured: true,
+      widget_key: 'wch_test_key_123',
+      channel: { id: 'ch-1', channel_type: 'WEB_CHAT', display_name: 'Test Web Chat', status: 'active' },
+      assistant: { id: 'ast-1', tenant_id: 'test-tenant-123', name: 'Test Assistant', model: 'gpt-4o-mini', status: 'active' },
+      integration: { id: 'int-1', integration_key: 'wch_test_key_123', integration_type: 'WEB_CHAT', enabled: true },
+      appearance: {
+        ...mockAppearance,
+        logo_url: '/api/v1/public/web-chat/assets/asset-saved-1',
+        launcher_label: 'محادثة مباشرة',
+      },
+      palette: {
+        dominant: '#059669',
+        primary: '#10B981',
+        accent: '#F59E0B',
+        candidates: ['#10B981', '#059669', '#F59E0B'],
+      },
+      behavior: mockBehavior,
+      embed_snippet: '<script></script>',
+      installation: { widget_key: 'wch_test_key_123', embed_snippet: '', status: 'active', guidance: [] },
+    };
+
+    vi.mocked(tenantApi.getWebChatChannel).mockResolvedValue(persistedPayload);
+    vi.mocked(tenantApi.listAssistants).mockResolvedValue([]);
+
+    renderComponent();
+    fireEvent.click(await screen.findByRole('button', { name: /Appearance & Theme/i }));
+
+    // Saved logo thumbnail must be immediately present
+    expect(await screen.findByAltText('Brand Logo Thumbnail')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Replace Logo/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Remove Logo/i })).toBeTruthy();
+
+    // Arabic Unicode launcher label must be preserved
+    const launcherInput = screen.getByLabelText(/Launcher Label/i) as HTMLInputElement;
+    expect(launcherInput.value).toBe('محادثة مباشرة');
+
+    // Palette recommendations must persist from payload without re-uploading
+    expect(await screen.findByTestId('logo-palette-recommendations')).toBeTruthy();
+    expect(screen.getAllByText('#059669').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /Apply Recommendations/i })).toBeTruthy();
+  });
+
+  it('supports empty Launcher Label for circular icon-only launcher', async () => {
+    const payloadWithEmptyLabel: WebChatChannelResponse = {
+      tenant_id: 'test-tenant-123',
+      configured: true,
+      widget_key: 'wch_test_key_123',
+      channel: { id: 'ch-1', channel_type: 'WEB_CHAT', display_name: 'Test Web Chat', status: 'active' },
+      assistant: { id: 'ast-1', tenant_id: 'test-tenant-123', name: 'Test Assistant', model: 'gpt-4o-mini', status: 'active' },
+      integration: { id: 'int-1', integration_key: 'wch_test_key_123', integration_type: 'WEB_CHAT', enabled: true },
+      appearance: {
+        ...mockAppearance,
+        launcher_label: '',
+      },
+      behavior: mockBehavior,
+      embed_snippet: '<script></script>',
+      installation: { widget_key: 'wch_test_key_123', embed_snippet: '', status: 'active', guidance: [] },
+    };
+
+    vi.mocked(tenantApi.getWebChatChannel).mockResolvedValue(payloadWithEmptyLabel);
+    vi.mocked(tenantApi.listAssistants).mockResolvedValue([]);
+
+    renderComponent();
+    fireEvent.click(await screen.findByRole('button', { name: /Appearance & Theme/i }));
+
+    const launcherInput = (await screen.findByLabelText(/Launcher Label/i)) as HTMLInputElement;
+    expect(launcherInput.value).toBe('');
   });
 });

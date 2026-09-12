@@ -80,6 +80,12 @@ export interface WebChatChannelResponse {
   } | null;
   appearance: WebChatAppearanceConfig;
   behavior: WebChatBehaviorConfig;
+  palette?: {
+    dominant: string | null;
+    primary: string;
+    accent: string;
+    candidates: string[];
+  } | null;
   embed_snippet: string;
   installation: {
     widget_key: string;

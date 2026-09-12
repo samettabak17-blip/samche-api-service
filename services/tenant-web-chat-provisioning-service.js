@@ -38,9 +38,10 @@ export const DEFAULT_WEB_CHAT_BEHAVIOR = Object.freeze({
 });
 
 function sanitizeLauncherLabel(label, fallback = 'Canlı Destek') {
+  if (label === undefined || label === null) return fallback;
   if (typeof label !== 'string') return fallback;
   const cleaned = label.replace(/<[^>]*>?/gm, '').trim();
-  if (!cleaned) return fallback;
+  if (!cleaned) return ''; // Bounded safe length, empty value = circular/minimal launcher
   return cleaned.slice(0, 50);
 }
 
@@ -542,6 +543,23 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
 
     const embedSnippet = generateWebChatEmbedSnippet(resolvedIntegration.integration_key);
 
+    let palette = null;
+    if (normalizedAppearance.logo_asset_id) {
+      try {
+        const assetRes = await client.query(
+          `SELECT extracted_palette FROM tenant_web_chat_assets
+            WHERE id = $1 AND tenant_id = $2 AND status = 'ACTIVE'`,
+          [normalizedAppearance.logo_asset_id, validTenantId]
+        );
+        if (assetRes.rowCount > 0 && assetRes.rows[0].extracted_palette) {
+          const rawPalette = assetRes.rows[0].extracted_palette;
+          if (rawPalette && typeof rawPalette === 'object' && Array.isArray(rawPalette.candidates)) {
+            palette = rawPalette;
+          }
+        }
+      } catch (e) {}
+    }
+
     return {
       tenant_id: validTenantId,
       configured: true,
@@ -570,6 +588,7 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
       },
       appearance: normalizedAppearance,
       behavior: normalizedBehavior,
+      palette: palette || null,
       embed_snippet: embedSnippet,
       installation: {
         widget_key: resolvedIntegration.integration_key,
@@ -717,6 +736,23 @@ export async function getWebChatIntegrationForTenant(databaseOrOptions, maybeTen
   const behavior = normalizeWebChatBehavior(rawConfig.behavior);
   const embedSnippet = generateWebChatEmbedSnippet(row.integration_key);
 
+  let palette = null;
+  if (appearance.logo_asset_id) {
+    try {
+      const assetRes = await database.query(
+        `SELECT extracted_palette FROM tenant_web_chat_assets
+          WHERE id = $1 AND tenant_id = $2 AND status = 'ACTIVE'`,
+        [appearance.logo_asset_id, validTenantId]
+      );
+      if (assetRes.rowCount > 0 && assetRes.rows[0].extracted_palette) {
+        const rawPalette = assetRes.rows[0].extracted_palette;
+        if (rawPalette && typeof rawPalette === 'object' && Array.isArray(rawPalette.candidates)) {
+          palette = rawPalette;
+        }
+      }
+    } catch (e) {}
+  }
+
   return {
     tenant_id: validTenantId,
     configured: true,
@@ -741,6 +777,7 @@ export async function getWebChatIntegrationForTenant(databaseOrOptions, maybeTen
     },
     appearance,
     behavior,
+    palette: palette || null,
     embed_snippet: embedSnippet,
     installation: {
       widget_key: row.integration_key,

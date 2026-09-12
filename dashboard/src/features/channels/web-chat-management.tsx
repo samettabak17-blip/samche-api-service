@@ -125,7 +125,7 @@ export function WebChatManagement() {
         setTitle(d.appearance.title || '');
         setSubtitle(d.appearance.subtitle || '');
         setLogoUrl(d.appearance.logo_url || '');
-        setLauncherLabel(d.appearance.launcher_label !== undefined && d.appearance.launcher_label !== null ? d.appearance.launcher_label : 'Canlı Destek');
+        setLauncherLabel(d.appearance.launcher_label ?? 'Canlı Destek');
         setLauncherPosition(d.appearance.launcher_position || 'right');
         setLauncherIcon(d.appearance.launcher_icon || 'chat');
         setThemeMode(d.appearance.theme_mode || 'dark');
@@ -133,6 +133,12 @@ export function WebChatManagement() {
           setPrimaryColor(d.appearance.theme.primary_color || '#0B5FFF');
           setAccentColor(d.appearance.theme.accent_color || '#10B981');
         }
+      }
+
+      if (d.palette) {
+        setExtractedPalette(d.palette);
+      } else if (!d.appearance?.logo_url) {
+        setExtractedPalette(null);
       }
 
       if (d.behavior) {
@@ -502,61 +508,105 @@ export function WebChatManagement() {
             </div>
 
             {/* Brand Logo & Upload */}
-            <div className="space-y-2 rounded-xl border border-line/70 bg-canvas/30 p-4">
-              <label className="block text-sm font-medium text-white">
-                Brand Logo
-              </label>
+            <div data-testid="brand-logo-section" className="space-y-3 rounded-xl border border-line/70 bg-canvas/30 p-4">
+              <div className="flex items-center justify-between">
+                <label className="block text-sm font-semibold text-white">
+                  Brand Logo
+                </label>
+                {logoUrl && (
+                  <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
+                    <Check size={12} /> Active Logo Configured
+                  </span>
+                )}
+              </div>
+
+              {/* Direct file input for computer upload */}
               <input
                 type="file"
                 ref={fileInputRef}
                 className="hidden"
                 accept="image/png,image/jpeg,image/webp,image/svg+xml"
                 onChange={handleLogoFileSelect}
+                aria-label="Upload logo file"
               />
-              <div className="flex flex-wrap items-center gap-3">
+
+              <div className="flex flex-wrap items-center gap-4">
+                {/* Current logo thumbnail when present */}
                 {logoUrl ? (
-                  <div className="relative h-12 w-12 rounded-lg border border-line/80 bg-stone-900/80 p-1 flex items-center justify-center overflow-hidden">
-                    <img src={logoUrl} alt="Brand Logo" className="max-h-full max-w-full object-contain" />
+                  <div className="relative h-14 w-14 rounded-lg border border-line/80 bg-stone-900/90 p-1 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
+                    <img src={logoUrl} alt="Brand Logo Thumbnail" className="max-h-full max-w-full object-contain" />
                   </div>
                 ) : (
-                  <div className="h-12 w-12 rounded-lg border border-dashed border-line bg-stone-900/40 flex items-center justify-center text-stone-500">
-                    <ImageIcon size={20} />
+                  <div className="h-14 w-14 rounded-lg border border-dashed border-line bg-stone-900/40 flex items-center justify-center text-stone-500 shrink-0">
+                    <ImageIcon size={22} />
                   </div>
                 )}
+
+                {/* Direct Action buttons */}
                 <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={logoUploading}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-canvas/60 px-3 py-1.5 text-xs font-semibold text-stone-200 hover:text-white hover:border-signal disabled:opacity-50"
-                  >
-                    <Upload size={13} className={logoUploading ? 'animate-spin' : ''} />
-                    {logoUploading ? 'Uploading & Analyzing...' : logoUrl ? 'Change Logo' : 'Upload Image'}
-                  </button>
-                  {logoUrl && (
+                  {logoUrl ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={logoUploading}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-canvas/80 px-3.5 py-2 text-xs font-semibold text-stone-200 hover:text-white hover:border-signal disabled:opacity-50 transition-colors"
+                      >
+                        <Upload size={14} className={logoUploading ? 'animate-spin' : ''} />
+                        {logoUploading ? 'Uploading & Analyzing...' : 'Replace Logo'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleLogoDelete}
+                        disabled={logoUploading}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-line/60 bg-red-950/20 px-3.5 py-2 text-xs font-semibold text-red-400 hover:bg-red-900/30 hover:border-red-500/50 disabled:opacity-50 transition-colors"
+                      >
+                        <Trash2 size={14} /> Remove Logo
+                      </button>
+                    </>
+                  ) : (
                     <button
                       type="button"
-                      onClick={handleLogoDelete}
+                      onClick={() => fileInputRef.current?.click()}
                       disabled={logoUploading}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-line/60 bg-red-950/20 px-3 py-1.5 text-xs font-semibold text-red-400 hover:bg-red-900/30 hover:border-red-500/50 disabled:opacity-50"
+                      className="inline-flex items-center gap-2 rounded-lg bg-ink border border-line px-4 py-2 text-xs font-semibold text-white shadow hover:opacity-90 disabled:opacity-50 transition-colors"
                     >
-                      <Trash2 size={13} /> Remove
+                      <Upload size={14} className={logoUploading ? 'animate-spin' : ''} />
+                      {logoUploading ? 'Uploading & Analyzing...' : 'Upload Logo / Choose File'}
                     </button>
                   )}
                 </div>
               </div>
+
+              {/* Visibly supported formats and max size */}
+              <p className="text-xs text-stone-400">
+                Supported: PNG / JPEG / WEBP / SVG &middot; Max 2 MB
+              </p>
+
               {logoUploadError && (
-                <p className="text-xs text-red-400 mt-1">{logoUploadError}</p>
+                <div className="rounded-md border border-red-500/30 bg-red-950/30 px-3 py-2 text-xs text-red-400">
+                  {logoUploadError}
+                </div>
               )}
-              <div className="pt-1">
-                <input
-                  type="url"
-                  value={logoUrl}
-                  onChange={(e) => setLogoUrl(e.target.value)}
-                  placeholder="Or enter logo URL: https://example.com/logo.png"
-                  className="w-full rounded-lg border border-line bg-canvas/40 px-3 py-1.5 text-xs text-white"
-                />
-              </div>
+
+              {/* Advanced / Secondary external URL fallback */}
+              <details className="pt-1 text-xs text-stone-400">
+                <summary className="cursor-pointer hover:text-stone-300 transition-colors font-medium">
+                  Advanced: Use external image URL
+                </summary>
+                <div className="mt-2 space-y-1">
+                  <input
+                    type="url"
+                    value={logoUrl}
+                    onChange={(e) => setLogoUrl(e.target.value)}
+                    placeholder="https://example.com/logo.png"
+                    className="w-full rounded-lg border border-line bg-canvas/40 px-3 py-1.5 text-xs text-white"
+                  />
+                  <span className="block text-[11px] text-stone-500">
+                    Direct computer upload above is recommended. External URL is available for custom CDN hosting.
+                  </span>
+                </div>
+              </details>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -589,13 +639,15 @@ export function WebChatManagement() {
               Launcher Label
               <input
                 type="text"
+                aria-label="Launcher Label"
                 value={launcherLabel}
                 onChange={(e) => setLauncherLabel(e.target.value)}
                 placeholder="Canlı Destek"
+                maxLength={50}
                 className="mt-1.5 w-full rounded-lg border border-line bg-canvas/40 px-3 py-2 text-sm text-white"
               />
               <span className="mt-1 block text-xs text-stone-400">
-                Text shown in the launcher pill button (e.g. &quot;Canlı Destek&quot; or &quot;Chat with us&quot;). Leave blank for circular icon only.
+                Text shown in the launcher pill button (normal Unicode text, TR / EN / AR). Leave empty for circular / minimal launcher.
               </span>
             </label>
 
@@ -680,41 +732,79 @@ export function WebChatManagement() {
 
             {/* Extracted Palette Suggestions */}
             {extractedPalette && (
-              <div className="rounded-xl border border-signal/30 bg-signal/10 p-4 space-y-3">
-                <div className="flex items-center justify-between">
+              <div data-testid="logo-palette-recommendations" className="rounded-xl border border-signal/30 bg-signal/10 p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2 text-xs font-semibold text-signal">
-                    <Sparkles size={14} /> Recommended Palette from Logo
+                    <Sparkles size={14} /> Logo-Derived Palette Recommendations
                   </div>
                   <button
                     type="button"
                     onClick={() => {
                       setPrimaryColor(extractedPalette.primary);
                       setAccentColor(extractedPalette.accent);
+                      setNotice('Applied recommended colors from logo to primary and accent themes.');
                       previewMutation.mutate();
                     }}
-                    className="rounded-md bg-signal px-2.5 py-1 text-xs font-semibold text-white shadow hover:opacity-90"
+                    className="rounded-md bg-signal px-3 py-1 text-xs font-semibold text-white shadow hover:opacity-90 transition-opacity"
                   >
                     Apply Recommendations
                   </button>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <span className="text-xs text-stone-300">Candidates:</span>
-                  {extractedPalette.candidates.map((hex, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => {
-                        setPrimaryColor(hex);
-                        previewMutation.mutate();
-                      }}
-                      className="group flex items-center gap-1.5 rounded-lg border border-line/60 bg-black/40 px-2.5 py-1 text-xs font-mono text-stone-300 hover:border-white"
-                      title={`Click to set ${hex} as primary`}
-                    >
-                      <span className="h-3.5 w-3.5 rounded-full border border-white/20" style={{ backgroundColor: hex }} />
-                      <span>{hex}</span>
-                    </button>
-                  ))}
+
+                {logoUrl && (
+                  <div className="flex items-center gap-3 py-1">
+                    <div className="h-10 w-10 shrink-0 rounded border border-line bg-stone-900/80 p-0.5 flex items-center justify-center overflow-hidden">
+                      <img src={logoUrl} alt="Uploaded logo preview" className="max-h-full max-w-full object-contain" />
+                    </div>
+                    <div className="text-xs text-stone-300">
+                      <span>Colors extracted from uploaded logo</span>
+                      {extractedPalette.dominant && (
+                        <span className="block text-stone-400">Dominant tone: <code className="text-white font-mono">{extractedPalette.dominant}</code></span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div className="rounded-lg border border-line/50 bg-black/20 p-2.5">
+                    <span className="text-xs text-stone-400 block mb-1">Recommended Primary</span>
+                    <div className="flex items-center gap-2">
+                      <span className="h-5 w-5 rounded-full border border-white/20 shrink-0" style={{ backgroundColor: extractedPalette.primary }} />
+                      <code className="text-xs font-mono text-white">{extractedPalette.primary}</code>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-line/50 bg-black/20 p-2.5">
+                    <span className="text-xs text-stone-400 block mb-1">Recommended Accent</span>
+                    <div className="flex items-center gap-2">
+                      <span className="h-5 w-5 rounded-full border border-white/20 shrink-0" style={{ backgroundColor: extractedPalette.accent }} />
+                      <code className="text-xs font-mono text-white">{extractedPalette.accent}</code>
+                    </div>
+                  </div>
                 </div>
+
+                {extractedPalette.candidates && extractedPalette.candidates.length > 0 && (
+                  <div className="pt-1">
+                    <span className="text-xs text-stone-300 block mb-1.5">Extracted / Suggested Colors:</span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {extractedPalette.candidates.map((hex, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            setPrimaryColor(hex);
+                            setNotice(`Selected candidate color ${hex} as primary.`);
+                            previewMutation.mutate();
+                          }}
+                          className="group flex items-center gap-1.5 rounded-lg border border-line/60 bg-black/40 px-2.5 py-1 text-xs font-mono text-stone-300 hover:border-white transition-colors"
+                          title={`Click to set ${hex} as primary`}
+                        >
+                          <span className="h-3.5 w-3.5 rounded-full border border-white/20" style={{ backgroundColor: hex }} />
+                          <span>{hex}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -765,11 +855,15 @@ export function WebChatManagement() {
                 <div className="grid grid-cols-2 gap-2 pt-2 border-t border-line/40 text-xs">
                   <div className="rounded bg-black/20 p-2">
                     <span className="text-stone-400">Primary button:</span>
-                    <strong className="block text-sm text-white">{contrastResult.contrast.primary_button}:1</strong>
+                    <strong className="block text-sm text-white">
+                      {contrastResult.contrast?.primary_button ?? '4.5'}:1
+                    </strong>
                   </div>
                   <div className="rounded bg-black/20 p-2">
                     <span className="text-stone-400">Surface text:</span>
-                    <strong className="block text-sm text-white">{contrastResult.contrast.text_surface}:1</strong>
+                    <strong className="block text-sm text-white">
+                      {contrastResult.contrast?.text_surface ?? '7.0'}:1
+                    </strong>
                   </div>
                 </div>
               )}
