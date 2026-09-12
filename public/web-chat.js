@@ -116,6 +116,7 @@
 
   var PRICE_DETECTION_REGEX = /(?:[\$€£₺]\s*\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?\s*(?:[\$€£₺]|TL|USD|EUR|TRY))/i;
   var CTA_FILTER_REGEX = /^(?:sepete\s*ekle|add\s*to\s*cart|satın\s*al|buy\s*now|incele|view|detay|sepet|tüm\s*ürünler|satın\s*alın)$/i;
+  var UI_CONTROL_REGEX = /^(?:sırala|filtrele|filtre|kategori|kategoriler|sort|filter|category|categories|pages?|sayfa|göster|seçiniz)\b/i;
 
   function extractVisibleProductsFromDom() {
     if (typeof document === 'undefined') return [];
@@ -177,11 +178,10 @@
       }
 
       if (!name) continue;
-      if (PRICE_DETECTION_REGEX.test(name) || CTA_FILTER_REGEX.test(name) || name.length < 3) continue;
+      if (PRICE_DETECTION_REGEX.test(name) || CTA_FILTER_REGEX.test(name) || UI_CONTROL_REGEX.test(name) || name.length < 3) continue;
 
       var nameKey = name.toLowerCase();
       if (seenNames.indexOf(nameKey) !== -1) continue;
-      seenNames.push(nameKey);
 
       var price = '';
       var priceEl = card.querySelector('[class*="price"], [itemprop="price"], .amount, [class*="cost"]');
@@ -193,6 +193,11 @@
         var cm = cardText.match(PRICE_DETECTION_REGEX);
         if (cm) price = safeString(cm[0].trim(), 50);
       }
+
+      // Valid product cards in a listing must have either a price or a product detail link
+      if (!price && (!href || href === '#' || href === window.location.href)) continue;
+
+      seenNames.push(nameKey);
 
       visibleProducts.push({
         type: 'PRODUCT',
