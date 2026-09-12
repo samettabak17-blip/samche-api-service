@@ -12,6 +12,11 @@ export const DEFAULT_WEB_CHAT_APPEARANCE = Object.freeze({
   launcher_position: 'right',
   launcher_icon: 'chat',
   theme_mode: 'dark',
+  launcher_style: 'pill',
+  glow_intensity: 80,
+  glow_spread: 70,
+  pulse_animation: 'normal',
+  animation_speed: 'normal',
   theme: {
     primary_color: '#2563EB',
     accent_color: '#3B82F6',
@@ -20,6 +25,10 @@ export const DEFAULT_WEB_CHAT_APPEARANCE = Object.freeze({
     surface_solid: '#111827',
     glow_color: 'rgba(37, 99, 235, 0.35)',
     glow_soft: 'rgba(37, 99, 235, 0.18)',
+    glow_ring: 'rgba(37, 99, 235, 0.65)',
+    glow_spread_px: 28,
+    glow_halo_px: 45,
+    pulse_duration: '3.6s',
     launcher_text: '#FFFFFF',
     text_color: '#F8FAFC',
     muted_color: '#94A3B8',
@@ -74,6 +83,36 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
     ? String(input.theme_mode).toLowerCase()
     : 'dark';
 
+  const VALID_LAUNCHER_STYLES = ['pill', 'circular', 'minimal', 'glass', 'neon_pulse', 'custom'];
+  const launcherStyleCandidate = typeof input?.launcher_style === 'string'
+    ? input.launcher_style.trim().toLowerCase()
+    : 'pill';
+  const launcherStyle = VALID_LAUNCHER_STYLES.includes(launcherStyleCandidate)
+    ? launcherStyleCandidate
+    : 'pill';
+
+  const rawIntensity = Number(input?.glow_intensity);
+  const glowIntensity = Number.isFinite(rawIntensity)
+    ? Math.max(0, Math.min(100, Math.round(rawIntensity)))
+    : 80;
+
+  const rawSpread = Number(input?.glow_spread);
+  const glowSpread = Number.isFinite(rawSpread)
+    ? Math.max(0, Math.min(100, Math.round(rawSpread)))
+    : 70;
+
+  const rawPulse = String(input?.pulse_animation || 'normal').toLowerCase().trim();
+  const pulseAnimation = rawPulse === 'smooth_pulse' || rawPulse === 'smooth'
+    ? 'normal'
+    : ['none', 'subtle', 'normal', 'strong'].includes(rawPulse)
+    ? rawPulse
+    : 'normal';
+
+  const rawSpeed = String(input?.animation_speed || 'normal').toLowerCase().trim();
+  const animationSpeed = ['slow', 'normal', 'fast'].includes(rawSpeed)
+    ? rawSpeed
+    : 'normal';
+
   const primaryCandidate = input?.theme?.primary_color || input?.primary_color || '#2563EB';
   const accentCandidate = input?.theme?.accent_color || input?.accent_color || null;
 
@@ -87,6 +126,11 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
     primaryColor: primaryCandidate,
     accentColor: accentCandidate,
     mode: themeMode === 'auto' ? 'dark' : themeMode,
+    glowIntensity,
+    glowSpread,
+    pulseAnimation,
+    animationSpeed,
+    launcherStyle,
   });
 
   return {
@@ -100,6 +144,11 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
     launcher_position: launcherPosition,
     launcher_icon: launcherIcon,
     theme_mode: themeMode,
+    launcher_style: launcherStyle,
+    glow_intensity: glowIntensity,
+    glow_spread: glowSpread,
+    pulse_animation: pulseAnimation,
+    animation_speed: animationSpeed,
     theme: {
       primary_color: tokens.primary,
       accent_color: tokens.accent,
@@ -108,6 +157,10 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
       surface_solid: tokens.surface_solid,
       glow_color: tokens.glow,
       glow_soft: tokens.glow_soft,
+      glow_ring: tokens.glow_ring,
+      glow_spread_px: tokens.glow_spread_px,
+      glow_halo_px: tokens.glow_halo_px,
+      pulse_duration: tokens.pulse_duration,
       launcher_text: tokens.launcher_text,
       text_color: tokens.text,
       muted_color: tokens.muted,

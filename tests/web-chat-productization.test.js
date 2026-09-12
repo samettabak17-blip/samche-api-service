@@ -458,7 +458,167 @@ test('Dashboard and public web-chat.js both implement canonical asset URL resolu
   assert.match(webChatJsSource, /resolveWebChatAssetUrl/);
   assert.match(webChatJsSource, /resolveApiBaseUrl/);
 });
+test('Launcher style and glow schema normalization enforces bounds and safe defaults', () => {
+  // 1. Defaults when fields omitted (backward compatibility)
+  const defaultAppearance = normalizeWebChatAppearance({}, 'Acme');
+  assert.equal(defaultAppearance.launcher_style, 'pill');
+  assert.equal(defaultAppearance.glow_intensity, 80);
+  assert.equal(defaultAppearance.glow_spread, 70);
+  assert.equal(defaultAppearance.pulse_animation, 'normal');
+  assert.equal(defaultAppearance.animation_speed, 'normal');
+  assert.ok(defaultAppearance.theme.glow_ring);
+  assert.ok(defaultAppearance.theme.glow_spread_px >= 10);
+  assert.ok(defaultAppearance.theme.glow_halo_px >= 20);
+  assert.equal(defaultAppearance.theme.pulse_duration, '3.6s');
 
+  // 2. All canonical styles supported
+  for (const style of ['pill', 'circular', 'minimal', 'glass', 'neon_pulse', 'custom']) {
+    const app = normalizeWebChatAppearance({ launcher_style: style }, 'Acme');
+    assert.equal(app.launcher_style, style);
+  }
 
+  // 3. Invalid launcher style falls back to 'pill'
+  const invalidStyleApp = normalizeWebChatAppearance({ launcher_style: 'invalid_marquee_style' }, 'Acme');
+  assert.equal(invalidStyleApp.launcher_style, 'pill');
 
+  // 4. Glow intensity bounds clamping [0, 100]
+  assert.equal(normalizeWebChatAppearance({ glow_intensity: -50 }).glow_intensity, 0);
+  assert.equal(normalizeWebChatAppearance({ glow_intensity: 150 }).glow_intensity, 100);
+  assert.equal(normalizeWebChatAppearance({ glow_intensity: 'abc' }).glow_intensity, 80);
+  assert.equal(normalizeWebChatAppearance({ glow_intensity: 45 }).glow_intensity, 45);
+
+  // 5. Glow spread bounds clamping [0, 100]
+  assert.equal(normalizeWebChatAppearance({ glow_spread: -10 }).glow_spread, 0);
+  assert.equal(normalizeWebChatAppearance({ glow_spread: 250 }).glow_spread, 100);
+  assert.equal(normalizeWebChatAppearance({ glow_spread: 'xyz' }).glow_spread, 70);
+  assert.equal(normalizeWebChatAppearance({ glow_spread: 60 }).glow_spread, 60);
+
+  // 6. Pulse animation normalization
+  assert.equal(normalizeWebChatAppearance({ pulse_animation: 'none' }).pulse_animation, 'none');
+  assert.equal(normalizeWebChatAppearance({ pulse_animation: 'subtle' }).pulse_animation, 'subtle');
+  assert.equal(normalizeWebChatAppearance({ pulse_animation: 'normal' }).pulse_animation, 'normal');
+  assert.equal(normalizeWebChatAppearance({ pulse_animation: 'strong' }).pulse_animation, 'strong');
+  assert.equal(normalizeWebChatAppearance({ pulse_animation: 'smooth_pulse' }).pulse_animation, 'normal'); // alias
+  assert.equal(normalizeWebChatAppearance({ pulse_animation: 'unknown' }).pulse_animation, 'normal');
+
+  // 7. Animation speed normalization
+  assert.equal(normalizeWebChatAppearance({ animation_speed: 'slow' }).animation_speed, 'slow');
+  assert.equal(normalizeWebChatAppearance({ animation_speed: 'normal' }).animation_speed, 'normal');
+  assert.equal(normalizeWebChatAppearance({ animation_speed: 'fast' }).animation_speed, 'fast');
+  assert.equal(normalizeWebChatAppearance({ animation_speed: 'turbo' }).animation_speed, 'normal');
+});
+
+test('Theme token derivation generates distinct luminous rings and ambient halos for different tenant brand palettes', () => {
+  // Cyan brand
+  const cyanTokens = deriveWebChatThemeTokens({
+    primaryColor: '#06B6D4',
+    accentColor: '#3B82F6',
+    glowIntensity: 85,
+    glowSpread: 75,
+    pulseAnimation: 'normal',
+    animationSpeed: 'normal',
+    launcherStyle: 'pill',
+  });
+  assert.ok(cyanTokens.glow_ring.includes('6, 182, 212'));
+  assert.ok(cyanTokens.glow.includes('6, 182, 212'));
+  assert.ok(cyanTokens.glow_spread_px >= 20);
+  assert.ok(cyanTokens.glow_halo_px >= 40);
+  assert.equal(cyanTokens.pulse_duration, '3.6s');
+
+  // Amber/Gold brand
+  const goldTokens = deriveWebChatThemeTokens({
+    primaryColor: '#D97706',
+    accentColor: '#F59E0B',
+    glowIntensity: 90,
+    glowSpread: 80,
+    pulseAnimation: 'strong',
+    animationSpeed: 'fast',
+    launcherStyle: 'circular',
+  });
+  assert.ok(goldTokens.glow_ring.includes('217, 119, 6'));
+  assert.notEqual(goldTokens.glow_ring, cyanTokens.glow_ring);
+  assert.equal(goldTokens.pulse_duration, '2.2s');
+
+  // Emerald brand
+  const emeraldTokens = deriveWebChatThemeTokens({
+    primaryColor: '#059669',
+    accentColor: '#10B981',
+    glowIntensity: 30,
+    glowSpread: 25,
+    pulseAnimation: 'none',
+    animationSpeed: 'slow',
+    launcherStyle: 'minimal',
+  });
+  assert.ok(emeraldTokens.glow_ring.includes('5, 150, 105'));
+  assert.notEqual(emeraldTokens.glow_ring, cyanTokens.glow_ring);
+  assert.notEqual(emeraldTokens.glow_ring, goldTokens.glow_ring);
+  assert.equal(emeraldTokens.pulse_duration, '5.5s');
+});
+
+test('public/web-chat.js implements all canonical launcher style modes, pulse keyframes, and single-surface open state', () => {
+  // Styles implemented
+  assert.match(webChatJsSource, /\.samche-style-pill/);
+  assert.match(webChatJsSource, /\.samche-style-circular/);
+  assert.match(webChatJsSource, /\.samche-style-minimal/);
+  assert.match(webChatJsSource, /\.samche-style-glass/);
+  assert.match(webChatJsSource, /\.samche-style-neon-pulse/);
+  assert.match(webChatJsSource, /\.samche-style-custom/);
+
+  // Logo housing and badge
+  assert.match(webChatJsSource, /\.samche-launcher-badge/);
+  assert.match(webChatJsSource, /\.samche-launcher-badge img/);
+
+  // Pulse keyframes and animation duration variable
+  assert.match(webChatJsSource, /@keyframes samche-glow-breathe/);
+  assert.match(webChatJsSource, /@keyframes samche-glow-pulse-strong/);
+  assert.match(webChatJsSource, /@keyframes samche-glow-pulse-subtle/);
+  assert.match(webChatJsSource, /--chat-pulse-duration/);
+  assert.match(webChatJsSource, /--chat-glow-ring/);
+  assert.match(webChatJsSource, /--chat-glow-spread/);
+  assert.match(webChatJsSource, /--chat-glow-halo/);
+
+  // Single-surface open state: launcher hides smoothly, no competing close button
+  assert.match(webChatJsSource, /\.samche-launcher\.samche-launcher-hidden/);
+  assert.match(webChatJsSource, /launcher\.classList\.add\('samche-launcher-hidden'\)/);
+  assert.match(webChatJsSource, /launcher\.classList\.remove\('samche-launcher-hidden'\)/);
+
+  // Minimize button in panel header
+  assert.match(webChatJsSource, /\.samche-minimize-btn/);
+  assert.match(webChatJsSource, /MINIMIZE_ICON_SVG/);
+});
+
+test('Dashboard WebChatManagement exposes complete Launcher Style & Glow controls and deterministic preview', () => {
+  const updatedSource = fs.readFileSync(new URL('../dashboard/src/features/channels/web-chat-management.tsx', import.meta.url), 'utf8');
+
+  // Controls for 6 styles
+  assert.match(updatedSource, /Launcher Style &amp; Glow/);
+  assert.match(updatedSource, /LAUNCHER_STYLE_OPTIONS/);
+  assert.match(updatedSource, /LauncherStyleIcon/);
+
+  // Sliders for glow intensity and spread
+  assert.match(updatedSource, /Glow Intensity/);
+  assert.match(updatedSource, /glowIntensity/);
+  assert.match(updatedSource, /Glow Spread/);
+  assert.match(updatedSource, /glowSpread/);
+
+  // Selects for pulse and speed
+  assert.match(updatedSource, /Pulse Animation/);
+  assert.match(updatedSource, /pulseAnimation/);
+  assert.match(updatedSource, /Animation Speed/);
+  assert.match(updatedSource, /animationSpeed/);
+
+  // Deterministic preview states (both, closed, open)
+  assert.match(updatedSource, /LivePreviewCanvas/);
+  assert.match(updatedSource, /previewState/);
+  assert.match(updatedSource, /setPreviewState\('both'\)/);
+  assert.match(updatedSource, /setPreviewState\('closed'\)/);
+  assert.match(updatedSource, /setPreviewState\('open'\)/);
+
+  // Persistence payload includes all new fields
+  assert.match(updatedSource, /launcher_style:\s*launcherStyle/);
+  assert.match(updatedSource, /glow_intensity:\s*glowIntensity/);
+  assert.match(updatedSource, /glow_spread:\s*glowSpread/);
+  assert.match(updatedSource, /pulse_animation:\s*pulseAnimation/);
+  assert.match(updatedSource, /animation_speed:\s*animationSpeed/);
+});
 

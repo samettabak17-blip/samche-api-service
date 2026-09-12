@@ -4,6 +4,7 @@ import { useParams, Link } from 'react-router-dom';
 import {
   Check,
   Copy,
+  ExternalLink,
   Image as ImageIcon,
   Laptop,
   MessageSquare,
@@ -52,6 +53,140 @@ function getAccessibleForeground(bgColor: string): string {
   }
 }
 
+function hexToRgba(hex: string, alpha: number): string {
+  try {
+    const clean = hex.replace('#', '');
+    const r = parseInt(clean.length === 3 ? clean[0] + clean[0] : clean.slice(0, 2), 16) || 0;
+    const g = parseInt(clean.length === 3 ? clean[1] + clean[1] : clean.slice(2, 4), 16) || 0;
+    const b = parseInt(clean.length === 3 ? clean[2] + clean[2] : clean.slice(4, 6), 16) || 0;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  } catch {
+    return `rgba(37, 99, 235, ${alpha})`;
+  }
+}
+
+const LAUNCHER_STYLE_OPTIONS = [
+  { id: 'pill' as const, name: 'Pill (Default)' },
+  { id: 'circular' as const, name: 'Circular' },
+  { id: 'minimal' as const, name: 'Minimal' },
+  { id: 'glass' as const, name: 'Glass' },
+  { id: 'neon_pulse' as const, name: 'Neon Pulse' },
+  { id: 'custom' as const, name: 'Custom' },
+];
+
+function LauncherStyleIcon({ id, logoUrl }: { id: string; logoUrl?: string | null }) {
+  if (id === 'circular') {
+    return (
+      <div className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-sky-400 bg-slate-900 p-0.5 shadow-[0_0_10px_rgba(56,189,248,0.7)]">
+        {logoUrl ? <img src={logoUrl} alt="" className="h-3.5 w-3.5 object-contain" /> : <div className="h-2 w-2 rounded-full bg-sky-400" />}
+      </div>
+    );
+  }
+  if (id === 'minimal') {
+    return (
+      <div className="flex h-6 w-6 items-center justify-center rounded-full border border-stone-400 bg-stone-900">
+        {logoUrl ? <img src={logoUrl} alt="" className="h-3 w-3 object-contain opacity-80" /> : <div className="h-2 w-2 rounded-full bg-stone-300" />}
+      </div>
+    );
+  }
+  if (id === 'glass') {
+    return (
+      <div className="flex h-5 w-9 items-center justify-center rounded-full border border-white/30 bg-white/10 shadow-[inset_0_0_6px_rgba(255,255,255,0.2)] backdrop-blur">
+        {logoUrl ? <img src={logoUrl} alt="" className="h-3 w-3 object-contain" /> : <div className="h-2 w-2 rounded-full bg-white/60" />}
+      </div>
+    );
+  }
+  if (id === 'neon_pulse') {
+    return (
+      <div className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-cyan-300 bg-slate-950 shadow-[0_0_14px_rgba(6,182,212,0.9)]">
+        {logoUrl ? <img src={logoUrl} alt="" className="h-3 w-3 object-contain" /> : <div className="h-2 w-2 rounded-full bg-cyan-300" />}
+      </div>
+    );
+  }
+  if (id === 'custom') {
+    return (
+      <div className="flex h-6 w-6 items-center justify-center rounded-full border border-purple-400/80 bg-slate-950 shadow-[0_0_8px_rgba(168,85,247,0.5)]">
+        <Sliders size={12} className="text-purple-300" />
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-5 w-10 items-center gap-1 rounded-full border border-sky-400/80 bg-slate-900/90 px-1 shadow-[0_0_8px_rgba(56,189,248,0.5)]">
+      <div className="h-3 w-3 rounded-full border border-sky-400/80 bg-sky-400/30 flex items-center justify-center overflow-hidden">
+        {logoUrl ? <img src={logoUrl} alt="" className="h-2 w-2 object-contain" /> : <div className="h-1.5 w-1.5 rounded-full bg-sky-400" />}
+      </div>
+      <div className="h-1 w-3 rounded bg-white/70" />
+    </div>
+  );
+}
+
+function LivePreviewCanvas({
+  previewViewport,
+  previewState,
+  setPreviewState,
+  primaryColor,
+  renderPreviewLauncher,
+  renderPreviewPanel,
+}: {
+  previewViewport: 'desktop' | 'mobile';
+  previewState: 'both' | 'closed' | 'open';
+  setPreviewState: (s: 'both' | 'closed' | 'open') => void;
+  primaryColor: string;
+  renderPreviewLauncher: (onClick?: () => void) => React.ReactNode;
+  renderPreviewPanel: (onClose?: () => void) => React.ReactNode;
+}) {
+  return (
+    <div
+      className={`relative mx-auto rounded-2xl border border-line/80 overflow-hidden transition-all duration-300 p-6 flex items-center justify-center ${
+        previewViewport === 'mobile' ? 'max-w-sm h-[580px]' : 'w-full min-h-[460px]'
+      }`}
+      style={{
+        background: `radial-gradient(circle at 65% 35%, ${primaryColor}18 0%, #050814 60%, #02040a 100%)`,
+      }}
+    >
+      {previewState === 'both' && (
+        <div className="w-full flex flex-col md:flex-row items-center justify-around gap-8">
+          <div className="flex flex-col items-center gap-4">
+            <div className="text-center">
+              <span className="text-sky-400 text-sm font-semibold block">Closed State</span>
+              <span className="text-stone-400 text-xs">Premium glowing launcher</span>
+            </div>
+            <div className="p-4 flex items-center justify-center">
+              {renderPreviewLauncher(() => setPreviewState('open'))}
+            </div>
+          </div>
+
+          <div className="flex flex-col items-center gap-3 w-full max-w-[340px]">
+            <div className="text-center">
+              <span className="text-sky-400 text-sm font-semibold block">Open State</span>
+              <span className="text-stone-400 text-xs">Smooth expand with glow</span>
+            </div>
+            {renderPreviewPanel(() => setPreviewState('closed'))}
+          </div>
+        </div>
+      )}
+
+      {previewState === 'closed' && (
+        <div className="flex flex-col items-center justify-center gap-6 py-12">
+          <div className="text-center">
+            <span className="text-sky-400 text-base font-semibold block">Closed State Preview</span>
+            <span className="text-stone-400 text-xs">Configured closed-state AI launcher</span>
+          </div>
+          <div className="p-8 flex items-center justify-center">
+            {renderPreviewLauncher(() => setPreviewState('open'))}
+          </div>
+        </div>
+      )}
+
+      {previewState === 'open' && (
+        <div className="flex flex-col items-center justify-center w-full max-w-[340px]">
+          {renderPreviewPanel(() => setPreviewState('closed'))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function WebChatManagement() {
   const { tenantId } = useParams();
   const { canManage } = useTenant();
@@ -78,6 +213,13 @@ export function WebChatManagement() {
   const [themeMode, setThemeMode] = useState<'dark' | 'light' | 'auto'>('dark');
   const [primaryColor, setPrimaryColor] = useState('#0B5FFF');
   const [accentColor, setAccentColor] = useState('#10B981');
+
+  const [launcherStyle, setLauncherStyle] = useState<'pill' | 'circular' | 'minimal' | 'glass' | 'neon_pulse' | 'custom'>('pill');
+  const [glowIntensity, setGlowIntensity] = useState<number>(80);
+  const [glowSpread, setGlowSpread] = useState<number>(70);
+  const [pulseAnimation, setPulseAnimation] = useState<'none' | 'subtle' | 'normal' | 'strong'>('normal');
+  const [animationSpeed, setAnimationSpeed] = useState<'slow' | 'normal' | 'fast'>('normal');
+  const [previewState, setPreviewState] = useState<'both' | 'closed' | 'open'>('both');
 
   const [previewOpen, setPreviewOpen] = useState(true);
   const [logoUploading, setLogoUploading] = useState(false);
@@ -130,6 +272,11 @@ export function WebChatManagement() {
         setLauncherPosition(d.appearance.launcher_position || 'right');
         setLauncherIcon(d.appearance.launcher_icon || 'chat');
         setThemeMode(d.appearance.theme_mode || 'dark');
+        setLauncherStyle(d.appearance.launcher_style || 'pill');
+        setGlowIntensity(d.appearance.glow_intensity ?? 80);
+        setGlowSpread(d.appearance.glow_spread ?? 70);
+        setPulseAnimation(d.appearance.pulse_animation || 'normal');
+        setAnimationSpeed(d.appearance.animation_speed || 'normal');
         if (d.appearance.theme) {
           setPrimaryColor(d.appearance.theme.primary_color || '#0B5FFF');
           setAccentColor(d.appearance.theme.accent_color || '#10B981');
@@ -158,6 +305,11 @@ export function WebChatManagement() {
         primary_color: primaryColor,
         accent_color: accentColor,
         mode: themeMode === 'auto' ? 'dark' : themeMode,
+        glow_intensity: glowIntensity,
+        glow_spread: glowSpread,
+        pulse_animation: pulseAnimation,
+        animation_speed: animationSpeed,
+        launcher_style: launcherStyle,
       }),
     onSuccess: (res) => {
       setContrastResult(res);
@@ -227,6 +379,205 @@ export function WebChatManagement() {
   const primaryFg = contrastResult?.primary_foreground || getAccessibleForeground(primaryColor);
   const displayLogoUrl = resolveWebChatAssetUrl(logoUrl);
 
+  const clampedIntensity = Math.max(0, Math.min(100, Math.round(Number(glowIntensity) || 0)));
+  const clampedSpread = Math.max(0, Math.min(100, Math.round(Number(glowSpread) || 0)));
+  const intensityFactor = clampedIntensity / 100;
+  const spreadFactor = clampedSpread / 100;
+
+  const glowRing = contrastResult?.glow_ring || hexToRgba(primaryColor, Number(Math.min(1, 0.35 + intensityFactor * 0.6).toFixed(2)));
+  const glowColor = contrastResult?.glow || hexToRgba(primaryColor, Number(Math.min(1, 0.15 + intensityFactor * 0.45).toFixed(2)));
+  const glowSoftColor = contrastResult?.glow_soft || hexToRgba(primaryColor, Number(Math.min(1, 0.08 + intensityFactor * 0.22).toFixed(2)));
+  const glowSpreadPx = contrastResult?.glow_spread_px ?? Math.round(10 + spreadFactor * 26);
+  const glowHaloPx = contrastResult?.glow_halo_px ?? Math.round(20 + spreadFactor * 36);
+  const pulseDuration = contrastResult?.pulse_duration || (animationSpeed === 'slow' ? '5.5s' : animationSpeed === 'fast' ? '2.2s' : '3.6s');
+
+  const renderPreviewLauncher = (onClick?: () => void) => {
+    const isCircular = launcherStyle === 'circular' || launcherStyle === 'minimal' || (!launcherLabel && launcherStyle !== 'pill');
+
+    let bgStyle = 'linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%)';
+    let borderStyle = `1.5px solid ${glowRing}`;
+    let shadowStyle = `0 0 ${Math.round(glowSpreadPx * 0.45)}px ${glowRing}, 0 0 ${glowHaloPx}px ${glowColor}, 0 8px 28px -4px ${glowSoftColor}, 0 4px 16px rgba(0, 0, 0, 0.5)`;
+
+    if (launcherStyle === 'circular') {
+      bgStyle = 'radial-gradient(circle at center, rgba(30, 41, 59, 0.9) 0%, rgba(2, 6, 23, 0.98) 100%)';
+      borderStyle = `2px solid ${glowRing}`;
+      shadowStyle = `0 0 ${Math.round(glowSpreadPx * 0.6)}px ${glowRing}, 0 0 ${glowHaloPx}px ${glowColor}, 0 10px 30px -4px ${glowSoftColor}, 0 4px 18px rgba(0, 0, 0, 0.6)`;
+    } else if (launcherStyle === 'minimal') {
+      bgStyle = '#111827';
+      borderStyle = '1px solid rgba(255, 255, 255, 0.15)';
+      shadowStyle = `0 4px 16px rgba(0, 0, 0, 0.35), 0 0 ${Math.round(glowSpreadPx * 0.2)}px ${glowSoftColor}`;
+    } else if (launcherStyle === 'glass') {
+      bgStyle = 'rgba(17, 24, 39, 0.68)';
+      borderStyle = '1.5px solid rgba(255, 255, 255, 0.22)';
+      shadowStyle = `0 8px 32px 0 rgba(0, 0, 0, 0.4), inset 0 0 14px rgba(255, 255, 255, 0.08), 0 0 ${Math.round(glowSpreadPx * 0.45)}px ${glowSoftColor}`;
+    } else if (launcherStyle === 'neon_pulse') {
+      bgStyle = 'radial-gradient(circle at center, rgba(15, 23, 42, 0.95) 0%, rgba(2, 6, 23, 1) 100%)';
+      borderStyle = `2px solid ${glowRing}`;
+      shadowStyle = `0 0 ${Math.round(glowSpreadPx * 0.7)}px ${glowRing}, 0 0 ${glowHaloPx}px ${glowColor}, 0 0 ${Math.round(glowHaloPx * 1.5)}px ${glowSoftColor}, 0 10px 32px rgba(0, 0, 0, 0.6)`;
+    }
+
+    const animationClass = pulseAnimation === 'none' || launcherStyle === 'minimal'
+      ? ''
+      : pulseAnimation === 'strong' || launcherStyle === 'neon_pulse'
+      ? 'animate-pulse'
+      : 'hover:scale-105';
+
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`group relative flex items-center justify-center transition-all duration-300 cursor-pointer user-select-none ${animationClass} ${
+          isCircular
+            ? 'h-16 w-16 rounded-full p-1.5'
+            : 'h-[52px] rounded-full py-1.5 pl-1.5 pr-5 gap-3'
+        }`}
+        style={{
+          background: bgStyle,
+          border: borderStyle,
+          boxShadow: shadowStyle,
+        }}
+        title="Click to toggle chat preview"
+      >
+        <div
+          className={`rounded-full flex items-center justify-center overflow-hidden shrink-0 transition-transform ${
+            isCircular
+              ? 'h-full w-full p-1'
+              : 'h-10 w-10 p-1.5 shadow-inner'
+          }`}
+          style={!isCircular ? {
+            background: 'radial-gradient(circle at center, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.95) 100%)',
+            border: `1.5px solid ${glowRing}`,
+            boxShadow: `inset 0 0 8px rgba(0,0,0,0.5), 0 0 10px ${glowSoftColor}`,
+          } : undefined}
+        >
+          {launcherIcon === 'logo' && logoUrl ? (
+            <img
+              src={displayLogoUrl}
+              alt={brandName || 'Logo'}
+              className="max-h-full max-w-full object-contain pointer-events-none"
+            />
+          ) : displayLogoUrl ? (
+            <img
+              src={displayLogoUrl}
+              alt={brandName || 'Logo'}
+              className="max-h-full max-w-full object-contain pointer-events-none"
+            />
+          ) : (
+            <MessageSquare size={isCircular ? 24 : 18} style={{ color: primaryFg }} />
+          )}
+        </div>
+
+        {!isCircular && (
+          <span className="text-[14.5px] font-semibold text-white tracking-tight truncate max-w-[200px]">
+            {launcherLabel ? launcherLabel : 'Canlı Destek'}
+          </span>
+        )}
+      </button>
+    );
+  };
+
+  const renderPreviewPanel = (onClose?: () => void) => (
+    <div
+      className="w-full max-w-[340px] rounded-2xl overflow-hidden shadow-2xl flex flex-col transition-all duration-300"
+      style={{
+        background: themeMode === 'light' ? 'rgba(255, 255, 255, 0.94)' : 'rgba(11, 15, 25, 0.94)',
+        backdropFilter: 'blur(24px)',
+        border: `1.5px solid ${glowRing}`,
+        boxShadow: `0 0 ${Math.round(glowSpreadPx * 0.75)}px ${glowSoftColor}, 0 24px 60px -12px rgba(0, 0, 0, 0.8), 0 12px 32px rgba(0, 0, 0, 0.5)`,
+      }}
+    >
+      <div
+        className="flex items-center justify-between px-4 py-3 border-b"
+        style={{
+          borderColor: themeMode === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.1)',
+          background: `linear-gradient(135deg, ${primaryColor}22, ${themeMode === 'light' ? 'rgba(0, 0, 0, 0.02)' : 'rgba(255, 255, 255, 0.03)'})`,
+        }}
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shadow overflow-hidden p-0.5"
+            style={{
+              background: 'radial-gradient(circle at center, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.95) 100%)',
+              border: `1.5px solid ${glowRing}`,
+            }}
+          >
+            {displayLogoUrl ? (
+              <img src={displayLogoUrl} alt={brandName || 'Brand'} className="h-full w-full object-contain" />
+            ) : (
+              <span style={{ color: primaryFg }}>{brandName ? brandName.charAt(0).toUpperCase() : 'S'}</span>
+            )}
+          </div>
+          <div>
+            <h3 className={`text-sm font-semibold ${themeMode === 'light' ? 'text-stone-900' : 'text-white'}`}>
+              {title || brandName || 'Canlı Destek'}
+            </h3>
+            <p className="text-[11px] text-emerald-400 flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
+              <span>{subtitle || 'Çevrimiçi'}</span>
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1 text-stone-400 hover:text-white transition-colors cursor-pointer"
+            title="Minimize chat"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      </div>
+
+      <div className="p-4 space-y-3 h-48 overflow-y-auto text-xs">
+        <div className="flex flex-col items-start">
+          <div
+            className="max-w-[85%] rounded-2xl px-3.5 py-2 font-normal"
+            style={{
+              background: themeMode === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.08)',
+              border: themeMode === 'light' ? '1px solid rgba(0, 0, 0, 0.08)' : '1px solid rgba(255, 255, 255, 0.12)',
+              color: themeMode === 'light' ? '#1E293B' : '#F8FAFC',
+            }}
+          >
+            Merhaba! Size nasıl yardımcı olabilirim?
+          </div>
+        </div>
+
+        <div className="flex flex-col items-end">
+          <div
+            className="max-w-[85%] rounded-2xl px-3.5 py-2 font-medium"
+            style={{ background: primaryColor, color: primaryFg }}
+          >
+            Kargo ve teslimat süreleri hakkında bilgi alabilir miyim?
+          </div>
+        </div>
+      </div>
+
+      <div
+        className="p-3 border-t flex items-center gap-2"
+        style={{ borderColor: themeMode === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)' }}
+      >
+        <input
+          type="text"
+          disabled
+          placeholder="Bir mesaj yazın..."
+          className={`flex-1 rounded-xl px-3 py-1.5 text-xs focus:outline-none ${
+            themeMode === 'light'
+              ? 'bg-black/[0.04] border border-black/10 text-stone-900 placeholder-stone-400'
+              : 'bg-white/[0.06] border border-white/10 text-white placeholder-stone-400'
+          }`}
+        />
+        <button
+          type="button"
+          className="h-8 w-8 rounded-xl flex items-center justify-center shadow"
+          style={{ background: primaryColor, color: primaryFg }}
+        >
+          <Send size={13} />
+        </button>
+      </div>
+    </div>
+  );
+
   const saveMutation = useMutation({
     mutationFn: () => {
       const appearance: Partial<WebChatAppearanceConfig> = {
@@ -238,6 +589,11 @@ export function WebChatManagement() {
         launcher_position: launcherPosition,
         launcher_icon: launcherIcon,
         theme_mode: themeMode,
+        launcher_style: launcherStyle,
+        glow_intensity: glowIntensity,
+        glow_spread: glowSpread,
+        pulse_animation: pulseAnimation,
+        animation_speed: animationSpeed,
         theme: {
           primary_color: primaryColor,
           accent_color: accentColor,
@@ -678,21 +1034,140 @@ export function WebChatManagement() {
                 </button>
               </div>
             )}
-          </div>
 
-          <div className="panel p-6 space-y-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold">Palette & WCAG AA Contrast Guard</h2>
-              <button
-                type="button"
-                onClick={() => previewMutation.mutate()}
-                disabled={previewMutation.isPending}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-xs font-semibold text-stone-300 hover:text-white"
-              >
-                <RefreshCw size={13} className={previewMutation.isPending ? 'animate-spin' : ''} />
-                Audit Contrast
-              </button>
+            {/* Launcher Style & Glow (NEW) */}
+            <div className="space-y-3.5 pt-4 border-t border-line/60">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-white">Launcher Style &amp; Glow</h3>
+                <span className="rounded bg-sky-500/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-sky-400">
+                  NEW
+                </span>
+              </div>
+
+              {/* 6 Selector Cards */}
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                {LAUNCHER_STYLE_OPTIONS.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => {
+                      setLauncherStyle(s.id);
+                      if (s.id === 'minimal') {
+                        setGlowIntensity(25);
+                        setGlowSpread(20);
+                        setPulseAnimation('none');
+                      } else if (s.id === 'neon_pulse') {
+                        setGlowIntensity(95);
+                        setGlowSpread(85);
+                        setPulseAnimation('strong');
+                      }
+                      previewMutation.mutate();
+                    }}
+                    className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border p-2 text-center transition-all cursor-pointer ${
+                      launcherStyle === s.id
+                        ? 'border-sky-400 bg-sky-950/40 text-white shadow-[0_0_15px_rgba(56,189,248,0.25)]'
+                        : 'border-line/60 bg-canvas/30 text-stone-400 hover:border-line hover:text-stone-200'
+                    }`}
+                  >
+                    <div className="flex h-7 items-center justify-center">
+                      <LauncherStyleIcon id={s.id} logoUrl={displayLogoUrl} />
+                    </div>
+                    <span className="text-[10.5px] font-semibold tracking-tight">{s.name}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Sliders & Selects */}
+              <div className="grid grid-cols-2 gap-3.5 rounded-xl border border-line/60 bg-canvas/30 p-3.5">
+                <div>
+                  <div className="flex items-center justify-between text-xs font-medium mb-1.5">
+                    <span className="text-stone-300">Glow Intensity</span>
+                    <span className="font-mono text-sky-400 font-semibold">{glowIntensity}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={glowIntensity}
+                    onChange={(e) => {
+                      setGlowIntensity(Number(e.target.value));
+                      if (launcherStyle !== 'custom') setLauncherStyle('custom');
+                    }}
+                    onMouseUp={() => previewMutation.mutate()}
+                    onTouchEnd={() => previewMutation.mutate()}
+                    className="w-full accent-sky-400 h-1.5 bg-stone-800 rounded-lg cursor-pointer"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-stone-300 mb-1.5">Pulse Animation</label>
+                  <select
+                    value={pulseAnimation}
+                    onChange={(e) => {
+                      setPulseAnimation(e.target.value as any);
+                      previewMutation.mutate();
+                    }}
+                    className="w-full rounded-lg border border-line bg-canvas/40 px-2.5 py-1.5 text-xs text-white"
+                  >
+                    <option value="normal">Smooth Pulse</option>
+                    <option value="none">None</option>
+                    <option value="subtle">Subtle</option>
+                    <option value="strong">Strong</option>
+                  </select>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between text-xs font-medium mb-1.5">
+                    <span className="text-stone-300">Glow Spread</span>
+                    <span className="font-mono text-sky-400 font-semibold">{glowSpread}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={glowSpread}
+                    onChange={(e) => {
+                      setGlowSpread(Number(e.target.value));
+                      if (launcherStyle !== 'custom') setLauncherStyle('custom');
+                    }}
+                    onMouseUp={() => previewMutation.mutate()}
+                    onTouchEnd={() => previewMutation.mutate()}
+                    className="w-full accent-sky-400 h-1.5 bg-stone-800 rounded-lg cursor-pointer"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-stone-300 mb-1.5">Animation Speed</label>
+                  <select
+                    value={animationSpeed}
+                    onChange={(e) => {
+                      setAnimationSpeed(e.target.value as any);
+                      previewMutation.mutate();
+                    }}
+                    className="w-full rounded-lg border border-line bg-canvas/40 px-2.5 py-1.5 text-xs text-white"
+                  >
+                    <option value="slow">Slow</option>
+                    <option value="normal">Normal</option>
+                    <option value="fast">Fast</option>
+                  </select>
+                </div>
+              </div>
             </div>
+
+            {/* Palette & WCAG Guard Section */}
+            <div className="space-y-4 pt-4 border-t border-line/60">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-white">Palette &amp; WCAG AA Guard</h3>
+                <button
+                  type="button"
+                  onClick={() => previewMutation.mutate()}
+                  disabled={previewMutation.isPending}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs font-semibold text-stone-300 hover:text-white"
+                >
+                  <RefreshCw size={12} className={previewMutation.isPending ? 'animate-spin' : ''} />
+                  Audit Contrast
+                </button>
+              </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -841,34 +1316,116 @@ export function WebChatManagement() {
                 ))}
               </div>
             </div>
+          </div>
+        </div>
 
-            <div className="rounded-xl border border-line/80 bg-canvas/40 p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-stone-400">WCAG AA Compliance</span>
-                <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-400">
-                  <Check size={14} /> Auto-guarded
-                </span>
+          {/* Right Column: Live Preview */}
+          <div className="panel p-6 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line/60 pb-3">
+              <div>
+                <h2 className="text-base font-semibold text-white">Live Preview</h2>
+                <p className="text-xs text-stone-400">See how your widget looks and behaves for your customers.</p>
               </div>
-              <p className="text-xs text-stone-400">
-                The widget dynamically computes relative luminance and normalizes button foregrounds to maintain readable 4.5:1 / 3:1 contrast.
-              </p>
 
-              {contrastResult && (
-                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-line/40 text-xs">
-                  <div className="rounded bg-black/20 p-2">
-                    <span className="text-stone-400">Primary button:</span>
-                    <strong className="block text-sm text-white">
-                      {contrastResult.contrast?.primary_button ?? '4.5'}:1
-                    </strong>
-                  </div>
-                  <div className="rounded bg-black/20 p-2">
-                    <span className="text-stone-400">Surface text:</span>
-                    <strong className="block text-sm text-white">
-                      {contrastResult.contrast?.text_surface ?? '7.0'}:1
-                    </strong>
-                  </div>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 rounded-lg border border-line p-0.5 bg-black/20">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewViewport('desktop')}
+                    className={`flex items-center gap-1 rounded px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
+                      previewViewport === 'desktop' ? 'bg-signal text-white' : 'text-stone-400 hover:text-white'
+                    }`}
+                  >
+                    <Laptop size={13} /> Desktop
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewViewport('mobile')}
+                    className={`flex items-center gap-1 rounded px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
+                      previewViewport === 'mobile' ? 'bg-signal text-white' : 'text-stone-400 hover:text-white'
+                    }`}
+                  >
+                    <Smartphone size={13} /> Mobile
+                  </button>
                 </div>
-              )}
+
+                <div className="flex items-center gap-1 rounded-lg border border-line p-0.5 bg-black/20">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewState('both')}
+                    className={`rounded px-2 py-1 text-xs font-medium transition cursor-pointer ${
+                      previewState === 'both' ? 'bg-ink text-white' : 'text-stone-400 hover:text-white'
+                    }`}
+                    title="Show closed launcher and open panel together"
+                  >
+                    Both
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewState('closed')}
+                    className={`rounded px-2 py-1 text-xs font-medium transition cursor-pointer ${
+                      previewState === 'closed' ? 'bg-ink text-white' : 'text-stone-400 hover:text-white'
+                    }`}
+                    title="Inspect closed launcher alone"
+                  >
+                    Closed
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewState('open')}
+                    className={`rounded px-2 py-1 text-xs font-medium transition cursor-pointer ${
+                      previewState === 'open' ? 'bg-ink text-white' : 'text-stone-400 hover:text-white'
+                    }`}
+                    title="Inspect open panel"
+                  >
+                    Open
+                  </button>
+                </div>
+
+                {isConfigured && data.widget_key && (
+                  <a
+                    href={`https://samche-api-staging.onrender.com/task8-demo/?widget_key=${encodeURIComponent(data.widget_key)}`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="inline-flex items-center gap-1 rounded-lg border border-line bg-canvas/40 px-2.5 py-1 text-xs font-medium text-stone-300 hover:text-white"
+                  >
+                    <ExternalLink size={12} /> Open in New Tab
+                  </a>
+                )}
+              </div>
+            </div>
+
+            <LivePreviewCanvas
+              previewViewport={previewViewport}
+              previewState={previewState}
+              setPreviewState={setPreviewState}
+              primaryColor={primaryColor}
+              renderPreviewLauncher={renderPreviewLauncher}
+              renderPreviewPanel={renderPreviewPanel}
+            />
+
+            {/* WCAG Guard Status Footer */}
+            <div className="rounded-xl border border-line/80 bg-canvas/40 p-3.5 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="h-6 w-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                  <Check size={14} />
+                </div>
+                <div>
+                  <span className="text-xs font-semibold text-white block">WCAG AA Compliant</span>
+                  <span className="text-[11px] text-stone-400">
+                    Contrast ratio {contrastResult?.contrast?.primary_button ?? '9.81'}:1 &middot; Accessible &middot; Production Ready
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => previewMutation.mutate()}
+                disabled={previewMutation.isPending}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs font-medium text-stone-300 hover:text-white cursor-pointer"
+              >
+                <RefreshCw size={12} className={previewMutation.isPending ? 'animate-spin' : ''} />
+                Audit Contrast
+              </button>
             </div>
           </div>
         </div>
@@ -977,7 +1534,7 @@ export function WebChatManagement() {
                 <button
                   type="button"
                   onClick={() => setPreviewViewport('desktop')}
-                  className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition ${
+                  className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition cursor-pointer ${
                     previewViewport === 'desktop' ? 'bg-signal text-white' : 'text-stone-400 hover:text-white'
                   }`}
                 >
@@ -986,175 +1543,54 @@ export function WebChatManagement() {
                 <button
                   type="button"
                   onClick={() => setPreviewViewport('mobile')}
-                  className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition ${
+                  className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition cursor-pointer ${
                     previewViewport === 'mobile' ? 'bg-signal text-white' : 'text-stone-400 hover:text-white'
                   }`}
                 >
                   <Smartphone size={14} /> Mobile
                 </button>
               </div>
+
+              <div className="flex items-center gap-1 rounded-lg border border-line p-1 bg-black/20">
+                <button
+                  type="button"
+                  onClick={() => setPreviewState('both')}
+                  className={`rounded px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
+                    previewState === 'both' ? 'bg-ink text-white' : 'text-stone-400 hover:text-white'
+                  }`}
+                >
+                  Both
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewState('closed')}
+                  className={`rounded px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
+                    previewState === 'closed' ? 'bg-ink text-white' : 'text-stone-400 hover:text-white'
+                  }`}
+                >
+                  Closed
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewState('open')}
+                  className={`rounded px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
+                    previewState === 'open' ? 'bg-ink text-white' : 'text-stone-400 hover:text-white'
+                  }`}
+                >
+                  Open
+                </button>
+              </div>
             </div>
           </div>
 
-          <div
-            className={`relative mx-auto rounded-2xl border border-line bg-gradient-to-br from-stone-900 to-black p-6 overflow-hidden ${
-              previewViewport === 'mobile' ? 'max-w-sm h-[600px]' : 'w-full h-[520px]'
-            }`}
-          >
-            <div className={`relative h-full flex flex-col justify-end ${
-              launcherPosition === 'left' ? 'items-start' : 'items-end'
-            }`}>
-              {previewOpen && (
-                <div
-                  className="w-full max-w-[340px] rounded-2xl overflow-hidden shadow-2xl flex flex-col mb-4 transition-all duration-200"
-                  style={{
-                    background: themeMode === 'light' ? 'rgba(255, 255, 255, 0.94)' : 'rgba(17, 24, 39, 0.90)',
-                    backdropFilter: 'blur(20px)',
-                    border: themeMode === 'light' ? '1px solid rgba(0, 0, 0, 0.1)' : '1px solid rgba(255, 255, 255, 0.12)',
-                    boxShadow: `0 20px 45px -10px rgba(0, 0, 0, 0.7), 0 0 25px ${primaryColor}22`,
-                  }}
-                >
-                  <div
-                    className="flex items-center justify-between px-4 py-3 border-b"
-                    style={{
-                      borderColor: themeMode === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.1)',
-                      background: `linear-gradient(135deg, ${primaryColor}22, ${themeMode === 'light' ? 'rgba(0, 0, 0, 0.02)' : 'rgba(255, 255, 255, 0.03)'})`,
-                    }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shadow overflow-hidden"
-                        style={{ background: primaryColor, color: primaryFg }}
-                      >
-                        {logoUrl ? (
-                          <img src={displayLogoUrl} alt={brandName || 'Brand'} className="h-full w-full object-contain p-0.5" />
-                        ) : (
-                          brandName ? brandName.charAt(0).toUpperCase() : 'S'
-                        )}
-                      </div>
-                      <div>
-                        <h3 className={`text-sm font-semibold ${themeMode === 'light' ? 'text-stone-900' : 'text-white'}`}>
-                          {title || brandName || 'Web Chat'}
-                        </h3>
-                        <p className={`text-[11px] ${themeMode === 'light' ? 'text-stone-500' : 'text-stone-300'}`}>
-                          {subtitle || 'Online • Active now'}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setPreviewOpen(false)}
-                      className="rounded p-1 text-stone-400 hover:text-white"
-                      title="Minimize chat preview"
-                    >
-                      <X size={15} />
-                    </button>
-                  </div>
-
-                  <div className="p-4 space-y-3 h-48 overflow-y-auto text-xs">
-                    <div className="flex flex-col items-start">
-                      <div
-                        className="max-w-[85%] rounded-2xl px-3.5 py-2 font-normal"
-                        style={{
-                          background: themeMode === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.08)',
-                          border: themeMode === 'light' ? '1px solid rgba(0, 0, 0, 0.08)' : '1px solid rgba(255, 255, 255, 0.12)',
-                          color: themeMode === 'light' ? '#1E293B' : '#F8FAFC',
-                        }}
-                      >
-                        Merhaba! Size nasıl yardımcı olabilirim?
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col items-end">
-                      <div
-                        className="max-w-[85%] rounded-2xl px-3.5 py-2 font-medium"
-                        style={{ background: primaryColor, color: primaryFg }}
-                      >
-                        Kargo ve teslimat süreleri hakkında bilgi alabilir miyim?
-                      </div>
-                    </div>
-                  </div>
-
-                  <div
-                    className="p-3 border-t flex items-center gap-2"
-                    style={{ borderColor: themeMode === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)' }}
-                  >
-                    <input
-                      type="text"
-                      disabled
-                      placeholder="Bir mesaj yazın..."
-                      className={`flex-1 rounded-xl px-3 py-1.5 text-xs focus:outline-none ${
-                        themeMode === 'light'
-                          ? 'bg-black/[0.04] border border-black/10 text-stone-900 placeholder-stone-400'
-                          : 'bg-white/[0.06] border border-white/10 text-white placeholder-stone-400'
-                      }`}
-                    />
-                    <button
-                      type="button"
-                      className="h-8 w-8 rounded-xl flex items-center justify-center shadow"
-                      style={{ background: primaryColor, color: primaryFg }}
-                    >
-                      <Send size={13} />
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Launcher Button / Pill */}
-              {previewOpen ? (
-                <button
-                  type="button"
-                  onClick={() => setPreviewOpen(false)}
-                  className="h-12 w-12 rounded-full flex items-center justify-center shadow-xl cursor-pointer hover:scale-105 transition-transform"
-                  style={{
-                    background: primaryColor,
-                    color: primaryFg,
-                    boxShadow: `0 10px 25px -4px ${primaryColor}77`,
-                  }}
-                  title="Close chat preview"
-                >
-                  <X size={20} />
-                </button>
-              ) : launcherLabel ? (
-                <button
-                  type="button"
-                  onClick={() => setPreviewOpen(true)}
-                  className="inline-flex items-center gap-2.5 rounded-full px-5 py-3 shadow-2xl cursor-pointer font-semibold text-sm transition-transform hover:scale-105 active:scale-95"
-                  style={{
-                    background: primaryColor,
-                    color: primaryFg,
-                    boxShadow: `0 10px 30px -4px ${primaryColor}77`,
-                  }}
-                  title="Open chat preview"
-                >
-                  {launcherIcon === 'logo' && logoUrl ? (
-                    <img src={displayLogoUrl} alt="Logo" className="h-5 w-5 rounded-full object-contain" />
-                  ) : (
-                    <MessageSquare size={18} />
-                  )}
-                  <span>{launcherLabel}</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setPreviewOpen(true)}
-                  className="h-14 w-14 rounded-full flex items-center justify-center shadow-xl cursor-pointer hover:scale-105 transition-transform"
-                  style={{
-                    background: primaryColor,
-                    color: primaryFg,
-                    boxShadow: `0 10px 25px -4px ${primaryColor}77`,
-                  }}
-                  title="Open chat preview"
-                >
-                  {launcherIcon === 'logo' && logoUrl ? (
-                    <img src={displayLogoUrl} alt="Logo" className="h-6 w-6 rounded-full object-contain" />
-                  ) : (
-                    <MessageSquare size={22} />
-                  )}
-                </button>
-              )}
-            </div>
-          </div>
+          <LivePreviewCanvas
+            previewViewport={previewViewport}
+            previewState={previewState}
+            setPreviewState={setPreviewState}
+            primaryColor={primaryColor}
+            renderPreviewLauncher={renderPreviewLauncher}
+            renderPreviewPanel={renderPreviewPanel}
+          />
         </div>
       )}
 

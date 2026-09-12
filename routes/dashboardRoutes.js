@@ -290,17 +290,36 @@ router.post('/:tenantId/channels/web-chat/theme-preview', requireTenantAccess, a
     base_color: baseColor = null,
     candidates = [],
     mode = 'dark',
+    glow_intensity: glowIntensity = 80,
+    glow_spread: glowSpread = 70,
+    pulse_animation: pulseAnimation = 'normal',
+    animation_speed: animationSpeed = 'normal',
+    launcher_style: launcherStyle = 'pill',
   } = req.body ?? {};
 
   try {
     let result;
     if (Array.isArray(candidates) && candidates.length > 0) {
-      result = analyzeLogoPalette({ candidates, baseColor: primaryColor || baseColor, mode });
+      result = analyzeLogoPalette({
+        candidates,
+        baseColor: primaryColor || baseColor,
+        mode,
+        glowIntensity,
+        glowSpread,
+        pulseAnimation,
+        animationSpeed,
+        launcherStyle,
+      });
     } else {
       result = deriveWebChatThemeTokens({
         primaryColor: primaryColor || baseColor || '#2563EB',
         accentColor,
         mode,
+        glowIntensity,
+        glowSpread,
+        pulseAnimation,
+        animationSpeed,
+        launcherStyle,
       });
     }
     return res.json(result);

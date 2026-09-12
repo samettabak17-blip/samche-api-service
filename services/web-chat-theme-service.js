@@ -99,6 +99,11 @@ export function deriveWebChatThemeTokens({
   primaryColor = '#2563EB',
   accentColor = null,
   mode = 'dark',
+  glowIntensity = 80,
+  glowSpread = 70,
+  pulseAnimation = 'normal',
+  animationSpeed = 'normal',
+  launcherStyle = 'pill',
 } = {}) {
   const effectiveMode = ['dark', 'light'].includes(String(mode).toLowerCase())
     ? String(mode).toLowerCase()
@@ -129,8 +134,23 @@ export function deriveWebChatThemeTokens({
 
   const primaryForeground = accessibleForegroundFor(safePrimary, 4.5);
   const accentForeground = accessibleForegroundFor(safeAccent, 4.5);
-  const glowColor = hexToRgba(safePrimary, 0.35);
-  const glowSoftColor = hexToRgba(safePrimary, 0.18);
+
+  const clampedIntensity = Math.max(0, Math.min(100, Math.round(Number(glowIntensity ?? 80) || 0)));
+  const clampedSpread = Math.max(0, Math.min(100, Math.round(Number(glowSpread ?? 70) || 0)));
+  const intensityFactor = clampedIntensity / 80;
+  const spreadFactor = clampedSpread / 70;
+
+  const glowRing = hexToRgba(safePrimary, Number(Math.min(1, Math.max(0, intensityFactor * 0.65)).toFixed(2)));
+  const glowColor = hexToRgba(safePrimary, Number(Math.min(1, Math.max(0, intensityFactor * 0.35)).toFixed(2)));
+  const glowSoftColor = hexToRgba(safePrimary, Number(Math.min(1, Math.max(0, intensityFactor * 0.18)).toFixed(2)));
+  const glowSpreadPx = Math.round(Math.max(4, spreadFactor * 24));
+  const glowHaloPx = Math.round(Math.max(10, spreadFactor * 42));
+
+  const normSpeed = ['slow', 'fast'].includes(String(animationSpeed).toLowerCase())
+    ? String(animationSpeed).toLowerCase()
+    : 'normal';
+  const pulseDuration = normSpeed === 'slow' ? '5.5s' : normSpeed === 'fast' ? '2.2s' : '3.6s';
+
   const launcherText = primaryForeground;
 
   const inputBg = isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(15, 23, 42, 0.04)';
@@ -157,6 +177,10 @@ export function deriveWebChatThemeTokens({
     surface_glass: surfaceGlass,
     glow: glowColor,
     glow_soft: glowSoftColor,
+    glow_ring: glowRing,
+    glow_spread_px: glowSpreadPx,
+    glow_halo_px: glowHaloPx,
+    pulse_duration: pulseDuration,
     launcher_text: launcherText,
     text: textColor,
     muted: mutedColor,
@@ -173,7 +197,16 @@ export function deriveWebChatThemeTokens({
   };
 }
 
-export function analyzeLogoPalette({ candidates = [], baseColor = null, mode = 'dark' } = {}) {
+export function analyzeLogoPalette({
+  candidates = [],
+  baseColor = null,
+  mode = 'dark',
+  glowIntensity = 80,
+  glowSpread = 70,
+  pulseAnimation = 'normal',
+  animationSpeed = 'normal',
+  launcherStyle = 'pill',
+} = {}) {
   const sampled = (Array.isArray(candidates) ? candidates : [])
     .map((c) => (HEX_COLOR_REGEX.test(String(c || '').trim()) ? normalizeHex(c) : null))
     .filter(Boolean);
@@ -200,5 +233,10 @@ export function analyzeLogoPalette({ candidates = [], baseColor = null, mode = '
     primaryColor: primaryCandidate,
     accentColor: accentCandidate,
     mode,
+    glowIntensity,
+    glowSpread,
+    pulseAnimation,
+    animationSpeed,
+    launcherStyle,
   });
 }

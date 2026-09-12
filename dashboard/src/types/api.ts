@@ -23,6 +23,10 @@ export interface WebChatThemeConfig {
   surface_solid?: string;
   glow_color?: string;
   glow_soft?: string;
+  glow_ring?: string;
+  glow_spread_px?: number;
+  glow_halo_px?: number;
+  pulse_duration?: string;
   launcher_text?: string;
   text_color?: string;
   muted_color?: string;
@@ -41,6 +45,11 @@ export interface WebChatAppearanceConfig {
   launcher_position: 'right' | 'left';
   launcher_icon: 'chat' | 'logo';
   theme_mode: 'dark' | 'light' | 'auto';
+  launcher_style?: 'pill' | 'circular' | 'minimal' | 'glass' | 'neon_pulse' | 'custom';
+  glow_intensity?: number;
+  glow_spread?: number;
+  pulse_animation?: 'none' | 'subtle' | 'normal' | 'strong';
+  animation_speed?: 'slow' | 'normal' | 'fast';
   theme: WebChatThemeConfig;
   contrast?: {
     primary_button?: number;
@@ -110,6 +119,10 @@ export interface WebChatThemePreviewResponse {
   surface_glass: string;
   glow: string;
   glow_soft?: string;
+  glow_ring?: string;
+  glow_spread_px?: number;
+  glow_halo_px?: number;
+  pulse_duration?: string;
   launcher_text?: string;
   text: string;
   muted: string;

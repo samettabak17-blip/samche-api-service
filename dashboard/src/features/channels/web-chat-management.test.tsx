@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -392,4 +392,86 @@ describe('WebChatManagement Component', () => {
     const launcherInput = (await screen.findByLabelText(/Launcher Label/i)) as HTMLInputElement;
     expect(launcherInput.value).toBe('');
   });
+  it('exposes configurable Launcher Style & Glow controls, interactive cards, sliders, and deterministic preview', async () => {
+    const payload: WebChatChannelResponse = {
+      tenant_id: 'test-tenant-123',
+      configured: true,
+      widget_key: 'wch_test_key_123',
+      channel: { id: 'ch-1', channel_type: 'WEB_CHAT', display_name: 'Test Web Chat', status: 'active' },
+      assistant: { id: 'ast-1', tenant_id: 'test-tenant-123', name: 'Test Assistant', model: 'gpt-4o-mini', status: 'active' },
+      integration: { id: 'int-1', integration_key: 'wch_test_key_123', integration_type: 'WEB_CHAT', enabled: true },
+      appearance: {
+        ...mockAppearance,
+        launcher_style: 'pill',
+        glow_intensity: 80,
+        glow_spread: 70,
+        pulse_animation: 'normal',
+        animation_speed: 'normal',
+      },
+      behavior: mockBehavior,
+      embed_snippet: '<script></script>',
+      installation: { widget_key: 'wch_test_key_123', embed_snippet: '', status: 'active', guidance: [] },
+    };
+
+    vi.mocked(tenantApi.getWebChatChannel).mockResolvedValue(payload);
+    vi.mocked(tenantApi.listAssistants).mockResolvedValue([]);
+    vi.mocked(tenantApi.updateWebChatChannel).mockResolvedValue(payload);
+
+    renderComponent();
+    fireEvent.click(await screen.findByRole('button', { name: /Appearance & Theme/i }));
+
+    // 1. Launcher Style & Glow header with NEW badge
+    expect(await screen.findByText(/Launcher Style & Glow/i)).toBeTruthy();
+    expect(screen.getByText('NEW')).toBeTruthy();
+
+    // 2. All 6 style options visible
+    expect(screen.getByRole('button', { name: /Pill \(Default\)/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Circular/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Minimal/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Glass/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Neon Pulse/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Custom/i })).toBeTruthy();
+
+    // 3. Switch style to Circular
+    fireEvent.click(screen.getByRole('button', { name: /Circular/i }));
+
+    // 4. Sliders are interactive
+    const intensitySlider = screen.getByDisplayValue('80') as HTMLInputElement;
+    expect(intensitySlider).toBeTruthy();
+    fireEvent.change(intensitySlider, { target: { value: '95' } });
+    expect(screen.getByText('95%')).toBeTruthy();
+
+    // 5. Select pulse and speed
+    const pulseSelect = screen.getByDisplayValue('Smooth Pulse') as HTMLSelectElement;
+    expect(pulseSelect).toBeTruthy();
+    fireEvent.change(pulseSelect, { target: { value: 'strong' } });
+
+    // 6. Deterministic preview controls (Both, Closed, Open)
+    expect(screen.getByRole('button', { name: /^Both$/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Closed$/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Open$/i })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Closed$/i }));
+    expect(screen.getByText('Closed State Preview')).toBeTruthy();
+
+    // 7. WCAG AA status card visible in Live Preview
+    expect(screen.getByText('WCAG AA Compliant')).toBeTruthy();
+
+    // 8. Save Appearance includes new launcher fields
+    fireEvent.click(screen.getByRole('button', { name: /Save Appearance/i }));
+    await waitFor(() => {
+      expect(tenantApi.updateWebChatChannel).toHaveBeenCalledWith(
+        'test-tenant-123',
+        expect.objectContaining({
+          appearance: expect.objectContaining({
+            launcher_style: 'custom', // intensity slider moved it to custom
+            glow_intensity: 95,
+            glow_spread: 70,
+            pulse_animation: 'strong',
+          }),
+        })
+      );
+    });
+  });
+
 });
