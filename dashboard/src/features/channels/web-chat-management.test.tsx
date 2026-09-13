@@ -458,7 +458,7 @@ describe('WebChatManagement Component', () => {
     expect(screen.getByText('WCAG AA Compliant')).toBeTruthy();
 
     // 8. Save Appearance includes new launcher fields
-    fireEvent.click(screen.getByRole('button', { name: /Save Appearance/i }));
+    fireEvent.click(screen.getAllByRole('button', { name: /Save Appearance/i })[0]);
     await waitFor(() => {
       expect(tenantApi.updateWebChatChannel).toHaveBeenCalledWith(
         'test-tenant-123',
@@ -473,5 +473,63 @@ describe('WebChatManagement Component', () => {
       );
     });
   });
+  it('renders canonical shared launcher & panel with unsaved changes detection and locale parity in Live Preview', async () => {
+    const payload: WebChatChannelResponse = {
+      tenant_id: 'test-tenant-123',
+      configured: true,
+      widget_key: 'wch_parity_test_key',
+      channel: { id: 'ch-1', channel_type: 'WEB_CHAT', display_name: 'Test Web Chat', status: 'active' },
+      assistant: { id: 'ast-1', tenant_id: 'test-tenant-123', name: 'Test Assistant', model: 'gpt-4o-mini', status: 'active' },
+      integration: { id: 'int-1', integration_key: 'wch_parity_test_key', integration_type: 'WEB_CHAT', enabled: true },
+      appearance: {
+        ...mockAppearance,
+        launcher_style: 'pill',
+        launcher_label: 'Canlı Destek',
+        glow_intensity: 80,
+        glow_spread: 70,
+        pulse_animation: 'normal',
+      },
+      behavior: {
+        ...mockBehavior,
+        language: 'tr',
+      },
+      embed_snippet: '<script></script>',
+      installation: { widget_key: 'wch_parity_test_key', embed_snippet: '', status: 'active', guidance: [] },
+    };
+
+    vi.mocked(tenantApi.getWebChatChannel).mockResolvedValue(payload);
+    vi.mocked(tenantApi.listAssistants).mockResolvedValue([]);
+    vi.mocked(tenantApi.updateWebChatChannel).mockResolvedValue(payload);
+
+    renderComponent();
+    fireEvent.click(await screen.findByRole('button', { name: /Live Preview/i }));
+
+    // 1. Initially saved: live sync indicator is shown
+    expect(await screen.findByTestId('saved-sync-indicator-preview-tab')).toBeTruthy();
+    expect(screen.getByText(/Live parity confirmed/i)).toBeTruthy();
+
+    // 2. Canonical elements are rendered
+    expect(screen.getByTestId('preview-canonical-launcher')).toBeTruthy();
+    expect(screen.getByTestId('preview-canonical-panel')).toBeTruthy();
+    expect(screen.getByText('Merhaba! Size nasıl yardımcı olabilirim?')).toBeTruthy();
+
+    // 3. Navigate to Appearance & Theme and make an edit -> unsaved changes indicator appears
+    fireEvent.click(screen.getByRole('button', { name: /Appearance & Theme/i }));
+    expect(await screen.findByTestId('saved-sync-indicator')).toBeTruthy();
+
+    const labelInput = screen.getByLabelText(/Launcher Label/i);
+    fireEvent.change(labelInput, { target: { value: 'Canlı Yardım Masası' } });
+
+    // Unsaved changes indicator must now appear
+    expect(await screen.findByTestId('unsaved-changes-indicator')).toBeTruthy();
+    expect(screen.getByText(/Unsaved changes:/i)).toBeTruthy();
+
+    // 4. Change language to English -> Live preview reflects English strings
+    const langSelect = screen.getByLabelText(/Primary Language/i);
+    fireEvent.change(langSelect, { target: { value: 'en' } });
+
+    expect(await screen.findByText('Hello! How can I help you today?')).toBeTruthy();
+  });
+
 
 });

@@ -207,6 +207,68 @@
       });
     }
 
+    if (visibleProducts.length === 0) {
+      var NON_PRODUCT_HEADING_REGEX = /^(?:why\s|about\s|contact\s|our\s|customer\s|subscribe|newsletter|follow\s|frequently\s|faq|reviews|testimonials|hakkımızda|bize\s|neden\s|müşteri\s|yorumlar|sıkça|e-bülten|explore\s|today'?s\stop|search\s)/i;
+      var BADGE_REGEX = /^(?:\d+%?|guaranteed|same-day|secure|free\sshipping|fast\sdelivery|100%|authentic)$/i;
+
+      var headings = Array.prototype.slice.call(document.querySelectorAll('h3, h4, h5'));
+      for (var hi = 0; hi < headings.length && visibleProducts.length < 15; hi++) {
+        var hEl = headings[hi];
+        if (hEl.closest('nav, header, footer, #samche-webchat-container, [class*="cookie"]')) continue;
+
+        var hName = hEl.textContent ? hEl.textContent.trim() : '';
+        if (!hName || hName.length < 3 || hName.length > 120) continue;
+        if (UI_CONTROL_REGEX.test(hName) || CTA_FILTER_REGEX.test(hName) || NON_PRODUCT_HEADING_REGEX.test(hName) || BADGE_REGEX.test(hName)) continue;
+
+        var hKey = hName.toLowerCase();
+        if (seenNames.indexOf(hKey) !== -1) continue;
+
+        var hDesc = '';
+        var hPrice = '';
+        var hLink = '';
+
+        var hBlock = hEl;
+        while (hBlock && hBlock.parentElement && hBlock.parentElement !== document.body && !hBlock.classList.contains('layout-element') && !hBlock.classList.contains('product') && !hBlock.classList.contains('card')) {
+          hBlock = hBlock.parentElement;
+        }
+
+        var hNext = hBlock ? hBlock.nextElementSibling : null;
+        while (hNext && !hDesc) {
+          var pEl = hNext.querySelector ? (hNext.querySelector('p') || (hNext.tagName === 'P' ? hNext : null)) : null;
+          if (pEl && pEl.textContent && pEl.textContent.trim().length >= 15) {
+            hDesc = safeString(pEl.textContent.trim(), 250);
+            break;
+          }
+          if (hNext.querySelector && hNext.querySelector('h1, h2, h3, h4, h5')) break;
+          hNext = hNext.nextElementSibling;
+        }
+
+        if (!hDesc && hBlock) {
+          var pInner = hBlock.querySelector('p');
+          if (pInner && pInner.textContent && !pInner.contains(hEl) && pInner.textContent.trim().length >= 15) {
+            hDesc = safeString(pInner.textContent.trim(), 250);
+          }
+        }
+
+        var pMatch = (hBlock ? hBlock.textContent : '').match(PRICE_DETECTION_REGEX);
+        if (pMatch) hPrice = safeString(pMatch[0].trim(), 50);
+
+        var aInside = hBlock ? hBlock.querySelector('a[href]') : null;
+        if (aInside && aInside.href && !aInside.href.endsWith('#') && aInside.href !== window.location.href) {
+          hLink = safeString(aInside.getAttribute('href') || aInside.href, 2048);
+        }
+
+        seenNames.push(hKey);
+        visibleProducts.push({
+          type: 'PRODUCT',
+          name: safeString(hName, 120),
+          summary: hDesc || undefined,
+          price: hPrice || undefined,
+          url: hLink || undefined,
+        });
+      }
+    }
+
     return visibleProducts;
   }
 
@@ -276,6 +338,20 @@
     var visibleProducts = extractVisibleProductsFromDom();
     var singleProduct = (visibleProducts.length <= 1) ? extractSingleProductDetail() : null;
 
+    var rawHeadings = Array.prototype.slice.call(document.querySelectorAll('h1, h2, h3, h4'));
+    var cleanHeadings = [];
+    var seenH = {};
+    for (var hi = 0; hi < rawHeadings.length && cleanHeadings.length < 15; hi++) {
+      var hText = rawHeadings[hi].textContent ? rawHeadings[hi].textContent.trim() : '';
+      if (hText && hText.length >= 3 && hText.length <= 120 && !seenH[hText.toLowerCase()]) {
+        seenH[hText.toLowerCase()] = true;
+        cleanHeadings.push(safeString(hText, 120));
+      }
+    }
+    if (cleanHeadings.length > 0) {
+      safeAttributes.page_headings = cleanHeadings.slice(0, 10);
+    }
+
     if (visibleProducts.length > 1) {
       safeAttributes.page_type = 'PRODUCT_LIST';
       safeAttributes.visible_products = visibleProducts;
@@ -283,8 +359,17 @@
       safeAttributes.visible_product_count = visibleProducts.length;
       entityType = 'PRODUCT_LIST';
       if (!summary || summary === 'PAGE' || summary === 'WebSite' || summary === 'Catalog') {
-        summary = 'Bu sayfada görüntülenen ürünler (' + visibleProducts.length + ' adet): ' +
-          visibleProducts.map(function(p) { return p.name + (p.price ? ' (' + p.price + ')' : ''); }).join(', ');
+        var pCount = visibleProducts.length;
+        if (lang.startsWith('en')) {
+          summary = 'Visible products on this page (' + pCount + ' items): ' +
+            visibleProducts.map(function(p) { return p.name + (p.price ? ' (' + p.price + ')' : ''); }).join(', ');
+        } else if (lang.startsWith('ar')) {
+          summary = 'المنتجات المعروضة في هذه الصفحة (' + pCount + ' عناصر): ' +
+            visibleProducts.map(function(p) { return p.name + (p.price ? ' (' + p.price + ')' : ''); }).join(', ');
+        } else {
+          summary = 'Bu sayfada görüntülenen ürünler (' + pCount + ' adet): ' +
+            visibleProducts.map(function(p) { return p.name + (p.price ? ' (' + p.price + ')' : ''); }).join(', ');
+        }
       }
     } else if (singleProduct) {
       entityType = 'PRODUCT';
@@ -303,7 +388,9 @@
       if (singleP.price) safeAttributes.price = singleP.price;
       safeAttributes.visible_products = visibleProducts;
       safeAttributes.visible_product_names = [singleP.name];
-      if (!summary || summary === 'PAGE') summary = singleP.name + (singleP.price ? ' (' + singleP.price + ')' : '');
+      if (!summary || summary === 'PAGE') {
+        summary = singleP.name + (singleP.price ? ' (' + singleP.price + ')' : '');
+      }
     }
 
     return {
@@ -316,6 +403,7 @@
       entity_id: String(entityId),
       entity_name: entityName,
       summary: summary,
+      headings: cleanHeadings.length > 0 ? cleanHeadings : undefined,
       attributes: safeAttributes,
       visible_products: visibleProducts.length > 0 ? visibleProducts : undefined,
       referrer: safeString(document.referrer, 2048) || null,
@@ -825,6 +913,37 @@
         }
       } catch (e) {}
     },
+    getBehaviorStorageKey: function(widgetKey) {
+      return 'samche_webchat_behavior_' + encodeURIComponent(widgetKey || 'default');
+    },
+    getStoredBehavior: function(widgetKey) {
+      var key = this.getBehaviorStorageKey(widgetKey);
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          var val = window.localStorage.getItem(key);
+          if (val) return JSON.parse(val);
+        }
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          var sVal = window.sessionStorage.getItem(key);
+          if (sVal) return JSON.parse(sVal);
+        }
+      } catch (e) {}
+      return memStore[key] || null;
+    },
+    storeBehavior: function(widgetKey, behavior) {
+      if (!behavior || typeof behavior !== 'object') return;
+      var key = this.getBehaviorStorageKey(widgetKey);
+      memStore[key] = behavior;
+      try {
+        var str = JSON.stringify(behavior);
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem(key, str);
+        }
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          window.sessionStorage.setItem(key, str);
+        }
+      } catch (e) {}
+    },
     hydrateHistory: function(container, messages, appendFn) {
       if (!container || !Array.isArray(messages)) return 0;
       var count = 0;
@@ -903,13 +1022,13 @@
     'svg { display: block; flex-shrink: 0; box-sizing: content-box; }',
     'button { background: none; border: none; outline: none; cursor: pointer; padding: 0; margin: 0; font-family: inherit; color: inherit; line-height: 1; }',
     'textarea, input { font-family: inherit; font-size: 14px; line-height: 1.4; box-sizing: border-box; }',
-    '.samche-launcher { position: fixed !important; bottom: 24px !important; right: 24px !important; min-height: 54px !important; height: 54px !important; max-width: calc(100vw - 48px) !important; border-radius: 9999px !important; cursor: pointer !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; pointer-events: auto !important; transition: transform .22s cubic-bezier(.16,1,.3,1), box-shadow .22s ease, opacity .2s ease !important; outline: none !important; z-index: 2147483641 !important; margin: 0 !important; user-select: none !important; direction: ltr !important; overflow: visible !important; contain: none !important; animation: samche-glow-breathe var(--chat-pulse-duration, 3.6s) infinite ease-in-out; }',
+    '.samche-launcher { position: fixed !important; bottom: 24px !important; right: 24px !important; min-height: 54px !important; height: 54px !important; max-width: calc(100vw - 48px) !important; border-radius: 9999px !important; cursor: pointer !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; pointer-events: auto !important; transition: transform .22s cubic-bezier(.16,1,.3,1), box-shadow .22s ease, opacity .2s ease !important; outline: none !important; z-index: 2147483641 !important; margin: 0 !important; user-select: none !important; direction: ltr !important; overflow: visible !important; contain: none !important; background-color: #0F172A !important; background: linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%); color: var(--chat-launcher-text, #FFFFFF); border: 1.5px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.7)); box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-ring, rgba(56, 189, 248, 0.7)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.4)), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.5); animation: samche-glow-breathe var(--chat-pulse-duration, 3.6s) infinite ease-in-out; }',
     '.samche-launcher.samche-launcher-hidden { opacity: 0 !important; pointer-events: none !important; visibility: hidden !important; transform: scale(0.85) !important; transition: opacity .2s ease, transform .2s ease !important; }',
     '.samche-launcher.samche-style-pill { padding: 4px 18px 4px 6px !important; gap: 10px; background: linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%); border: 1.5px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.7)); color: #FFFFFF; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-ring, rgba(56, 189, 248, 0.7)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.4)), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.5); }',
     '.samche-launcher.samche-style-circular { width: 62px !important; height: 62px !important; min-width: 62px !important; min-height: 62px !important; max-width: 62px !important; max-height: 62px !important; border-radius: 50% !important; padding: 5px !important; background: radial-gradient(circle at center, rgba(30, 41, 59, 0.9) 0%, rgba(2, 6, 23, 0.98) 100%); border: 2px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.85)); box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.6) var(--chat-glow-ring, rgba(56, 189, 248, 0.8)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.45)), 0 10px 30px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.25)), 0 4px 18px rgba(0, 0, 0, 0.6); }',
     '.samche-launcher.samche-style-minimal { width: 52px !important; height: 52px !important; min-width: 52px !important; min-height: 52px !important; max-width: 52px !important; max-height: 52px !important; border-radius: 50% !important; padding: 4px !important; background: #111827; border: 1px solid var(--chat-border, rgba(255, 255, 255, 0.15)); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 0 calc(var(--chat-glow-spread, 24px) * 0.2) var(--chat-glow-soft, rgba(56, 189, 248, 0.2)); animation: none !important; }',
     '.samche-launcher.samche-style-glass { padding: 4px 18px 4px 6px !important; gap: 10px; background: rgba(17, 24, 39, 0.68); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1.5px solid rgba(255, 255, 255, 0.22); color: #FFFFFF; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), inset 0 0 14px rgba(255, 255, 255, 0.08), 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-soft, rgba(56, 189, 248, 0.3)); }',
-    '.samche-launcher.samche-style-neon-pulse { padding: 4px 18px 4px 6px !important; gap: 10px; background: radial-gradient(circle at center, rgba(15, 23, 42, 0.95) 0%, rgba(2, 6, 23, 1) 100%); border: 2px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.95)); color: #FFFFFF; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.7) var(--chat-glow-ring, rgba(56, 189, 248, 0.9)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.55)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.5) var(--chat-glow-soft, rgba(56, 189, 248, 0.3)), 0 10px 32px rgba(0, 0, 0, 0.6); animation: samche-glow-pulse-strong var(--chat-pulse-duration, 3.6s) infinite ease-in-out !important; }',
+    '.samche-launcher.samche-style-neon-pulse, .samche-launcher.samche-style-neon_pulse { padding: 4px 18px 4px 6px !important; gap: 10px; background: radial-gradient(circle at center, rgba(15, 23, 42, 0.95) 0%, rgba(2, 6, 23, 1) 100%); border: 2px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.95)); color: #FFFFFF; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.7) var(--chat-glow-ring, rgba(56, 189, 248, 0.9)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.55)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.5) var(--chat-glow-soft, rgba(56, 189, 248, 0.3)), 0 10px 32px rgba(0, 0, 0, 0.6); animation: samche-glow-pulse-strong var(--chat-pulse-duration, 3.6s) infinite ease-in-out !important; }',
     '.samche-launcher.samche-style-custom { padding: 4px 18px 4px 6px !important; gap: 10px; background: linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%); border: 1.5px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.7)); color: #FFFFFF; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-ring, rgba(56, 189, 248, 0.7)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.4)), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.5); }',
     '.samche-launcher.samche-launcher-circle { width: 62px !important; height: 62px !important; min-width: 62px !important; min-height: 62px !important; max-width: 62px !important; max-height: 62px !important; border-radius: 50% !important; padding: 5px !important; }',
     '.samche-launcher.samche-pulse-none { animation: none !important; }',
@@ -981,7 +1100,7 @@
     '.samche-messages { flex: 1; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }',
     '.samche-msg { animation: samche-msg-fadein .24s cubic-bezier(.16,1,.3,1); max-width: 85%; font-size: 14px; line-height: 1.5; word-break: break-word; }',
     '.samche-msg-user { align-self: flex-end; background: var(--chat-primary, #2563EB); color: var(--chat-primary-foreground, #FFFFFF) !important; padding: 10px 14px; border-radius: 16px 16px 4px 16px; box-shadow: 0 4px 14px -3px var(--chat-glow, rgba(37,99,235,0.3)); font-weight: 500; }',
-    '.samche-msg-bot { align-self: flex-start; background: rgba(255,255,255,0.07); color: var(--chat-text, #F8FAFC) !important; border: 1px solid var(--chat-border, rgba(255,255,255,0.08)); padding: 12px 16px; border-radius: 16px 16px 16px 4px; }',
+    '.samche-msg-bot { align-self: flex-start; background: var(--chat-bot-bubble-bg, rgba(255,255,255,0.07)); color: var(--chat-text, #F8FAFC) !important; border: 1px solid var(--chat-bot-bubble-border, var(--chat-border, rgba(255,255,255,0.08))); padding: 12px 16px; border-radius: 16px 16px 16px 4px; }',
     '.samche-msg-bot a { color: var(--chat-accent, #60A5FA); text-decoration: underline; }',
     '.samche-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; border-top: 1px solid var(--chat-border, rgba(255,255,255,0.06)); background: rgba(0,0,0,0.1); max-height: 90px; overflow-y: auto; flex-shrink: 0; }',
     '.samche-chip { font-size: 12px; padding: 6px 12px; border-radius: 9999px; background: rgba(255,255,255,0.08); color: var(--chat-text, #F8FAFC); border: 1px solid var(--chat-border, rgba(255,255,255,0.12)); cursor: pointer; transition: background .15s ease, transform .15s ease; outline: none; white-space: nowrap; }',
@@ -1005,6 +1124,10 @@
     '.samche-widget-inline .samche-wrap { position: absolute !important; inset: 0 !important; width: 100% !important; height: 100% !important; }',
     '.samche-widget-inline .samche-launcher { position: absolute !important; bottom: 16px !important; right: 16px !important; }',
     '.samche-widget-inline .samche-panel { position: absolute !important; bottom: 84px !important; right: 16px !important; width: calc(100% - 32px) !important; max-width: 360px !important; height: calc(100% - 100px) !important; max-height: 480px !important; }',
+    '.samche-preview-mount .samche-wrap { position: relative !important; inset: auto !important; width: 100% !important; height: auto !important; z-index: 10 !important; }',
+    '.samche-preview-mount .samche-launcher { position: relative !important; bottom: auto !important; right: auto !important; z-index: 10 !important; }',
+    '.samche-preview-mount .samche-panel { position: relative !important; bottom: auto !important; right: auto !important; z-index: 10 !important; width: 400px !important; height: 600px !important; max-width: 100% !important; max-height: 100% !important; }',
+    '.samche-preview-mobile .samche-panel { width: 100% !important; height: 100% !important; max-width: 100% !important; max-height: 100% !important; border-radius: 0 !important; border: none !important; }',
     '@media (max-width: 640px), (max-height: 500px) and (orientation: landscape) { .samche-launcher, .samche-launcher.samche-launcher-circle { bottom: 16px; right: 16px; width: 52px !important; height: 52px !important; min-width: 52px !important; min-height: 52px !important; max-width: 52px !important; max-height: 52px !important; } .samche-pos-left .samche-launcher { right: auto; left: 16px; } .samche-panel.samche-open { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100% !important; height: 100dvh !important; max-height: 100dvh !important; max-width: 100vw !important; border-radius: 0 !important; border: none !important; margin: 0 !important; padding-top: env(safe-area-inset-top, 0); padding-bottom: env(safe-area-inset-bottom, 0); } }',
     '@media (max-height: 500px) and (orientation: landscape) { .samche-panel.samche-open { position: fixed !important; inset: 0 !important; width: 100vw !important; height: 100vh !important; max-height: 100vh !important; max-width: 100vw !important; border-radius: 0 !important; border: none !important; } }',
     '.samche-panel[dir="rtl"], .samche-wrap[dir="rtl"] { direction: rtl; text-align: right; }',
@@ -1023,7 +1146,14 @@
 
   var I18N = {
     tr: {
+      defaultTitle: 'Canlı Destek',
+      defaultStatus: 'Çevrimiçi',
+      defaultLauncherLabel: 'Canlı Destek',
       clearBtnLabel: 'Sohbeti Temizle',
+      minimizeBtnLabel: 'Küçült',
+      closeBtnLabel: 'Kapat',
+      composerPlaceholder: 'Mesajınızı yazın...',
+      sendLabel: 'Mesaj Gönder',
       confirmText: 'Sohbet geçmişini temizlemek istediğinize emin misiniz?',
       cancelBtn: 'İptal',
       clearBtn: 'Temizle',
@@ -1031,9 +1161,18 @@
       cannotClearHuman: 'Canlı destek temsilcisi görüşmesinde sohbet temizlenemez.',
       cannotClearSending: 'Mesaj iletilirken sohbet temizlenemez.',
       browsingPrefix: 'Gözatılan: ',
+      botGreeting: 'Merhaba! Size nasıl yardımcı olabilirim?',
+      userSample: 'Kargo ve teslimat süreleri hakkında bilgi alabilir miyim?',
     },
     en: {
+      defaultTitle: 'Live Support',
+      defaultStatus: 'Online',
+      defaultLauncherLabel: 'Live Support',
       clearBtnLabel: 'Clear Conversation',
+      minimizeBtnLabel: 'Minimize',
+      closeBtnLabel: 'Close',
+      composerPlaceholder: 'Type a message...',
+      sendLabel: 'Send message',
       confirmText: 'Are you sure you want to clear this conversation?',
       cancelBtn: 'Cancel',
       clearBtn: 'Clear',
@@ -1041,9 +1180,18 @@
       cannotClearHuman: 'Cannot clear conversation while human support is active.',
       cannotClearSending: 'Cannot clear conversation while sending a message.',
       browsingPrefix: 'Viewing: ',
+      botGreeting: 'Hello! How can I help you today?',
+      userSample: 'Can I get information about shipping and delivery times?',
     },
     ar: {
+      defaultTitle: 'الدعم المباشر',
+      defaultStatus: 'متصل',
+      defaultLauncherLabel: 'الدعم المباشر',
       clearBtnLabel: 'مسح المحادثة',
+      minimizeBtnLabel: 'تصغير',
+      closeBtnLabel: 'إغلاق',
+      composerPlaceholder: 'اكتب رسالة...',
+      sendLabel: 'إرسال',
       confirmText: 'هل أنت متأكد أنك تريد مسح هذه المحادثة؟',
       cancelBtn: 'إلغاء',
       clearBtn: 'مسح',
@@ -1051,6 +1199,8 @@
       cannotClearHuman: 'لا يمكن مسح المحادثة أثناء اتصال الدعم البشري.',
       cannotClearSending: 'لا يمكن مسح المحادثة أثناء إرسال الرسالة.',
       browsingPrefix: 'المعروض: ',
+      botGreeting: 'مرحباً! كيف يمكنني مساعدتك اليوم؟',
+      userSample: 'هل يمكنني الحصول على معلومات حول أوقات الشحن والتسليم؟',
     },
   };
 
@@ -1156,9 +1306,10 @@
       var activeAppearance = effectiveAppearance || {};
       var launcher = document.createElement('button');
       var initialHasLabel = Boolean(activeAppearance && typeof activeAppearance.launcher_label === 'string' && activeAppearance.launcher_label.trim());
-      var initialStyle = String(activeAppearance.launcher_style || 'pill').toLowerCase();
+      var initialStyle = String(activeAppearance.launcher_style || 'pill').toLowerCase().trim();
+      var normInitialStyle = initialStyle.replace(/_/g, '-');
       var initialIsCircular = initialStyle === 'circular' || initialStyle === 'minimal' || (!activeAppearance.launcher_label && initialStyle !== 'pill');
-      launcher.className = 'samche-launcher samche-style-' + initialStyle + (initialIsCircular || !initialHasLabel ? ' samche-launcher-circle' : '');
+      launcher.className = 'samche-launcher samche-style-' + normInitialStyle + ' samche-style-' + initialStyle + (initialIsCircular || !initialHasLabel ? ' samche-launcher-circle' : '');
       launcher.setAttribute('aria-label', (activeAppearance && activeAppearance.launcher_label) || (activeAppearance && activeAppearance.title) || 'Canlı Destek Asistanı');
       launcher.setAttribute('aria-expanded', 'false');
       launcher.setAttribute('aria-haspopup', 'dialog');
@@ -1222,11 +1373,33 @@
       chipsContainer.style.display = 'none';
       panel.appendChild(chipsContainer);
 
+      var storedBehavior = SamcheChatPersistence.getStoredBehavior(widgetKey);
+      var initialLangCandidate = options.language
+        || (storedBehavior && storedBehavior.language)
+        || (effectiveAppearance && effectiveAppearance.language);
+      if (!initialLangCandidate && typeof document !== 'undefined') {
+        var sTag = document.currentScript || document.querySelector('script[data-widget-key]');
+        if (sTag && sTag.getAttribute('data-language')) {
+          initialLangCandidate = sTag.getAttribute('data-language');
+        } else if (document.documentElement && document.documentElement.lang) {
+          initialLangCandidate = document.documentElement.lang;
+        } else if (typeof navigator !== 'undefined' && navigator.language) {
+          initialLangCandidate = navigator.language;
+        }
+      }
+      var initLang = 'tr';
+      if (initialLangCandidate) {
+        var il = String(initialLangCandidate).toLowerCase().trim();
+        if (il.startsWith('ar')) initLang = 'ar';
+        else if (il.startsWith('en')) initLang = 'en';
+      }
+      var initDict = I18N[initLang] || I18N.tr;
+
       var composer = document.createElement('div');
       composer.className = 'samche-composer';
       composer.innerHTML = [
-        '<textarea class="samche-composer-input" placeholder="Mesajınızı yazın..." rows="1" aria-label="Mesajınızı yazın"></textarea>',
-        '<button class="samche-send-btn" aria-label="Gönder" disabled>' + SEND_ICON_SVG + '</button>'
+        '<textarea class="samche-composer-input" placeholder="' + escapeHtml(initDict.composerPlaceholder) + '" rows="1" aria-label="' + escapeHtml(initDict.composerPlaceholder) + '"></textarea>',
+        '<button class="samche-send-btn" aria-label="' + escapeHtml(initDict.sendLabel) + '" disabled>' + SEND_ICON_SVG + '</button>'
       ].join('');
       panel.appendChild(composer);
       wrap.appendChild(panel);
@@ -1241,7 +1414,7 @@
       var isSending = false;
       var isResetting = false;
       var isHumanTakeoverActive = false;
-      var currentLang = 'tr';
+      var currentLang = initLang;
       var lastKnownResetTime = SamcheChatPersistence.getLastResetTime(widgetKey);
       var nudgeTimer = null;
       var contextBadgeEl = header.querySelector('.samche-header-context-badge');
@@ -1256,7 +1429,11 @@
 
       function setLanguage(lang) {
         if (!lang || typeof lang !== 'string') return;
-        var l = lang.toLowerCase();
+        var l = lang.toLowerCase().trim();
+        if (l === 'auto') {
+          l = (typeof document !== 'undefined' && document.documentElement && document.documentElement.lang) || (typeof navigator !== 'undefined' && (navigator.language || navigator.userLanguage)) || 'tr';
+          l = String(l).toLowerCase().trim();
+        }
         if (l.startsWith('ar')) currentLang = 'ar';
         else if (l.startsWith('en')) currentLang = 'en';
         else currentLang = 'tr';
@@ -1264,6 +1441,22 @@
         var dict = I18N[currentLang] || I18N.tr;
         clearBtn.setAttribute('aria-label', dict.clearBtnLabel);
         clearBtn.setAttribute('title', isHumanTakeoverActive ? dict.cannotClearHuman : dict.clearBtnLabel);
+        if (minimizeBtn) {
+          minimizeBtn.setAttribute('aria-label', dict.minimizeBtnLabel || 'Küçült');
+          minimizeBtn.setAttribute('title', dict.minimizeBtnLabel || 'Küçült');
+        }
+        if (closeBtn) {
+          closeBtn.setAttribute('aria-label', dict.closeBtnLabel || 'Kapat');
+          closeBtn.setAttribute('title', dict.closeBtnLabel || 'Kapat');
+        }
+        if (textarea) {
+          textarea.placeholder = dict.composerPlaceholder || 'Mesajınızı yazın...';
+          textarea.setAttribute('aria-label', dict.composerPlaceholder || 'Mesajınızı yazın...');
+        }
+        if (sendBtn) {
+          sendBtn.setAttribute('aria-label', dict.sendLabel || 'Mesaj Gönder');
+          sendBtn.setAttribute('title', dict.sendLabel || 'Mesaj Gönder');
+        }
         confirmDescEl.textContent = dict.confirmText;
         confirmCancelBtn.textContent = dict.cancelBtn;
         confirmProceedBtn.textContent = dict.clearBtn;
@@ -1275,7 +1468,19 @@
           panel.removeAttribute('dir');
           wrap.removeAttribute('dir');
         }
+
+        if (!currentAppearance || !currentAppearance.title) {
+          var titleEl = header.querySelector('.samche-header-title');
+          if (titleEl) titleEl.textContent = dict.defaultTitle;
+        }
+        if (!currentAppearance || !currentAppearance.subtitle) {
+          var statusText = header.querySelector('.samche-status-text');
+          if (statusText) statusText.textContent = dict.defaultStatus;
+        }
+        updateLauncher();
       }
+
+      setLanguage(initLang);
 
       clearBtn.addEventListener('click', function(e) {
         e.preventDefault();
@@ -1547,15 +1752,17 @@
         launcher.classList.remove('samche-launcher-hidden');
         launcher.setAttribute('aria-expanded', 'false');
 
-        var style = String(currentAppearance.launcher_style || 'pill').toLowerCase();
-        var isCircular = style === 'circular' || style === 'minimal' || (!currentAppearance.launcher_label && currentAppearance.launcher_style !== 'pill');
-        var labelText = (!isCircular && typeof currentAppearance.launcher_label === 'string')
-          ? currentAppearance.launcher_label.trim()
+        var app = currentAppearance || effectiveAppearance || {};
+        var rawStyle = String(app.launcher_style || 'pill').toLowerCase().trim();
+        var normStyle = rawStyle.replace(/_/g, '-');
+        var isCircular = rawStyle === 'circular' || rawStyle === 'minimal' || (!app.launcher_label && rawStyle !== 'pill');
+        var labelText = (!isCircular && typeof app.launcher_label === 'string')
+          ? app.launcher_label.trim()
           : '';
 
-        launcher.className = 'samche-launcher samche-style-' + style + (isCircular || !labelText ? ' samche-launcher-circle' : '');
+        launcher.className = 'samche-launcher samche-style-' + normStyle + ' samche-style-' + rawStyle + (isCircular || !labelText ? ' samche-launcher-circle' : '');
 
-        var pulse = String(currentAppearance.pulse_animation || 'normal').toLowerCase();
+        var pulse = String(app.pulse_animation || 'normal').toLowerCase();
         if (pulse === 'none') {
           launcher.classList.add('samche-pulse-none');
         } else if (pulse === 'subtle') {
@@ -1566,10 +1773,10 @@
           launcher.classList.add('samche-pulse-normal');
         }
 
-        var logoSrc = currentAppearance.logo_url ? resolveWebChatAssetUrl(currentAppearance.logo_url) : null;
+        var logoSrc = app.logo_url ? resolveWebChatAssetUrl(app.logo_url) : null;
         var badgeHtml = '<span class="samche-launcher-badge">' + (
           logoSrc
-            ? '<img class="samche-launcher-logo" src="' + logoSrc + '" alt="' + escapeHtml(currentAppearance.brand_name || 'Logo') + '" />'
+            ? '<img class="samche-launcher-logo" src="' + logoSrc + '" alt="' + escapeHtml(app.brand_name || 'Logo') + '" />'
             : '<span class="samche-launcher-icon">' + CHAT_ICON_SVG + '</span>'
         ) + '</span>';
 
@@ -1577,7 +1784,7 @@
           launcher.setAttribute('aria-label', labelText);
           launcher.innerHTML = badgeHtml + '<span class="samche-launcher-label">' + escapeHtml(labelText) + '</span>';
         } else {
-          launcher.setAttribute('aria-label', currentAppearance.title || 'Canlı Destek');
+          launcher.setAttribute('aria-label', app.title || 'Canlı Destek');
           launcher.innerHTML = badgeHtml;
         }
       }
@@ -1658,7 +1865,7 @@
         }
         if (appearance.theme) {
           var t = appearance.theme;
-          var targets = [host, wrap, launcher];
+          var targets = [host, wrap, launcher, panel];
           for (var ti = 0; ti < targets.length; ti++) {
             var target = targets[ti];
             if (!target || !target.style) continue;
@@ -1679,6 +1886,10 @@
             if (t.text_color) target.style.setProperty('--chat-text', t.text_color);
             if (t.muted_color) target.style.setProperty('--chat-muted', t.muted_color);
             if (t.border_color) target.style.setProperty('--chat-border', t.border_color);
+            if (t.input_bg) target.style.setProperty('--chat-input-bg', t.input_bg);
+            if (t.input_border) target.style.setProperty('--chat-input-border', t.input_border);
+            if (t.bot_bubble_bg) target.style.setProperty('--chat-bot-bubble-bg', t.bot_bubble_bg);
+            if (t.bot_bubble_border) target.style.setProperty('--chat-bot-bubble-border', t.bot_bubble_border);
           }
         }
       }
@@ -1861,29 +2072,81 @@
             }).catch(function() {});
           }
 
-          // Delayed check for client-rendered SPA / Nuxt / React hydration
+          // Setup bounded dynamic recapture for client-rendered SPA / Nuxt / React hydration
+          var mutationRecaptureCount = 0;
+          var maxRecapturesPerNav = 3;
+          var recaptureDebounceTimer = null;
+          var lastCapturedSignature = '';
+
+          function sendRecapturedContext(ctx) {
+            if (!ctx || !sessionToken) return;
+            fetch(resolveApiBaseUrl() + '/api/chat/page-context', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Samche-Web-Chat-Session': sessionToken,
+              },
+              body: JSON.stringify({ page_context: ctx }),
+            }).catch(function() {});
+          }
+
+          function scheduleDynamicRecapture() {
+            if (typeof window === 'undefined' || typeof document === 'undefined') return;
+            if (mutationRecaptureCount >= maxRecapturesPerNav) return;
+            if (recaptureDebounceTimer) clearTimeout(recaptureDebounceTimer);
+            recaptureDebounceTimer = setTimeout(function() {
+              if (mutationRecaptureCount >= maxRecapturesPerNav) return;
+              var newCtx = capturePageContext();
+              if (!newCtx) return;
+              var sig = (newCtx.title || '') + '|' + (newCtx.entity_name || '') + '|' +
+                ((newCtx.visible_products && newCtx.visible_products.length) || 0) + '|' +
+                ((newCtx.headings && newCtx.headings.length) || 0);
+              if (sig !== lastCapturedSignature) {
+                lastCapturedSignature = sig;
+                mutationRecaptureCount++;
+                sendRecapturedContext(newCtx);
+              }
+            }, 400);
+          }
+
           if (typeof window !== 'undefined') {
             setTimeout(function() {
               var hydratedCtx = capturePageContext();
-              if (hydratedCtx && sessionToken && hydratedCtx.attributes && hydratedCtx.attributes.visible_products && hydratedCtx.attributes.visible_products.length > 0) {
-                fetch(resolveApiBaseUrl() + '/api/chat/page-context', {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'X-Samche-Web-Chat-Session': sessionToken,
-                  },
-                  body: JSON.stringify({ page_context: hydratedCtx }),
-                }).catch(function() {});
+              if (hydratedCtx) {
+                sendRecapturedContext(hydratedCtx);
               }
-            }, 1200);
+            }, 800);
+
+            if (typeof MutationObserver !== 'undefined' && document.body) {
+              try {
+                var bodyObserver = new MutationObserver(function(mutations) {
+                  var hasExternalMutation = false;
+                  for (var mi = 0; mi < mutations.length; mi++) {
+                    var mTarget = mutations[mi].target;
+                    if (mTarget && (mTarget === host || host.contains(mTarget) || (mTarget.id && mTarget.id.indexOf('samche') !== -1))) {
+                      continue;
+                    }
+                    hasExternalMutation = true;
+                    break;
+                  }
+                  if (hasExternalMutation) {
+                    scheduleDynamicRecapture();
+                  }
+                });
+                bodyObserver.observe(document.body, { childList: true, subtree: true });
+              } catch (e) {}
+            }
           }
         }
         if (data.appearance) {
           SamcheChatPersistence.storeAppearance(widgetKey, data.appearance);
           applyTheme(data.appearance);
         }
-        if (data.behavior && data.behavior.language) {
-          setLanguage(data.behavior.language);
+        if (data.behavior) {
+          SamcheChatPersistence.storeBehavior(widgetKey, data.behavior);
+          if (data.behavior.language) {
+            setLanguage(data.behavior.language);
+          }
         }
         if (data.handling_mode === 'HUMAN') {
           isHumanTakeoverActive = true;
@@ -2139,6 +2402,7 @@
         setLanguage: function(l) { setLanguage(l); },
         isOpen: function() { return isOpen; },
         getSessionToken: function() { return sessionToken; },
+        capturePageContext: function() { return capturePageContext(); },
       };
       this.instances[widgetKey] = inst;
       if (pendingChips) {

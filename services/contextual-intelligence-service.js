@@ -78,6 +78,7 @@ function checkObjectDepth(obj, currentDepth = 1) {
   if (!obj || typeof obj !== 'object') return true;
   for (const key of Object.keys(obj)) {
     const val = obj[key];
+    if (currentDepth >= CONTEXT_LIMITS.MAX_DEPTH) return false;
     if (val && typeof val === 'object') {
       if (!checkObjectDepth(val, currentDepth + 1)) return false;
     }
@@ -212,13 +213,31 @@ export function validateAndNormalizePageContext(rawPayload) {
     }
   }
 
+  const rawHeadings = Array.isArray(rawPayload.headings) ? rawPayload.headings : [];
+  const headings = rawHeadings
+    .map((h) => sanitizeText(h, 120))
+    .filter(Boolean)
+    .slice(0, 15);
+  if (headings.length > 0 && !attributes.page_headings) {
+    attributes.page_headings = headings;
+    attributeProvenance.page_headings = PROVENANCE_SOURCES.PAGE_VISIBLE_FACT;
+  }
+
   const effectiveVisibleProducts = attributes.visible_products || [];
   if (effectiveVisibleProducts.length > 1) {
     if (!pageType || pageType === 'PAGE') pageType = 'PRODUCT_LIST';
     if (!entityType || entityType === 'PAGE' || entityType === 'WebSite') entityType = 'PRODUCT_LIST';
     if (!summary || summary === 'PAGE' || summary === 'WebSite') {
-      summary = `Bu sayfada görüntülenen ürünler (${effectiveVisibleProducts.length} adet): ` +
-        effectiveVisibleProducts.map((p) => p.name + (p.price ? ` (${p.price})` : '')).join(', ');
+      if (language && language.startsWith('en')) {
+        summary = `Visible products on this page (${effectiveVisibleProducts.length} items): ` +
+          effectiveVisibleProducts.map((p) => p.name + (p.price ? ` (${p.price})` : '')).join(', ');
+      } else if (language && language.startsWith('ar')) {
+        summary = `المنتجات المعروضة في هذه الصفحة (${effectiveVisibleProducts.length} عناصر): ` +
+          effectiveVisibleProducts.map((p) => p.name + (p.price ? ` (${p.price})` : '')).join(', ');
+      } else {
+        summary = `Bu sayfada görüntülenen ürünler (${effectiveVisibleProducts.length} adet): ` +
+          effectiveVisibleProducts.map((p) => p.name + (p.price ? ` (${p.price})` : '')).join(', ');
+      }
     }
   } else if (effectiveVisibleProducts.length === 1 && (!entityType || entityType === 'PAGE' || entityType === 'WebSite')) {
     const single = effectiveVisibleProducts[0];
@@ -239,6 +258,7 @@ export function validateAndNormalizePageContext(rawPayload) {
     entity_id: entityId || null,
     entity_name: entityName || null,
     summary: summary || null,
+    headings: headings.length > 0 ? headings : undefined,
     attributes,
     attribute_provenance: attributeProvenance,
     referrer: referrer || null,
@@ -265,6 +285,10 @@ export function resolvePageEntity(normalizedContext) {
     || normalizedContext.attributes?.catalog_items
     || [];
 
+  const headings = normalizedContext.headings
+    || normalizedContext.attributes?.page_headings
+    || [];
+
   return {
     entity_type: entityType,
     entity_id: entityId ? String(entityId) : primaryUrl,
@@ -274,6 +298,7 @@ export function resolvePageEntity(normalizedContext) {
     attribute_provenance: normalizedContext.attribute_provenance || {},
     summary: normalizedContext.summary || '',
     visible_products: Array.isArray(visibleProducts) ? visibleProducts : [],
+    headings: Array.isArray(headings) ? headings : [],
     source: PROVENANCE_SOURCES.PAGE_VISIBLE_FACT,
     freshness: nowIso,
     provenance: {
@@ -586,10 +611,11 @@ export function buildContextualIntelligencePromptSection({
       });
       sections.push('');
       sections.push('GROUNDING DIRECTIVE FOR CURRENT PAGE PRODUCTS:');
-      sections.push('- When the visitor asks "bu sayfada hangi ürünler var", "buradaki ürünler neler", "ürünleri listele", "en uygun olan hangisi", "fiyatları nedir", or asks to compare products on this page, answer DIRECTLY using the verified visible products and prices listed above.');
-      sections.push('- Strictly ground names, prices, and specs in the confirmed list above. NEVER state that you cannot see the products on this page or suggest navigating to the products section when products are listed above.');
-      sections.push('- If the visitor asks for the cheapest / most affordable ("en uygun"), identify the product with the lowest price from the list above.');
-      sections.push('- If the visitor asks to compare them ("karşılaştır"), compare their confirmed prices and features from the list above.');
+      sections.push('- When the visitor asks "bu sayfada hangi ürünler var", "buradaki ürünler neler", "ürünleri listele", "en uygun olan hangisi", "fiyatları nedir", or in English "what products are on this page", "what items are on this page", "what products are here", "list the products", "which products are available", "what do you have on this page", or asks to compare products on this page, answer DIRECTLY using the verified visible products and descriptions/prices listed above.');
+      sections.push('- Strictly ground names, descriptions, prices, and specs in the confirmed list above. NEVER state that you cannot see the products on this page, that you do not have verified information, or suggest navigating to the products section when products/items are listed above.');
+      sections.push('- If the visitor asks for the cheapest / most affordable ("en uygun" / "cheapest"), identify the product with the lowest price from the list above.');
+      sections.push('- If the visitor asks to compare them ("karşılaştır" / "compare"), compare their confirmed features and prices from the list above.');
+      sections.push('- Respond in the same language as the visitor\'s inquiry (Turkish, English, Arabic, etc.).');
       sections.push('');
       sections.push('SUPPORT INTENT COEXISTENCE:');
       sections.push('- If the visitor\'s question is about returns, cancellations, shipping times, warranty, or customer service (e.g. "ürünü iade etmek istiyorum", "kargo ne zaman gelir", "garanti şartları"), answer from tenant-approved support policies and knowledge context rather than assuming they only want product specs.');
@@ -600,7 +626,20 @@ export function buildContextualIntelligencePromptSection({
       if (currentEntity.attributes?.price) sections.push(`Price: ${sanitizeText(String(currentEntity.attributes.price), 50)}`);
       if (cleanUrl) sections.push(`Product URL: ${cleanUrl}`);
       if (cleanSummary) sections.push(`Product Description: ${cleanSummary}`);
-      sections.push('DIRECTIVE: When the visitor asks "Şu anda hangi ürüne bakıyorum?", "Bu ürün nedir?", or "Bu ürünün özellikleri neler?", answer using the current product details above.');
+      sections.push('DIRECTIVE: When the visitor asks "Şu anda hangi ürüne bakıyorum?", "Bu ürün nedir?", "What product is this?", or asks about specifications, answer using the current product details above.');
+    } else {
+      const pageHeadings = currentEntity.headings
+        || currentEntity.attributes?.page_headings
+        || [];
+      if (Array.isArray(pageHeadings) && pageHeadings.length > 0) {
+        sections.push('');
+        sections.push('[VISIBLE PAGE HEADINGS (PAGE_VISIBLE_FACT)]');
+        sections.push('The visitor is currently viewing a page containing the following visible sections/headings:');
+        pageHeadings.forEach((h, idx) => {
+          sections.push(`${idx + 1}. ${sanitizeText(h, 120)}`);
+        });
+        sections.push('GROUNDING DIRECTIVE: When asked about what is on this page, reference the confirmed visible headings and page content above.');
+      }
     }
   }
 

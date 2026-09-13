@@ -25,6 +25,7 @@ import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
 import { selectTenantAssistants } from '../resources/resource-utils';
 import { useTenant } from '../tenants/tenant-context';
 import { resolveWebChatAssetUrl } from '../../lib/branding';
+import { WebChatPreviewRenderer } from './web-chat-preview-renderer';
 import type {
   WebChatAppearanceConfig,
   WebChatBehaviorConfig,
@@ -116,73 +117,6 @@ function LauncherStyleIcon({ id, logoUrl }: { id: string; logoUrl?: string | nul
         {logoUrl ? <img src={logoUrl} alt="" className="h-2 w-2 object-contain" /> : <div className="h-1.5 w-1.5 rounded-full bg-sky-400" />}
       </div>
       <div className="h-1 w-3 rounded bg-white/70" />
-    </div>
-  );
-}
-
-function LivePreviewCanvas({
-  previewViewport,
-  previewState,
-  setPreviewState,
-  primaryColor,
-  renderPreviewLauncher,
-  renderPreviewPanel,
-}: {
-  previewViewport: 'desktop' | 'mobile';
-  previewState: 'both' | 'closed' | 'open';
-  setPreviewState: (s: 'both' | 'closed' | 'open') => void;
-  primaryColor: string;
-  renderPreviewLauncher: (onClick?: () => void) => React.ReactNode;
-  renderPreviewPanel: (onClose?: () => void) => React.ReactNode;
-}) {
-  return (
-    <div
-      className={`relative mx-auto rounded-2xl border border-line/80 overflow-hidden transition-all duration-300 p-6 flex items-center justify-center ${
-        previewViewport === 'mobile' ? 'max-w-sm h-[580px]' : 'w-full min-h-[460px]'
-      }`}
-      style={{
-        background: `radial-gradient(circle at 65% 35%, ${primaryColor}18 0%, #050814 60%, #02040a 100%)`,
-      }}
-    >
-      {previewState === 'both' && (
-        <div className="w-full flex flex-col md:flex-row items-center justify-around gap-8">
-          <div className="flex flex-col items-center gap-4">
-            <div className="text-center">
-              <span className="text-sky-400 text-sm font-semibold block">Closed State</span>
-              <span className="text-stone-400 text-xs">Premium glowing launcher</span>
-            </div>
-            <div className="p-4 flex items-center justify-center">
-              {renderPreviewLauncher(() => setPreviewState('open'))}
-            </div>
-          </div>
-
-          <div className="flex flex-col items-center gap-3 w-full max-w-[340px]">
-            <div className="text-center">
-              <span className="text-sky-400 text-sm font-semibold block">Open State</span>
-              <span className="text-stone-400 text-xs">Smooth expand with glow</span>
-            </div>
-            {renderPreviewPanel(() => setPreviewState('closed'))}
-          </div>
-        </div>
-      )}
-
-      {previewState === 'closed' && (
-        <div className="flex flex-col items-center justify-center gap-6 py-12">
-          <div className="text-center">
-            <span className="text-sky-400 text-base font-semibold block">Closed State Preview</span>
-            <span className="text-stone-400 text-xs">Configured closed-state AI launcher</span>
-          </div>
-          <div className="p-8 flex items-center justify-center">
-            {renderPreviewLauncher(() => setPreviewState('open'))}
-          </div>
-        </div>
-      )}
-
-      {previewState === 'open' && (
-        <div className="flex flex-col items-center justify-center w-full max-w-[340px]">
-          {renderPreviewPanel(() => setPreviewState('closed'))}
-        </div>
-      )}
     </div>
   );
 }
@@ -376,206 +310,36 @@ export function WebChatManagement() {
     }
   };
 
-  const primaryFg = contrastResult?.primary_foreground || getAccessibleForeground(primaryColor);
   const displayLogoUrl = resolveWebChatAssetUrl(logoUrl);
 
-  const clampedIntensity = Math.max(0, Math.min(100, Math.round(Number(glowIntensity) || 0)));
-  const clampedSpread = Math.max(0, Math.min(100, Math.round(Number(glowSpread) || 0)));
-  const intensityFactor = clampedIntensity / 100;
-  const spreadFactor = clampedSpread / 100;
+  const savedAppearance = (webChatQuery.data?.appearance || {}) as any;
+  const savedBehavior = (webChatQuery.data?.behavior || {}) as any;
+  const savedTheme = savedAppearance.theme || {};
 
-  const glowRing = contrastResult?.glow_ring || hexToRgba(primaryColor, Number(Math.min(1, 0.35 + intensityFactor * 0.6).toFixed(2)));
-  const glowColor = contrastResult?.glow || hexToRgba(primaryColor, Number(Math.min(1, 0.15 + intensityFactor * 0.45).toFixed(2)));
-  const glowSoftColor = contrastResult?.glow_soft || hexToRgba(primaryColor, Number(Math.min(1, 0.08 + intensityFactor * 0.22).toFixed(2)));
-  const glowSpreadPx = contrastResult?.glow_spread_px ?? Math.round(10 + spreadFactor * 26);
-  const glowHaloPx = contrastResult?.glow_halo_px ?? Math.round(20 + spreadFactor * 36);
-  const pulseDuration = contrastResult?.pulse_duration || (animationSpeed === 'slow' ? '5.5s' : animationSpeed === 'fast' ? '2.2s' : '3.6s');
-
-  const renderPreviewLauncher = (onClick?: () => void) => {
-    const isCircular = launcherStyle === 'circular' || launcherStyle === 'minimal' || (!launcherLabel && launcherStyle !== 'pill');
-
-    let bgStyle = 'linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%)';
-    let borderStyle = `1.5px solid ${glowRing}`;
-    let shadowStyle = `0 0 ${Math.round(glowSpreadPx * 0.45)}px ${glowRing}, 0 0 ${glowHaloPx}px ${glowColor}, 0 8px 28px -4px ${glowSoftColor}, 0 4px 16px rgba(0, 0, 0, 0.5)`;
-
-    if (launcherStyle === 'circular') {
-      bgStyle = 'radial-gradient(circle at center, rgba(30, 41, 59, 0.9) 0%, rgba(2, 6, 23, 0.98) 100%)';
-      borderStyle = `2px solid ${glowRing}`;
-      shadowStyle = `0 0 ${Math.round(glowSpreadPx * 0.6)}px ${glowRing}, 0 0 ${glowHaloPx}px ${glowColor}, 0 10px 30px -4px ${glowSoftColor}, 0 4px 18px rgba(0, 0, 0, 0.6)`;
-    } else if (launcherStyle === 'minimal') {
-      bgStyle = '#111827';
-      borderStyle = '1px solid rgba(255, 255, 255, 0.15)';
-      shadowStyle = `0 4px 16px rgba(0, 0, 0, 0.35), 0 0 ${Math.round(glowSpreadPx * 0.2)}px ${glowSoftColor}`;
-    } else if (launcherStyle === 'glass') {
-      bgStyle = 'rgba(17, 24, 39, 0.68)';
-      borderStyle = '1.5px solid rgba(255, 255, 255, 0.22)';
-      shadowStyle = `0 8px 32px 0 rgba(0, 0, 0, 0.4), inset 0 0 14px rgba(255, 255, 255, 0.08), 0 0 ${Math.round(glowSpreadPx * 0.45)}px ${glowSoftColor}`;
-    } else if (launcherStyle === 'neon_pulse') {
-      bgStyle = 'radial-gradient(circle at center, rgba(15, 23, 42, 0.95) 0%, rgba(2, 6, 23, 1) 100%)';
-      borderStyle = `2px solid ${glowRing}`;
-      shadowStyle = `0 0 ${Math.round(glowSpreadPx * 0.7)}px ${glowRing}, 0 0 ${glowHaloPx}px ${glowColor}, 0 0 ${Math.round(glowHaloPx * 1.5)}px ${glowSoftColor}, 0 10px 32px rgba(0, 0, 0, 0.6)`;
-    }
-
-    const animationClass = pulseAnimation === 'none' || launcherStyle === 'minimal'
-      ? ''
-      : pulseAnimation === 'strong' || launcherStyle === 'neon_pulse'
-      ? 'animate-pulse'
-      : 'hover:scale-105';
-
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        className={`group relative flex items-center justify-center transition-all duration-300 cursor-pointer user-select-none ${animationClass} ${
-          isCircular
-            ? 'h-16 w-16 rounded-full p-1.5'
-            : 'h-[52px] rounded-full py-1.5 pl-1.5 pr-5 gap-3'
-        }`}
-        style={{
-          background: bgStyle,
-          border: borderStyle,
-          boxShadow: shadowStyle,
-        }}
-        title="Click to toggle chat preview"
-      >
-        <div
-          className={`rounded-full flex items-center justify-center overflow-hidden shrink-0 transition-transform ${
-            isCircular
-              ? 'h-full w-full p-1'
-              : 'h-10 w-10 p-1.5 shadow-inner'
-          }`}
-          style={!isCircular ? {
-            background: 'radial-gradient(circle at center, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.95) 100%)',
-            border: `1.5px solid ${glowRing}`,
-            boxShadow: `inset 0 0 8px rgba(0,0,0,0.5), 0 0 10px ${glowSoftColor}`,
-          } : undefined}
-        >
-          {launcherIcon === 'logo' && logoUrl ? (
-            <img
-              src={displayLogoUrl}
-              alt={brandName || 'Logo'}
-              className="max-h-full max-w-full object-contain pointer-events-none"
-            />
-          ) : displayLogoUrl ? (
-            <img
-              src={displayLogoUrl}
-              alt={brandName || 'Logo'}
-              className="max-h-full max-w-full object-contain pointer-events-none"
-            />
-          ) : (
-            <MessageSquare size={isCircular ? 24 : 18} style={{ color: primaryFg }} />
-          )}
-        </div>
-
-        {!isCircular && (
-          <span className="text-[14.5px] font-semibold text-white tracking-tight truncate max-w-[200px]">
-            {launcherLabel ? launcherLabel : 'Canlı Destek'}
-          </span>
-        )}
-      </button>
-    );
-  };
-
-  const renderPreviewPanel = (onClose?: () => void) => (
-    <div
-      className="w-full max-w-[340px] rounded-2xl overflow-hidden shadow-2xl flex flex-col transition-all duration-300"
-      style={{
-        background: themeMode === 'light' ? 'rgba(255, 255, 255, 0.94)' : 'rgba(11, 15, 25, 0.94)',
-        backdropFilter: 'blur(24px)',
-        border: `1.5px solid ${glowRing}`,
-        boxShadow: `0 0 ${Math.round(glowSpreadPx * 0.75)}px ${glowSoftColor}, 0 24px 60px -12px rgba(0, 0, 0, 0.8), 0 12px 32px rgba(0, 0, 0, 0.5)`,
-      }}
-    >
-      <div
-        className="flex items-center justify-between px-4 py-3 border-b"
-        style={{
-          borderColor: themeMode === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.1)',
-          background: `linear-gradient(135deg, ${primaryColor}22, ${themeMode === 'light' ? 'rgba(0, 0, 0, 0.02)' : 'rgba(255, 255, 255, 0.03)'})`,
-        }}
-      >
-        <div className="flex items-center gap-3">
-          <div
-            className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shadow overflow-hidden p-0.5"
-            style={{
-              background: 'radial-gradient(circle at center, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.95) 100%)',
-              border: `1.5px solid ${glowRing}`,
-            }}
-          >
-            {displayLogoUrl ? (
-              <img src={displayLogoUrl} alt={brandName || 'Brand'} className="h-full w-full object-contain" />
-            ) : (
-              <span style={{ color: primaryFg }}>{brandName ? brandName.charAt(0).toUpperCase() : 'S'}</span>
-            )}
-          </div>
-          <div>
-            <h3 className={`text-sm font-semibold ${themeMode === 'light' ? 'text-stone-900' : 'text-white'}`}>
-              {title || brandName || 'Canlı Destek'}
-            </h3>
-            <p className="text-[11px] text-emerald-400 flex items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
-              <span>{subtitle || 'Çevrimiçi'}</span>
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-stone-400 hover:text-white transition-colors cursor-pointer"
-            title="Minimize chat"
-          >
-            <X size={15} />
-          </button>
-        </div>
-      </div>
-
-      <div className="p-4 space-y-3 h-48 overflow-y-auto text-xs">
-        <div className="flex flex-col items-start">
-          <div
-            className="max-w-[85%] rounded-2xl px-3.5 py-2 font-normal"
-            style={{
-              background: themeMode === 'light' ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.08)',
-              border: themeMode === 'light' ? '1px solid rgba(0, 0, 0, 0.08)' : '1px solid rgba(255, 255, 255, 0.12)',
-              color: themeMode === 'light' ? '#1E293B' : '#F8FAFC',
-            }}
-          >
-            Merhaba! Size nasıl yardımcı olabilirim?
-          </div>
-        </div>
-
-        <div className="flex flex-col items-end">
-          <div
-            className="max-w-[85%] rounded-2xl px-3.5 py-2 font-medium"
-            style={{ background: primaryColor, color: primaryFg }}
-          >
-            Kargo ve teslimat süreleri hakkında bilgi alabilir miyim?
-          </div>
-        </div>
-      </div>
-
-      <div
-        className="p-3 border-t flex items-center gap-2"
-        style={{ borderColor: themeMode === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.08)' }}
-      >
-        <input
-          type="text"
-          disabled
-          placeholder="Bir mesaj yazın..."
-          className={`flex-1 rounded-xl px-3 py-1.5 text-xs focus:outline-none ${
-            themeMode === 'light'
-              ? 'bg-black/[0.04] border border-black/10 text-stone-900 placeholder-stone-400'
-              : 'bg-white/[0.06] border border-white/10 text-white placeholder-stone-400'
-          }`}
-        />
-        <button
-          type="button"
-          className="h-8 w-8 rounded-xl flex items-center justify-center shadow"
-          style={{ background: primaryColor, color: primaryFg }}
-        >
-          <Send size={13} />
-        </button>
-      </div>
-    </div>
+  const hasUnsavedChanges = Boolean(
+    displayName !== (webChatQuery.data?.channel?.display_name || 'Web Chat') ||
+    assistantId !== (webChatQuery.data?.channel?.assistant_id || webChatQuery.data?.assistant?.id || '') ||
+    status !== (webChatQuery.data?.channel?.status || 'active') ||
+    brandName !== (savedAppearance.brand_name || '') ||
+    title !== (savedAppearance.title || '') ||
+    subtitle !== (savedAppearance.subtitle || '') ||
+    (logoUrl || '') !== (savedAppearance.logo_url || '') ||
+    launcherLabel !== (savedAppearance.launcher_label ?? 'Canlı Destek') ||
+    launcherPosition !== (savedAppearance.launcher_position || 'right') ||
+    launcherIcon !== (savedAppearance.launcher_icon || 'chat') ||
+    themeMode !== (savedAppearance.theme_mode || 'dark') ||
+    launcherStyle !== (savedAppearance.launcher_style || 'pill') ||
+    Number(glowIntensity) !== Number(savedAppearance.glow_intensity ?? 80) ||
+    Number(glowSpread) !== Number(savedAppearance.glow_spread ?? 70) ||
+    pulseAnimation !== (savedAppearance.pulse_animation || 'normal') ||
+    animationSpeed !== (savedAppearance.animation_speed || 'normal') ||
+    primaryColor.toLowerCase() !== (savedTheme.primary_color || '#0B5FFF').toLowerCase() ||
+    accentColor.toLowerCase() !== (savedTheme.accent_color || '#10B981').toLowerCase() ||
+    language !== (savedBehavior.language || 'auto') ||
+    proactiveEnabled !== Boolean(savedBehavior.proactive_enabled) ||
+    highIntentActivation !== (savedBehavior.high_intent_activation !== false) ||
+    Number(dwellThresholdSeconds) !== Number(savedBehavior.dwell_threshold_seconds || 15) ||
+    Number(cooldownSeconds) !== Number(savedBehavior.cooldown_seconds || 300)
   );
 
   const saveMutation = useMutation({
@@ -1022,6 +786,24 @@ export function WebChatManagement() {
               </select>
             </label>
 
+            <label className="block text-sm font-medium">
+              Primary Language &amp; Locale
+              <select
+                aria-label="Primary Language"
+                value={language}
+                onChange={(e) => setLanguage(e.target.value as 'auto' | 'tr' | 'en' | 'ar')}
+                className="mt-1.5 w-full rounded-lg border border-line bg-canvas/40 px-3 py-2 text-sm text-white"
+              >
+                <option value="auto">Auto-detect from visitor browser</option>
+                <option value="tr">Turkish (Türkçe)</option>
+                <option value="en">English (Live Support, Online)</option>
+                <option value="ar">Arabic (العربية - RTL layout enabled)</option>
+              </select>
+              <span className="mt-1 block text-xs text-stone-400">
+                Determines default assistant greetings, placeholders, and directional layout.
+              </span>
+            </label>
+
             {canManage && (
               <div className="pt-2">
                 <button
@@ -1395,13 +1177,60 @@ export function WebChatManagement() {
               </div>
             </div>
 
-            <LivePreviewCanvas
-              previewViewport={previewViewport}
-              previewState={previewState}
-              setPreviewState={setPreviewState}
+            {hasUnsavedChanges ? (
+              <div
+                data-testid="unsaved-changes-indicator"
+                className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-200"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                  <span>
+                    <strong>Unsaved changes:</strong> Preview shows live local adjustments. Live public website remains on the last saved configuration until saved.
+                  </span>
+                </div>
+                {canManage && (
+                  <button
+                    type="button"
+                    onClick={() => saveMutation.mutate()}
+                    disabled={saveMutation.isPending}
+                    className="rounded-lg bg-amber-400 px-3 py-1 font-semibold text-stone-950 shadow hover:bg-amber-300 disabled:opacity-60 shrink-0 cursor-pointer"
+                  >
+                    {saveMutation.isPending ? 'Saving...' : 'Save Appearance'}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div
+                data-testid="saved-sync-indicator"
+                className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-xs text-emerald-300"
+              >
+                <span className="h-2 w-2 rounded-full bg-emerald-400 shrink-0" />
+                <span>
+                  <strong>Live parity confirmed:</strong> Preview exactly matches the saved tenant configuration deployed to the public widget.
+                </span>
+              </div>
+            )}
+
+            <WebChatPreviewRenderer
+              viewport={previewViewport}
+              state={previewState}
+              onStateChange={setPreviewState}
+              brandName={brandName}
+              title={title}
+              subtitle={subtitle}
+              logoUrl={logoUrl}
+              launcherLabel={launcherLabel}
+              launcherPosition={launcherPosition}
+              launcherIcon={launcherIcon}
+              themeMode={themeMode}
+              launcherStyle={launcherStyle}
+              glowIntensity={glowIntensity}
+              glowSpread={glowSpread}
+              pulseAnimation={pulseAnimation}
+              animationSpeed={animationSpeed}
               primaryColor={primaryColor}
-              renderPreviewLauncher={renderPreviewLauncher}
-              renderPreviewPanel={renderPreviewPanel}
+              accentColor={accentColor}
+              language={language}
             />
 
             {/* WCAG Guard Status Footer */}
@@ -1583,13 +1412,60 @@ export function WebChatManagement() {
             </div>
           </div>
 
-          <LivePreviewCanvas
-            previewViewport={previewViewport}
-            previewState={previewState}
-            setPreviewState={setPreviewState}
+          {hasUnsavedChanges ? (
+            <div
+              data-testid="unsaved-changes-indicator-preview-tab"
+              className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-200"
+            >
+              <div className="flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                <span>
+                  <strong>Unsaved changes:</strong> Preview shows live local adjustments. Live public website remains on the last saved configuration until saved.
+                </span>
+              </div>
+              {canManage && (
+                <button
+                  type="button"
+                  onClick={() => saveMutation.mutate()}
+                  disabled={saveMutation.isPending}
+                  className="rounded-lg bg-amber-400 px-3 py-1 font-semibold text-stone-950 shadow hover:bg-amber-300 disabled:opacity-60 shrink-0 cursor-pointer"
+                >
+                  {saveMutation.isPending ? 'Saving...' : 'Save Appearance'}
+                </button>
+              )}
+            </div>
+          ) : (
+            <div
+              data-testid="saved-sync-indicator-preview-tab"
+              className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-xs text-emerald-300"
+            >
+              <span className="h-2 w-2 rounded-full bg-emerald-400 shrink-0" />
+              <span>
+                <strong>Live parity confirmed:</strong> Preview exactly matches the saved tenant configuration deployed to the public widget.
+              </span>
+            </div>
+          )}
+
+          <WebChatPreviewRenderer
+            viewport={previewViewport}
+            state={previewState}
+            onStateChange={setPreviewState}
+            brandName={brandName}
+            title={title}
+            subtitle={subtitle}
+            logoUrl={logoUrl}
+            launcherLabel={launcherLabel}
+            launcherPosition={launcherPosition}
+            launcherIcon={launcherIcon}
+            themeMode={themeMode}
+            launcherStyle={launcherStyle}
+            glowIntensity={glowIntensity}
+            glowSpread={glowSpread}
+            pulseAnimation={pulseAnimation}
+            animationSpeed={animationSpeed}
             primaryColor={primaryColor}
-            renderPreviewLauncher={renderPreviewLauncher}
-            renderPreviewPanel={renderPreviewPanel}
+            accentColor={accentColor}
+            language={language}
           />
         </div>
       )}

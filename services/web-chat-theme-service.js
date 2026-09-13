@@ -155,6 +155,8 @@ export function deriveWebChatThemeTokens({
 
   const inputBg = isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(15, 23, 42, 0.04)';
   const inputBorder = isDark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(15, 23, 42, 0.12)';
+  const botBubbleBg = isDark ? 'rgba(255, 255, 255, 0.07)' : 'rgba(15, 23, 42, 0.05)';
+  const botBubbleBorder = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)';
 
   const contrastPrimaryBtn = contrastRatio(safePrimary, primaryForeground);
   const contrastAccentBtn = contrastRatio(safeAccent, accentForeground);
@@ -187,6 +189,8 @@ export function deriveWebChatThemeTokens({
     border: borderColor,
     input_bg: inputBg,
     input_border: inputBorder,
+    bot_bubble_bg: botBubbleBg,
+    bot_bubble_border: botBubbleBorder,
     contrast: {
       primary_button: contrastPrimaryBtn,
       accent_button: contrastAccentBtn,

@@ -85,7 +85,7 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
 
   const VALID_LAUNCHER_STYLES = ['pill', 'circular', 'minimal', 'glass', 'neon_pulse', 'custom'];
   const launcherStyleCandidate = typeof input?.launcher_style === 'string'
-    ? input.launcher_style.trim().toLowerCase()
+    ? input.launcher_style.trim().toLowerCase().replace(/-/g, '_')
     : 'pill';
   const launcherStyle = VALID_LAUNCHER_STYLES.includes(launcherStyleCandidate)
     ? launcherStyleCandidate
@@ -167,6 +167,10 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
       border_color: tokens.border,
       primary_foreground: tokens.primary_foreground,
       accent_foreground: tokens.accent_foreground,
+      bot_bubble_bg: tokens.bot_bubble_bg,
+      bot_bubble_border: tokens.bot_bubble_border,
+      input_bg: tokens.input_bg,
+      input_border: tokens.input_border,
     },
     contrast: tokens.contrast,
     is_accessible: tokens.is_accessible,

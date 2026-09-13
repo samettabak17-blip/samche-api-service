@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Side-by-Side Visual Parity Audit</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, sans-serif; background: #07090e; color: #fff; }
+    .split-view { display: flex; width: 100vw; height: 100vh; }
+    .split-pane { flex: 1; position: relative; border-right: 1px solid #334155; padding: 20px; overflow: hidden; }
+    .split-pane-public { flex: 1; position: relative; }
+    h2 { font-size: 14px; margin: 0 0 10px 0; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.05em; }
+  </style>
+  <style id="canonical-preview-styles">
+    __CANONICAL_CSS__
+  </style>
+</head>
+<body>
+  <div class="split-view">
+    <div class="split-pane" id="preview-container">
+      <h2>Dashboard Live Preview Surface</h2>
+      <div id="preview-mount" class="samche-preview-mount"></div>
+    </div>
+    <div class="split-pane-public" id="public-container">
+      <h2>Real Public Website Surface</h2>
+      <div style="padding: 20px;">
+        <h1>Demo Storefront</h1>
+        <p>Customer facing website hosting canonical web-chat.js widget.</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="/web-chat.js" data-widget-key="__WIDGET_KEY__"></script>
+
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      const prevEl = document.getElementById('preview-mount');
+      const app = __CONFIG__;
+      const t = app.theme || {};
+      const isCirc = app.launcher_style === 'circular' || app.launcher_style === 'minimal' || !app.launcher_label;
+      const label = app.launcher_label || '';
+
+      const wrap = document.createElement('div');
+      wrap.className = 'samche-wrap';
+      wrap.style.setProperty('--chat-primary', t.primary_color || '#0B5FFF');
+      wrap.style.setProperty('--chat-glow', t.glow_color || 'rgba(11, 95, 255, 0.35)');
+      wrap.style.setProperty('--chat-glow-soft', t.glow_soft || 'rgba(11, 95, 255, 0.18)');
+      wrap.style.setProperty('--chat-glow-ring', t.glow_ring || 'rgba(11, 95, 255, 0.65)');
+      wrap.style.setProperty('--chat-glow-spread', (t.glow_spread_px || 24) + 'px');
+      wrap.style.setProperty('--chat-glow-halo', (t.glow_halo_px || 42) + 'px');
+      wrap.style.setProperty('--chat-pulse-duration', t.pulse_duration || '3.6s');
+
+      const launcher = document.createElement('button');
+      launcher.id = 'preview-launcher-btn';
+      const rawStyle = app.launcher_style || 'pill';
+      const normStyle = rawStyle.replace(/_/g, '-');
+      launcher.className = 'samche-launcher samche-style-' + normStyle + ' samche-style-' + rawStyle + (isCirc ? ' samche-launcher-circle' : '') + ' samche-pulse-' + app.pulse_animation;
+      launcher.innerHTML = '<span class="samche-launcher-badge"><span class="samche-launcher-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 1.821.487 3.53 1.338 5L2.5 21.5l4.646-.82A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 01-4.07-1.11l-.29-.17-2.76.49.5-2.69-.19-.3A7.963 7.963 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z"/></svg></span></span>' + (label && !isCirc ? '<span class="samche-launcher-label">' + label + '</span>' : '');
+
+      const panel = document.createElement('div');
+      panel.id = 'preview-panel-el';
+      panel.className = 'samche-panel samche-open';
+      panel.innerHTML = '<div class="samche-header"><div class="samche-header-info"><div class="samche-header-avatar"><span class="samche-avatar-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.477 2 12c0 1.821.487 3.53 1.338 5L2.5 21.5l4.646-.82A9.957 9.957 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a7.96 7.96 0 01-4.07-1.11l-.29-.17-2.76.49.5-2.69-.19-.3A7.963 7.963 0 014 12c0-4.411 3.589-8 8-8s8 3.589 8 8-3.589 8-8 8z"/></svg></span></div><div class="samche-header-titles"><span class="samche-header-title">' + app.title + '</span><span class="samche-header-status"><span class="samche-status-dot"></span><span class="samche-status-text">' + app.subtitle + '</span></span></div></div><div class="samche-header-actions"><button type="button" class="samche-clear-btn" aria-label="Clear Conversation" title="Clear Conversation"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button><button type="button" class="samche-minimize-btn" aria-label="Minimize" title="Minimize"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"></line></svg></button><button type="button" class="samche-close-btn" aria-label="Close" title="Close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button></div></div><div class="samche-messages"><div class="samche-msg samche-msg-bot"><span>Hello! How can I help you today?</span></div><div class="samche-msg samche-msg-user"><span>Can I get information about shipping and delivery times?</span></div></div><div class="samche-composer"><textarea class="samche-composer-input" rows="1" placeholder="Type a message..."></textarea><button type="button" class="samche-send-btn" aria-label="Send message" title="Send message"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button></div>';
+
+      wrap.appendChild(launcher);
+      wrap.appendChild(panel);
+      prevEl.appendChild(wrap);
+    });
+  </script>
+</body>
+</html>

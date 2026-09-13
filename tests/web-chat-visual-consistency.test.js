@@ -17,8 +17,8 @@ test('public/web-chat.js rehydrates stored appearance immediately on mount befor
   assert.match(runtimeSource, /applyTheme\(effectiveAppearance\);/);
 });
 
-test('public/web-chat.js applies theme CSS custom properties to host, wrap, and launcher', () => {
-  assert.match(runtimeSource, /var targets = \[host, wrap, launcher\];/);
+test('public/web-chat.js applies theme CSS custom properties to host, wrap, launcher, and panel', () => {
+  assert.match(runtimeSource, /var targets = \[host, wrap, launcher(?:, panel)?\];/);
   assert.match(runtimeSource, /target\.style\.setProperty\('--chat-glow'/);
   assert.match(runtimeSource, /target\.style\.setProperty\('--chat-glow-ring'/);
   assert.match(runtimeSource, /target\.style\.setProperty\('--chat-glow-spread'/);
