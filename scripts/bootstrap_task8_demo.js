@@ -97,13 +97,17 @@ async function bootstrapTask8Demo(options = {}) {
       channelName: 'SamChe Teknoloji Web Chat',
       displayName: 'SamChe Teknoloji Web Chat',
       allowedOrigins: ['*'],
-      welcomeMessage: 'Merhaba! SamChe Teknoloji Mağazasına hoş geldiniz. Size nasıl yardımcı olabilirim?',
+      welcomeMessage: 'Hello! How can I help you today?',
+      appearance: {
+        launcher_label: 'SamChe Support',
+        launcher_theme_mode: 'follow_theme',
+      },
       behavior: {
         proactive_enabled: true,
         high_intent_activation: true,
         dwell_threshold_seconds: 15,
         cooldown_seconds: 300,
-        language: 'tr'
+        language: 'en'
       },
       metadata: {
         environment: 'staging',

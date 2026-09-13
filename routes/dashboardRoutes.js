@@ -295,6 +295,11 @@ router.post('/:tenantId/channels/web-chat/theme-preview', requireTenantAccess, a
     pulse_animation: pulseAnimation = 'normal',
     animation_speed: animationSpeed = 'normal',
     launcher_style: launcherStyle = 'pill',
+    launcher_theme_mode: launcherThemeMode = 'follow_theme',
+    launcher_bg: launcherBg = null,
+    launcher_text: launcherText = null,
+    launcher_border: launcherBorder = null,
+    launcher_glow: launcherGlow = null,
   } = req.body ?? {};
 
   try {
@@ -309,6 +314,11 @@ router.post('/:tenantId/channels/web-chat/theme-preview', requireTenantAccess, a
         pulseAnimation,
         animationSpeed,
         launcherStyle,
+        launcherThemeMode,
+        launcherBg,
+        launcherText,
+        launcherBorder,
+        launcherGlow,
       });
     } else {
       result = deriveWebChatThemeTokens({
@@ -320,6 +330,11 @@ router.post('/:tenantId/channels/web-chat/theme-preview', requireTenantAccess, a
         pulseAnimation,
         animationSpeed,
         launcherStyle,
+        launcherThemeMode,
+        launcherBg,
+        launcherText,
+        launcherBorder,
+        launcherGlow,
       });
     }
     return res.json(result);

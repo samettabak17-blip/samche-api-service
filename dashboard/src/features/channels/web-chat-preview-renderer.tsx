@@ -32,6 +32,11 @@ export interface WebChatPreviewRendererProps {
   primaryColor?: string;
   accentColor?: string;
   language?: string;
+  launcherThemeMode?: 'auto_brand' | 'follow_theme' | 'custom';
+  launcherBg?: string | null;
+  launcherText?: string | null;
+  launcherBorder?: string | null;
+  launcherGlow?: string | null;
 }
 
 export function WebChatPreviewRenderer({
@@ -53,6 +58,11 @@ export function WebChatPreviewRenderer({
   primaryColor = '#0B5FFF',
   accentColor = '#10B981',
   language = 'auto',
+  launcherThemeMode = 'follow_theme',
+  launcherBg = null,
+  launcherText = null,
+  launcherBorder = null,
+  launcherGlow = null,
 }: WebChatPreviewRendererProps) {
   const [showConfirm, setShowConfirm] = useState(false);
 
@@ -65,6 +75,11 @@ export function WebChatPreviewRenderer({
     pulseAnimation,
     animationSpeed,
     launcherStyle,
+    launcherThemeMode,
+    launcherBg,
+    launcherText,
+    launcherBorder,
+    launcherGlow,
   });
 
   const locale = getEffectiveLocale(language);
@@ -91,6 +106,9 @@ export function WebChatPreviewRenderer({
     '--chat-glow-halo': `${tokens.glow_halo_px}px`,
     '--chat-pulse-duration': tokens.pulse_duration,
     '--chat-launcher-text': tokens.launcher_text,
+    '--chat-launcher-bg': tokens.launcher_bg,
+    '--chat-launcher-border': tokens.launcher_border,
+    '--chat-launcher-glow': tokens.launcher_glow,
     '--chat-text': tokens.text,
     '--chat-muted': tokens.muted,
     '--chat-border': tokens.border,

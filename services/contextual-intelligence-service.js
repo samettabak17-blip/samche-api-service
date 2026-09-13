@@ -394,7 +394,10 @@ export function updateSessionBrowsingState({
 
   const isNewDiscrete = isDiscreteEntity(newEntity);
   const prevIsDiscrete = isDiscreteEntity(base.currentEntity);
-  const isSameEntity = prevIsDiscrete && areEntitiesEqual(base.currentEntity, newEntity);
+  const isSameEntity = prevIsDiscrete && (
+    areEntitiesEqual(base.currentEntity, newEntity) ||
+    Boolean(normalized.path && (base.currentEntity.canonical_url === normalized.path || base.currentEntity.entity_id === normalized.path || base.currentEntity.canonical_url === normalized.url))
+  );
 
   if (isNewDiscrete) {
     if (isSameEntity) {

@@ -28,6 +28,9 @@ export interface WebChatThemeConfig {
   glow_halo_px?: number;
   pulse_duration?: string;
   launcher_text?: string;
+  launcher_bg?: string;
+  launcher_border?: string;
+  launcher_glow?: string;
   text_color?: string;
   muted_color?: string;
   border_color?: string;
@@ -50,12 +53,18 @@ export interface WebChatAppearanceConfig {
   glow_spread?: number;
   pulse_animation?: 'none' | 'subtle' | 'normal' | 'strong';
   animation_speed?: 'slow' | 'normal' | 'fast';
+  launcher_theme_mode?: 'auto_brand' | 'follow_theme' | 'custom';
+  launcher_bg?: string | null;
+  launcher_text?: string | null;
+  launcher_border?: string | null;
+  launcher_glow?: string | null;
   theme: WebChatThemeConfig;
   contrast?: {
     primary_button?: number;
     accent_button?: number;
     text_surface?: number;
     muted_surface?: number;
+    launcher?: number;
   };
   is_accessible?: boolean;
 }

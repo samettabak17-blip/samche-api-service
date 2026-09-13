@@ -178,6 +178,11 @@ export const tenantApi = {
     pulse_animation?: 'none' | 'subtle' | 'normal' | 'strong';
     animation_speed?: 'slow' | 'normal' | 'fast';
     launcher_style?: 'pill' | 'circular' | 'minimal' | 'glass' | 'neon_pulse' | 'custom';
+    launcher_theme_mode?: 'auto_brand' | 'follow_theme' | 'custom';
+    launcher_bg?: string | null;
+    launcher_text?: string | null;
+    launcher_border?: string | null;
+    launcher_glow?: string | null;
   }) => apiClient.post<WebChatThemePreviewResponse>(`${tenantRoot(tenantId)}/channels/web-chat/theme-preview`, body),
   uploadWebChatLogo: (tenantId: string, file: File) => {
     const formData = new FormData();

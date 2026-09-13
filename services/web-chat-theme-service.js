@@ -104,6 +104,11 @@ export function deriveWebChatThemeTokens({
   pulseAnimation = 'normal',
   animationSpeed = 'normal',
   launcherStyle = 'pill',
+  launcherThemeMode = 'follow_theme',
+  launcherBg = null,
+  launcherText = null,
+  launcherBorder = null,
+  launcherGlow = null,
 } = {}) {
   const effectiveMode = ['dark', 'light'].includes(String(mode).toLowerCase())
     ? String(mode).toLowerCase()
@@ -151,7 +156,50 @@ export function deriveWebChatThemeTokens({
     : 'normal';
   const pulseDuration = normSpeed === 'slow' ? '5.5s' : normSpeed === 'fast' ? '2.2s' : '3.6s';
 
-  const launcherText = primaryForeground;
+  const effectiveLauncherThemeMode = ['auto_brand', 'follow_theme', 'custom'].includes(String(launcherThemeMode || '').toLowerCase())
+    ? String(launcherThemeMode).toLowerCase()
+    : 'follow_theme';
+
+  let computedLauncherBg;
+  let computedLauncherText;
+  let computedLauncherBorder;
+  let computedLauncherGlow;
+
+  if (effectiveLauncherThemeMode === 'auto_brand') {
+    computedLauncherBg = safePrimary;
+    computedLauncherText = accessibleForegroundFor(safePrimary, 4.5);
+    computedLauncherBorder = glowRing;
+    computedLauncherGlow = glowColor;
+  } else if (effectiveLauncherThemeMode === 'custom') {
+    computedLauncherBg = launcherBg ? normalizeHex(launcherBg, isDark ? '#0F172A' : '#FFFFFF') : (isDark ? '#0F172A' : '#FFFFFF');
+    computedLauncherGlow = launcherGlow ? normalizeHex(launcherGlow, safePrimary) : glowColor;
+    computedLauncherBorder = launcherBorder ? normalizeHex(launcherBorder, glowRing) : glowRing;
+
+    if (launcherText && HEX_COLOR_REGEX.test(String(launcherText).trim())) {
+      const normText = normalizeHex(launcherText);
+      const ratio = contrastRatio(computedLauncherBg, normText);
+      computedLauncherText = ratio >= 4.5 ? normText : accessibleForegroundFor(computedLauncherBg, 4.5);
+    } else {
+      computedLauncherText = accessibleForegroundFor(computedLauncherBg, 4.5);
+    }
+  } else {
+    // follow_theme: panel-matched launcher mode
+    if (isDark) {
+      computedLauncherBg = '#0F172A';
+      computedLauncherText = '#FFFFFF';
+      computedLauncherBorder = glowRing;
+      computedLauncherGlow = glowColor;
+    } else {
+      computedLauncherBg = '#FFFFFF';
+      computedLauncherText = '#0F172A';
+      computedLauncherBorder = 'rgba(15, 23, 42, 0.12)';
+      computedLauncherGlow = glowColor;
+    }
+  }
+
+  const contrastLauncher = contrastRatio(computedLauncherBg, computedLauncherText);
+
+  const launcherTextToken = computedLauncherText;
 
   const inputBg = isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(15, 23, 42, 0.04)';
   const inputBorder = isDark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(15, 23, 42, 0.12)';
@@ -166,7 +214,8 @@ export function deriveWebChatThemeTokens({
   const isAccessible =
     contrastPrimaryBtn >= 4.5 &&
     contrastTextSurface >= 4.5 &&
-    contrastMutedSurface >= 3.0;
+    contrastMutedSurface >= 3.0 &&
+    contrastLauncher >= 4.5;
 
   return {
     mode: effectiveMode,
@@ -183,7 +232,11 @@ export function deriveWebChatThemeTokens({
     glow_spread_px: glowSpreadPx,
     glow_halo_px: glowHaloPx,
     pulse_duration: pulseDuration,
-    launcher_text: launcherText,
+    launcher_text: launcherTextToken,
+    launcher_theme_mode: effectiveLauncherThemeMode,
+    launcher_bg: computedLauncherBg,
+    launcher_border: computedLauncherBorder,
+    launcher_glow: computedLauncherGlow,
     text: textColor,
     muted: mutedColor,
     border: borderColor,
@@ -196,6 +249,7 @@ export function deriveWebChatThemeTokens({
       accent_button: contrastAccentBtn,
       text_surface: contrastTextSurface,
       muted_surface: contrastMutedSurface,
+      launcher: contrastLauncher,
     },
     is_accessible: isAccessible,
   };
@@ -210,6 +264,11 @@ export function analyzeLogoPalette({
   pulseAnimation = 'normal',
   animationSpeed = 'normal',
   launcherStyle = 'pill',
+  launcherThemeMode = 'auto_brand',
+  launcherBg = null,
+  launcherText = null,
+  launcherBorder = null,
+  launcherGlow = null,
 } = {}) {
   const sampled = (Array.isArray(candidates) ? candidates : [])
     .map((c) => (HEX_COLOR_REGEX.test(String(c || '').trim()) ? normalizeHex(c) : null))
@@ -242,5 +301,10 @@ export function analyzeLogoPalette({
     pulseAnimation,
     animationSpeed,
     launcherStyle,
+    launcherThemeMode,
+    launcherBg,
+    launcherText,
+    launcherBorder,
+    launcherGlow,
   });
 }

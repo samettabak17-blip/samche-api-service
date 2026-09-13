@@ -80,6 +80,7 @@ jobs:
           tests/proactive-high-intent-real-browser.test.js
           tests/web-chat-clear-conversation.test.js
           tests/web-chat-entity-scoped-proactive.test.js
+          tests/task8-launcher-customization-and-proactive.test.js
 
 
       - name: Run Dashboard checks

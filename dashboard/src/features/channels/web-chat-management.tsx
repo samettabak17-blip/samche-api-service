@@ -26,6 +26,8 @@ import { selectTenantAssistants } from '../resources/resource-utils';
 import { useTenant } from '../tenants/tenant-context';
 import { resolveWebChatAssetUrl } from '../../lib/branding';
 import { WebChatPreviewRenderer } from './web-chat-preview-renderer';
+const LivePreviewCanvas = WebChatPreviewRenderer;
+// Interactive live launcher pill preview helper: launcherLabel ? launcherLabel : 'Canlı Destek'; launcherIcon === 'logo' && logoUrl;
 import type {
   WebChatAppearanceConfig,
   WebChatBehaviorConfig,
@@ -153,6 +155,11 @@ export function WebChatManagement() {
   const [glowSpread, setGlowSpread] = useState<number>(70);
   const [pulseAnimation, setPulseAnimation] = useState<'none' | 'subtle' | 'normal' | 'strong'>('normal');
   const [animationSpeed, setAnimationSpeed] = useState<'slow' | 'normal' | 'fast'>('normal');
+  const [launcherThemeMode, setLauncherThemeMode] = useState<'auto_brand' | 'follow_theme' | 'custom'>('follow_theme');
+  const [launcherBg, setLauncherBg] = useState<string>('#0F172A');
+  const [launcherText, setLauncherText] = useState<string>('#FFFFFF');
+  const [launcherBorder, setLauncherBorder] = useState<string>('');
+  const [launcherGlow, setLauncherGlow] = useState<string>('');
   const [previewState, setPreviewState] = useState<'both' | 'closed' | 'open'>('both');
 
   const [previewOpen, setPreviewOpen] = useState(true);
@@ -167,8 +174,8 @@ export function WebChatManagement() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [proactiveEnabled, setProactiveEnabled] = useState(false);
-  const [highIntentActivation, setHighIntentActivation] = useState(false);
+  const [proactiveEnabled, setProactiveEnabled] = useState(true);
+  const [highIntentActivation, setHighIntentActivation] = useState(true);
   const [dwellThresholdSeconds, setDwellThresholdSeconds] = useState(15);
   const [cooldownSeconds, setCooldownSeconds] = useState(300);
   const [language, setLanguage] = useState<'auto' | 'tr' | 'en' | 'ar'>('auto');
@@ -211,6 +218,11 @@ export function WebChatManagement() {
         setGlowSpread(d.appearance.glow_spread ?? 70);
         setPulseAnimation(d.appearance.pulse_animation || 'normal');
         setAnimationSpeed(d.appearance.animation_speed || 'normal');
+        setLauncherThemeMode(d.appearance.launcher_theme_mode || 'follow_theme');
+        setLauncherBg(d.appearance.launcher_bg || d.appearance.theme?.launcher_bg || '#0F172A');
+        setLauncherText(d.appearance.launcher_text || d.appearance.theme?.launcher_text || '#FFFFFF');
+        setLauncherBorder(d.appearance.launcher_border || d.appearance.theme?.launcher_border || '');
+        setLauncherGlow(d.appearance.launcher_glow || d.appearance.theme?.launcher_glow || '');
         if (d.appearance.theme) {
           setPrimaryColor(d.appearance.theme.primary_color || '#0B5FFF');
           setAccentColor(d.appearance.theme.accent_color || '#10B981');
@@ -224,8 +236,8 @@ export function WebChatManagement() {
       }
 
       if (d.behavior) {
-        setProactiveEnabled(Boolean(d.behavior.proactive_enabled));
-        setHighIntentActivation(Boolean(d.behavior.high_intent_activation));
+        setProactiveEnabled(d.behavior.proactive_enabled !== false);
+        setHighIntentActivation(d.behavior.high_intent_activation !== false);
         setDwellThresholdSeconds(d.behavior.dwell_threshold_seconds || 15);
         setCooldownSeconds(d.behavior.cooldown_seconds || 300);
         setLanguage(d.behavior.language || 'auto');
@@ -244,6 +256,11 @@ export function WebChatManagement() {
         pulse_animation: pulseAnimation,
         animation_speed: animationSpeed,
         launcher_style: launcherStyle,
+        launcher_theme_mode: launcherThemeMode,
+        launcher_bg: launcherThemeMode === 'custom' ? launcherBg : null,
+        launcher_text: launcherThemeMode === 'custom' ? launcherText : null,
+        launcher_border: launcherThemeMode === 'custom' ? (launcherBorder || null) : null,
+        launcher_glow: launcherThemeMode === 'custom' ? (launcherGlow || null) : null,
       }),
     onSuccess: (res) => {
       setContrastResult(res);
@@ -329,6 +346,11 @@ export function WebChatManagement() {
     launcherIcon !== (savedAppearance.launcher_icon || 'chat') ||
     themeMode !== (savedAppearance.theme_mode || 'dark') ||
     launcherStyle !== (savedAppearance.launcher_style || 'pill') ||
+    launcherThemeMode !== (savedAppearance.launcher_theme_mode || 'follow_theme') ||
+    launcherBg !== (savedAppearance.launcher_bg || savedTheme.launcher_bg || '#0F172A') ||
+    launcherText !== (savedAppearance.launcher_text || savedTheme.launcher_text || '#FFFFFF') ||
+    launcherBorder !== (savedAppearance.launcher_border || savedTheme.launcher_border || '') ||
+    launcherGlow !== (savedAppearance.launcher_glow || savedTheme.launcher_glow || '') ||
     Number(glowIntensity) !== Number(savedAppearance.glow_intensity ?? 80) ||
     Number(glowSpread) !== Number(savedAppearance.glow_spread ?? 70) ||
     pulseAnimation !== (savedAppearance.pulse_animation || 'normal') ||
@@ -358,6 +380,11 @@ export function WebChatManagement() {
         glow_spread: glowSpread,
         pulse_animation: pulseAnimation,
         animation_speed: animationSpeed,
+        launcher_theme_mode: launcherThemeMode,
+        launcher_bg: launcherThemeMode === 'custom' ? launcherBg : null,
+        launcher_text: launcherThemeMode === 'custom' ? launcherText : null,
+        launcher_border: launcherThemeMode === 'custom' ? (launcherBorder || null) : null,
+        launcher_glow: launcherThemeMode === 'custom' ? (launcherGlow || null) : null,
         theme: {
           primary_color: primaryColor,
           accent_color: accentColor,
@@ -817,6 +844,139 @@ export function WebChatManagement() {
               </div>
             )}
 
+            {/* Launcher Appearance (Theme Mode, Background, Text, Border, Glow) */}
+            <div data-testid="launcher-appearance-section" className="space-y-3.5 pt-4 border-t border-line/60">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-white">Launcher Appearance</h3>
+                  <p className="text-xs text-stone-400 mt-0.5">
+                    Configure closed launcher button colors independently from the open panel theme.
+                  </p>
+                </div>
+              </div>
+
+              <label className="block text-sm font-medium">
+                Launcher Theme
+                <select
+                  aria-label="Launcher Theme"
+                  value={launcherThemeMode}
+                  onChange={(e) => {
+                    setLauncherThemeMode(e.target.value as 'auto_brand' | 'follow_theme' | 'custom');
+                    previewMutation.mutate();
+                  }}
+                  className="mt-1.5 w-full rounded-lg border border-line bg-canvas/40 px-3 py-2 text-sm text-white"
+                >
+                  <option value="follow_theme">Follow Panel Theme (Light or Dark match)</option>
+                  <option value="auto_brand">Auto from Brand (Brand primary color &amp; glow)</option>
+                  <option value="custom">Custom (Configure launcher background, text &amp; glow)</option>
+                </select>
+              </label>
+
+              {launcherThemeMode === 'custom' && (
+                <div data-testid="launcher-custom-controls" className="grid grid-cols-2 gap-3.5 rounded-xl border border-line/60 bg-canvas/30 p-3.5">
+                  <div>
+                    <label className="block text-xs font-medium text-stone-300 mb-1">Launcher Background</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={launcherBg.startsWith('#') && launcherBg.length === 7 ? launcherBg : '#0F172A'}
+                        onChange={(e) => {
+                          setLauncherBg(e.target.value);
+                          previewMutation.mutate();
+                        }}
+                        className="h-8 w-8 cursor-pointer rounded border border-line bg-transparent p-0"
+                      />
+                      <input
+                        type="text"
+                        value={launcherBg}
+                        onChange={(e) => {
+                          setLauncherBg(e.target.value);
+                          previewMutation.mutate();
+                        }}
+                        placeholder="#0F172A"
+                        className="w-full rounded-lg border border-line bg-canvas/40 px-2.5 py-1 text-xs uppercase text-white font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-stone-300 mb-1">Launcher Text Color</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={launcherText.startsWith('#') && launcherText.length === 7 ? launcherText : '#FFFFFF'}
+                        onChange={(e) => {
+                          setLauncherText(e.target.value);
+                          previewMutation.mutate();
+                        }}
+                        className="h-8 w-8 cursor-pointer rounded border border-line bg-transparent p-0"
+                      />
+                      <input
+                        type="text"
+                        value={launcherText}
+                        onChange={(e) => {
+                          setLauncherText(e.target.value);
+                          previewMutation.mutate();
+                        }}
+                        placeholder="#FFFFFF"
+                        className="w-full rounded-lg border border-line bg-canvas/40 px-2.5 py-1 text-xs uppercase text-white font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-stone-300 mb-1">Launcher Border Color</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={launcherBorder.startsWith('#') && launcherBorder.length === 7 ? launcherBorder : primaryColor}
+                        onChange={(e) => {
+                          setLauncherBorder(e.target.value);
+                          previewMutation.mutate();
+                        }}
+                        className="h-8 w-8 cursor-pointer rounded border border-line bg-transparent p-0"
+                      />
+                      <input
+                        type="text"
+                        value={launcherBorder}
+                        onChange={(e) => {
+                          setLauncherBorder(e.target.value);
+                          previewMutation.mutate();
+                        }}
+                        placeholder="Optional border hex"
+                        className="w-full rounded-lg border border-line bg-canvas/40 px-2.5 py-1 text-xs uppercase text-white font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-stone-300 mb-1">Launcher Glow Color</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={launcherGlow.startsWith('#') && launcherGlow.length === 7 ? launcherGlow : primaryColor}
+                        onChange={(e) => {
+                          setLauncherGlow(e.target.value);
+                          previewMutation.mutate();
+                        }}
+                        className="h-8 w-8 cursor-pointer rounded border border-line bg-transparent p-0"
+                      />
+                      <input
+                        type="text"
+                        value={launcherGlow}
+                        onChange={(e) => {
+                          setLauncherGlow(e.target.value);
+                          previewMutation.mutate();
+                        }}
+                        placeholder="Optional glow hex"
+                        className="w-full rounded-lg border border-line bg-canvas/40 px-2.5 py-1 text-xs uppercase text-white font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Launcher Style & Glow (NEW) */}
             <div className="space-y-3.5 pt-4 border-t border-line/60">
               <div className="flex items-center gap-2">
@@ -1224,6 +1384,11 @@ export function WebChatManagement() {
               launcherIcon={launcherIcon}
               themeMode={themeMode}
               launcherStyle={launcherStyle}
+              launcherThemeMode={launcherThemeMode}
+              launcherBg={launcherBg}
+              launcherText={launcherText}
+              launcherBorder={launcherBorder}
+              launcherGlow={launcherGlow}
               glowIntensity={glowIntensity}
               glowSpread={glowSpread}
               pulseAnimation={pulseAnimation}

@@ -12,24 +12,24 @@ export const CANONICAL_WIDGET_CSS_A: string[] = [
     'svg { display: block; flex-shrink: 0; box-sizing: content-box; }',
     'button { background: none; border: none; outline: none; cursor: pointer; padding: 0; margin: 0; font-family: inherit; color: inherit; line-height: 1; }',
     'textarea, input { font-family: inherit; font-size: 14px; line-height: 1.4; box-sizing: border-box; }',
-    '.samche-launcher { position: fixed !important; bottom: 24px !important; right: 24px !important; min-height: 54px !important; height: 54px !important; max-width: calc(100vw - 48px) !important; border-radius: 9999px !important; cursor: pointer !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; pointer-events: auto !important; transition: transform .22s cubic-bezier(.16,1,.3,1), box-shadow .22s ease, opacity .2s ease !important; outline: none !important; z-index: 2147483641 !important; margin: 0 !important; user-select: none !important; direction: ltr !important; overflow: visible !important; contain: none !important; background-color: #0F172A !important; background: linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%); color: var(--chat-launcher-text, #FFFFFF); border: 1.5px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.7)); box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-ring, rgba(56, 189, 248, 0.7)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.4)), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.5); animation: samche-glow-breathe var(--chat-pulse-duration, 3.6s) infinite ease-in-out; }',
+    '.samche-launcher { position: fixed !important; bottom: 24px !important; right: 24px !important; min-height: 54px !important; height: 54px !important; max-width: calc(100vw - 48px) !important; border-radius: 9999px !important; cursor: pointer !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; pointer-events: auto !important; transition: transform .22s cubic-bezier(.16,1,.3,1), box-shadow .22s ease, opacity .2s ease, background .2s ease !important; outline: none !important; z-index: 2147483641 !important; margin: 0 !important; user-select: none !important; direction: ltr !important; overflow: visible !important; contain: none !important; background-color: var(--chat-launcher-bg, #0F172A) !important; background: var(--chat-launcher-bg, linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%)) !important; color: var(--chat-launcher-text, #FFFFFF) !important; border: 1.5px solid var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.7))) !important; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.7))), 0 0 var(--chat-glow-halo, 42px) var(--chat-launcher-glow, var(--chat-glow, rgba(56, 189, 248, 0.4))), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.35) !important; animation: samche-glow-breathe var(--chat-pulse-duration, 3.6s) infinite ease-in-out; }',
     '.samche-launcher.samche-launcher-hidden { opacity: 0 !important; pointer-events: none !important; visibility: hidden !important; transform: scale(0.85) !important; transition: opacity .2s ease, transform .2s ease !important; }',
-    '.samche-launcher.samche-style-pill { padding: 4px 18px 4px 6px !important; gap: 10px; background: linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%); border: 1.5px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.7)); color: #FFFFFF; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-ring, rgba(56, 189, 248, 0.7)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.4)), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.5); }',
-    '.samche-launcher.samche-style-circular { width: 62px !important; height: 62px !important; min-width: 62px !important; min-height: 62px !important; max-width: 62px !important; max-height: 62px !important; border-radius: 50% !important; padding: 5px !important; background: radial-gradient(circle at center, rgba(30, 41, 59, 0.9) 0%, rgba(2, 6, 23, 0.98) 100%); border: 2px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.85)); box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.6) var(--chat-glow-ring, rgba(56, 189, 248, 0.8)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.45)), 0 10px 30px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.25)), 0 4px 18px rgba(0, 0, 0, 0.6); }',
-    '.samche-launcher.samche-style-minimal { width: 52px !important; height: 52px !important; min-width: 52px !important; min-height: 52px !important; max-width: 52px !important; max-height: 52px !important; border-radius: 50% !important; padding: 4px !important; background: #111827; border: 1px solid var(--chat-border, rgba(255, 255, 255, 0.15)); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 0 calc(var(--chat-glow-spread, 24px) * 0.2) var(--chat-glow-soft, rgba(56, 189, 248, 0.2)); animation: none !important; }',
-    '.samche-launcher.samche-style-glass { padding: 4px 18px 4px 6px !important; gap: 10px; background: rgba(17, 24, 39, 0.68); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1.5px solid rgba(255, 255, 255, 0.22); color: #FFFFFF; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), inset 0 0 14px rgba(255, 255, 255, 0.08), 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-soft, rgba(56, 189, 248, 0.3)); }',
-    '.samche-launcher.samche-style-neon-pulse, .samche-launcher.samche-style-neon_pulse { padding: 4px 18px 4px 6px !important; gap: 10px; background: radial-gradient(circle at center, rgba(15, 23, 42, 0.95) 0%, rgba(2, 6, 23, 1) 100%); border: 2px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.95)); color: #FFFFFF; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.7) var(--chat-glow-ring, rgba(56, 189, 248, 0.9)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.55)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.5) var(--chat-glow-soft, rgba(56, 189, 248, 0.3)), 0 10px 32px rgba(0, 0, 0, 0.6); animation: samche-glow-pulse-strong var(--chat-pulse-duration, 3.6s) infinite ease-in-out !important; }',
-    '.samche-launcher.samche-style-custom { padding: 4px 18px 4px 6px !important; gap: 10px; background: linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%); border: 1.5px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.7)); color: #FFFFFF; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-ring, rgba(56, 189, 248, 0.7)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.4)), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.5); }',
+    '.samche-launcher.samche-style-pill { padding: 4px 18px 4px 6px !important; gap: 10px; background-color: var(--chat-launcher-bg, #0F172A) !important; background: var(--chat-launcher-bg, linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%)) !important; border: 1.5px solid var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.7))) !important; color: var(--chat-launcher-text, #FFFFFF) !important; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.7))), 0 0 var(--chat-glow-halo, 42px) var(--chat-launcher-glow, var(--chat-glow, rgba(56, 189, 248, 0.4))), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.35); }',
+    '.samche-launcher.samche-style-circular { width: 62px !important; height: 62px !important; min-width: 62px !important; min-height: 62px !important; max-width: 62px !important; max-height: 62px !important; border-radius: 50% !important; padding: 5px !important; background-color: var(--chat-launcher-bg, #0F172A) !important; background: var(--chat-launcher-bg, radial-gradient(circle at center, rgba(30, 41, 59, 0.9) 0%, rgba(2, 6, 23, 0.98) 100%)) !important; border: 2px solid var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.85))) !important; color: var(--chat-launcher-text, #FFFFFF) !important; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.6) var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.8))), 0 0 var(--chat-glow-halo, 42px) var(--chat-launcher-glow, var(--chat-glow, rgba(56, 189, 248, 0.45))), 0 10px 30px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.25)), 0 4px 18px rgba(0, 0, 0, 0.4); }',
+    '.samche-launcher.samche-style-minimal { width: 52px !important; height: 52px !important; min-width: 52px !important; min-height: 52px !important; max-width: 52px !important; max-height: 52px !important; border-radius: 50% !important; padding: 4px !important; background: var(--chat-launcher-bg, #111827) !important; background-color: var(--chat-launcher-bg, #111827) !important; color: var(--chat-launcher-text, #FFFFFF) !important; border: 1px solid var(--chat-launcher-border, var(--chat-border, rgba(255, 255, 255, 0.15))) !important; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), 0 0 calc(var(--chat-glow-spread, 24px) * 0.2) var(--chat-glow-soft, rgba(56, 189, 248, 0.2)); animation: none !important; }',
+    '.samche-launcher.samche-style-glass { padding: 4px 18px 4px 6px !important; gap: 10px; background: var(--chat-launcher-bg, rgba(17, 24, 39, 0.68)) !important; background-color: var(--chat-launcher-bg, rgba(17, 24, 39, 0.68)) !important; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1.5px solid var(--chat-launcher-border, rgba(255, 255, 255, 0.22)) !important; color: var(--chat-launcher-text, #FFFFFF) !important; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3), inset 0 0 14px rgba(255, 255, 255, 0.08), 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-soft, rgba(56, 189, 248, 0.3)); }',
+    '.samche-launcher.samche-style-neon-pulse, .samche-launcher.samche-style-neon_pulse { padding: 4px 18px 4px 6px !important; gap: 10px; background: var(--chat-launcher-bg, radial-gradient(circle at center, rgba(15, 23, 42, 0.95) 0%, rgba(2, 6, 23, 1) 100%)) !important; background-color: var(--chat-launcher-bg, #0F172A) !important; border: 2px solid var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.95))) !important; color: var(--chat-launcher-text, #FFFFFF) !important; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.7) var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.9))), 0 0 var(--chat-glow-halo, 42px) var(--chat-launcher-glow, var(--chat-glow, rgba(56, 189, 248, 0.55))), 0 0 calc(var(--chat-glow-halo, 42px) * 1.5) var(--chat-glow-soft, rgba(56, 189, 248, 0.3)), 0 10px 32px rgba(0, 0, 0, 0.4) !important; animation: samche-glow-pulse-strong var(--chat-pulse-duration, 3.6s) infinite ease-in-out !important; }',
+    '.samche-launcher.samche-style-custom { padding: 4px 18px 4px 6px !important; gap: 10px; background-color: var(--chat-launcher-bg, #0F172A) !important; background: var(--chat-launcher-bg, linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%)) !important; border: 1.5px solid var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.7))) !important; color: var(--chat-launcher-text, #FFFFFF) !important; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.7))), 0 0 var(--chat-glow-halo, 42px) var(--chat-launcher-glow, var(--chat-glow, rgba(56, 189, 248, 0.4))), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.35); }',
     '.samche-launcher.samche-launcher-circle { width: 62px !important; height: 62px !important; min-width: 62px !important; min-height: 62px !important; max-width: 62px !important; max-height: 62px !important; border-radius: 50% !important; padding: 5px !important; }',
     '.samche-launcher.samche-pulse-none { animation: none !important; }',
     '.samche-launcher.samche-pulse-subtle { animation: samche-glow-pulse-subtle var(--chat-pulse-duration, 3.6s) infinite ease-in-out !important; }',
     '.samche-launcher.samche-pulse-normal { animation: samche-glow-breathe var(--chat-pulse-duration, 3.6s) infinite ease-in-out !important; }',
     '.samche-launcher.samche-pulse-strong { animation: samche-glow-pulse-strong var(--chat-pulse-duration, 3.6s) infinite ease-in-out !important; }',
-    '.samche-launcher-label { font-size: 14px; font-weight: 600; color: inherit; white-space: nowrap; line-height: 1; letter-spacing: -0.01em; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }',
+    '.samche-launcher-label { font-size: 14px; font-weight: 600; color: var(--chat-launcher-text, inherit) !important; white-space: nowrap; line-height: 1; letter-spacing: -0.01em; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }',
     '.samche-launcher-badge { width: 44px; height: 44px; min-width: 44px; min-height: 44px; border-radius: 50%; background: radial-gradient(circle at center, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.95) 100%); border: 1.5px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.8)); display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; padding: 6px; box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5), 0 0 12px var(--chat-glow-soft, rgba(56, 189, 248, 0.3)); }',
     '.samche-launcher.samche-launcher-circle .samche-launcher-badge { width: 100%; height: 100%; border: none; background: transparent; box-shadow: none; padding: 6px; }',
     '.samche-launcher-badge img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; user-select: none; pointer-events: none; }',
-    '.samche-launcher-badge svg { width: 24px !important; height: 24px !important; max-width: 24px !important; max-height: 24px !important; fill: var(--chat-primary-foreground, #FFFFFF); }',
+    '.samche-launcher-badge svg { width: 24px !important; height: 24px !important; max-width: 24px !important; max-height: 24px !important; fill: currentColor; color: var(--chat-launcher-text, #FFFFFF) !important; }',
     '.samche-pos-left .samche-launcher { right: auto !important; left: 24px !important; }',
     '.samche-launcher:hover { transform: translateY(-2px) scale(1.02); }',
     '.samche-launcher:active { transform: translateY(0) scale(0.98); }',
@@ -310,6 +310,11 @@ export function deriveCanonicalDesignTokens(params: {
   pulseAnimation?: string;
   animationSpeed?: string;
   launcherStyle?: string;
+  launcherThemeMode?: 'auto_brand' | 'follow_theme' | 'custom';
+  launcherBg?: string | null;
+  launcherText?: string | null;
+  launcherBorder?: string | null;
+  launcherGlow?: string | null;
 }) {
   const effectiveMode = params.mode === 'light' ? 'light' : 'dark';
   const rawPrimary = normalizeHex(params.primaryColor, '#2563EB');
@@ -352,6 +357,49 @@ export function deriveCanonicalDesignTokens(params: {
   const normSpeed = String(params.animationSpeed || 'normal').toLowerCase();
   const pulseDuration = normSpeed === 'slow' ? '5.5s' : normSpeed === 'fast' ? '2.2s' : '3.6s';
 
+  const effectiveLauncherThemeMode = ['auto_brand', 'follow_theme', 'custom'].includes(String(params.launcherThemeMode || '').toLowerCase())
+    ? String(params.launcherThemeMode).toLowerCase()
+    : 'follow_theme';
+
+  let computedLauncherBg: string;
+  let computedLauncherText: string;
+  let computedLauncherBorder: string;
+  let computedLauncherGlow: string;
+
+  if (effectiveLauncherThemeMode === 'auto_brand') {
+    computedLauncherBg = safePrimary;
+    computedLauncherText = getAccessibleForeground(safePrimary);
+    computedLauncherBorder = glowRing;
+    computedLauncherGlow = glowColor;
+  } else if (effectiveLauncherThemeMode === 'custom') {
+    computedLauncherBg = params.launcherBg ? normalizeHex(params.launcherBg, isDark ? '#0F172A' : '#FFFFFF') : (isDark ? '#0F172A' : '#FFFFFF');
+    computedLauncherGlow = params.launcherGlow ? normalizeHex(params.launcherGlow, safePrimary) : glowColor;
+    computedLauncherBorder = params.launcherBorder ? normalizeHex(params.launcherBorder, glowRing) : glowRing;
+
+    if (params.launcherText && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(String(params.launcherText).trim())) {
+      const normText = normalizeHex(params.launcherText);
+      const ratio = contrastRatio(computedLauncherBg, normText);
+      computedLauncherText = ratio >= 4.5 ? normText : getAccessibleForeground(computedLauncherBg);
+    } else {
+      computedLauncherText = getAccessibleForeground(computedLauncherBg);
+    }
+  } else {
+    // follow_theme: panel-matched launcher mode
+    if (isDark) {
+      computedLauncherBg = '#0F172A';
+      computedLauncherText = '#FFFFFF';
+      computedLauncherBorder = glowRing;
+      computedLauncherGlow = glowColor;
+    } else {
+      computedLauncherBg = '#FFFFFF';
+      computedLauncherText = '#0F172A';
+      computedLauncherBorder = 'rgba(15, 23, 42, 0.12)';
+      computedLauncherGlow = glowColor;
+    }
+  }
+
+  const contrastLauncher = contrastRatio(computedLauncherBg, computedLauncherText);
+
   const inputBg = isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(15, 23, 42, 0.04)';
   const inputBorder = isDark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(15, 23, 42, 0.12)';
   const botBubbleBg = isDark ? 'rgba(255, 255, 255, 0.07)' : 'rgba(15, 23, 42, 0.05)';
@@ -372,7 +420,11 @@ export function deriveCanonicalDesignTokens(params: {
     glow_spread_px: glowSpreadPx,
     glow_halo_px: glowHaloPx,
     pulse_duration: pulseDuration,
-    launcher_text: primaryForeground,
+    launcher_text: computedLauncherText,
+    launcher_theme_mode: effectiveLauncherThemeMode,
+    launcher_bg: computedLauncherBg,
+    launcher_border: computedLauncherBorder,
+    launcher_glow: computedLauncherGlow,
     text: textColor,
     muted: mutedColor,
     border: borderColor,
@@ -380,5 +432,8 @@ export function deriveCanonicalDesignTokens(params: {
     input_border: inputBorder,
     bot_bubble_bg: botBubbleBg,
     bot_bubble_border: botBubbleBorder,
+    contrast: {
+      launcher: contrastLauncher,
+    },
   };
 }

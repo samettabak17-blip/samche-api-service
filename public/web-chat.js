@@ -208,7 +208,7 @@
     }
 
     if (visibleProducts.length === 0) {
-      var NON_PRODUCT_HEADING_REGEX = /^(?:why\s|about\s|contact\s|our\s|customer\s|subscribe|newsletter|follow\s|frequently\s|faq|reviews|testimonials|hakkımızda|bize\s|neden\s|müşteri\s|yorumlar|sıkça|e-bülten|explore\s|today'?s\stop|search\s)/i;
+      var NON_PRODUCT_HEADING_REGEX = /^(?:why\s|about\s|contact\s|our\s|customer\s|subscribe|newsletter|follow\s|frequently\s|faq|reviews|testimonials|hakkımızda|bize\s|neden\s|müşteri\s|yorumlar|sıkça|e-bülten|explore\s|today'?s\stop|search\s|trending|deals|featured|you\smay|similar|related|popüler|önerilen|benzer|top\sdeals|hot\sdeals)/i;
       var BADGE_REGEX = /^(?:\d+%?|guaranteed|same-day|secure|free\sshipping|fast\sdelivery|100%|authentic)$/i;
 
       var headings = Array.prototype.slice.call(document.querySelectorAll('h3, h4, h5'));
@@ -254,8 +254,13 @@
         if (pMatch) hPrice = safeString(pMatch[0].trim(), 50);
 
         var aInside = hBlock ? hBlock.querySelector('a[href]') : null;
-        if (aInside && aInside.href && !aInside.href.endsWith('#') && aInside.href !== window.location.href) {
+        if (aInside && aInside.href && !aInside.href.endsWith('#') && aInside.href !== window.location.href && aInside.getAttribute('href') !== '/') {
           hLink = safeString(aInside.getAttribute('href') || aInside.href, 2048);
+        }
+
+        // Section headers or promotional titles without price or product detail link are not products
+        if (!hPrice && (!hLink || hLink === '/' || hLink === '#' || hLink === window.location.href || hLink === window.location.pathname)) {
+          continue;
         }
 
         seenNames.push(hKey);
@@ -377,16 +382,22 @@
       if (singleProduct.price) safeAttributes.price = singleProduct.price;
       if (singleProduct.summary && !summary) summary = singleProduct.summary;
       for (var spK in (singleProduct.attributes || {})) {
-        if (!safeAttributes[spK]) safeAttributes[spK] = singleProduct.attributes[spK];
+        if (!safeAttributes[spK] && typeof singleProduct.attributes[spK] !== 'object') {
+          safeAttributes[spK] = singleProduct.attributes[spK];
+        }
       }
-      safeAttributes.visible_products = [singleProduct];
       safeAttributes.visible_product_names = [singleProduct.name];
+      visibleProducts = [{
+        type: 'PRODUCT',
+        name: singleProduct.name,
+        price: singleProduct.price || undefined,
+        summary: singleProduct.summary || undefined,
+      }];
     } else if (visibleProducts.length === 1) {
       var singleP = visibleProducts[0];
       entityType = 'PRODUCT';
       entityName = singleP.name;
       if (singleP.price) safeAttributes.price = singleP.price;
-      safeAttributes.visible_products = visibleProducts;
       safeAttributes.visible_product_names = [singleP.name];
       if (!summary || summary === 'PAGE') {
         summary = singleP.name + (singleP.price ? ' (' + singleP.price + ')' : '');
@@ -1022,24 +1033,24 @@
     'svg { display: block; flex-shrink: 0; box-sizing: content-box; }',
     'button { background: none; border: none; outline: none; cursor: pointer; padding: 0; margin: 0; font-family: inherit; color: inherit; line-height: 1; }',
     'textarea, input { font-family: inherit; font-size: 14px; line-height: 1.4; box-sizing: border-box; }',
-    '.samche-launcher { position: fixed !important; bottom: 24px !important; right: 24px !important; min-height: 54px !important; height: 54px !important; max-width: calc(100vw - 48px) !important; border-radius: 9999px !important; cursor: pointer !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; pointer-events: auto !important; transition: transform .22s cubic-bezier(.16,1,.3,1), box-shadow .22s ease, opacity .2s ease !important; outline: none !important; z-index: 2147483641 !important; margin: 0 !important; user-select: none !important; direction: ltr !important; overflow: visible !important; contain: none !important; background-color: #0F172A !important; background: linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%); color: var(--chat-launcher-text, #FFFFFF); border: 1.5px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.7)); box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-ring, rgba(56, 189, 248, 0.7)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.4)), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.5); animation: samche-glow-breathe var(--chat-pulse-duration, 3.6s) infinite ease-in-out; }',
+    '.samche-launcher { position: fixed !important; bottom: 24px !important; right: 24px !important; min-height: 54px !important; height: 54px !important; max-width: calc(100vw - 48px) !important; border-radius: 9999px !important; cursor: pointer !important; display: inline-flex !important; align-items: center !important; justify-content: center !important; pointer-events: auto !important; transition: transform .22s cubic-bezier(.16,1,.3,1), box-shadow .22s ease, opacity .2s ease, background .2s ease !important; outline: none !important; z-index: 2147483641 !important; margin: 0 !important; user-select: none !important; direction: ltr !important; overflow: visible !important; contain: none !important; background-color: var(--chat-launcher-bg, #0F172A) !important; background: var(--chat-launcher-bg, linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%)) !important; color: var(--chat-launcher-text, #FFFFFF) !important; border: 1.5px solid var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.7))) !important; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.7))), 0 0 var(--chat-glow-halo, 42px) var(--chat-launcher-glow, var(--chat-glow, rgba(56, 189, 248, 0.4))), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.35) !important; animation: samche-glow-breathe var(--chat-pulse-duration, 3.6s) infinite ease-in-out; }',
     '.samche-launcher.samche-launcher-hidden { opacity: 0 !important; pointer-events: none !important; visibility: hidden !important; transform: scale(0.85) !important; transition: opacity .2s ease, transform .2s ease !important; }',
-    '.samche-launcher.samche-style-pill { padding: 4px 18px 4px 6px !important; gap: 10px; background: linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%); border: 1.5px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.7)); color: #FFFFFF; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-ring, rgba(56, 189, 248, 0.7)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.4)), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.5); }',
-    '.samche-launcher.samche-style-circular { width: 62px !important; height: 62px !important; min-width: 62px !important; min-height: 62px !important; max-width: 62px !important; max-height: 62px !important; border-radius: 50% !important; padding: 5px !important; background: radial-gradient(circle at center, rgba(30, 41, 59, 0.9) 0%, rgba(2, 6, 23, 0.98) 100%); border: 2px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.85)); box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.6) var(--chat-glow-ring, rgba(56, 189, 248, 0.8)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.45)), 0 10px 30px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.25)), 0 4px 18px rgba(0, 0, 0, 0.6); }',
-    '.samche-launcher.samche-style-minimal { width: 52px !important; height: 52px !important; min-width: 52px !important; min-height: 52px !important; max-width: 52px !important; max-height: 52px !important; border-radius: 50% !important; padding: 4px !important; background: #111827; border: 1px solid var(--chat-border, rgba(255, 255, 255, 0.15)); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), 0 0 calc(var(--chat-glow-spread, 24px) * 0.2) var(--chat-glow-soft, rgba(56, 189, 248, 0.2)); animation: none !important; }',
-    '.samche-launcher.samche-style-glass { padding: 4px 18px 4px 6px !important; gap: 10px; background: rgba(17, 24, 39, 0.68); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1.5px solid rgba(255, 255, 255, 0.22); color: #FFFFFF; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4), inset 0 0 14px rgba(255, 255, 255, 0.08), 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-soft, rgba(56, 189, 248, 0.3)); }',
-    '.samche-launcher.samche-style-neon-pulse, .samche-launcher.samche-style-neon_pulse { padding: 4px 18px 4px 6px !important; gap: 10px; background: radial-gradient(circle at center, rgba(15, 23, 42, 0.95) 0%, rgba(2, 6, 23, 1) 100%); border: 2px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.95)); color: #FFFFFF; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.7) var(--chat-glow-ring, rgba(56, 189, 248, 0.9)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.55)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.5) var(--chat-glow-soft, rgba(56, 189, 248, 0.3)), 0 10px 32px rgba(0, 0, 0, 0.6); animation: samche-glow-pulse-strong var(--chat-pulse-duration, 3.6s) infinite ease-in-out !important; }',
-    '.samche-launcher.samche-style-custom { padding: 4px 18px 4px 6px !important; gap: 10px; background: linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%); border: 1.5px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.7)); color: #FFFFFF; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-ring, rgba(56, 189, 248, 0.7)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.4)), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.5); }',
+    '.samche-launcher.samche-style-pill { padding: 4px 18px 4px 6px !important; gap: 10px; background-color: var(--chat-launcher-bg, #0F172A) !important; background: var(--chat-launcher-bg, linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%)) !important; border: 1.5px solid var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.7))) !important; color: var(--chat-launcher-text, #FFFFFF) !important; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.7))), 0 0 var(--chat-glow-halo, 42px) var(--chat-launcher-glow, var(--chat-glow, rgba(56, 189, 248, 0.4))), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.35); }',
+    '.samche-launcher.samche-style-circular { width: 62px !important; height: 62px !important; min-width: 62px !important; min-height: 62px !important; max-width: 62px !important; max-height: 62px !important; border-radius: 50% !important; padding: 5px !important; background-color: var(--chat-launcher-bg, #0F172A) !important; background: var(--chat-launcher-bg, radial-gradient(circle at center, rgba(30, 41, 59, 0.9) 0%, rgba(2, 6, 23, 0.98) 100%)) !important; border: 2px solid var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.85))) !important; color: var(--chat-launcher-text, #FFFFFF) !important; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.6) var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.8))), 0 0 var(--chat-glow-halo, 42px) var(--chat-launcher-glow, var(--chat-glow, rgba(56, 189, 248, 0.45))), 0 10px 30px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.25)), 0 4px 18px rgba(0, 0, 0, 0.4); }',
+    '.samche-launcher.samche-style-minimal { width: 52px !important; height: 52px !important; min-width: 52px !important; min-height: 52px !important; max-width: 52px !important; max-height: 52px !important; border-radius: 50% !important; padding: 4px !important; background: var(--chat-launcher-bg, #111827) !important; background-color: var(--chat-launcher-bg, #111827) !important; color: var(--chat-launcher-text, #FFFFFF) !important; border: 1px solid var(--chat-launcher-border, var(--chat-border, rgba(255, 255, 255, 0.15))) !important; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), 0 0 calc(var(--chat-glow-spread, 24px) * 0.2) var(--chat-glow-soft, rgba(56, 189, 248, 0.2)); animation: none !important; }',
+    '.samche-launcher.samche-style-glass { padding: 4px 18px 4px 6px !important; gap: 10px; background: var(--chat-launcher-bg, rgba(17, 24, 39, 0.68)) !important; background-color: var(--chat-launcher-bg, rgba(17, 24, 39, 0.68)) !important; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1.5px solid var(--chat-launcher-border, rgba(255, 255, 255, 0.22)) !important; color: var(--chat-launcher-text, #FFFFFF) !important; box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3), inset 0 0 14px rgba(255, 255, 255, 0.08), 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-soft, rgba(56, 189, 248, 0.3)); }',
+    '.samche-launcher.samche-style-neon-pulse, .samche-launcher.samche-style-neon_pulse { padding: 4px 18px 4px 6px !important; gap: 10px; background: var(--chat-launcher-bg, radial-gradient(circle at center, rgba(15, 23, 42, 0.95) 0%, rgba(2, 6, 23, 1) 100%)) !important; background-color: var(--chat-launcher-bg, #0F172A) !important; border: 2px solid var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.95))) !important; color: var(--chat-launcher-text, #FFFFFF) !important; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.7) var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.9))), 0 0 var(--chat-glow-halo, 42px) var(--chat-launcher-glow, var(--chat-glow, rgba(56, 189, 248, 0.55))), 0 0 calc(var(--chat-glow-halo, 42px) * 1.5) var(--chat-glow-soft, rgba(56, 189, 248, 0.3)), 0 10px 32px rgba(0, 0, 0, 0.4) !important; animation: samche-glow-pulse-strong var(--chat-pulse-duration, 3.6s) infinite ease-in-out !important; }',
+    '.samche-launcher.samche-style-custom { padding: 4px 18px 4px 6px !important; gap: 10px; background-color: var(--chat-launcher-bg, #0F172A) !important; background: var(--chat-launcher-bg, linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(2, 6, 23, 0.98) 100%)) !important; border: 1.5px solid var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.7))) !important; color: var(--chat-launcher-text, #FFFFFF) !important; box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-launcher-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.7))), 0 0 var(--chat-glow-halo, 42px) var(--chat-launcher-glow, var(--chat-glow, rgba(56, 189, 248, 0.4))), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.35); }',
     '.samche-launcher.samche-launcher-circle { width: 62px !important; height: 62px !important; min-width: 62px !important; min-height: 62px !important; max-width: 62px !important; max-height: 62px !important; border-radius: 50% !important; padding: 5px !important; }',
     '.samche-launcher.samche-pulse-none { animation: none !important; }',
     '.samche-launcher.samche-pulse-subtle { animation: samche-glow-pulse-subtle var(--chat-pulse-duration, 3.6s) infinite ease-in-out !important; }',
     '.samche-launcher.samche-pulse-normal { animation: samche-glow-breathe var(--chat-pulse-duration, 3.6s) infinite ease-in-out !important; }',
     '.samche-launcher.samche-pulse-strong { animation: samche-glow-pulse-strong var(--chat-pulse-duration, 3.6s) infinite ease-in-out !important; }',
-    '.samche-launcher-label { font-size: 14px; font-weight: 600; color: inherit; white-space: nowrap; line-height: 1; letter-spacing: -0.01em; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }',
+    '.samche-launcher-label { font-size: 14px; font-weight: 600; color: var(--chat-launcher-text, inherit) !important; white-space: nowrap; line-height: 1; letter-spacing: -0.01em; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }',
     '.samche-launcher-badge { width: 44px; height: 44px; min-width: 44px; min-height: 44px; border-radius: 50%; background: radial-gradient(circle at center, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.95) 100%); border: 1.5px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.8)); display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; padding: 6px; box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5), 0 0 12px var(--chat-glow-soft, rgba(56, 189, 248, 0.3)); }',
     '.samche-launcher.samche-launcher-circle .samche-launcher-badge { width: 100%; height: 100%; border: none; background: transparent; box-shadow: none; padding: 6px; }',
     '.samche-launcher-badge img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; user-select: none; pointer-events: none; }',
-    '.samche-launcher-badge svg { width: 24px !important; height: 24px !important; max-width: 24px !important; max-height: 24px !important; fill: var(--chat-primary-foreground, #FFFFFF); }',
+    '.samche-launcher-badge svg { width: 24px !important; height: 24px !important; max-width: 24px !important; max-height: 24px !important; fill: currentColor; color: var(--chat-launcher-text, #FFFFFF) !important; }',
     '.samche-pos-left .samche-launcher { right: auto !important; left: 24px !important; }',
     '.samche-launcher:hover { transform: translateY(-2px) scale(1.02); }',
     '.samche-launcher:active { transform: translateY(0) scale(0.98); }',
@@ -1883,6 +1894,9 @@
             if (t.glow_halo_px) target.style.setProperty('--chat-glow-halo', t.glow_halo_px + 'px');
             if (t.pulse_duration) target.style.setProperty('--chat-pulse-duration', t.pulse_duration);
             if (t.launcher_text) target.style.setProperty('--chat-launcher-text', t.launcher_text);
+            if (t.launcher_bg) target.style.setProperty('--chat-launcher-bg', t.launcher_bg);
+            if (t.launcher_border) target.style.setProperty('--chat-launcher-border', t.launcher_border);
+            if (t.launcher_glow) target.style.setProperty('--chat-launcher-glow', t.launcher_glow);
             if (t.text_color) target.style.setProperty('--chat-text', t.text_color);
             if (t.muted_color) target.style.setProperty('--chat-muted', t.muted_color);
             if (t.border_color) target.style.setProperty('--chat-border', t.border_color);
@@ -2080,6 +2094,21 @@
 
           function sendRecapturedContext(ctx) {
             if (!ctx || !sessionToken) return;
+            var isDisc = isDiscreteContext(ctx);
+            var recEntId = isDisc && ctx.entity_id ? String(ctx.entity_id) : null;
+            if (recEntId && !proactiveState.currentEntityId) {
+              proactiveState.currentEntityId = recEntId;
+              proactiveState.entityDwellStartedAt = Date.now();
+              proactiveState.entityDwellStartPerf = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+              if (data.behavior && data.behavior.proactive_enabled !== false && !proactiveState.acknowledgedEntityIds[recEntId]) {
+                startDwellTracker(sessionToken, data.behavior.dwell_threshold_seconds || 15);
+              }
+              if (ctx.entity_name) {
+                setContextBadge((I18N[currentLang] || I18N.tr).browsingPrefix + ctx.entity_name);
+              }
+            }
+            // Preserve ongoing dwell if recEntId matches existing currentEntityId (MutationObserver DOM update != navigation)
+
             fetch(resolveApiBaseUrl() + '/api/chat/page-context', {
               method: 'POST',
               headers: {
@@ -2255,7 +2284,7 @@
           proactiveState.dismissedAt = dismissedTime;
         }
 
-        if (data.behavior && data.behavior.proactive_enabled) {
+        if (data.behavior && data.behavior.proactive_enabled !== false) {
           configureProactive({
             sessionToken: sessionToken,
             dwellThresholdSeconds: data.behavior.dwell_threshold_seconds || 15,

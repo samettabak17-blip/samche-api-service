@@ -30,16 +30,24 @@ export const DEFAULT_WEB_CHAT_APPEARANCE = Object.freeze({
     glow_halo_px: 45,
     pulse_duration: '3.6s',
     launcher_text: '#FFFFFF',
+    launcher_bg: '#0F172A',
+    launcher_border: 'rgba(37, 99, 235, 0.65)',
+    launcher_glow: 'rgba(37, 99, 235, 0.35)',
     text_color: '#F8FAFC',
     muted_color: '#94A3B8',
     border_color: 'rgba(255, 255, 255, 0.12)',
     primary_foreground: '#FFFFFF',
     accent_foreground: '#FFFFFF',
   },
+  launcher_theme_mode: 'follow_theme',
+  launcher_bg: null,
+  launcher_text: null,
+  launcher_border: null,
+  launcher_glow: null,
 });
 
 export const DEFAULT_WEB_CHAT_BEHAVIOR = Object.freeze({
-  proactive_enabled: false,
+  proactive_enabled: true,
   high_intent_activation: true,
   dwell_threshold_seconds: 15,
   cooldown_seconds: 300,
@@ -122,6 +130,22 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
         ? input.welcome_message.trim()
         : null);
 
+  const launcherThemeMode = ['auto_brand', 'follow_theme', 'custom'].includes(String(input?.launcher_theme_mode || '').toLowerCase())
+    ? String(input.launcher_theme_mode).toLowerCase()
+    : 'follow_theme';
+  const launcherBg = typeof input?.launcher_bg === 'string' && input.launcher_bg.trim()
+    ? input.launcher_bg.trim()
+    : (typeof input?.theme?.launcher_bg === 'string' && input.theme.launcher_bg.trim() ? input.theme.launcher_bg.trim() : null);
+  const launcherText = typeof input?.launcher_text === 'string' && input.launcher_text.trim()
+    ? input.launcher_text.trim()
+    : (typeof input?.theme?.launcher_text === 'string' && input.theme.launcher_text.trim() ? input.theme.launcher_text.trim() : null);
+  const launcherBorder = typeof input?.launcher_border === 'string' && input.launcher_border.trim()
+    ? input.launcher_border.trim()
+    : (typeof input?.theme?.launcher_border === 'string' && input.theme.launcher_border.trim() ? input.theme.launcher_border.trim() : null);
+  const launcherGlow = typeof input?.launcher_glow === 'string' && input.launcher_glow.trim()
+    ? input.launcher_glow.trim()
+    : (typeof input?.theme?.launcher_glow === 'string' && input.theme.launcher_glow.trim() ? input.theme.launcher_glow.trim() : null);
+
   const tokens = deriveWebChatThemeTokens({
     primaryColor: primaryCandidate,
     accentColor: accentCandidate,
@@ -131,6 +155,11 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
     pulseAnimation,
     animationSpeed,
     launcherStyle,
+    launcherThemeMode,
+    launcherBg,
+    launcherText,
+    launcherBorder,
+    launcherGlow,
   });
 
   return {
@@ -149,6 +178,11 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
     glow_spread: glowSpread,
     pulse_animation: pulseAnimation,
     animation_speed: animationSpeed,
+    launcher_theme_mode: tokens.launcher_theme_mode,
+    launcher_bg: tokens.launcher_bg,
+    launcher_text: tokens.launcher_text,
+    launcher_border: tokens.launcher_border,
+    launcher_glow: tokens.launcher_glow,
     theme: {
       primary_color: tokens.primary,
       accent_color: tokens.accent,
@@ -162,6 +196,9 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
       glow_halo_px: tokens.glow_halo_px,
       pulse_duration: tokens.pulse_duration,
       launcher_text: tokens.launcher_text,
+      launcher_bg: tokens.launcher_bg,
+      launcher_border: tokens.launcher_border,
+      launcher_glow: tokens.launcher_glow,
       text_color: tokens.text,
       muted_color: tokens.muted,
       border_color: tokens.border,
@@ -178,7 +215,9 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
 }
 
 export function normalizeWebChatBehavior(input = {}) {
-  const proactiveEnabled = Boolean(input?.proactive_enabled);
+  const proactiveEnabled = input?.proactive_enabled !== undefined
+    ? Boolean(input.proactive_enabled)
+    : DEFAULT_WEB_CHAT_BEHAVIOR.proactive_enabled;
   const highIntentActivation = input?.high_intent_activation !== false;
   const dwellThreshold = Math.max(5, Math.min(120, Number(input?.dwell_threshold_seconds) || 15));
   const cooldown = Math.max(30, Math.min(3600, Number(input?.cooldown_seconds) || 300));

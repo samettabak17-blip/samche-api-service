@@ -532,4 +532,63 @@ describe('WebChatManagement Component', () => {
   });
 
 
+  it('supports configuring launcher theme mode (Follow Panel Theme, Auto from Brand, Custom) with custom background, text, border, and glow', async () => {
+    const payload: WebChatChannelResponse = {
+      tenant_id: 'test-tenant-123',
+      configured: true,
+      widget_key: 'wch_launcher_custom_key',
+      channel: { id: 'ch-1', channel_type: 'WEB_CHAT', display_name: 'Test Web Chat', status: 'active' },
+      assistant: { id: 'ast-1', tenant_id: 'test-tenant-123', name: 'Test Assistant', model: 'gpt-4o-mini', status: 'active' },
+      integration: { id: 'int-1', integration_key: 'wch_launcher_custom_key', integration_type: 'WEB_CHAT', enabled: true },
+      appearance: {
+        ...mockAppearance,
+        launcher_theme_mode: 'follow_theme',
+      },
+      behavior: mockBehavior,
+      embed_snippet: '<script></script>',
+      installation: { widget_key: 'wch_launcher_custom_key', embed_snippet: '', status: 'active', guidance: [] },
+    };
+
+    vi.mocked(tenantApi.getWebChatChannel).mockResolvedValue(payload);
+    vi.mocked(tenantApi.listAssistants).mockResolvedValue([]);
+    vi.mocked(tenantApi.updateWebChatChannel).mockResolvedValue(payload);
+
+    renderComponent();
+    fireEvent.click(await screen.findByRole('button', { name: /Appearance & Theme/i }));
+
+    // 1. Launcher Theme select is present
+    const launcherThemeSelect = screen.getByLabelText(/Launcher Theme/i) as HTMLSelectElement;
+    expect(launcherThemeSelect).toBeTruthy();
+    expect(launcherThemeSelect.value).toBe('follow_theme');
+
+    // 2. Switch to Custom launcher theme
+    fireEvent.change(launcherThemeSelect, { target: { value: 'custom' } });
+    expect(launcherThemeSelect.value).toBe('custom');
+
+    // 3. Custom controls become visible
+    expect(await screen.findByTestId('launcher-custom-controls')).toBeTruthy();
+
+    const bgInput = screen.getByPlaceholderText('#0F172A') as HTMLInputElement;
+    fireEvent.change(bgInput, { target: { value: '#4F46E5' } });
+
+    const textInput = screen.getByPlaceholderText('#FFFFFF') as HTMLInputElement;
+    fireEvent.change(textInput, { target: { value: '#F8FAFC' } });
+
+    // 4. Save Appearance persists launcher custom configuration
+    fireEvent.click(screen.getAllByRole('button', { name: /Save Appearance/i })[0]);
+    await waitFor(() => {
+      expect(tenantApi.updateWebChatChannel).toHaveBeenCalledWith(
+        'test-tenant-123',
+        expect.objectContaining({
+          appearance: expect.objectContaining({
+            launcher_theme_mode: 'custom',
+            launcher_bg: '#4F46E5',
+            launcher_text: '#F8FAFC',
+          }),
+        })
+      );
+    });
+  });
+
+
 });
