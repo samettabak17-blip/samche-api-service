@@ -1216,9 +1216,12 @@
   };
 
   function isDiscreteContext(ctx) {
-    if (!ctx || !ctx.entity_type) return false;
-    var isNonDiscrete = /^(?:PAGE|GENERIC_PAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ)/i.test(ctx.entity_type)
-      || /^(?:catalog|home|pricing|security|about)/i.test(ctx.page_type || '');
+    if (!ctx) return false;
+    if (ctx.path === '/' || ctx.path === '' || ctx.entity_id === '/') return false;
+    var rawType = String(ctx.entity_type || '').toUpperCase().trim();
+    if (!rawType) return false;
+    var isNonDiscrete = /^(?:PAGE|GENERIC_PAGE|WEBSITE|WEBPAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ|PRODUCT_LIST|ITEM_LIST)/i.test(rawType)
+      || /^(?:catalog|home|pricing|security|about|website|webpage)/i.test(ctx.page_type || '');
     return !isNonDiscrete && Boolean(ctx.entity_id);
   }
 

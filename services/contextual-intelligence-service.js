@@ -314,6 +314,8 @@ export function resolvePageEntity(normalizedContext) {
 export const NON_DISCRETE_ENTITY_TYPES = Object.freeze(new Set([
   'PAGE',
   'GENERIC_PAGE',
+  'WEBSITE',
+  'WEBPAGE',
   'CATALOG',
   'CATALOGUE',
   'HOME',
@@ -348,6 +350,9 @@ export const NON_DISCRETE_ENTITY_TYPES = Object.freeze(new Set([
 
 export function isDiscreteEntity(entity) {
   if (!entity || typeof entity !== 'object') return false;
+  if (entity.entity_id === '/' || entity.canonical_url === '/' || entity.path === '/') {
+    return false; // Root homepage is never a discrete entity
+  }
   const rawType = String(entity.entity_type || '').toUpperCase().trim();
   if (rawType && NON_DISCRETE_ENTITY_TYPES.has(rawType)) {
     return false;

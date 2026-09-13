@@ -1,0 +1,45 @@
+{
+  "ctx": {
+    "url": "https://demo.samchecompany.com/",
+    "path": "/",
+    "canonical_url": "https://demo.samchecompany.com/",
+    "title": "Home",
+    "language": "en",
+    "entity_type": "WebSite",
+    "entity_id": "/",
+    "entity_name": "Home",
+    "summary": "",
+    "headings": [
+      "Same-Day Dispatch, Unbeatable Prices",
+      "Today's Top Flash Deals",
+      "Wireless Noise-Cancelling Headphones",
+      "High-Speed Power Bank",
+      "Smart 4K UHD TV",
+      "Why Shop SAMCHE?",
+      "Same-Day",
+      "100%",
+      "Guaranteed",
+      "Explore the Full SAMCHE Catalog"
+    ],
+    "attributes": {
+      "page_headings": [
+        "Same-Day Dispatch, Unbeatable Prices",
+        "Today's Top Flash Deals",
+        "Wireless Noise-Cancelling Headphones",
+        "High-Speed Power Bank",
+        "Smart 4K UHD TV",
+        "Why Shop SAMCHE?",
+        "Same-Day",
+        "100%",
+        "Guaranteed",
+        "Explore the Full SAMCHE Catalog"
+      ]
+    },
+    "referrer": null,
+    "timestamp": "2026-09-13T23:22:37.603Z"
+  },
+  "location": {
+    "pathname": "/",
+    "href": "https://demo.samchecompany.com/"
+  }
+}
