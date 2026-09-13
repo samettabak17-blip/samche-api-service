@@ -426,10 +426,10 @@ test('REAL BROWSER E2E: Responsive Viewports (Desktop, Tablet, Mobile, Mobile La
           const launcher = shadow?.querySelector('.samche-launcher');
           const panel = shadow?.querySelector('.samche-panel');
 
+          const launcherRect = launcher.getBoundingClientRect();
           launcher.click();
           await new Promise(r => setTimeout(r, 80));
           const openRect = panel.getBoundingClientRect();
-          const launcherRect = launcher.getBoundingClientRect();
 
           shadow.querySelector('.samche-close-btn').click();
           await new Promise(r => setTimeout(r, 80));
