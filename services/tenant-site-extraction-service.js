@@ -244,8 +244,10 @@ export function extractProducts(html, schemaBlocks = [], baseUrl = '') {
 }
 
 export function extractReviews(html, schemaBlocks = []) {
+  if (typeof html !== 'string') return [];
   const reviews = [];
   const seenTexts = new Set();
+  const seenAuthors = new Set();
 
   for (const block of schemaBlocks) {
     const typeStr = Array.isArray(block?.['@type']) ? block['@type'].join(' ') : String(block?.['@type'] || '');
@@ -266,57 +268,85 @@ export function extractReviews(html, schemaBlocks = []) {
     }
   }
 
-  const reviewCardRegex = /<(?:div|article|blockquote|li)\b[^>]*class=["'][^"']*(?:review|testimonial|feedback|quote|customer-say|shopper)[^"']*["'][^>]*>([\s\S]*?)<\/(?:div|article|blockquote|li)>/gi;
-  let rMatch;
-  while ((rMatch = reviewCardRegex.exec(html)) !== null) {
-    const cardHtml = rMatch[1];
-    const textMatch = cardHtml.match(/<(?:p|blockquote|span)\b[^>]*>([\s\S]*?)<\/(?:p|blockquote|span)>/i);
-    const candidateText = textMatch ? sanitizeExtractionText(textMatch[1], 600) : sanitizeExtractionText(cardHtml, 600);
+  const decoded = html
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
 
-    if (candidateText && candidateText.length > 25 && !seenTexts.has(candidateText.toLowerCase())) {
-      const authorMatch = cardHtml.match(/<(?:h[3-6]|span|div|cite|p)\b[^>]*class=["'][^"']*(?:author|reviewer|name|customer|client|user)[^"']*["'][^>]*>([\s\S]*?)<\/(?:h[3-6]|span|div|cite|p)>/i)
-        || cardHtml.match(/([A-ZÇĞİÖŞÜ][a-zçğıöşü]+(?:\s+[A-ZÇĞİÖŞÜ]\.?)?(?:,\s*|\s*[-–—]\s*)(?:Dubai|Abu Dhabi|Sharjah|Ajman|UAE|RAK|Fujairah|Istanbul|London|New York|[A-Za-z\s]+))/);
+  const componentReviewRegex = /<(?:h[2-6]|p|blockquote|span)\b[^>]*>([A-ZÇĞİÖŞÜ][^<]{25,350})<\/(?:h[2-6]|p|blockquote|div|span)>[\s\S]{0,120}?<span\b[^>]*>([A-ZÇĞİÖŞÜ][a-zçğıöşü]+(?:\s+[A-ZÇĞİÖŞÜ]\.?)?(?:,\s*|\s*[-–—]\s*)(?:Dubai|Abu Dhabi|Sharjah|Ajman|UAE|[A-Za-z]+))<\/span>/gi;
+  let cMatch;
+  while ((cMatch = componentReviewRegex.exec(decoded)) !== null) {
+    let cleanText = cMatch[1].replace(/<[^>]+>/g, ' ').replace(/["\\]/g, '').trim();
+    const authorLocation = cMatch[2].trim();
+    if (!cleanText.includes('{') && !cleanText.includes('[') && !seenAuthors.has(authorLocation.toLowerCase())) {
+      seenAuthors.add(authorLocation.toLowerCase());
+      seenTexts.add(cleanText.toLowerCase());
+      let author = authorLocation;
+      let location = undefined;
+      if (authorLocation.includes(',')) {
+        const parts = authorLocation.split(',');
+        author = parts[0].trim();
+        location = parts[1].trim();
+      }
+      reviews.push({ text: cleanText, author, location, rating: '5/5' });
+      if (reviews.length >= 15) break;
+    }
+  }
 
-      const authorLocation = authorMatch ? sanitizeExtractionText(authorMatch[1], 100) : '';
-      let author = 'Verified Customer';
-      let location = '';
+  if (reviews.length === 0) {
+    const reviewCardRegex = /<(?:div|article|blockquote|li)\b[^>]*class=["'][^"']*(?:review|testimonial|feedback|quote|customer-say|shopper)[^"']*["'][^>]*>([\s\S]*?)<\/(?:div|article|blockquote|li)>/gi;
+    let rMatch;
+    while ((rMatch = reviewCardRegex.exec(decoded)) !== null) {
+      const cardHtml = rMatch[1];
+      const textMatch = cardHtml.match(/<(?:p|blockquote|span)\b[^>]*>([\s\S]*?)<\/(?:p|blockquote|span)>/i);
+      const candidateText = textMatch ? sanitizeExtractionText(textMatch[1], 600) : sanitizeExtractionText(cardHtml, 600);
 
-      if (authorLocation) {
-        if (authorLocation.includes(',')) {
-          const parts = authorLocation.split(',');
-          author = parts[0].trim();
-          location = parts.slice(1).join(',').trim();
-        } else if (authorLocation.includes('-')) {
-          const parts = authorLocation.split('-');
-          author = parts[0].trim();
-          location = parts.slice(1).join('-').trim();
-        } else {
-          author = authorLocation;
+      if (candidateText && candidateText.length > 25 && !seenTexts.has(candidateText.toLowerCase())) {
+        const authorMatch = cardHtml.match(/<(?:h[3-6]|span|div|cite|p)\b[^>]*class=["'][^"']*(?:author|reviewer|name|customer|client|user)[^"']*["'][^>]*>([\s\S]*?)<\/(?:h[3-6]|span|div|cite|p)>/i)
+          || cardHtml.match(/([A-ZÇĞİÖŞÜ][a-zçğıöşü]+(?:\s+[A-ZÇĞİÖŞÜ]\.?)?(?:,\s*|\s*[-–—]\s*)(?:Dubai|Abu Dhabi|Sharjah|Ajman|UAE|RAK|Fujairah|Istanbul|London|New York|[A-Za-z\s]+))/);
+
+        const authorLocation = authorMatch ? sanitizeExtractionText(authorMatch[1], 100) : '';
+        let author = 'Verified Customer';
+        let location = '';
+
+        if (authorLocation) {
+          if (authorLocation.includes(',')) {
+            const parts = authorLocation.split(',');
+            author = parts[0].trim();
+            location = parts.slice(1).join(',').trim();
+          } else if (authorLocation.includes('-')) {
+            const parts = authorLocation.split('-');
+            author = parts[0].trim();
+            location = parts.slice(1).join('-').trim();
+          } else {
+            author = authorLocation;
+          }
         }
+
+        const ratingMatch = cardHtml.match(/([1-5](?:\.[0-9])?)\s*\/\s*5|([1-5])\s*stars?|★{1,5}/i);
+        let rating = undefined;
+        if (ratingMatch) {
+          rating = ratingMatch[1] || ratingMatch[2] || (ratingMatch[0].includes('★') ? String(ratingMatch[0].length) : '5');
+        }
+
+        seenTexts.add(candidateText.toLowerCase());
+        reviews.push({
+          author: author || 'Verified Shopper',
+          location: location || undefined,
+          text: candidateText,
+          rating: rating || '5/5',
+        });
+
+        if (reviews.length >= 20) break;
       }
-
-      const ratingMatch = cardHtml.match(/([1-5](?:\.[0-9])?)\s*\/\s*5|([1-5])\s*stars?|★{1,5}/i);
-      let rating = undefined;
-      if (ratingMatch) {
-        rating = ratingMatch[1] || ratingMatch[2] || (ratingMatch[0].includes('★') ? String(ratingMatch[0].length) : '5');
-      }
-
-      seenTexts.add(candidateText.toLowerCase());
-      reviews.push({
-        author: author || 'Verified Shopper',
-        location: location || undefined,
-        text: candidateText,
-        rating: rating || '5/5',
-      });
-
-      if (reviews.length >= 20) break;
     }
   }
 
   if (reviews.length === 0) {
     const quotePattern = /["“]([^"”]{20,400})["”]\s*[-–—]?\s*([A-ZÇĞİÖŞÜ][a-zçğıöşü]+(?:\s+[A-ZÇĞİÖŞÜ]\.?)?(?:,\s*[A-Za-z\s]+)?)/g;
     let qMatch;
-    while ((qMatch = quotePattern.exec(html)) !== null) {
+    while ((qMatch = quotePattern.exec(decoded)) !== null) {
       const qText = sanitizeExtractionText(qMatch[1], 600);
       const qAuthor = sanitizeExtractionText(qMatch[2], 100);
       if (qText && !seenTexts.has(qText.toLowerCase())) {
