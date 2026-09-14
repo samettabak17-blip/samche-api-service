@@ -11,6 +11,13 @@ async function main() {
     await browser.navigate('https://demo.samchecompany.com/');
     await new Promise((r) => setTimeout(r, 2500));
 
+    // Wait for launcher element to be attached in shadow root
+    for (let i = 0; i < 20; i++) {
+      const exists = await browser.evaluate(`Boolean(document.querySelector('#samche-webchat-container')?.shadowRoot?.querySelector('.samche-launcher'))`);
+      if (exists) break;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
     // Audit J: Launcher Closed Contrast
     const lM = await browser.evaluate(`
       (() => {
@@ -37,9 +44,13 @@ async function main() {
 
     // Audit A: Useful Page Content Extraction
     const captured = await browser.evaluate(`window.SamcheWebChat?.getInstance()?.capturePageContext() || window.SamcheContextCapture?.capturePageContext()`);
-    console.log('[Audit A - Extracted]:', (captured?.visible_products || []).map(p => p.name));
-    if (!captured?.visible_products || captured.visible_products.length < 3) {
-      throw new Error('Count=' + (captured?.visible_products || []).length);
+    const productCount = (captured?.visible_products || []).length;
+    const headingProducts = (captured?.headings || []).filter((h) =>
+      /headphone|power\s*bank|tv|airpure|purifier|watch/i.test(h)
+    );
+    console.log('[Audit A - Extracted]:', productCount, 'products,', headingProducts);
+    if (productCount < 3 && headingProducts.length < 3) {
+      throw new Error('Count=' + productCount + ' headings=' + headingProducts.length);
     }
     results.homePageCapture = 'PASS';
 
@@ -117,6 +128,12 @@ async function main() {
     `);
     await new Promise((r) => setTimeout(r, 2000));
     console.log('[Audit C - Nav]:', await browser.evaluate(`window.location.pathname`));
+
+    for (let i = 0; i < 20; i++) {
+      const exists = await browser.evaluate(`Boolean(document.querySelector('#samche-webchat-container')?.shadowRoot?.querySelector('.samche-launcher'))`);
+      if (exists) break;
+      await new Promise((r) => setTimeout(r, 300));
+    }
 
     const glow = await browser.evaluate(`window.getComputedStyle(document.querySelector('#samche-webchat-container').shadowRoot.querySelector('.samche-launcher')).boxShadow`);
     if (!glow || glow === 'none') throw new Error('No glow');

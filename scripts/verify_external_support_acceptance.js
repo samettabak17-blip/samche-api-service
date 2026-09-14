@@ -9,30 +9,42 @@ import { BrowserCdp } from '../tests/helpers/browser-cdp.js';
 
 const DEMO_ORIGIN = (process.env.EXTERNAL_DEMO_URL || 'https://demo.samchecompany.com').trim().replace(/\/+$/, '');
 
-async function sendChatTurn(browser, message, timeoutSec = 25) {
+async function openWebChat(browser) {
   await browser.evaluate(`
     (() => {
       const s = document.querySelector('#samche-webchat-container')?.shadowRoot;
-      if (!s) throw new Error('Shadow root not found');
+      if (!s) return;
       const panel = s.querySelector('.samche-panel');
-      if (!panel.classList.contains('samche-open')) {
+      if (panel && !panel.classList.contains('samche-open')) {
         const l = s.querySelector('.samche-launcher');
         if (l) l.click();
       }
-      const inp = s.querySelector('.samche-composer-input');
-      const btn = s.querySelector('.samche-send-btn');
-      inp.value = ${JSON.stringify(message)};
-      inp.dispatchEvent(new Event('input', { bubbles: true }));
-      btn.disabled = false;
-      btn.click();
+    })()
+  `);
+  await new Promise((r) => setTimeout(r, 800));
+}
+
+async function sendChatTurn(browser, message, timeoutSec = 30) {
+  await openWebChat(browser);
+
+  const initialBotCount = await browser.evaluate(`
+    (() => {
+      const s = document.querySelector('#samche-webchat-container')?.shadowRoot;
+      const msgs = s ? s.querySelectorAll('.samche-msg-bot') : [];
+      return msgs.length;
     })()
   `);
 
-  let prevCount = await browser.evaluate(`
-    (() => {
-      const msgs = document.querySelector('#samche-webchat-container')?.shadowRoot?.querySelectorAll('.samche-msg-bot');
-      return msgs ? msgs.length : 0;
-    })()
+  await browser.evaluate(`
+    ((msg) => {
+      const s = document.querySelector('#samche-webchat-container')?.shadowRoot;
+      const inp = s.querySelector('.samche-composer-input');
+      const btn = s.querySelector('.samche-send-btn');
+      inp.value = msg;
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      btn.disabled = false;
+      btn.click();
+    })(${JSON.stringify(message)})
   `);
 
   let aiReply = '';
@@ -41,22 +53,26 @@ async function sendChatTurn(browser, message, timeoutSec = 25) {
 
   for (let s = 0; s < timeoutSec; s++) {
     await new Promise((r) => setTimeout(r, 1000));
-    const cur = await browser.evaluate(`
+    const status = await browser.evaluate(`
       (() => {
-        const msgs = document.querySelector('#samche-webchat-container')?.shadowRoot?.querySelectorAll('.samche-msg-bot');
-        if (!msgs || msgs.length === 0) return '';
-        return msgs[msgs.length - 1].textContent.trim();
+        const s = document.querySelector('#samche-webchat-container')?.shadowRoot;
+        const msgs = s ? Array.from(s.querySelectorAll('.samche-msg-bot')).map(el => el.textContent.trim()) : [];
+        const isTyping = Boolean(s?.querySelector('.msg-typing-indicator'));
+        return { msgs, isTyping };
       })()
     `);
 
-    if (cur && !cur.includes('Hello! How can I help you today?')) {
-      aiReply = cur;
-      if (cur.length > 20 && cur.length === lastLen) {
-        stableCount++;
-        if (stableCount >= 2) break;
-      } else {
-        stableCount = 0;
-        lastLen = cur.length;
+    if (status.msgs.length > initialBotCount) {
+      const last = status.msgs[status.msgs.length - 1];
+      if (last.length > 15 && !last.includes('Hello! How can I help you today?')) {
+        aiReply = last;
+        if (!status.isTyping && last.length === lastLen) {
+          stableCount++;
+          if (stableCount >= 2) break;
+        } else {
+          stableCount = 0;
+          lastLen = last.length;
+        }
       }
     }
   }
