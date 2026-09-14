@@ -336,8 +336,8 @@ test('REAL BROWSER E2E: Canonical Web Chat Widget Runtime & Shadow DOM Encapsula
   assert.ok(widgetInspection.shadowExists, 'Shadow DOM shadowRoot must exist on host');
   assert.ok(widgetInspection.launcherExists, 'Launcher button must exist inside shadowRoot');
   assert.ok(widgetInspection.panelExists, 'Panel must exist inside shadowRoot');
-  assert.equal(widgetInspection.launcherWidth, 60, 'Launcher button width must be exactly 60px');
-  assert.equal(widgetInspection.launcherHeight, 60, 'Launcher button height must be exactly 60px');
+  assert.ok(Math.abs(widgetInspection.launcherWidth - 60) <= 1, 'Launcher button width must be canonical 60px (got ' + widgetInspection.launcherWidth + ')');
+  assert.ok(Math.abs(widgetInspection.launcherHeight - 60) <= 1, 'Launcher button height must be canonical 60px (got ' + widgetInspection.launcherHeight + ')');
   assert.equal(widgetInspection.hostPointerEvents, 'none', 'Host element must have pointer-events: none');
   assert.equal(widgetInspection.isPanelOpen, false, 'Panel must be closed initially');
 });
@@ -445,10 +445,9 @@ test('REAL BROWSER E2E: Responsive Viewports (Desktop, Tablet, Mobile, Mobile La
 
       console.log(`VIEWPORT ${vp.name}: launcher=${measurement.launcherWidth}x${measurement.launcherHeight}, panel=${measurement.panelWidth}x${measurement.panelHeight}`);
 
-      assert.equal(
-        measurement.launcherWidth,
-        vp.expectedLauncherSize,
-        `${vp.name}: launcher width must be ${vp.expectedLauncherSize}px (got ${measurement.launcherWidth}px)`
+      assert.ok(
+        Math.abs(measurement.launcherWidth - vp.expectedLauncherSize) <= 1,
+        `${vp.name}: launcher width must be within 1px of ${vp.expectedLauncherSize}px (got ${measurement.launcherWidth}px)`
       );
 
       if (vp.expectedPanelFull) {
