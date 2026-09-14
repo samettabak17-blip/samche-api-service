@@ -22,6 +22,8 @@ import {
   canPerformWebChatAction,
   WEBCHAT_PERMISSIONS,
 } from '../services/web-chat-permissions.js';
+import { discoverAndIndexTenantSite } from '../services/tenant-site-discovery-service.js';
+import { listTenantSitePages, getTenantSiteDiscoveryState } from '../services/tenant-site-index-service.js';
 import multer from 'multer';
 import {
   WebChatAssetError,
@@ -274,6 +276,67 @@ router.put('/:tenantId/channels/web-chat', requireTenantAccess, requireTenantAdm
   } catch (error) {
     if (webChatProvisioningErrorResponse(req, res, error)) return;
     console.error('Update web chat channel error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/:tenantId/channels/web-chat/discover-site', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  if (!tenant(req, res)) return;
+  if (!canPerformWebChatAction({ systemRole: req.user?.system_role, tenantRole: req.verified_tenant_role, action: WEBCHAT_PERMISSIONS.CONFIGURE })) {
+    return res.status(403).json({ error: 'Web Chat configure access required' });
+  }
+
+  const { website_url: websiteUrl = null, max_pages: maxPages = 50 } = req.body ?? {};
+  let targetUrl = websiteUrl;
+
+  if (!targetUrl) {
+    const integration = await getWebChatIntegrationForTenant({ database: req.app?.locals?.database || pool, tenantId: req.verified_tenant_id });
+    targetUrl = integration?.behavior?.website_url || null;
+  }
+
+  if (!targetUrl || typeof targetUrl !== 'string' || !/^https?:\/\//i.test(targetUrl)) {
+    return res.status(400).json({ error: 'A valid website_url (http/https) is required for discovery.' });
+  }
+
+  try {
+    const discoveryResult = await discoverAndIndexTenantSite({
+      database: req.app?.locals?.database || pool,
+      tenantId: req.verified_tenant_id,
+      rootUrl: targetUrl,
+      options: { maxPages: Number(maxPages) || 50 },
+    });
+    return res.status(200).json(discoveryResult);
+  } catch (error) {
+    console.error('Site discovery error:', error);
+    return res.status(500).json({ error: 'Site discovery failed', message: error?.message });
+  }
+});
+
+router.get('/:tenantId/channels/web-chat/site-pages', requireTenantAccess, async (req, res) => {
+  if (!tenant(req, res)) return;
+  if (!canPerformWebChatAction({ systemRole: req.user?.system_role, tenantRole: req.verified_tenant_role, action: WEBCHAT_PERMISSIONS.VIEW })) {
+    return res.status(403).json({ error: 'Web Chat view access required' });
+  }
+
+  try {
+    const pages = await listTenantSitePages({
+      database: req.app?.locals?.database || pool,
+      tenantId: req.verified_tenant_id,
+      pageType: req.query.page_type || null,
+      limit: Number(req.query.limit) || 100,
+    });
+    const hostname = req.query.hostname ? String(req.query.hostname).toLowerCase() : (pages[0]?.hostname || null);
+    const discoveryState = hostname
+      ? await getTenantSiteDiscoveryState({ database: req.app?.locals?.database || pool, tenantId: req.verified_tenant_id, hostname })
+      : null;
+
+    return res.json({
+      discovery_state: discoveryState,
+      total_pages: pages.length,
+      pages,
+    });
+  } catch (error) {
+    console.error('List site pages error:', error);
     return res.status(500).json({ error: 'Server error' });
   }
 });

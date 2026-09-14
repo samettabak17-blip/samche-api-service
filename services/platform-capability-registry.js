@@ -72,6 +72,7 @@ export const PLATFORM_RELATIONSHIP_OWNERSHIP = Object.freeze([
   relationship('configuration_assistant_profile', 'assistant configuration lifecycle service', 'assistant_configuration_versions', 'tenant-scoped assistant and active profile', 'generation job idempotency', 'durable configuration generation job', 'normal configuration generation'),
   relationship('conversation_tenant_channel_assistant', 'live inbox ingress service', 'conversations + messages', 'resolved enabled channel integration', 'external message id/idempotency key', 'durable conversation state', 'normal channel ingress'),
   relationship('push_subscription_user_device', 'push notification subscription service', 'push_subscriptions', 'authenticated tenant user', 'tenant/user/endpoint uniqueness', 'opt-in subscription convergence', 'explicit device subscription'),
+  relationship('tenant_site_pages', 'tenant-site-index-service', 'tenant_site_pages', 'tenant id in site page index', 'tenant_id and url unique constraint', 'migration 081 + normal discovery operation', 'normal site discovery and indexing'),
 ]);
 
 export const PLATFORM_CAPABILITY_MANIFEST = Object.freeze([
@@ -104,6 +105,7 @@ export const PLATFORM_CAPABILITY_MANIFEST = Object.freeze([
   capability('guide_assistant', 7, 'samcheguide-runtime', 'scoped Guide conversation messages', 'CHANNEL_ENABLED', ['guide', 'active tenant runtime'], 'GUIDE_ENABLEMENT'),
   capability('guide_shared_context', 7, 'guide-session-context-service', 'server-scoped Guide session context', 'CHANNEL_ENABLED', ['guide_public_sessions'], 'GUIDE_ENABLEMENT'),
   capability('guide_persistence', 7, 'guide-conversation-service', 'guide_public_sessions + conversations + messages', 'CHANNEL_ENABLED', ['PostgreSQL'], 'GUIDE_ENABLEMENT'),
+  capability('site_intelligence', 8, 'tenant-site-index-service', 'tenant-scoped tenant_site_pages and tenant_site_discovery', 'ALWAYS', ['PostgreSQL']),
 ]);
 
 export function validatePlatformCapabilityManifest(manifest = PLATFORM_CAPABILITY_MANIFEST) {
@@ -118,7 +120,7 @@ export function validatePlatformCapabilityManifest(manifest = PLATFORM_CAPABILIT
   for (const item of manifest) {
     if (!item || required.some((field) => item[field] === undefined || item[field] === '')) throw new TypeError('PLATFORM_CAPABILITY_METADATA_INCOMPLETE');
     if (!/^[a-z][a-z0-9_]+$/.test(item.key) || keys.has(item.key)) throw new TypeError('PLATFORM_CAPABILITY_KEY_INVALID');
-    if (!/^TASK_[1-7]$/.test(item.introduced_by_task)) throw new TypeError('PLATFORM_CAPABILITY_TASK_INVALID');
+    if (!/^TASK_[1-8]$/.test(item.introduced_by_task)) throw new TypeError('PLATFORM_CAPABILITY_TASK_INVALID');
     if (!Array.isArray(item.runtime_dependencies)) throw new TypeError('PLATFORM_CAPABILITY_DEPENDENCIES_INVALID');
     if (!['ALWAYS', 'ON_DEMAND', 'CHANNEL_ENABLED'].includes(item.enablement)) throw new TypeError('PLATFORM_CAPABILITY_ENABLEMENT_INVALID');
     if (!['PLATFORM_ENSURE', 'DOMAIN_FLOW', 'CHANNEL_FLOW', 'RUNTIME_RESOLUTION'].includes(item.canonical_creator)) throw new TypeError('PLATFORM_CAPABILITY_CREATOR_INVALID');

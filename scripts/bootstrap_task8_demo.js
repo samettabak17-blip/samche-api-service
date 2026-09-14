@@ -107,7 +107,8 @@ async function bootstrapTask8Demo(options = {}) {
         high_intent_activation: true,
         dwell_threshold_seconds: 15,
         cooldown_seconds: 300,
-        language: 'en'
+        language: 'en',
+        website_url: 'https://demo.samchecompany.com',
       },
       metadata: {
         environment: 'staging',

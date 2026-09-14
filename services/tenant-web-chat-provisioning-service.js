@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { resolveTenantProactiveConfig } from './visitor-intent-service.js';
 import { analyzeLogoPalette, deriveWebChatThemeTokens } from './web-chat-theme-service.js';
+import { triggerTenantSiteDiscoveryBackground } from './tenant-site-discovery-service.js';
 
 export const DEFAULT_WEB_CHAT_APPEARANCE = Object.freeze({
   brand_name: 'SamChe',
@@ -224,6 +225,9 @@ export function normalizeWebChatBehavior(input = {}) {
   const language = ['tr', 'en', 'ar'].includes(String(input?.language).toLowerCase())
     ? String(input.language).toLowerCase()
     : 'auto';
+  const websiteUrl = typeof input?.website_url === 'string' && input.website_url.trim()
+    ? input.website_url.trim()
+    : (typeof input?.site_url === 'string' && input.site_url.trim() ? input.site_url.trim() : null);
 
   return {
     proactive_enabled: proactiveEnabled,
@@ -231,6 +235,7 @@ export function normalizeWebChatBehavior(input = {}) {
     dwell_threshold_seconds: dwellThreshold,
     cooldown_seconds: cooldown,
     language,
+    website_url: websiteUrl,
   };
 }
 
@@ -654,6 +659,14 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
           }
         }
       } catch (e) {}
+    }
+
+    if (normalizedBehavior.website_url) {
+      triggerTenantSiteDiscoveryBackground({
+        database: client,
+        tenantId: validTenantId,
+        rootUrl: normalizedBehavior.website_url,
+      });
     }
 
     return {

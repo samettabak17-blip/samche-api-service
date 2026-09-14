@@ -119,6 +119,16 @@ import {
   INTENT_TYPES,
   RESOLUTION_ACTIONS,
 } from './services/conversation-intelligence-service.js';
+import {
+  retrieveRelevantTenantSiteContext,
+  formatTenantSiteIntelligencePromptSection,
+} from './services/tenant-site-retrieval-service.js';
+import {
+  triggerTenantSiteDiscoveryBackground,
+} from './services/tenant-site-discovery-service.js';
+import {
+  getTenantSiteDiscoveryState,
+} from './services/tenant-site-index-service.js';
 
 
 dotenv.config();
@@ -2091,6 +2101,19 @@ app.post("/api/chat/page-context", async (req, res) => {
       rawPageContext: rawPayload,
     });
 
+    if (rawPayload?.url && typeof rawPayload.url === 'string' && /^https?:\/\//i.test(rawPayload.url)) {
+      try {
+        const pageHost = new URL(rawPayload.url).hostname.toLowerCase();
+        getTenantSiteDiscoveryState({ database: pool, tenantId: webChatIntegration.tenant_id, hostname: pageHost })
+          .then((discoveryState) => {
+            if (!discoveryState || discoveryState.pages_indexed === 0) {
+              triggerTenantSiteDiscoveryBackground({ database: pool, tenantId: webChatIntegration.tenant_id, rootUrl: rawPayload.url });
+            }
+          })
+          .catch(() => {});
+      } catch {}
+    }
+
     // Resolve tenant persona & configuration for proactive settings & runtime grounding
     let webChatRuntimePersona = null;
     try {
@@ -3126,6 +3149,35 @@ app.post("/api/chat", async (req, res) => {
       }
     }
 
+    let webChatSiteIntelligenceSection = '';
+    if (webChatIntegration) {
+      try {
+        const relevantSitePages = await retrieveRelevantTenantSiteContext({
+          database: pool,
+          tenantId: webChatIntegration.tenant_id,
+          query: normalizedMessage,
+          currentPageUrl: webChatBrowsingState?.currentPage?.url || null,
+          limit: 4,
+        });
+        if (relevantSitePages && relevantSitePages.length > 0) {
+          webChatSiteIntelligenceSection = formatTenantSiteIntelligencePromptSection(relevantSitePages);
+        }
+
+        const rootCandidate = webChatBrowsingState?.currentPage?.url || req.body?.current_url || req.body?.page_context?.url;
+        if (rootCandidate && typeof rootCandidate === 'string' && /^https?:\/\//i.test(rootCandidate)) {
+          const pageHost = new URL(rootCandidate).hostname.toLowerCase();
+          getTenantSiteDiscoveryState({ database: pool, tenantId: webChatIntegration.tenant_id, hostname: pageHost })
+            .then((discState) => {
+              if (!discState || discState.pages_indexed === 0) {
+                triggerTenantSiteDiscoveryBackground({ database: pool, tenantId: webChatIntegration.tenant_id, rootUrl: rootCandidate });
+              }
+            })
+            .catch(() => {});
+        }
+      } catch (siteRetrievalErr) {
+        console.warn('[WEB_CHAT_SITE_RETRIEVAL_WARN]', siteRetrievalErr?.message || siteRetrievalErr);
+      }
+    }
 
     let webChatInboundState = null;
     if (webChatIntegration && webChatSession?.sessionId) {
@@ -3622,11 +3674,15 @@ If the user already provided sector info, NEVER ask again.`
         channelRules: 'Return safe HTML suitable for Web Chat. Do not reveal internal metadata.',
         contextualIntelligence: webChatContextualSection,
         conversationIntelligence: conversationIntelligenceSection,
+        siteIntelligence: webChatSiteIntelligenceSection,
       });
     } else if (webChatRuntimeKnowledge) {
       messages[0].content = appendRuntimeKnowledgeToSystemInstruction(messages[0].content, webChatRuntimeKnowledge);
       if (webChatContextualSection) {
         messages[0].content = messages[0].content + '\n\n' + webChatContextualSection;
+      }
+      if (webChatSiteIntelligenceSection) {
+        messages[0].content = messages[0].content + '\n\n' + webChatSiteIntelligenceSection;
       }
       if (conversationIntelligenceSection) {
         messages[0].content = messages[0].content + '\n\n' + conversationIntelligenceSection;
@@ -3634,6 +3690,9 @@ If the user already provided sector info, NEVER ask again.`
     } else {
       if (webChatContextualSection) {
         messages[0].content = messages[0].content + '\n\n' + webChatContextualSection;
+      }
+      if (webChatSiteIntelligenceSection) {
+        messages[0].content = messages[0].content + '\n\n' + webChatSiteIntelligenceSection;
       }
       if (conversationIntelligenceSection) {
         messages[0].content = messages[0].content + '\n\n' + conversationIntelligenceSection;
