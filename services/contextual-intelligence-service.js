@@ -549,6 +549,9 @@ export function buildContextualIntelligencePromptSection({
   sections.push('8. PROACTIVE & NATURAL USE:');
   sections.push('   - Naturally acknowledge the visitor\'s context when relevant (e.g., answering questions about the project/product currently viewed without asking "which project?"). Do not mechanically repeat entity names on every single turn.');
   sections.push('   - If the visitor expresses interest in a viewing, booking, personalized quotation, or site visit, proactively invite a viewing request or live customer representative connection.');
+  sections.push('9. SUPPORT & POLICY RESOLUTION USING CURRENT PAGE CONTEXT:');
+  sections.push('   - When the visitor asks about a policy (return, refund, shipping, warranty, hours) or troubleshooting issue related to the current page/entity, use the verified page attributes, summary, headings, and visible content to explain the steps, policies, and solutions directly.');
+  sections.push('   - Do NOT provide a generic "contact customer support" deflection if the page context or approved knowledge contains the answer.');
   sections.push('--------------------------------------------------------------------------------');
 
   if (currentEntity) {
@@ -687,21 +690,42 @@ export function buildContextualIntelligencePromptSection({
 }
 
 
-export function formatVisitorContextForHandoff({ currentEntity = null, previousEntities = [] }) {
-  if (!currentEntity && (!previousEntities || previousEntities.length === 0)) {
+export function formatVisitorContextForHandoff(browsingState = {}, handoffContext = {}) {
+  const currentEntity = browsingState?.currentEntity || null;
+  const previousEntities = browsingState?.previousEntities || [];
+  const currentPage = browsingState?.currentPage || null;
+
+  if (!currentEntity && (!previousEntities || previousEntities.length === 0) && !currentPage && !handoffContext.supportTopic && !handoffContext.topicSummary) {
     return null;
   }
 
   const parts = [];
   if (currentEntity) {
     parts.push(`Visitor was viewing ${currentEntity.entity_name} (${currentEntity.entity_type})${currentEntity.canonical_url ? ` at ${currentEntity.canonical_url}` : ''}`);
+  } else if (currentPage?.title || currentPage?.url) {
+    parts.push(`Visitor was on page: ${currentPage.title || currentPage.url}${currentPage.url ? ` (${currentPage.url})` : ''}`);
   }
   if (previousEntities && previousEntities.length > 0) {
     const prevNames = previousEntities.map((e) => e.entity_name).join(', ');
     parts.push(`Previously viewed: ${prevNames}`);
   }
+  if (handoffContext.supportTopic || handoffContext.topicSummary) {
+    parts.push(`Support Topic: ${handoffContext.supportTopic || handoffContext.topicSummary}`);
+  }
+  if (handoffContext.lastIntent) {
+    parts.push(`Detected Intent: ${handoffContext.lastIntent}`);
+  }
+  if (Array.isArray(handoffContext.resolutionAttempts) && handoffContext.resolutionAttempts.length > 0) {
+    parts.push(`AI Resolution Attempts: ${handoffContext.resolutionAttempts.join('; ')}`);
+  }
 
   return {
+    current_page: currentPage ? {
+      url: currentPage.url,
+      path: currentPage.path,
+      title: currentPage.title,
+      page_type: currentPage.page_type,
+    } : null,
     current_entity: currentEntity ? {
       name: currentEntity.entity_name,
       type: currentEntity.entity_type,
@@ -713,7 +737,10 @@ export function formatVisitorContextForHandoff({ currentEntity = null, previousE
       type: e.entity_type,
       url: e.canonical_url,
     })),
-    summary_text: parts.join('. '),
+    support_context: handoffContext.supportTopic || handoffContext.topicSummary || null,
+    last_intent: handoffContext.lastIntent || null,
+    ai_resolution_attempts: handoffContext.resolutionAttempts || [],
+    summary_text: parts.join('. ') || 'No browsing context recorded.',
   };
 }
 

@@ -112,6 +112,13 @@ import {
 } from './services/visitor-intent-service.js';
 import { extractUrlsFromText, processMessageUrlIntelligence } from './services/url-intelligence-service.js';
 import { formatUrlIntelligenceFailureExplanation } from './services/url-intelligence-service.js';
+import {
+  classifyConversationIntent,
+  evaluateSupportResolutionPlan,
+  buildConversationIntelligencePromptSection,
+  INTENT_TYPES,
+  RESOLUTION_ACTIONS,
+} from './services/conversation-intelligence-service.js';
 
 
 dotenv.config();
@@ -3145,6 +3152,81 @@ app.post("/api/chat", async (req, res) => {
       }
     }
 
+    // Shared Conversation Intelligence & Support Resolution Evaluation
+    const conversationIntent = classifyConversationIntent({
+      message: normalizedMessage,
+      browsingState: webChatBrowsingState,
+      conversationHistory: cleanMemory,
+    });
+
+    const resolutionPlan = evaluateSupportResolutionPlan({
+      intentClassification: conversationIntent,
+      browsingState: webChatBrowsingState,
+      hasRuntimeKnowledge: Boolean(webChatRuntimeKnowledge?.knowledge?.length),
+      hasPersona: Boolean(webChatRuntimePersona?.available),
+    });
+
+    const conversationIntelligenceSection = buildConversationIntelligencePromptSection(resolutionPlan);
+
+    // Canonical Human Escalation Path (When customer explicitly requests human support)
+    if (conversationIntent.isHumanRequest && webChatIntegration && webChatSession?.sessionId && webChatInboundState?.conversation?.id) {
+      const detectedLang = ['tr', 'en', 'ar'].includes(webChatBrowsingState?.currentPage?.language)
+        ? webChatBrowsingState.currentPage.language
+        : (webChatRuntimePersona?.configuration?.language || 'en');
+      let handoffPolicy;
+      try {
+        handoffPolicy = await resolvePlatformHumanSupportPolicy({ database: pool, locale: detectedLang });
+      } catch {
+        handoffPolicy = {
+          defaultTopic: 'Customer Support Request',
+          acknowledgement: () => detectedLang === 'tr'
+            ? 'Talebinizi aldık. Sizi bir müşteri temsilcisine aktarıyorum, lütfen hatta kalın.'
+            : 'We have received your request. I am connecting you with a representative, please hold on.',
+        };
+      }
+      const handoffAck = handoffPolicy.acknowledgement(conversationIntent.signals.join(', ') || handoffPolicy.defaultTopic);
+
+      const handoffVisitorContext = formatVisitorContextForHandoff(webChatBrowsingState, {
+        supportTopic: handoffPolicy.defaultTopic,
+        lastIntent: conversationIntent.primaryIntent,
+        resolutionAttempts: ['EXPLICIT_HUMAN_REQUEST'],
+      });
+
+      const handoffOutcome = await requestCustomerHumanSupport({
+        tenantId: webChatIntegration.tenant_id,
+        conversationId: webChatInboundState.conversation.id,
+        acknowledgement: handoffAck,
+        topicSummary: handoffPolicy.defaultTopic,
+        database: pool,
+      });
+
+      try {
+        await pool.query(
+          `UPDATE conversations SET visitor_context = $1::jsonb WHERE id = $2 AND tenant_id = $3`,
+          [JSON.stringify(handoffVisitorContext), webChatInboundState.conversation.id, webChatIntegration.tenant_id]
+        );
+      } catch (vcErr) {
+        console.warn('HANDOFF_VISITOR_CONTEXT_UPDATE_WARN:', vcErr.message);
+      }
+
+      addWebMemory(userId, "assistant", handoffAck, webChatKnowledgeAuthority, {
+        message_type: 'ASSISTANT',
+      });
+
+      return res.status(200).json({
+        reply: handoffAck,
+        response: handoffAck,
+        text: handoffAck,
+        session: webChatSession?.sessionId || null,
+        handoff: {
+          requested: true,
+          mode: 'HUMAN',
+          attentionState: 'REQUESTED',
+          operatorId: handoffOutcome?.assignedOperatorId || null,
+        },
+      });
+    }
+
     if (webChatUrlResult && !webChatUrlResult.success) {
       const webChatLang = inferWhatsAppDeterministicInboundLanguage(normalizedMessage) || 'en';
       const limitationReply = formatUrlIntelligenceFailureExplanation(webChatUrlResult, webChatLang, { conversational: true });
@@ -3539,14 +3621,23 @@ If the user already provided sector info, NEVER ask again.`
         knowledgeContext: webChatRuntimeKnowledge?.knowledgeContext ?? '',
         channelRules: 'Return safe HTML suitable for Web Chat. Do not reveal internal metadata.',
         contextualIntelligence: webChatContextualSection,
+        conversationIntelligence: conversationIntelligenceSection,
       });
     } else if (webChatRuntimeKnowledge) {
       messages[0].content = appendRuntimeKnowledgeToSystemInstruction(messages[0].content, webChatRuntimeKnowledge);
       if (webChatContextualSection) {
         messages[0].content = messages[0].content + '\n\n' + webChatContextualSection;
       }
-    } else if (webChatContextualSection) {
-      messages[0].content = messages[0].content + '\n\n' + webChatContextualSection;
+      if (conversationIntelligenceSection) {
+        messages[0].content = messages[0].content + '\n\n' + conversationIntelligenceSection;
+      }
+    } else {
+      if (webChatContextualSection) {
+        messages[0].content = messages[0].content + '\n\n' + webChatContextualSection;
+      }
+      if (conversationIntelligenceSection) {
+        messages[0].content = messages[0].content + '\n\n' + conversationIntelligenceSection;
+      }
     }
 
     const completion = await openaiClient.chat.completions.create({
@@ -3587,6 +3678,8 @@ If the user already provided sector info, NEVER ask again.`
       response: aiReply,
       text: aiReply,
       session: webChatSession?.sessionId || null,
+      intent: conversationIntent?.primaryIntent || null,
+      action: resolutionPlan?.action || null,
     });
   } catch (err) {
     console.error("OpenAI Web Chatbot error:", err);

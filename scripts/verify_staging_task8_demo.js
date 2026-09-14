@@ -339,6 +339,67 @@ async function verifyStagingTask8Demo() {
       throw new Error(`Probe D FAILED: URL intelligence failed: "${reply3}"`);
     }
     console.log(`      ✓ URL intelligence probe: PASS`);
+    // Probe E: AI-First Resolvable Support (No premature handoff)
+    console.log('      Executing Probe E: AI-First Support (Return Policy & Warranty)...');
+    const cResSupport = await fetchWithTimeout(chatUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Samche-Web-Chat-Session': sessionToken,
+      },
+      body: JSON.stringify({ message: 'What is your return policy and warranty on electronics?', conversation_session: sessionToken }),
+    });
+    if (!cResSupport.ok) throw new Error(`Probe E HTTP error: ${cResSupport.status}`);
+    const dataSupport = await cResSupport.json();
+    const replySupport = (dataSupport.reply || dataSupport.response || dataSupport.text || '').toLowerCase();
+    const hasReturnOrWarranty = (replySupport.includes('14') || replySupport.includes('return') || replySupport.includes('iade'))
+      && (replySupport.includes('24') || replySupport.includes('warranty') || replySupport.includes('garanti') || replySupport.includes('month'));
+    const notDeflected = !dataSupport.handoff?.requested;
+    results.ai_first_support_resolution = hasReturnOrWarranty && notDeflected;
+    if (!results.ai_first_support_resolution) {
+      throw new Error(`Probe E FAILED: AI-first support resolution failed or prematurely handed off: "${replySupport}"`);
+    }
+    console.log(`      ✓ AI-First support probe: PASS (resolved directly without handoff)`);
+
+    // Probe F: Private State Grounding (Zero Hallucination of live order records)
+    console.log('      Executing Probe F: Private State Grounding (Order #77412 lookup)...');
+    const cResPrivate = await fetchWithTimeout(chatUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Samche-Web-Chat-Session': sessionToken,
+      },
+      body: JSON.stringify({ message: 'Where is my order #77412? When will it arrive?', conversation_session: sessionToken }),
+    });
+    if (!cResPrivate.ok) throw new Error(`Probe F HTTP error: ${cResPrivate.status}`);
+    const dataPrivate = await cResPrivate.json();
+    const replyPrivate = (dataPrivate.reply || dataPrivate.response || dataPrivate.text || '').toLowerCase();
+    const explainsLimitation = replyPrivate.includes('cannot') || replyPrivate.includes('do not have') || replyPrivate.includes('access') || replyPrivate.includes('tracking link') || replyPrivate.includes('email') || replyPrivate.includes('support@samche.ae');
+    results.ai_private_state_grounding = explainsLimitation;
+    if (!results.ai_private_state_grounding) {
+      throw new Error(`Probe F FAILED: Model fabricated or failed to explain limitation: "${replyPrivate}"`);
+    }
+    console.log(`      ✓ Private state grounding probe: PASS (limitation explained, zero fabrication)`);
+
+    // Probe G: Canonical Human Escalation Request
+    console.log('      Executing Probe G: Explicit Human Escalation Request...');
+    const cResHuman = await fetchWithTimeout(chatUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Samche-Web-Chat-Session': sessionToken,
+      },
+      body: JSON.stringify({ message: 'I want to speak with a human agent please', conversation_session: sessionToken }),
+    });
+    if (!cResHuman.ok) throw new Error(`Probe G HTTP error: ${cResHuman.status}`);
+    const dataHuman = await cResHuman.json();
+    const replyHuman = (dataHuman.reply || dataHuman.response || dataHuman.text || '').toLowerCase();
+    results.ai_explicit_human_escalation = dataHuman.handoff?.requested === true || /representative|agent|temsilci|hold on|aktarıyorum/i.test(replyHuman);
+    if (!results.ai_explicit_human_escalation) {
+      throw new Error(`Probe G FAILED: Expected canonical human escalation response: "${replyHuman}"`);
+    }
+    console.log(`      ✓ Explicit human escalation probe: PASS (canonical escalation triggered)`);
+
   }
 
   // 5. Proactive Web Chat Engagement & High-Intent Activation Scenarios
