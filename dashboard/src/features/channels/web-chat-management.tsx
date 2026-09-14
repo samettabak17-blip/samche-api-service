@@ -123,6 +123,61 @@ function LauncherStyleIcon({ id, logoUrl }: { id: string; logoUrl?: string | nul
   );
 }
 
+function ColorFieldWithTransparent({
+  label,
+  value,
+  onChange,
+  fallbackColor = '#0F172A',
+  placeholder = '#0F172A',
+  testId,
+}: {
+  label: string;
+  value: string;
+  onChange: (val: string) => void;
+  fallbackColor?: string;
+  placeholder?: string;
+  testId?: string;
+}) {
+  const isTrans = (value || '').trim().toLowerCase() === 'transparent';
+  return (
+    <div data-testid={testId} className="space-y-1">
+      <div className="flex items-center justify-between">
+        <label className="block text-xs font-medium text-stone-300">{label}</label>
+        <button
+          type="button"
+          onClick={() => {
+            onChange(isTrans ? fallbackColor : 'transparent');
+          }}
+          className={`px-2 py-0.5 text-[11px] rounded border transition-colors cursor-pointer ${
+            isTrans
+              ? 'bg-sky-500/30 border-sky-400 text-sky-200 font-semibold'
+              : 'bg-canvas/50 border-line text-stone-400 hover:text-white'
+          }`}
+          title={isTrans ? 'Click to set custom color' : 'Click to make transparent'}
+        >
+          {isTrans ? '✓ Transparent' : 'Transparent'}
+        </button>
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          type="color"
+          disabled={isTrans}
+          value={!isTrans && value && value.startsWith('#') && value.length === 7 ? value : fallbackColor.startsWith('#') ? fallbackColor : '#0F172A'}
+          onChange={(e) => onChange(e.target.value)}
+          className={`h-8 w-8 rounded border border-line bg-transparent p-0 ${isTrans ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
+        />
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="w-full rounded-lg border border-line bg-canvas/40 px-2.5 py-1 text-xs uppercase text-white font-mono"
+        />
+      </div>
+    </div>
+  );
+}
+
 export function WebChatManagement() {
   const { tenantId } = useParams();
   const { canManage } = useTenant();
@@ -160,6 +215,8 @@ export function WebChatManagement() {
   const [launcherText, setLauncherText] = useState<string>('#FFFFFF');
   const [launcherBorder, setLauncherBorder] = useState<string>('');
   const [launcherGlow, setLauncherGlow] = useState<string>('');
+  const [launcherLogoBg, setLauncherLogoBg] = useState<string>('transparent');
+  const [launcherLogoBorder, setLauncherLogoBorder] = useState<string>('transparent');
   const [previewState, setPreviewState] = useState<'both' | 'closed' | 'open'>('both');
 
   const [previewOpen, setPreviewOpen] = useState(true);
@@ -219,10 +276,12 @@ export function WebChatManagement() {
         setPulseAnimation(d.appearance.pulse_animation || 'normal');
         setAnimationSpeed(d.appearance.animation_speed || 'normal');
         setLauncherThemeMode(d.appearance.launcher_theme_mode || 'follow_theme');
-        setLauncherBg(d.appearance.launcher_bg || d.appearance.theme?.launcher_bg || '#0F172A');
-        setLauncherText(d.appearance.launcher_text || d.appearance.theme?.launcher_text || '#FFFFFF');
-        setLauncherBorder(d.appearance.launcher_border || d.appearance.theme?.launcher_border || '');
-        setLauncherGlow(d.appearance.launcher_glow || d.appearance.theme?.launcher_glow || '');
+        setLauncherBg(d.appearance.launcher_background || d.appearance.launcher_bg || d.appearance.theme?.launcher_background || d.appearance.theme?.launcher_bg || '#0F172A');
+        setLauncherText(d.appearance.launcher_foreground || d.appearance.launcher_text || d.appearance.theme?.launcher_foreground || d.appearance.theme?.launcher_text || '#FFFFFF');
+        setLauncherBorder(d.appearance.launcher_border_color || d.appearance.launcher_border || d.appearance.theme?.launcher_border_color || d.appearance.theme?.launcher_border || '');
+        setLauncherGlow(d.appearance.launcher_glow_color || d.appearance.launcher_glow || d.appearance.theme?.launcher_glow_color || d.appearance.theme?.launcher_glow || '');
+        setLauncherLogoBg(d.appearance.launcher_logo_background || d.appearance.launcher_logo_bg || d.appearance.theme?.launcher_logo_background || d.appearance.theme?.launcher_logo_bg || 'transparent');
+        setLauncherLogoBorder(d.appearance.launcher_logo_border_color || d.appearance.launcher_logo_border || d.appearance.theme?.launcher_logo_border_color || d.appearance.theme?.launcher_logo_border || 'transparent');
         if (d.appearance.theme) {
           setPrimaryColor(d.appearance.theme.primary_color || '#0B5FFF');
           setAccentColor(d.appearance.theme.accent_color || '#10B981');
@@ -254,13 +313,23 @@ export function WebChatManagement() {
         glow_intensity: glowIntensity,
         glow_spread: glowSpread,
         pulse_animation: pulseAnimation,
+        pulse_mode: pulseAnimation,
         animation_speed: animationSpeed,
+        pulse_speed: animationSpeed,
         launcher_style: launcherStyle,
         launcher_theme_mode: launcherThemeMode,
+        launcher_background: launcherThemeMode === 'custom' ? launcherBg : null,
         launcher_bg: launcherThemeMode === 'custom' ? launcherBg : null,
+        launcher_foreground: launcherThemeMode === 'custom' ? launcherText : null,
         launcher_text: launcherThemeMode === 'custom' ? launcherText : null,
+        launcher_border_color: launcherThemeMode === 'custom' ? (launcherBorder || null) : null,
         launcher_border: launcherThemeMode === 'custom' ? (launcherBorder || null) : null,
+        launcher_glow_color: launcherThemeMode === 'custom' ? (launcherGlow || null) : null,
         launcher_glow: launcherThemeMode === 'custom' ? (launcherGlow || null) : null,
+        launcher_logo_background: launcherThemeMode === 'custom' ? launcherLogoBg : null,
+        launcher_logo_bg: launcherThemeMode === 'custom' ? launcherLogoBg : null,
+        launcher_logo_border_color: launcherThemeMode === 'custom' ? (launcherLogoBorder || null) : null,
+        launcher_logo_border: launcherThemeMode === 'custom' ? (launcherLogoBorder || null) : null,
       }),
     onSuccess: (res) => {
       setContrastResult(res);
@@ -347,10 +416,12 @@ export function WebChatManagement() {
     themeMode !== (savedAppearance.theme_mode || 'dark') ||
     launcherStyle !== (savedAppearance.launcher_style || 'pill') ||
     launcherThemeMode !== (savedAppearance.launcher_theme_mode || 'follow_theme') ||
-    launcherBg !== (savedAppearance.launcher_bg || savedTheme.launcher_bg || '#0F172A') ||
-    launcherText !== (savedAppearance.launcher_text || savedTheme.launcher_text || '#FFFFFF') ||
-    launcherBorder !== (savedAppearance.launcher_border || savedTheme.launcher_border || '') ||
-    launcherGlow !== (savedAppearance.launcher_glow || savedTheme.launcher_glow || '') ||
+    launcherBg !== (savedAppearance.launcher_background || savedAppearance.launcher_bg || savedTheme.launcher_background || savedTheme.launcher_bg || '#0F172A') ||
+    launcherText !== (savedAppearance.launcher_foreground || savedAppearance.launcher_text || savedTheme.launcher_foreground || savedTheme.launcher_text || '#FFFFFF') ||
+    launcherBorder !== (savedAppearance.launcher_border_color || savedAppearance.launcher_border || savedTheme.launcher_border_color || savedTheme.launcher_border || '') ||
+    launcherGlow !== (savedAppearance.launcher_glow_color || savedAppearance.launcher_glow || savedTheme.launcher_glow_color || savedTheme.launcher_glow || '') ||
+    launcherLogoBg !== (savedAppearance.launcher_logo_background || savedAppearance.launcher_logo_bg || savedTheme.launcher_logo_background || savedTheme.launcher_logo_bg || 'transparent') ||
+    launcherLogoBorder !== (savedAppearance.launcher_logo_border_color || savedAppearance.launcher_logo_border || savedTheme.launcher_logo_border_color || savedTheme.launcher_logo_border || 'transparent') ||
     Number(glowIntensity) !== Number(savedAppearance.glow_intensity ?? 80) ||
     Number(glowSpread) !== Number(savedAppearance.glow_spread ?? 70) ||
     pulseAnimation !== (savedAppearance.pulse_animation || 'normal') ||
@@ -379,12 +450,22 @@ export function WebChatManagement() {
         glow_intensity: glowIntensity,
         glow_spread: glowSpread,
         pulse_animation: pulseAnimation,
+        pulse_mode: pulseAnimation,
         animation_speed: animationSpeed,
+        pulse_speed: animationSpeed,
         launcher_theme_mode: launcherThemeMode,
+        launcher_background: launcherThemeMode === 'custom' ? launcherBg : null,
         launcher_bg: launcherThemeMode === 'custom' ? launcherBg : null,
+        launcher_foreground: launcherThemeMode === 'custom' ? launcherText : null,
         launcher_text: launcherThemeMode === 'custom' ? launcherText : null,
+        launcher_border_color: launcherThemeMode === 'custom' ? (launcherBorder || null) : null,
         launcher_border: launcherThemeMode === 'custom' ? (launcherBorder || null) : null,
+        launcher_glow_color: launcherThemeMode === 'custom' ? (launcherGlow || null) : null,
         launcher_glow: launcherThemeMode === 'custom' ? (launcherGlow || null) : null,
+        launcher_logo_background: launcherThemeMode === 'custom' ? launcherLogoBg : null,
+        launcher_logo_bg: launcherThemeMode === 'custom' ? launcherLogoBg : null,
+        launcher_logo_border_color: launcherThemeMode === 'custom' ? (launcherLogoBorder || null) : null,
+        launcher_logo_border: launcherThemeMode === 'custom' ? (launcherLogoBorder || null) : null,
         theme: {
           primary_color: primaryColor,
           accent_color: accentColor,
@@ -873,106 +954,111 @@ export function WebChatManagement() {
               </label>
 
               {launcherThemeMode === 'custom' && (
-                <div data-testid="launcher-custom-controls" className="grid grid-cols-2 gap-3.5 rounded-xl border border-line/60 bg-canvas/30 p-3.5">
+                <div data-testid="launcher-custom-controls" className="space-y-4 rounded-xl border border-line/60 bg-canvas/30 p-4">
                   <div>
-                    <label className="block text-xs font-medium text-stone-300 mb-1">Launcher Background</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={launcherBg.startsWith('#') && launcherBg.length === 7 ? launcherBg : '#0F172A'}
-                        onChange={(e) => {
-                          setLauncherBg(e.target.value);
-                          previewMutation.mutate();
-                        }}
-                        className="h-8 w-8 cursor-pointer rounded border border-line bg-transparent p-0"
-                      />
-                      <input
-                        type="text"
+                    <h4 className="text-xs font-semibold text-white uppercase tracking-wider mb-2.5">Launcher Colors</h4>
+                    <div className="grid grid-cols-2 gap-3.5">
+                      <ColorFieldWithTransparent
+                        testId="launcher-bg-control"
+                        label="Launcher Background"
                         value={launcherBg}
-                        onChange={(e) => {
-                          setLauncherBg(e.target.value);
+                        onChange={(val) => {
+                          setLauncherBg(val);
                           previewMutation.mutate();
                         }}
+                        fallbackColor={themeMode === 'light' ? '#FFFFFF' : '#0F172A'}
                         placeholder="#0F172A"
-                        className="w-full rounded-lg border border-line bg-canvas/40 px-2.5 py-1 text-xs uppercase text-white font-mono"
                       />
-                    </div>
-                  </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-stone-300 mb-1">Launcher Text Color</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={launcherText.startsWith('#') && launcherText.length === 7 ? launcherText : '#FFFFFF'}
-                        onChange={(e) => {
-                          setLauncherText(e.target.value);
-                          previewMutation.mutate();
-                        }}
-                        className="h-8 w-8 cursor-pointer rounded border border-line bg-transparent p-0"
-                      />
-                      <input
-                        type="text"
-                        value={launcherText}
-                        onChange={(e) => {
-                          setLauncherText(e.target.value);
-                          previewMutation.mutate();
-                        }}
-                        placeholder="#FFFFFF"
-                        className="w-full rounded-lg border border-line bg-canvas/40 px-2.5 py-1 text-xs uppercase text-white font-mono"
-                      />
-                    </div>
-                  </div>
+                      <div data-testid="launcher-text-control" className="space-y-1">
+                        <label className="block text-xs font-medium text-stone-300">Launcher Text Color</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="color"
+                            value={launcherText.startsWith('#') && launcherText.length === 7 ? launcherText : '#FFFFFF'}
+                            onChange={(e) => {
+                              setLauncherText(e.target.value);
+                              previewMutation.mutate();
+                            }}
+                            className="h-8 w-8 cursor-pointer rounded border border-line bg-transparent p-0"
+                          />
+                          <input
+                            type="text"
+                            value={launcherText}
+                            onChange={(e) => {
+                              setLauncherText(e.target.value);
+                              previewMutation.mutate();
+                            }}
+                            placeholder="#FFFFFF"
+                            className="w-full rounded-lg border border-line bg-canvas/40 px-2.5 py-1 text-xs uppercase text-white font-mono"
+                          />
+                        </div>
+                      </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-stone-300 mb-1">Launcher Border Color</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={launcherBorder.startsWith('#') && launcherBorder.length === 7 ? launcherBorder : primaryColor}
-                        onChange={(e) => {
-                          setLauncherBorder(e.target.value);
-                          previewMutation.mutate();
-                        }}
-                        className="h-8 w-8 cursor-pointer rounded border border-line bg-transparent p-0"
-                      />
-                      <input
-                        type="text"
+                      <ColorFieldWithTransparent
+                        testId="launcher-border-control"
+                        label="Launcher Border Color"
                         value={launcherBorder}
-                        onChange={(e) => {
-                          setLauncherBorder(e.target.value);
+                        onChange={(val) => {
+                          setLauncherBorder(val);
                           previewMutation.mutate();
                         }}
-                        placeholder="Optional border hex"
-                        className="w-full rounded-lg border border-line bg-canvas/40 px-2.5 py-1 text-xs uppercase text-white font-mono"
+                        fallbackColor={primaryColor}
+                        placeholder="Border hex / transparent"
+                      />
+
+                      <ColorFieldWithTransparent
+                        testId="launcher-glow-control"
+                        label="Launcher Glow Color"
+                        value={launcherGlow}
+                        onChange={(val) => {
+                          setLauncherGlow(val);
+                          previewMutation.mutate();
+                        }}
+                        fallbackColor={primaryColor}
+                        placeholder="Glow hex / transparent"
                       />
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-stone-300 mb-1">Launcher Glow Color</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={launcherGlow.startsWith('#') && launcherGlow.length === 7 ? launcherGlow : primaryColor}
-                        onChange={(e) => {
-                          setLauncherGlow(e.target.value);
+                  <div className="pt-3 border-t border-line/40">
+                    <h4 className="text-xs font-semibold text-white uppercase tracking-wider mb-1.5">Logo / Avatar Container</h4>
+                    <p className="text-[11px] text-stone-400 mb-2.5">
+                      Controls the backing container and border around uploaded logo images or chat icons. Transparent prevents forced dark backing on transparent PNG/SVG assets.
+                    </p>
+                    <div className="grid grid-cols-2 gap-3.5">
+                      <ColorFieldWithTransparent
+                        testId="launcher-logo-bg-control"
+                        label="Logo Background"
+                        value={launcherLogoBg}
+                        onChange={(val) => {
+                          setLauncherLogoBg(val);
                           previewMutation.mutate();
                         }}
-                        className="h-8 w-8 cursor-pointer rounded border border-line bg-transparent p-0"
+                        fallbackColor="#0F172A"
+                        placeholder="transparent"
                       />
-                      <input
-                        type="text"
-                        value={launcherGlow}
-                        onChange={(e) => {
-                          setLauncherGlow(e.target.value);
+
+                      <ColorFieldWithTransparent
+                        testId="launcher-logo-border-control"
+                        label="Logo Border"
+                        value={launcherLogoBorder}
+                        onChange={(val) => {
+                          setLauncherLogoBorder(val);
                           previewMutation.mutate();
                         }}
-                        placeholder="Optional glow hex"
-                        className="w-full rounded-lg border border-line bg-canvas/40 px-2.5 py-1 text-xs uppercase text-white font-mono"
+                        fallbackColor={primaryColor}
+                        placeholder="transparent"
                       />
                     </div>
                   </div>
+
+                  {launcherBg.trim().toLowerCase() === 'transparent' && (
+                    <div data-testid="launcher-transparency-warning" className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-200">
+                      <span className="font-semibold shrink-0">Host Contrast Notice:</span>
+                      <span>Launcher background is transparent; contrast depends on the host website background. Ensure your host site provides adequate contrast behind the launcher button.</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1385,14 +1471,24 @@ export function WebChatManagement() {
               themeMode={themeMode}
               launcherStyle={launcherStyle}
               launcherThemeMode={launcherThemeMode}
+              launcherBackground={launcherBg}
               launcherBg={launcherBg}
+              launcherForeground={launcherText}
               launcherText={launcherText}
+              launcherBorderColor={launcherBorder}
               launcherBorder={launcherBorder}
+              launcherGlowColor={launcherGlow}
               launcherGlow={launcherGlow}
+              launcherLogoBackground={launcherLogoBg}
+              launcherLogoBg={launcherLogoBg}
+              launcherLogoBorderColor={launcherLogoBorder}
+              launcherLogoBorder={launcherLogoBorder}
               glowIntensity={glowIntensity}
               glowSpread={glowSpread}
               pulseAnimation={pulseAnimation}
+              pulseMode={pulseAnimation}
               animationSpeed={animationSpeed}
+              pulseSpeed={animationSpeed}
               primaryColor={primaryColor}
               accentColor={accentColor}
               language={language}
@@ -1401,13 +1497,21 @@ export function WebChatManagement() {
             {/* WCAG Guard Status Footer */}
             <div className="rounded-xl border border-line/80 bg-canvas/40 p-3.5 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="h-6 w-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                  <Check size={14} />
+                <div className={`h-6 w-6 rounded-full flex items-center justify-center ${
+                  launcherBg.trim().toLowerCase() === 'transparent'
+                    ? 'bg-amber-500/20 text-amber-400'
+                    : 'bg-emerald-500/20 text-emerald-400'
+                }`}>
+                  {launcherBg.trim().toLowerCase() === 'transparent' ? <Sliders size={14} /> : <Check size={14} />}
                 </div>
                 <div>
-                  <span className="text-xs font-semibold text-white block">WCAG AA Compliant</span>
+                  <span className="text-xs font-semibold text-white block">
+                    {launcherBg.trim().toLowerCase() === 'transparent' ? 'Launcher Contrast Unverified (Transparent)' : 'WCAG AA Compliant'}
+                  </span>
                   <span className="text-[11px] text-stone-400">
-                    Contrast ratio {contrastResult?.contrast?.primary_button ?? '9.81'}:1 &middot; Accessible &middot; Production Ready
+                    {launcherBg.trim().toLowerCase() === 'transparent'
+                      ? 'Transparent launcher relies on host page contrast • Panel elements verified'
+                      : `Contrast ratio ${contrastResult?.contrast?.primary_button ?? '9.81'}:1 • Accessible • Production Ready`}
                   </span>
                 </div>
               </div>
@@ -1624,10 +1728,25 @@ export function WebChatManagement() {
             launcherIcon={launcherIcon}
             themeMode={themeMode}
             launcherStyle={launcherStyle}
+            launcherThemeMode={launcherThemeMode}
+            launcherBackground={launcherBg}
+            launcherBg={launcherBg}
+            launcherForeground={launcherText}
+            launcherText={launcherText}
+            launcherBorderColor={launcherBorder}
+            launcherBorder={launcherBorder}
+            launcherGlowColor={launcherGlow}
+            launcherGlow={launcherGlow}
+            launcherLogoBackground={launcherLogoBg}
+            launcherLogoBg={launcherLogoBg}
+            launcherLogoBorderColor={launcherLogoBorder}
+            launcherLogoBorder={launcherLogoBorder}
             glowIntensity={glowIntensity}
             glowSpread={glowSpread}
             pulseAnimation={pulseAnimation}
+            pulseMode={pulseAnimation}
             animationSpeed={animationSpeed}
+            pulseSpeed={animationSpeed}
             primaryColor={primaryColor}
             accentColor={accentColor}
             language={language}

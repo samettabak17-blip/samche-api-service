@@ -30,10 +30,18 @@ export const DEFAULT_WEB_CHAT_APPEARANCE = Object.freeze({
     glow_spread_px: 28,
     glow_halo_px: 45,
     pulse_duration: '3.6s',
-    launcher_text: '#FFFFFF',
+    launcher_background: '#0F172A',
     launcher_bg: '#0F172A',
+    launcher_foreground: '#FFFFFF',
+    launcher_text: '#FFFFFF',
+    launcher_border_color: 'rgba(37, 99, 235, 0.65)',
     launcher_border: 'rgba(37, 99, 235, 0.65)',
+    launcher_glow_color: 'rgba(37, 99, 235, 0.35)',
     launcher_glow: 'rgba(37, 99, 235, 0.35)',
+    launcher_logo_background: 'transparent',
+    launcher_logo_bg: 'transparent',
+    launcher_logo_border_color: 'transparent',
+    launcher_logo_border: 'transparent',
     text_color: '#F8FAFC',
     muted_color: '#94A3B8',
     border_color: 'rgba(255, 255, 255, 0.12)',
@@ -41,10 +49,18 @@ export const DEFAULT_WEB_CHAT_APPEARANCE = Object.freeze({
     accent_foreground: '#FFFFFF',
   },
   launcher_theme_mode: 'follow_theme',
+  launcher_background: null,
   launcher_bg: null,
+  launcher_foreground: null,
   launcher_text: null,
+  launcher_border_color: null,
   launcher_border: null,
+  launcher_glow_color: null,
   launcher_glow: null,
+  launcher_logo_background: null,
+  launcher_logo_bg: null,
+  launcher_logo_border_color: null,
+  launcher_logo_border: null,
 });
 
 export const DEFAULT_WEB_CHAT_BEHAVIOR = Object.freeze({
@@ -110,14 +126,14 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
     ? Math.max(0, Math.min(100, Math.round(rawSpread)))
     : 70;
 
-  const rawPulse = String(input?.pulse_animation || 'normal').toLowerCase().trim();
+  const rawPulse = String(input?.pulse_mode || input?.pulse_animation || 'normal').toLowerCase().trim();
   const pulseAnimation = rawPulse === 'smooth_pulse' || rawPulse === 'smooth'
     ? 'normal'
     : ['none', 'subtle', 'normal', 'strong'].includes(rawPulse)
     ? rawPulse
     : 'normal';
 
-  const rawSpeed = String(input?.animation_speed || 'normal').toLowerCase().trim();
+  const rawSpeed = String(input?.pulse_speed || input?.animation_speed || 'normal').toLowerCase().trim();
   const animationSpeed = ['slow', 'normal', 'fast'].includes(rawSpeed)
     ? rawSpeed
     : 'normal';
@@ -134,18 +150,21 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
   const launcherThemeMode = ['auto_brand', 'follow_theme', 'custom'].includes(String(input?.launcher_theme_mode || '').toLowerCase())
     ? String(input.launcher_theme_mode).toLowerCase()
     : 'follow_theme';
-  const launcherBg = typeof input?.launcher_bg === 'string' && input.launcher_bg.trim()
-    ? input.launcher_bg.trim()
-    : (typeof input?.theme?.launcher_bg === 'string' && input.theme.launcher_bg.trim() ? input.theme.launcher_bg.trim() : null);
-  const launcherText = typeof input?.launcher_text === 'string' && input.launcher_text.trim()
-    ? input.launcher_text.trim()
-    : (typeof input?.theme?.launcher_text === 'string' && input.theme.launcher_text.trim() ? input.theme.launcher_text.trim() : null);
-  const launcherBorder = typeof input?.launcher_border === 'string' && input.launcher_border.trim()
-    ? input.launcher_border.trim()
-    : (typeof input?.theme?.launcher_border === 'string' && input.theme.launcher_border.trim() ? input.theme.launcher_border.trim() : null);
-  const launcherGlow = typeof input?.launcher_glow === 'string' && input.launcher_glow.trim()
-    ? input.launcher_glow.trim()
-    : (typeof input?.theme?.launcher_glow === 'string' && input.theme.launcher_glow.trim() ? input.theme.launcher_glow.trim() : null);
+
+  const readToken = (canonKey, aliasKey) => {
+    if (typeof input?.[canonKey] === 'string' && input[canonKey].trim()) return input[canonKey].trim();
+    if (typeof input?.[aliasKey] === 'string' && input[aliasKey].trim()) return input[aliasKey].trim();
+    if (typeof input?.theme?.[canonKey] === 'string' && input.theme[canonKey].trim()) return input.theme[canonKey].trim();
+    if (typeof input?.theme?.[aliasKey] === 'string' && input.theme[aliasKey].trim()) return input.theme[aliasKey].trim();
+    return null;
+  };
+
+  const launcherBg = readToken('launcher_background', 'launcher_bg');
+  const launcherText = readToken('launcher_foreground', 'launcher_text');
+  const launcherBorder = readToken('launcher_border_color', 'launcher_border');
+  const launcherGlow = readToken('launcher_glow_color', 'launcher_glow');
+  const launcherLogoBg = readToken('launcher_logo_background', 'launcher_logo_bg');
+  const launcherLogoBorder = readToken('launcher_logo_border_color', 'launcher_logo_border');
 
   const tokens = deriveWebChatThemeTokens({
     primaryColor: primaryCandidate,
@@ -154,13 +173,23 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
     glowIntensity,
     glowSpread,
     pulseAnimation,
+    pulseMode: pulseAnimation,
     animationSpeed,
+    pulseSpeed: animationSpeed,
     launcherStyle,
     launcherThemeMode,
+    launcherBackground: launcherBg,
     launcherBg,
+    launcherForeground: launcherText,
     launcherText,
+    launcherBorderColor: launcherBorder,
     launcherBorder,
+    launcherGlowColor: launcherGlow,
     launcherGlow,
+    launcherLogoBackground: launcherLogoBg,
+    launcherLogoBg,
+    launcherLogoBorderColor: launcherLogoBorder,
+    launcherLogoBorder,
   });
 
   return {
@@ -178,12 +207,22 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
     glow_intensity: glowIntensity,
     glow_spread: glowSpread,
     pulse_animation: pulseAnimation,
+    pulse_mode: pulseAnimation,
     animation_speed: animationSpeed,
+    pulse_speed: animationSpeed,
     launcher_theme_mode: tokens.launcher_theme_mode,
+    launcher_background: tokens.launcher_background,
     launcher_bg: tokens.launcher_bg,
+    launcher_foreground: tokens.launcher_foreground,
     launcher_text: tokens.launcher_text,
+    launcher_border_color: tokens.launcher_border_color,
     launcher_border: tokens.launcher_border,
+    launcher_glow_color: tokens.launcher_glow_color,
     launcher_glow: tokens.launcher_glow,
+    launcher_logo_background: tokens.launcher_logo_background,
+    launcher_logo_bg: tokens.launcher_logo_bg,
+    launcher_logo_border_color: tokens.launcher_logo_border_color,
+    launcher_logo_border: tokens.launcher_logo_border,
     theme: {
       primary_color: tokens.primary,
       accent_color: tokens.accent,
@@ -196,10 +235,18 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
       glow_spread_px: tokens.glow_spread_px,
       glow_halo_px: tokens.glow_halo_px,
       pulse_duration: tokens.pulse_duration,
-      launcher_text: tokens.launcher_text,
+      launcher_background: tokens.launcher_background,
       launcher_bg: tokens.launcher_bg,
+      launcher_foreground: tokens.launcher_foreground,
+      launcher_text: tokens.launcher_text,
+      launcher_border_color: tokens.launcher_border_color,
       launcher_border: tokens.launcher_border,
+      launcher_glow_color: tokens.launcher_glow_color,
       launcher_glow: tokens.launcher_glow,
+      launcher_logo_background: tokens.launcher_logo_background,
+      launcher_logo_bg: tokens.launcher_logo_bg,
+      launcher_logo_border_color: tokens.launcher_logo_border_color,
+      launcher_logo_border: tokens.launcher_logo_border,
       text_color: tokens.text,
       muted_color: tokens.muted,
       border_color: tokens.border,

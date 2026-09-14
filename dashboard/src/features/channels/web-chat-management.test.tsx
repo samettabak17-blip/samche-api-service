@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
@@ -631,6 +631,79 @@ describe('WebChatManagement Component', () => {
       );
     });
   });
+  it('supports transparent launcher background and custom/transparent logo background and border', async () => {
+    const payload: WebChatChannelResponse = {
+      tenant_id: 'test-tenant-123',
+      configured: true,
+      widget_key: 'wch_launcher_trans_key',
+      channel: { id: 'ch-1', channel_type: 'WEB_CHAT', display_name: 'Test Web Chat', status: 'active' },
+      assistant: { id: 'ast-1', tenant_id: 'test-tenant-123', name: 'Test Assistant', model: 'gpt-4o-mini', status: 'active' },
+      integration: { id: 'int-1', integration_key: 'wch_launcher_trans_key', integration_type: 'WEB_CHAT', enabled: true },
+      appearance: {
+        ...mockAppearance,
+        launcher_theme_mode: 'custom',
+        launcher_bg: '#1E293B',
+        launcher_logo_bg: '#0F172A',
+        launcher_logo_border: '#3B82F6',
+      },
+      behavior: mockBehavior,
+      embed_snippet: '<script></script>',
+      installation: { widget_key: 'wch_launcher_trans_key', embed_snippet: '', status: 'active', guidance: [] },
+    };
+
+    vi.mocked(tenantApi.getWebChatChannel).mockResolvedValue(payload);
+    vi.mocked(tenantApi.listAssistants).mockResolvedValue([]);
+    vi.mocked(tenantApi.updateWebChatChannel).mockResolvedValue(payload);
+
+    renderComponent();
+    fireEvent.click(await screen.findByRole('button', { name: /Appearance & Theme/i }));
+
+    expect(await screen.findByTestId('launcher-custom-controls')).toBeTruthy();
+
+    // Verify Logo Background and Border controls exist
+    const logoBgControl = screen.getByTestId('launcher-logo-bg-control');
+    const logoBorderControl = screen.getByTestId('launcher-logo-border-control');
+    const launcherBgControl = screen.getByTestId('launcher-bg-control');
+
+    expect(logoBgControl).toBeTruthy();
+    expect(logoBorderControl).toBeTruthy();
+    expect(launcherBgControl).toBeTruthy();
+
+    // Toggle Launcher Background to Transparent
+    const launcherBgTransBtn = within(launcherBgControl).getByRole('button', { name: /Transparent/i });
+    fireEvent.click(launcherBgTransBtn);
+
+    // Host contrast warning should become visible
+    expect(await screen.findByTestId('launcher-transparency-warning')).toBeTruthy();
+
+    // Toggle Logo Background and Logo Border to Transparent
+    const logoBgTransBtn = within(logoBgControl).getByRole('button', { name: /Transparent/i });
+    fireEvent.click(logoBgTransBtn);
+
+    const logoBorderTransBtn = within(logoBorderControl).getByRole('button', { name: /Transparent/i });
+    fireEvent.click(logoBorderTransBtn);
+
+    // Save Appearance
+    fireEvent.click(screen.getAllByRole('button', { name: /Save Appearance/i })[0]);
+
+    await waitFor(() => {
+      expect(tenantApi.updateWebChatChannel).toHaveBeenCalledWith(
+        'test-tenant-123',
+        expect.objectContaining({
+          appearance: expect.objectContaining({
+            launcher_theme_mode: 'custom',
+            launcher_bg: 'transparent',
+            launcher_background: 'transparent',
+            launcher_logo_bg: 'transparent',
+            launcher_logo_background: 'transparent',
+            launcher_logo_border: 'transparent',
+            launcher_logo_border_color: 'transparent',
+          }),
+        })
+      );
+    });
+  });
+
 
 
 });

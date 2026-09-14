@@ -356,17 +356,36 @@ router.post('/:tenantId/channels/web-chat/theme-preview', requireTenantAccess, a
     glow_intensity: glowIntensity = 80,
     glow_spread: glowSpread = 70,
     pulse_animation: pulseAnimation = 'normal',
+    pulse_mode: pulseMode = null,
     animation_speed: animationSpeed = 'normal',
+    pulse_speed: pulseSpeed = null,
     launcher_style: launcherStyle = 'pill',
     launcher_theme_mode: launcherThemeMode = 'follow_theme',
+    launcher_background: launcherBackground = null,
     launcher_bg: launcherBg = null,
+    launcher_foreground: launcherForeground = null,
     launcher_text: launcherText = null,
+    launcher_border_color: launcherBorderColor = null,
     launcher_border: launcherBorder = null,
+    launcher_glow_color: launcherGlowColor = null,
     launcher_glow: launcherGlow = null,
+    launcher_logo_background: launcherLogoBackground = null,
+    launcher_logo_bg: launcherLogoBg = null,
+    launcher_logo_border_color: launcherLogoBorderColor = null,
+    launcher_logo_border: launcherLogoBorder = null,
   } = req.body ?? {};
 
   try {
     let result;
+    const effectiveLauncherBg = launcherBackground ?? launcherBg ?? null;
+    const effectiveLauncherText = launcherForeground ?? launcherText ?? null;
+    const effectiveLauncherBorder = launcherBorderColor ?? launcherBorder ?? null;
+    const effectiveLauncherGlow = launcherGlowColor ?? launcherGlow ?? null;
+    const effectiveLauncherLogoBg = launcherLogoBackground ?? launcherLogoBg ?? null;
+    const effectiveLauncherLogoBorder = launcherLogoBorderColor ?? launcherLogoBorder ?? null;
+    const effectivePulse = pulseMode || pulseAnimation;
+    const effectiveSpeed = pulseSpeed || animationSpeed;
+
     if (Array.isArray(candidates) && candidates.length > 0) {
       result = analyzeLogoPalette({
         candidates,
@@ -374,14 +393,24 @@ router.post('/:tenantId/channels/web-chat/theme-preview', requireTenantAccess, a
         mode,
         glowIntensity,
         glowSpread,
-        pulseAnimation,
-        animationSpeed,
+        pulseAnimation: effectivePulse,
+        pulseMode: effectivePulse,
+        animationSpeed: effectiveSpeed,
+        pulseSpeed: effectiveSpeed,
         launcherStyle,
         launcherThemeMode,
-        launcherBg,
-        launcherText,
-        launcherBorder,
-        launcherGlow,
+        launcherBackground: effectiveLauncherBg,
+        launcherBg: effectiveLauncherBg,
+        launcherForeground: effectiveLauncherText,
+        launcherText: effectiveLauncherText,
+        launcherBorderColor: effectiveLauncherBorder,
+        launcherBorder: effectiveLauncherBorder,
+        launcherGlowColor: effectiveLauncherGlow,
+        launcherGlow: effectiveLauncherGlow,
+        launcherLogoBackground: effectiveLauncherLogoBg,
+        launcherLogoBg: effectiveLauncherLogoBg,
+        launcherLogoBorderColor: effectiveLauncherLogoBorder,
+        launcherLogoBorder: effectiveLauncherLogoBorder,
       });
     } else {
       result = deriveWebChatThemeTokens({
@@ -390,14 +419,24 @@ router.post('/:tenantId/channels/web-chat/theme-preview', requireTenantAccess, a
         mode,
         glowIntensity,
         glowSpread,
-        pulseAnimation,
-        animationSpeed,
+        pulseAnimation: effectivePulse,
+        pulseMode: effectivePulse,
+        animationSpeed: effectiveSpeed,
+        pulseSpeed: effectiveSpeed,
         launcherStyle,
         launcherThemeMode,
-        launcherBg,
-        launcherText,
-        launcherBorder,
-        launcherGlow,
+        launcherBackground: effectiveLauncherBg,
+        launcherBg: effectiveLauncherBg,
+        launcherForeground: effectiveLauncherText,
+        launcherText: effectiveLauncherText,
+        launcherBorderColor: effectiveLauncherBorder,
+        launcherBorder: effectiveLauncherBorder,
+        launcherGlowColor: effectiveLauncherGlow,
+        launcherGlow: effectiveLauncherGlow,
+        launcherLogoBackground: effectiveLauncherLogoBg,
+        launcherLogoBg: effectiveLauncherLogoBg,
+        launcherLogoBorderColor: effectiveLauncherLogoBorder,
+        launcherLogoBorder: effectiveLauncherLogoBorder,
       });
     }
     return res.json(result);

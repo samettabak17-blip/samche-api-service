@@ -55,12 +55,12 @@ test('SHARED_RENDERER_CONTRACT: public runtime and dashboard contract share iden
   }
 });
 
-test('LAUNCHER_DIMENSIONS_PARITY: Pill (54px), Circular (62x62), and Minimal (52x52) match canonical specs', () => {
+test('LAUNCHER_DIMENSIONS_PARITY: Pill (54px), Circular (60x60), and Minimal (52x52) match canonical specs', () => {
   assert.match(dashboardContractSource, /\.samche-launcher\s*\{[^}]*height:\s*54px\s*!important/);
   assert.match(dashboardContractSource, /\.samche-launcher\.samche-style-pill\s*\{[^}]*padding:\s*4px 18px 4px 6px\s*!important/);
 
-  assert.match(dashboardContractSource, /\.samche-launcher\.samche-style-circular\s*\{[^}]*width:\s*62px\s*!important;\s*height:\s*62px\s*!important/);
-  assert.match(publicSource, /\.samche-launcher\.samche-style-circular\s*\{[^}]*width:\s*62px\s*!important;\s*height:\s*62px\s*!important/);
+  assert.match(dashboardContractSource, /\.samche-launcher\.samche-style-circular\s*\{[^}]*width:\s*60px\s*!important;\s*height:\s*60px\s*!important/);
+  assert.match(publicSource, /\.samche-launcher\.samche-style-circular\s*\{[^}]*width:\s*60px\s*!important;\s*height:\s*60px\s*!important/);
 
   assert.match(dashboardContractSource, /\.samche-launcher\.samche-style-minimal\s*\{[^}]*width:\s*52px\s*!important;\s*height:\s*52px\s*!important/);
   assert.match(publicSource, /\.samche-launcher\.samche-style-minimal\s*\{[^}]*width:\s*52px\s*!important;\s*height:\s*52px\s*!important/);

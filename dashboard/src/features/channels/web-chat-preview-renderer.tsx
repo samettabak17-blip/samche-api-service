@@ -28,15 +28,25 @@ export interface WebChatPreviewRendererProps {
   glowIntensity?: number;
   glowSpread?: number;
   pulseAnimation?: 'none' | 'subtle' | 'normal' | 'strong';
+  pulseMode?: string;
   animationSpeed?: 'slow' | 'normal' | 'fast';
+  pulseSpeed?: string;
   primaryColor?: string;
   accentColor?: string;
   language?: string;
   launcherThemeMode?: 'auto_brand' | 'follow_theme' | 'custom';
+  launcherBackground?: string | null;
   launcherBg?: string | null;
+  launcherForeground?: string | null;
   launcherText?: string | null;
+  launcherBorderColor?: string | null;
   launcherBorder?: string | null;
+  launcherGlowColor?: string | null;
   launcherGlow?: string | null;
+  launcherLogoBackground?: string | null;
+  launcherLogoBg?: string | null;
+  launcherLogoBorderColor?: string | null;
+  launcherLogoBorder?: string | null;
 }
 
 export function WebChatPreviewRenderer({
@@ -54,17 +64,36 @@ export function WebChatPreviewRenderer({
   glowIntensity = 80,
   glowSpread = 70,
   pulseAnimation = 'normal',
+  pulseMode,
   animationSpeed = 'normal',
+  pulseSpeed,
   primaryColor = '#0B5FFF',
   accentColor = '#10B981',
   language = 'auto',
   launcherThemeMode = 'follow_theme',
+  launcherBackground = null,
   launcherBg = null,
+  launcherForeground = null,
   launcherText = null,
+  launcherBorderColor = null,
   launcherBorder = null,
+  launcherGlowColor = null,
   launcherGlow = null,
+  launcherLogoBackground = null,
+  launcherLogoBg = null,
+  launcherLogoBorderColor = null,
+  launcherLogoBorder = null,
 }: WebChatPreviewRendererProps) {
   const [showConfirm, setShowConfirm] = useState(false);
+
+  const effectivePulse = pulseMode || pulseAnimation;
+  const effectiveSpeed = pulseSpeed || animationSpeed;
+  const effectiveBg = launcherBackground ?? launcherBg ?? null;
+  const effectiveText = launcherForeground ?? launcherText ?? null;
+  const effectiveBorder = launcherBorderColor ?? launcherBorder ?? null;
+  const effectiveGlow = launcherGlowColor ?? launcherGlow ?? null;
+  const effectiveLogoBg = launcherLogoBackground ?? launcherLogoBg ?? null;
+  const effectiveLogoBorder = launcherLogoBorderColor ?? launcherLogoBorder ?? null;
 
   const tokens = deriveCanonicalDesignTokens({
     primaryColor,
@@ -72,14 +101,24 @@ export function WebChatPreviewRenderer({
     mode: themeMode,
     glowIntensity,
     glowSpread,
-    pulseAnimation,
-    animationSpeed,
+    pulseAnimation: effectivePulse,
+    pulseMode: effectivePulse,
+    animationSpeed: effectiveSpeed,
+    pulseSpeed: effectiveSpeed,
     launcherStyle,
     launcherThemeMode,
-    launcherBg,
-    launcherText,
-    launcherBorder,
-    launcherGlow,
+    launcherBackground: effectiveBg,
+    launcherBg: effectiveBg,
+    launcherForeground: effectiveText,
+    launcherText: effectiveText,
+    launcherBorderColor: effectiveBorder,
+    launcherBorder: effectiveBorder,
+    launcherGlowColor: effectiveGlow,
+    launcherGlow: effectiveGlow,
+    launcherLogoBackground: effectiveLogoBg,
+    launcherLogoBg: effectiveLogoBg,
+    launcherLogoBorderColor: effectiveLogoBorder,
+    launcherLogoBorder: effectiveLogoBorder,
   });
 
   const locale = getEffectiveLocale(language);
@@ -105,10 +144,12 @@ export function WebChatPreviewRenderer({
     '--chat-glow-spread': `${tokens.glow_spread_px}px`,
     '--chat-glow-halo': `${tokens.glow_halo_px}px`,
     '--chat-pulse-duration': tokens.pulse_duration,
-    '--chat-launcher-text': tokens.launcher_text,
-    '--chat-launcher-bg': tokens.launcher_bg,
-    '--chat-launcher-border': tokens.launcher_border,
-    '--chat-launcher-glow': tokens.launcher_glow,
+    '--chat-launcher-text': tokens.launcher_foreground || tokens.launcher_text,
+    '--chat-launcher-bg': tokens.launcher_background || tokens.launcher_bg,
+    '--chat-launcher-border': tokens.launcher_border_color || tokens.launcher_border,
+    '--chat-launcher-glow': tokens.launcher_glow_color || tokens.launcher_glow,
+    '--chat-launcher-logo-bg': tokens.launcher_logo_background || tokens.launcher_logo_bg,
+    '--chat-launcher-logo-border': tokens.launcher_logo_border_color || tokens.launcher_logo_border,
     '--chat-text': tokens.text,
     '--chat-muted': tokens.muted,
     '--chat-border': tokens.border,

@@ -14,6 +14,25 @@ export class WebChatThemeError extends Error {
   }
 }
 
+export function isTransparent(val) {
+  return typeof val === 'string' && val.trim().toLowerCase() === 'transparent';
+}
+
+export function normalizeColorToken(color, fallback = '#2563EB', { allowTransparent = false } = {}) {
+  if (typeof color !== 'string') return fallback;
+  const trimmed = color.trim();
+  if (allowTransparent && trimmed.toLowerCase() === 'transparent') {
+    return 'transparent';
+  }
+  if (HEX_COLOR_REGEX.test(trimmed)) {
+    return normalizeHex(trimmed, fallback);
+  }
+  if (trimmed.startsWith('rgba(') || trimmed.startsWith('rgb(')) {
+    return trimmed;
+  }
+  return fallback;
+}
+
 export function normalizeHex(color, fallback = '#2563EB') {
   if (typeof color !== 'string') return fallback.toUpperCase();
   const trimmed = color.trim();
@@ -102,13 +121,23 @@ export function deriveWebChatThemeTokens({
   glowIntensity = 80,
   glowSpread = 70,
   pulseAnimation = 'normal',
+  pulseMode = null,
   animationSpeed = 'normal',
+  pulseSpeed = null,
   launcherStyle = 'pill',
   launcherThemeMode = 'follow_theme',
+  launcherBackground = null,
   launcherBg = null,
+  launcherForeground = null,
   launcherText = null,
+  launcherBorderColor = null,
   launcherBorder = null,
+  launcherGlowColor = null,
   launcherGlow = null,
+  launcherLogoBackground = null,
+  launcherLogoBg = null,
+  launcherLogoBorderColor = null,
+  launcherLogoBorder = null,
 } = {}) {
   const effectiveMode = ['dark', 'light'].includes(String(mode).toLowerCase())
     ? String(mode).toLowerCase()
@@ -151,36 +180,99 @@ export function deriveWebChatThemeTokens({
   const glowSpreadPx = Math.round(Math.max(4, spreadFactor * 24));
   const glowHaloPx = Math.round(Math.max(10, spreadFactor * 42));
 
-  const normSpeed = ['slow', 'fast'].includes(String(animationSpeed).toLowerCase())
-    ? String(animationSpeed).toLowerCase()
+  const effectivePulseSpeed = pulseSpeed || animationSpeed;
+  const normSpeed = ['slow', 'fast'].includes(String(effectivePulseSpeed).toLowerCase())
+    ? String(effectivePulseSpeed).toLowerCase()
     : 'normal';
   const pulseDuration = normSpeed === 'slow' ? '5.5s' : normSpeed === 'fast' ? '2.2s' : '3.6s';
+
+  const effectivePulseMode = pulseMode || pulseAnimation;
+  const normPulse = ['none', 'subtle', 'normal', 'strong'].includes(String(effectivePulseMode).toLowerCase())
+    ? String(effectivePulseMode).toLowerCase()
+    : 'normal';
 
   const effectiveLauncherThemeMode = ['auto_brand', 'follow_theme', 'custom'].includes(String(launcherThemeMode || '').toLowerCase())
     ? String(launcherThemeMode).toLowerCase()
     : 'follow_theme';
 
+  const rawLauncherBg = launcherBackground ?? launcherBg ?? null;
+  const rawLauncherText = launcherForeground ?? launcherText ?? null;
+  const rawLauncherBorder = launcherBorderColor ?? launcherBorder ?? null;
+  const rawLauncherGlow = launcherGlowColor ?? launcherGlow ?? null;
+  const rawLauncherLogoBg = launcherLogoBackground ?? launcherLogoBg ?? null;
+  const rawLauncherLogoBorder = launcherLogoBorderColor ?? launcherLogoBorder ?? null;
+
   let computedLauncherBg;
   let computedLauncherText;
   let computedLauncherBorder;
   let computedLauncherGlow;
+  let computedLauncherLogoBg;
+  let computedLauncherLogoBorder;
 
   if (effectiveLauncherThemeMode === 'auto_brand') {
     computedLauncherBg = safePrimary;
     computedLauncherText = accessibleForegroundFor(safePrimary, 4.5);
     computedLauncherBorder = glowRing;
     computedLauncherGlow = glowColor;
+    computedLauncherLogoBg = 'transparent';
+    computedLauncherLogoBorder = 'transparent';
   } else if (effectiveLauncherThemeMode === 'custom') {
-    computedLauncherBg = launcherBg ? normalizeHex(launcherBg, isDark ? '#0F172A' : '#FFFFFF') : (isDark ? '#0F172A' : '#FFFFFF');
-    computedLauncherGlow = launcherGlow ? normalizeHex(launcherGlow, safePrimary) : glowColor;
-    computedLauncherBorder = launcherBorder ? normalizeHex(launcherBorder, glowRing) : glowRing;
-
-    if (launcherText && HEX_COLOR_REGEX.test(String(launcherText).trim())) {
-      const normText = normalizeHex(launcherText);
-      const ratio = contrastRatio(computedLauncherBg, normText);
-      computedLauncherText = ratio >= 4.5 ? normText : accessibleForegroundFor(computedLauncherBg, 4.5);
+    if (isTransparent(rawLauncherBg)) {
+      computedLauncherBg = 'transparent';
+    } else if (rawLauncherBg && String(rawLauncherBg).trim()) {
+      computedLauncherBg = normalizeColorToken(rawLauncherBg, isDark ? '#0F172A' : '#FFFFFF', { allowTransparent: true });
     } else {
-      computedLauncherText = accessibleForegroundFor(computedLauncherBg, 4.5);
+      computedLauncherBg = isDark ? '#0F172A' : '#FFFFFF';
+    }
+
+    if (isTransparent(rawLauncherText)) {
+      computedLauncherText = 'transparent';
+    } else if (computedLauncherBg === 'transparent') {
+      if (rawLauncherText && String(rawLauncherText).trim()) {
+        computedLauncherText = normalizeColorToken(rawLauncherText, isDark ? '#FFFFFF' : '#0F172A', { allowTransparent: true });
+      } else {
+        computedLauncherText = isDark ? '#FFFFFF' : '#0F172A';
+      }
+    } else {
+      if (rawLauncherText && HEX_COLOR_REGEX.test(String(rawLauncherText).trim())) {
+        const normText = normalizeHex(rawLauncherText);
+        const ratio = contrastRatio(computedLauncherBg, normText);
+        computedLauncherText = ratio >= 4.5 ? normText : accessibleForegroundFor(computedLauncherBg, 4.5);
+      } else {
+        computedLauncherText = accessibleForegroundFor(computedLauncherBg, 4.5);
+      }
+    }
+
+    if (isTransparent(rawLauncherBorder)) {
+      computedLauncherBorder = 'transparent';
+    } else if (rawLauncherBorder && String(rawLauncherBorder).trim()) {
+      computedLauncherBorder = normalizeColorToken(rawLauncherBorder, glowRing, { allowTransparent: true });
+    } else {
+      computedLauncherBorder = glowRing;
+    }
+
+    if (isTransparent(rawLauncherGlow)) {
+      computedLauncherGlow = 'transparent';
+    } else if (rawLauncherGlow && String(rawLauncherGlow).trim()) {
+      computedLauncherGlow = normalizeColorToken(rawLauncherGlow, glowColor, { allowTransparent: true });
+    } else {
+      computedLauncherGlow = glowColor;
+    }
+
+    if (isTransparent(rawLauncherLogoBg)) {
+      computedLauncherLogoBg = 'transparent';
+    } else if (rawLauncherLogoBg && String(rawLauncherLogoBg).trim()) {
+      computedLauncherLogoBg = normalizeColorToken(rawLauncherLogoBg, 'transparent', { allowTransparent: true });
+    } else {
+      computedLauncherLogoBg = 'transparent';
+    }
+
+    if (isTransparent(rawLauncherLogoBorder)) {
+      computedLauncherLogoBorder = 'transparent';
+    } else if (rawLauncherLogoBorder && String(rawLauncherLogoBorder).trim()) {
+      computedLauncherLogoBorder = normalizeColorToken(rawLauncherLogoBorder, 'transparent', { allowTransparent: true });
+    } else {
+      computedLauncherLogoBorder = 'transparent';
     }
   } else {
     // follow_theme: panel-matched launcher mode
@@ -189,15 +281,31 @@ export function deriveWebChatThemeTokens({
       computedLauncherText = '#FFFFFF';
       computedLauncherBorder = glowRing;
       computedLauncherGlow = glowColor;
+      computedLauncherLogoBg = 'transparent';
+      computedLauncherLogoBorder = 'transparent';
     } else {
       computedLauncherBg = '#FFFFFF';
       computedLauncherText = '#0F172A';
       computedLauncherBorder = 'rgba(15, 23, 42, 0.12)';
       computedLauncherGlow = glowColor;
+      computedLauncherLogoBg = 'transparent';
+      computedLauncherLogoBorder = 'transparent';
     }
   }
 
-  const contrastLauncher = contrastRatio(computedLauncherBg, computedLauncherText);
+  const isLauncherTransparent = computedLauncherBg === 'transparent';
+  let contrastLauncher = null;
+  let launcherAccessible = true;
+  let launcherWarning = null;
+
+  if (isLauncherTransparent) {
+    contrastLauncher = null;
+    launcherAccessible = false;
+    launcherWarning = 'Launcher background is transparent; host page contrast cannot be mathematically verified.';
+  } else {
+    contrastLauncher = contrastRatio(computedLauncherBg, computedLauncherText);
+    launcherAccessible = contrastLauncher >= 4.5;
+  }
 
   const launcherTextToken = computedLauncherText;
 
@@ -215,7 +323,7 @@ export function deriveWebChatThemeTokens({
     contrastPrimaryBtn >= 4.5 &&
     contrastTextSurface >= 4.5 &&
     contrastMutedSurface >= 3.0 &&
-    contrastLauncher >= 4.5;
+    (isLauncherTransparent ? false : launcherAccessible);
 
   return {
     mode: effectiveMode,
@@ -232,11 +340,23 @@ export function deriveWebChatThemeTokens({
     glow_spread_px: glowSpreadPx,
     glow_halo_px: glowHaloPx,
     pulse_duration: pulseDuration,
+    pulse_animation: normPulse,
+    pulse_mode: normPulse,
+    animation_speed: normSpeed,
+    pulse_speed: normSpeed,
     launcher_text: launcherTextToken,
+    launcher_foreground: launcherTextToken,
     launcher_theme_mode: effectiveLauncherThemeMode,
     launcher_bg: computedLauncherBg,
+    launcher_background: computedLauncherBg,
     launcher_border: computedLauncherBorder,
+    launcher_border_color: computedLauncherBorder,
     launcher_glow: computedLauncherGlow,
+    launcher_glow_color: computedLauncherGlow,
+    launcher_logo_bg: computedLauncherLogoBg,
+    launcher_logo_background: computedLauncherLogoBg,
+    launcher_logo_border: computedLauncherLogoBorder,
+    launcher_logo_border_color: computedLauncherLogoBorder,
     text: textColor,
     muted: mutedColor,
     border: borderColor,
@@ -250,6 +370,9 @@ export function deriveWebChatThemeTokens({
       text_surface: contrastTextSurface,
       muted_surface: contrastMutedSurface,
       launcher: contrastLauncher,
+      launcher_transparent: isLauncherTransparent,
+      launcher_warning: launcherWarning,
+      launcher_accessible: launcherAccessible,
     },
     is_accessible: isAccessible,
   };
@@ -262,13 +385,23 @@ export function analyzeLogoPalette({
   glowIntensity = 80,
   glowSpread = 70,
   pulseAnimation = 'normal',
+  pulseMode = null,
   animationSpeed = 'normal',
+  pulseSpeed = null,
   launcherStyle = 'pill',
   launcherThemeMode = 'auto_brand',
+  launcherBackground = null,
   launcherBg = null,
+  launcherForeground = null,
   launcherText = null,
+  launcherBorderColor = null,
   launcherBorder = null,
+  launcherGlowColor = null,
   launcherGlow = null,
+  launcherLogoBackground = null,
+  launcherLogoBg = null,
+  launcherLogoBorderColor = null,
+  launcherLogoBorder = null,
 } = {}) {
   const sampled = (Array.isArray(candidates) ? candidates : [])
     .map((c) => (HEX_COLOR_REGEX.test(String(c || '').trim()) ? normalizeHex(c) : null))
@@ -299,12 +432,22 @@ export function analyzeLogoPalette({
     glowIntensity,
     glowSpread,
     pulseAnimation,
+    pulseMode,
     animationSpeed,
+    pulseSpeed,
     launcherStyle,
     launcherThemeMode,
+    launcherBackground,
     launcherBg,
+    launcherForeground,
     launcherText,
+    launcherBorderColor,
     launcherBorder,
+    launcherGlowColor,
     launcherGlow,
+    launcherLogoBackground,
+    launcherLogoBg,
+    launcherLogoBorderColor,
+    launcherLogoBorder,
   });
 }
