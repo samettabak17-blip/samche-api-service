@@ -530,6 +530,48 @@ describe('WebChatManagement Component', () => {
 
     expect(await screen.findByText('Hello! How can I help you today?')).toBeTruthy();
   });
+  it('renders realistic mobile live preview with canonical launcher and bounded floating panel', async () => {
+    const payload: WebChatChannelResponse = {
+      tenant_id: 'test-tenant-123',
+      configured: true,
+      widget_key: 'wch_mobile_preview_key',
+      channel: { id: 'ch-1', channel_type: 'WEB_CHAT', display_name: 'Test Web Chat', status: 'active' },
+      assistant: { id: 'ast-1', tenant_id: 'test-tenant-123', name: 'Test Assistant', model: 'gpt-4o-mini', status: 'active' },
+      integration: { id: 'int-1', integration_key: 'wch_mobile_preview_key', integration_type: 'WEB_CHAT', enabled: true },
+      appearance: mockAppearance,
+      behavior: mockBehavior,
+      embed_snippet: '<script></script>',
+      installation: { widget_key: 'wch_mobile_preview_key', embed_snippet: '', status: 'active', guidance: [] },
+    };
+
+    vi.mocked(tenantApi.getWebChatChannel).mockResolvedValue(payload);
+    vi.mocked(tenantApi.listAssistants).mockResolvedValue([]);
+
+    renderComponent();
+    fireEvent.click(await screen.findByRole('button', { name: /Live Preview/i }));
+
+    // Switch to Mobile viewport
+    fireEvent.click(screen.getByRole('button', { name: /Mobile/i }));
+
+    // Both canonical launcher and panel must be rendered inside realistic phone frames
+    expect(await screen.findByText(/Closed Launcher State/i)).toBeTruthy();
+    expect(screen.getByText(/Open Floating Card/i)).toBeTruthy();
+    expect(screen.getByTestId('preview-canonical-launcher')).toBeTruthy();
+    expect(screen.getByTestId('preview-canonical-panel')).toBeTruthy();
+
+    // Verify simulated website background is present behind widget
+    expect(screen.getAllByText('Yeşil Vadi Peyzaj').length).toBeGreaterThan(0);
+
+    // Switch to Closed only
+    fireEvent.click(screen.getByRole('button', { name: /^Closed$/i }));
+    expect(screen.getByTestId('preview-canonical-launcher')).toBeTruthy();
+    expect(screen.queryByTestId('preview-canonical-panel')).toBeNull();
+
+    // Switch to Open only
+    fireEvent.click(screen.getByRole('button', { name: /^Open$/i }));
+    expect(screen.getByTestId('preview-canonical-panel')).toBeTruthy();
+  });
+
 
 
   it('supports configuring launcher theme mode (Follow Panel Theme, Auto from Brand, Custom) with custom background, text, border, and glow', async () => {

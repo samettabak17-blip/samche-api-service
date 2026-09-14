@@ -242,6 +242,72 @@ export function WebChatPreviewRenderer({
     </div>
   );
 
+  const renderMobileDevice = (mode: 'closed' | 'open') => (
+    <div className="relative mx-auto w-[360px] h-[640px] rounded-[38px] border-4 border-stone-700 bg-slate-950 shadow-2xl overflow-hidden flex flex-col shrink-0">
+      <div className="h-6 w-full bg-black/60 flex items-center justify-between px-6 text-[10px] text-stone-400 select-none shrink-0 z-30">
+        <span>9:41</span>
+        <div className="h-2 w-16 bg-stone-800 rounded-full" />
+        <span>5G 100%</span>
+      </div>
+
+      <div className="relative flex-1 w-full overflow-hidden bg-gradient-to-b from-slate-900 to-slate-950 p-4 select-none pointer-events-none opacity-80">
+        <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-3">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-md bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-[10px] text-sky-400 font-bold">
+              {displayLogoUrl ? <img src={displayLogoUrl} alt="logo" className="w-4 h-4 object-contain" /> : 'S'}
+            </div>
+            <span className="text-xs font-semibold text-stone-200 tracking-tight">{brandName || 'SamChe Teknoloji'}</span>
+          </div>
+          <div className="flex flex-col gap-1 w-3.5 text-stone-400">
+            <span className="h-0.5 w-full bg-stone-400 rounded" />
+            <span className="h-0.5 w-full bg-stone-400 rounded" />
+          </div>
+        </div>
+        <div className="rounded-xl bg-gradient-to-r from-sky-950/40 to-slate-800/40 border border-white/5 p-3 mb-3">
+          <div className="h-2 w-16 bg-sky-400/40 rounded mb-1.5" />
+          <div className="h-3 w-4/5 bg-white/25 rounded mb-1" />
+          <div className="h-2 w-2/3 bg-white/10 rounded" />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-lg bg-stone-900/60 border border-white/5 p-2 flex flex-col justify-between h-24">
+            <div className="w-full h-12 bg-white/5 rounded-md" />
+            <div className="h-2 w-3/4 bg-white/20 rounded mt-1" />
+            <div className="h-2 w-1/2 bg-sky-400/30 rounded" />
+          </div>
+          <div className="rounded-lg bg-stone-900/60 border border-white/5 p-2 flex flex-col justify-between h-24">
+            <div className="w-full h-12 bg-white/5 rounded-md" />
+            <div className="h-2 w-3/4 bg-white/20 rounded mt-1" />
+            <div className="h-2 w-1/2 bg-sky-400/30 rounded" />
+          </div>
+        </div>
+      </div>
+
+      <div
+        className="samche-preview-mount samche-preview-mobile absolute inset-0 w-full h-full pointer-events-none"
+        style={cssVars}
+      >
+        <div className="samche-wrap h-full w-full">
+          {mode === 'closed' && (
+            <div
+              className="absolute bottom-4 right-4 z-10 pointer-events-auto"
+              style={launcherPosition === 'left' ? { left: '16px', right: 'auto' } : {}}
+            >
+              {renderLauncher()}
+            </div>
+          )}
+          {mode === 'open' && (
+            <div
+              className="absolute bottom-4 right-4 left-4 z-20 pointer-events-auto flex justify-end"
+              style={launcherPosition === 'left' ? { justifyContent: 'flex-start' } : {}}
+            >
+              {renderPanel()}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div
       className="samche-preview-root relative w-full rounded-2xl border border-line/80 overflow-hidden p-6 flex items-center justify-center transition-all duration-300"
@@ -298,35 +364,26 @@ export function WebChatPreviewRenderer({
         </div>
       ) : (
         /* Mobile Device Simulation */
-        <div className="relative mx-auto w-[360px] h-[640px] rounded-[38px] border-4 border-stone-700 bg-slate-950 shadow-2xl overflow-hidden flex flex-col">
-          {/* Mobile Status Bar */}
-          <div className="h-6 w-full bg-black/60 flex items-center justify-between px-6 text-[10px] text-stone-400 select-none shrink-0 z-20">
-            <span>9:41</span>
-            <div className="h-2 w-16 bg-stone-800 rounded-full" />
-            <span>5G 100%</span>
-          </div>
-
-          <div
-            className="samche-preview-mount samche-preview-mobile relative flex-1 w-full overflow-hidden bg-slate-900/40"
-            style={cssVars}
-          >
-            <div className="samche-wrap h-full w-full">
-              {state === 'closed' || state === 'both' ? (
-                <div
-                  className="absolute bottom-4 right-4 z-10"
-                  style={launcherPosition === 'left' ? { left: '16px', right: 'auto' } : {}}
-                >
-                  {renderLauncher()}
-                </div>
-              ) : null}
-
-              {state === 'open' && (
-                <div className="absolute inset-0 h-full w-full z-20">
-                  {renderPanel()}
-                </div>
-              )}
+        <div className="w-full flex flex-col xl:flex-row items-center justify-around gap-8 py-4">
+          {(state === 'both' || state === 'closed') && (
+            <div className="flex flex-col items-center gap-3">
+              <div className="text-center">
+                <span className="text-sky-400 text-sm font-semibold block">Closed Launcher State</span>
+                <span className="text-stone-400 text-xs">Compact non-blocking floating button</span>
+              </div>
+              {renderMobileDevice('closed')}
             </div>
-          </div>
+          )}
+
+          {(state === 'both' || state === 'open') && (
+            <div className="flex flex-col items-center gap-3">
+              <div className="text-center">
+                <span className="text-sky-400 text-sm font-semibold block">Open Floating Card</span>
+                <span className="text-stone-400 text-xs">Bounded floating card over website</span>
+              </div>
+              {renderMobileDevice('open')}
+            </div>
+          )}
         </div>
       )}
     </div>

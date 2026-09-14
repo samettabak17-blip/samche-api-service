@@ -82,6 +82,8 @@ jobs:
           tests/web-chat-entity-scoped-proactive.test.js
           tests/task8-launcher-customization-and-proactive.test.js
           tests/web-chat-support-intelligence.test.js
+          tests/web-chat-mobile-productization.test.js
+
 
 
       - name: Run Dashboard checks
