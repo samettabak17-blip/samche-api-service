@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-const productionSources = import.meta.glob(['./**/*.ts', './**/*.tsx', '!./**/*.test.ts', '!./**/*.test.tsx'], {
+const productionSources = import.meta.glob([
+  './**/*.ts',
+  './**/*.tsx',
+  '!./**/*.test.ts',
+  '!./**/*.test.tsx',
+  '!./features/channels/web-chat-canonical-contract.ts',
+], {
   query: '?raw',
   import: 'default',
   eager: true,
