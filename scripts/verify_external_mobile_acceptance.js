@@ -31,17 +31,32 @@ async function verifyExternalMobileAcceptance() {
   };
 
   try {
+    console.log(`Navigating to ${DEMO_URL}...`);
+    await browser.navigate(DEMO_URL);
+    await new Promise((r) => setTimeout(r, 1500));
+
+    for (let i = 0; i < 30; i++) {
+      const hasLauncher = await browser.evaluate(`Boolean(document.querySelector('#samche-webchat-container')?.shadowRoot?.querySelector('.samche-launcher'))`);
+      if (hasLauncher) break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
     for (const vp of VIEWPORTS) {
       console.log(`\n--- Testing Viewport: ${vp.name} (${vp.width}x${vp.height}) ---`);
       await browser.setViewport({ width: vp.width, height: vp.height, isMobile: vp.isMobile });
-      await browser.navigate(DEMO_URL);
-      await new Promise((r) => setTimeout(r, 2000));
+      await new Promise((r) => setTimeout(r, 400));
 
-      for (let i = 0; i < 20; i++) {
-        const hasLauncher = await browser.evaluate(`Boolean(document.querySelector('#samche-webchat-container')?.shadowRoot?.querySelector('.samche-launcher'))`);
-        if (hasLauncher) break;
-        await new Promise((r) => setTimeout(r, 300));
-      }
+      // Ensure panel starts closed
+      await browser.evaluate(`
+        (() => {
+          const shadow = document.querySelector('#samche-webchat-container')?.shadowRoot;
+          const p = shadow?.querySelector('.samche-panel');
+          if (p && p.classList.contains('samche-open')) {
+            shadow.querySelector('.samche-close-btn')?.click();
+          }
+        })()
+      `);
+      await new Promise((r) => setTimeout(r, 400));
 
       // 1. BASELINE & CLOSED LAUNCHER AUDIT
       const baseline = await browser.evaluate(`

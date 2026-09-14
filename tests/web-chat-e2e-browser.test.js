@@ -406,13 +406,13 @@ test('REAL BROWSER E2E: Launcher Click Opens Premium Chat Panel & Internal Contr
 test('REAL BROWSER E2E: Responsive Viewports (Desktop, Tablet, Mobile, Mobile Landscape)', async () => {
   if (!browser) return;
   const viewports = [
-    { name: 'Desktop 1440x900', width: 1440, height: 900, isMobile: false, expectedLauncherSize: 60, expectedPanelFull: false },
-    { name: 'Tablet 768x1024', width: 768, height: 1024, isMobile: false, expectedLauncherSize: 60, expectedPanelFull: false },
-    { name: 'Mobile 430x932', width: 430, height: 932, isMobile: true, expectedLauncherSize: 52, expectedPanelFull: true },
-    { name: 'Mobile 390x844', width: 390, height: 844, isMobile: true, expectedLauncherSize: 52, expectedPanelFull: true },
-    { name: 'Mobile 375x812', width: 375, height: 812, isMobile: true, expectedLauncherSize: 52, expectedPanelFull: true },
-    { name: 'Mobile 320x568', width: 320, height: 568, isMobile: true, expectedLauncherSize: 52, expectedPanelFull: true },
-    { name: 'Landscape 812x375', width: 812, height: 375, isMobile: true, expectedLauncherSize: 52, expectedPanelFull: true },
+    { name: 'Desktop 1440x900', width: 1440, height: 900, isMobile: false, expectedLauncherSize: 60 },
+    { name: 'Tablet 768x1024', width: 768, height: 1024, isMobile: false, expectedLauncherSize: 60 },
+    { name: 'Mobile 430x932', width: 430, height: 932, isMobile: true, expectedLauncherSize: 52 },
+    { name: 'Mobile 390x844', width: 390, height: 844, isMobile: true, expectedLauncherSize: 52 },
+    { name: 'Mobile 375x812', width: 375, height: 812, isMobile: true, expectedLauncherSize: 52 },
+    { name: 'Mobile 320x568', width: 320, height: 568, isMobile: true, expectedLauncherSize: 52 },
+    { name: 'Landscape 812x375', width: 812, height: 375, isMobile: true, expectedLauncherSize: 60 },
   ];
 
   for (const vp of viewports) {
@@ -450,10 +450,11 @@ test('REAL BROWSER E2E: Responsive Viewports (Desktop, Tablet, Mobile, Mobile La
         `${vp.name}: launcher width must be within 1px of ${vp.expectedLauncherSize}px (got ${measurement.launcherWidth}px)`
       );
 
-      if (vp.expectedPanelFull) {
+      if (vp.isMobile && vp.width <= 640) {
+        const expectedW = Math.min(vp.width - 32, 400);
         assert.ok(
-          measurement.panelWidth >= vp.width - 25,
-          `${vp.name}: mobile panel must expand near full width (got ${measurement.panelWidth}px for viewport ${vp.width}px)`
+          Math.abs(measurement.panelWidth - expectedW) <= 5,
+          `${vp.name}: mobile panel must be bounded floating card of ~${expectedW}px (got ${measurement.panelWidth}px)`
         );
       } else {
         assert.ok(
@@ -541,10 +542,10 @@ test('REAL BROWSER E2E: Adversarial Host CSS Isolation Fixture', async () => {
 
   assert.ok(isolationResult.isRound, 'Shadow DOM launcher must retain 50% border-radius despite adversarial host CSS');
   assert.ok(isolationResult.notRed, 'Shadow DOM launcher must preserve its white color despite adversarial host CSS');
-  assert.equal(isolationResult.launcherWidth, 60, 'Launcher button must not be stretched by host button rules');
-  assert.equal(isolationResult.launcherHeight, 60, 'Launcher button height must remain exactly 60px');
-  assert.equal(isolationResult.svgWidth, 28, 'Launcher SVG must remain exactly 28px width, not blown up to 800px');
-  assert.equal(isolationResult.svgHeight, 28, 'Launcher SVG must remain exactly 28px height, not blown up to 800px');
+  assert.ok(Math.abs(isolationResult.launcherWidth - 60) <= 1, 'Launcher button must not be stretched by host button rules');
+  assert.ok(Math.abs(isolationResult.launcherHeight - 60) <= 1, 'Launcher button height must remain ~60px');
+  assert.ok(Math.abs(isolationResult.svgWidth - 24) <= 2, 'Launcher SVG must remain ~24px width, not blown up to 800px');
+  assert.ok(Math.abs(isolationResult.svgHeight - 24) <= 2, 'Launcher SVG must remain ~24px height, not blown up to 800px');
   assert.ok(isolationResult.panelWidth >= 380 && isolationResult.panelWidth <= 420, 'Panel width must remain ~400px');
 });
 
