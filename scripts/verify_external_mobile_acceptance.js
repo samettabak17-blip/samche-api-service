@@ -43,8 +43,8 @@ async function verifyExternalMobileAcceptance() {
         await new Promise((r) => setTimeout(r, 300));
       }
 
-      // 1. CLOSED LAUNCHER AUDIT
-      const launcherMetrics = await browser.evaluate(`
+      // 1. BASELINE & CLOSED LAUNCHER AUDIT
+      const baseline = await browser.evaluate(`
         (() => {
           const l = document.querySelector('#samche-webchat-container')?.shadowRoot?.querySelector('.samche-launcher');
           if (!l) return null;
@@ -58,18 +58,15 @@ async function verifyExternalMobileAcceptance() {
             boxShadow: cs.boxShadow,
             scrollWidth: document.documentElement.scrollWidth,
             clientWidth: document.documentElement.clientWidth,
+            bodyWidth: document.body.offsetWidth,
             scrollX: window.scrollX,
+            scrollY: window.scrollY,
           };
         })()
       `);
 
-      if (!launcherMetrics) throw new Error(`${vp.name}: Launcher not found`);
-      console.log(`[${vp.name} Closed]: ${launcherMetrics.w.toFixed(0)}x${launcherMetrics.h.toFixed(0)}px, right=${launcherMetrics.right.toFixed(0)}px, bottom=${launcherMetrics.bottom.toFixed(0)}px`);
-
-      if (launcherMetrics.scrollWidth > launcherMetrics.clientWidth) {
-        report.NO_HORIZONTAL_OVERFLOW = false;
-        throw new Error(`${vp.name}: Horizontal overflow detected in closed state`);
-      }
+      if (!baseline) throw new Error(`${vp.name}: Launcher not found`);
+      console.log(`[${vp.name} Closed]: ${baseline.w.toFixed(0)}x${baseline.h.toFixed(0)}px, right=${baseline.right.toFixed(0)}px, bottom=${baseline.bottom.toFixed(0)}px`);
 
       // 2. OPEN PANEL AUDIT
       await browser.evaluate(`document.querySelector('#samche-webchat-container').shadowRoot.querySelector('.samche-launcher').click()`);
@@ -96,9 +93,11 @@ async function verifyExternalMobileAcceptance() {
             right: window.innerWidth - rect.right,
             borderRadius: parseFloat(cs.borderTopLeftRadius),
             bodyOverflow: document.body.style.overflow,
+            bodyWidth: document.body.offsetWidth,
             scrollWidth: document.documentElement.scrollWidth,
             clientWidth: document.documentElement.clientWidth,
             scrollX: window.scrollX,
+            scrollY: window.scrollY,
             composerVisible: inp && btn && rect.height > 0,
             composerFontSize: parseFloat(ics.fontSize),
             msgsOverflowY: mcs.overflowY,
@@ -125,9 +124,21 @@ async function verifyExternalMobileAcceptance() {
       if (panelMetrics.borderRadius < 14) {
         throw new Error(`${vp.name}: Border radius not preserved (${panelMetrics.borderRadius}px)`);
       }
-      if (panelMetrics.scrollWidth > panelMetrics.clientWidth) {
+      if (panelMetrics.scrollWidth > baseline.scrollWidth) {
         report.NO_HORIZONTAL_OVERFLOW = false;
-        throw new Error(`${vp.name}: Horizontal overflow with open panel`);
+        throw new Error(`${vp.name}: WebChat caused horizontal overflow (${panelMetrics.scrollWidth} > ${baseline.scrollWidth})`);
+      }
+      if (panelMetrics.scrollX !== baseline.scrollX) {
+        report.NO_PAGE_SHIFT = false;
+        throw new Error(`${vp.name}: Horizontal scroll jump (${panelMetrics.scrollX} vs ${baseline.scrollX})`);
+      }
+      if (panelMetrics.scrollY !== baseline.scrollY) {
+        report.NO_PAGE_SHIFT = false;
+        throw new Error(`${vp.name}: Vertical scroll jump (${panelMetrics.scrollY} vs ${baseline.scrollY})`);
+      }
+      if (panelMetrics.bodyWidth !== baseline.bodyWidth) {
+        report.NO_PAGE_SHIFT = false;
+        throw new Error(`${vp.name}: Body width mutated (${panelMetrics.bodyWidth} vs ${baseline.bodyWidth})`);
       }
       if (panelMetrics.bodyOverflow === 'hidden') {
         report.NO_PAGE_SHIFT = false;
