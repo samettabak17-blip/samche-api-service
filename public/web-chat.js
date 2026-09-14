@@ -259,8 +259,11 @@
         }
 
         // Section headers or promotional titles without price or product detail link are not products
+        var isDealOrProduct = /(?:Headphones|Power Bank|TV|Earbuds|Watch|Purifier|Blender|Vacuum|Scale|Flask|Charger|Speaker|Camera|Phone|Laptop)/i.test(hName);
         if (!hPrice && (!hLink || hLink === '/' || hLink === '#' || hLink === window.location.href || hLink === window.location.pathname)) {
-          continue;
+          if (!isDealOrProduct) {
+            continue;
+          }
         }
 
         seenNames.push(hKey);

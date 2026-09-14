@@ -4,6 +4,7 @@ import {
   ensureTenantWebChatPersona,
 } from '../services/tenant-web-chat-provisioning-service.js';
 import { resolvePublicWebChatIntegration } from '../services/public-web-chat-integration-service.js';
+import { discoverAndIndexTenantSite } from '../services/tenant-site-discovery-service.js';
 
 const { Pool } = pg;
 
@@ -182,6 +183,23 @@ async function bootstrapTask8Demo(options = {}) {
       console.log('✓ Public Web Chat resolution verified successfully.');
     } finally {
       verifyClient.release();
+    }
+
+    // 6. Synchronously index tenant site pages for cross-page retrieval
+    console.log('[5/5] Indexing tenant website pages for cross-page retrieval...');
+    const siteIndexClient = await pool.connect();
+    try {
+      const siteSummary = await discoverAndIndexTenantSite({
+        database: siteIndexClient,
+        tenantId,
+        rootUrl: 'https://demo.samchecompany.com',
+        options: { maxPages: 25 },
+      });
+      console.log(`✓ Tenant website pages indexed: ${siteSummary.indexedCount} pages indexed (${siteSummary.source}).`);
+    } catch (siteErr) {
+      console.warn('[SITE_INDEX_BOOTSTRAP_WARN] Failed to index website:', siteErr.message);
+    } finally {
+      siteIndexClient.release();
     }
 
     const summary = {

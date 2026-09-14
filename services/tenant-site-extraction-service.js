@@ -112,7 +112,7 @@ export function extractSummary(html) {
 
 export function extractHeadings(html) {
   const headings = [];
-  const headingRegex = /<h([1-3])\b[^>]*>([\s\S]*?)<\/h\1>/gi;
+  const headingRegex = /<h([1-4])\b[^>]*>([\s\S]*?)<\/h\1>/gi;
   let match;
   while ((match = headingRegex.exec(html)) !== null) {
     const clean = sanitizeExtractionText(match[2], 200);
@@ -236,6 +236,26 @@ export function extractProducts(html, schemaBlocks = [], baseUrl = '') {
           price: bodyPrices[0].trim(),
           description: extractSummary(html) || undefined,
         });
+      }
+    }
+  }
+
+  if (products.length < 5) {
+    const featureBlockRegex = /<h([3-5])\b[^>]*>([\s\S]*?)<\/h\1>(?:[\s\S]{0,400}?<p\b[^>]*>([\s\S]*?)<\/p>)?/gi;
+    let fbMatch;
+    while ((fbMatch = featureBlockRegex.exec(html)) !== null) {
+      const hText = sanitizeExtractionText(fbMatch[2], 120);
+      const pText = fbMatch[3] ? sanitizeExtractionText(fbMatch[3], 250) : '';
+      if (hText && hText.length > 5 && hText.length < 80 && !seenNames.has(hText.toLowerCase())) {
+        if (!/about|contact|shipping|returns|why shop|guaranteed|catalog|dispatch|prices|explore|reviews|all rights|cookies|privacy/i.test(hText)) {
+          if (/(?:Headphones|Power Bank|TV|Earbuds|Watch|Purifier|Blender|Vacuum|Scale|Flask|Charger|Speaker|Camera|Phone|Laptop)/i.test(hText)) {
+            seenNames.add(hText.toLowerCase());
+            products.push({
+              name: hText,
+              description: pText || undefined,
+            });
+          }
+        }
       }
     }
   }

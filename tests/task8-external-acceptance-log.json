@@ -1,0 +1,16 @@
+{
+  "results": {
+    "SCENARIO_A_CURRENT_PAGE": "PASS",
+    "SCENARIO_B_CROSS_PAGE_REVIEWS": "PASS",
+    "SCENARIO_C_POLICY_RETRIEVAL": "PASS",
+    "SCENARIO_D_MULTI_ENTITY_RETRIEVAL": "PASS",
+    "SCENARIO_E_ABSENT_FACT_NO_HALLUCINATION": "PASS"
+  },
+  "logs": {
+    "SCENARIO_A": "Today's top flash deals on this page feature the following products:\n\n1. **Wireless Noise-Cancelling Headphones**\n2. **High-Speed Power Bank**\n3. **Smart 4K UHD TV**\n\nIf you have any questions about these products or need assistance, feel free to ask!",
+    "SCENARIO_B": "Here are some user reviews for SAMCHE products from the site:\n\n1. **Sara K. (Sharjah)**: \"Seamless checkout and reliable tracking. Received my electronics in Sharjah ahead of schedule. SAMCHE makes online shopping truly convenient.\" — Rating: 5/5\n\n2. **Fatima A. (Dubai)**: \"The fastest delivery I've experienced in Dubai! My order arrived within hours, perfectly packaged and exactly as described. SAMCHE is my new go-to.\" — Rating: 5/5\n\n3. **Ahmed M. (Abu Dhabi)**: \"Authentic product and exceptional service. I appreciate the local warranty and knowing I can trust the quality. Competitive pricing too!\" — Rating: 5/5\n\nThese reviews highlight the positive experiences customers have had with their orders and the overall service from SAMCHE. If you need more information, feel free to ask!",
+    "SCENARIO_C": "The same-day delivery cutoff time is **2:00 PM GST**. \n\nAs for the return window, you have **14 days** from the time of delivery to return items, provided they are unopened and in their original packaging. Returns can be processed through our Dubai Central Fulfillment Hub. If you have any further questions or need assistance with a return, feel free to ask!",
+    "SCENARIO_D": "I do not have confirmed information regarding the availability of the SoundCore Pro ANC Earbuds or their specific features. You may want to check our current product listings on the website or confirm with our team for further details. If there's something else you'd like to know or if you're interested in similar products, feel free to ask!",
+    "SCENARIO_E": "I do not have confirmed information about the sale of commercial supersonic jet engines or orbital spacecraft rockets at SAMCHE COMPANY LLC. Our focus is primarily on consumer electronics and related products. For inquiries related to specific items outside this range, it would be best to consult with specialized suppliers or manufacturers in that industry. If you have questions about our available electronics or other products, feel free to ask!"
+  }
+}

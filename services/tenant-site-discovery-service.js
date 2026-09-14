@@ -76,7 +76,7 @@ export async function discoverSitemapUrls(rootUrl, { fetchImpl = null } = {}) {
 
   // 1. Check robots.txt for Sitemap directive
   try {
-    const robotsRes = await safeFetchUrl(`${baseOrigin}/robots.txt`, { fetchImpl, maxSizeBytes: 32768, timeoutMs: 4000 });
+    const robotsRes = await safeFetchUrl(`${baseOrigin}/robots.txt`, { fetchImpl, maxSizeBytes: 32768, timeoutMs: 4000, allowXmlOrText: true });
     if (robotsRes && robotsRes.html) {
       const sitemapMatches = robotsRes.html.match(/^Sitemap:\s*(\S+)/gim) || [];
       for (const line of sitemapMatches) {
@@ -98,7 +98,7 @@ export async function discoverSitemapUrls(rootUrl, { fetchImpl = null } = {}) {
     visitedSitemaps.add(sitemapUrl);
 
     try {
-      const res = await safeFetchUrl(sitemapUrl, { fetchImpl, maxSizeBytes: 262144, timeoutMs: 5000 });
+      const res = await safeFetchUrl(sitemapUrl, { fetchImpl, maxSizeBytes: 262144, timeoutMs: 5000, allowXmlOrText: true });
       if (res && res.html) {
         const { pageUrls, sitemapUrls } = parseSitemapXmlUrls(res.html, baseHostname);
         for (const u of pageUrls) {
@@ -137,7 +137,7 @@ export async function crawlInternalLinks(seedUrl, { fetchImpl = null, maxPages =
     visited.add(currentUrl);
 
     try {
-      const res = await safeFetchUrl(currentUrl, { fetchImpl, maxSizeBytes: 262144, timeoutMs: 5000 });
+      const res = await safeFetchUrl(currentUrl, { fetchImpl, maxSizeBytes: 262144, timeoutMs: 5000, allowXmlOrText: true });
       if (res && res.html) {
         const links = extractInternalLinks(res.html, currentUrl);
         for (const link of links) {
@@ -216,7 +216,7 @@ export async function discoverAndIndexTenantSite({
 
   for (const pageUrl of boundedUrls) {
     try {
-      const res = await safeFetchUrl(pageUrl, { fetchImpl, maxSizeBytes: 300000, timeoutMs: 6000 });
+      const res = await safeFetchUrl(pageUrl, { fetchImpl, maxSizeBytes: 300000, timeoutMs: 6000, allowXmlOrText: true });
       if (res && res.html) {
         const intelligence = extractTenantPageIntelligence(res.html, pageUrl);
         const saved = await upsertTenantSitePage({

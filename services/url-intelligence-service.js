@@ -498,6 +498,7 @@ export async function safeFetchUrl(urlString, {
   maxRemoteImageBytes = URL_INTELLIGENCE_LIMITS.MAX_REMOTE_IMAGE_BYTES,
   fetchImpl = null,
   lookupImpl = dns.lookup,
+  allowXmlOrText = false,
 } = {}) {
   let currentUrl = urlString;
   const clientFetch = fetchImpl || fetch;
@@ -607,8 +608,16 @@ export async function safeFetchUrl(urlString, {
         };
       }
 
-      // 2. HTML Page Handling
-      if (isHtmlContentType(contentType)) {
+      const isXmlOrText = allowXmlOrText && (
+        contentType === 'application/xml' ||
+        contentType === 'text/xml' ||
+        contentType === 'text/plain' ||
+        contentType.endsWith('/xml') ||
+        contentType.endsWith('+xml')
+      );
+
+      // 2. HTML, XML, or Plain Text Page Handling
+      if (isHtmlContentType(contentType) || isXmlOrText) {
         let text;
         try {
           text = await res.text();
@@ -621,7 +630,7 @@ export async function safeFetchUrl(urlString, {
 
         // Generic redirect and interstitial unwrapper:
         // Follows meta-refresh, query-param targets, script redirects, interstitial notice links, and canonical redirects
-        if (redirectCount < maxRedirects) {
+        if (redirectCount < maxRedirects && !isXmlOrText) {
           const redirectCandidate = extractMetaRefreshUrl(text)
             || extractEmbeddedQueryRedirectUrl(currentUrl, text)
             || (text.length < 8000 ? extractScriptRedirectUrl(text) : null)
@@ -651,7 +660,7 @@ export async function safeFetchUrl(urlString, {
 
         const boundedHtml = text.slice(0, maxSizeBytes);
         return {
-          resourceType: 'HTML_PAGE',
+          resourceType: isXmlOrText ? (contentType.includes('xml') ? 'XML_DOCUMENT' : 'PLAIN_TEXT') : 'HTML_PAGE',
           finalUrl: currentUrl,
           status: res.status,
           contentType,

@@ -86,9 +86,14 @@ async function main() {
   console.log('================================================================');
   console.log(`Target Demo Site: ${DEMO_ORIGIN}\n`);
 
-  const browser = await BrowserCdp.launch({ headless: true });
-  await browser.send('Network.enable');
-  await browser.setViewport({ width: 1440, height: 900 });
+  let browser = null;
+  try {
+    browser = await BrowserCdp.launch({ headless: true });
+    await browser.send('Network.enable');
+    await browser.setViewport({ width: 1440, height: 900 });
+  } catch (launchErr) {
+    console.warn('[BROWSER_LAUNCH_WARN] Headless CDP unavailable:', launchErr?.message || launchErr);
+  }
 
   const results = {
     SCENARIO_A_CURRENT_PAGE: 'FAIL',
@@ -201,7 +206,9 @@ async function main() {
   } catch (err) {
     console.error('Acceptance suite run error:', err);
   } finally {
-    await browser.close();
+    if (browser) {
+      await browser.close().catch(() => {});
+    }
   }
 
   console.log('================================================================');
