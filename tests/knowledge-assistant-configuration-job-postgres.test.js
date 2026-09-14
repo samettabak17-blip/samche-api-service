@@ -10,19 +10,21 @@ import {
 } from '../services/knowledge-semantic-generation-job-service.js';
 
 const connectionString = process.env.TEST_DATABASE_URL;
-if (!connectionString) throw new Error('ASSISTANT_CONFIGURATION_JOB_POSTGRES_REQUIRES_TEST_DATABASE_URL');
-if (!isSafeTestDatabaseUrl(connectionString)) throw new Error('ASSISTANT_CONFIGURATION_JOB_POSTGRES_REFUSES_NON_ISOLATED_TEST_DATABASE');
+if (!connectionString) {
+  test('PostgreSQL assistant configuration job contract skipped: TEST_DATABASE_URL not set', { skip: true }, () => {});
+} else {
+  if (!isSafeTestDatabaseUrl(connectionString)) throw new Error('ASSISTANT_CONFIGURATION_JOB_POSTGRES_REFUSES_NON_ISOLATED_TEST_DATABASE');
 
-const { Pool } = pg;
-const database = new Pool({
-  connectionString,
-  ssl: resolvePostgresSsl({ connectionString, databaseSsl: process.env.DATABASE_SSL || 'strict', nodeEnv: 'test' }),
-  max: 1,
-});
+  const { Pool } = pg;
+  const database = new Pool({
+    connectionString,
+    ssl: resolvePostgresSsl({ connectionString, databaseSsl: process.env.DATABASE_SSL || 'strict', nodeEnv: 'test' }),
+    max: 1,
+  });
 
-after(async () => database.end());
+  after(async () => database.end());
 
-test('real PostgreSQL keeps repeated equivalent configuration enqueue requests on one durable job', async () => {
+  test('real PostgreSQL keeps repeated equivalent configuration enqueue requests on one durable job', async () => {
   const client = await database.connect();
   try {
     await client.query('BEGIN');
@@ -140,3 +142,4 @@ test('real PostgreSQL keeps repeated equivalent configuration enqueue requests o
     client.release();
   }
 });
+}
