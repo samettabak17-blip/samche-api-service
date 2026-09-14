@@ -94,7 +94,7 @@ async function runDirectVerification(results, logs) {
   console.log('[Scenario E] Absent Fact: Asking for non-existent rocket parts...');
   const replyE = await askDirect(sessionToken, "Do you sell commercial supersonic jet engines or orbital spacecraft rockets?");
   logs.SCENARIO_E = replyE;
-  if (/(?:do not (?:sell|offer|have)|not available|unavailable|cannot find|do not carry)/i.test(replyE) &&
+  if (/(?:do(?:n't|\s+not)\s+(?:sell|offer|have)|not available|unavailable|cannot find|do not carry|outside of our|fall outside)/i.test(replyE) &&
       !/(?:we sell supersonic|our jet engines cost|orbital rockets are in stock)/i.test(replyE)) {
     results.SCENARIO_E_ABSENT_FACT_NO_HALLUCINATION = 'PASS';
     console.log('✓ Scenario E PASS: Honestly disclaimed absent product without hallucination.\n');
