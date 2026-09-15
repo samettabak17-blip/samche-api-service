@@ -6,9 +6,11 @@ const HUMAN_SUPPORT_PATTERNS = [
   /(?:^|\s)(?:live\s+support|live\s+agent|human\s+support)(?:\s|$)/iu,
   /(?:^|\s)customer\s+support(?:\s|$)/iu,
   /(?:^|\s)(?:speak|talk)\s+to\s+(?:a\s+)?(?:human|agent|someone)(?:\s|$)/iu,
+  /(?:^|\s)(?:want|need|give\s+me|get)\s+(?:a\s+)?(?:human|live\s+agent|agent|representative|someone)(?:\s|$)/iu,
+  /(?:^|\s)talk\s+to\s+(?:a\s+)?human(?:\s|$)/iu,
   /(?:^|\s)connect\s+me\s+to\s+(?:an?\s+)?(?:human|agent|someone)(?:\s|$)/iu,
   /(?:^|\s)(?:bir\s+)?insanla\s+(?:görüşmek|gorusmek|konuşmak|konusmak)(?:\s|$)/iu,
-  /(?:^|\s)(?:دعم\s+مباشر|موظف|ممثل\s+بشري)(?:\s|$)/iu,
+  /(?:^|\s)(?:دعم\s+مباشر|موظف|ممثل\s+بشري|أريد\s+(?:التحدث\s+مع\s+)?(?:إنسان|شخص|موظف|ممثل)|تحدث\s+مع\s+(?:إنسان|موظف)|خدمة\s+العملاء)(?:\s|$)/iu,
   /^\/(?:w|n)$/iu,
 ];
 

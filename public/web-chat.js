@@ -465,6 +465,8 @@
   var proactiveState = {
     sessionToken: null,
     currentEntityId: null,
+    currentEntityName: null,
+    previousEntityName: null,
     lastAcknowledgedEntityId: null,
     acknowledgedEntityIds: {},
     isContextualOpeningInProgress: false,
@@ -1135,9 +1137,12 @@
     '.samche-msg-user { align-self: flex-end; background: var(--chat-primary, #2563EB); color: var(--chat-primary-foreground, #FFFFFF) !important; padding: 10px 14px; border-radius: 16px 16px 4px 16px; box-shadow: 0 4px 14px -3px var(--chat-glow, rgba(37,99,235,0.3)); font-weight: 500; }',
     '.samche-msg-bot { align-self: flex-start; background: var(--chat-bot-bubble-bg, rgba(255,255,255,0.07)); color: var(--chat-text, #F8FAFC) !important; border: 1px solid var(--chat-bot-bubble-border, var(--chat-border, rgba(255,255,255,0.08))); padding: 12px 16px; border-radius: 16px 16px 16px 4px; }',
     '.samche-msg-bot a { color: var(--chat-accent, #60A5FA); text-decoration: underline; }',
-    '.samche-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; border-top: 1px solid var(--chat-border, rgba(255,255,255,0.06)); background: rgba(0,0,0,0.1); max-height: 90px; overflow-y: auto; flex-shrink: 0; }',
-    '.samche-chip { font-size: 12px; padding: 6px 12px; border-radius: 9999px; background: rgba(255,255,255,0.08); color: var(--chat-text, #F8FAFC); border: 1px solid var(--chat-border, rgba(255,255,255,0.12)); cursor: pointer; transition: background .15s ease, transform .15s ease; outline: none; white-space: nowrap; }',
-    '.samche-chip:hover { background: rgba(255,255,255,0.15); transform: translateY(-1px); }',
+    '.samche-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 14px; border-top: 1px solid var(--chat-border, rgba(255,255,255,0.06)); background: rgba(0,0,0,0.08); max-height: 76px; max-width: 100%; box-sizing: border-box; overflow-y: auto; overflow-x: hidden; flex-shrink: 0; -webkit-overflow-scrolling: touch; }',
+    '.samche-chips::-webkit-scrollbar { width: 4px; height: 4px; }',
+    '.samche-chips::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 4px; }',
+    '.samche-chip { font-family: inherit; font-size: 12px; line-height: 1.3; padding: 5px 11px; border-radius: 9999px; background: rgba(255,255,255,0.07); color: var(--chat-text, #F8FAFC); border: 1px solid var(--chat-border, rgba(255,255,255,0.12)); cursor: pointer; transition: background .15s ease, border-color .15s ease, transform .15s ease; outline: none; white-space: nowrap; max-width: 100%; text-overflow: ellipsis; overflow: hidden; box-sizing: border-box; text-align: left; }',
+    '.samche-chip:hover, .samche-chip:focus-visible { background: rgba(255,255,255,0.15); border-color: var(--chat-border, rgba(255,255,255,0.25)); transform: translateY(-1px); }',
+    '.samche-chip:active { transform: translateY(0); }',
     '.samche-composer { padding: 14px 16px; border-top: 1px solid var(--chat-border, rgba(255,255,255,0.08)); background: rgba(0,0,0,0.15); display: flex; align-items: flex-end; gap: 10px; flex-shrink: 0; }',
     '.samche-composer-input { flex: 1; background: var(--chat-input-bg, rgba(255,255,255,0.06)); border: 1px solid var(--chat-input-border, rgba(255,255,255,0.14)); border-radius: 12px; color: var(--chat-text, #F8FAFC) !important; padding: 10px 14px; font-size: 14px; line-height: 1.4; resize: none; max-height: 110px; min-height: 42px; outline: none; }',
     '.samche-composer-input:focus { border-color: var(--chat-accent, #60A5FA); }',
@@ -1167,6 +1172,8 @@
     '@media (max-width: 340px) { .samche-launcher-label { display: none !important; } .samche-launcher { width: 48px !important; height: 48px !important; min-width: 48px !important; min-height: 48px !important; max-width: 48px !important; max-height: 48px !important; border-radius: 50% !important; padding: 0 !important; } }',
     '@media (max-height: 500px) and (orientation: landscape) { .samche-panel { bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important; right: calc(16px + env(safe-area-inset-right, 0px)) !important; left: auto !important; top: auto !important; width: min(380px, calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))) !important; max-width: 380px !important; height: calc(100vh - 20px) !important; height: calc(var(--samche-vv-height, 100dvh) - 20px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) !important; max-height: calc(var(--samche-vv-height, 100dvh) - 20px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) !important; border-radius: 16px !important; } .samche-pos-left .samche-panel { right: auto !important; left: calc(16px + env(safe-area-inset-left, 0px)) !important; } .samche-panel.samche-open { position: fixed !important; inset: auto !important; bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important; right: calc(16px + env(safe-area-inset-right, 0px)) !important; width: min(380px, calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))) !important; max-width: 380px !important; height: calc(100vh - 20px) !important; height: calc(var(--samche-vv-height, 100dvh) - 20px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) !important; max-height: calc(var(--samche-vv-height, 100dvh) - 20px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) !important; border-radius: 16px !important; border: 1.5px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.45)) !important; } .samche-pos-left .samche-panel.samche-open { right: auto !important; left: calc(16px + env(safe-area-inset-left, 0px)) !important; } }',
     '.samche-panel[dir="rtl"], .samche-wrap[dir="rtl"] { direction: rtl; text-align: right; }',
+    '.samche-panel[dir="rtl"] .samche-chips { direction: rtl; }',
+    '.samche-panel[dir="rtl"] .samche-chip { direction: rtl; text-align: right; }',
     '.samche-panel[dir="rtl"] .samche-msg-user { align-self: flex-start; border-radius: 16px 16px 16px 4px; }',
     '.samche-panel[dir="rtl"] .samche-msg-bot { align-self: flex-end; border-radius: 16px 16px 4px 16px; }',
     '.samche-panel[dir="rtl"] .samche-composer-input { text-align: right; }',
@@ -1248,6 +1255,74 @@
     var isNonDiscrete = /^(?:PAGE|GENERIC_PAGE|WEBSITE|WEBPAGE|CATALOG|CATALOGUE|HOME|HOMEPAGE|LANDING|SEARCH|CATEGORY|CATEGORIES|COLLECTION|COLLECTIONS|ABOUT|SECURITY|CONTACT|TERMS|PRIVACY|FAQ|PRODUCT_LIST|ITEM_LIST)/i.test(rawType)
       || /^(?:catalog|home|pricing|security|about|website|webpage)/i.test(ctx.page_type || '');
     return !isNonDiscrete && Boolean(ctx.entity_id);
+  }
+
+  function generateClientQuickQuestions(ctx, prevEntityName, lang) {
+    if (!ctx || !isDiscreteContext(ctx)) return [];
+    var l = (lang || 'en').toLowerCase();
+    var isTr = l.indexOf('tr') === 0;
+    var isAr = l.indexOf('ar') === 0;
+    var rawType = String(ctx.entity_type || '').toUpperCase();
+    var isService = /^(?:SERVICE|CONSULTING|MEMBERSHIP|PLAN|PACKAGE)/i.test(rawType);
+    var isProperty = /^(?:PROPERTY|PROJECT|REAL_ESTATE|APARTMENT|VILLA)/i.test(rawType);
+    var isVehicle = /^(?:VEHICLE|CAR|AUTOMOBILE|MOTORCYCLE)/i.test(rawType);
+    var isCourse = /^(?:COURSE|CLASS|WORKSHOP|PROGRAM|TRAINING)/i.test(rawType);
+    var isSoftware = /^(?:SOFTWARE|APP|APPLICATION|SAAS)/i.test(rawType);
+
+    var chips = [];
+
+    // 1. Core features / Overview
+    if (isService) {
+      chips.push(isTr ? 'Bu hizmet neleri kapsıyor?' : (isAr ? 'ماذا تشمل هذه الخدمة؟' : 'What does this service include?'));
+    } else if (isProperty) {
+      chips.push(isTr ? 'Proje özellikleri ve olanaklar nelerdir?' : (isAr ? 'ما هي الميزات والمرافق الرئيسية؟' : 'What are the key features and amenities?'));
+    } else if (isVehicle) {
+      chips.push(isTr ? 'Araç özellikleri ve donanımı nedir?' : (isAr ? 'ما هي مواصفات المركبة الرئيسية؟' : 'What are the vehicle specifications?'));
+    } else if (isCourse) {
+      chips.push(isTr ? 'Eğitim müfredatı neleri içeriyor?' : (isAr ? 'ماذا يشمل المنهج الدراسي؟' : 'What does the curriculum cover?'));
+    } else if (isSoftware) {
+      chips.push(isTr ? 'Temel özellikleri ve yetenekleri neler?' : (isAr ? 'ما هي الميزات والقدرات الأساسية؟' : 'What are the core features?'));
+    } else {
+      chips.push(isTr ? 'Öne çıkan özellikleri neler?' : (isAr ? 'ما هي الميزات الرئيسية؟' : 'What are the key features?'));
+    }
+
+    // 2. Comparison
+    if (prevEntityName) {
+      var pClean = String(prevEntityName).slice(0, 24);
+      chips.push(isTr ? ('Bunu ' + pClean + ' ile karşılaştır') : (isAr ? ('كيف يقارن بـ ' + pClean + '؟') : ('How does it compare to ' + pClean + '?')));
+    } else {
+      chips.push(isTr ? 'Benzer modellerle farkı nedir?' : (isAr ? 'كيف يقارن بالخيارات الأخرى؟' : 'How does it compare to alternatives?'));
+    }
+
+    // 3. Operational / Delivery / Getting started
+    if (isService) {
+      chips.push(isTr ? 'Nasıl başlayabilirim?' : (isAr ? 'كيف يمكنني البدء؟' : 'How can I get started?'));
+    } else if (isProperty) {
+      chips.push(isTr ? 'Kat planları ve fiyat detayları neler?' : (isAr ? 'ما هي المخططات والأسعار المتاحة؟' : 'What are the floor plans and pricing?'));
+    } else if (isVehicle) {
+      chips.push(isTr ? 'Fiyat ve finansman seçenekleri neler?' : (isAr ? 'ما هي خيارات السعر والتمويل؟' : 'What are the pricing and financing options?'));
+    } else if (isCourse) {
+      chips.push(isTr ? 'Ders saatleri ve süre bilgisi nedir?' : (isAr ? 'ما هي المواعيد ومدة الدورة؟' : 'What is the schedule and duration?'));
+    } else if (isSoftware) {
+      chips.push(isTr ? 'Hangi entegrasyonları destekliyor?' : (isAr ? 'ما هي عمليات التكامل المدعومة؟' : 'What integrations are supported?'));
+    } else {
+      chips.push(isTr ? 'Teslimat ve kargo seçenekleri neler?' : (isAr ? 'ما هي خيارات التوصيل والشحن؟' : 'What are the delivery options?'));
+    }
+
+    // 4. Policy / Warranty / Trial
+    if (isProperty) {
+      chips.push(isTr ? 'Ödeme planı ve teslim tarihi nedir?' : (isAr ? 'ما هي خطة الدفع وتاريخ التسليم؟' : 'What is the payment plan and handover date?'));
+    } else if (isSoftware) {
+      chips.push(isTr ? 'Ücretsiz deneme sürümü var mı?' : (isAr ? 'هل تتوفر نسخة تجريبية مجانية؟' : 'Is there a free trial?'));
+    } else if (isVehicle) {
+      chips.push(isTr ? 'Test sürüşü randevusu alabilir miyim?' : (isAr ? 'هل يمكنني حجز تجربة قيادة؟' : 'Can I schedule a test drive?'));
+    } else if (isCourse) {
+      chips.push(isTr ? 'Ön koşul veya sertifika veriliyor mu?' : (isAr ? 'هل توجد متطلبات مسبقة أو شهادة؟' : 'Are there prerequisites or certification?'));
+    } else {
+      chips.push(isTr ? 'Garanti ve iade koşulları nedir?' : (isAr ? 'ما هي سياسة الضمان والإرجاع؟' : 'What is the warranty and return policy?'));
+    }
+
+    return chips.slice(0, 4);
   }
 
   var SamcheCanonicalWidget = {
@@ -1664,9 +1739,12 @@
           var resetTs = SamcheChatPersistence.recordConversationReset(widgetKey);
           lastKnownResetTime = parseInt(resetTs, 10) || Date.now();
 
-          // 6. Context badge remains current entity badge
+          // 6. Context badge remains current entity badge & suggestions preserved/regenerated
           if (currentCtx && currentCtx.entity_name && isDiscreteContext(currentCtx)) {
             setContextBadge(dict.browsingPrefix + currentCtx.entity_name);
+            setChips(generateClientQuickQuestions(currentCtx, null, currentLang));
+          } else {
+            setChips([]);
           }
 
           // 7. Focus textarea
@@ -2169,7 +2247,17 @@
                 'X-Samche-Web-Chat-Session': sessionToken,
               },
               body: JSON.stringify({ page_context: initialCtx }),
-            }).catch(function() {});
+            })
+            .then(function(res) { return res.json(); })
+            .then(function(respData) {
+              if (respData && respData.quick_questions && respData.quick_questions.length > 0) {
+                setChips(respData.quick_questions);
+              }
+              if (respData && respData.proactive_engagement) {
+                handleProactiveResult(respData);
+              }
+            })
+            .catch(function() {});
           }
 
           // Setup bounded dynamic recapture for client-rendered SPA / Nuxt / React hydration
@@ -2184,6 +2272,7 @@
             var recEntId = isDisc && ctx.entity_id ? String(ctx.entity_id) : null;
             if (recEntId && !proactiveState.currentEntityId) {
               proactiveState.currentEntityId = recEntId;
+              proactiveState.currentEntityName = ctx.entity_name || null;
               proactiveState.entityDwellStartedAt = Date.now();
               proactiveState.entityDwellStartPerf = (typeof performance !== 'undefined') ? performance.now() : Date.now();
               if (data.behavior && data.behavior.proactive_enabled !== false && !proactiveState.acknowledgedEntityIds[recEntId]) {
@@ -2192,6 +2281,7 @@
               if (ctx.entity_name) {
                 setContextBadge((I18N[currentLang] || I18N.tr).browsingPrefix + ctx.entity_name);
               }
+              setChips(generateClientQuickQuestions(ctx, proactiveState.previousEntityName, currentLang));
             }
             // Preserve ongoing dwell if recEntId matches existing currentEntityId (MutationObserver DOM update != navigation)
 
@@ -2202,7 +2292,17 @@
                 'X-Samche-Web-Chat-Session': sessionToken,
               },
               body: JSON.stringify({ page_context: ctx }),
-            }).catch(function() {});
+            })
+            .then(function(res) { return res.json(); })
+            .then(function(respData) {
+              if (respData && respData.quick_questions && respData.quick_questions.length > 0) {
+                setChips(respData.quick_questions);
+              }
+              if (respData && respData.proactive_engagement) {
+                handleProactiveResult(respData);
+              }
+            })
+            .catch(function() {});
           }
 
           function scheduleDynamicRecapture() {
@@ -2328,10 +2428,12 @@
         var initCtx = capturePageContext();
         if (initCtx && isDiscreteContext(initCtx) && initCtx.entity_id) {
           proactiveState.currentEntityId = String(initCtx.entity_id);
+          proactiveState.currentEntityName = initCtx.entity_name || null;
           proactiveState.entityDwellStartedAt = Date.now();
           proactiveState.entityDwellStartPerf = (typeof performance !== 'undefined') ? performance.now() : Date.now();
         } else {
           proactiveState.currentEntityId = null;
+          proactiveState.currentEntityName = null;
           proactiveState.entityDwellStartedAt = null;
           proactiveState.entityDwellStartPerf = null;
         }
@@ -2347,6 +2449,14 @@
         }
         if (initialBadge) {
           setContextBadge(initialBadge);
+        }
+
+        if (data.quick_questions && Array.isArray(data.quick_questions) && data.quick_questions.length > 0) {
+          setChips(data.quick_questions);
+        } else if (initCtx && isDiscreteContext(initCtx)) {
+          setChips(generateClientQuickQuestions(initCtx, null, currentLang));
+        } else {
+          setChips([]);
         }
 
         var engagementState = (data.browsing_state && data.browsing_state.engagement_state) || {};
@@ -2447,6 +2557,9 @@
         }
 
         if (entityChanged) {
+          setChips([]);
+          proactiveState.previousEntityName = proactiveState.currentEntityName;
+          proactiveState.currentEntityName = (isDiscrete && newContext) ? (newContext.entity_name || null) : null;
           proactiveState.currentEntityId = newEntityId;
           clearTimers();
           proactiveState.dwellSeconds = 0;
@@ -2458,10 +2571,13 @@
             if (!proactiveState.acknowledgedEntityIds[newEntityId]) {
               startDwellTracker(sessionToken, proactiveState.dwellThresholdSeconds);
             }
+            setChips(generateClientQuickQuestions(newContext, proactiveState.previousEntityName, currentLang));
           } else {
             proactiveState.entityDwellStartedAt = null;
             proactiveState.entityDwellStartPerf = null;
           }
+        } else if (!isDiscrete) {
+          setChips([]);
         }
 
         if (sessionToken && newContext) {
@@ -2475,6 +2591,11 @@
           })
           .then(function(res) { return res.json(); })
           .then(function(respData) {
+            if (respData && respData.quick_questions && respData.quick_questions.length > 0) {
+              setChips(respData.quick_questions);
+            } else if (!isDiscrete) {
+              setChips([]);
+            }
             if (respData && respData.proactive_engagement) {
               handleProactiveResult(respData);
             }

@@ -11,6 +11,9 @@ export const INTENT_TYPES = Object.freeze({
   SUPPORT_CURRENT_PAGE: 'SUPPORT_CURRENT_PAGE',
   SUPPORT_TROUBLESHOOTING: 'SUPPORT_TROUBLESHOOTING',
   SUPPORT_ORDER_PROCESS: 'SUPPORT_ORDER_PROCESS',
+  SUPPORT_PAYMENT_BILLING: 'SUPPORT_PAYMENT_BILLING',
+  SUPPORT_USAGE_GUIDE: 'SUPPORT_USAGE_GUIDE',
+  SUPPORT_CONTACT_INFO: 'SUPPORT_CONTACT_INFO',
   SUPPORT_PRIVATE_STATE: 'SUPPORT_PRIVATE_STATE',
   SUPPORT_ACCOUNT_ACCESS: 'SUPPORT_ACCOUNT_ACCESS',
   SUPPORT_COMPLAINT: 'SUPPORT_COMPLAINT',
@@ -33,27 +36,36 @@ export const RESOLUTION_ACTIONS = Object.freeze({
 // Semantic signal patterns across multiple industries
 const EXPLICIT_HUMAN_PATTERNS = [
   /(?:^|\s)(?:speak|talk|chat|connect)\s+(?:to|with)\s+(?:a\s+)?(?:human|live\s+agent|agent|representative|person|someone)(?:\s|$)/iu,
+  /(?:^|\s)(?:want|need|give\s+me|get)\s+(?:a\s+)?(?:human|live\s+agent|real\s+person|agent|representative|someone)(?:\s|$)/iu,
+  /(?:^|\s)talk\s+to\s+(?:a\s+)?human(?:\s|$)/iu,
   /(?:^|\s)(?:connect|transfer)\s+me\s+to\s+(?:an?\s+)?(?:human|live\s+agent|agent|representative|someone)(?:\s|$)/iu,
   /(?:^|\s)(?:live\s+support|live\s+agent|human\s+support|talk\s+to\s+a\s+live\s+person)(?:\s|$)/iu,
   /(?:^|\s)(?:canlı|canli)\s+destek(?:\s|$)/iu,
   /(?:^|\s)(?:müşteri|musteri)\s+(?:temsilcisi|hizmetleri)(?:\s|$)/iu,
   /(?:^|\s)temsilci(?:ye)?\s+(?:bağlanmak|baglanmak|aktar|görüşmek|gorusmek)(?:\s|$)/iu,
   /(?:^|\s)(?:bir\s+)?insanla\s+(?:görüşmek|gorusmek|konuşmak|konusmak)(?:\s|$)/iu,
+  /(?:^|\s)(?:دعم\s+مباشر|موظف|ممثل\s+بşري|أريد\s+(?:التحدث\s+مع\s+)?(?:إنسان|شخص|موظف|ممثل)|تحدث\s+مع\s+(?:إنسان|موظف)|خدمة\s+العملاء)(?:\s|$)/iu,
 ];
 
 const SUPPORT_ACCOUNT_PATTERN = /(?:log\s*in|sign\s*in|sign\s*up|passwords?|workspace|accounts?|credentials?|reset\s+password|verify\s+account|giriş|şifre|parola|hesap|üyelik)/i;
 
-const SUPPORT_TROUBLESHOOTING_PATTERN = /(?:troubleshoot|not\s+working|broken|malfunction|error|bug|issue|problem|defect|damage|repair|fail|crash|won['’]?t\s+(?:turn\s+on|start|pair|connect|work|charge)|reset|fix|reboot|blink|clean(?:ing)?|filter|pair(?:ing)?|çalışmıyor|calismiyor|bozuk|arızalı|arizali|hata|açılmıyor|acilmiyor|bağlanmıyor|baglanmiyor|düzelmiyor|duzelmiyor|sıfırlama|sifirlama|sorun|problem|temizle(?:me)?|fabrika\s+ayarları)/i;
+const SUPPORT_TROUBLESHOOTING_PATTERN = /(?:troubleshoot|not\s+working|broken|malfunction|error|bug|issue|problem|defect|damage|repair|fail|crash|won['’]?t\s+(?:turn\s+on|start|pair|connect|work|charge)|reset|fix|reboot|blink|\bclean(?:ing)?\s+(?:the|my)?\s*(?:filter|sensor|tray|brush|tank|unit|hepa)|filter\s+(?:light|clogged|dirty)|pair(?:ing)?\s+failed|çalışmıyor|calismiyor|bozuk|arızalı|arizali|hata|açılmıyor|acilmiyor|bağlanmıyor|baglanmiyor|düzelmiyor|duzelmiyor|sıfırlama|sifirlama|sorun|problem|fabrika\s+ayarları)/i;
 
-const SUPPORT_POLICY_PATTERN = /(?:returns?|refunds?|warranty|guarantee|shipping\s+(?:policy|fee|cutoff|time)|delivery\s+(?:time|cutoff|period)|dispatch\s+cutoff|cancellation|exchanges?|iade|değişim|degisim|garanti|teslimat\s+süresi|kargo\s+süresi)/i;
+const SUPPORT_POLICY_PATTERN = /(?:returns?|refunds?|warranty|guarantee|shipping|deliver(?:y|ies)|dispatch|cutoff|cancellations?|cancel\b|cancelling|exchanges?|iade|değişim|degisim|garanti|teslimat|kargo|iptal)/i;
+
+const SUPPORT_CONTACT_PATTERN = /(?:contact|reach\s+us|phone|call|email|address|location|fulfillment\s+(?:hub|center)|hours|operating\s+hours|helpdesk|store\s+location|iletişim|telefon|adres|merkez|saatler)/i;
 
 const SUPPORT_ORDER_PATTERN = /(?:where\s+is\s+my\s+order|track\s+(?:my\s+)?(?:order|package|shipment|parcel)|order\s+status|shipping\s+status|delivery\s+status|when\s+will\s+it\s+arrive|dispatch\s+status|sipariş(?:im)?\s+(?:nerede|durumu|ne\s+zaman)|kargom\s+nerede|takip\s+numarası|takip\s+kodu)/i;
+
+const SUPPORT_PAYMENT_PATTERN = /(?:payments?|billing|checkout|credit\s+card|card\s+declined|payment\s+failed|failed\s+to\s+pay|charge\s+issue|invoice|fatura|ödeme|kart\s+hatası|ödeme\s+yapamadım)/i;
+
+const SUPPORT_USAGE_PATTERN = /(?:how\s+(?:do|can)\s+I\s+use|how\s+to\s+(?:use|setup|install|clean|configure)|user\s+guide|manual|usage|instructions|nasıl\s+kullanılır|nasıl\s+çalışır|kurulum|temizlik)/i;
 
 const SUPPORT_PRIVATE_STATE_PATTERN = /(?:#\s*[a-z0-9_-]{3,}|(?:order|tracking|ticket|shipment|invoice|package|parcel|sipariş|kargo|takip)\s*(?:#|no\.?|id|number|numara[a-z]*|kod[a-z]*)\s*[:=]?\s*[a-z0-9_-]{2,}|(?:order|tracking|ticket|shipment|invoice|package|parcel|sipariş|kargo|takip)\s*(?:[:=]|\s)\s*[a-z0-9_-]*\d+[a-z0-9_-]*|my\s+account\s+balance|refund\s+my\s+(?:money|card|credit|payment|order)|charge\s+on\s+my\s+card|kartımdan\s+çekilen|hesap\s+bakiyem)/i;
 
 const SUPPORT_COMPLAINT_PATTERN = /(?:complaint|unhappy|dissatisfied|terrible|awful|worst|manager|escalate|unacceptable|very\s+bad|berbat|rezalet|şikayet|sikayet|memnun\s+değilim|kötü\s+hizmet)/i;
 
-const SALES_DISCOVERY_PATTERN = /(?:recommend|suggest|what\s+do\s+you\s+have|show\s+me|best\s+(?:option|product|choice)|what\s+are\s+the\s+features|specifications|specs|options|catalog|öneri|tavsiye|neler\s+var|en\s+iyi|özellikler|katalog)/i;
+const SALES_DISCOVERY_PATTERN = /(?:recommend|suggest|what\s+do\s+you\s+have|show\s+me|best\s+(?:option|product|choice)|(?:what\s+(?:are|is)\s+)?(?:the\s+)?(?:key\s+|main\s+)?features?|specifications?|specs?|capabilities|functions?|details|pricing|options|catalog|öneri|tavsiye|neler\s+var|en\s+iyi|özellikler?|katalog)/i;
 
 const SALES_COMPARISON_PATTERN = /(?:compare|difference\s+between|which\s+(?:one\s+)?is\s+better|vs\.?|versus|or\s+the\s+other|hangisi\s+daha\s+iyi|farkı\s+ne|farki\s+ne|karşılaştır|kıyasla)/i;
 
@@ -106,21 +118,34 @@ export function classifyConversationIntent({
   const isTroubleshooting = SUPPORT_TROUBLESHOOTING_PATTERN.test(text);
   const isPolicy = SUPPORT_POLICY_PATTERN.test(text);
   const isOrderProcess = SUPPORT_ORDER_PATTERN.test(text);
+  const isPayment = SUPPORT_PAYMENT_PATTERN.test(text);
+  const isUsage = SUPPORT_USAGE_PATTERN.test(text);
+  const isContact = SUPPORT_CONTACT_PATTERN.test(text);
   const isAccount = SUPPORT_ACCOUNT_PATTERN.test(text);
   const isComplaint = SUPPORT_COMPLAINT_PATTERN.test(text);
 
   if (isTroubleshooting) signals.push('SUPPORT_TROUBLESHOOTING');
   if (isPolicy) signals.push('SUPPORT_POLICY');
   if (isOrderProcess) signals.push('SUPPORT_ORDER_PROCESS');
+  if (isPayment) signals.push('SUPPORT_PAYMENT_BILLING');
+  if (isUsage) signals.push('SUPPORT_USAGE_GUIDE');
+  if (isContact) signals.push('SUPPORT_CONTACT_INFO');
   if (isAccount) signals.push('SUPPORT_ACCOUNT');
   if (isComplaint) signals.push('SUPPORT_COMPLAINT');
 
-  const isSupport = isTroubleshooting || isPolicy || isOrderProcess || isAccount || isComplaint || isPrivateState;
+  const isSupport = isTroubleshooting || isPolicy || isOrderProcess || isPayment || isUsage || isContact || isAccount || isComplaint || isPrivateState;
 
   // 4. Detect Sales Signals
   const isDiscovery = SALES_DISCOVERY_PATTERN.test(text);
   const isComparison = SALES_COMPARISON_PATTERN.test(text);
-  const isPurchase = SALES_PURCHASE_PATTERN.test(text);
+  let isPurchase = SALES_PURCHASE_PATTERN.test(text);
+  const isPastPurchaseReference = /(?:satın\s+aldığım|satın\s+aldigim|aldığım\s+ürün|i\s+bought|i\s+purchased|item\s+i\s+bought|already\s+bought)/i.test(text);
+  if (isPastPurchaseReference && (isTroubleshooting || isPolicy || isOrderProcess || isComplaint)) {
+    const hasActiveCommercialTerms = /(?:price|cost|discount|deal|offer|coupon|fiyat|ücret|indirim|kupon)/i.test(text);
+    if (!hasActiveCommercialTerms) {
+      isPurchase = false;
+    }
+  }
 
   if (isDiscovery) signals.push('SALES_DISCOVERY');
   if (isComparison) signals.push('SALES_COMPARISON');
@@ -138,7 +163,7 @@ export function classifyConversationIntent({
     if (pagePath.includes('return') || pagePath.includes('contact') || pagePath.includes('support') || pagePath.includes('help')) {
       isCurrentPageSupport = true;
       signals.push('CURRENT_PAGE_SUPPORT_PAGE_CORRELATION');
-    } else if (isDiscreteEntity(currentEntity) && (isTroubleshooting || isPolicy)) {
+    } else if (isDiscreteEntity(currentEntity) && (isTroubleshooting || isPolicy || isUsage)) {
       isCurrentPageSupport = true;
       signals.push('CURRENT_PAGE_ENTITY_SUPPORT_CORRELATION');
     }
@@ -153,12 +178,21 @@ export function classifyConversationIntent({
   } else if (isPrivateState) {
     primaryIntent = INTENT_TYPES.SUPPORT_PRIVATE_STATE;
     if (isSales) secondaryIntents.push(INTENT_TYPES.SALES_DISCOVERY);
+  } else if (isPayment) {
+    primaryIntent = INTENT_TYPES.SUPPORT_PAYMENT_BILLING;
+    if (isSales) secondaryIntents.push(INTENT_TYPES.SALES_PURCHASE);
   } else if (isCurrentPageSupport) {
     primaryIntent = INTENT_TYPES.SUPPORT_CURRENT_PAGE;
     if (isSales) secondaryIntents.push(INTENT_TYPES.SALES_DISCOVERY);
   } else if (isTroubleshooting) {
     primaryIntent = INTENT_TYPES.SUPPORT_TROUBLESHOOTING;
     if (isSales) secondaryIntents.push(isComparison ? INTENT_TYPES.SALES_COMPARISON : INTENT_TYPES.SALES_DISCOVERY);
+  } else if (isContact) {
+    primaryIntent = INTENT_TYPES.SUPPORT_CONTACT_INFO;
+    if (isSales) secondaryIntents.push(INTENT_TYPES.SALES_DISCOVERY);
+  } else if (isUsage) {
+    primaryIntent = INTENT_TYPES.SUPPORT_USAGE_GUIDE;
+    if (isSales) secondaryIntents.push(INTENT_TYPES.SALES_DISCOVERY);
   } else if (isPolicy) {
     primaryIntent = INTENT_TYPES.SUPPORT_INFORMATIONAL;
     if (isSales) secondaryIntents.push(INTENT_TYPES.SALES_PURCHASE);
@@ -255,25 +289,47 @@ export function evaluateSupportResolutionPlan({
     };
   }
 
-  // 4. Resolvable Support Request (Informational, Current Page, Troubleshooting, Policy)
+  // 4. Resolvable Support Request (Informational, Current Page, Troubleshooting, Policy, Payment, Usage)
   // AI MUST resolve directly. NO handoff!
   if (intent.isSupport) {
     const isCurrentPage = intent.primaryIntent === INTENT_TYPES.SUPPORT_CURRENT_PAGE;
     const isTroubleshoot = intent.primaryIntent === INTENT_TYPES.SUPPORT_TROUBLESHOOTING;
+    const isPayment = intent.primaryIntent === INTENT_TYPES.SUPPORT_PAYMENT_BILLING;
+    const isUsage = intent.primaryIntent === INTENT_TYPES.SUPPORT_USAGE_GUIDE;
+    const isContact = intent.primaryIntent === INTENT_TYPES.SUPPORT_CONTACT_INFO;
+    const isOrderProcess = intent.primaryIntent === INTENT_TYPES.SUPPORT_ORDER_PROCESS;
+
+    let guidance = 'Provide the verified policy, procedure, or timeframe directly using current page context, site-wide intelligence, and approved business profile facts.';
+    let stage = 'RESOLVE';
+
+    if (isTroubleshoot) {
+      stage = 'DIAGNOSE_AND_RESOLVE';
+      guidance = 'Diagnose the technical problem step-by-step and provide grounded troubleshooting steps using approved knowledge and product specifications. Do NOT deflect to customer support when instructions exist.';
+    } else if (isPayment) {
+      stage = 'RESOLVE';
+      guidance = 'Provide clear self-service payment troubleshooting steps (verifying card details, checking with issuing bank, trying alternative payment methods, checking billing address). Do NOT deflect prematurely.';
+    } else if (isUsage) {
+      stage = 'RESOLVE';
+      guidance = 'Provide clear, step-by-step instructions on how to use, configure, or clean the product based on verified specifications and approved facts.';
+    } else if (isContact) {
+      stage = 'RESOLVE';
+      guidance = 'Provide verified contact information, support channels, email, phone, operating hours, and fulfillment hub address directly from site intelligence without deflection.';
+    } else if (isOrderProcess) {
+      stage = 'RESOLVE';
+      guidance = 'Explain standard fulfillment steps, delivery timeframes, dispatch cutoffs, and how tracking links are provided via confirmation email.';
+    }
 
     return {
       action: RESOLUTION_ACTIONS.AI_FIRST_RESOLVE,
       intent: intent.primaryIntent,
-      stage: isTroubleshoot ? 'DIAGNOSE_AND_RESOLVE' : 'RESOLVE',
+      stage,
       canResolveSafely: true,
       requiresHandoff: false,
       groundingSources: isCurrentPage
-        ? ['CURRENT_PAGE_VISIBLE_FACT', 'SITE_STRUCTURED_DATA', 'APPROVED_KNOWLEDGE']
-        : ['APPROVED_KNOWLEDGE', 'ACTIVE_BUSINESS_PROFILE', 'CURRENT_PAGE_CONTEXT'],
+        ? ['CURRENT_PAGE_VISIBLE_FACT', 'SITE_STRUCTURED_DATA', 'APPROVED_KNOWLEDGE', 'RELEVANT_TENANT_SITE_INTELLIGENCE']
+        : ['APPROVED_KNOWLEDGE', 'ACTIVE_BUSINESS_PROFILE', 'CURRENT_PAGE_CONTEXT', 'RELEVANT_TENANT_SITE_INTELLIGENCE'],
       reason: 'RESOLVABLE_VIA_APPROVED_KNOWLEDGE_AND_PAGE_CONTEXT',
-      guidance: isTroubleshoot
-        ? 'Diagnose the technical problem step-by-step and provide grounded troubleshooting steps using approved knowledge and product specifications. Do NOT deflect to customer support when instructions exist.'
-        : 'Provide the verified policy, procedure, or timeframe directly using current page context and approved business profile facts.',
+      guidance,
     };
   }
 
@@ -285,9 +341,9 @@ export function evaluateSupportResolutionPlan({
       stage: 'GUIDE',
       canResolveSafely: true,
       requiresHandoff: false,
-      groundingSources: ['CURRENT_PAGE_CONTEXT', 'APPROVED_KNOWLEDGE', 'BUSINESS_PROFILE'],
+      groundingSources: ['CURRENT_PAGE_CONTEXT', 'APPROVED_KNOWLEDGE', 'BUSINESS_PROFILE', 'RELEVANT_TENANT_SITE_INTELLIGENCE'],
       reason: 'COMMERCIAL_ENGAGEMENT',
-      guidance: 'Provide expert sales guidance, product recommendations, or comparison grounded strictly in verified catalog and page context.',
+      guidance: 'Provide consultative, expert sales guidance highlighting key product features and benefits. Proactively recommend next steps, offer comparisons, and assist with ordering details.',
     };
   }
 
@@ -312,7 +368,7 @@ export function buildConversationIntelligencePromptSection(plan = null) {
 
   const lines = [
     '================================================================================',
-    'CONVERSATION INTELLIGENCE DIRECTIVE (AI-FIRST RESOLUTION CONTRACT)',
+    'CONVERSATION INTELLIGENCE DIRECTIVE (AI-FIRST RESOLUTION & SALES CONTRACT)',
     '================================================================================',
     `PRIMARY INTENT: ${plan.intent}`,
     `ACTION: ${plan.action}`,
@@ -326,9 +382,26 @@ export function buildConversationIntelligencePromptSection(plan = null) {
   }
 
   if (plan.action === RESOLUTION_ACTIONS.AI_FIRST_RESOLVE) {
-    lines.push('CRITICAL CONTRACT: Under NO circumstances should you deflect this resolvable support request with "Please contact customer support" or "Reach out to our team". Resolve it directly with verified knowledge, current page information, and diagnostic instructions.');
+    lines.push('AI-FIRST SUPPORT RESOLUTION CONTRACT:');
+    lines.push('1. Under NO circumstances should you deflect this resolvable support request with "Please contact customer support", "Visit our website", or "Reach out to our team". Resolve it directly with verified knowledge, current page information, and site-wide intelligence.');
+    lines.push('2. Provide concrete, step-by-step instructions (e.g. return process steps, packaging requirements, delivery timelines and cutoffs, cancellation procedure, account recovery steps, troubleshooting instructions).');
+    lines.push('3. Cross-page intelligence must be utilized: answer return, shipping, warranty, FAQ, or contact questions even if the customer is on a product page.');
+    lines.push('4. Conclude with a helpful follow-up to confirm resolution or offer immediate next steps.');
+  } else if (plan.action === RESOLUTION_ACTIONS.SALES_ENGAGE) {
+    lines.push('ACTIVE SALES CONSULTANT CONTRACT:');
+    lines.push('1. Do NOT behave as a passive answering machine. Provide a helpful, value-oriented response that highlights key features and real-world benefits for the customer.');
+    lines.push('2. Ground all claims strictly in verified specifications, visible attributes, and approved catalog facts.');
+    lines.push('3. Proactively offer relevant next steps: offer to compare with other items they viewed, highlight delivery or warranty advantages, ask qualifying questions, or assist them toward taking the next purchase step.');
+    lines.push('4. Conclude with a warm, open-ended question or next step.');
+  } else if (plan.action === RESOLUTION_ACTIONS.COEXISTENCE_RESOLVE) {
+    lines.push('SALES + SUPPORT DUAL RESOLUTION CONTRACT:');
+    lines.push('1. Seamlessly resolve both the support question (return, shipping, policy, troubleshooting) and the sales question (features, recommendations, comparison) in the same turn without deflection.');
+    lines.push('2. Ground both aspects in verified facts and provide clear, proactive next steps.');
   } else if (plan.action === RESOLUTION_ACTIONS.EXPLAIN_LIMITATION_AND_GUIDE) {
-    lines.push('CRITICAL CONTRACT: Do NOT invent order status, delivery progress, or tracking numbers. Clearly state the limitation in a natural tone, explain the verified standard delivery timeframes, and instruct the customer on the official next step (checking their confirmation email link or contacting support with their order ID).');
+    lines.push('CRITICAL CONTRACT (NO PRIVATE DATA FABRICATION):');
+    lines.push('1. Do NOT invent order status, delivery progress, or tracking numbers. Clearly state that live order/account databases cannot be queried directly in this chat session for security/privacy.');
+    lines.push('2. Explain the verified standard delivery timeframes and dispatch cutoffs from site policies.');
+    lines.push('3. Instruct the customer on the official next step (checking their confirmation email link or contacting support with their order ID).');
   }
 
   lines.push('================================================================================');

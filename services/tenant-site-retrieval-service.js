@@ -7,7 +7,9 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-
 
 const REVIEW_QUERY_PATTERN = /(?:reviews?|ratings?|feedback|testimonials?|what\s+do\s+(?:customers|shoppers|people|users)\s+say|what\s+are\s+the\s+user\s+reviews|customer\s+comments|yorum|değerlendirme|musteri|kullanıcı\s+yorumlar[ıi]|ne\s+diyor)/i;
 
-const POLICY_QUERY_PATTERN = /(?:returns?|refunds?|warranty|guarantee|shipping\s+(?:policy|cutoff|time)|delivery\s+(?:cutoff|time)|same-day\s+(?:dispatch|delivery)|cutoff|iade|kargo|garanti|teslimat|değişim)/i;
+const POLICY_QUERY_PATTERN = /(?:returns?|refunds?|warranty|guarantee|shipping\s+(?:policy|cutoff|time)|delivery\s+(?:cutoff|time)|same-day\s+(?:dispatch|delivery)|dispatch\s+cutoff|cutoff|cancellations?|cancel\b|cancelling|track\s+(?:my\s+)?(?:order|package|parcel)|order\s+status|kargom\s+nerede|sipariş|iade|kargo|garanti|teslimat|değişim|iptal)/i;
+
+const SUPPORT_GENERAL_QUERY_PATTERN = /(?:support|help|customer\s+care|faq|troubleshoot|account|login|signup|password|payment|checkout|pay|billing|failed|how\s+do\s+I|how\s+to\s+use|yardım|destek|ödeme|nasıl|kullanım)/i;
 
 const CONTACT_QUERY_PATTERN = /(?:contact|reach\s+us|phone|call|email|address|location|office|hub|fulfillment\s+hub|hours|operating\s+hours|helpdesk|iletişim|telefon|adres|merkez|saatler)/i;
 
@@ -39,6 +41,7 @@ export async function retrieveRelevantTenantSiteContext({
 
   const isReviewQuery = REVIEW_QUERY_PATTERN.test(userQuery);
   const isPolicyQuery = POLICY_QUERY_PATTERN.test(userQuery);
+  const isSupportGeneralQuery = SUPPORT_GENERAL_QUERY_PATTERN.test(userQuery);
   const isContactQuery = CONTACT_QUERY_PATTERN.test(userQuery);
   const isProductQuery = PRODUCT_QUERY_PATTERN.test(userQuery);
   const tokens = cleanQueryTokens(userQuery);
@@ -107,9 +110,19 @@ export async function retrieveRelevantTenantSiteContext({
     if (isPolicyQuery) {
       if (pageType === 'POLICY') score += 50;
       if (pageType === 'CONTACT') score += 25;
+      if (pageType === 'FAQ' || pageType === 'SUPPORT') score += 30;
       if (policiesArray.length > 0) score += 30;
-      if (titleLower.includes('policy') || titleLower.includes('return') || titleLower.includes('shipping') || titleLower.includes('warranty')) score += 20;
-      if (headingsLower.includes('dispatch') || headingsLower.includes('returns') || headingsLower.includes('warranty')) score += 15;
+      if (titleLower.includes('policy') || titleLower.includes('return') || titleLower.includes('shipping') || titleLower.includes('warranty') || titleLower.includes('delivery')) score += 20;
+      if (headingsLower.includes('dispatch') || headingsLower.includes('returns') || headingsLower.includes('warranty') || headingsLower.includes('delivery')) score += 15;
+    }
+
+    if (isSupportGeneralQuery) {
+      if (pageType === 'SUPPORT' || pageType === 'FAQ') score += 50;
+      if (pageType === 'POLICY' || pageType === 'CONTACT') score += 30;
+      if (Array.isArray(page.faqs) && page.faqs.length > 0) score += 30;
+      if (policiesArray.length > 0) score += 20;
+      if (titleLower.includes('faq') || titleLower.includes('help') || titleLower.includes('support') || titleLower.includes('contact')) score += 20;
+      if (headingsLower.includes('frequently asked') || headingsLower.includes('customer care') || headingsLower.includes('help')) score += 15;
     }
 
     if (isContactQuery) {
@@ -196,6 +209,18 @@ export function formatTenantSiteIntelligencePromptSection(retrievedPages = []) {
       sections.push('Verified Policies [PROVENANCE: SITE_PAGE_FACT]:');
       for (const pol of policies) {
         sections.push(`  • ${pol.title}: ${pol.text}`);
+      }
+    }
+
+    const faqs = Array.isArray(page.faqs) ? page.faqs : [];
+    if (faqs.length > 0) {
+      sections.push('Verified FAQs & Answers [PROVENANCE: SITE_PAGE_FACT]:');
+      for (const faq of faqs.slice(0, 5)) {
+        const q = faq.question || faq.q || '';
+        const a = faq.answer || faq.a || '';
+        if (q && a) {
+          sections.push(`  • Q: ${q}\n    A: ${a}`);
+        }
       }
     }
 

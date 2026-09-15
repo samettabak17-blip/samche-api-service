@@ -129,6 +129,9 @@ import {
 import {
   getTenantSiteDiscoveryState,
 } from './services/tenant-site-index-service.js';
+import {
+  generateContextualQuickQuestions,
+} from './services/contextual-quick-questions-service.js';
 
 
 dotenv.config();
@@ -2010,6 +2013,29 @@ app.post("/api/chat/bootstrap", async (req, res) => {
             webMemoryStore[verified.sessionId] = mem;
           }
 
+          let bootstrapQuickQuestions = [];
+          if (browsingState?.currentEntity) {
+            try {
+              let bPersona = null;
+              try {
+                bPersona = await resolveTenantRuntimePersona({
+                  database: pool,
+                  tenantId: integration.tenant_id,
+                  assistantId: integration.assistant_id,
+                });
+              } catch {}
+              bootstrapQuickQuestions = await generateContextualQuickQuestions({
+                tenantId: integration.tenant_id,
+                currentEntity: browsingState.currentEntity,
+                previousEntities: browsingState.previousEntities || [],
+                database: pool,
+                language: browsingState.currentPage?.language || bPersona?.configuration?.language || 'en',
+                tenantProfile: bPersona?.profile,
+                assistantConfig: bPersona?.configuration,
+              });
+            } catch {}
+          }
+
           return res.json({
             session: suppliedSession,
             resumed: true,
@@ -2020,6 +2046,7 @@ app.post("/api/chat/bootstrap", async (req, res) => {
             behavior,
             config_version: configVersion,
             assistant: publicAssistant,
+            quick_questions: bootstrapQuickQuestions,
             browsing_state: {
               current_entity: browsingState?.currentEntity || null,
               previous_entities: browsingState?.previousEntities || [],
@@ -2038,6 +2065,34 @@ app.post("/api/chat/bootstrap", async (req, res) => {
       is_greeting: true,
       id: 'greeting_' + session.sessionId,
     });
+
+    let freshQuickQuestions = [];
+    if (req.body?.page_context) {
+      try {
+        const norm = validateAndNormalizePageContext(req.body.page_context);
+        const ent = resolvePageEntity(norm);
+        if (ent && isDiscreteEntity(ent)) {
+          let bPersona = null;
+          try {
+            bPersona = await resolveTenantRuntimePersona({
+              database: pool,
+              tenantId: integration.tenant_id,
+              assistantId: integration.assistant_id,
+            });
+          } catch {}
+          freshQuickQuestions = await generateContextualQuickQuestions({
+            tenantId: integration.tenant_id,
+            currentEntity: ent,
+            previousEntities: [],
+            database: pool,
+            language: norm?.language || bPersona?.configuration?.language || 'en',
+            tenantProfile: bPersona?.profile,
+            assistantConfig: bPersona?.configuration,
+          });
+        }
+      } catch {}
+    }
+
     return res.json({
       session: session.token,
       resumed: false,
@@ -2054,6 +2109,7 @@ app.post("/api/chat/bootstrap", async (req, res) => {
       behavior,
       config_version: configVersion,
       assistant: publicAssistant,
+      quick_questions: freshQuickQuestions,
     });
   } catch (error) {
     console.error('WEB_CHAT_BOOTSTRAP_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
@@ -2288,6 +2344,16 @@ app.post("/api/chat/page-context", async (req, res) => {
       assistant_id: webChatIntegration.assistant_id,
     });
 
+    const quickQuestions = await generateContextualQuickQuestions({
+      tenantId: webChatIntegration.tenant_id,
+      currentEntity: updatedState.currentEntity,
+      previousEntities: updatedState.previousEntities,
+      database: pool,
+      language: updatedState.currentPage?.language || webChatRuntimePersona?.configuration?.language || 'en',
+      tenantProfile: webChatRuntimePersona?.profile,
+      assistantConfig: webChatRuntimePersona?.configuration,
+    });
+
     return res.json({
       status: 'ok',
       current_entity: updatedState.currentEntity ? {
@@ -2299,6 +2365,7 @@ app.post("/api/chat/page-context", async (req, res) => {
       previous_entities_count: updatedState.previousEntities.length,
       intent_state: intentEvaluation.intentState,
       intent_score: intentEvaluation.score,
+      quick_questions: quickQuestions,
       proactive_engagement: {
         should_open: Boolean(intentEvaluation.shouldAutoOpen && !isCurrentEntityAcknowledged && !existingEntityProactive),
         should_engage: Boolean(intentEvaluation.shouldProactivelyEngage && !isCurrentEntityAcknowledged && !existingEntityProactive),
