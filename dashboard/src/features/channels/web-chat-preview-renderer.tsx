@@ -302,7 +302,10 @@ export function WebChatPreviewRenderer({
   const subColor = isLightHost ? 'text-stone-600' : 'text-stone-400';
 
   const renderMobileDevice = (mode: 'closed' | 'open') => (
-    <div className={`relative mx-auto w-[360px] h-[640px] rounded-[38px] border-4 ${isLightHost ? 'border-stone-300 bg-slate-100 shadow-xl' : 'border-stone-700 bg-slate-950 shadow-2xl'} overflow-hidden flex flex-col shrink-0`}>
+    <div
+      data-testid={`preview-mobile-device-${mode}`}
+      className={`relative mx-auto w-[360px] h-[640px] rounded-[38px] border-4 ${isLightHost ? 'border-stone-300 bg-slate-100 shadow-xl' : 'border-stone-700 bg-slate-950 shadow-2xl'} overflow-hidden flex flex-col shrink-0`}
+    >
       <div className={`h-6 w-full ${isLightHost ? 'bg-slate-200/90 text-stone-600' : 'bg-black/60 text-stone-400'} flex items-center justify-between px-6 text-[10px] select-none shrink-0 z-30`}>
         <span>9:41</span>
         <div className={`h-2 w-16 ${isLightHost ? 'bg-stone-300' : 'bg-stone-800'} rounded-full`} />
@@ -345,7 +348,7 @@ export function WebChatPreviewRenderer({
         className="samche-preview-mount samche-preview-mobile absolute inset-0 w-full h-full pointer-events-none"
         style={cssVars}
       >
-        <div className="samche-wrap h-full w-full">
+        <div className="samche-wrap absolute inset-0 w-full h-full pointer-events-none">
           {mode === 'closed' && (
             <div
               className="absolute bottom-4 right-4 z-10 pointer-events-auto"
@@ -380,7 +383,7 @@ export function WebChatPreviewRenderer({
       <style>{CANONICAL_WIDGET_CSS}</style>
 
       {viewport === 'desktop' ? (
-        <div className="samche-preview-mount w-full min-h-[660px] flex items-center justify-center p-4">
+        <div data-testid="preview-desktop-surface" className="samche-preview-mount w-full min-h-[660px] flex items-center justify-center p-4">
           <div className="samche-wrap w-full flex flex-col md:flex-row items-center justify-around gap-8">
             {state === 'both' && (
               <>

@@ -161,6 +161,16 @@ test('TASK 8: Transparent logo background and border persist canonically and all
   assert.match(publicSource, /\.samche-launcher-badge\s*\{[^}]*border:\s*1\.5px solid var\(--chat-launcher-logo-border/);
   assert.match(dashboardContractSource, /\.samche-launcher-badge\s*\{[^}]*background:\s*var\(--chat-launcher-logo-bg,\s*transparent\)\s*!important/);
   assert.match(dashboardContractSource, /\.samche-launcher-badge\s*\{[^}]*border:\s*1\.5px solid var\(--chat-launcher-logo-border/);
+
+  // BUG 2: Verify header avatar CSS consumes same canonical transparency contract without dark backing
+  assert.match(publicSource, /\.samche-header-avatar\s*\{[^}]*background:\s*var\(--chat-launcher-logo-bg,\s*transparent\)\s*!important/);
+  assert.match(publicSource, /\.samche-header-avatar\s*\{[^}]*border:\s*1px solid var\(--chat-launcher-logo-border,\s*transparent\)\s*!important/);
+  assert.match(dashboardContractSource, /\.samche-header-avatar\s*\{[^}]*background:\s*var\(--chat-launcher-logo-bg,\s*transparent\)\s*!important/);
+  assert.match(dashboardContractSource, /\.samche-header-avatar\s*\{[^}]*border:\s*1px solid var\(--chat-launcher-logo-border,\s*transparent\)\s*!important/);
+
+  // BUG 1: Verify mobile preview wrap is bounded to full device frame (inset: 0, 100% height)
+  assert.match(publicSource, /\.samche-preview-mobile\.samche-preview-mount \.samche-wrap,\s*\.samche-preview-mobile \.samche-wrap\s*\{[^}]*position:\s*absolute\s*!important;[^}]*inset:\s*0\s*!important;[^}]*height:\s*100%\s*!important/);
+  assert.match(dashboardContractSource, /\.samche-preview-mobile\.samche-preview-mount \.samche-wrap,\s*\.samche-preview-mobile \.samche-wrap\s*\{[^}]*position:\s*absolute\s*!important;[^}]*inset:\s*0\s*!important;[^}]*height:\s*100%\s*!important/);
 });
 
 test('TASK 8: Fresh tenant compatibility and historical config fallback', () => {

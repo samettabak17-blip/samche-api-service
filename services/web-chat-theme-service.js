@@ -214,20 +214,35 @@ export function deriveWebChatThemeTokens({
   const rawLauncherLogoBg = launcherLogoBackground ?? launcherLogoBg ?? null;
   const rawLauncherLogoBorder = launcherLogoBorderColor ?? launcherLogoBorder ?? null;
 
+  let computedLauncherLogoBg;
+  let computedLauncherLogoBorder;
+
+  if (isTransparent(rawLauncherLogoBg)) {
+    computedLauncherLogoBg = 'transparent';
+  } else if (rawLauncherLogoBg && String(rawLauncherLogoBg).trim()) {
+    computedLauncherLogoBg = normalizeColorToken(rawLauncherLogoBg, 'transparent', { allowTransparent: true });
+  } else {
+    computedLauncherLogoBg = 'transparent';
+  }
+
+  if (isTransparent(rawLauncherLogoBorder)) {
+    computedLauncherLogoBorder = 'transparent';
+  } else if (rawLauncherLogoBorder && String(rawLauncherLogoBorder).trim()) {
+    computedLauncherLogoBorder = normalizeColorToken(rawLauncherLogoBorder, 'transparent', { allowTransparent: true });
+  } else {
+    computedLauncherLogoBorder = 'transparent';
+  }
+
   let computedLauncherBg;
   let computedLauncherText;
   let computedLauncherBorder;
   let computedLauncherGlow;
-  let computedLauncherLogoBg;
-  let computedLauncherLogoBorder;
 
   if (effectiveLauncherThemeMode === 'auto_brand') {
     computedLauncherBg = safePrimary;
     computedLauncherText = accessibleForegroundFor(safePrimary, 4.5);
     computedLauncherBorder = glowRing;
     computedLauncherGlow = glowColor;
-    computedLauncherLogoBg = 'transparent';
-    computedLauncherLogoBorder = 'transparent';
   } else if (effectiveLauncherThemeMode === 'custom') {
     if (isTransparent(rawLauncherBg)) {
       computedLauncherBg = 'transparent';
@@ -270,22 +285,6 @@ export function deriveWebChatThemeTokens({
     } else {
       computedLauncherGlow = glowColor;
     }
-
-    if (isTransparent(rawLauncherLogoBg)) {
-      computedLauncherLogoBg = 'transparent';
-    } else if (rawLauncherLogoBg && String(rawLauncherLogoBg).trim()) {
-      computedLauncherLogoBg = normalizeColorToken(rawLauncherLogoBg, 'transparent', { allowTransparent: true });
-    } else {
-      computedLauncherLogoBg = 'transparent';
-    }
-
-    if (isTransparent(rawLauncherLogoBorder)) {
-      computedLauncherLogoBorder = 'transparent';
-    } else if (rawLauncherLogoBorder && String(rawLauncherLogoBorder).trim()) {
-      computedLauncherLogoBorder = normalizeColorToken(rawLauncherLogoBorder, 'transparent', { allowTransparent: true });
-    } else {
-      computedLauncherLogoBorder = 'transparent';
-    }
   } else {
     // follow_theme: panel-matched launcher mode
     if (isDark) {
@@ -293,15 +292,11 @@ export function deriveWebChatThemeTokens({
       computedLauncherText = '#FFFFFF';
       computedLauncherBorder = glowRing;
       computedLauncherGlow = glowColor;
-      computedLauncherLogoBg = 'transparent';
-      computedLauncherLogoBorder = 'transparent';
     } else {
       computedLauncherBg = '#FFFFFF';
       computedLauncherText = '#0F172A';
       computedLauncherBorder = 'rgba(15, 23, 42, 0.12)';
       computedLauncherGlow = glowColor;
-      computedLauncherLogoBg = 'transparent';
-      computedLauncherLogoBorder = 'transparent';
     }
   }
 

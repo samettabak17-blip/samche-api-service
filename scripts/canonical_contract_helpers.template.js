@@ -155,6 +155,25 @@ export function getAccessibleForeground(backgroundColor: string): string {
   return whiteRatio >= darkRatio ? '#FFFFFF' : '#0F172A';
 }
 
+export function isTransparent(val?: string | null): boolean {
+  return typeof val === 'string' && val.trim().toLowerCase() === 'transparent';
+}
+
+export function normalizeColorToken(color?: string | null, fallback = '#2563EB', options: { allowTransparent?: boolean } = {}): string {
+  if (typeof color !== 'string') return fallback;
+  const trimmed = color.trim();
+  if (options.allowTransparent && trimmed.toLowerCase() === 'transparent') {
+    return 'transparent';
+  }
+  if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(trimmed)) {
+    return normalizeHex(trimmed, fallback);
+  }
+  if (trimmed.startsWith('rgba(') || trimmed.startsWith('rgb(')) {
+    return trimmed;
+  }
+  return fallback;
+}
+
 export function mixColors(colorA: string, colorB: string, ratio = 0.5): string {
   const rgbA = hexToRgb(colorA);
   const rgbB = hexToRgb(colorB);
@@ -164,6 +183,17 @@ export function mixColors(colorA: string, colorB: string, ratio = 0.5): string {
   return rgbToHex([r, g, b]);
 }
 
+export function normalizePrimaryForMode(primaryHex: string, mode: 'dark' | 'light'): string {
+  const lum = relativeLuminance(primaryHex);
+  if (mode === 'dark') {
+    if (lum < 0.08) return mixColors(primaryHex, '#FFFFFF', 0.28);
+    if (lum > 0.85) return mixColors(primaryHex, '#1E293B', 0.20);
+  } else {
+    if (lum > 0.70) return mixColors(primaryHex, '#0F172A', 0.28);
+  }
+  return primaryHex;
+}
+
 export function deriveCanonicalDesignTokens(params: {
   primaryColor?: string;
   accentColor?: string | null;
@@ -171,17 +201,44 @@ export function deriveCanonicalDesignTokens(params: {
   glowIntensity?: number;
   glowSpread?: number;
   pulseAnimation?: string;
+  pulseMode?: string;
   animationSpeed?: string;
+  pulseSpeed?: string;
   launcherStyle?: string;
+  launcherThemeMode?: 'auto_brand' | 'follow_theme' | 'custom';
+  launcherBackground?: string | null;
+  launcherBg?: string | null;
+  launcherForeground?: string | null;
+  launcherText?: string | null;
+  launcherBorderColor?: string | null;
+  launcherBorder?: string | null;
+  launcherGlowColor?: string | null;
+  launcherGlow?: string | null;
+  launcherLogoBackground?: string | null;
+  launcherLogoBg?: string | null;
+  launcherLogoBorderColor?: string | null;
+  launcherLogoBorder?: string | null;
+  launcherLogoScale?: number;
+  panelLogoScale?: number;
 }) {
   const effectiveMode = params.mode === 'light' ? 'light' : 'dark';
   const rawPrimary = normalizeHex(params.primaryColor, '#2563EB');
-  const safePrimary = rawPrimary;
+  const safePrimary = normalizePrimaryForMode(rawPrimary, effectiveMode);
 
   const rawAccent = params.accentColor
     ? normalizeHex(params.accentColor, safePrimary)
     : mixColors(safePrimary, effectiveMode === 'dark' ? '#FFFFFF' : '#000000', 0.18);
-  const safeAccent = rawAccent;
+  const safeAccent = normalizePrimaryForMode(rawAccent, effectiveMode);
+
+  const rawLauncherLogoScale = Number(params.launcherLogoScale ?? (params as any).launcher_logo_scale);
+  const clampedLauncherLogoScale = Number.isFinite(rawLauncherLogoScale)
+    ? Math.max(50, Math.min(200, Math.round(rawLauncherLogoScale)))
+    : 100;
+
+  const rawPanelLogoScale = Number(params.panelLogoScale ?? (params as any).panel_logo_scale);
+  const clampedPanelLogoScale = Number.isFinite(rawPanelLogoScale)
+    ? Math.max(50, Math.min(200, Math.round(rawPanelLogoScale)))
+    : 100;
 
   const isDark = effectiveMode === 'dark';
   const surfaceSolid = isDark ? '#111827' : '#FFFFFF';
@@ -212,8 +269,125 @@ export function deriveCanonicalDesignTokens(params: {
   const glowSpreadPx = Math.round(Math.max(4, spreadFactor * 24));
   const glowHaloPx = Math.round(Math.max(10, spreadFactor * 42));
 
-  const normSpeed = String(params.animationSpeed || 'normal').toLowerCase();
+  const effectivePulseSpeed = params.pulseSpeed || params.animationSpeed;
+  const normSpeed = String(effectivePulseSpeed || 'normal').toLowerCase();
   const pulseDuration = normSpeed === 'slow' ? '5.5s' : normSpeed === 'fast' ? '2.2s' : '3.6s';
+
+  const effectivePulseMode = params.pulseMode || params.pulseAnimation;
+  const normPulse = ['none', 'subtle', 'normal', 'strong'].includes(String(effectivePulseMode || '').toLowerCase())
+    ? String(effectivePulseMode).toLowerCase()
+    : 'normal';
+
+  const effectiveLauncherThemeMode = ['auto_brand', 'follow_theme', 'custom'].includes(String(params.launcherThemeMode || '').toLowerCase())
+    ? String(params.launcherThemeMode).toLowerCase()
+    : 'follow_theme';
+
+  const rawLauncherBg = params.launcherBackground ?? params.launcherBg ?? null;
+  const rawLauncherText = params.launcherForeground ?? params.launcherText ?? null;
+  const rawLauncherBorder = params.launcherBorderColor ?? params.launcherBorder ?? null;
+  const rawLauncherGlow = params.launcherGlowColor ?? params.launcherGlow ?? null;
+  const rawLauncherLogoBg = params.launcherLogoBackground ?? params.launcherLogoBg ?? null;
+  const rawLauncherLogoBorder = params.launcherLogoBorderColor ?? params.launcherLogoBorder ?? null;
+
+  let computedLauncherLogoBg: string;
+  let computedLauncherLogoBorder: string;
+
+  if (isTransparent(rawLauncherLogoBg)) {
+    computedLauncherLogoBg = 'transparent';
+  } else if (rawLauncherLogoBg && String(rawLauncherLogoBg).trim()) {
+    computedLauncherLogoBg = normalizeColorToken(rawLauncherLogoBg, 'transparent', { allowTransparent: true });
+  } else {
+    computedLauncherLogoBg = 'transparent';
+  }
+
+  if (isTransparent(rawLauncherLogoBorder)) {
+    computedLauncherLogoBorder = 'transparent';
+  } else if (rawLauncherLogoBorder && String(rawLauncherLogoBorder).trim()) {
+    computedLauncherLogoBorder = normalizeColorToken(rawLauncherLogoBorder, 'transparent', { allowTransparent: true });
+  } else {
+    computedLauncherLogoBorder = 'transparent';
+  }
+
+  let computedLauncherBg: string;
+  let computedLauncherText: string;
+  let computedLauncherBorder: string;
+  let computedLauncherGlow: string;
+
+  if (effectiveLauncherThemeMode === 'auto_brand') {
+    computedLauncherBg = safePrimary;
+    computedLauncherText = getAccessibleForeground(safePrimary);
+    computedLauncherBorder = glowRing;
+    computedLauncherGlow = glowColor;
+  } else if (effectiveLauncherThemeMode === 'custom') {
+    if (isTransparent(rawLauncherBg)) {
+      computedLauncherBg = 'transparent';
+    } else if (rawLauncherBg && String(rawLauncherBg).trim()) {
+      computedLauncherBg = normalizeColorToken(rawLauncherBg, isDark ? '#0F172A' : '#FFFFFF', { allowTransparent: true });
+    } else {
+      computedLauncherBg = isDark ? '#0F172A' : '#FFFFFF';
+    }
+
+    if (isTransparent(rawLauncherText)) {
+      computedLauncherText = 'transparent';
+    } else if (computedLauncherBg === 'transparent') {
+      if (rawLauncherText && String(rawLauncherText).trim()) {
+        computedLauncherText = normalizeColorToken(rawLauncherText, isDark ? '#FFFFFF' : '#0F172A', { allowTransparent: true });
+      } else {
+        computedLauncherText = isDark ? '#FFFFFF' : '#0F172A';
+      }
+    } else {
+      if (rawLauncherText && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(String(rawLauncherText).trim())) {
+        const normText = normalizeHex(rawLauncherText);
+        const ratio = contrastRatio(computedLauncherBg, normText);
+        computedLauncherText = ratio >= 4.5 ? normText : getAccessibleForeground(computedLauncherBg);
+      } else {
+        computedLauncherText = getAccessibleForeground(computedLauncherBg);
+      }
+    }
+
+    if (isTransparent(rawLauncherBorder)) {
+      computedLauncherBorder = 'transparent';
+    } else if (rawLauncherBorder && String(rawLauncherBorder).trim()) {
+      computedLauncherBorder = normalizeColorToken(rawLauncherBorder, glowRing, { allowTransparent: true });
+    } else {
+      computedLauncherBorder = glowRing;
+    }
+
+    if (isTransparent(rawLauncherGlow)) {
+      computedLauncherGlow = 'transparent';
+    } else if (rawLauncherGlow && String(rawLauncherGlow).trim()) {
+      computedLauncherGlow = normalizeColorToken(rawLauncherGlow, glowColor, { allowTransparent: true });
+    } else {
+      computedLauncherGlow = glowColor;
+    }
+  } else {
+    // follow_theme: panel-matched launcher mode
+    if (isDark) {
+      computedLauncherBg = '#0F172A';
+      computedLauncherText = '#FFFFFF';
+      computedLauncherBorder = glowRing;
+      computedLauncherGlow = glowColor;
+    } else {
+      computedLauncherBg = '#FFFFFF';
+      computedLauncherText = '#0F172A';
+      computedLauncherBorder = 'rgba(15, 23, 42, 0.12)';
+      computedLauncherGlow = glowColor;
+    }
+  }
+
+  const isLauncherTransparent = computedLauncherBg === 'transparent';
+  let contrastLauncher: number | null = null;
+  let launcherAccessible = true;
+  let launcherWarning: string | null = null;
+
+  if (isLauncherTransparent) {
+    contrastLauncher = null;
+    launcherAccessible = false;
+    launcherWarning = 'Launcher background is transparent; host page contrast cannot be mathematically verified.';
+  } else {
+    contrastLauncher = contrastRatio(computedLauncherBg, computedLauncherText);
+    launcherAccessible = contrastLauncher >= 4.5;
+  }
 
   const inputBg = isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(15, 23, 42, 0.04)';
   const inputBorder = isDark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(15, 23, 42, 0.12)';
@@ -235,7 +409,25 @@ export function deriveCanonicalDesignTokens(params: {
     glow_spread_px: glowSpreadPx,
     glow_halo_px: glowHaloPx,
     pulse_duration: pulseDuration,
-    launcher_text: primaryForeground,
+    pulse_animation: normPulse,
+    pulse_mode: normPulse,
+    animation_speed: normSpeed,
+    pulse_speed: normSpeed,
+    launcher_text: computedLauncherText,
+    launcher_foreground: computedLauncherText,
+    launcher_theme_mode: effectiveLauncherThemeMode,
+    launcher_bg: computedLauncherBg,
+    launcher_background: computedLauncherBg,
+    launcher_border: computedLauncherBorder,
+    launcher_border_color: computedLauncherBorder,
+    launcher_glow: computedLauncherGlow,
+    launcher_glow_color: computedLauncherGlow,
+    launcher_logo_bg: computedLauncherLogoBg,
+    launcher_logo_background: computedLauncherLogoBg,
+    launcher_logo_border: computedLauncherLogoBorder,
+    launcher_logo_border_color: computedLauncherLogoBorder,
+    launcher_logo_scale: clampedLauncherLogoScale,
+    panel_logo_scale: clampedPanelLogoScale,
     text: textColor,
     muted: mutedColor,
     border: borderColor,
@@ -243,5 +435,12 @@ export function deriveCanonicalDesignTokens(params: {
     input_border: inputBorder,
     bot_bubble_bg: botBubbleBg,
     bot_bubble_border: botBubbleBorder,
+    contrast: {
+      launcher: contrastLauncher,
+      launcher_transparent: isLauncherTransparent,
+      launcher_warning: launcherWarning,
+      launcher_accessible: launcherAccessible,
+    },
+    is_accessible: isLauncherTransparent ? false : launcherAccessible,
   };
 }
