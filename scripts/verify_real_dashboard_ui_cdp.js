@@ -182,12 +182,17 @@ function createVerificationServer() {
 
     if (pathname.includes('/dashboard/overview')) {
       return sendJson(200, {
-        total_conversations: 0,
-        active_conversations: 0,
-        resolved_conversations: 0,
-        avg_response_time_seconds: 0,
-        human_takeover_rate: 0,
-        metrics: [],
+        range_days: 7,
+        range: { start_date: '', end_date: '', previous_start_date: '', previous_end_date: '' },
+        kpis: {
+          total_conversations: 0,
+          new_leads: 0,
+          appointments: 0,
+          automations: 0,
+          satisfaction_rate: 0,
+          conversation_growth: 0,
+        },
+        conversation_timeseries: [],
       });
     }
 
