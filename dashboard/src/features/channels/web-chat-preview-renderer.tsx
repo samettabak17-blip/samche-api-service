@@ -47,6 +47,9 @@ export interface WebChatPreviewRendererProps {
   launcherLogoBg?: string | null;
   launcherLogoBorderColor?: string | null;
   launcherLogoBorder?: string | null;
+  launcherLogoScale?: number;
+  panelLogoScale?: number;
+  hostCanvas?: 'light' | 'dark';
 }
 
 export function WebChatPreviewRenderer({
@@ -83,6 +86,9 @@ export function WebChatPreviewRenderer({
   launcherLogoBg = null,
   launcherLogoBorderColor = null,
   launcherLogoBorder = null,
+  launcherLogoScale = 100,
+  panelLogoScale = 100,
+  hostCanvas = 'light',
 }: WebChatPreviewRendererProps) {
   const [showConfirm, setShowConfirm] = useState(false);
 
@@ -119,6 +125,8 @@ export function WebChatPreviewRenderer({
     launcherLogoBg: effectiveLogoBg,
     launcherLogoBorderColor: effectiveLogoBorder,
     launcherLogoBorder: effectiveLogoBorder,
+    launcherLogoScale,
+    panelLogoScale,
   });
 
   const locale = getEffectiveLocale(language);
@@ -150,6 +158,8 @@ export function WebChatPreviewRenderer({
     '--chat-launcher-glow': tokens.launcher_glow_color || tokens.launcher_glow,
     '--chat-launcher-logo-bg': tokens.launcher_logo_background || tokens.launcher_logo_bg,
     '--chat-launcher-logo-border': tokens.launcher_logo_border_color || tokens.launcher_logo_border,
+    '--chat-launcher-logo-scale': ((launcherLogoScale ?? 100) / 100).toFixed(2),
+    '--chat-panel-logo-scale': ((panelLogoScale ?? 100) / 100).toFixed(2),
     '--chat-text': tokens.text,
     '--chat-muted': tokens.muted,
     '--chat-border': tokens.border,
@@ -283,41 +293,49 @@ export function WebChatPreviewRenderer({
     </div>
   );
 
+  const isLightHost = hostCanvas === 'light';
+  const previewBg = isLightHost
+    ? `radial-gradient(circle at 65% 35%, ${tokens.primary}12 0%, #f8fafc 55%, #e2e8f0 100%)`
+    : `radial-gradient(circle at 65% 35%, ${tokens.primary}18 0%, #050814 60%, #02040a 100%)`;
+
+  const titleColor = isLightHost ? 'text-sky-800' : 'text-sky-400';
+  const subColor = isLightHost ? 'text-stone-600' : 'text-stone-400';
+
   const renderMobileDevice = (mode: 'closed' | 'open') => (
-    <div className="relative mx-auto w-[360px] h-[640px] rounded-[38px] border-4 border-stone-700 bg-slate-950 shadow-2xl overflow-hidden flex flex-col shrink-0">
-      <div className="h-6 w-full bg-black/60 flex items-center justify-between px-6 text-[10px] text-stone-400 select-none shrink-0 z-30">
+    <div className={`relative mx-auto w-[360px] h-[640px] rounded-[38px] border-4 ${isLightHost ? 'border-stone-300 bg-slate-100 shadow-xl' : 'border-stone-700 bg-slate-950 shadow-2xl'} overflow-hidden flex flex-col shrink-0`}>
+      <div className={`h-6 w-full ${isLightHost ? 'bg-slate-200/90 text-stone-600' : 'bg-black/60 text-stone-400'} flex items-center justify-between px-6 text-[10px] select-none shrink-0 z-30`}>
         <span>9:41</span>
-        <div className="h-2 w-16 bg-stone-800 rounded-full" />
+        <div className={`h-2 w-16 ${isLightHost ? 'bg-stone-300' : 'bg-stone-800'} rounded-full`} />
         <span>5G 100%</span>
       </div>
 
-      <div className="relative flex-1 w-full overflow-hidden bg-gradient-to-b from-slate-900 to-slate-950 p-4 select-none pointer-events-none opacity-80">
-        <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-3">
+      <div className={`relative flex-1 w-full overflow-hidden ${isLightHost ? 'bg-gradient-to-b from-slate-50 to-slate-100 opacity-90' : 'bg-gradient-to-b from-slate-900 to-slate-950 opacity-80'} p-4 select-none pointer-events-none`}>
+        <div className="flex items-center justify-between pb-3 border-b border-black/10 dark:border-white/10 mb-3">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded-md bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-[10px] text-sky-400 font-bold">
               {displayLogoUrl ? <img src={displayLogoUrl} alt="logo" className="w-4 h-4 object-contain" /> : 'S'}
             </div>
-            <span className="text-xs font-semibold text-stone-200 tracking-tight">{brandName || 'SamChe Teknoloji'}</span>
+            <span className={`text-xs font-semibold ${isLightHost ? 'text-stone-800' : 'text-stone-200'} tracking-tight`}>{brandName || 'SamChe Teknoloji'}</span>
           </div>
           <div className="flex flex-col gap-1 w-3.5 text-stone-400">
             <span className="h-0.5 w-full bg-stone-400 rounded" />
             <span className="h-0.5 w-full bg-stone-400 rounded" />
           </div>
         </div>
-        <div className="rounded-xl bg-gradient-to-r from-sky-950/40 to-slate-800/40 border border-white/5 p-3 mb-3">
+        <div className={`rounded-xl ${isLightHost ? 'bg-sky-50 border border-sky-100' : 'bg-gradient-to-r from-sky-950/40 to-slate-800/40 border border-white/5'} p-3 mb-3`}>
           <div className="h-2 w-16 bg-sky-400/40 rounded mb-1.5" />
-          <div className="h-3 w-4/5 bg-white/25 rounded mb-1" />
-          <div className="h-2 w-2/3 bg-white/10 rounded" />
+          <div className="h-3 w-4/5 bg-stone-300 dark:bg-white/25 rounded mb-1" />
+          <div className="h-2 w-2/3 bg-stone-200 dark:bg-white/10 rounded" />
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-lg bg-stone-900/60 border border-white/5 p-2 flex flex-col justify-between h-24">
-            <div className="w-full h-12 bg-white/5 rounded-md" />
-            <div className="h-2 w-3/4 bg-white/20 rounded mt-1" />
+          <div className={`rounded-lg ${isLightHost ? 'bg-white border border-stone-200' : 'bg-stone-900/60 border border-white/5'} p-2 flex flex-col justify-between h-24`}>
+            <div className={`w-full h-12 ${isLightHost ? 'bg-slate-100' : 'bg-white/5'} rounded-md`} />
+            <div className={`h-2 w-3/4 ${isLightHost ? 'bg-stone-300' : 'bg-white/20'} rounded mt-1`} />
             <div className="h-2 w-1/2 bg-sky-400/30 rounded" />
           </div>
-          <div className="rounded-lg bg-stone-900/60 border border-white/5 p-2 flex flex-col justify-between h-24">
-            <div className="w-full h-12 bg-white/5 rounded-md" />
-            <div className="h-2 w-3/4 bg-white/20 rounded mt-1" />
+          <div className={`rounded-lg ${isLightHost ? 'bg-white border border-stone-200' : 'bg-stone-900/60 border border-white/5'} p-2 flex flex-col justify-between h-24`}>
+            <div className={`w-full h-12 ${isLightHost ? 'bg-slate-100' : 'bg-white/5'} rounded-md`} />
+            <div className={`h-2 w-3/4 ${isLightHost ? 'bg-stone-300' : 'bg-white/20'} rounded mt-1`} />
             <div className="h-2 w-1/2 bg-sky-400/30 rounded" />
           </div>
         </div>
@@ -352,9 +370,11 @@ export function WebChatPreviewRenderer({
   return (
     <div
       className="samche-preview-root relative w-full rounded-2xl border border-line/80 overflow-hidden p-6 flex items-center justify-center transition-all duration-300"
+      data-testid="web-chat-preview-root"
+      data-host-canvas={isLightHost ? 'light' : 'dark'}
       style={{
         ...cssVars,
-        background: `radial-gradient(circle at 65% 35%, ${tokens.primary}18 0%, #050814 60%, #02040a 100%)`,
+        background: previewBg,
       }}
     >
       <style>{CANONICAL_WIDGET_CSS}</style>
@@ -366,8 +386,8 @@ export function WebChatPreviewRenderer({
               <>
                 <div className="flex flex-col items-center gap-4">
                   <div className="text-center">
-                    <span className="text-sky-400 text-sm font-semibold block">Closed State</span>
-                    <span className="text-stone-400 text-xs">Canonical launcher with live glow</span>
+                    <span className={`${titleColor} text-sm font-semibold block`}>Closed State</span>
+                    <span className={`${subColor} text-xs`}>Canonical launcher with live glow</span>
                   </div>
                   <div className="p-4 flex items-center justify-center min-h-[100px]">
                     {renderLauncher()}
@@ -376,8 +396,8 @@ export function WebChatPreviewRenderer({
 
                 <div className="flex flex-col items-center gap-3 w-full max-w-[420px]">
                   <div className="text-center">
-                    <span className="text-sky-400 text-sm font-semibold block">Open State</span>
-                    <span className="text-stone-400 text-xs">Canonical 400x600 glass panel</span>
+                    <span className={`${titleColor} text-sm font-semibold block`}>Open State</span>
+                    <span className={`${subColor} text-xs`}>Canonical 400x600 glass panel</span>
                   </div>
                   {renderPanel()}
                 </div>
@@ -387,8 +407,8 @@ export function WebChatPreviewRenderer({
             {state === 'closed' && (
               <div className="flex flex-col items-center justify-center gap-6 py-12">
                 <div className="text-center">
-                  <span className="text-sky-400 text-base font-semibold block">Closed State Preview</span>
-                  <span className="text-stone-400 text-xs">Configured closed-state AI launcher</span>
+                  <span className={`${titleColor} text-base font-semibold block`}>Closed State Preview</span>
+                  <span className={`${subColor} text-xs`}>Configured closed-state AI launcher</span>
                 </div>
                 <div className="p-8 flex items-center justify-center min-h-[140px]">
                   {renderLauncher()}
@@ -409,8 +429,8 @@ export function WebChatPreviewRenderer({
           {(state === 'both' || state === 'closed') && (
             <div className="flex flex-col items-center gap-3">
               <div className="text-center">
-                <span className="text-sky-400 text-sm font-semibold block">Closed Launcher State</span>
-                <span className="text-stone-400 text-xs">Compact non-blocking floating button</span>
+                <span className={`${titleColor} text-sm font-semibold block`}>Closed Launcher State</span>
+                <span className={`${subColor} text-xs`}>Compact non-blocking floating button</span>
               </div>
               {renderMobileDevice('closed')}
             </div>
@@ -419,8 +439,8 @@ export function WebChatPreviewRenderer({
           {(state === 'both' || state === 'open') && (
             <div className="flex flex-col items-center gap-3">
               <div className="text-center">
-                <span className="text-sky-400 text-sm font-semibold block">Open Floating Card</span>
-                <span className="text-stone-400 text-xs">Bounded floating card over website</span>
+                <span className={`${titleColor} text-sm font-semibold block`}>Open Floating Card</span>
+                <span className={`${subColor} text-xs`}>Bounded floating card over website</span>
               </div>
               {renderMobileDevice('open')}
             </div>

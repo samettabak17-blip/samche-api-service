@@ -42,6 +42,8 @@ export const DEFAULT_WEB_CHAT_APPEARANCE = Object.freeze({
     launcher_logo_bg: 'transparent',
     launcher_logo_border_color: 'transparent',
     launcher_logo_border: 'transparent',
+    launcher_logo_scale: 100,
+    panel_logo_scale: 100,
     text_color: '#F8FAFC',
     muted_color: '#94A3B8',
     border_color: 'rgba(255, 255, 255, 0.12)',
@@ -61,6 +63,8 @@ export const DEFAULT_WEB_CHAT_APPEARANCE = Object.freeze({
   launcher_logo_bg: null,
   launcher_logo_border_color: null,
   launcher_logo_border: null,
+  launcher_logo_scale: 100,
+  panel_logo_scale: 100,
 });
 
 export const DEFAULT_WEB_CHAT_BEHAVIOR = Object.freeze({
@@ -147,13 +151,31 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
         ? input.welcome_message.trim()
         : null);
 
+  const rawConfigVersion = input?.config_version !== undefined && input?.config_version !== null
+    ? input.config_version
+    : input?.version;
+  const configVersion = rawConfigVersion !== undefined && rawConfigVersion !== null
+    ? (typeof rawConfigVersion === 'number' && Number.isFinite(rawConfigVersion) ? rawConfigVersion : Number(rawConfigVersion) || Date.now())
+    : Date.now();
+  const updatedAt = typeof input?.updated_at === 'string' && input.updated_at.trim()
+    ? input.updated_at.trim()
+    : new Date(configVersion).toISOString();
+
   const launcherThemeMode = ['auto_brand', 'follow_theme', 'custom'].includes(String(input?.launcher_theme_mode || '').toLowerCase())
     ? String(input.launcher_theme_mode).toLowerCase()
     : 'follow_theme';
 
   const readToken = (canonKey, aliasKey) => {
-    if (typeof input?.[canonKey] === 'string' && input[canonKey].trim()) return input[canonKey].trim();
-    if (typeof input?.[aliasKey] === 'string' && input[aliasKey].trim()) return input[aliasKey].trim();
+    if (input && Object.prototype.hasOwnProperty.call(input, canonKey)) {
+      const val = input[canonKey];
+      if (typeof val === 'string' && val.trim()) return val.trim();
+      return null;
+    }
+    if (input && Object.prototype.hasOwnProperty.call(input, aliasKey)) {
+      const val = input[aliasKey];
+      if (typeof val === 'string' && val.trim()) return val.trim();
+      return null;
+    }
     if (typeof input?.theme?.[canonKey] === 'string' && input.theme[canonKey].trim()) return input.theme[canonKey].trim();
     if (typeof input?.theme?.[aliasKey] === 'string' && input.theme[aliasKey].trim()) return input.theme[aliasKey].trim();
     return null;
@@ -165,6 +187,16 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
   const launcherGlow = readToken('launcher_glow_color', 'launcher_glow');
   const launcherLogoBg = readToken('launcher_logo_background', 'launcher_logo_bg');
   const launcherLogoBorder = readToken('launcher_logo_border_color', 'launcher_logo_border');
+
+  const rawLauncherLogoScale = Number(input?.launcher_logo_scale ?? input?.theme?.launcher_logo_scale);
+  const launcherLogoScale = Number.isFinite(rawLauncherLogoScale)
+    ? Math.max(50, Math.min(200, Math.round(rawLauncherLogoScale)))
+    : 100;
+
+  const rawPanelLogoScale = Number(input?.panel_logo_scale ?? input?.theme?.panel_logo_scale);
+  const panelLogoScale = Number.isFinite(rawPanelLogoScale)
+    ? Math.max(50, Math.min(200, Math.round(rawPanelLogoScale)))
+    : 100;
 
   const tokens = deriveWebChatThemeTokens({
     primaryColor: primaryCandidate,
@@ -190,6 +222,8 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
     launcherLogoBg,
     launcherLogoBorderColor: launcherLogoBorder,
     launcherLogoBorder,
+    launcherLogoScale,
+    panelLogoScale,
   });
 
   return {
@@ -223,6 +257,10 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
     launcher_logo_bg: tokens.launcher_logo_bg,
     launcher_logo_border_color: tokens.launcher_logo_border_color,
     launcher_logo_border: tokens.launcher_logo_border,
+    launcher_logo_scale: launcherLogoScale,
+    panel_logo_scale: panelLogoScale,
+    config_version: configVersion,
+    updated_at: updatedAt,
     theme: {
       primary_color: tokens.primary,
       accent_color: tokens.accent,
@@ -247,6 +285,10 @@ export function normalizeWebChatAppearance(input = {}, fallbackBrandName = 'SamC
       launcher_logo_bg: tokens.launcher_logo_bg,
       launcher_logo_border_color: tokens.launcher_logo_border_color,
       launcher_logo_border: tokens.launcher_logo_border,
+      launcher_logo_scale: launcherLogoScale,
+      panel_logo_scale: panelLogoScale,
+      config_version: configVersion,
+      updated_at: updatedAt,
       text_color: tokens.text,
       muted_color: tokens.muted,
       border_color: tokens.border,
@@ -566,11 +608,16 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
     if (!appearanceInput.greeting && (opts.greeting || opts.welcomeMessage)) {
       appearanceInput.greeting = String(opts.greeting || opts.welcomeMessage).trim();
     }
+    const currentVersion = Date.now();
+    appearanceInput.config_version = currentVersion;
+    appearanceInput.updated_at = new Date(currentVersion).toISOString();
     const normalizedAppearance = normalizeWebChatAppearance(appearanceInput, tenant.name);
     const normalizedBehavior = normalizeWebChatBehavior(behavior);
     const configPayload = JSON.stringify({
       appearance: normalizedAppearance,
       behavior: normalizedBehavior,
+      config_version: currentVersion,
+      updated_at: normalizedAppearance.updated_at,
     });
     const hasConfig = await checkConfigColumn(client);
     const isChannelActive = status ? status === 'active' : resolvedChannel.status === 'active';
@@ -613,6 +660,15 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
           : [resolvedChannel.id, resolvedAssistant.id, existingRow.id, validTenantId];
         const updated = await client.query(updateSql, updateParams);
         resolvedIntegration = updated.rows[0];
+
+        if (hasConfig) {
+          await client.query(
+            `UPDATE channel_integrations
+                SET config = $1, updated_at = CURRENT_TIMESTAMP
+              WHERE tenant_id = $2 AND integration_type = 'WEB_CHAT' AND id != $3`,
+            [configPayload, validTenantId, existingRow.id]
+          );
+        }
       } else {
         const insertSql = hasConfig
           ? `INSERT INTO channel_integrations (integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled, config)
@@ -637,6 +693,15 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
           : [normalizedWidgetKey, validTenantId, resolvedChannel.id, resolvedAssistant.id, isChannelActive];
         const inserted = await client.query(insertSql, insertParams);
         resolvedIntegration = inserted.rows[0];
+
+        if (hasConfig) {
+          await client.query(
+            `UPDATE channel_integrations
+                SET config = $1, updated_at = CURRENT_TIMESTAMP
+              WHERE tenant_id = $2 AND integration_type = 'WEB_CHAT' AND id != $3`,
+            [configPayload, validTenantId, resolvedIntegration.id]
+          );
+        }
       }
     } else {
       const tenantIntegration = await client.query(
@@ -669,6 +734,15 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
             : [resolvedChannel.id, resolvedAssistant.id, isChannelActive, row.id, validTenantId];
           const updated = await client.query(updateSql, updateParams);
           resolvedIntegration = updated.rows[0];
+
+          if (hasConfig) {
+            await client.query(
+              `UPDATE channel_integrations
+                  SET config = $1, updated_at = CURRENT_TIMESTAMP
+                WHERE tenant_id = $2 AND integration_type = 'WEB_CHAT' AND id != $3`,
+              [configPayload, validTenantId, row.id]
+            );
+          }
         } else {
           resolvedIntegration = row;
         }
@@ -720,6 +794,8 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
       tenant_id: validTenantId,
       configured: true,
       widget_key: resolvedIntegration.integration_key,
+      config_version: currentVersion,
+      updated_at: normalizedAppearance.updated_at,
       channel_id: resolvedChannel.id,
       integration_id: resolvedIntegration.id,
       channel: {
@@ -759,6 +835,7 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
       bootstrap_config: {
         widget_key: resolvedIntegration.integration_key,
         api_endpoint: '/api/chat/bootstrap',
+        config_version: currentVersion,
       },
     };
   });
@@ -921,6 +998,8 @@ export async function getWebChatIntegrationForTenant(databaseOrOptions, maybeTen
     tenant_id: validTenantId,
     configured: true,
     widget_key: row.integration_key,
+    config_version: appearance.config_version,
+    updated_at: appearance.updated_at,
     channel: {
       id: row.channel_id,
       channel_type: row.channel_type,
@@ -956,6 +1035,7 @@ export async function getWebChatIntegrationForTenant(databaseOrOptions, maybeTen
     bootstrap_config: {
       widget_key: row.integration_key,
       api_endpoint: '/api/chat/bootstrap',
+      config_version: appearance.config_version,
     },
   };
 }

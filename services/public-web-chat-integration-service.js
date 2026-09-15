@@ -4,7 +4,7 @@ export async function resolvePublicWebChatIntegration({ database, widgetKey }) {
   try {
     result = await database.query(
       `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id,
-              ci.config,
+              ci.config, ci.updated_at,
               tc.channel_type, tc.status AS channel_status, tc.display_name AS channel_name,
               a.status AS assistant_status, a.name AS assistant_name
          FROM channel_integrations ci
@@ -19,7 +19,7 @@ export async function resolvePublicWebChatIntegration({ database, widgetKey }) {
   } catch (err) {
     if (err?.code === '42703' || String(err?.message || '').includes('config')) {
       result = await database.query(
-        `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id,
+        `SELECT ci.tenant_id, ci.channel_id, ci.assistant_id, ci.updated_at,
                 tc.channel_type, tc.status AS channel_status, tc.display_name AS channel_name,
                 a.status AS assistant_status, a.name AS assistant_name
            FROM channel_integrations ci

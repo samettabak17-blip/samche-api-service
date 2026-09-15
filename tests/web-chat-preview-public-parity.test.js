@@ -66,11 +66,11 @@ test('LAUNCHER_DIMENSIONS_PARITY: Pill (54px), Circular (60x60), and Minimal (52
   assert.match(publicSource, /\.samche-launcher\.samche-style-minimal\s*\{[^}]*width:\s*52px\s*!important;\s*height:\s*52px\s*!important/);
 });
 
-test('LOGO_SIZE_PARITY: Launcher badge has canonical 44px pill badge and 100% circular badge', () => {
-  assert.match(dashboardContractSource, /\.samche-launcher-badge\s*\{[^}]*width:\s*44px;\s*height:\s*44px/);
-  assert.match(publicSource, /\.samche-launcher-badge\s*\{[^}]*width:\s*44px;\s*height:\s*44px/);
-  assert.match(dashboardContractSource, /\.samche-launcher\.samche-launcher-circle \.samche-launcher-badge\s*\{[^}]*width:\s*100%;\s*height:\s*100%/);
-  assert.match(publicSource, /\.samche-launcher\.samche-launcher-circle \.samche-launcher-badge\s*\{[^}]*width:\s*100%;\s*height:\s*100%/);
+test('LOGO_SIZE_PARITY: Launcher badge has canonical 44px pill badge and 100% circular badge with scale support', () => {
+  assert.match(dashboardContractSource, /\.samche-launcher-badge\s*\{[^}]*width:\s*calc\(44px \* var\(--chat-launcher-logo-scale,\s*1\)\)/);
+  assert.match(publicSource, /\.samche-launcher-badge\s*\{[^}]*width:\s*calc\(44px \* var\(--chat-launcher-logo-scale,\s*1\)\)/);
+  assert.match(dashboardContractSource, /\.samche-launcher\.samche-launcher-circle \.samche-launcher-badge\s*\{[^}]*width:\s*100%\s*!important;\s*height:\s*100%\s*!important/);
+  assert.match(publicSource, /\.samche-launcher\.samche-launcher-circle \.samche-launcher-badge\s*\{[^}]*width:\s*100%\s*!important;\s*height:\s*100%\s*!important/);
 });
 
 test('GLOW_AND_PULSE_PARITY: Multi-layer glow and breathe/pulse animations are defined identically', () => {
@@ -89,8 +89,8 @@ test('PANEL_DIMENSIONS_AND_HEADER_PARITY: Panel is 400x600 with 20px radius; hea
   assert.match(dashboardContractSource, /\.samche-panel\s*\{[^}]*width:\s*400px;[^}]*height:\s*600px;[^}]*border-radius:\s*20px/);
   assert.match(publicSource, /\.samche-panel\s*\{[^}]*width:\s*400px;[^}]*height:\s*600px;[^}]*border-radius:\s*20px/);
 
-  assert.match(dashboardContractSource, /\.samche-header-avatar\s*\{[^}]*width:\s*36px;\s*height:\s*36px;\s*border-radius:\s*10px/);
-  assert.match(publicSource, /\.samche-header-avatar\s*\{[^}]*width:\s*36px;\s*height:\s*36px;\s*border-radius:\s*10px/);
+  assert.match(dashboardContractSource, /\.samche-header-avatar\s*\{[^}]*width:\s*calc\(36px \* var\(--chat-panel-logo-scale,\s*1\)\)/);
+  assert.match(publicSource, /\.samche-header-avatar\s*\{[^}]*width:\s*calc\(36px \* var\(--chat-panel-logo-scale,\s*1\)\)/);
 
   assert.match(previewRendererSource, /samche-clear-btn/);
   assert.match(previewRendererSource, /samche-minimize-btn/);

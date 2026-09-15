@@ -161,6 +161,7 @@ export const tenantApi = {
   deleteChannel: (tenantId: string, channelId: string) => apiClient.delete<{ message: string }>(`${tenantRoot(tenantId)}/channels/${channelId}`),
   getWebChatChannel: (tenantId: string) => apiClient.get<WebChatChannelResponse>(`${tenantRoot(tenantId)}/channels/web-chat`),
   updateWebChatChannel: (tenantId: string, body: {
+    widget_key?: string | null;
     display_name?: string;
     assistant_id?: string | null;
     status?: 'active' | 'inactive';

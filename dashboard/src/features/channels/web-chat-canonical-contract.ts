@@ -26,9 +26,9 @@ export const CANONICAL_WIDGET_CSS_A: string[] = [
     '.samche-launcher.samche-pulse-normal { animation: samche-glow-breathe var(--chat-pulse-duration, 3.6s) infinite ease-in-out !important; }',
     '.samche-launcher.samche-pulse-strong { animation: samche-glow-pulse-strong var(--chat-pulse-duration, 3.6s) infinite ease-in-out !important; }',
     '.samche-launcher-label { font-size: 14px; font-weight: 600; color: var(--chat-launcher-text, inherit) !important; white-space: nowrap; line-height: 1; letter-spacing: -0.01em; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }',
-    '.samche-launcher-badge { width: 44px; height: 44px; min-width: 44px; min-height: 44px; border-radius: 50%; background: var(--chat-launcher-logo-bg, transparent) !important; background-color: var(--chat-launcher-logo-bg, transparent) !important; border: 1.5px solid var(--chat-launcher-logo-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.8))) !important; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; padding: 6px; box-sizing: border-box !important; }',
-    '.samche-launcher.samche-launcher-circle .samche-launcher-badge { width: 100%; height: 100%; border: 1.5px solid var(--chat-launcher-logo-border, transparent) !important; background: var(--chat-launcher-logo-bg, transparent) !important; background-color: var(--chat-launcher-logo-bg, transparent) !important; box-shadow: none !important; padding: 6px; }',
-    '.samche-launcher-badge img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; user-select: none; pointer-events: none; }',
+    '.samche-launcher-badge { width: calc(44px * var(--chat-launcher-logo-scale, 1)) !important; height: calc(44px * var(--chat-launcher-logo-scale, 1)) !important; min-width: calc(44px * var(--chat-launcher-logo-scale, 1)) !important; min-height: calc(44px * var(--chat-launcher-logo-scale, 1)) !important; max-width: 58px !important; max-height: 58px !important; border-radius: 50%; background: var(--chat-launcher-logo-bg, transparent) !important; background-color: var(--chat-launcher-logo-bg, transparent) !important; border: 1.5px solid var(--chat-launcher-logo-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.8))) !important; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; padding: calc(6px * (2 - var(--chat-launcher-logo-scale, 1))) !important; box-sizing: border-box !important; transition: width .2s ease, height .2s ease, transform .2s ease !important; }',
+    '.samche-launcher.samche-launcher-circle .samche-launcher-badge { width: 100% !important; height: 100% !important; max-width: 100% !important; max-height: 100% !important; border: 1.5px solid var(--chat-launcher-logo-border, transparent) !important; background: var(--chat-launcher-logo-bg, transparent) !important; background-color: var(--chat-launcher-logo-bg, transparent) !important; box-shadow: none !important; padding: calc(8px * (1.5 - var(--chat-launcher-logo-scale, 1) * 0.5)) !important; }',
+    '.samche-launcher-badge img { max-width: 100% !important; max-height: 100% !important; width: calc(100% * var(--chat-launcher-logo-scale, 1)) !important; height: calc(100% * var(--chat-launcher-logo-scale, 1)) !important; object-fit: contain !important; display: block; user-select: none; pointer-events: none; }',
     '.samche-launcher-badge svg { width: 24px !important; height: 24px !important; max-width: 24px !important; max-height: 24px !important; fill: currentColor; color: var(--chat-launcher-text, #FFFFFF) !important; }',
     '.samche-pos-left .samche-launcher { right: auto !important; left: 24px !important; }',
     '.samche-launcher:hover { transform: translateY(-2px) scale(1.02); }',
@@ -36,7 +36,8 @@ export const CANONICAL_WIDGET_CSS_A: string[] = [
     '.samche-launcher:focus-visible { outline: 2px solid var(--chat-accent, #60A5FA); outline-offset: 3px; }',
     '.samche-launcher-icon { width: 24px !important; height: 24px !important; display: flex; align-items: center; justify-content: center; fill: currentColor; flex-shrink: 0; }',
     '.samche-launcher-icon svg { width: 24px !important; height: 24px !important; max-width: 24px !important; max-height: 24px !important; fill: currentColor; }',
-    '.samche-launcher-logo { max-width: 100%; max-height: 100%; object-fit: contain; flex-shrink: 0; }',
+    '.samche-launcher-logo { max-width: 100% !important; max-height: 100% !important; width: calc(100% * var(--chat-launcher-logo-scale, 1)) !important; height: calc(100% * var(--chat-launcher-logo-scale, 1)) !important; object-fit: contain !important; flex-shrink: 0; }',
+    '.samche-launcher.samche-launcher-circle .samche-launcher-logo { width: calc(34px * var(--chat-launcher-logo-scale, 1)) !important; height: calc(34px * var(--chat-launcher-logo-scale, 1)) !important; max-width: 52px !important; max-height: 52px !important; object-fit: contain !important; }',
     '.samche-launcher.samche-intent-pulse { animation: samche-intent-pulse 2s ease-in-out 3 !important; }',
     '@keyframes samche-glow-breathe { 0%, 100% { box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-ring, rgba(56, 189, 248, 0.7)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.4)), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.5); transform: scale(1); } 50% { box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.7) var(--chat-glow-ring, rgba(56, 189, 248, 0.9)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.3) var(--chat-glow, rgba(56, 189, 248, 0.55)), 0 12px 36px -2px var(--chat-glow-soft, rgba(56, 189, 248, 0.35)), 0 6px 20px rgba(0, 0, 0, 0.6); transform: scale(1.025); } }',
     '@keyframes samche-glow-pulse-strong { 0%, 100% { box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.5) var(--chat-glow-ring, rgba(56, 189, 248, 0.8)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.5)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.6) var(--chat-glow-soft, rgba(56, 189, 248, 0.3)), 0 8px 30px rgba(0, 0, 0, 0.6); transform: scale(1); } 50% { box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.9) var(--chat-glow-ring, rgba(56, 189, 248, 1)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.5) var(--chat-glow, rgba(56, 189, 248, 0.75)), 0 0 calc(var(--chat-glow-halo, 42px) * 2.2) var(--chat-glow-soft, rgba(56, 189, 248, 0.45)), 0 14px 40px rgba(0, 0, 0, 0.7); transform: scale(1.04); } }',
@@ -51,8 +52,8 @@ export const CANONICAL_WIDGET_CSS_A: string[] = [
 export const CANONICAL_WIDGET_CSS_B: string[] = [
     '.samche-header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--chat-border, rgba(255,255,255,0.08)); background: rgba(255,255,255,0.03); flex-shrink: 0; }',
     '.samche-header-info { display: flex; align-items: center; gap: 12px; }',
-    '.samche-header-avatar { width: 36px; height: 36px; border-radius: 10px; background: var(--chat-surface-tint, #1E293B); border: 1px solid var(--chat-border, rgba(255,255,255,0.12)); display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }',
-    '.samche-header-avatar img { width: 100%; height: 100%; object-fit: contain; }',
+    '.samche-header-avatar { width: calc(36px * var(--chat-panel-logo-scale, 1)) !important; height: calc(36px * var(--chat-panel-logo-scale, 1)) !important; min-width: calc(36px * var(--chat-panel-logo-scale, 1)) !important; min-height: calc(36px * var(--chat-panel-logo-scale, 1)) !important; max-width: 60px !important; max-height: 60px !important; border-radius: 10px; background: var(--chat-surface-tint, #1E293B); border: 1px solid var(--chat-border, rgba(255,255,255,0.12)); display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; transition: width .2s ease, height .2s ease !important; }',
+    '.samche-header-avatar img { width: 100% !important; height: 100% !important; object-fit: contain !important; padding: 2px !important; }',
     '.samche-header-avatar svg, .samche-avatar-icon svg { width: 20px !important; height: 20px !important; max-width: 20px !important; max-height: 20px !important; fill: var(--chat-primary, #2563EB); }',
     '.samche-header-titles { display: flex; flex-direction: column; }',
     '.samche-header-title { font-size: 15px; font-weight: 600; color: var(--chat-text, #F8FAFC); line-height: 1.25; }',
@@ -321,6 +322,17 @@ export function mixColors(colorA: string, colorB: string, ratio = 0.5): string {
   return rgbToHex([r, g, b]);
 }
 
+export function normalizePrimaryForMode(primaryHex: string, mode: 'dark' | 'light'): string {
+  const lum = relativeLuminance(primaryHex);
+  if (mode === 'dark') {
+    if (lum < 0.08) return mixColors(primaryHex, '#FFFFFF', 0.28);
+    if (lum > 0.85) return mixColors(primaryHex, '#1E293B', 0.20);
+  } else {
+    if (lum > 0.70) return mixColors(primaryHex, '#0F172A', 0.28);
+  }
+  return primaryHex;
+}
+
 export function deriveCanonicalDesignTokens(params: {
   primaryColor?: string;
   accentColor?: string | null;
@@ -345,15 +357,27 @@ export function deriveCanonicalDesignTokens(params: {
   launcherLogoBg?: string | null;
   launcherLogoBorderColor?: string | null;
   launcherLogoBorder?: string | null;
+  launcherLogoScale?: number;
+  panelLogoScale?: number;
 }) {
   const effectiveMode = params.mode === 'light' ? 'light' : 'dark';
   const rawPrimary = normalizeHex(params.primaryColor, '#2563EB');
-  const safePrimary = rawPrimary;
+  const safePrimary = normalizePrimaryForMode(rawPrimary, effectiveMode);
 
   const rawAccent = params.accentColor
     ? normalizeHex(params.accentColor, safePrimary)
     : mixColors(safePrimary, effectiveMode === 'dark' ? '#FFFFFF' : '#000000', 0.18);
-  const safeAccent = rawAccent;
+  const safeAccent = normalizePrimaryForMode(rawAccent, effectiveMode);
+
+  const rawLauncherLogoScale = Number(params.launcherLogoScale ?? (params as any).launcher_logo_scale);
+  const clampedLauncherLogoScale = Number.isFinite(rawLauncherLogoScale)
+    ? Math.max(50, Math.min(200, Math.round(rawLauncherLogoScale)))
+    : 100;
+
+  const rawPanelLogoScale = Number(params.panelLogoScale ?? (params as any).panel_logo_scale);
+  const clampedPanelLogoScale = Number.isFinite(rawPanelLogoScale)
+    ? Math.max(50, Math.min(200, Math.round(rawPanelLogoScale)))
+    : 100;
 
   const isDark = effectiveMode === 'dark';
   const surfaceSolid = isDark ? '#111827' : '#FFFFFF';
@@ -546,6 +570,8 @@ export function deriveCanonicalDesignTokens(params: {
     launcher_logo_background: computedLauncherLogoBg,
     launcher_logo_border: computedLauncherLogoBorder,
     launcher_logo_border_color: computedLauncherLogoBorder,
+    launcher_logo_scale: clampedLauncherLogoScale,
+    panel_logo_scale: clampedPanelLogoScale,
     text: textColor,
     muted: mutedColor,
     border: borderColor,

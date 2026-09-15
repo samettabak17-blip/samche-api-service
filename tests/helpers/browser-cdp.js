@@ -155,7 +155,8 @@ export class BrowserCdp {
       awaitPromise: true,
     });
     if (res?.exceptionDetails) {
-      throw new Error(`Evaluation exception: ${res.exceptionDetails.text || JSON.stringify(res.exceptionDetails)}`);
+      const details = res.exceptionDetails.exception?.description || res.exceptionDetails.text || JSON.stringify(res.exceptionDetails);
+      throw new Error(`Evaluation exception: ${details}`);
     }
     return res?.result?.value;
   }
@@ -180,7 +181,11 @@ export class BrowserCdp {
       this.ws.close();
     } catch {}
     try {
-      this.proc.kill();
+      if (process.platform === 'win32' && this.proc?.pid) {
+        spawn('taskkill', ['/pid', String(this.proc.pid), '/T', '/F']);
+      } else {
+        this.proc.kill();
+      }
     } catch {}
   }
 }

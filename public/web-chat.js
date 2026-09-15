@@ -927,6 +927,24 @@
         }
       } catch (e) {}
     },
+    clearStoredAppearance: function(widgetKey) {
+      var key = this.getAppearanceStorageKey(widgetKey);
+      delete memStore[key];
+      try {
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.removeItem(key);
+        }
+      } catch (e) {}
+      try {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          window.sessionStorage.removeItem(key);
+        }
+      } catch (e) {}
+    },
+    getStoredConfigVersion: function(widgetKey) {
+      var app = this.getStoredAppearance(widgetKey);
+      return Number((app && (app.config_version || app.version)) || 0);
+    },
     getBehaviorStorageKey: function(widgetKey) {
       return 'samche_webchat_behavior_' + encodeURIComponent(widgetKey || 'default');
     },
@@ -1050,9 +1068,9 @@
     '.samche-launcher.samche-pulse-normal { animation: samche-glow-breathe var(--chat-pulse-duration, 3.6s) infinite ease-in-out !important; }',
     '.samche-launcher.samche-pulse-strong { animation: samche-glow-pulse-strong var(--chat-pulse-duration, 3.6s) infinite ease-in-out !important; }',
     '.samche-launcher-label { font-size: 14px; font-weight: 600; color: var(--chat-launcher-text, inherit) !important; white-space: nowrap; line-height: 1; letter-spacing: -0.01em; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }',
-    '.samche-launcher-badge { width: 44px; height: 44px; min-width: 44px; min-height: 44px; border-radius: 50%; background: var(--chat-launcher-logo-bg, transparent) !important; background-color: var(--chat-launcher-logo-bg, transparent) !important; border: 1.5px solid var(--chat-launcher-logo-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.8))) !important; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; padding: 6px; box-sizing: border-box !important; }',
-    '.samche-launcher.samche-launcher-circle .samche-launcher-badge { width: 100%; height: 100%; border: 1.5px solid var(--chat-launcher-logo-border, transparent) !important; background: var(--chat-launcher-logo-bg, transparent) !important; background-color: var(--chat-launcher-logo-bg, transparent) !important; box-shadow: none !important; padding: 6px; }',
-    '.samche-launcher-badge img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; user-select: none; pointer-events: none; }',
+    '.samche-launcher-badge { width: calc(44px * var(--chat-launcher-logo-scale, 1)) !important; height: calc(44px * var(--chat-launcher-logo-scale, 1)) !important; min-width: calc(44px * var(--chat-launcher-logo-scale, 1)) !important; min-height: calc(44px * var(--chat-launcher-logo-scale, 1)) !important; max-width: 58px !important; max-height: 58px !important; border-radius: 50%; background: var(--chat-launcher-logo-bg, transparent) !important; background-color: var(--chat-launcher-logo-bg, transparent) !important; border: 1.5px solid var(--chat-launcher-logo-border, var(--chat-glow-ring, rgba(56, 189, 248, 0.8))) !important; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; padding: calc(6px * (2 - var(--chat-launcher-logo-scale, 1))) !important; box-sizing: border-box !important; transition: width .2s ease, height .2s ease, transform .2s ease !important; }',
+    '.samche-launcher.samche-launcher-circle .samche-launcher-badge { width: 100% !important; height: 100% !important; max-width: 100% !important; max-height: 100% !important; border: 1.5px solid var(--chat-launcher-logo-border, transparent) !important; background: var(--chat-launcher-logo-bg, transparent) !important; background-color: var(--chat-launcher-logo-bg, transparent) !important; box-shadow: none !important; padding: calc(8px * (1.5 - var(--chat-launcher-logo-scale, 1) * 0.5)) !important; }',
+    '.samche-launcher-badge img { max-width: 100% !important; max-height: 100% !important; width: calc(100% * var(--chat-launcher-logo-scale, 1)) !important; height: calc(100% * var(--chat-launcher-logo-scale, 1)) !important; object-fit: contain !important; display: block; user-select: none; pointer-events: none; }',
     '.samche-launcher-badge svg { width: 24px !important; height: 24px !important; max-width: 24px !important; max-height: 24px !important; fill: currentColor; color: var(--chat-launcher-text, #FFFFFF) !important; }',
     '.samche-pos-left .samche-launcher { right: auto !important; left: 24px !important; }',
     '.samche-launcher:hover { transform: translateY(-2px) scale(1.02); }',
@@ -1060,7 +1078,8 @@
     '.samche-launcher:focus-visible { outline: 2px solid var(--chat-accent, #60A5FA); outline-offset: 3px; }',
     '.samche-launcher-icon { width: 24px !important; height: 24px !important; display: flex; align-items: center; justify-content: center; fill: currentColor; flex-shrink: 0; }',
     '.samche-launcher-icon svg { width: 24px !important; height: 24px !important; max-width: 24px !important; max-height: 24px !important; fill: currentColor; }',
-    '.samche-launcher-logo { max-width: 100%; max-height: 100%; object-fit: contain; flex-shrink: 0; }',
+    '.samche-launcher-logo { max-width: 100% !important; max-height: 100% !important; width: calc(100% * var(--chat-launcher-logo-scale, 1)) !important; height: calc(100% * var(--chat-launcher-logo-scale, 1)) !important; object-fit: contain !important; flex-shrink: 0; }',
+    '.samche-launcher.samche-launcher-circle .samche-launcher-logo { width: calc(34px * var(--chat-launcher-logo-scale, 1)) !important; height: calc(34px * var(--chat-launcher-logo-scale, 1)) !important; max-width: 52px !important; max-height: 52px !important; object-fit: contain !important; }',
     '.samche-launcher.samche-intent-pulse { animation: samche-intent-pulse 2s ease-in-out 3 !important; }',
     '@keyframes samche-glow-breathe { 0%, 100% { box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.45) var(--chat-glow-ring, rgba(56, 189, 248, 0.7)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.4)), 0 8px 28px -4px var(--chat-glow-soft, rgba(56, 189, 248, 0.2)), 0 4px 16px rgba(0, 0, 0, 0.5); transform: scale(1); } 50% { box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.7) var(--chat-glow-ring, rgba(56, 189, 248, 0.9)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.3) var(--chat-glow, rgba(56, 189, 248, 0.55)), 0 12px 36px -2px var(--chat-glow-soft, rgba(56, 189, 248, 0.35)), 0 6px 20px rgba(0, 0, 0, 0.6); transform: scale(1.025); } }',
     '@keyframes samche-glow-pulse-strong { 0%, 100% { box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.5) var(--chat-glow-ring, rgba(56, 189, 248, 0.8)), 0 0 var(--chat-glow-halo, 42px) var(--chat-glow, rgba(56, 189, 248, 0.5)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.6) var(--chat-glow-soft, rgba(56, 189, 248, 0.3)), 0 8px 30px rgba(0, 0, 0, 0.6); transform: scale(1); } 50% { box-shadow: 0 0 calc(var(--chat-glow-spread, 24px) * 0.9) var(--chat-glow-ring, rgba(56, 189, 248, 1)), 0 0 calc(var(--chat-glow-halo, 42px) * 1.5) var(--chat-glow, rgba(56, 189, 248, 0.75)), 0 0 calc(var(--chat-glow-halo, 42px) * 2.2) var(--chat-glow-soft, rgba(56, 189, 248, 0.45)), 0 14px 40px rgba(0, 0, 0, 0.7); transform: scale(1.04); } }',
@@ -1076,8 +1095,8 @@
   var CANONICAL_WIDGET_CSS_B = [
     '.samche-header { padding: 16px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--chat-border, rgba(255,255,255,0.08)); background: rgba(255,255,255,0.03); flex-shrink: 0; }',
     '.samche-header-info { display: flex; align-items: center; gap: 12px; }',
-    '.samche-header-avatar { width: 36px; height: 36px; border-radius: 10px; background: var(--chat-surface-tint, #1E293B); border: 1px solid var(--chat-border, rgba(255,255,255,0.12)); display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }',
-    '.samche-header-avatar img { width: 100%; height: 100%; object-fit: contain; }',
+    '.samche-header-avatar { width: calc(36px * var(--chat-panel-logo-scale, 1)) !important; height: calc(36px * var(--chat-panel-logo-scale, 1)) !important; min-width: calc(36px * var(--chat-panel-logo-scale, 1)) !important; min-height: calc(36px * var(--chat-panel-logo-scale, 1)) !important; max-width: 60px !important; max-height: 60px !important; border-radius: 10px; background: var(--chat-surface-tint, #1E293B); border: 1px solid var(--chat-border, rgba(255,255,255,0.12)); display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; transition: width .2s ease, height .2s ease !important; }',
+    '.samche-header-avatar img { width: 100% !important; height: 100% !important; object-fit: contain !important; padding: 2px !important; }',
     '.samche-header-avatar svg, .samche-avatar-icon svg { width: 20px !important; height: 20px !important; max-width: 20px !important; max-height: 20px !important; fill: var(--chat-primary, #2563EB); }',
     '.samche-header-titles { display: flex; flex-direction: column; }',
     '.samche-header-title { font-size: 15px; font-weight: 600; color: var(--chat-text, #F8FAFC); line-height: 1.25; }',
@@ -1705,9 +1724,19 @@
           if (e.key === 'samche_webchat_reset_' + encodeURIComponent(widgetKey)) {
             syncResetIfOccurred();
           }
+          if (e.key === 'samche_webchat_appearance_' + encodeURIComponent(widgetKey)) {
+            var freshApp = SamcheChatPersistence.getStoredAppearance(widgetKey);
+            if (freshApp) {
+              applyTheme(freshApp);
+            }
+          }
         });
         window.addEventListener('focus', function() {
           syncResetIfOccurred();
+          var freshApp = SamcheChatPersistence.getStoredAppearance(widgetKey);
+          if (freshApp && (!currentAppearance || freshApp.config_version !== currentAppearance.config_version)) {
+            applyTheme(freshApp);
+          }
         });
       }
 
@@ -1876,6 +1905,7 @@
       function applyTheme(appearance) {
         if (!appearance || typeof appearance !== 'object') return;
         currentAppearance = appearance;
+        effectiveAppearance = appearance;
         if (appearance.launcher_position === 'left') {
           wrap.classList.add('samche-pos-left');
         } else {
@@ -1890,52 +1920,75 @@
           if (statusText) statusText.textContent = appearance.subtitle;
         }
 
-        updateLauncher();
-
         if (appearance.logo_url) {
           var avatarWrap = header.querySelector('.samche-header-avatar');
           if (avatarWrap) avatarWrap.innerHTML = '<img src="' + resolveWebChatAssetUrl(appearance.logo_url) + '" alt="' + (appearance.brand_name || 'Logo') + '" />';
         }
-        if (appearance.theme) {
-          var t = appearance.theme;
-          var targets = [host, wrap, launcher, panel];
-          for (var ti = 0; ti < targets.length; ti++) {
-            var target = targets[ti];
-            if (!target || !target.style) continue;
-            if (t.primary_color) target.style.setProperty('--chat-primary', t.primary_color);
-            var fg = t.primary_foreground || (t.primary_color ? computeClientContrastForeground(t.primary_color) : '#FFFFFF');
-            target.style.setProperty('--chat-primary-foreground', fg);
-            if (t.accent_color) target.style.setProperty('--chat-accent', t.accent_color);
-            if (t.surface_tint) target.style.setProperty('--chat-surface-tint', t.surface_tint);
-            if (t.surface_glass) target.style.setProperty('--chat-surface-glass', t.surface_glass);
-            if (t.surface_solid) target.style.setProperty('--chat-surface-solid', t.surface_solid);
-            if (t.glow_color) target.style.setProperty('--chat-glow', t.glow_color);
-            if (t.glow_soft) target.style.setProperty('--chat-glow-soft', t.glow_soft);
-            if (t.glow_ring) target.style.setProperty('--chat-glow-ring', t.glow_ring);
-            if (t.glow_spread_px) target.style.setProperty('--chat-glow-spread', t.glow_spread_px + 'px');
-            if (t.glow_halo_px) target.style.setProperty('--chat-glow-halo', t.glow_halo_px + 'px');
-            if (t.pulse_duration) target.style.setProperty('--chat-pulse-duration', t.pulse_duration);
-            var lText = t.launcher_foreground || t.launcher_text || (appearance && (appearance.launcher_foreground || appearance.launcher_text));
-            if (lText !== undefined && lText !== null) target.style.setProperty('--chat-launcher-text', lText);
-            var lBg = t.launcher_background || t.launcher_bg || (appearance && (appearance.launcher_background || appearance.launcher_bg));
-            if (lBg !== undefined && lBg !== null) target.style.setProperty('--chat-launcher-bg', lBg);
-            var lBorder = t.launcher_border_color || t.launcher_border || (appearance && (appearance.launcher_border_color || appearance.launcher_border));
-            if (lBorder !== undefined && lBorder !== null) target.style.setProperty('--chat-launcher-border', lBorder);
-            var lGlow = t.launcher_glow_color || t.launcher_glow || (appearance && (appearance.launcher_glow_color || appearance.launcher_glow));
-            if (lGlow !== undefined && lGlow !== null) target.style.setProperty('--chat-launcher-glow', lGlow);
-            var lLogoBg = t.launcher_logo_background || t.launcher_logo_bg || (appearance && (appearance.launcher_logo_background || appearance.launcher_logo_bg));
-            if (lLogoBg !== undefined && lLogoBg !== null) target.style.setProperty('--chat-launcher-logo-bg', lLogoBg);
-            var lLogoBorder = t.launcher_logo_border_color || t.launcher_logo_border || (appearance && (appearance.launcher_logo_border_color || appearance.launcher_logo_border));
-            if (lLogoBorder !== undefined && lLogoBorder !== null) target.style.setProperty('--chat-launcher-logo-border', lLogoBorder);
-            if (t.text_color) target.style.setProperty('--chat-text', t.text_color);
-            if (t.muted_color) target.style.setProperty('--chat-muted', t.muted_color);
-            if (t.border_color) target.style.setProperty('--chat-border', t.border_color);
-            if (t.input_bg) target.style.setProperty('--chat-input-bg', t.input_bg);
-            if (t.input_border) target.style.setProperty('--chat-input-border', t.input_border);
-            if (t.bot_bubble_bg) target.style.setProperty('--chat-bot-bubble-bg', t.bot_bubble_bg);
-            if (t.bot_bubble_border) target.style.setProperty('--chat-bot-bubble-border', t.bot_bubble_border);
-          }
+
+        var t = appearance.theme || {};
+        var targets = [host, wrap, launcher, panel];
+        for (var ti = 0; ti < targets.length; ti++) {
+          var target = targets[ti];
+          if (!target || !target.style) continue;
+
+          var setOrRemove = function(prop, val) {
+            if (val !== undefined && val !== null && String(val).trim() !== '') {
+              target.style.setProperty(prop, String(val).trim());
+            } else {
+              target.style.removeProperty(prop);
+            }
+          };
+
+          setOrRemove('--chat-primary', t.primary_color);
+          var fg = t.primary_foreground || (t.primary_color ? computeClientContrastForeground(t.primary_color) : '#FFFFFF');
+          setOrRemove('--chat-primary-foreground', fg);
+          setOrRemove('--chat-accent', t.accent_color);
+          setOrRemove('--chat-surface-tint', t.surface_tint);
+          setOrRemove('--chat-surface-glass', t.surface_glass);
+          setOrRemove('--chat-surface-solid', t.surface_solid);
+          if (t.glow_color) target.style.setProperty('--chat-glow', t.glow_color); else setOrRemove('--chat-glow', null);
+          setOrRemove('--chat-glow-soft', t.glow_soft);
+          if (t.glow_ring) target.style.setProperty('--chat-glow-ring', t.glow_ring); else setOrRemove('--chat-glow-ring', null);
+          if (t.glow_spread_px) target.style.setProperty('--chat-glow-spread', t.glow_spread_px + 'px'); else setOrRemove('--chat-glow-spread', null);
+          if (t.glow_halo_px) target.style.setProperty('--chat-glow-halo', t.glow_halo_px + 'px'); else setOrRemove('--chat-glow-halo', null);
+          if (t.pulse_duration) target.style.setProperty('--chat-pulse-duration', t.pulse_duration); else setOrRemove('--chat-pulse-duration', null);
+
+          var lText = t.launcher_foreground || t.launcher_text || appearance.launcher_foreground || appearance.launcher_text;
+          setOrRemove('--chat-launcher-text', lText);
+
+          var lBg = t.launcher_background || t.launcher_bg || appearance.launcher_background || appearance.launcher_bg;
+          setOrRemove('--chat-launcher-bg', lBg);
+
+          var lBorder = t.launcher_border_color || t.launcher_border || appearance.launcher_border_color || appearance.launcher_border;
+          setOrRemove('--chat-launcher-border', lBorder);
+
+          var lGlow = t.launcher_glow_color || t.launcher_glow || appearance.launcher_glow_color || appearance.launcher_glow;
+          setOrRemove('--chat-launcher-glow', lGlow);
+
+          var lLogoBg = t.launcher_logo_background || t.launcher_logo_bg || appearance.launcher_logo_background || appearance.launcher_logo_bg;
+          setOrRemove('--chat-launcher-logo-bg', lLogoBg);
+
+          var lLogoBorder = t.launcher_logo_border_color || t.launcher_logo_border || appearance.launcher_logo_border_color || appearance.launcher_logo_border;
+          setOrRemove('--chat-launcher-logo-border', lLogoBorder);
+
+          var lScaleNum = Number(appearance.launcher_logo_scale ?? t.launcher_logo_scale ?? 100);
+          var lScale = Number.isFinite(lScaleNum) ? (Math.max(50, Math.min(200, lScaleNum)) / 100).toFixed(2) : '1';
+          setOrRemove('--chat-launcher-logo-scale', lScale);
+
+          var pScaleNum = Number(appearance.panel_logo_scale ?? t.panel_logo_scale ?? 100);
+          var pScale = Number.isFinite(pScaleNum) ? (Math.max(50, Math.min(200, pScaleNum)) / 100).toFixed(2) : '1';
+          setOrRemove('--chat-panel-logo-scale', pScale);
+
+          setOrRemove('--chat-text', t.text_color);
+          setOrRemove('--chat-muted', t.muted_color);
+          setOrRemove('--chat-border', t.border_color);
+          setOrRemove('--chat-input-bg', t.input_bg);
+          setOrRemove('--chat-input-border', t.input_border);
+          setOrRemove('--chat-bot-bubble-bg', t.bot_bubble_bg);
+          setOrRemove('--chat-bot-bubble-border', t.bot_bubble_border);
         }
+
+        updateLauncher();
       }
 
       if (effectiveAppearance) {
@@ -2094,6 +2147,7 @@
 
       fetch(resolveApiBaseUrl() + '/api/chat/bootstrap', {
         method: 'POST',
+        cache: 'no-store',
         headers: bHeaders,
         body: JSON.stringify({ widget_key: widgetKey, session_token: storedSession || undefined }),
       })
@@ -2198,7 +2252,15 @@
           }
         }
         if (data.appearance) {
-          SamcheChatPersistence.storeAppearance(widgetKey, data.appearance);
+          var serverVer = Number(data.appearance.config_version || data.config_version || 0);
+          var cachedVer = Number(storedAppearance && (storedAppearance.config_version || storedAppearance.version || 0));
+          var isStale = !cachedVer || (serverVer && serverVer > cachedVer) || JSON.stringify(storedAppearance) !== JSON.stringify(data.appearance);
+
+          if (isStale) {
+            SamcheChatPersistence.storeAppearance(widgetKey, data.appearance);
+          }
+          storedAppearance = data.appearance;
+          effectiveAppearance = data.appearance;
           applyTheme(data.appearance);
         }
         if (data.behavior) {

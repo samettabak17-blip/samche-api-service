@@ -3,10 +3,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { BrowserCdp } from '../tests/helpers/browser-cdp.js';
 
-const ARTIFACTS_DIR = path.resolve('artifacts');
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const rootDir = path.resolve(__dirname, '..');
+const ARTIFACTS_DIR = path.resolve(rootDir, 'artifacts');
 if (!fs.existsSync(ARTIFACTS_DIR)) fs.mkdirSync(ARTIFACTS_DIR, { recursive: true });
-const DIST_DIR = path.resolve('dashboard', 'dist');
-const PUBLIC_DIR = path.resolve('public');
+const DIST_DIR = path.resolve(rootDir, 'dashboard', 'dist');
+const PUBLIC_DIR = path.resolve(rootDir, 'public');
 
 
 
@@ -130,7 +135,8 @@ function createVerificationServer() {
     }
 
     if (pathname.startsWith('/assets/')) {
-      const filePath = path.join(DIST_DIR, pathname);
+      const rel = pathname.replace(/^\/+/, '');
+      const filePath = path.join(DIST_DIR, rel);
       if (fs.existsSync(filePath)) {
         res.writeHead(200, {
           'Content-Type': pathname.endsWith('.js')

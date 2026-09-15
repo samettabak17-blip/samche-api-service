@@ -306,6 +306,9 @@ export function WebChatManagement() {
   const [launcherGlow, setLauncherGlow] = useState<string>('');
   const [launcherLogoBg, setLauncherLogoBg] = useState<string>('transparent');
   const [launcherLogoBorder, setLauncherLogoBorder] = useState<string>('transparent');
+  const [launcherLogoScale, setLauncherLogoScale] = useState<number>(100);
+  const [panelLogoScale, setPanelLogoScale] = useState<number>(100);
+  const [previewHostCanvas, setPreviewHostCanvas] = useState<'light' | 'dark'>('light');
   const [previewState, setPreviewState] = useState<'both' | 'closed' | 'open'>('both');
 
   const [previewOpen, setPreviewOpen] = useState(true);
@@ -371,6 +374,8 @@ export function WebChatManagement() {
         setLauncherGlow(d.appearance.launcher_glow_color || d.appearance.launcher_glow || d.appearance.theme?.launcher_glow_color || d.appearance.theme?.launcher_glow || '');
         setLauncherLogoBg(d.appearance.launcher_logo_background || d.appearance.launcher_logo_bg || d.appearance.theme?.launcher_logo_background || d.appearance.theme?.launcher_logo_bg || 'transparent');
         setLauncherLogoBorder(d.appearance.launcher_logo_border_color || d.appearance.launcher_logo_border || d.appearance.theme?.launcher_logo_border_color || d.appearance.theme?.launcher_logo_border || 'transparent');
+        setLauncherLogoScale(Number(d.appearance.launcher_logo_scale ?? d.appearance.theme?.launcher_logo_scale ?? 100));
+        setPanelLogoScale(Number(d.appearance.panel_logo_scale ?? d.appearance.theme?.panel_logo_scale ?? 100));
         if (d.appearance.theme) {
           setPrimaryColor(d.appearance.theme.primary_color || '#0B5FFF');
           setAccentColor(d.appearance.theme.accent_color || '#10B981');
@@ -511,6 +516,8 @@ export function WebChatManagement() {
     launcherGlow !== (savedAppearance.launcher_glow_color || savedAppearance.launcher_glow || savedTheme.launcher_glow_color || savedTheme.launcher_glow || '') ||
     launcherLogoBg !== (savedAppearance.launcher_logo_background || savedAppearance.launcher_logo_bg || savedTheme.launcher_logo_background || savedTheme.launcher_logo_bg || 'transparent') ||
     launcherLogoBorder !== (savedAppearance.launcher_logo_border_color || savedAppearance.launcher_logo_border || savedTheme.launcher_logo_border_color || savedTheme.launcher_logo_border || 'transparent') ||
+    Number(launcherLogoScale) !== Number(savedAppearance.launcher_logo_scale ?? savedTheme.launcher_logo_scale ?? 100) ||
+    Number(panelLogoScale) !== Number(savedAppearance.panel_logo_scale ?? savedTheme.panel_logo_scale ?? 100) ||
     Number(glowIntensity) !== Number(savedAppearance.glow_intensity ?? 80) ||
     Number(glowSpread) !== Number(savedAppearance.glow_spread ?? 70) ||
     pulseAnimation !== (savedAppearance.pulse_animation || 'normal') ||
@@ -555,9 +562,13 @@ export function WebChatManagement() {
         launcher_logo_bg: launcherThemeMode === 'custom' ? launcherLogoBg : null,
         launcher_logo_border_color: launcherThemeMode === 'custom' ? (launcherLogoBorder || null) : null,
         launcher_logo_border: launcherThemeMode === 'custom' ? (launcherLogoBorder || null) : null,
+        launcher_logo_scale: launcherLogoScale,
+        panel_logo_scale: panelLogoScale,
         theme: {
           primary_color: primaryColor,
           accent_color: accentColor,
+          launcher_logo_scale: launcherLogoScale,
+          panel_logo_scale: panelLogoScale,
         },
       };
 
@@ -570,6 +581,7 @@ export function WebChatManagement() {
       };
 
       return tenantApi.updateWebChatChannel(tenantId!, {
+        widget_key: data?.widget_key || undefined,
         display_name: displayName,
         assistant_id: assistantId || null,
         status,
@@ -577,9 +589,17 @@ export function WebChatManagement() {
         behavior,
       });
     },
-    onSuccess: () => {
+    onSuccess: (res: any) => {
       queryClient.invalidateQueries({ queryKey: tenantKeys.webChatChannel(tenantId!) });
       queryClient.invalidateQueries({ queryKey: tenantKeys.channels(tenantId!) });
+      const savedApp = res?.appearance;
+      if (typeof window !== 'undefined' && data?.widget_key && savedApp) {
+        try {
+          if ((window as any).SamcheChatPersistence && typeof (window as any).SamcheChatPersistence.storeAppearance === 'function') {
+            (window as any).SamcheChatPersistence.storeAppearance(data.widget_key, savedApp);
+          }
+        } catch (e) {}
+      }
       setNotice('Web Chat configuration successfully updated.');
     },
   });
@@ -907,6 +927,92 @@ export function WebChatManagement() {
                   {logoUploadError}
                 </div>
               )}
+
+              {/* Logo Sizing Productization Controls */}
+              <div data-testid="logo-sizing-controls" className="space-y-4 pt-3 mt-1 border-t border-line/50">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-stone-300">
+                    Logo Sizing & Scale
+                  </span>
+                  <span className="text-[11px] text-stone-400">
+                    Aspect Ratio Preserved &middot; Min 50% / Max 200%
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Launcher Logo Size */}
+                  <div data-testid="launcher-logo-size-control" className="space-y-1.5 rounded-lg border border-line/60 bg-stone-900/40 p-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <label htmlFor="launcher-logo-scale-slider" className="font-medium text-stone-300">
+                        Launcher Logo Size
+                      </label>
+                      <span data-testid="launcher-logo-scale-value" className="font-mono text-sky-400 font-semibold text-xs">
+                        {launcherLogoScale}%
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 pt-1">
+                      <input
+                        id="launcher-logo-scale-slider"
+                        data-testid="launcher-logo-size-slider"
+                        type="range"
+                        min={50}
+                        max={200}
+                        step={5}
+                        value={launcherLogoScale}
+                        onChange={(e) => setLauncherLogoScale(Number(e.target.value))}
+                        className="flex-1 accent-sky-500 h-1.5 bg-stone-700 rounded-lg cursor-pointer"
+                        aria-label="Launcher Logo Size"
+                      />
+                      <input
+                        type="number"
+                        min={50}
+                        max={200}
+                        step={5}
+                        value={launcherLogoScale}
+                        onChange={(e) => setLauncherLogoScale(Math.max(50, Math.min(200, Number(e.target.value) || 100)))}
+                        className="w-16 rounded border border-line bg-canvas/60 px-2 py-1 text-center font-mono text-xs text-white"
+                        aria-label="Launcher Logo Size numeric percentage"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Panel Header Logo Size */}
+                  <div data-testid="panel-logo-size-control" className="space-y-1.5 rounded-lg border border-line/60 bg-stone-900/40 p-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <label htmlFor="panel-logo-scale-slider" className="font-medium text-stone-300">
+                        Panel Header Logo Size
+                      </label>
+                      <span data-testid="panel-logo-scale-value" className="font-mono text-sky-400 font-semibold text-xs">
+                        {panelLogoScale}%
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 pt-1">
+                      <input
+                        id="panel-logo-scale-slider"
+                        data-testid="panel-logo-size-slider"
+                        type="range"
+                        min={50}
+                        max={200}
+                        step={5}
+                        value={panelLogoScale}
+                        onChange={(e) => setPanelLogoScale(Number(e.target.value))}
+                        className="flex-1 accent-sky-500 h-1.5 bg-stone-700 rounded-lg cursor-pointer"
+                        aria-label="Panel Header Logo Size"
+                      />
+                      <input
+                        type="number"
+                        min={50}
+                        max={200}
+                        step={5}
+                        value={panelLogoScale}
+                        onChange={(e) => setPanelLogoScale(Math.max(50, Math.min(200, Number(e.target.value) || 100)))}
+                        className="w-16 rounded border border-line bg-canvas/60 px-2 py-1 text-center font-mono text-xs text-white"
+                        aria-label="Panel Header Logo Size numeric percentage"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               {/* Advanced / Secondary external URL fallback */}
               <details className="pt-1 text-xs text-stone-400">
@@ -1515,6 +1621,30 @@ export function WebChatManagement() {
                   </button>
                 </div>
 
+                {/* Host Canvas Toggle (Simulate Light vs Dark host website) */}
+                <div className="flex items-center gap-1 rounded-lg border border-line p-0.5 bg-black/20" title="Simulate host website background">
+                  <button
+                    type="button"
+                    data-testid="preview-host-light"
+                    onClick={() => setPreviewHostCanvas('light')}
+                    className={`rounded px-2 py-1 text-xs font-medium transition cursor-pointer ${
+                      previewHostCanvas === 'light' ? 'bg-sky-500/20 text-sky-300 border border-sky-400/30' : 'text-stone-400 hover:text-white'
+                    }`}
+                  >
+                    ☀️ Light Host
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="preview-host-dark"
+                    onClick={() => setPreviewHostCanvas('dark')}
+                    className={`rounded px-2 py-1 text-xs font-medium transition cursor-pointer ${
+                      previewHostCanvas === 'dark' ? 'bg-sky-500/20 text-sky-300 border border-sky-400/30' : 'text-stone-400 hover:text-white'
+                    }`}
+                  >
+                    🌙 Dark Host
+                  </button>
+                </div>
+
                 {isConfigured && data.widget_key && (
                   <a
                     href={`https://samche-api-staging.onrender.com/task8-demo/?widget_key=${encodeURIComponent(data.widget_key)}`}
@@ -1597,6 +1727,9 @@ export function WebChatManagement() {
               primaryColor={primaryColor}
               accentColor={accentColor}
               language={language}
+              launcherLogoScale={launcherLogoScale}
+              panelLogoScale={panelLogoScale}
+              hostCanvas={previewHostCanvas}
             />
 
             {/* WCAG Guard Status Footer */}
@@ -1783,6 +1916,30 @@ export function WebChatManagement() {
                   Open
                 </button>
               </div>
+
+              {/* Host Canvas Toggle (Simulate Light vs Dark host website) */}
+              <div className="flex items-center gap-1 rounded-lg border border-line p-0.5 bg-black/20" title="Simulate host website background">
+                <button
+                  type="button"
+                  data-testid="preview-host-light-preview-tab"
+                  onClick={() => setPreviewHostCanvas('light')}
+                  className={`rounded px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
+                    previewHostCanvas === 'light' ? 'bg-sky-500/20 text-sky-300 border border-sky-400/30' : 'text-stone-400 hover:text-white'
+                  }`}
+                >
+                  ☀️ Light Host
+                </button>
+                <button
+                  type="button"
+                  data-testid="preview-host-dark-preview-tab"
+                  onClick={() => setPreviewHostCanvas('dark')}
+                  className={`rounded px-2.5 py-1 text-xs font-medium transition cursor-pointer ${
+                    previewHostCanvas === 'dark' ? 'bg-sky-500/20 text-sky-300 border border-sky-400/30' : 'text-stone-400 hover:text-white'
+                  }`}
+                >
+                  🌙 Dark Host
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1855,6 +2012,9 @@ export function WebChatManagement() {
             primaryColor={primaryColor}
             accentColor={accentColor}
             language={language}
+            launcherLogoScale={launcherLogoScale}
+            panelLogoScale={panelLogoScale}
+            hostCanvas={previewHostCanvas}
           />
         </div>
       )}

@@ -39,6 +39,8 @@ export interface WebChatThemeConfig {
   launcher_logo_bg?: string;
   launcher_logo_border_color?: string;
   launcher_logo_border?: string;
+  launcher_logo_scale?: number;
+  panel_logo_scale?: number;
   text_color?: string;
   muted_color?: string;
   border_color?: string;
@@ -76,6 +78,8 @@ export interface WebChatAppearanceConfig {
   launcher_logo_bg?: string | null;
   launcher_logo_border_color?: string | null;
   launcher_logo_border?: string | null;
+  launcher_logo_scale?: number;
+  panel_logo_scale?: number;
   theme: WebChatThemeConfig;
   contrast?: {
     primary_button?: number;

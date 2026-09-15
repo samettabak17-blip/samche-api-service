@@ -138,10 +138,22 @@ export function deriveWebChatThemeTokens({
   launcherLogoBg = null,
   launcherLogoBorderColor = null,
   launcherLogoBorder = null,
+  launcherLogoScale = 100,
+  panelLogoScale = 100,
 } = {}) {
   const effectiveMode = ['dark', 'light'].includes(String(mode).toLowerCase())
     ? String(mode).toLowerCase()
     : 'dark';
+
+  const rawLauncherLogoScale = Number(launcherLogoScale);
+  const clampedLauncherLogoScale = Number.isFinite(rawLauncherLogoScale)
+    ? Math.max(50, Math.min(200, Math.round(rawLauncherLogoScale)))
+    : 100;
+
+  const rawPanelLogoScale = Number(panelLogoScale);
+  const clampedPanelLogoScale = Number.isFinite(rawPanelLogoScale)
+    ? Math.max(50, Math.min(200, Math.round(rawPanelLogoScale)))
+    : 100;
 
   const rawPrimary = normalizeHex(primaryColor, '#2563EB');
   const safePrimary = normalizePrimaryForMode(rawPrimary, effectiveMode);
@@ -357,6 +369,8 @@ export function deriveWebChatThemeTokens({
     launcher_logo_background: computedLauncherLogoBg,
     launcher_logo_border: computedLauncherLogoBorder,
     launcher_logo_border_color: computedLauncherLogoBorder,
+    launcher_logo_scale: clampedLauncherLogoScale,
+    panel_logo_scale: clampedPanelLogoScale,
     text: textColor,
     muted: mutedColor,
     border: borderColor,

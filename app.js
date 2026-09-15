@@ -575,7 +575,7 @@ app.use(['/guide', '/:slug/guide'], async (req, res, next) => {
 }, sharedGuideStatic);
 
 app.use('/public', express.static('public'));
-app.get('/web-chat.js', (req, res) => {
+app.get(['/web-chat.js', '/public/web-chat.js'], (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
@@ -1868,6 +1868,10 @@ app.get("/api/chat/history", async (req, res) => {
 });
 
 app.post("/api/chat/bootstrap", async (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
   const widgetKey = typeof req.body?.widget_key === 'string' ? req.body.widget_key.trim() : '';
   const secret = configuredPublicWebChatSessionSecret();
   if (!widgetKey || !secret) return res.status(503).json({ error: 'Web Chat is unavailable.' });
@@ -1876,7 +1880,11 @@ app.post("/api/chat/bootstrap", async (req, res) => {
     if (!integration) return res.status(404).json({ error: 'Web Chat integration is unavailable.' });
 
     const rawConfig = integration.config || {};
-    const appearance = normalizeWebChatAppearance(rawConfig.appearance, integration.channel_name);
+    const configVersion = Number(rawConfig.appearance?.config_version || rawConfig.config_version || (integration.updated_at ? new Date(integration.updated_at).getTime() : Date.now()));
+    const appearanceInput = Object.assign({}, rawConfig.appearance || {});
+    appearanceInput.config_version = configVersion;
+    appearanceInput.updated_at = rawConfig.appearance?.updated_at || (integration.updated_at ? new Date(integration.updated_at).toISOString() : new Date(configVersion).toISOString());
+    const appearance = normalizeWebChatAppearance(appearanceInput, integration.channel_name);
     const behavior = normalizeWebChatBehavior(rawConfig.behavior);
 
     let personaGreeting = null;
@@ -2010,6 +2018,7 @@ app.post("/api/chat/bootstrap", async (req, res) => {
             history: deduplicatedHistory,
             appearance,
             behavior,
+            config_version: configVersion,
             assistant: publicAssistant,
             browsing_state: {
               current_entity: browsingState?.currentEntity || null,
@@ -2043,6 +2052,7 @@ app.post("/api/chat/bootstrap", async (req, res) => {
       ],
       appearance,
       behavior,
+      config_version: configVersion,
       assistant: publicAssistant,
     });
   } catch (error) {
