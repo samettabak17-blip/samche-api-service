@@ -23,6 +23,7 @@ let onUnauthorized: UnauthorizedHandler | undefined;
 function apiBaseUrl(): string {
   const value = import.meta.env.VITE_API_BASE_URL?.trim();
   if (!value) {
+    if (typeof window !== 'undefined' && window.location?.origin) { return window.location.origin; }
     throw new ApiError(0, 'Dashboard API address is not configured.');
   }
 

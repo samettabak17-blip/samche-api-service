@@ -703,6 +703,80 @@ describe('WebChatManagement Component', () => {
       );
     });
   });
+  it('provides explicit Transparent and Use Color controls with checkerboard swatch and non-corrupting restoration', async () => {
+    const payload: WebChatChannelResponse = {
+      tenant_id: 'test-tenant-123',
+      configured: true,
+      widget_key: 'wch_launcher_trans_key',
+      channel: { id: 'ch-1', channel_type: 'WEB_CHAT', display_name: 'Test Web Chat', status: 'active' },
+      assistant: { id: 'ast-1', tenant_id: 'test-tenant-123', name: 'Test Assistant', model: 'gpt-4o-mini', status: 'active' },
+      integration: { id: 'int-1', integration_key: 'wch_launcher_trans_key', integration_type: 'WEB_CHAT', enabled: true },
+      appearance: {
+        ...mockAppearance,
+        launcher_theme_mode: 'custom',
+        launcher_bg: '#1E293B',
+        launcher_border_color: '#3B82F6',
+        launcher_logo_bg: 'transparent',
+        launcher_logo_border_color: 'transparent',
+      },
+      behavior: mockBehavior,
+      embed_snippet: '<script></script>',
+      installation: { widget_key: 'wch_launcher_trans_key', embed_snippet: '', status: 'active', guidance: [] },
+    };
+
+    vi.mocked(tenantApi.getWebChatChannel).mockResolvedValue(payload);
+    vi.mocked(tenantApi.listAssistants).mockResolvedValue([]);
+    vi.mocked(tenantApi.updateWebChatChannel).mockResolvedValue(payload);
+
+    renderComponent();
+    fireEvent.click(await screen.findByRole('button', { name: /Appearance & Theme/i }));
+
+    expect(await screen.findByTestId('launcher-custom-controls')).toBeTruthy();
+
+    // Verify LOGO / AVATAR CONTAINER section exists
+    const logoSection = screen.getByTestId('logo-avatar-container-section');
+    expect(logoSection).toBeTruthy();
+    expect(within(logoSection).getByText(/LOGO \/ AVATAR CONTAINER/i)).toBeTruthy();
+
+    // 1. Launcher Background starts as #1E293B -> verify color picker and explicit Transparent button
+    const launcherBgControl = screen.getByTestId('launcher-bg-control');
+    const launcherBgPicker = within(launcherBgControl).getByTestId('launcher-bg-control-color-picker');
+    expect(launcherBgPicker).toBeTruthy();
+    const launcherBgTransBtn = within(launcherBgControl).getByTestId('launcher-bg-control-transparent-btn');
+    expect(launcherBgTransBtn).toBeTruthy();
+
+    // Click Transparent
+    fireEvent.click(launcherBgTransBtn);
+
+    // Now checkerboard swatch and Use Color button appear
+    expect(within(launcherBgControl).getByTestId('launcher-bg-control-swatch-transparent')).toBeTruthy();
+    const launcherBgUseColorBtn = within(launcherBgControl).getByTestId('launcher-bg-control-use-color-btn');
+    expect(launcherBgUseColorBtn).toBeTruthy();
+    expect(within(launcherBgControl).getByDisplayValue('transparent')).toBeTruthy();
+
+    // Click Use Color -> restores #1E293B without corrupting configuration
+    fireEvent.click(launcherBgUseColorBtn);
+    expect(within(launcherBgControl).getByDisplayValue('#1E293B')).toBeTruthy();
+    expect(within(launcherBgControl).getByTestId('launcher-bg-control-transparent-btn')).toBeTruthy();
+
+    // 2. Logo Background starts as transparent -> verify checkerboard swatch and Use Color button
+    const logoBgControl = screen.getByTestId('launcher-logo-bg-control');
+    expect(within(logoBgControl).getByTestId('launcher-logo-bg-control-swatch-transparent')).toBeTruthy();
+    const logoBgUseColorBtn = within(logoBgControl).getByTestId('launcher-logo-bg-control-use-color-btn');
+    expect(logoBgUseColorBtn).toBeTruthy();
+
+    // Click Use Color on Logo Background
+    fireEvent.click(logoBgUseColorBtn);
+    // Switched to color picker and Transparent button
+    expect(within(logoBgControl).getByTestId('launcher-logo-bg-control-color-picker')).toBeTruthy();
+    const logoBgTransBtn = within(logoBgControl).getByTestId('launcher-logo-bg-control-transparent-btn');
+    expect(logoBgTransBtn).toBeTruthy();
+
+    // Switch it back to Transparent
+    fireEvent.click(logoBgTransBtn);
+    expect(within(logoBgControl).getByTestId('launcher-logo-bg-control-swatch-transparent')).toBeTruthy();
+  });
+
 
 
 

@@ -130,6 +130,7 @@ function ColorFieldWithTransparent({
   fallbackColor = '#0F172A',
   placeholder = '#0F172A',
   testId,
+  helperText,
 }: {
   label: string;
   value: string;
@@ -137,43 +138,131 @@ function ColorFieldWithTransparent({
   fallbackColor?: string;
   placeholder?: string;
   testId?: string;
+  helperText?: string;
 }) {
   const isTrans = (value || '').trim().toLowerCase() === 'transparent';
+  const [rememberedColor, setRememberedColor] = useState<string>(() => {
+    if (value && value.trim().toLowerCase() !== 'transparent') return value;
+    return fallbackColor && fallbackColor.startsWith('#') ? fallbackColor : '#0F172A';
+  });
+
+  useEffect(() => {
+    if (value && value.trim().toLowerCase() !== 'transparent') {
+      setRememberedColor(value);
+    }
+  }, [value]);
+
+  const activeColor = !isTrans && value && value.startsWith('#') && value.length === 7
+    ? value
+    : rememberedColor.startsWith('#') && rememberedColor.length === 7
+    ? rememberedColor
+    : fallbackColor.startsWith('#') && fallbackColor.length === 7
+    ? fallbackColor
+    : '#0F172A';
+
   return (
-    <div data-testid={testId} className="space-y-1">
+    <div data-testid={testId} className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <label className="block text-xs font-medium text-stone-300">{label}</label>
-        <button
-          type="button"
-          onClick={() => {
-            onChange(isTrans ? fallbackColor : 'transparent');
-          }}
-          className={`px-2 py-0.5 text-[11px] rounded border transition-colors cursor-pointer ${
-            isTrans
-              ? 'bg-sky-500/30 border-sky-400 text-sky-200 font-semibold'
-              : 'bg-canvas/50 border-line text-stone-400 hover:text-white'
-          }`}
-          title={isTrans ? 'Click to set custom color' : 'Click to make transparent'}
-        >
-          {isTrans ? '✓ Transparent' : 'Transparent'}
-        </button>
+        <label className="block text-xs font-semibold text-stone-200">{label}</label>
+        {isTrans && (
+          <span className="text-[10px] font-medium text-sky-400 bg-sky-500/15 border border-sky-500/30 px-1.5 py-0.5 rounded">
+            Transparent Active
+          </span>
+        )}
       </div>
+
       <div className="flex items-center gap-2">
-        <input
-          type="color"
-          disabled={isTrans}
-          value={!isTrans && value && value.startsWith('#') && value.length === 7 ? value : fallbackColor.startsWith('#') ? fallbackColor : '#0F172A'}
-          onChange={(e) => onChange(e.target.value)}
-          className={`h-8 w-8 rounded border border-line bg-transparent p-0 ${isTrans ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`}
-        />
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="w-full rounded-lg border border-line bg-canvas/40 px-2.5 py-1 text-xs uppercase text-white font-mono"
-        />
+        {isTrans ? (
+          <>
+            {/* Checkerboard/transparent swatch */}
+            <div
+              className="h-9 w-9 shrink-0 rounded-lg border-2 border-sky-400/80 shadow-inner relative flex items-center justify-center overflow-hidden"
+              style={{
+                backgroundImage:
+                  'repeating-conic-gradient(#475569 0% 25%, #1e293b 0% 50%)',
+                backgroundSize: '8px 8px',
+              }}
+              title="Transparent (no background color)"
+              data-testid={`${testId}-swatch-transparent`}
+            />
+
+            {/* Transparent value indicator */}
+            <input
+              type="text"
+              value="transparent"
+              readOnly
+              className="min-w-0 flex-1 rounded-lg border border-sky-500/40 bg-sky-500/15 px-3 py-2 text-xs font-mono lowercase text-sky-200 font-semibold cursor-default"
+              data-testid={`${testId}-value`}
+            />
+
+            {/* Explicit Use Color button */}
+            <button
+              type="button"
+              onClick={() => {
+                const restore = rememberedColor && rememberedColor.trim().toLowerCase() !== 'transparent'
+                  ? rememberedColor
+                  : fallbackColor && fallbackColor.trim().toLowerCase() !== 'transparent'
+                  ? fallbackColor
+                  : '#0F172A';
+                onChange(restore);
+              }}
+              className="shrink-0 inline-flex items-center justify-center rounded-lg border border-sky-500 bg-sky-600 hover:bg-sky-500 px-3 py-2 text-xs font-semibold text-white cursor-pointer transition-colors shadow-sm whitespace-nowrap"
+              title="Switch back to a custom color"
+              data-testid={`${testId}-use-color-btn`}
+            >
+              Use Color
+            </button>
+          </>
+        ) : (
+          <>
+            {/* Color swatch / native picker */}
+            <input
+              type="color"
+              value={activeColor}
+              onChange={(e) => {
+                setRememberedColor(e.target.value);
+                onChange(e.target.value);
+              }}
+              className="h-9 w-9 shrink-0 cursor-pointer rounded-lg border border-line bg-transparent p-0.5 hover:border-stone-400 transition-colors"
+              title="Choose color"
+              data-testid={`${testId}-color-picker`}
+            />
+
+            {/* Hex text input */}
+            <input
+              type="text"
+              value={value}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (next.trim().toLowerCase() !== 'transparent') {
+                  setRememberedColor(next);
+                }
+                onChange(next);
+              }}
+              placeholder={placeholder}
+              className="min-w-0 flex-1 rounded-lg border border-line bg-canvas/40 px-3 py-2 text-xs uppercase text-white font-mono focus:border-sky-500 focus:outline-none"
+              data-testid={`${testId}-value`}
+            />
+
+            {/* Explicit Transparent button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (value && value.trim().toLowerCase() !== 'transparent') {
+                  setRememberedColor(value);
+                }
+                onChange('transparent');
+              }}
+              className="shrink-0 inline-flex items-center justify-center rounded-lg border border-line bg-stone-800/90 hover:bg-stone-700 hover:border-stone-400 px-3 py-2 text-xs font-semibold text-stone-200 hover:text-white cursor-pointer transition-colors shadow-sm whitespace-nowrap"
+              title="Set to transparent"
+              data-testid={`${testId}-transparent-btn`}
+            >
+              Transparent
+            </button>
+          </>
+        )}
       </div>
+      {helperText && <p className="text-[11px] text-stone-400">{helperText}</p>}
     </div>
   );
 }
@@ -956,8 +1045,8 @@ export function WebChatManagement() {
               {launcherThemeMode === 'custom' && (
                 <div data-testid="launcher-custom-controls" className="space-y-4 rounded-xl border border-line/60 bg-canvas/30 p-4">
                   <div>
-                    <h4 className="text-xs font-semibold text-white uppercase tracking-wider mb-2.5">Launcher Colors</h4>
-                    <div className="grid grid-cols-2 gap-3.5">
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider mb-3">Launcher Colors</h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <ColorFieldWithTransparent
                         testId="launcher-bg-control"
                         label="Launcher Background"
@@ -970,8 +1059,8 @@ export function WebChatManagement() {
                         placeholder="#0F172A"
                       />
 
-                      <div data-testid="launcher-text-control" className="space-y-1">
-                        <label className="block text-xs font-medium text-stone-300">Launcher Text Color</label>
+                      <div data-testid="launcher-text-control" className="space-y-1.5">
+                        <label className="block text-xs font-semibold text-stone-200">Launcher Text Color</label>
                         <div className="flex items-center gap-2">
                           <input
                             type="color"
@@ -980,7 +1069,8 @@ export function WebChatManagement() {
                               setLauncherText(e.target.value);
                               previewMutation.mutate();
                             }}
-                            className="h-8 w-8 cursor-pointer rounded border border-line bg-transparent p-0"
+                            className="h-9 w-9 shrink-0 cursor-pointer rounded-lg border border-line bg-transparent p-0.5 hover:border-stone-400 transition-colors"
+                            title="Choose launcher text color"
                           />
                           <input
                             type="text"
@@ -990,7 +1080,7 @@ export function WebChatManagement() {
                               previewMutation.mutate();
                             }}
                             placeholder="#FFFFFF"
-                            className="w-full rounded-lg border border-line bg-canvas/40 px-2.5 py-1 text-xs uppercase text-white font-mono"
+                            className="min-w-0 flex-1 rounded-lg border border-line bg-canvas/40 px-3 py-2 text-xs uppercase text-white font-mono focus:border-sky-500 focus:outline-none"
                           />
                         </div>
                       </div>
@@ -1021,12 +1111,14 @@ export function WebChatManagement() {
                     </div>
                   </div>
 
-                  <div className="pt-3 border-t border-line/40">
-                    <h4 className="text-xs font-semibold text-white uppercase tracking-wider mb-1.5">Logo / Avatar Container</h4>
-                    <p className="text-[11px] text-stone-400 mb-2.5">
-                      Controls the backing container and border around uploaded logo images or chat icons. Transparent prevents forced dark backing on transparent PNG/SVG assets.
-                    </p>
-                    <div className="grid grid-cols-2 gap-3.5">
+                  <div data-testid="logo-avatar-container-section" className="pt-4 border-t border-line/50 space-y-3">
+                    <div>
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">LOGO / AVATAR CONTAINER</h4>
+                      <p className="text-xs text-stone-400 mt-1">
+                        Controls the backing container and border around uploaded logo images or chat icons. Transparent prevents forced dark backing on transparent PNG/SVG assets.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <ColorFieldWithTransparent
                         testId="launcher-logo-bg-control"
                         label="Logo Background"
@@ -1057,6 +1149,19 @@ export function WebChatManagement() {
                     <div data-testid="launcher-transparency-warning" className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-200">
                       <span className="font-semibold shrink-0">Host Contrast Notice:</span>
                       <span>Launcher background is transparent; contrast depends on the host website background. Ensure your host site provides adequate contrast behind the launcher button.</span>
+                    </div>
+                  )}
+
+                  {canManage && (
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={() => saveMutation.mutate()}
+                        disabled={saveMutation.isPending}
+                        className="inline-flex items-center gap-2 rounded-lg bg-ink px-4 py-2 text-xs font-semibold text-white shadow hover:opacity-95 disabled:opacity-60 cursor-pointer"
+                      >
+                        {saveMutation.isPending ? 'Saving...' : 'Save Appearance'}
+                      </button>
                     </div>
                   )}
                 </div>
