@@ -420,10 +420,10 @@ export function WebChatManagement() {
         launcher_border: launcherThemeMode === 'custom' ? (launcherBorder || null) : null,
         launcher_glow_color: launcherThemeMode === 'custom' ? (launcherGlow || null) : null,
         launcher_glow: launcherThemeMode === 'custom' ? (launcherGlow || null) : null,
-        launcher_logo_background: launcherThemeMode === 'custom' ? launcherLogoBg : null,
-        launcher_logo_bg: launcherThemeMode === 'custom' ? launcherLogoBg : null,
-        launcher_logo_border_color: launcherThemeMode === 'custom' ? (launcherLogoBorder || null) : null,
-        launcher_logo_border: launcherThemeMode === 'custom' ? (launcherLogoBorder || null) : null,
+        launcher_logo_background: launcherLogoBg,
+        launcher_logo_bg: launcherLogoBg,
+        launcher_logo_border_color: launcherLogoBorder || null,
+        launcher_logo_border: launcherLogoBorder || null,
       }),
     onSuccess: (res) => {
       setContrastResult(res);
@@ -558,10 +558,10 @@ export function WebChatManagement() {
         launcher_border: launcherThemeMode === 'custom' ? (launcherBorder || null) : null,
         launcher_glow_color: launcherThemeMode === 'custom' ? (launcherGlow || null) : null,
         launcher_glow: launcherThemeMode === 'custom' ? (launcherGlow || null) : null,
-        launcher_logo_background: launcherThemeMode === 'custom' ? launcherLogoBg : null,
-        launcher_logo_bg: launcherThemeMode === 'custom' ? launcherLogoBg : null,
-        launcher_logo_border_color: launcherThemeMode === 'custom' ? (launcherLogoBorder || null) : null,
-        launcher_logo_border: launcherThemeMode === 'custom' ? (launcherLogoBorder || null) : null,
+        launcher_logo_background: launcherLogoBg,
+        launcher_logo_bg: launcherLogoBg,
+        launcher_logo_border_color: launcherLogoBorder || null,
+        launcher_logo_border: launcherLogoBorder || null,
         launcher_logo_scale: launcherLogoScale,
         panel_logo_scale: panelLogoScale,
         theme: {
@@ -928,90 +928,9 @@ export function WebChatManagement() {
                 </div>
               )}
 
-              {/* Logo Sizing Productization Controls */}
-              <div data-testid="logo-sizing-controls" className="space-y-4 pt-3 mt-1 border-t border-line/50">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-stone-300">
-                    Logo Sizing & Scale
-                  </span>
-                  <span className="text-[11px] text-stone-400">
-                    Aspect Ratio Preserved &middot; Min 50% / Max 200%
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* Launcher Logo Size */}
-                  <div data-testid="launcher-logo-size-control" className="space-y-1.5 rounded-lg border border-line/60 bg-stone-900/40 p-3">
-                    <div className="flex items-center justify-between text-xs">
-                      <label htmlFor="launcher-logo-scale-slider" className="font-medium text-stone-300">
-                        Launcher Logo Size
-                      </label>
-                      <span data-testid="launcher-logo-scale-value" className="font-mono text-sky-400 font-semibold text-xs">
-                        {launcherLogoScale}%
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3 pt-1">
-                      <input
-                        id="launcher-logo-scale-slider"
-                        data-testid="launcher-logo-size-slider"
-                        type="range"
-                        min={50}
-                        max={200}
-                        step={5}
-                        value={launcherLogoScale}
-                        onChange={(e) => setLauncherLogoScale(Number(e.target.value))}
-                        className="flex-1 accent-sky-500 h-1.5 bg-stone-700 rounded-lg cursor-pointer"
-                        aria-label="Launcher Logo Size"
-                      />
-                      <input
-                        type="number"
-                        min={50}
-                        max={200}
-                        step={5}
-                        value={launcherLogoScale}
-                        onChange={(e) => setLauncherLogoScale(Math.max(50, Math.min(200, Number(e.target.value) || 100)))}
-                        className="w-16 rounded border border-line bg-canvas/60 px-2 py-1 text-center font-mono text-xs text-white"
-                        aria-label="Launcher Logo Size numeric percentage"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Panel Header Logo Size */}
-                  <div data-testid="panel-logo-size-control" className="space-y-1.5 rounded-lg border border-line/60 bg-stone-900/40 p-3">
-                    <div className="flex items-center justify-between text-xs">
-                      <label htmlFor="panel-logo-scale-slider" className="font-medium text-stone-300">
-                        Panel Header Logo Size
-                      </label>
-                      <span data-testid="panel-logo-scale-value" className="font-mono text-sky-400 font-semibold text-xs">
-                        {panelLogoScale}%
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3 pt-1">
-                      <input
-                        id="panel-logo-scale-slider"
-                        data-testid="panel-logo-size-slider"
-                        type="range"
-                        min={50}
-                        max={200}
-                        step={5}
-                        value={panelLogoScale}
-                        onChange={(e) => setPanelLogoScale(Number(e.target.value))}
-                        className="flex-1 accent-sky-500 h-1.5 bg-stone-700 rounded-lg cursor-pointer"
-                        aria-label="Panel Header Logo Size"
-                      />
-                      <input
-                        type="number"
-                        min={50}
-                        max={200}
-                        step={5}
-                        value={panelLogoScale}
-                        onChange={(e) => setPanelLogoScale(Math.max(50, Math.min(200, Number(e.target.value) || 100)))}
-                        className="w-16 rounded border border-line bg-canvas/60 px-2 py-1 text-center font-mono text-xs text-white"
-                        aria-label="Panel Header Logo Size numeric percentage"
-                      />
-                    </div>
-                  </div>
-                </div>
+              {/* Logo Sizing Notice */}
+              <div className="rounded-lg border border-line/50 bg-stone-900/30 px-3.5 py-2.5 text-xs text-stone-300 flex items-center justify-between">
+                <span>Display scale (50%–200%) and backing container styling are configured under <strong>Logo / Avatar Container</strong> in Launcher Appearance below.</span>
               </div>
 
               {/* Advanced / Secondary external URL fallback */}
@@ -1217,61 +1136,164 @@ export function WebChatManagement() {
                     </div>
                   </div>
 
-                  <div data-testid="logo-avatar-container-section" className="pt-4 border-t border-line/50 space-y-3">
-                    <div>
-                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">LOGO / AVATAR CONTAINER</h4>
-                      <p className="text-xs text-stone-400 mt-1">
-                        Controls the backing container and border around uploaded logo images or chat icons. Transparent prevents forced dark backing on transparent PNG/SVG assets.
-                      </p>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <ColorFieldWithTransparent
-                        testId="launcher-logo-bg-control"
-                        label="Logo Background"
-                        value={launcherLogoBg}
-                        onChange={(val) => {
-                          setLauncherLogoBg(val);
-                          previewMutation.mutate();
-                        }}
-                        fallbackColor="#0F172A"
-                        placeholder="transparent"
-                      />
-
-                      <ColorFieldWithTransparent
-                        testId="launcher-logo-border-control"
-                        label="Logo Border"
-                        value={launcherLogoBorder}
-                        onChange={(val) => {
-                          setLauncherLogoBorder(val);
-                          previewMutation.mutate();
-                        }}
-                        fallbackColor={primaryColor}
-                        placeholder="transparent"
-                      />
-                    </div>
-                  </div>
-
                   {launcherBg.trim().toLowerCase() === 'transparent' && (
                     <div data-testid="launcher-transparency-warning" className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-200">
                       <span className="font-semibold shrink-0">Host Contrast Notice:</span>
                       <span>Launcher background is transparent; contrast depends on the host website background. Ensure your host site provides adequate contrast behind the launcher button.</span>
                     </div>
                   )}
-
-                  {canManage && (
-                    <div className="pt-2">
-                      <button
-                        type="button"
-                        onClick={() => saveMutation.mutate()}
-                        disabled={saveMutation.isPending}
-                        className="inline-flex items-center gap-2 rounded-lg bg-ink px-4 py-2 text-xs font-semibold text-white shadow hover:opacity-95 disabled:opacity-60 cursor-pointer"
-                      >
-                        {saveMutation.isPending ? 'Saving...' : 'Save Appearance'}
-                      </button>
-                    </div>
-                  )}
                 </div>
               )}
+
+              {/* LOGO / AVATAR CONTAINER - Always visible */}
+              <div data-testid="logo-avatar-container-section" className="space-y-4 rounded-xl border border-line/60 bg-canvas/30 p-4">
+                <div>
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider">LOGO / AVATAR CONTAINER</h4>
+                  <p className="text-xs text-stone-400 mt-1">
+                    Controls the backing container, border, and display scale for launcher badge and panel header avatars. Transparent prevents forced dark backing on transparent PNG/SVG assets.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <ColorFieldWithTransparent
+                    testId="launcher-logo-bg-control"
+                    label="Logo Background"
+                    value={launcherLogoBg}
+                    onChange={(val) => {
+                      setLauncherLogoBg(val);
+                      previewMutation.mutate();
+                    }}
+                    fallbackColor="#0F172A"
+                    placeholder="transparent"
+                  />
+
+                  <ColorFieldWithTransparent
+                    testId="launcher-logo-border-control"
+                    label="Logo Border"
+                    value={launcherLogoBorder}
+                    onChange={(val) => {
+                      setLauncherLogoBorder(val);
+                      previewMutation.mutate();
+                    }}
+                    fallbackColor={primaryColor}
+                    placeholder="transparent"
+                  />
+                </div>
+
+                <div data-testid="logo-sizing-controls" className="pt-3 border-t border-line/50 space-y-4">
+                  <div className="space-y-4">
+                    {/* Launcher Logo Size */}
+                    <div data-testid="launcher-logo-size-control" className="space-y-2 rounded-lg border border-line/60 bg-stone-900/40 p-3">
+                      <div className="flex items-center justify-between text-xs">
+                        <label htmlFor="launcher-logo-scale-slider" className="font-semibold text-stone-200">
+                          Launcher Logo Size
+                        </label>
+                        <span data-testid="launcher-logo-scale-value" className="font-mono text-sky-400 font-bold text-xs bg-sky-950/40 px-2 py-0.5 rounded border border-sky-800/40">
+                          {launcherLogoScale}%
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 pt-1">
+                        <input
+                          id="launcher-logo-scale-slider"
+                          data-testid="launcher-logo-size-slider"
+                          type="range"
+                          min={50}
+                          max={200}
+                          step={5}
+                          value={launcherLogoScale}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setLauncherLogoScale(val);
+                            previewMutation.mutate();
+                          }}
+                          className="flex-1 accent-sky-500 h-2 bg-stone-700 rounded-lg cursor-pointer"
+                          aria-label="Launcher Logo Size"
+                        />
+                        <input
+                          type="number"
+                          min={50}
+                          max={200}
+                          step={5}
+                          value={launcherLogoScale}
+                          onChange={(e) => {
+                            const val = Math.max(50, Math.min(200, Number(e.target.value) || 100));
+                            setLauncherLogoScale(val);
+                            previewMutation.mutate();
+                          }}
+                          className="w-16 rounded border border-line bg-canvas/60 px-2 py-1 text-center font-mono text-xs text-white"
+                          aria-label="Launcher Logo Size numeric percentage"
+                        />
+                      </div>
+                      <div className="flex justify-between text-[10px] text-stone-400 font-mono px-0.5">
+                        <span>50%</span>
+                        <span>100%</span>
+                        <span>200%</span>
+                      </div>
+                    </div>
+
+                    {/* Panel Header Logo Size */}
+                    <div data-testid="panel-logo-size-control" className="space-y-2 rounded-lg border border-line/60 bg-stone-900/40 p-3">
+                      <div className="flex items-center justify-between text-xs">
+                        <label htmlFor="panel-logo-scale-slider" className="font-semibold text-stone-200">
+                          Panel Header Logo Size
+                        </label>
+                        <span data-testid="panel-logo-scale-value" className="font-mono text-sky-400 font-bold text-xs bg-sky-950/40 px-2 py-0.5 rounded border border-sky-800/40">
+                          {panelLogoScale}%
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 pt-1">
+                        <input
+                          id="panel-logo-scale-slider"
+                          data-testid="panel-logo-size-slider"
+                          type="range"
+                          min={50}
+                          max={200}
+                          step={5}
+                          value={panelLogoScale}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setPanelLogoScale(val);
+                            previewMutation.mutate();
+                          }}
+                          className="flex-1 accent-sky-500 h-2 bg-stone-700 rounded-lg cursor-pointer"
+                          aria-label="Panel Header Logo Size"
+                        />
+                        <input
+                          type="number"
+                          min={50}
+                          max={200}
+                          step={5}
+                          value={panelLogoScale}
+                          onChange={(e) => {
+                            const val = Math.max(50, Math.min(200, Number(e.target.value) || 100));
+                            setPanelLogoScale(val);
+                            previewMutation.mutate();
+                          }}
+                          className="w-16 rounded border border-line bg-canvas/60 px-2 py-1 text-center font-mono text-xs text-white"
+                          aria-label="Panel Header Logo Size numeric percentage"
+                        />
+                      </div>
+                      <div className="flex justify-between text-[10px] text-stone-400 font-mono px-0.5">
+                        <span>50%</span>
+                        <span>100%</span>
+                        <span>200%</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {canManage && (
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => saveMutation.mutate()}
+                      disabled={saveMutation.isPending}
+                      className="inline-flex items-center gap-2 rounded-lg bg-ink px-4 py-2 text-xs font-semibold text-white shadow hover:opacity-95 disabled:opacity-60 cursor-pointer"
+                    >
+                      {saveMutation.isPending ? 'Saving...' : 'Save Appearance'}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Launcher Style & Glow (NEW) */}

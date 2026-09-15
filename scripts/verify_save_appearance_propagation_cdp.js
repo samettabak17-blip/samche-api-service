@@ -763,7 +763,7 @@ async function run() {
     // =========================================================================
     // TEST Q: Tenant-Configurable Logo Sizing (Launcher & Panel Header Scale)
     // =========================================================================
-    console.log('\n[Test Q] Configuring Launcher Logo Size (135%) and Panel Header Logo Size (125%)...');
+    console.log('\n[Test Q] Testing Real Dashboard Logo Size Controls (50%, 100%, 150%, 200%)...');
     await browser.evaluate(`window.history.back()`);
 
     for (let i = 0; i < 40; i++) {
@@ -792,43 +792,99 @@ async function run() {
       await new Promise((r) => setTimeout(r, 100));
     }
 
-    // Set scales on sliders
-    await browser.evaluate(`
+    // Step 1: Verify BOTH controls are visibly rendered inside LOGO / AVATAR CONTAINER
+    const controlVisibility = await browser.evaluate(`
       (() => {
-        const setRangeVal = (el, val) => {
+        const container = document.querySelector('[data-testid="logo-avatar-container-section"]');
+        const launcherControl = document.querySelector('[data-testid="launcher-logo-size-control"]');
+        const panelControl = document.querySelector('[data-testid="panel-logo-size-control"]');
+        return {
+          containerExists: Boolean(container),
+          launcherInsideContainer: Boolean(container && container.contains(launcherControl)),
+          panelInsideContainer: Boolean(container && container.contains(panelControl)),
+          launcherVisible: Boolean(launcherControl && launcherControl.offsetParent !== null),
+          panelVisible: Boolean(panelControl && panelControl.offsetParent !== null),
+        };
+      })()
+    `);
+    console.log('  Logo controls visibility in LOGO / AVATAR CONTAINER:', controlVisibility);
+    if (!controlVisibility.containerExists || !controlVisibility.launcherInsideContainer || !controlVisibility.panelInsideContainer) {
+      throw new Error(`Logo controls must be rendered inside LOGO / AVATAR CONTAINER: ${JSON.stringify(controlVisibility)}`);
+    }
+    if (!controlVisibility.launcherVisible || !controlVisibility.panelVisible) {
+      throw new Error(`Both logo size controls must be visibly rendered: ${JSON.stringify(controlVisibility)}`);
+    }
+    console.log('  ✓ PASS: REAL_DASHBOARD_LAUNCHER_LOGO_CONTROL = PASS');
+    console.log('  ✓ PASS: REAL_DASHBOARD_PANEL_LOGO_CONTROL = PASS');
+
+    const setSlider = async (selector, val) => {
+      await browser.evaluate(`
+        (() => {
+          const el = document.querySelector('${selector}');
           if (!el) return;
           const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-          if (setter) setter.call(el, val);
-          else el.value = val;
+          if (setter) setter.call(el, ${val});
+          else el.value = ${val};
           el.dispatchEvent(new Event('input', { bubbles: true }));
           el.dispatchEvent(new Event('change', { bubbles: true }));
-        };
+        })()
+      `);
+      await new Promise(r => setTimeout(r, 150));
+    };
 
-        const launcherSlider = document.querySelector('[data-testid="launcher-logo-size-slider"]');
-        const panelSlider = document.querySelector('[data-testid="panel-logo-size-slider"]');
-        setRangeVal(launcherSlider, 135);
-        setRangeVal(panelSlider, 125);
-      })()
-    `);
-    await new Promise(r => setTimeout(r, 300));
-
-    // Verify Live Preview immediately reflects new scales
-    const previewScaleCheck = await browser.evaluate(`
-      (() => {
-        const previewRoot = document.querySelector('[data-testid="web-chat-preview-root"]');
-        const cs = previewRoot ? window.getComputedStyle(previewRoot) : null;
-        return {
-          launcherScale: cs ? cs.getPropertyValue('--chat-launcher-logo-scale') : null,
-          panelScale: cs ? cs.getPropertyValue('--chat-panel-logo-scale') : null,
-        };
-      })()
-    `);
-    console.log('  Live Preview scale variables:', previewScaleCheck);
-    if (previewScaleCheck.launcherScale !== '1.35' || previewScaleCheck.panelScale !== '1.25') {
-      throw new Error(`Preview did not immediately reflect scale updates: ${JSON.stringify(previewScaleCheck)}`);
+    // Step 2: Test Launcher Logo Size at 50%, 100%, 150%, 200%
+    console.log('  Testing Launcher Logo Size at 50%, 100%, 150%, 200%...');
+    const launcherTestSteps = [50, 100, 150, 200];
+    for (const step of launcherTestSteps) {
+      await setSlider('[data-testid="launcher-logo-size-slider"]', step);
+      const res = await browser.evaluate(`
+        (() => {
+          const valEl = document.querySelector('[data-testid="launcher-logo-scale-value"]');
+          const root = document.querySelector('[data-testid="web-chat-preview-root"]');
+          const cs = root ? window.getComputedStyle(root) : null;
+          return {
+            text: valEl ? valEl.innerText.trim() : null,
+            scaleVar: cs ? cs.getPropertyValue('--chat-launcher-logo-scale') : null,
+          };
+        })()
+      `);
+      console.log(`    Launcher step ${step}% -> text: "${res.text}", var: ${res.scaleVar}`);
+      if (res.text !== `${step}%`) throw new Error(`Expected text ${step}%, got ${res.text}`);
+      if (Math.abs(parseFloat(res.scaleVar) - (step / 100)) > 0.001) {
+        throw new Error(`Expected scale var ${step / 100}, got ${res.scaleVar}`);
+      }
     }
-    console.log('  ✓ PASS: Live Preview immediately updates CSS scale variables (1.35 / 1.25)');
+    console.log('  ✓ PASS: LAUNCHER_50_100_150_200 = PASS');
 
+    // Step 3: Test Panel Header Logo Size at 50%, 100%, 150%, 200%
+    console.log('  Testing Panel Header Logo Size at 50%, 100%, 150%, 200%...');
+    const panelTestSteps = [50, 100, 150, 200];
+    for (const step of panelTestSteps) {
+      await setSlider('[data-testid="panel-logo-size-slider"]', step);
+      const res = await browser.evaluate(`
+        (() => {
+          const valEl = document.querySelector('[data-testid="panel-logo-scale-value"]');
+          const root = document.querySelector('[data-testid="web-chat-preview-root"]');
+          const cs = root ? window.getComputedStyle(root) : null;
+          return {
+            text: valEl ? valEl.innerText.trim() : null,
+            scaleVar: cs ? cs.getPropertyValue('--chat-panel-logo-scale') : null,
+          };
+        })()
+      `);
+      console.log(`    Panel step ${step}% -> text: "${res.text}", var: ${res.scaleVar}`);
+      if (res.text !== `${step}%`) throw new Error(`Expected text ${step}%, got ${res.text}`);
+      if (Math.abs(parseFloat(res.scaleVar) - (step / 100)) > 0.001) {
+        throw new Error(`Expected scale var ${step / 100}, got ${res.scaleVar}`);
+      }
+    }
+    console.log('  ✓ PASS: PANEL_50_100_150_200 = PASS');
+
+    // Step 4: Set distinct scales and save appearance
+    await setSlider('[data-testid="launcher-logo-size-slider"]', 150);
+    await setSlider('[data-testid="panel-logo-size-slider"]', 125);
+    console.log('  ✓ PASS: LIVE_PREVIEW_UPDATE = PASS');
+    
     // Save appearance with new scales
     const vBeforeQ = storedChannelState.config_version;
     await browser.evaluate(`
@@ -844,9 +900,10 @@ async function run() {
       await new Promise((r) => setTimeout(r, 50));
     }
     console.log('  ✓ Saved successfully. Server stored config_version:', storedChannelState.config_version);
-    if (storedChannelState.appearance.launcher_logo_scale !== 135 || storedChannelState.appearance.panel_logo_scale !== 125) {
+    if (storedChannelState.appearance.launcher_logo_scale !== 150 || storedChannelState.appearance.panel_logo_scale !== 125) {
       throw new Error(`Server stored appearance missing correct logo scales: ${JSON.stringify(storedChannelState.appearance)}`);
     }
+    console.log('  ✓ PASS: SAVE_PERSISTENCE = PASS');
 
     // Reload public site and verify scales in public widget
     await browser.navigate(`${origin}/task8-demo/`);
@@ -872,10 +929,10 @@ async function run() {
       })()
     `);
     console.log('  Public widget logo scale verification:', publicScaleCheck);
-    if (publicScaleCheck.launcherScaleVar !== '1.35' || publicScaleCheck.panelScaleVar !== '1.25') {
-      throw new Error(`Public widget scale variables incorrect: ${JSON.stringify(publicScaleCheck)}`);
+    if (Math.abs(parseFloat(publicScaleCheck.launcherScaleVar) - 1.5) > 0.001 || Math.abs(parseFloat(publicScaleCheck.panelScaleVar) - 1.25) > 0.001) {
+      throw new Error('Public widget scale variables incorrect: ' + JSON.stringify(publicScaleCheck));
     }
-    console.log('  ✓ PASS: Public widget applies exact saved logo scale variables (1.35 / 1.25)');
+    console.log('  ✓ PASS: PUBLIC_WIDGET_PROPAGATION = PASS');
 
     // =========================================================================
     // TEST R: Real Color Parity - Dark Glass Surface Styles
