@@ -170,6 +170,7 @@ export function formatTenantSiteIntelligencePromptSection(retrievedPages = []) {
   sections.push('3. REVIEWS & TESTIMONIALS: If customer reviews or testimonials from the tenant\'s site are retrieved below, answer using those verified customer statements with proper attribution. Do NOT invent new reviews, and do NOT fabricate sentiments not present in the data.');
   sections.push('4. HONESTY ON ABSENT FACTS: If the requested information is absent from BOTH the current page AND the retrieved site intelligence (and approved knowledge), state clearly and politely that verified details on that specific topic are not available. Do NOT hallucinate.');
   sections.push('5. PROVENANCE: Every fact retrieved below carries [PROVENANCE: SITE_PAGE_FACT] or [PROVENANCE: SITE_STRUCTURED_DATA].');
+  sections.push('6. POLICY APPLICABILITY & LOGISTICS BOUNDARIES: Retrieved policies apply strictly under their explicit conditions (e.g. an unopened-item return policy does NOT apply to opened defective products or transit damage). Fulfillment hubs or warehouses mentioned for logistics are internal processing locations, NOT walk-in customer return counters unless explicitly specified as a walk-in desk.');
   sections.push('--------------------------------------------------------------------------------');
 
   for (const page of retrievedPages) {

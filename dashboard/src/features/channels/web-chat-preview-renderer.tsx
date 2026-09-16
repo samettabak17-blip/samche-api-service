@@ -10,6 +10,7 @@ import {
   TRASH_ICON_SVG,
   deriveCanonicalDesignTokens,
   getEffectiveLocale,
+  formatAssistantHtml,
 } from './web-chat-canonical-contract';
 
 export interface WebChatPreviewRendererProps {
@@ -267,9 +268,10 @@ export function WebChatPreviewRenderer({
       )}
 
       <div className="samche-messages">
-        <div className="samche-msg samche-msg-bot">
-          <span>{dict.botGreeting}</span>
-        </div>
+        <div
+          className="samche-msg samche-msg-bot"
+          dangerouslySetInnerHTML={{ __html: formatAssistantHtml(dict.botGreeting) }}
+        />
         <div className="samche-msg samche-msg-user">
           <span>{dict.userSample}</span>
         </div>

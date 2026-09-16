@@ -33,6 +33,34 @@ export const RESOLUTION_ACTIONS = Object.freeze({
   COEXISTENCE_RESOLVE: 'COEXISTENCE_RESOLVE',
 });
 
+export const SUPPORT_CASES = Object.freeze({
+  NORMAL_RETURN: 'NORMAL_RETURN',
+  DEFECTIVE_OR_MALFUNCTION: 'DEFECTIVE_OR_MALFUNCTION',
+  DAMAGED_ON_ARRIVAL: 'DAMAGED_ON_ARRIVAL',
+  WRONG_ITEM: 'WRONG_ITEM',
+  MISSING_ITEM: 'MISSING_ITEM',
+  DELIVERY_ISSUE: 'DELIVERY_ISSUE',
+  ORDER_STATUS: 'ORDER_STATUS',
+  PAYMENT_BILLING: 'PAYMENT_BILLING',
+  CANCELLATION: 'CANCELLATION',
+  ACCOUNT_ACCESS: 'ACCOUNT_ACCESS',
+  PRODUCT_USAGE: 'PRODUCT_USAGE',
+  WARRANTY_INQUIRY: 'WARRANTY_INQUIRY',
+  EXPLICIT_HUMAN_REQUEST: 'EXPLICIT_HUMAN_REQUEST',
+  GENERAL_SUPPORT: 'GENERAL_SUPPORT',
+});
+
+export const POLICY_SUBJECTS = Object.freeze({
+  NORMAL_RETURN: 'NORMAL_RETURN',
+  DEFECTIVE_MALFUNCTION: 'DEFECTIVE_MALFUNCTION',
+  DAMAGED_ON_ARRIVAL: 'DAMAGED_ON_ARRIVAL',
+  WRONG_ITEM: 'WRONG_ITEM',
+  WARRANTY: 'WARRANTY',
+  CANCELLATION: 'CANCELLATION',
+  SHIPPING_DELIVERY: 'SHIPPING_DELIVERY',
+  GENERAL: 'GENERAL',
+});
+
 // Semantic signal patterns across multiple industries
 const EXPLICIT_HUMAN_PATTERNS = [
   /(?:^|\s)(?:speak|talk|chat|connect)\s+(?:to|with)\s+(?:a\s+)?(?:human|live\s+agent|agent|representative|person|someone)(?:\s|$)/iu,
@@ -48,6 +76,20 @@ const EXPLICIT_HUMAN_PATTERNS = [
 ];
 
 const SUPPORT_ACCOUNT_PATTERN = /(?:log\s*in|sign\s*in|sign\s*up|passwords?|workspace|accounts?|credentials?|reset\s+password|verify\s+account|giriş|şifre|parola|hesap|üyelik)/i;
+
+const SUPPORT_DAMAGED_ARRIVAL_PATTERN = /(?:damaged|broken|cracked|shattered|crushed|dented)\s+(?:on|upon|in|during)?\s*(?:arrival|delivery|transit|shipping|box|package)|(?:arrived|delivered)\s+(?:damaged|broken|cracked|shattered|crushed|dented|scratched)|kargo(?:da)?\s+(?:kırılmış|hasar|hasarlı|ezilmiş|parçalanmış)|hasarlı\s+(?:bir\s+)?(?:geldi|ulaştı|teslim)|(?:kırık|ezik)\s+(?:bir\s+)?(?:geldi|ulaştı|teslim)|(?:وصل\s+تالف|مكسور\s+عند\s+الوصول|تضرر\s+أثناء\s+الشحن)/iu;
+
+const SUPPORT_WRONG_ITEM_PATTERN = /(?:received|sent|got)\s+(?:(?:me|us)\s+)?(?:the\s+)?(?:wrong|incorrect|different)\s+(?:item|product|model|order|size|color|package|device)|(?:wrong|incorrect|different)\s+(?:item|product|model)\s+(?:was\s+)?(?:sent|delivered|received)|(?:yanlış|farklı|başka)\s+(?:bir\s+)?(?:ürün|model|sipariş|paket|renk|beden)\s+(?:geldi|gönderildi|teslim\s+edildi|çıktı)|(?:وصلني\s+منتج\s+مختلف|منتج\s+خاطئ|طلب\s+غير\s+صحيح)/iu;
+
+const SUPPORT_MISSING_ITEM_PATTERN = /(?:missing|incomplete|omitted)\s+(?:item|part|accessory|cable|piece|box|order|package)|(?:item|piece|part|accessory|cable)\s+(?:is\s+)?missing|(?:eksik|çıkmadı|yok)\s+(?:bir\s+)?(?:parça|ürün|kablo|aksesuar|kutu)|içinden\s+(?:çıkmadı|eksik\s+çıktı)|(?:قطعة\s+ناقصة|منتج\s+ناقص|عنصر\s+مفقود)/iu;
+
+const SUPPORT_DEFECTIVE_PATTERN = /(?:not\s+working\s+(?:properly|correctly|at\s+all)?|defective|malfunction(?:ing)?|faulty|won['’]?t\s+(?:turn\s+on|start|pair|connect|work|charge|boot|power\s+on)|stopped\s+working|error\s+code|filter\s+light\s+(?:is\s+)?blinking|crashes?|crashed|keeps\s+shutting\s+off|does\s+not\s+turn\s+on|doesn['’]?t\s+work|broken\s+product|hardware\s+malfunction|çalışmıyor|calismiyor|bozuldu|bozuk|arızalandı|arızalı|arizali|açılmıyor|acilmiyor|düzgün\s+çalışmıyor|bağlanmıyor|hata\s+veriyor|ışığı\s+yanıp\s+sönüyor|(?:لا\s+يعمل|معطل|عطل|لا\s+يشتغل|خلل\s+فني))/iu;
+
+const SUPPORT_CANCELLATION_PATTERN = /(?:cancel\s+(?:my\s+)?(?:order|subscription|booking|reservation)|cancellation\s+policy|how\s+(?:do\s+i|to)\s+cancel|iptal\s+(?:etmek|et|politikası|işlemi)|(?:إلغاء\s+(?:الطلب|الحجز)))/iu;
+
+const SUPPORT_WARRANTY_PATTERN = /(?:warranty|guarantee|garanti\s+(?:süresi|kapsamı|şartları)|ضمان)/i;
+
+const SUPPORT_NORMAL_RETURN_PATTERN = /(?:return\s+policy|how\s+(?:can\s+i|do\s+i)\s+return|want\s+to\s+return|send\s+(?:it\s+)?back|return\s+(?:window|period|procedure)|refund\s+(?:policy|procedure|window)|change\s+of\s+mind|unopened\s+return|iade\s+etmek|iade\s+koşulları|iade\s+süresi|iade\s+nasıl\s+yapılır|cayma\s+hakkı|(?:استرجاع|سياسة\s+الإرجاع))/iu;
 
 const SUPPORT_TROUBLESHOOTING_PATTERN = /(?:troubleshoot|not\s+working|broken|malfunction|error|bug|issue|problem|defect|damage|repair|fail|crash|won['’]?t\s+(?:turn\s+on|start|pair|connect|work|charge)|reset|fix|reboot|blink|\bclean(?:ing)?\s+(?:the|my)?\s*(?:filter|sensor|tray|brush|tank|unit|hepa)|filter\s+(?:light|clogged|dirty)|pair(?:ing)?\s+failed|çalışmıyor|calismiyor|bozuk|arızalı|arizali|hata|açılmıyor|acilmiyor|bağlanmıyor|baglanmiyor|düzelmiyor|duzelmiyor|sıfırlama|sifirlama|sorun|problem|fabrika\s+ayarları)/i;
 
@@ -71,6 +113,127 @@ const SALES_COMPARISON_PATTERN = /(?:compare|difference\s+between|which\s+(?:one
 
 const SALES_PURCHASE_PATTERN = /(?:how\s+much|price|cost|buy|purchase|order\s+now|add\s+to\s+cart|discount|deal|offer|voucher|coupon|fiyat|fiyatı|ücret|satın\s+al|satin\s+al|indirim|kupon|kampanya)/i;
 
+/**
+ * Classify granular support case from text and deterministic flags.
+ */
+export function classifySupportCase(text = '', flags = {}) {
+  const query = String(text || '').trim();
+  if (flags.isHumanRequest) return SUPPORT_CASES.EXPLICIT_HUMAN_REQUEST;
+  if (flags.isPrivateState) return SUPPORT_CASES.ORDER_STATUS;
+  if (SUPPORT_DAMAGED_ARRIVAL_PATTERN.test(query)) return SUPPORT_CASES.DAMAGED_ON_ARRIVAL;
+  if (SUPPORT_WRONG_ITEM_PATTERN.test(query)) return SUPPORT_CASES.WRONG_ITEM;
+  if (SUPPORT_MISSING_ITEM_PATTERN.test(query)) return SUPPORT_CASES.MISSING_ITEM;
+  if (SUPPORT_DEFECTIVE_PATTERN.test(query)) return SUPPORT_CASES.DEFECTIVE_OR_MALFUNCTION;
+  if (SUPPORT_CANCELLATION_PATTERN.test(query)) return SUPPORT_CASES.CANCELLATION;
+  if (SUPPORT_WARRANTY_PATTERN.test(query)) return SUPPORT_CASES.WARRANTY_INQUIRY;
+  if (SUPPORT_NORMAL_RETURN_PATTERN.test(query)) return SUPPORT_CASES.NORMAL_RETURN;
+  if (flags.isAccount) return SUPPORT_CASES.ACCOUNT_ACCESS;
+  if (flags.isPayment) return SUPPORT_CASES.PAYMENT_BILLING;
+  if (flags.isUsage) return SUPPORT_CASES.PRODUCT_USAGE;
+  if (flags.isOrderProcess) return SUPPORT_CASES.DELIVERY_ISSUE;
+  if (SUPPORT_TROUBLESHOOTING_PATTERN.test(query)) return SUPPORT_CASES.DEFECTIVE_OR_MALFUNCTION;
+  if (SUPPORT_POLICY_PATTERN.test(query)) {
+    if (/(?:return|refund|iade|değişim)/i.test(query)) return SUPPORT_CASES.NORMAL_RETURN;
+    if (/(?:shipping|deliver|cutoff|kargo|teslimat)/i.test(query)) return SUPPORT_CASES.DELIVERY_ISSUE;
+  }
+  return SUPPORT_CASES.GENERAL_SUPPORT;
+}
+
+/**
+ * Evaluate policy applicability against the customer's specific support case.
+ * Enforces the critical rule: A policy retrieved for one condition (e.g. unopened return)
+ * MUST NOT automatically be applied to another condition (e.g. opened defective item).
+ */
+export function evaluatePolicyApplicability({
+  supportCase = null,
+  policySubject = null,
+  policyText = '',
+  applicabilityConditions = [],
+  customerIssue = null,
+} = {}) {
+  const text = String(policyText || '').toLowerCase();
+  const effectiveCase = supportCase || customerIssue;
+
+  const conditions = Array.isArray(applicabilityConditions) ? [...applicabilityConditions] : [];
+  const requiresUnopened = /(?:unopened|original\s+packaging|unused|açılmamış|kutusunda|kullanılmamış|resaleable|غير\s+مفتوح)/i.test(text);
+  if (requiresUnopened && !conditions.includes('UNOPENED_ORIGINAL_PACKAGING')) {
+    conditions.push('UNOPENED_ORIGINAL_PACKAGING');
+  }
+
+  // 1. DEFECTIVE OR MALFUNCTIONING ITEM
+  if (effectiveCase === SUPPORT_CASES.DEFECTIVE_OR_MALFUNCTION) {
+    if (requiresUnopened) {
+      return {
+        isApplicable: false,
+        policySubject: policySubject || POLICY_SUBJECTS.NORMAL_RETURN,
+        applicabilityConditions: conditions,
+        reason: 'UNOPENED_RESTRICTION_INAPPLICABLE_TO_DEFECTIVE_PRODUCT',
+        explanation: 'The return policy applies specifically to unopened items in original packaging. This condition cannot be applied to an opened defective or malfunctioning product discovered after opening or use.',
+        directive: 'DO NOT present the unopened return policy as applicable to this defective product. Explicitly clarify that the published return policy applies to unopened items and does not establish defective product terms.',
+      };
+    }
+    if (/(?:warranty|defective|malfunction|faulty|replacement|repair|garanti|arızalı|değişim|tamir)/i.test(text)) {
+      return {
+        isApplicable: true,
+        policySubject: policySubject || POLICY_SUBJECTS.WARRANTY,
+        applicabilityConditions: conditions,
+        reason: 'VERIFIED_DEFECTIVE_OR_WARRANTY_POLICY_APPLIES',
+        explanation: 'Verified policy explicitly covers warranty, defects, or malfunctioning items.',
+        directive: 'Apply verified warranty/defective terms directly without inventing unverified operational promises.',
+      };
+    }
+  }
+
+  // 2. DAMAGED ON ARRIVAL
+  if (effectiveCase === SUPPORT_CASES.DAMAGED_ON_ARRIVAL) {
+    if (requiresUnopened || /(?:standard\s+return|change\s+of\s+mind)/i.test(text)) {
+      return {
+        isApplicable: false,
+        policySubject: policySubject || POLICY_SUBJECTS.NORMAL_RETURN,
+        applicabilityConditions: conditions,
+        reason: 'TRANSIT_DAMAGE_NOT_NORMAL_RETURN',
+        explanation: 'Transit damage complaints are not governed by standard unopened change-of-mind return policies.',
+        directive: 'Do NOT apply normal return policies to transit damage. Guide customer on transit damage reporting and photo evidence.',
+      };
+    }
+  }
+
+  // 3. WRONG ITEM RECEIVED
+  if (effectiveCase === SUPPORT_CASES.WRONG_ITEM) {
+    if (requiresUnopened) {
+      return {
+        isApplicable: false,
+        policySubject: policySubject || POLICY_SUBJECTS.NORMAL_RETURN,
+        applicabilityConditions: conditions,
+        reason: 'FULFILLMENT_ERROR_NOT_NORMAL_RETURN',
+        explanation: 'Receiving the wrong item is a fulfillment error, not a standard change-of-mind return.',
+        directive: 'Do NOT apply unopened return policies to fulfillment errors. Direct to order verification.',
+      };
+    }
+  }
+
+  // 4. NORMAL RETURN
+  if (effectiveCase === SUPPORT_CASES.NORMAL_RETURN) {
+    return {
+      isApplicable: true,
+      policySubject: policySubject || POLICY_SUBJECTS.NORMAL_RETURN,
+      applicabilityConditions: conditions,
+      reason: 'NORMAL_RETURN_POLICY_APPLIES',
+      explanation: 'Verified return policy applies directly to standard return requests.',
+      directive: 'Explain verified return window, packaging requirements, and procedure step-by-step.',
+    };
+  }
+
+  return {
+    isApplicable: true,
+    policySubject: policySubject || POLICY_SUBJECTS.GENERAL,
+    applicabilityConditions: conditions,
+    reason: 'STANDARD_POLICY_APPLIES',
+    explanation: 'Verified policy is evaluated under standard grounding rules.',
+    directive: 'Ground response in verified facts.',
+  };
+}
+
 
 /**
  * Classify conversation intent using deterministic signals and multi-industry taxonomies.
@@ -93,6 +256,7 @@ export function classifyConversationIntent({
     signals.push('EXPLICIT_HUMAN_REQUEST_SIGNAL');
     return {
       primaryIntent: INTENT_TYPES.HUMAN_ESCALATION,
+      supportCase: SUPPORT_CASES.EXPLICIT_HUMAN_REQUEST,
       secondaryIntents: [],
       isSupport: true,
       isSales: false,
@@ -115,6 +279,11 @@ export function classifyConversationIntent({
   }
 
   // 3. Detect Support Signals
+  const isDamagedArrival = SUPPORT_DAMAGED_ARRIVAL_PATTERN.test(text);
+  const isWrongItem = SUPPORT_WRONG_ITEM_PATTERN.test(text);
+  const isMissingItem = SUPPORT_MISSING_ITEM_PATTERN.test(text);
+  const isDefectiveItem = SUPPORT_DEFECTIVE_PATTERN.test(text);
+  const isCancellation = SUPPORT_CANCELLATION_PATTERN.test(text);
   const isTroubleshooting = SUPPORT_TROUBLESHOOTING_PATTERN.test(text);
   const isPolicy = SUPPORT_POLICY_PATTERN.test(text);
   const isOrderProcess = SUPPORT_ORDER_PATTERN.test(text);
@@ -124,6 +293,11 @@ export function classifyConversationIntent({
   const isAccount = SUPPORT_ACCOUNT_PATTERN.test(text);
   const isComplaint = SUPPORT_COMPLAINT_PATTERN.test(text);
 
+  if (isDamagedArrival) signals.push('SUPPORT_DAMAGED_ON_ARRIVAL');
+  if (isWrongItem) signals.push('SUPPORT_WRONG_ITEM');
+  if (isMissingItem) signals.push('SUPPORT_MISSING_ITEM');
+  if (isDefectiveItem) signals.push('SUPPORT_DEFECTIVE_OR_MALFUNCTION');
+  if (isCancellation) signals.push('SUPPORT_CANCELLATION');
   if (isTroubleshooting) signals.push('SUPPORT_TROUBLESHOOTING');
   if (isPolicy) signals.push('SUPPORT_POLICY');
   if (isOrderProcess) signals.push('SUPPORT_ORDER_PROCESS');
@@ -133,14 +307,26 @@ export function classifyConversationIntent({
   if (isAccount) signals.push('SUPPORT_ACCOUNT');
   if (isComplaint) signals.push('SUPPORT_COMPLAINT');
 
-  const isSupport = isTroubleshooting || isPolicy || isOrderProcess || isPayment || isUsage || isContact || isAccount || isComplaint || isPrivateState;
+  const isSupport = isDamagedArrival || isWrongItem || isMissingItem || isDefectiveItem || isCancellation
+    || isTroubleshooting || isPolicy || isOrderProcess || isPayment || isUsage || isContact || isAccount || isComplaint || isPrivateState;
+
+  // Granular support case classification
+  const supportCase = classifySupportCase(text, {
+    isHumanRequest: false,
+    isPrivateState,
+    isAccount,
+    isPayment,
+    isUsage,
+    isContact,
+    isOrderProcess,
+  });
 
   // 4. Detect Sales Signals
   const isDiscovery = SALES_DISCOVERY_PATTERN.test(text);
   const isComparison = SALES_COMPARISON_PATTERN.test(text);
   let isPurchase = SALES_PURCHASE_PATTERN.test(text);
   const isPastPurchaseReference = /(?:satın\s+aldığım|satın\s+aldigim|aldığım\s+ürün|i\s+bought|i\s+purchased|item\s+i\s+bought|already\s+bought)/i.test(text);
-  if (isPastPurchaseReference && (isTroubleshooting || isPolicy || isOrderProcess || isComplaint)) {
+  if (isPastPurchaseReference && (isTroubleshooting || isPolicy || isOrderProcess || isComplaint || isDefectiveItem || isDamagedArrival)) {
     const hasActiveCommercialTerms = /(?:price|cost|discount|deal|offer|coupon|fiyat|ücret|indirim|kupon)/i.test(text);
     if (!hasActiveCommercialTerms) {
       isPurchase = false;
@@ -163,7 +349,7 @@ export function classifyConversationIntent({
     if (pagePath.includes('return') || pagePath.includes('contact') || pagePath.includes('support') || pagePath.includes('help')) {
       isCurrentPageSupport = true;
       signals.push('CURRENT_PAGE_SUPPORT_PAGE_CORRELATION');
-    } else if (isDiscreteEntity(currentEntity) && (isTroubleshooting || isPolicy || isUsage)) {
+    } else if (isDiscreteEntity(currentEntity) && (isTroubleshooting || isPolicy || isUsage || isDefectiveItem)) {
       isCurrentPageSupport = true;
       signals.push('CURRENT_PAGE_ENTITY_SUPPORT_CORRELATION');
     }
@@ -174,7 +360,7 @@ export function classifyConversationIntent({
 
   if (isAccount) {
     primaryIntent = INTENT_TYPES.SUPPORT_ACCOUNT_ACCESS;
-    if (isTroubleshooting) secondaryIntents.push(INTENT_TYPES.SUPPORT_TROUBLESHOOTING);
+    if (isTroubleshooting || isDefectiveItem) secondaryIntents.push(INTENT_TYPES.SUPPORT_TROUBLESHOOTING);
   } else if (isPrivateState) {
     primaryIntent = INTENT_TYPES.SUPPORT_PRIVATE_STATE;
     if (isSales) secondaryIntents.push(INTENT_TYPES.SALES_DISCOVERY);
@@ -184,16 +370,19 @@ export function classifyConversationIntent({
   } else if (isCurrentPageSupport) {
     primaryIntent = INTENT_TYPES.SUPPORT_CURRENT_PAGE;
     if (isSales) secondaryIntents.push(INTENT_TYPES.SALES_DISCOVERY);
-  } else if (isTroubleshooting) {
+  } else if (isDefectiveItem || isTroubleshooting) {
     primaryIntent = INTENT_TYPES.SUPPORT_TROUBLESHOOTING;
     if (isSales) secondaryIntents.push(isComparison ? INTENT_TYPES.SALES_COMPARISON : INTENT_TYPES.SALES_DISCOVERY);
+  } else if (isDamagedArrival || isWrongItem || isMissingItem) {
+    primaryIntent = INTENT_TYPES.SUPPORT_COMPLAINT;
+    if (isSales) secondaryIntents.push(INTENT_TYPES.SALES_DISCOVERY);
   } else if (isContact) {
     primaryIntent = INTENT_TYPES.SUPPORT_CONTACT_INFO;
     if (isSales) secondaryIntents.push(INTENT_TYPES.SALES_DISCOVERY);
   } else if (isUsage) {
     primaryIntent = INTENT_TYPES.SUPPORT_USAGE_GUIDE;
     if (isSales) secondaryIntents.push(INTENT_TYPES.SALES_DISCOVERY);
-  } else if (isPolicy) {
+  } else if (isPolicy || isCancellation) {
     primaryIntent = INTENT_TYPES.SUPPORT_INFORMATIONAL;
     if (isSales) secondaryIntents.push(INTENT_TYPES.SALES_PURCHASE);
   } else if (isOrderProcess) {
@@ -212,6 +401,7 @@ export function classifyConversationIntent({
 
   return {
     primaryIntent,
+    supportCase,
     secondaryIntents,
     isSupport,
     isSales,
@@ -240,17 +430,21 @@ export function evaluateSupportResolutionPlan({
 } = {}) {
   const intent = intentClassification || {
     primaryIntent: INTENT_TYPES.GENERAL_CONVERSATION,
+    supportCase: SUPPORT_CASES.GENERAL_SUPPORT,
     isSupport: false,
     isSales: false,
     isHumanRequest: false,
     isPrivateStateRequest: false,
   };
 
+  const supportCase = intent.supportCase || SUPPORT_CASES.GENERAL_SUPPORT;
+
   // 1. Explicit Human Escalation
-  if (intent.isHumanRequest || intent.primaryIntent === INTENT_TYPES.HUMAN_ESCALATION) {
+  if (intent.isHumanRequest || intent.primaryIntent === INTENT_TYPES.HUMAN_ESCALATION || supportCase === SUPPORT_CASES.EXPLICIT_HUMAN_REQUEST) {
     return {
       action: RESOLUTION_ACTIONS.HUMAN_ESCALATION,
       intent: INTENT_TYPES.HUMAN_ESCALATION,
+      supportCase: SUPPORT_CASES.EXPLICIT_HUMAN_REQUEST,
       stage: 'ESCALATE',
       canResolveSafely: false,
       requiresHandoff: true,
@@ -262,10 +456,11 @@ export function evaluateSupportResolutionPlan({
   // 2. Private Customer State Request (Order lookup, private account)
   // AI MUST explain limitation and guide without hallucinating private state.
   // NO premature human handoff!
-  if (intent.isPrivateStateRequest || intent.primaryIntent === INTENT_TYPES.SUPPORT_PRIVATE_STATE) {
+  if (intent.isPrivateStateRequest || intent.primaryIntent === INTENT_TYPES.SUPPORT_PRIVATE_STATE || supportCase === SUPPORT_CASES.ORDER_STATUS) {
     return {
       action: RESOLUTION_ACTIONS.EXPLAIN_LIMITATION_AND_GUIDE,
       intent: INTENT_TYPES.SUPPORT_PRIVATE_STATE,
+      supportCase: SUPPORT_CASES.ORDER_STATUS,
       stage: 'GUIDE',
       canResolveSafely: true,
       requiresHandoff: false,
@@ -280,6 +475,7 @@ export function evaluateSupportResolutionPlan({
     return {
       action: RESOLUTION_ACTIONS.COEXISTENCE_RESOLVE,
       intent: intent.primaryIntent,
+      supportCase,
       stage: 'RESOLVE',
       canResolveSafely: true,
       requiresHandoff: false,
@@ -293,6 +489,104 @@ export function evaluateSupportResolutionPlan({
   // AI MUST resolve directly. NO handoff!
   if (intent.isSupport) {
     const isCurrentPage = intent.primaryIntent === INTENT_TYPES.SUPPORT_CURRENT_PAGE;
+
+    // Granular Support Case Handlers with Policy Applicability Guards
+    if (supportCase === SUPPORT_CASES.DEFECTIVE_OR_MALFUNCTION) {
+      return {
+        action: RESOLUTION_ACTIONS.AI_FIRST_RESOLVE,
+        intent: intent.primaryIntent,
+        supportCase: SUPPORT_CASES.DEFECTIVE_OR_MALFUNCTION,
+        stage: 'DIAGNOSE_AND_RESOLVE',
+        canResolveSafely: true,
+        requiresHandoff: false,
+        groundingSources: isCurrentPage
+          ? ['CURRENT_PAGE_VISIBLE_FACT', 'APPROVED_KNOWLEDGE', 'ACTIVE_BUSINESS_PROFILE', 'RELEVANT_TENANT_SITE_INTELLIGENCE']
+          : ['APPROVED_KNOWLEDGE', 'ACTIVE_BUSINESS_PROFILE', 'CURRENT_PAGE_CONTEXT', 'RELEVANT_TENANT_SITE_INTELLIGENCE'],
+        reason: 'DEFECTIVE_OR_MALFUNCTIONING_ITEM_DIAGNOSIS',
+        policyApplicability: {
+          normalUnopenedReturnApplies: false,
+          replacementRequiresVerification: true,
+          physicalVisitForbidden: true,
+        },
+        guidance: [
+          'DEFECTIVE / MALFUNCTIONING PRODUCT RESOLUTION CONTRACT:',
+          '1. UNDERSTAND & DIAGNOSE: Directly acknowledge that the product is malfunctioning or not working properly. Do NOT deflect with generic messages like "contact customer support" or give passive brush-offs.',
+          '2. POLICY APPLICABILITY GUARD (CRITICAL): A policy retrieved for unopened returns does NOT apply to an opened defective product. If the verified return policy specifies unopened or original packaging conditions, explicitly clarify: the published return policy applies to unopened items and does not automatically govern opened defective products. DO NOT tell the customer they can return it under an unopened 14-day policy.',
+          '3. SAFE TROUBLESHOOTING: Provide safe product-specific troubleshooting steps ONLY if verified in approved knowledge/product specifications. If none are verified, ask relevant diagnostic questions (what symptoms occur, what indicator lights show) without fabricating troubleshooting steps.',
+          '4. NO UNVERIFIED REPLACEMENT PROMISES: Do NOT promise a replacement or exchange unless an approved replacement policy is explicitly verified in tenant knowledge. If unverified, clarify that replacement eligibility must be confirmed with the support team.',
+          '5. NO INVENTED PHYSICAL RETURN LOCATIONS: Never tell the customer to visit a fulfillment center, warehouse, or office in person unless verified tenant knowledge explicitly states customer walk-in drop-offs are accepted there.',
+          '6. CONCRETE NEXT STEPS: Provide verified next steps (e.g. sharing order number and symptoms with verified support email/phone for warranty review or replacement confirmation).',
+        ].join('\n'),
+      };
+    }
+
+    if (supportCase === SUPPORT_CASES.DAMAGED_ON_ARRIVAL) {
+      return {
+        action: RESOLUTION_ACTIONS.AI_FIRST_RESOLVE,
+        intent: intent.primaryIntent,
+        supportCase: SUPPORT_CASES.DAMAGED_ON_ARRIVAL,
+        stage: 'ASSESS_AND_GUIDE',
+        canResolveSafely: true,
+        requiresHandoff: false,
+        groundingSources: ['APPROVED_KNOWLEDGE', 'ACTIVE_BUSINESS_PROFILE', 'RELEVANT_TENANT_SITE_INTELLIGENCE'],
+        reason: 'DAMAGED_ON_ARRIVAL_ASSESSMENT',
+        policyApplicability: {
+          normalUnopenedReturnApplies: false,
+          replacementRequiresVerification: true,
+          physicalVisitForbidden: true,
+        },
+        guidance: [
+          'DAMAGED ON ARRIVAL RESOLUTION CONTRACT:',
+          '1. UNDERSTAND & ACKNOWLEDGE: Acknowledge that the item arrived damaged in transit. Do not deflect.',
+          '2. POLICY APPLICABILITY GUARD: Transit damage is NOT a normal change-of-mind return. Do NOT apply unopened return policy restrictions.',
+          '3. EVIDENCE & NEXT STEPS: Advise the customer to keep the original shipping box/packaging and take photos of the damaged item and packaging for carrier claim verification.',
+          '4. VERIFIED CHANNELS ONLY: Direct customer to report through verified support channels with their order details. Do not invent replacement promises or physical walk-in locations.',
+        ].join('\n'),
+      };
+    }
+
+    if (supportCase === SUPPORT_CASES.WRONG_ITEM) {
+      return {
+        action: RESOLUTION_ACTIONS.AI_FIRST_RESOLVE,
+        intent: intent.primaryIntent,
+        supportCase: SUPPORT_CASES.WRONG_ITEM,
+        stage: 'ASSESS_AND_GUIDE',
+        canResolveSafely: true,
+        requiresHandoff: false,
+        groundingSources: ['APPROVED_KNOWLEDGE', 'ACTIVE_BUSINESS_PROFILE', 'RELEVANT_TENANT_SITE_INTELLIGENCE'],
+        reason: 'WRONG_ITEM_FULFILLMENT_ERROR',
+        policyApplicability: {
+          normalUnopenedReturnApplies: false,
+          replacementRequiresVerification: true,
+          physicalVisitForbidden: true,
+        },
+        guidance: [
+          'WRONG ITEM RECEIVED RESOLUTION CONTRACT:',
+          '1. ACKNOWLEDGE FULFILLMENT ERROR: Acknowledge that an incorrect item was received. Do not deflect.',
+          '2. POLICY APPLICABILITY GUARD: A dispatch error is NOT a standard customer return. Do not impose unopened return restrictions or fees.',
+          '3. VERIFICATION & NEXT STEPS: Ask the customer to provide photos of the item received and the packing slip/order number to verified support for resolution.',
+        ].join('\n'),
+      };
+    }
+
+    if (supportCase === SUPPORT_CASES.NORMAL_RETURN) {
+      return {
+        action: RESOLUTION_ACTIONS.AI_FIRST_RESOLVE,
+        intent: intent.primaryIntent,
+        supportCase: SUPPORT_CASES.NORMAL_RETURN,
+        stage: 'RESOLVE',
+        canResolveSafely: true,
+        requiresHandoff: false,
+        groundingSources: isCurrentPage
+          ? ['CURRENT_PAGE_VISIBLE_FACT', 'SITE_STRUCTURED_DATA', 'APPROVED_KNOWLEDGE', 'RELEVANT_TENANT_SITE_INTELLIGENCE']
+          : ['APPROVED_KNOWLEDGE', 'ACTIVE_BUSINESS_PROFILE', 'CURRENT_PAGE_CONTEXT', 'RELEVANT_TENANT_SITE_INTELLIGENCE'],
+        reason: 'NORMAL_RETURN_POLICY_RESOLUTION',
+        policyApplicability: {
+          normalUnopenedReturnApplies: true,
+        },
+        guidance: 'Provide the verified return policy, window, packaging requirements, and procedure step-by-step from verified tenant facts. Do not invent unverified return drop-off locations or promises.',
+      };
+    }
     const isTroubleshoot = intent.primaryIntent === INTENT_TYPES.SUPPORT_TROUBLESHOOTING;
     const isPayment = intent.primaryIntent === INTENT_TYPES.SUPPORT_PAYMENT_BILLING;
     const isUsage = intent.primaryIntent === INTENT_TYPES.SUPPORT_USAGE_GUIDE;
@@ -322,6 +616,7 @@ export function evaluateSupportResolutionPlan({
     return {
       action: RESOLUTION_ACTIONS.AI_FIRST_RESOLVE,
       intent: intent.primaryIntent,
+      supportCase,
       stage,
       canResolveSafely: true,
       requiresHandoff: false,
@@ -338,6 +633,7 @@ export function evaluateSupportResolutionPlan({
     return {
       action: RESOLUTION_ACTIONS.SALES_ENGAGE,
       intent: intent.primaryIntent,
+      supportCase,
       stage: 'GUIDE',
       canResolveSafely: true,
       requiresHandoff: false,
@@ -351,6 +647,7 @@ export function evaluateSupportResolutionPlan({
   return {
     action: RESOLUTION_ACTIONS.AI_FIRST_RESOLVE,
     intent: INTENT_TYPES.GENERAL_CONVERSATION,
+    supportCase: SUPPORT_CASES.GENERAL_SUPPORT,
     stage: 'RESOLVE',
     canResolveSafely: true,
     requiresHandoff: false,
@@ -371,6 +668,7 @@ export function buildConversationIntelligencePromptSection(plan = null) {
     'CONVERSATION INTELLIGENCE DIRECTIVE (AI-FIRST RESOLUTION & SALES CONTRACT)',
     '================================================================================',
     `PRIMARY INTENT: ${plan.intent}`,
+    ...(plan.supportCase ? [`SUPPORT CASE: ${plan.supportCase}`] : []),
     `ACTION: ${plan.action}`,
     `RESOLUTION STAGE: ${plan.stage}`,
     `SAFE DIRECT RESOLUTION: ${plan.canResolveSafely ? 'YES (MANDATORY AI-FIRST DIRECT RESOLUTION)' : 'NO'}`,
@@ -387,6 +685,23 @@ export function buildConversationIntelligencePromptSection(plan = null) {
     lines.push('2. Provide concrete, step-by-step instructions (e.g. return process steps, packaging requirements, delivery timelines and cutoffs, cancellation procedure, account recovery steps, troubleshooting instructions).');
     lines.push('3. Cross-page intelligence must be utilized: answer return, shipping, warranty, FAQ, or contact questions even if the customer is on a product page.');
     lines.push('4. Conclude with a helpful follow-up to confirm resolution or offer immediate next steps.');
+
+    if (plan.supportCase === SUPPORT_CASES.DEFECTIVE_OR_MALFUNCTION) {
+      lines.push('CRITICAL POLICY APPLICABILITY INVARIANTS FOR DEFECTIVE PRODUCTS:');
+      lines.push('- A normal return policy requiring unopened items in original packaging does NOT apply to an opened defective product.');
+      lines.push('- Clarify honestly if applicable: "The verified return policy applies to unopened items in original packaging, so it does not automatically cover opened or defective products."');
+      lines.push('- NEVER promise a replacement or exchange unless an approved replacement policy is explicitly verified in tenant facts. State that replacement eligibility must be confirmed with the support team.');
+      lines.push('- NEVER tell the customer to visit a fulfillment hub or warehouse in person unless verified tenant knowledge explicitly confirms walk-in customer drop-offs are accepted there.');
+      lines.push('- Do NOT invent troubleshooting steps. If no steps are verified in your facts, ask diagnostic questions about symptoms.');
+    } else if (plan.supportCase === SUPPORT_CASES.DAMAGED_ON_ARRIVAL) {
+      lines.push('CRITICAL POLICY APPLICABILITY INVARIANTS FOR DAMAGED ARRIVAL:');
+      lines.push('- Transit damage is NOT a standard change-of-mind return. Do NOT apply unopened return restrictions.');
+      lines.push('- Guide the customer to document damage (take photos of packaging and item) and report through verified support channels.');
+    } else if (plan.supportCase === SUPPORT_CASES.WRONG_ITEM) {
+      lines.push('CRITICAL POLICY APPLICABILITY INVARIANTS FOR WRONG ITEM:');
+      lines.push('- Fulfillment error is NOT a normal return or product defect.');
+      lines.push('- Request order details and photos of incorrect item received, and provide verified support contact channels.');
+    }
   } else if (plan.action === RESOLUTION_ACTIONS.SALES_ENGAGE) {
     lines.push('ACTIVE SALES CONSULTANT CONTRACT:');
     lines.push('1. Do NOT behave as a passive answering machine. Provide a helpful, value-oriented response that highlights key features and real-world benefits for the customer.');

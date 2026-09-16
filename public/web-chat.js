@@ -22,6 +22,155 @@
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
   }
+
+  function formatAssistantHtml(rawText) {
+    if (rawText === null || rawText === undefined) return '';
+    var str = String(rawText);
+    if (!str.trim()) return '';
+
+    str = str.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    str = str.replace(/<a\s+(?:[^>]*?\s+)?href=["']((?:https?:\/\/|\/)[^"'>\s]+)["'][^>]*?>([\s\S]*?)<\/a>/gi, function(match, href, label) {
+      var cleanLabel = label.replace(/<[^>]+>/g, '').trim() || href;
+      return '[' + cleanLabel + '](' + href + ')';
+    });
+
+    str = str.replace(/<br\s*\/?>/gi, '\n');
+    str = str.replace(/<\/p>\s*<p[^>]*>/gi, '\n\n');
+    str = str.replace(/<\/?p[^>]*>/gi, '\n');
+
+    var rawLines = str.split('\n');
+    var blocks = [];
+    var currentBlock = null;
+
+    function closeCurrentBlock() {
+      if (currentBlock) {
+        blocks.push(currentBlock);
+        currentBlock = null;
+      }
+    }
+
+    for (var i = 0; i < rawLines.length; i++) {
+      var rawLine = rawLines[i];
+      var trimmed = rawLine.trim();
+
+      if (!trimmed) {
+        closeCurrentBlock();
+        continue;
+      }
+
+      var headerMatch = trimmed.match(/^#{1,6}\s+(.*)$/);
+      if (headerMatch) {
+        closeCurrentBlock();
+        blocks.push({ type: 'p', lines: ['**' + headerMatch[1].trim() + '**'] });
+        continue;
+      }
+
+      var numMatch = trimmed.match(/^(\d+)[\.\)]\s+(.*)$/);
+      if (numMatch) {
+        if (!currentBlock || currentBlock.type !== 'ol') {
+          closeCurrentBlock();
+          currentBlock = { type: 'ol', items: [] };
+        }
+        currentBlock.items.push(numMatch[2]);
+        continue;
+      }
+
+      var bulletMatch = trimmed.match(/^[-*•]\s+(.*)$/);
+      if (bulletMatch) {
+        if (!currentBlock || currentBlock.type !== 'ul') {
+          closeCurrentBlock();
+          currentBlock = { type: 'ul', items: [] };
+        }
+        currentBlock.items.push(bulletMatch[1]);
+        continue;
+      }
+
+      if (!currentBlock || currentBlock.type !== 'p') {
+        closeCurrentBlock();
+        currentBlock = { type: 'p', lines: [] };
+      }
+      currentBlock.lines.push(trimmed);
+    }
+    closeCurrentBlock();
+
+    function formatInline(text) {
+      if (!text) return '';
+
+      var linkPlaceholders = [];
+
+      // 1. Markdown links: [Label](https://...) or [Label](/path)
+      var intermediate = text.replace(/\[([^\]]+)\]\(((?:https?:\/\/|\/)[^\s\)\"'>]+)\)/g, function(match, label, url) {
+        var idx = linkPlaceholders.length;
+        var cleanLabel = escapeHtml(label)
+          .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+          .replace(/__(.+?)__/g, '<strong>$1</strong>');
+        var cleanUrl = escapeHtml(url);
+        var linkHtml = '<a href="' + cleanUrl + '" target="_blank" rel="noopener noreferrer">' + cleanLabel + '</a>';
+        linkPlaceholders.push(linkHtml);
+        return '@@SAMCHELINK' + idx + 'TOKEN@@';
+      });
+
+      // 2. Standalone raw URLs: https://... or http://...
+      intermediate = intermediate.replace(/(^|[\s(])(https?:\/\/[^\s)<>"']+)/g, function(match, prefix, url) {
+        var trailing = '';
+        var punctMatch = url.match(/[.,;:!?]+$/);
+        if (punctMatch) {
+          trailing = punctMatch[0];
+          url = url.slice(0, -trailing.length);
+        }
+        var idx = linkPlaceholders.length;
+        var cleanUrl = escapeHtml(url);
+        var linkHtml = '<a href="' + cleanUrl + '" target="_blank" rel="noopener noreferrer">' + cleanUrl + '</a>';
+        linkPlaceholders.push(linkHtml);
+        return prefix + '@@SAMCHELINK' + idx + 'TOKEN@@' + trailing;
+      });
+
+      // 3. HTML Escape remaining text
+      var escaped = escapeHtml(intermediate);
+
+      // 4. Bold formatting
+      escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      escaped = escaped.replace(/__(.+?)__/g, '<strong>$1</strong>');
+
+      // 5. Restore link placeholders
+      for (var j = 0; j < linkPlaceholders.length; j++) {
+        escaped = escaped.replace('@@SAMCHELINK' + j + 'TOKEN@@', linkPlaceholders[j]);
+      }
+
+      return escaped;
+    }
+
+    var htmlParts = [];
+    for (var b = 0; b < blocks.length; b++) {
+      var blk = blocks[b];
+      if (blk.type === 'p') {
+        var pContent = blk.lines.map(formatInline).join('<br>');
+        htmlParts.push('<p>' + pContent + '</p>');
+      } else if (blk.type === 'ol') {
+        var olItems = blk.items.map(function(item) {
+          return '<li>' + formatInline(item) + '</li>';
+        }).join('');
+        htmlParts.push('<ol>' + olItems + '</ol>');
+      } else if (blk.type === 'ul') {
+        var ulItems = blk.items.map(function(item) {
+          return '<li>' + formatInline(item) + '</li>';
+        }).join('');
+        htmlParts.push('<ul>' + ulItems + '</ul>');
+      }
+    }
+
+    return htmlParts.join('');
+  }
+
+  function renderAssistantMessage(targetNode, rawText) {
+    if (!targetNode) return;
+    var html = formatAssistantHtml(rawText);
+    targetNode.innerHTML = html;
+    if (typeof targetNode.textContent === 'string' && !targetNode.textContent && typeof rawText === 'string') {
+      targetNode.textContent = rawText;
+    }
+  }
   function resolveApiBaseUrl(customBaseUrl) {
     if (typeof customBaseUrl === 'string' && customBaseUrl.trim()) {
       return customBaseUrl.trim().replace(/\/+$/, '');
@@ -769,40 +918,16 @@
     var onComplete = options.onComplete || null;
 
     if (!targetNode) return;
+    if (signal && signal.aborted) return;
     var rawText = typeof content === 'string' ? content : String(content || '');
     targetNode.textContent = '';
 
-    var hasHtml = /<[a-z][\s\S]*>/i.test(rawText);
+    await progressiveText(targetNode, rawText, { signal: signal, container: container });
 
-    if (hasHtml && typeof document !== 'undefined') {
-      var temp = document.createElement('div');
-      temp.innerHTML = rawText;
-      var children = Array.from(temp.childNodes);
-      for (var i = 0; i < children.length; i++) {
-        if (signal && signal.aborted) return;
-        if (targetNode && typeof targetNode.isConnected === 'boolean' && !targetNode.isConnected) return;
+    if (signal && signal.aborted) return;
+    if (targetNode && typeof targetNode.isConnected === 'boolean' && !targetNode.isConnected) return;
 
-        var child = children[i];
-        if (child.nodeType === 3) {
-          await progressiveText(targetNode, child.textContent, { signal: signal, container: container });
-        } else if (child.nodeType === 1) {
-          var clone = child.cloneNode(false);
-          targetNode.appendChild(clone);
-          if (child.childNodes && child.childNodes.length > 0) {
-            await progressiveText(clone, child.textContent, { signal: signal, container: container });
-          }
-          if (container) {
-            smartScrollToBottom(container, false);
-          }
-          var elDelay = responseDelay(PRESENTATION_TIMING.sentence_pause_ms);
-          if (elDelay > 0 && typeof setTimeout !== 'undefined') {
-            await new Promise(function(resolve) { setTimeout(resolve, elDelay); });
-          }
-        }
-      }
-    } else {
-      await progressiveText(targetNode, rawText, { signal: signal, container: container });
-    }
+    renderAssistantMessage(targetNode, rawText);
 
     if (container) {
       smartScrollToBottom(container, false);
@@ -1136,7 +1261,14 @@
     '.samche-msg { animation: samche-msg-fadein .24s cubic-bezier(.16,1,.3,1); max-width: 85%; font-size: 14px; line-height: 1.5; word-break: break-word; }',
     '.samche-msg-user { align-self: flex-end; background: var(--chat-primary, #2563EB); color: var(--chat-primary-foreground, #FFFFFF) !important; padding: 10px 14px; border-radius: 16px 16px 4px 16px; box-shadow: 0 4px 14px -3px var(--chat-glow, rgba(37,99,235,0.3)); font-weight: 500; }',
     '.samche-msg-bot { align-self: flex-start; background: var(--chat-bot-bubble-bg, rgba(255,255,255,0.07)); color: var(--chat-text, #F8FAFC) !important; border: 1px solid var(--chat-bot-bubble-border, var(--chat-border, rgba(255,255,255,0.08))); padding: 12px 16px; border-radius: 16px 16px 16px 4px; }',
-    '.samche-msg-bot a { color: var(--chat-accent, #60A5FA); text-decoration: underline; }',
+    '.samche-msg-bot a { color: var(--chat-accent, #60A5FA); text-decoration: underline; word-break: break-word; }',
+    '.samche-msg-bot p { margin: 0 0 8px 0; line-height: 1.5; }',
+    '.samche-msg-bot p:last-child { margin-bottom: 0; }',
+    '.samche-msg-bot ul, .samche-msg-bot ol { margin: 6px 0; padding-left: 20px; padding-inline-start: 20px; }',
+    '.samche-msg-bot ul:last-child, .samche-msg-bot ol:last-child { margin-bottom: 0; }',
+    '.samche-msg-bot li { margin-bottom: 4px; line-height: 1.45; }',
+    '.samche-msg-bot li:last-child { margin-bottom: 0; }',
+    '.samche-msg-bot strong { font-weight: 600; color: inherit; }',
     '.samche-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 14px; border-top: 1px solid var(--chat-border, rgba(255,255,255,0.06)); background: rgba(0,0,0,0.08); max-height: 76px; max-width: 100%; box-sizing: border-box; overflow-y: auto; overflow-x: hidden; flex-shrink: 0; -webkit-overflow-scrolling: touch; }',
     '.samche-chips::-webkit-scrollbar { width: 4px; height: 4px; }',
     '.samche-chips::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 4px; }',
@@ -1176,6 +1308,7 @@
     '.samche-panel[dir="rtl"] .samche-chip { direction: rtl; text-align: right; }',
     '.samche-panel[dir="rtl"] .samche-msg-user { align-self: flex-start; border-radius: 16px 16px 16px 4px; }',
     '.samche-panel[dir="rtl"] .samche-msg-bot { align-self: flex-end; border-radius: 16px 16px 4px 16px; }',
+    '.samche-panel[dir="rtl"] .samche-msg-bot ul, .samche-panel[dir="rtl"] .samche-msg-bot ol { padding-right: 20px; padding-left: 0; padding-inline-start: 20px; padding-inline-end: 0; text-align: right; }',
     '.samche-panel[dir="rtl"] .samche-composer-input { text-align: right; }',
     '.samche-panel[dir="rtl"] .samche-send-btn svg { transform: scaleX(-1); }',
     '@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } .samche-launcher, .samche-intent-pulse { animation: none !important; transition: none !important; } .samche-panel { transition: none !important; } }'
@@ -2104,8 +2237,7 @@
         if (role === 'user') {
           msg.textContent = text;
         } else {
-          var hasHtml = /<[a-z][\s\S]*>/i.test(text);
-          if (hasHtml) msg.innerHTML = text; else msg.textContent = text;
+          renderAssistantMessage(msg, text);
         }
         messages.appendChild(msg);
         smartScrollToBottom(messages, true);
@@ -2710,6 +2842,9 @@
       var i = this.getInstance(key);
       if (i) i.sendMessage(text);
     },
+    escapeHtml: escapeHtml,
+    formatAssistantHtml: formatAssistantHtml,
+    renderAssistantMessage: renderAssistantMessage,
   };
 
   if (typeof document !== 'undefined') {
@@ -2764,6 +2899,9 @@
     progressiveReveal: progressiveReveal,
     injectStyles: injectStyles,
     I18N: I18N,
+    escapeHtml: escapeHtml,
+    formatAssistantHtml: formatAssistantHtml,
+    renderAssistantMessage: renderAssistantMessage,
   };
 
   global.SamcheContextCapture = {

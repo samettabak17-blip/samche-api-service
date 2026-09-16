@@ -91,10 +91,20 @@ export const CANONICAL_WIDGET_CSS_B: string[] = [
     '.samche-msg { animation: samche-msg-fadein .24s cubic-bezier(.16,1,.3,1); max-width: 85%; font-size: 14px; line-height: 1.5; word-break: break-word; }',
     '.samche-msg-user { align-self: flex-end; background: var(--chat-primary, #2563EB); color: var(--chat-primary-foreground, #FFFFFF) !important; padding: 10px 14px; border-radius: 16px 16px 4px 16px; box-shadow: 0 4px 14px -3px var(--chat-glow, rgba(37,99,235,0.3)); font-weight: 500; }',
     '.samche-msg-bot { align-self: flex-start; background: var(--chat-bot-bubble-bg, rgba(255,255,255,0.07)); color: var(--chat-text, #F8FAFC) !important; border: 1px solid var(--chat-bot-bubble-border, var(--chat-border, rgba(255,255,255,0.08))); padding: 12px 16px; border-radius: 16px 16px 16px 4px; }',
-    '.samche-msg-bot a { color: var(--chat-accent, #60A5FA); text-decoration: underline; }',
-    '.samche-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; border-top: 1px solid var(--chat-border, rgba(255,255,255,0.06)); background: rgba(0,0,0,0.1); max-height: 90px; overflow-y: auto; flex-shrink: 0; }',
-    '.samche-chip { font-size: 12px; padding: 6px 12px; border-radius: 9999px; background: rgba(255,255,255,0.08); color: var(--chat-text, #F8FAFC); border: 1px solid var(--chat-border, rgba(255,255,255,0.12)); cursor: pointer; transition: background .15s ease, transform .15s ease; outline: none; white-space: nowrap; }',
-    '.samche-chip:hover { background: rgba(255,255,255,0.15); transform: translateY(-1px); }',
+    '.samche-msg-bot a { color: var(--chat-accent, #60A5FA); text-decoration: underline; word-break: break-word; }',
+    '.samche-msg-bot p { margin: 0 0 8px 0; line-height: 1.5; }',
+    '.samche-msg-bot p:last-child { margin-bottom: 0; }',
+    '.samche-msg-bot ul, .samche-msg-bot ol { margin: 6px 0; padding-left: 20px; padding-inline-start: 20px; }',
+    '.samche-msg-bot ul:last-child, .samche-msg-bot ol:last-child { margin-bottom: 0; }',
+    '.samche-msg-bot li { margin-bottom: 4px; line-height: 1.45; }',
+    '.samche-msg-bot li:last-child { margin-bottom: 0; }',
+    '.samche-msg-bot strong { font-weight: 600; color: inherit; }',
+    '.samche-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 14px; border-top: 1px solid var(--chat-border, rgba(255,255,255,0.06)); background: rgba(0,0,0,0.08); max-height: 76px; max-width: 100%; box-sizing: border-box; overflow-y: auto; overflow-x: hidden; flex-shrink: 0; -webkit-overflow-scrolling: touch; }',
+    '.samche-chips::-webkit-scrollbar { width: 4px; height: 4px; }',
+    '.samche-chips::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.18); border-radius: 4px; }',
+    '.samche-chip { font-family: inherit; font-size: 12px; line-height: 1.3; padding: 5px 11px; border-radius: 9999px; background: rgba(255,255,255,0.07); color: var(--chat-text, #F8FAFC); border: 1px solid var(--chat-border, rgba(255,255,255,0.12)); cursor: pointer; transition: background .15s ease, border-color .15s ease, transform .15s ease; outline: none; white-space: nowrap; max-width: 100%; text-overflow: ellipsis; overflow: hidden; box-sizing: border-box; text-align: left; }',
+    '.samche-chip:hover, .samche-chip:focus-visible { background: rgba(255,255,255,0.15); border-color: var(--chat-border, rgba(255,255,255,0.25)); transform: translateY(-1px); }',
+    '.samche-chip:active { transform: translateY(0); }',
     '.samche-composer { padding: 14px 16px; border-top: 1px solid var(--chat-border, rgba(255,255,255,0.08)); background: rgba(0,0,0,0.15); display: flex; align-items: flex-end; gap: 10px; flex-shrink: 0; }',
     '.samche-composer-input { flex: 1; background: var(--chat-input-bg, rgba(255,255,255,0.06)); border: 1px solid var(--chat-input-border, rgba(255,255,255,0.14)); border-radius: 12px; color: var(--chat-text, #F8FAFC) !important; padding: 10px 14px; font-size: 14px; line-height: 1.4; resize: none; max-height: 110px; min-height: 42px; outline: none; }',
     '.samche-composer-input:focus { border-color: var(--chat-accent, #60A5FA); }',
@@ -124,8 +134,11 @@ export const CANONICAL_WIDGET_CSS_B: string[] = [
     '@media (max-width: 340px) { .samche-launcher-label { display: none !important; } .samche-launcher { width: 48px !important; height: 48px !important; min-width: 48px !important; min-height: 48px !important; max-width: 48px !important; max-height: 48px !important; border-radius: 50% !important; padding: 0 !important; } }',
     '@media (max-height: 500px) and (orientation: landscape) { .samche-panel { bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important; right: calc(16px + env(safe-area-inset-right, 0px)) !important; left: auto !important; top: auto !important; width: min(380px, calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))) !important; max-width: 380px !important; height: calc(100vh - 20px) !important; height: calc(var(--samche-vv-height, 100dvh) - 20px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) !important; max-height: calc(var(--samche-vv-height, 100dvh) - 20px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) !important; border-radius: 16px !important; } .samche-pos-left .samche-panel { right: auto !important; left: calc(16px + env(safe-area-inset-left, 0px)) !important; } .samche-panel.samche-open { position: fixed !important; inset: auto !important; bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important; right: calc(16px + env(safe-area-inset-right, 0px)) !important; width: min(380px, calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))) !important; max-width: 380px !important; height: calc(100vh - 20px) !important; height: calc(var(--samche-vv-height, 100dvh) - 20px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) !important; max-height: calc(var(--samche-vv-height, 100dvh) - 20px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) !important; border-radius: 16px !important; border: 1.5px solid var(--chat-glow-ring, rgba(56, 189, 248, 0.45)) !important; } .samche-pos-left .samche-panel.samche-open { right: auto !important; left: calc(16px + env(safe-area-inset-left, 0px)) !important; } }',
     '.samche-panel[dir="rtl"], .samche-wrap[dir="rtl"] { direction: rtl; text-align: right; }',
+    '.samche-panel[dir="rtl"] .samche-chips { direction: rtl; }',
+    '.samche-panel[dir="rtl"] .samche-chip { direction: rtl; text-align: right; }',
     '.samche-panel[dir="rtl"] .samche-msg-user { align-self: flex-start; border-radius: 16px 16px 16px 4px; }',
     '.samche-panel[dir="rtl"] .samche-msg-bot { align-self: flex-end; border-radius: 16px 16px 4px 16px; }',
+    '.samche-panel[dir="rtl"] .samche-msg-bot ul, .samche-panel[dir="rtl"] .samche-msg-bot ol { padding-right: 20px; padding-left: 0; padding-inline-start: 20px; padding-inline-end: 0; text-align: right; }',
     '.samche-panel[dir="rtl"] .samche-composer-input { text-align: right; }',
     '.samche-panel[dir="rtl"] .samche-send-btn svg { transform: scaleX(-1); }',
     '@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } .samche-launcher, .samche-intent-pulse { animation: none !important; transition: none !important; } .samche-panel { transition: none !important; } }'
@@ -585,3 +598,159 @@ export function deriveCanonicalDesignTokens(params: {
     is_accessible: isLauncherTransparent ? false : launcherAccessible,
   };
 }
+
+export function escapeHtml(str: any): string {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+export function formatAssistantHtml(rawText: any): string {
+  if (rawText === null || rawText === undefined) return '';
+  let str = String(rawText);
+  if (!str.trim()) return '';
+
+  str = str.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  str = str.replace(/<a\s+(?:[^>]*?\s+)?href=["']((?:https?:\/\/|\/)[^"'>\s]+)["'][^>]*?>([\s\S]*?)<\/a>/gi, (_match, href, label) => {
+    const cleanLabel = label.replace(/<[^>]+>/g, '').trim() || href;
+    return '[' + cleanLabel + '](' + href + ')';
+  });
+
+  str = str.replace(/<br\s*\/?>/gi, '\n');
+  str = str.replace(/<\/p>\s*<p[^>]*>/gi, '\n\n');
+  str = str.replace(/<\/?p[^>]*>/gi, '\n');
+
+  const rawLines = str.split('\n');
+  const blocks: Array<{ type: 'p'; lines: string[] } | { type: 'ol' | 'ul'; items: string[] }> = [];
+  let currentBlock: { type: 'p'; lines: string[] } | { type: 'ol' | 'ul'; items: string[] } | null = null;
+
+  function closeCurrentBlock() {
+    if (currentBlock) {
+      blocks.push(currentBlock);
+      currentBlock = null;
+    }
+  }
+
+  for (let i = 0; i < rawLines.length; i++) {
+    const rawLine = rawLines[i];
+    const trimmed = rawLine.trim();
+
+    if (!trimmed) {
+      closeCurrentBlock();
+      continue;
+    }
+
+    const headerMatch = trimmed.match(/^#{1,6}\s+(.*)$/);
+    if (headerMatch) {
+      closeCurrentBlock();
+      blocks.push({ type: 'p', lines: ['**' + headerMatch[1].trim() + '**'] });
+      continue;
+    }
+
+    const numMatch = trimmed.match(/^(\d+)[\.\)]\s+(.*)$/);
+    if (numMatch) {
+      if (!currentBlock || currentBlock.type !== 'ol') {
+        closeCurrentBlock();
+        currentBlock = { type: 'ol', items: [] };
+      }
+      (currentBlock as { type: 'ol'; items: string[] }).items.push(numMatch[2]);
+      continue;
+    }
+
+    const bulletMatch = trimmed.match(/^[-*•]\s+(.*)$/);
+    if (bulletMatch) {
+      if (!currentBlock || currentBlock.type !== 'ul') {
+        closeCurrentBlock();
+        currentBlock = { type: 'ul', items: [] };
+      }
+      (currentBlock as { type: 'ul'; items: string[] }).items.push(bulletMatch[1]);
+      continue;
+    }
+
+    if (!currentBlock || currentBlock.type !== 'p') {
+      closeCurrentBlock();
+      currentBlock = { type: 'p', lines: [] };
+    }
+    (currentBlock as { type: 'p'; lines: string[] }).lines.push(trimmed);
+  }
+  closeCurrentBlock();
+
+  function formatInline(text: string): string {
+    if (!text) return '';
+
+    const linkPlaceholders: string[] = [];
+
+    // 1. Markdown links: [Label](https://...) or [Label](/path)
+    let intermediate = text.replace(/\[([^\]]+)\]\(((?:https?:\/\/|\/)[^\s\)\"'>]+)\)/g, (_match, label, url) => {
+      const idx = linkPlaceholders.length;
+      const cleanLabel = escapeHtml(label)
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/__(.+?)__/g, '<strong>$1</strong>');
+      const cleanUrl = escapeHtml(url);
+      const linkHtml = `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer">${cleanLabel}</a>`;
+      linkPlaceholders.push(linkHtml);
+      return `@@SAMCHELINK${idx}TOKEN@@`;
+    });
+
+    // 2. Standalone raw URLs: https://... or http://...
+    intermediate = intermediate.replace(/(^|[\s(])(https?:\/\/[^\s)<>"']+)/g, (_match, prefix, url) => {
+      let trailing = '';
+      const punctMatch = url.match(/[.,;:!?]+$/);
+      if (punctMatch) {
+        trailing = punctMatch[0];
+        url = url.slice(0, -trailing.length);
+      }
+      const idx = linkPlaceholders.length;
+      const cleanUrl = escapeHtml(url);
+      const linkHtml = `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer">${cleanUrl}</a>`;
+      linkPlaceholders.push(linkHtml);
+      return `${prefix}@@SAMCHELINK${idx}TOKEN@@${trailing}`;
+    });
+
+    // 3. HTML Escape remaining text
+    let escaped = escapeHtml(intermediate);
+
+    // 4. Bold formatting
+    escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    escaped = escaped.replace(/__(.+?)__/g, '<strong>$1</strong>');
+
+    // 5. Restore link placeholders
+    for (let j = 0; j < linkPlaceholders.length; j++) {
+      escaped = escaped.replace(`@@SAMCHELINK${j}TOKEN@@`, linkPlaceholders[j]);
+    }
+
+    return escaped;
+  }
+
+  const htmlParts: string[] = [];
+  for (let b = 0; b < blocks.length; b++) {
+    const blk = blocks[b];
+    if (blk.type === 'p') {
+      const pContent = blk.lines.map(formatInline).join('<br>');
+      htmlParts.push(`<p>${pContent}</p>`);
+    } else if (blk.type === 'ol') {
+      const olItems = blk.items.map((item) => `<li>${formatInline(item)}</li>`).join('');
+      htmlParts.push(`<ol>${olItems}</ol>`);
+    } else if (blk.type === 'ul') {
+      const ulItems = blk.items.map((item) => `<li>${formatInline(item)}</li>`).join('');
+      htmlParts.push(`<ul>${ulItems}</ul>`);
+    }
+  }
+
+  return htmlParts.join('');
+}
+
+export function renderAssistantMessage(targetNode: any, rawText: any): void {
+  if (!targetNode) return;
+  const html = formatAssistantHtml(rawText);
+  targetNode.innerHTML = html;
+  if (!targetNode.textContent && typeof rawText === 'string') {
+    targetNode.textContent = rawText;
+  }
+}
+

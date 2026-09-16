@@ -444,3 +444,159 @@ export function deriveCanonicalDesignTokens(params: {
     is_accessible: isLauncherTransparent ? false : launcherAccessible,
   };
 }
+
+export function escapeHtml(str: any): string {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+export function formatAssistantHtml(rawText: any): string {
+  if (rawText === null || rawText === undefined) return '';
+  let str = String(rawText);
+  if (!str.trim()) return '';
+
+  str = str.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  str = str.replace(/<a\s+(?:[^>]*?\s+)?href=["']((?:https?:\/\/|\/)[^"'>\s]+)["'][^>]*?>([\s\S]*?)<\/a>/gi, (_match, href, label) => {
+    const cleanLabel = label.replace(/<[^>]+>/g, '').trim() || href;
+    return '[' + cleanLabel + '](' + href + ')';
+  });
+
+  str = str.replace(/<br\s*\/?>/gi, '\n');
+  str = str.replace(/<\/p>\s*<p[^>]*>/gi, '\n\n');
+  str = str.replace(/<\/?p[^>]*>/gi, '\n');
+
+  const rawLines = str.split('\n');
+  const blocks: Array<{ type: 'p'; lines: string[] } | { type: 'ol' | 'ul'; items: string[] }> = [];
+  let currentBlock: { type: 'p'; lines: string[] } | { type: 'ol' | 'ul'; items: string[] } | null = null;
+
+  function closeCurrentBlock() {
+    if (currentBlock) {
+      blocks.push(currentBlock);
+      currentBlock = null;
+    }
+  }
+
+  for (let i = 0; i < rawLines.length; i++) {
+    const rawLine = rawLines[i];
+    const trimmed = rawLine.trim();
+
+    if (!trimmed) {
+      closeCurrentBlock();
+      continue;
+    }
+
+    const headerMatch = trimmed.match(/^#{1,6}\s+(.*)$/);
+    if (headerMatch) {
+      closeCurrentBlock();
+      blocks.push({ type: 'p', lines: ['**' + headerMatch[1].trim() + '**'] });
+      continue;
+    }
+
+    const numMatch = trimmed.match(/^(\d+)[\.\)]\s+(.*)$/);
+    if (numMatch) {
+      if (!currentBlock || currentBlock.type !== 'ol') {
+        closeCurrentBlock();
+        currentBlock = { type: 'ol', items: [] };
+      }
+      (currentBlock as { type: 'ol'; items: string[] }).items.push(numMatch[2]);
+      continue;
+    }
+
+    const bulletMatch = trimmed.match(/^[-*•]\s+(.*)$/);
+    if (bulletMatch) {
+      if (!currentBlock || currentBlock.type !== 'ul') {
+        closeCurrentBlock();
+        currentBlock = { type: 'ul', items: [] };
+      }
+      (currentBlock as { type: 'ul'; items: string[] }).items.push(bulletMatch[1]);
+      continue;
+    }
+
+    if (!currentBlock || currentBlock.type !== 'p') {
+      closeCurrentBlock();
+      currentBlock = { type: 'p', lines: [] };
+    }
+    (currentBlock as { type: 'p'; lines: string[] }).lines.push(trimmed);
+  }
+  closeCurrentBlock();
+
+  function formatInline(text: string): string {
+    if (!text) return '';
+
+    const linkPlaceholders: string[] = [];
+
+    // 1. Markdown links: [Label](https://...) or [Label](/path)
+    let intermediate = text.replace(/\[([^\]]+)\]\(((?:https?:\/\/|\/)[^\s\)\"'>]+)\)/g, (_match, label, url) => {
+      const idx = linkPlaceholders.length;
+      const cleanLabel = escapeHtml(label)
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/__(.+?)__/g, '<strong>$1</strong>');
+      const cleanUrl = escapeHtml(url);
+      const linkHtml = `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer">${cleanLabel}</a>`;
+      linkPlaceholders.push(linkHtml);
+      return `@@SAMCHELINK${idx}TOKEN@@`;
+    });
+
+    // 2. Standalone raw URLs: https://... or http://...
+    intermediate = intermediate.replace(/(^|[\s(])(https?:\/\/[^\s)<>"']+)/g, (_match, prefix, url) => {
+      let trailing = '';
+      const punctMatch = url.match(/[.,;:!?]+$/);
+      if (punctMatch) {
+        trailing = punctMatch[0];
+        url = url.slice(0, -trailing.length);
+      }
+      const idx = linkPlaceholders.length;
+      const cleanUrl = escapeHtml(url);
+      const linkHtml = `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer">${cleanUrl}</a>`;
+      linkPlaceholders.push(linkHtml);
+      return `${prefix}@@SAMCHELINK${idx}TOKEN@@${trailing}`;
+    });
+
+    // 3. HTML Escape remaining text
+    let escaped = escapeHtml(intermediate);
+
+    // 4. Bold formatting
+    escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    escaped = escaped.replace(/__(.+?)__/g, '<strong>$1</strong>');
+
+    // 5. Restore link placeholders
+    for (let j = 0; j < linkPlaceholders.length; j++) {
+      escaped = escaped.replace(`@@SAMCHELINK${j}TOKEN@@`, linkPlaceholders[j]);
+    }
+
+    return escaped;
+  }
+
+  const htmlParts: string[] = [];
+  for (let b = 0; b < blocks.length; b++) {
+    const blk = blocks[b];
+    if (blk.type === 'p') {
+      const pContent = blk.lines.map(formatInline).join('<br>');
+      htmlParts.push(`<p>${pContent}</p>`);
+    } else if (blk.type === 'ol') {
+      const olItems = blk.items.map((item) => `<li>${formatInline(item)}</li>`).join('');
+      htmlParts.push(`<ol>${olItems}</ol>`);
+    } else if (blk.type === 'ul') {
+      const ulItems = blk.items.map((item) => `<li>${formatInline(item)}</li>`).join('');
+      htmlParts.push(`<ul>${ulItems}</ul>`);
+    }
+  }
+
+  return htmlParts.join('');
+}
+
+export function renderAssistantMessage(targetNode: any, rawText: any): void {
+  if (!targetNode) return;
+  const html = formatAssistantHtml(rawText);
+  targetNode.innerHTML = html;
+  if (!targetNode.textContent && typeof rawText === 'string') {
+    targetNode.textContent = rawText;
+  }
+}
+
