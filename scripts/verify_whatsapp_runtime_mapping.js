@@ -44,7 +44,7 @@ try {
          JOIN tenant_channels tc ON tc.id = ci.channel_id AND tc.tenant_id = ci.tenant_id
          JOIN tenants t ON t.id = ci.tenant_id AND t.status = 'active'
          JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
-        WHERE ci.integration_key = $1
+        WHERE (ci.integration_key = $1 OR LOWER(ci.integration_key) = LOWER($1))
         LIMIT 2`,
       [key]
     );
