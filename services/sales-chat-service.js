@@ -2,11 +2,12 @@ const MODEL = 'gpt-4o-mini';
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_HISTORY = 12;
 const MAX_HISTORY_MESSAGE_LENGTH = 1200;
-const ALLOWED_INTENTS = new Set(['sales', 'qualification', 'product_question', 'pricing', 'off_topic', 'handoff']);
+const ALLOWED_INTENTS = new Set(['sales', 'qualification', 'product_question', 'capability_question', 'feature_question', 'pricing_question', 'pricing', 'demo_question', 'off_topic', 'handoff']);
+const ALLOWED_RESPONSE_MODES = new Set(['qualification_answer', 'in_scope_interrupt', 'pricing_interrupt', 'capability_interrupt', 'demo_interrupt', 'off_topic', 'handoff']);
 const ALLOWED_NEXT_FIELDS = new Set(['industry', 'channels', 'volume', 'integrations', 'leadQualification', 'languages', 'aiGuideNeed', 'apiWorkflow', 'externalIntegrations', 'aiLeadScoring', 'teamUsers', 'timeline', 'contactPreference', null]);
 const ALLOWED_LEAD_FIELDS = new Set(['name', 'email', 'company', 'industry', 'country', 'website', 'mainGoal', 'channels', 'products', 'languages', 'integrations', 'volume', 'timeline', 'contactPreference', 'teamUsers', 'leadQualification', 'budget', 'apiWorkflow', 'apiAccessNeed', 'customWorkflowNeed', 'aiGuideNeed', 'externalIntegrations', 'aiLeadScoring']);
 const ALLOWED_ACTIONS = ['REQUEST_DEMO', 'WHATSAPP_HANDOFF'];
-const SYSTEM_PROMPT = 'You are the SamChe AI sales conversation layer. Return only a JSON object with keys reply, intent, extractedFields, requestedNextField, and actionIntent. Use supplied lead state and approved facts as context. Never invent or alter pricing, setup fees, limits, features, availability, discounts, legal/security claims, or roadmap commitments. Do not reset qualification state. For off-topic questions, politely redirect and refer to the pending SamChe question without repeating the same wording. Extract only fields in the structured contract. Keep replies concise and natural in the requested locale.';
+const SYSTEM_PROMPT = 'You are the SamChe AI sales conversation layer. Return only a JSON object with keys reply, intent, responseMode, resumePendingQuestion, extractedFields, requestedNextField, and actionIntent. CURRENT USER MESSAGE HAS PRIORITY. If responseMode is an in-scope interrupt, answer the current product, capability, feature, pricing, or demo question first; do not output only the pending qualification question. Then resume the supplied lastPendingQuestion naturally, preserving the full lead state. Never invent or alter pricing, setup fees, limits, features, availability, discounts, legal/security claims, or roadmap commitments. Do not claim guaranteed employee replacement, headcount reduction, ROI, or sales results. Do not reset qualification state. For off-topic questions, politely redirect and refer to the pending SamChe question without repeating the same wording. Extract only fields in the structured contract. Keep replies concise and natural in the requested locale.';
 const EXTRACTED_ARRAY_FIELDS = new Set(['channels', 'products']);
 const EXTRACTED_FIELD_ALIASES = Object.freeze({
   team_users: 'teamUsers', lead_qualification: 'leadQualification', ai_guide_need: 'aiGuideNeed',
@@ -33,11 +34,13 @@ const SALES_CHAT_RESPONSE_FORMAT = Object.freeze({
       properties: {
         reply: { type: 'string' },
         intent: { type: 'string', enum: [...ALLOWED_INTENTS] },
+        responseMode: { type: 'string', enum: [...ALLOWED_RESPONSE_MODES] },
+        resumePendingQuestion: { type: 'boolean' },
         extractedFields: { type: 'object', additionalProperties: false, properties: EXTRACTED_FIELD_SCHEMA, required: [...ALLOWED_LEAD_FIELDS] },
         requestedNextField: { anyOf: [{ type: 'string', enum: [...ALLOWED_NEXT_FIELDS].filter(Boolean) }, { type: 'null' }] },
         actionIntent: { type: 'array', items: { type: 'string', enum: ALLOWED_ACTIONS } },
       },
-      required: ['reply', 'intent', 'extractedFields', 'requestedNextField', 'actionIntent'],
+      required: ['reply', 'intent', 'responseMode', 'resumePendingQuestion', 'extractedFields', 'requestedNextField', 'actionIntent'],
     },
   },
 });
@@ -62,6 +65,8 @@ function buildContext(body, commercialFacts) {
     pendingField: ALLOWED_NEXT_FIELDS.has(body.pendingQualificationField ?? body.pendingField) ? (body.pendingQualificationField ?? body.pendingField) : null,
     lastPendingQuestion: text(body.lastPendingQuestion, 500),
     recommendedPlan: text(body.recommendedPlan, 40),
+    responseMode: ALLOWED_RESPONSE_MODES.has(body.responseMode) ? body.responseMode : 'qualification_answer',
+    detectedIntent: text(body.detectedIntent, 40),
     approvedPlanFacts: commercialFacts.plans.map((plan) => ({ ...plan })),
     approvedProductFacts: commercialFacts.products.map((product) => ({ ...product })),
     allowedActions: [...ALLOWED_ACTIONS],
@@ -97,6 +102,8 @@ export function validateSalesLlmOutput(output, { plans, products, allowedActions
   if (!value || typeof value !== 'object' || Array.isArray(value)) return failure('invalid_shape');
   if (typeof value.reply !== 'string' || !value.reply.trim() || value.reply.length > 3000) return failure('invalid_reply', { field: 'reply' });
   if (!ALLOWED_INTENTS.has(value.intent)) return failure('invalid_intent', { value: safeDiagnosticValue(value.intent) });
+  if (!ALLOWED_RESPONSE_MODES.has(value.responseMode)) return failure('invalid_response_mode', { value: safeDiagnosticValue(value.responseMode) });
+  if (typeof value.resumePendingQuestion !== 'boolean') return failure('invalid_resume_pending_question');
   if (!ALLOWED_NEXT_FIELDS.has(value.requestedNextField ?? null)) return failure('invalid_next_field', { value: safeDiagnosticValue(value.requestedNextField) });
   if (!Array.isArray(value.actionIntent) || value.actionIntent.some((action) => !allowedActions.includes(action))) return failure('invalid_action', { value: safeDiagnosticValue(value.actionIntent?.find((action) => !allowedActions.includes(action))) });
   if (!value.extractedFields || typeof value.extractedFields !== 'object' || Array.isArray(value.extractedFields)) return failure('invalid_fields');
@@ -113,7 +120,10 @@ export function validateSalesLlmOutput(output, { plans, products, allowedActions
   const knownProducts = products.map((product) => product.name);
   const unknownProductClaim = [...value.reply.matchAll(/\b(?:Web Chatbot|WhatsApp AI|AI Guide|Knowledge Intelligence|Live Inbox|CRM & Pipeline)\b/g)].some((match) => knownProducts.length > 0 && !knownProducts.includes(match[0]));
   if (unknownProductClaim) return failure('unsupported_product_claim', { category: 'product_name' });
-  return { ok: true, value: { reply: value.reply.trim(), intent: value.intent, extractedFields: value.extractedFields, requestedNextField: value.requestedNextField ?? null, actionIntent: value.actionIntent } };
+  if (value.responseMode === 'capability_interrupt' && value.intent !== 'capability_question') return failure('response_mode_intent_mismatch');
+  if (value.responseMode === 'pricing_interrupt' && !['pricing', 'pricing_question'].includes(value.intent)) return failure('response_mode_intent_mismatch');
+  if (['in_scope_interrupt', 'capability_interrupt', 'pricing_interrupt', 'demo_interrupt'].includes(value.responseMode) && value.resumePendingQuestion !== true) return failure('interrupt_resume_required');
+  return { ok: true, value: { reply: value.reply.trim(), intent: value.intent, responseMode: value.responseMode, resumePendingQuestion: value.resumePendingQuestion, extractedFields: value.extractedFields, requestedNextField: value.requestedNextField ?? null, actionIntent: value.actionIntent } };
 }
 
 function logValidationFailure(result, { environment, logger }) {

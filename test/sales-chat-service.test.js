@@ -29,7 +29,7 @@ test('builds bounded context from server-owned commercial facts and returns vali
   const service = createSalesChatService({
     openaiClient: providerWith(JSON.stringify({
       reply: 'Which channels bring you the most enquiries?', intent: 'qualification', extractedFields: {},
-      requestedNextField: 'channels', actionIntent: [],
+      requestedNextField: 'channels', actionIntent: [], responseMode: 'qualification_answer', resumePendingQuestion: true,
     })), commercialFacts,
   });
   const result = await service.handle({ body: requestBody({ approvedPlanFacts: [{ slug: 'business', monthly: 1 }], leadState: { industry: 'Real Estate' } }) });
@@ -44,7 +44,7 @@ test('rejects provider output with unsupported commercial claims without exposin
   const service = createSalesChatService({
     openaiClient: providerWith(JSON.stringify({
       reply: 'Growth is free and unlimited at AED 1,000.', intent: 'pricing', extractedFields: {},
-      requestedNextField: null, actionIntent: [],
+      requestedNextField: null, actionIntent: [], responseMode: 'pricing_interrupt', resumePendingQuestion: true,
     })), commercialFacts,
   });
   const result = await service.handle({ body: requestBody({ userMessage: 'What is the price?' }) });
@@ -84,7 +84,7 @@ test('rate limiter allows the configured burst and rejects the next request', ()
 test('uses strict JSON Schema response format for the provider contract', async () => {
   let request;
   const service = createSalesChatService({
-    openaiClient: { chat: { completions: { create: async (...args) => { request = args[0]; return { choices: [{ message: { content: JSON.stringify({ reply: 'Tell me about your business.', intent: 'qualification', extractedFields: {}, requestedNextField: 'industry', actionIntent: [] }) } }] }; } } } },
+  openaiClient: { chat: { completions: { create: async (...args) => { request = args[0]; return { choices: [{ message: { content: JSON.stringify({ reply: 'Tell me about your business.', intent: 'qualification', extractedFields: {}, requestedNextField: 'industry', actionIntent: [], responseMode: 'qualification_answer', resumePendingQuestion: true }) } }] }; } } } },
     commercialFacts,
   });
   const result = await service.handle({ body: requestBody() });
@@ -92,7 +92,7 @@ test('uses strict JSON Schema response format for the provider contract', async 
   assert.equal(request.response_format.type, 'json_schema');
   assert.equal(request.response_format.json_schema.strict, true);
   assert.equal(request.response_format.json_schema.schema.additionalProperties, false);
-  assert.deepEqual(request.response_format.json_schema.schema.required, ['reply', 'intent', 'extractedFields', 'requestedNextField', 'actionIntent']);
+  assert.deepEqual(request.response_format.json_schema.schema.required, ['reply', 'intent', 'responseMode', 'resumePendingQuestion', 'extractedFields', 'requestedNextField', 'actionIntent']);
 });
 
 test('normalizes only explicit safe enum and field aliases before validation', () => {
@@ -101,7 +101,7 @@ test('normalizes only explicit safe enum and field aliases before validation', (
     intent: 'off-topic',
     extractedFields: { team_users: '3' },
     requestedNextField: 'team_users',
-    actionIntent: [],
+    actionIntent: [], responseMode: 'off_topic', resumePendingQuestion: true,
   }, { plans: commercialFacts.plans, products: commercialFacts.products });
   assert.equal(result.ok, true);
   assert.equal(result.value.intent, 'off_topic');
@@ -112,7 +112,7 @@ test('normalizes only explicit safe enum and field aliases before validation', (
 test('does not normalize unknown extracted field names', () => {
   const result = validateSalesLlmOutput({
     reply: 'Tell me more about your team.', intent: 'qualification', extractedFields: { teamSize: '3' },
-    requestedNextField: 'teamUsers', actionIntent: [],
+    requestedNextField: 'teamUsers', actionIntent: [], responseMode: 'qualification_answer', resumePendingQuestion: true,
   }, { plans: commercialFacts.plans, products: commercialFacts.products });
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'unsupported_field');
@@ -122,7 +122,7 @@ test('does not normalize unknown extracted field names', () => {
 test('logs only sanitized validation diagnostics in the staging environment', async () => {
   const logs = [];
   const service = createSalesChatService({
-    openaiClient: providerWith(JSON.stringify({ reply: 'I can help.', intent: 'general', extractedFields: {}, requestedNextField: null, actionIntent: [] })),
+    openaiClient: providerWith(JSON.stringify({ reply: 'I can help.', intent: 'general', extractedFields: {}, requestedNextField: null, actionIntent: [], responseMode: 'qualification_answer', resumePendingQuestion: true })),
     commercialFacts,
     environment: { RENDER_SERVICE_NAME: 'samche-api-staging' },
     logger: { warn: (...args) => logs.push(args) },
@@ -130,4 +130,26 @@ test('logs only sanitized validation diagnostics in the staging environment', as
   const result = await service.handle({ body: requestBody() });
   assert.equal(result.status, 422);
   assert.deepEqual(logs, [['sales_chat_validation_failed', { reason: 'invalid_intent', value: 'general' }]]);
+});
+
+test('preserves an explicit capability interrupt mode and pending-question resume contract', async () => {
+  const service = createSalesChatService({
+    openaiClient: providerWith(JSON.stringify({
+      reply: 'SamChe AI supports first-response work while human sales staff remain important for complex negotiations and closing.',
+      intent: 'capability_question', extractedFields: {}, requestedNextField: 'languages', actionIntent: [],
+      responseMode: 'capability_interrupt', resumePendingQuestion: true,
+    })), commercialFacts,
+  });
+  const result = await service.handle({ body: requestBody({
+    responseMode: 'capability_interrupt',
+    userMessage: 'Can this AI replace one of my sales staff?',
+    pendingQualificationField: 'languages',
+    lastPendingQuestion: 'Which languages do you need the assistant to support?',
+  }) });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.context.responseMode, 'capability_interrupt');
+  assert.equal(result.context.userMessage, 'Can this AI replace one of my sales staff?');
+  assert.equal(result.body.responseMode, 'capability_interrupt');
+  assert.equal(result.body.resumePendingQuestion, true);
 });
