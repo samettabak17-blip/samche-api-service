@@ -214,6 +214,29 @@ try {
        (SELECT count(*)::integer FROM assistant_configuration_versions WHERE tenant_id=$1 AND assistant_id=$3) AS configuration_count`,
     [scopedTenantId, latest.request_fingerprint, safeAssistantId],
   ) : { rows: [{ exact_attempt_count: 0, recommendation_count: 0, configuration_count: 0 }] };
+  auditPhase = 'INGRESS_EVIDENCE';
+  const ingressEvidence = await client.query(
+    `SELECT
+       (SELECT count(*)::integer FROM conversations WHERE tenant_id = $1) AS tenant_conversation_count,
+       (SELECT count(*)::integer FROM conversation_messages WHERE tenant_id = $1) AS tenant_message_count,
+       (SELECT count(*)::integer FROM crm_leads WHERE tenant_id = $1) AS tenant_lead_count,
+       (SELECT count(*)::integer FROM conversation_messages WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '2 hours') AS recent_global_message_count,
+       (SELECT count(*)::integer FROM conversations WHERE created_at >= CURRENT_TIMESTAMP - INTERVAL '2 hours') AS recent_global_conversation_count,
+       (SELECT json_agg(c) FROM (
+          SELECT id, channel_id, status, created_at, updated_at
+            FROM conversations
+           WHERE tenant_id = $1
+           ORDER BY created_at DESC LIMIT 5
+       ) c) AS latest_tenant_conversations,
+       (SELECT json_agg(m) FROM (
+          SELECT id, conversation_id, sender_type, length(content) AS content_length, created_at
+            FROM conversation_messages
+           WHERE tenant_id = $1
+           ORDER BY created_at DESC LIMIT 5
+       ) m) AS latest_tenant_messages`,
+    [scopedTenantId],
+  );
+
   console.log(JSON.stringify({
     profile_context: context.rows[0],
     async_recommendation_job_schema: asyncJobSchema.rows[0] ?? null,
@@ -225,6 +248,7 @@ try {
     latest_configuration_run: latestConfigurationRun,
     whatsapp_runtime_rows: runtime.rows,
     counts: counts.rows[0],
+    ingress_evidence: ingressEvidence.rows[0],
     stage_history_available: false,
     stage_history_note: 'The bounded run model stores the latest stage and total elapsed_ms, not an event ledger.',
   }));
