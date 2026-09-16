@@ -79,6 +79,8 @@ import {
 } from "./services/public-web-chat-integration-service.js";
 import { resolveInitialWebChatGreeting } from "./services/tenant-web-chat-provisioning-service.js";
 import { getPublicWebChatAsset } from './services/web-chat-asset-service.js';
+import { createSalesChatRateLimiter, createSalesChatService, registerSalesChatRoute } from './services/sales-chat-service.js';
+import { salesChatCommercialFacts } from './config/sales-chat-commercial.js';
 
 import { createCustomerInvitationOutboxStartup } from './services/customer-invitation-outbox-bootstrap.js';
 import { isAllowedGuideCorsOrigin } from './services/guide-public-cors-service.js';
@@ -151,6 +153,11 @@ app.use('/api/v1/auth/forgot-password', express.raw({ type: 'application/json', 
 app.use('/api/v1/auth/password-resets', express.raw({ type: 'application/json', limit: '4kb' }));
 
 const allowedCorsOrigins = [
+  'https://samche.ai',
+  'https://www.samche.ai',
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:8787',
   process.env.DASHBOARD_ALLOWED_ORIGIN,
   process.env.SAMCHEGUIDE_ALLOWED_ORIGIN,
   ...(process.env.CORS_ALLOWED_ORIGINS?.split(',') ?? []),
@@ -654,6 +661,9 @@ const knowledgeGenerationEnabled = knowledgeGenerationProviderName === 'OPENAI'
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
+const salesChatService = createSalesChatService({ openaiClient, commercialFacts: salesChatCommercialFacts });
+const salesChatRateLimiter = createSalesChatRateLimiter();
+registerSalesChatRoute({ app, service: salesChatService, rateLimiter: salesChatRateLimiter });
 const knowledgeEmbedder = process.env.OPENAI_API_KEY ? createOpenAIEmbedder(openaiClient) : null;
 const knowledgeImageExtractor = googleGeminiEnabled ? createGeminiImageKnowledgeExtractor() : null;
 
