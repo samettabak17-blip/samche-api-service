@@ -2,6 +2,31 @@ name: Bootstrap Staging WhatsApp Mapping
 
 on:
   workflow_dispatch:
+    inputs:
+      tenant_id:
+        description: 'Tenant UUID (defaults to secret STAGING_WHATSAPP_TENANT_ID)'
+        required: false
+        type: string
+      phone_id:
+        description: 'WhatsApp Phone Number ID (defaults to secret STAGING_WHATSAPP_PHONE_ID)'
+        required: false
+        type: string
+      tenant_name:
+        description: 'Tenant Display Name (defaults to secret STAGING_WHATSAPP_TENANT_NAME)'
+        required: false
+        type: string
+      assistant_name:
+        description: 'AI Assistant Name (defaults to auto-generated)'
+        required: false
+        type: string
+      system_prompt:
+        description: 'AI Assistant System Prompt (defaults to existing/generic)'
+        required: false
+        type: string
+      enforce_master_policy:
+        description: 'Enforce SamChe Turkish Master Policy (true/false)'
+        required: false
+        type: string
 
 jobs:
   bootstrap:
@@ -22,14 +47,17 @@ jobs:
       - name: Bootstrap and verify tenant-safe WhatsApp mapping
         env:
           STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
-          STAGING_WHATSAPP_TENANT_ID: ${{ secrets.STAGING_WHATSAPP_TENANT_ID }}
-          STAGING_WHATSAPP_PHONE_ID: ${{ secrets.STAGING_WHATSAPP_PHONE_ID }}
-          STAGING_WHATSAPP_TENANT_NAME: ${{ secrets.STAGING_WHATSAPP_TENANT_NAME }}
+          STAGING_WHATSAPP_TENANT_ID: ${{ inputs.tenant_id || secrets.STAGING_WHATSAPP_TENANT_ID }}
+          STAGING_WHATSAPP_PHONE_ID: ${{ inputs.phone_id || secrets.STAGING_WHATSAPP_PHONE_ID }}
+          STAGING_WHATSAPP_TENANT_NAME: ${{ inputs.tenant_name || secrets.STAGING_WHATSAPP_TENANT_NAME }}
+          STAGING_WHATSAPP_ASSISTANT_NAME: ${{ inputs.assistant_name || '' }}
+          STAGING_WHATSAPP_SYSTEM_PROMPT: ${{ inputs.system_prompt || '' }}
+          STAGING_WHATSAPP_ENFORCE_MASTER_POLICY: ${{ inputs.enforce_master_policy || '' }}
         run: node scripts/bootstrap_whatsapp_mapping.js
       - name: Verify exact webhook runtime resolver mapping
         env:
           STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
-          STAGING_WHATSAPP_TENANT_ID: ${{ secrets.STAGING_WHATSAPP_TENANT_ID }}
-          STAGING_WHATSAPP_PHONE_ID: ${{ secrets.STAGING_WHATSAPP_PHONE_ID }}
-          STAGING_WHATSAPP_TENANT_NAME: ${{ secrets.STAGING_WHATSAPP_TENANT_NAME }}
+          STAGING_WHATSAPP_TENANT_ID: ${{ inputs.tenant_id || secrets.STAGING_WHATSAPP_TENANT_ID }}
+          STAGING_WHATSAPP_PHONE_ID: ${{ inputs.phone_id || secrets.STAGING_WHATSAPP_PHONE_ID }}
+          STAGING_WHATSAPP_TENANT_NAME: ${{ inputs.tenant_name || secrets.STAGING_WHATSAPP_TENANT_NAME }}
         run: node scripts/verify_whatsapp_runtime_mapping.js

@@ -10,8 +10,13 @@ const phoneNumberId = process.env.STAGING_WHATSAPP_PHONE_ID;
 const tenantDisplayName = process.env.STAGING_WHATSAPP_TENANT_NAME;
 const canonicalPhoneNumberId = phoneNumberId ? normalizeWhatsAppExternalId(phoneNumberId) : null;
 const integrationKey = canonicalPhoneNumberId ? `whatsapp:${canonicalPhoneNumberId}` : null;
-const runtimeAssistant = { name: 'SamChe AI', model: 'gemini-2.5-pro' };
-const legacyRuntimeAssistantName = 'SamChe WhatsApp Runtime';
+const defaultRuntimeAssistant = { name: 'SamChe AI', model: 'gemini-2.5-pro' };
+const defaultAssistantName = tenantDisplayName ? `${tenantDisplayName} AI` : defaultRuntimeAssistant.name;
+const runtimeAssistant = {
+  name: process.env.STAGING_WHATSAPP_ASSISTANT_NAME || defaultAssistantName,
+  model: process.env.STAGING_WHATSAPP_ASSISTANT_MODEL || defaultRuntimeAssistant.model,
+};
+const legacyRuntimeAssistantName = process.env.STAGING_WHATSAPP_LEGACY_ASSISTANT_NAME || 'SamChe WhatsApp Runtime';
 const masterPolicy = readFileSync(new URL('../policies/samche-whatsapp-master-business-policy.tr.txt', import.meta.url), 'utf8');
 const deterministicResponseTemplates = JSON.parse(
   readFileSync(new URL('../policies/samche-whatsapp-deterministic-responses.json', import.meta.url), 'utf8')
@@ -28,6 +33,10 @@ const masterPolicyRawSha256 = createHash('sha256').update(masterPolicy, 'utf8').
 const masterPolicyCanonicalSha256 = createHash('sha256').update(masterPolicyCanonical, 'utf8').digest('hex');
 const expectedMasterPolicyCanonicalSha256 = 'c72bc5787e31ee788431fcb7b73a6f1f72fb3471c3910a00e87005d389edaf58';
 
+const enforceMasterPolicy = process.env.STAGING_WHATSAPP_ENFORCE_MASTER_POLICY
+  ? process.env.STAGING_WHATSAPP_ENFORCE_MASTER_POLICY === 'true'
+  : (!process.env.STAGING_WHATSAPP_SYSTEM_PROMPT && !process.env.STAGING_WHATSAPP_ASSISTANT_NAME);
+
 if (!connectionString || !tenantId || !phoneNumberId || !tenantDisplayName) {
   console.error('WHATSAPP_MAPPING: CONFIGURATION_REQUIRED');
   process.exit(1);
@@ -36,7 +45,7 @@ if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
   console.error('WHATSAPP_MAPPING: INVALID_CONFIGURATION');
   process.exit(1);
 }
-if (masterPolicyCanonicalSha256 !== expectedMasterPolicyCanonicalSha256) {
+if (enforceMasterPolicy && masterPolicyCanonicalSha256 !== expectedMasterPolicyCanonicalSha256) {
   console.error('WHATSAPP_MAPPING: MASTER_POLICY_INTEGRITY_FAILED');
   process.exit(1);
 }
@@ -54,12 +63,24 @@ function hasRequiredDeterministicTemplates(value) {
   );
 }
 
+function buildGenericDeterministicTemplates() {
+  return {
+    first_contact: {
+      tr: 'Merhaba, ben {{assistantName}}.\n\n{{companyName}} yapay zeka asistanıyım ve size yardımcı olmak için buradayım. Size nasıl yardımcı olabilirim?',
+      en: "Hello, I'm {{assistantName}}.\n\nI'm the AI assistant for {{companyName}}, and I'm here to assist you. How can I help you today?",
+      ar: 'مرحبًا، أنا {{assistantName}}.\n\nأنا المساعد الذكي لشركة {{companyName}}، وأنا هنا لمساعدتك. كيف يمكنني مساعدتك اليوم؟',
+    },
+    social: deterministicResponseTemplates.social,
+    human_support: deterministicResponseTemplates.human_support,
+  };
+}
+
 function fail(code) { const error = new Error(code); error.code = code; throw error; }
 const pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false } });
 
 async function resolveAssistant(client) {
   const integrationAssistant = await client.query(
-    `SELECT ci.assistant_id, a.status
+    `SELECT ci.assistant_id, a.id, a.status, a.name, a.system_prompt, a.whatsapp_response_templates
        FROM channel_integrations ci
        JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
       WHERE ci.integration_key = $1 AND ci.tenant_id = $2
@@ -68,22 +89,48 @@ async function resolveAssistant(client) {
   );
   if (integrationAssistant.rowCount > 1) fail('WHATSAPP_ASSISTANT_AMBIGUOUS');
 
-  const candidates = integrationAssistant.rowCount
-    ? integrationAssistant
-    : await client.query(
-      `SELECT id, status
+  let assistantRow = null;
+  if (integrationAssistant.rowCount === 1) {
+    assistantRow = integrationAssistant.rows[0];
+  } else {
+    const candidates = await client.query(
+      `SELECT id, status, name, system_prompt, whatsapp_response_templates
          FROM ai_assistants
         WHERE tenant_id = $1
-          AND model = $2
-          AND name IN ($3, $4)
-        ORDER BY CASE WHEN name = $3 THEN 0 ELSE 1 END
+          AND (name = $2 OR ($3::text IS NOT NULL AND name = $3))
+        ORDER BY CASE WHEN name = $2 THEN 0 ELSE 1 END
         FOR UPDATE`,
-      [tenantId, runtimeAssistant.model, runtimeAssistant.name, legacyRuntimeAssistantName]
+      [tenantId, runtimeAssistant.name, legacyRuntimeAssistantName]
     );
-  if (candidates.rowCount > 1) fail('WHATSAPP_ASSISTANT_AMBIGUOUS');
+    if (candidates.rowCount > 1) fail('WHATSAPP_ASSISTANT_AMBIGUOUS');
+    if (candidates.rowCount === 1) {
+      assistantRow = candidates.rows[0];
+    } else {
+      const anyActive = await client.query(
+        `SELECT id, status, name, system_prompt, whatsapp_response_templates
+           FROM ai_assistants
+          WHERE tenant_id = $1 AND status = 'active'
+          LIMIT 2
+          FOR UPDATE`,
+        [tenantId]
+      );
+      if (anyActive.rowCount === 1) {
+        assistantRow = anyActive.rows[0];
+      }
+    }
+  }
 
-  if (candidates.rowCount === 1) {
-    if (candidates.rows[0].status !== 'active') fail('WHATSAPP_ASSISTANT_INACTIVE');
+  const effectivePolicy = enforceMasterPolicy
+    ? masterPolicy
+    : (process.env.STAGING_WHATSAPP_SYSTEM_PROMPT || assistantRow?.system_prompt || `You are an AI assistant for ${tenantDisplayName}. Provide helpful, concise, and professional concierge support.`);
+
+  const effectiveTemplates = hasRequiredDeterministicTemplates(assistantRow?.whatsapp_response_templates)
+    ? assistantRow.whatsapp_response_templates
+    : (enforceMasterPolicy ? deterministicResponseTemplates : buildGenericDeterministicTemplates());
+
+  if (assistantRow) {
+    if (assistantRow.status !== 'active') fail('WHATSAPP_ASSISTANT_INACTIVE');
+    const targetAssistantId = assistantRow.assistant_id ?? assistantRow.id;
     const updated = await client.query(
       `UPDATE ai_assistants
           SET name = $1,
@@ -93,7 +140,7 @@ async function resolveAssistant(client) {
               updated_at = CURRENT_TIMESTAMP
         WHERE id = $5 AND tenant_id = $6
         RETURNING id, status`,
-      [runtimeAssistant.name, masterPolicy, runtimeAssistant.model, JSON.stringify(deterministicResponseTemplates), candidates.rows[0].assistant_id ?? candidates.rows[0].id, tenantId]
+      [runtimeAssistant.name, effectivePolicy, runtimeAssistant.model, JSON.stringify(effectiveTemplates), targetAssistantId, tenantId]
     );
     return { assistant: updated.rows[0], outcome: 'configured' };
   }
@@ -101,7 +148,7 @@ async function resolveAssistant(client) {
   const created = await client.query(
     `INSERT INTO ai_assistants (tenant_id, name, system_prompt, model, status, whatsapp_response_templates)
      VALUES ($1, $2, $3, $4, 'active', $5::jsonb) RETURNING id, status`,
-    [tenantId, runtimeAssistant.name, masterPolicy, runtimeAssistant.model, JSON.stringify(deterministicResponseTemplates)]
+    [tenantId, runtimeAssistant.name, effectivePolicy, runtimeAssistant.model, JSON.stringify(effectiveTemplates)]
   );
   return { assistant: created.rows[0], outcome: 'created' };
 }
@@ -141,12 +188,13 @@ async function resolveChannel(client, assistantId) {
     }
     return { channel, outcome: 'resolved' };
   }
+  const channelDisplayName = process.env.STAGING_WHATSAPP_CHANNEL_NAME || `${tenantDisplayName} WhatsApp`;
   const created = await client.query(
     `INSERT INTO tenant_channels
       (tenant_id, assistant_id, channel_type, display_name, external_channel_id, status)
-     VALUES ($1, $2, 'WHATSAPP', 'SamChe WhatsApp', $3, 'active')
+     VALUES ($1, $2, 'WHATSAPP', $3, $4, 'active')
      RETURNING id, assistant_id, status`,
-    [tenantId, assistantId, canonicalPhoneNumberId]
+    [tenantId, assistantId, channelDisplayName, canonicalPhoneNumberId]
   );
   return { channel: created.rows[0], outcome: 'created' };
 }
@@ -201,13 +249,17 @@ try {
     const verifiedPolicyCanonicalSha256 = row
       ? createHash('sha256').update(verifiedPolicyCanonical, 'utf8').digest('hex')
       : null;
+    const isPolicyValid = enforceMasterPolicy
+      ? verifiedPolicyCanonicalSha256 === expectedMasterPolicyCanonicalSha256
+      : verifiedPolicyCanonical.length > 0;
     if (!row || tenantDisplayName !== (await client.query('SELECT name FROM tenants WHERE id = $1', [tenantId])).rows[0]?.name || row.tenant_id !== tenantId || row.channel_id !== channel.channel.id ||
         row.assistant_id !== assistant.assistant.id || row.enabled !== true ||
         row.channel_type !== 'WHATSAPP' || row.channel_status !== 'active' ||
         row.assistant_status !== 'active' || row.model !== runtimeAssistant.model ||
         row.assistant_name !== runtimeAssistant.name ||
         !hasRequiredDeterministicTemplates(row.whatsapp_response_templates) ||
-        verifiedPolicyCanonicalSha256 !== expectedMasterPolicyCanonicalSha256) fail('MAPPING_VERIFICATION_FAILED');
+        (enforceMasterPolicy && verifiedPolicyCanonicalSha256 !== expectedMasterPolicyCanonicalSha256) ||
+        !isPolicyValid) fail('MAPPING_VERIFICATION_FAILED');
     await client.query('COMMIT');
     console.log('WHATSAPP_MAPPING: READY (assistant=' + assistant.outcome + '; channel=' + channel.outcome + '; policy_characters=' + verifiedPolicyCanonical.length + '; policy_lines=' + policyLineCount(verifiedPolicyCanonical) + '; policy_raw_sha256=' + verifiedPolicyRawSha256 + '; policy_canonical_sha256=' + verifiedPolicyCanonicalSha256 + ')');
   } catch (error) {
