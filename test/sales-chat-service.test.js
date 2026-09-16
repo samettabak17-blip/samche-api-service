@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSalesChatRateLimiter, createSalesChatService } from '../services/sales-chat-service.js';
+import { createSalesChatRateLimiter, createSalesChatService, validateSalesLlmOutput } from '../services/sales-chat-service.js';
 
 const commercialFacts = {
   plans: [
@@ -79,4 +79,55 @@ test('rate limiter allows the configured burst and rejects the next request', ()
   assert.equal(limiter.allow('203.0.113.5'), false);
   now += 1001;
   assert.equal(limiter.allow('203.0.113.5'), true);
+});
+
+test('uses strict JSON Schema response format for the provider contract', async () => {
+  let request;
+  const service = createSalesChatService({
+    openaiClient: { chat: { completions: { create: async (...args) => { request = args[0]; return { choices: [{ message: { content: JSON.stringify({ reply: 'Tell me about your business.', intent: 'qualification', extractedFields: {}, requestedNextField: 'industry', actionIntent: [] }) } }] }; } } } },
+    commercialFacts,
+  });
+  const result = await service.handle({ body: requestBody() });
+  assert.equal(result.status, 200);
+  assert.equal(request.response_format.type, 'json_schema');
+  assert.equal(request.response_format.json_schema.strict, true);
+  assert.equal(request.response_format.json_schema.schema.additionalProperties, false);
+  assert.deepEqual(request.response_format.json_schema.schema.required, ['reply', 'intent', 'extractedFields', 'requestedNextField', 'actionIntent']);
+});
+
+test('normalizes only explicit safe enum and field aliases before validation', () => {
+  const result = validateSalesLlmOutput({
+    reply: 'Growth may be the closest fit for your business.',
+    intent: 'off-topic',
+    extractedFields: { team_users: '3' },
+    requestedNextField: 'team_users',
+    actionIntent: [],
+  }, { plans: commercialFacts.plans, products: commercialFacts.products });
+  assert.equal(result.ok, true);
+  assert.equal(result.value.intent, 'off_topic');
+  assert.equal(result.value.requestedNextField, 'teamUsers');
+  assert.deepEqual(result.value.extractedFields, { teamUsers: '3' });
+});
+
+test('does not normalize unknown extracted field names', () => {
+  const result = validateSalesLlmOutput({
+    reply: 'Tell me more about your team.', intent: 'qualification', extractedFields: { teamSize: '3' },
+    requestedNextField: 'teamUsers', actionIntent: [],
+  }, { plans: commercialFacts.plans, products: commercialFacts.products });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'unsupported_field');
+  assert.equal(result.field, 'teamSize');
+});
+
+test('logs only sanitized validation diagnostics in the staging environment', async () => {
+  const logs = [];
+  const service = createSalesChatService({
+    openaiClient: providerWith(JSON.stringify({ reply: 'I can help.', intent: 'general', extractedFields: {}, requestedNextField: null, actionIntent: [] })),
+    commercialFacts,
+    environment: { RENDER_SERVICE_NAME: 'samche-api-staging' },
+    logger: { warn: (...args) => logs.push(args) },
+  });
+  const result = await service.handle({ body: requestBody() });
+  assert.equal(result.status, 422);
+  assert.deepEqual(logs, [['sales_chat_validation_failed', { reason: 'invalid_intent', value: 'general' }]]);
 });
