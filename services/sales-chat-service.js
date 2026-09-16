@@ -132,6 +132,73 @@ function logValidationFailure(result, { environment, logger }) {
   logger?.warn?.('sales_chat_validation_failed', { reason: result.reason, ...details });
 }
 
+function isInterruptMode(mode) { return ['capability_interrupt', 'pricing_interrupt', 'in_scope_interrupt', 'demo_interrupt'].includes(mode); }
+
+function expectedIntentForMode(mode, userMessage = '') {
+  if (mode === 'capability_interrupt') return 'capability_question';
+  if (mode === 'pricing_interrupt') return 'pricing_question';
+  if (mode === 'in_scope_interrupt') return /ai guide|web chatbot|whatsapp ai|live inbox|knowledge intelligence|product|feature/i.test(userMessage) ? 'feature_question' : 'product_question';
+  if (mode === 'demo_interrupt') return 'demo_question';
+  return 'qualification';
+}
+
+function pendingResumePresent(reply, context) {
+  if (!context.lastPendingQuestion || !context.pendingField) return true;
+  if (reply.toLowerCase().includes(context.lastPendingQuestion.toLowerCase())) return true;
+  const fieldTerms = {
+    industry: /industry|business/i, channels: /channel|website|whatsapp/i, volume: /volume|enquir|inquir|lead/i,
+    integrations: /integration|crm|booking/i, leadQualification: /qualif/i, languages: /language/i,
+    aiGuideNeed: /ai guide/i, apiWorkflow: /api|workflow/i, externalIntegrations: /external/i,
+    aiLeadScoring: /scoring/i, teamUsers: /team|user|people|staff/i, timeline: /start|launch/i, contactPreference: /demo|whatsapp|contact/i,
+  };
+  return Boolean(fieldTerms[context.pendingField]?.test(reply));
+}
+
+function planFromContext(context, plans) {
+  const textValue = `${context.userMessage} ${context.recommendedPlan}`.toLowerCase();
+  return plans.find((plan) => textValue.includes(plan.slug) || textValue.includes(plan.name.toLowerCase())) || null;
+}
+
+function safeInterruptReply(mode, context, plans) {
+  const pending = context.lastPendingQuestion || '';
+  if (mode === 'capability_interrupt') return `SamChe AI can support first-response work by answering FAQs, qualifying leads, and routing conversations. It is a support layer rather than a one-for-one employee replacement; people remain important for negotiation, relationships, and closing.${pending ? ` ${pending}` : ''}`;
+  if (mode === 'pricing_interrupt') {
+    const plan = planFromContext(context, plans);
+    if (plan) return `The ${plan.name} plan is ${plan.from ? 'from ' : ''}AED ${plan.monthly.toLocaleString('en-US')}/month, with ${plan.from ? 'from ' : ''}AED ${plan.setup.toLocaleString('en-US')} one-time setup and ${plan.interactions} AI interactions per month.${pending ? ` ${pending}` : ''}`;
+  }
+  if (mode === 'in_scope_interrupt') {
+    const product = /ai guide/i.test(context.userMessage)
+      ? 'AI Guide provides a guided, step-by-step experience for helping visitors find relevant information and next actions.'
+      : 'SamChe AI can answer common questions using approved business knowledge and route qualified conversations to your team.';
+    return `${product}${pending ? ` ${pending}` : ''}`;
+  }
+  return `I can help with that SamChe AI question.${pending ? ` ${pending}` : ''}`;
+}
+
+function interruptReplyIsUsable(mode, reply, context, plans) {
+  if (!reply || !pendingResumePresent(reply, context)) return false;
+  if (mode === 'capability_interrupt') return /automate|support|first-response|faq|qualif|rout|human|sales staff|negotiat|relationship|closing/i.test(reply)
+    && !/guaranteed|headcount reduction|reduce(?:d)? headcount|replace.*one-for-one|\broi\b|sales results/i.test(reply);
+  if (mode === 'pricing_interrupt') {
+    const plan = planFromContext(context, plans);
+    return Boolean(plan && reply.includes(`AED ${plan.monthly.toLocaleString('en-US')}`));
+  }
+  if (mode === 'in_scope_interrupt') return /ai guide|web chatbot|whatsapp ai|live inbox|knowledge intelligence|product|feature/i.test(reply);
+  return true;
+}
+
+function enforceInterruptResponse(candidate, context, commercialFacts) {
+  const mode = context.responseMode;
+  const usable = candidate && interruptReplyIsUsable(mode, candidate.reply, context, commercialFacts.plans);
+  const reply = usable ? candidate.reply : safeInterruptReply(mode, context, commercialFacts.plans);
+  return {
+    reply, intent: expectedIntentForMode(mode, context.userMessage), responseMode: mode,
+    extractedFields: usable ? candidate.extractedFields : {},
+    requestedNextField: context.pendingField || (usable ? candidate.requestedNextField : null),
+    resumePendingQuestion: Boolean(context.lastPendingQuestion && context.pendingField), actionIntent: [],
+  };
+}
+
 export function createSalesChatService({ openaiClient, commercialFacts, timeoutMs = 20000, environment = process.env, logger = console } = {}) {
   async function handle({ body = {} } = {}) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) return { status: 400, body: { error: 'Sales assistant request is invalid.' } };
@@ -148,10 +215,12 @@ export function createSalesChatService({ openaiClient, commercialFacts, timeoutM
       const content = completion?.choices?.[0]?.message?.content;
       if (typeof content !== 'string') {
         logValidationFailure(failure('invalid_provider_response'), { environment, logger });
+        if (isInterruptMode(context.responseMode)) return { status: 200, body: enforceInterruptResponse(null, context, commercialFacts), context };
         return { status: 422, body: { error: 'Sales assistant response was not usable.' }, context };
       }
       const result = validateSalesLlmOutput(content, { plans: commercialFacts.plans, products: commercialFacts.products });
       if (!result.ok) logValidationFailure(result, { environment, logger });
+      if (isInterruptMode(context.responseMode)) return { status: 200, body: enforceInterruptResponse(result.ok ? result.value : null, context, commercialFacts), context };
       return result.ok ? { status: 200, body: result.value, context } : { status: 422, body: { error: 'Sales assistant response was not usable.' }, context };
     } catch {
       return { status: 503, body: { error: 'Sales assistant is temporarily unavailable.' }, context };

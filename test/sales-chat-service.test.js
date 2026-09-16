@@ -153,3 +153,65 @@ test('preserves an explicit capability interrupt mode and pending-question resum
   assert.equal(result.body.responseMode, 'capability_interrupt');
   assert.equal(result.body.resumePendingQuestion, true);
 });
+
+test('server enforcement repairs conflicting capability intent and removes model actions', async () => {
+  const service = createSalesChatService({
+    openaiClient: providerWith(JSON.stringify({
+      reply: 'Which languages do you need?', intent: 'off_topic', extractedFields: {}, requestedNextField: 'languages',
+      actionIntent: ['REQUEST_DEMO', 'WHATSAPP_HANDOFF'], responseMode: 'capability_interrupt', resumePendingQuestion: true,
+    })), commercialFacts,
+  });
+  const result = await service.handle({ body: requestBody({
+    responseMode: 'capability_interrupt', detectedIntent: 'capability_question',
+    pendingQualificationField: 'languages', lastPendingQuestion: 'Which languages do you need?',
+    userMessage: 'Can this AI replace one of my sales staff?',
+  }) });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.intent, 'capability_question');
+  assert.equal(result.body.responseMode, 'capability_interrupt');
+  assert.deepEqual(result.body.actionIntent, []);
+  assert.match(result.body.reply, /first-response|sales staff|negotiat|human/i);
+  assert.match(result.body.reply, /languages/i);
+});
+
+test('server enforcement falls back to approved pricing when the model returns only the pending question', async () => {
+  const service = createSalesChatService({
+    openaiClient: providerWith(JSON.stringify({
+      reply: 'How many people will use the shared inbox?', intent: 'pricing_question', extractedFields: {}, requestedNextField: 'teamUsers',
+      actionIntent: ['REQUEST_DEMO', 'WHATSAPP_HANDOFF'], responseMode: 'pricing_interrupt', resumePendingQuestion: true,
+    })), commercialFacts,
+  });
+  const result = await service.handle({ body: requestBody({
+    responseMode: 'pricing_interrupt', detectedIntent: 'pricing_question', recommendedPlan: 'growth',
+    pendingQualificationField: 'teamUsers', lastPendingQuestion: 'How many people will use the shared inbox?',
+    userMessage: 'How much does Growth cost?',
+  }) });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.intent, 'pricing_question');
+  assert.equal(result.body.responseMode, 'pricing_interrupt');
+  assert.deepEqual(result.body.actionIntent, []);
+  assert.match(result.body.reply, /AED 3,990\/month/);
+  assert.match(result.body.reply, /shared inbox|team/i);
+});
+
+test('server enforcement keeps AI Guide as a product interrupt even when the model misclassifies it', async () => {
+  const service = createSalesChatService({
+    openaiClient: providerWith(JSON.stringify({
+      reply: 'AI Guide is useful.', intent: 'capability_question', extractedFields: {}, requestedNextField: 'languages',
+      actionIntent: ['REQUEST_DEMO'], responseMode: 'in_scope_interrupt', resumePendingQuestion: true,
+    })), commercialFacts,
+  });
+  const result = await service.handle({ body: requestBody({
+    responseMode: 'in_scope_interrupt', detectedIntent: 'product_question', pendingQualificationField: 'languages',
+    lastPendingQuestion: 'Which languages do you need?', userMessage: 'How does AI Guide work?',
+  }) });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.intent, 'feature_question');
+  assert.equal(result.body.responseMode, 'in_scope_interrupt');
+  assert.deepEqual(result.body.actionIntent, []);
+  assert.match(result.body.reply, /AI Guide/i);
+  assert.match(result.body.reply, /languages/i);
+});
