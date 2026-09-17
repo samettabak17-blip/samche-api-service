@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { resolveTenantProactiveConfig } from './visitor-intent-service.js';
 import { analyzeLogoPalette, deriveWebChatThemeTokens } from './web-chat-theme-service.js';
 import { triggerTenantSiteDiscoveryBackground } from './tenant-site-discovery-service.js';
+import { normalizeDemoModeConfig } from './tenant-demo-mode-service.js';
 
 export const DEFAULT_WEB_CHAT_APPEARANCE = Object.freeze({
   brand_name: 'SamChe',
@@ -613,12 +614,16 @@ export async function ensureWebChatIntegration(databaseOrOptions, maybeOptions =
     appearanceInput.updated_at = new Date(currentVersion).toISOString();
     const normalizedAppearance = normalizeWebChatAppearance(appearanceInput, tenant.name);
     const normalizedBehavior = normalizeWebChatBehavior(behavior);
-    const configPayload = JSON.stringify({
+    const configPayloadObj = {
       appearance: normalizedAppearance,
       behavior: normalizedBehavior,
       config_version: currentVersion,
       updated_at: normalizedAppearance.updated_at,
-    });
+    };
+    if (opts.demoMode || opts.demo_mode) {
+      configPayloadObj.demo_mode = normalizeDemoModeConfig(opts.demoMode || opts.demo_mode);
+    }
+    const configPayload = JSON.stringify(configPayloadObj);
     const hasConfig = await checkConfigColumn(client);
     const isChannelActive = status ? status === 'active' : resolvedChannel.status === 'active';
 
@@ -1148,6 +1153,7 @@ export async function ensureTenantWebChatPersona(databaseOrOptions, maybeOptions
         timing_strategy: ['10m', '3h', '24h'],
         cta_behavior: 'Offer the next documented step and answer any questions.',
       },
+      ...(opts.demoMode || opts.demo_mode ? { demo_mode: normalizeDemoModeConfig(opts.demoMode || opts.demo_mode, profileData) } : {}),
       ...(opts.configurationData || {}),
     };
 

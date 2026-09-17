@@ -109,6 +109,14 @@ export function normalizeDemoModeConfig(rawDemoMode, tenantProfile = null, assis
     ? rawDemoMode.transition_behavior.trim()
     : 'continue_as_tenant_assistant';
 
+  const welcomeTitle = typeof rawDemoMode.welcome_title === 'string' && rawDemoMode.welcome_title.trim()
+    ? rawDemoMode.welcome_title.trim()
+    : null;
+
+  const welcomeMessage = typeof rawDemoMode.welcome_message === 'string' && rawDemoMode.welcome_message.trim()
+    ? rawDemoMode.welcome_message.trim()
+    : (typeof rawDemoMode.webchat_welcome === 'string' && rawDemoMode.webchat_welcome.trim() ? rawDemoMode.webchat_welcome.trim() : null);
+
   const rawScenarios = Array.isArray(rawDemoMode.scenarios) ? rawDemoMode.scenarios : null;
   const scenarios = rawScenarios && rawScenarios.length > 0
     ? rawScenarios.map((s, idx) => ({
@@ -139,6 +147,9 @@ export function normalizeDemoModeConfig(rawDemoMode, tenantProfile = null, assis
         },
       ];
 
+  const rawChips = Array.isArray(rawDemoMode.chips) ? rawDemoMode.chips : (Array.isArray(rawDemoMode.starter_questions) ? rawDemoMode.starter_questions : null);
+  const chips = rawChips ? rawChips.filter((c) => typeof c === 'string' && c.trim()).map((c) => c.trim()) : null;
+
   const translations = rawDemoMode.translations && typeof rawDemoMode.translations === 'object'
     ? rawDemoMode.translations
     : {};
@@ -151,7 +162,12 @@ export function normalizeDemoModeConfig(rawDemoMode, tenantProfile = null, assis
     business_context: businessContext,
     disclosure,
     transition_behavior: transitionBehavior,
+    welcome_title: welcomeTitle,
+    welcome_message: welcomeMessage,
+    webchat_welcome: welcomeMessage,
     scenarios,
+    chips: chips || scenarios.map((s) => s.label),
+    starter_questions: chips || scenarios.map((s) => s.label),
     translations,
   };
 }
@@ -251,42 +267,55 @@ export function formatWebChatDemoWelcome({ demoMode, language = 'en' }) {
   const platformName = demoMode.platform_name || DEFAULT_PLATFORM_NAME;
 
   if (lang === 'tr') {
-    const welcomeTitle = custom?.welcome_title || `${platformName} Demosuna Hoş Geldiniz`;
-    const welcomeMessage = custom?.webchat_welcome || [
+    const welcomeTitle = custom?.welcome_title || (demoMode.translations?.tr?.welcome_title) || (demoMode.language === 'tr' ? demoMode.welcome_title : null) || `${platformName} Demosuna Hoş Geldiniz`;
+    const welcomeMessage = custom?.webchat_welcome || custom?.welcome_message || (demoMode.translations?.tr?.webchat_welcome) || (demoMode.translations?.tr?.welcome_message) || (demoMode.language === 'tr' ? (demoMode.webchat_welcome || demoMode.welcome_message) : null) || [
       `${platformName} Demosuna Hoş Geldiniz.`,
-      `${platformName} tarafından desteklenen etkinlik yönetimi asistanı ${businessName} AI deneyimine başlamak üzeresiniz.`,
+      `${platformName} tarafından desteklenen ${demoMode.business_type === 'e-commerce' || demoMode.business_type?.includes('e-ticaret') || demoMode.business_type?.includes('e-commerce') ? 'e-ticaret asistanı' : 'etkinlik yönetimi asistanı'} ${businessName} AI deneyimine başlamak üzeresiniz.`,
       `Gerçek bir müşteri gibi etkileşim kurmayı deneyin.`,
     ].join('\n\n');
-    const chips = Array.isArray(custom?.chips) && custom.chips.length > 0
-      ? custom.chips
+    const rawChips = custom?.chips || custom?.starter_questions || demoMode.translations?.tr?.chips || demoMode.translations?.tr?.starter_questions || (
+      Array.isArray(custom?.scenarios) && custom.scenarios.length > 0 ? custom.scenarios.map((s) => s.label || s.prompt) :
+      (demoMode.language === 'tr' && Array.isArray(demoMode.scenarios) && demoMode.scenarios.length > 0 ? demoMode.scenarios.map((s) => s.label || s.prompt) : null)
+    );
+    const chips = Array.isArray(rawChips) && rawChips.length > 0
+      ? rawChips
       : ['Etkinlik Planla', 'Hizmetleri Öğren', 'Müşteri Desteği', 'Yetkiliye Bağlan'];
-    return { welcome_title: welcomeTitle, welcome_message: welcomeMessage, chips };
+    return { welcome_title: welcomeTitle, welcome_message: welcomeMessage, chips, starter_questions: chips };
   }
 
   if (lang === 'ar') {
-    const welcomeTitle = custom?.welcome_title || `مرحباً بكم في عرض ${platformName} التجريبي`;
-    const welcomeMessage = custom?.webchat_welcome || [
+    const welcomeTitle = custom?.welcome_title || (demoMode.translations?.ar?.welcome_title) || (demoMode.language === 'ar' ? demoMode.welcome_title : null) || `مرحباً بكم في عرض ${platformName} التجريبي`;
+    const welcomeMessage = custom?.webchat_welcome || custom?.welcome_message || (demoMode.translations?.ar?.webchat_welcome) || (demoMode.translations?.ar?.welcome_message) || (demoMode.language === 'ar' ? (demoMode.webchat_welcome || demoMode.welcome_message) : null) || [
       `مرحباً بكم في عرض ${platformName} التجريبي.`,
-      `أنت على وشك تجربة ${businessName} AI — مساعد إدارة الفعاليات المدعوم بـ ${platformName}.`,
+      `أنت على وشك تجربة ${businessName} AI — ${demoMode.business_type === 'e-commerce' || demoMode.business_type?.includes('تجارة') || demoMode.business_type?.includes('e-commerce') ? 'مساعد التجارة الإلكترونية' : 'مساعد إدارة الفعاليات'} المدعوم بـ ${platformName}.`,
       `جرّب التفاعل معه تماماً كعميل حقيقي.`,
     ].join('\n\n');
-    const chips = Array.isArray(custom?.chips) && custom.chips.length > 0
-      ? custom.chips
+    const rawChips = custom?.chips || custom?.starter_questions || demoMode.translations?.ar?.chips || demoMode.translations?.ar?.starter_questions || (
+      Array.isArray(custom?.scenarios) && custom.scenarios.length > 0 ? custom.scenarios.map((s) => s.label || s.prompt) :
+      (demoMode.language === 'ar' && Array.isArray(demoMode.scenarios) && demoMode.scenarios.length > 0 ? demoMode.scenarios.map((s) => s.label || s.prompt) : null)
+    );
+    const chips = Array.isArray(rawChips) && rawChips.length > 0
+      ? rawChips
       : ['تخطيط فعالية', 'الاستفسار عن الخدمات', 'تجربة الدعم الفني', 'طلب موظف'];
-    return { welcome_title: welcomeTitle, welcome_message: welcomeMessage, chips };
+    return { welcome_title: welcomeTitle, welcome_message: welcomeMessage, chips, starter_questions: chips };
   }
 
   // Default to English
-  const welcomeTitle = custom?.welcome_title || `Welcome to the ${platformName} Demo`;
-  const welcomeMessage = custom?.webchat_welcome || [
+  const welcomeTitle = custom?.welcome_title || (demoMode.translations?.en?.welcome_title) || demoMode.welcome_title || `Welcome to the ${platformName} Demo`;
+  const welcomeMessage = custom?.webchat_welcome || custom?.welcome_message || (demoMode.translations?.en?.webchat_welcome) || (demoMode.translations?.en?.welcome_message) || demoMode.webchat_welcome || demoMode.welcome_message || [
     `Welcome to the ${platformName} Demo.`,
     `You're about to experience ${businessName} AI — an event management assistant powered by ${platformName}.`,
     `Try interacting with it just like a real customer.`,
   ].join('\n\n');
-  const chips = Array.isArray(custom?.chips) && custom.chips.length > 0
-    ? custom.chips
-    : (demoMode.scenarios?.map((s) => s.label) || ['Plan an Event', 'Ask About Services', 'Try Customer Support', 'Request a Human']);
-  return { welcome_title: welcomeTitle, welcome_message: welcomeMessage, chips };
+  const rawChips = custom?.chips || custom?.starter_questions || (
+    Array.isArray(custom?.scenarios) && custom.scenarios.length > 0 ? custom.scenarios.map((s) => s.label || s.prompt) :
+    demoMode.chips || demoMode.starter_questions ||
+    (Array.isArray(demoMode.scenarios) && demoMode.scenarios.length > 0 ? demoMode.scenarios.map((s) => s.label || s.prompt) : null)
+  );
+  const chips = Array.isArray(rawChips) && rawChips.length > 0
+    ? rawChips
+    : ['Plan an Event', 'Ask About Services', 'Try Customer Support', 'Request a Human'];
+  return { welcome_title: welcomeTitle, welcome_message: welcomeMessage, chips, starter_questions: chips };
 }
 
 /**

@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>SamChe Teknoloji Mağazası - Akıllı Cihazlar & Aksesuarlar</title>
   <meta name="description" content="En yeni akıllı saatler, powerbankler, kulaklıklar ve güvenlik donanımları en uygun fiyatlarla SamChe Teknoloji'de.">
   <meta property="og:title" content="SamChe Teknoloji Mağazası - Akıllı Cihazlar & Aksesuarlar">
@@ -37,7 +37,8 @@
       --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-    body { background-color: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
+    html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; overflow-x: hidden; }
+    body { background-color: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; overflow-x: hidden; max-width: 100%; }
     header { background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 40; }
     .header-inner { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
     .logo { display: flex; align-items: center; gap: 0.75rem; text-decoration: none; color: var(--text); font-weight: 700; font-size: 1.25rem; }
@@ -102,9 +103,10 @@
     @media (max-width: 640px) {
       .header-inner { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
       nav { flex-wrap: wrap; }
+      main { padding: 1.25rem 1rem; width: 100%; max-width: 100%; box-sizing: border-box; overflow-x: hidden; }
       .hero-banner { padding: 1.5rem; }
       .hero-banner h1 { font-size: 1.5rem; }
-      .security-view, .about-view, .detail-view { padding: 1.25rem; width: calc(100vw - 32px); }
+      .security-view, .about-view, .detail-view { padding: 1.25rem; width: 100%; max-width: 100%; box-sizing: border-box; }
     }
     [dir="rtl"] { direction: rtl; text-align: right; }
     [dir="rtl"] nav { direction: rtl; }

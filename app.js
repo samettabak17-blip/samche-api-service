@@ -81,7 +81,7 @@ import {
   normalizeWebChatBehavior,
 } from "./services/public-web-chat-integration-service.js";
 import { resolveInitialWebChatGreeting } from "./services/tenant-web-chat-provisioning-service.js";
-import { formatGuideDemoWelcome, formatWebChatDemoWelcome, normalizeDemoModeConfig } from './services/tenant-demo-mode-service.js';
+import { formatGuideDemoWelcome, formatWebChatDemoWelcome, normalizeDemoModeConfig, isDemoEntryIntent } from './services/tenant-demo-mode-service.js';
 
 import { getPublicWebChatAsset } from './services/web-chat-asset-service.js';
 import { createSalesChatRateLimiter, createSalesChatService, registerSalesChatRoute } from './services/sales-chat-service.js';
@@ -2948,9 +2948,10 @@ app.post("/api/chat/reset", async (req, res) => {
     const appearance = normalizeWebChatAppearance(rawConfig.appearance, webChatIntegration.channel_name);
     const behavior = normalizeWebChatBehavior(rawConfig.behavior);
 
+    let persona = null;
     let personaGreeting = null;
     try {
-      const persona = await resolveTenantRuntimePersona({
+      persona = await resolveTenantRuntimePersona({
         database: pool,
         tenantId: webChatIntegration.tenant_id,
         assistantId: webChatIntegration.assistant_id,
@@ -2960,7 +2961,13 @@ app.post("/api/chat/reset", async (req, res) => {
       }
     } catch {}
 
-    const resolvedGreeting = resolveInitialWebChatGreeting({
+    const demoMode = persona?.demoMode
+      || normalizeDemoModeConfig(persona?.configuration?.demo_mode || rawConfig?.demo_mode, persona?.profile, persona?.configuration);
+    const demoWelcome = demoMode?.enabled
+      ? formatWebChatDemoWelcome({ demoMode, language: behavior.language })
+      : null;
+
+    const resolvedGreeting = demoWelcome?.welcome_message || resolveInitialWebChatGreeting({
       configuredGreeting: appearance.greeting || personaGreeting || null,
       brandName: appearance.brand_name || webChatIntegration.channel_name || 'Asistan',
       assistantName: webChatIntegration.assistant_name || appearance.title,
@@ -3038,6 +3045,27 @@ app.post("/api/chat/reset", async (req, res) => {
       current_entity: currentState?.currentEntity?.entity_id || null,
     });
 
+    let resetQuickQuestions = [];
+    if (demoWelcome?.chips && demoWelcome.chips.length > 0) {
+      resetQuickQuestions = demoWelcome.chips;
+    } else if (rawPayload) {
+      try {
+        const norm = validateAndNormalizePageContext(rawPayload);
+        const ent = resolvePageEntity(norm);
+        if (ent && isDiscreteEntity(ent)) {
+          resetQuickQuestions = await generateContextualQuickQuestions({
+            tenantId: webChatIntegration.tenant_id,
+            currentEntity: ent,
+            previousEntities: [],
+            database: pool,
+            language: norm?.language || persona?.configuration?.language || 'en',
+            tenantProfile: persona?.profile,
+            assistantConfig: persona?.configuration,
+          });
+        }
+      } catch {}
+    }
+
     return res.json({
       status: 'ok',
       cleared: true,
@@ -3051,6 +3079,8 @@ app.post("/api/chat/reset", async (req, res) => {
       appearance,
       behavior,
       assistant: publicAssistant,
+      demo_mode: demoMode?.enabled ? demoMode : null,
+      quick_questions: resetQuickQuestions,
     });
   } catch (error) {
     console.error('CHAT_RESET_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
@@ -3432,6 +3462,38 @@ app.post("/api/chat", async (req, res) => {
         text: limitationReply,
         session: webChatSession?.sessionId || null,
       });
+    }
+
+    if (webChatRuntimePersona?.demoMode?.enabled && isDemoEntryIntent(normalizedMessage)) {
+      const demoIntro = formatWebChatDemoWelcome({
+        demoMode: webChatRuntimePersona.demoMode,
+        language: webChatBrowsingState?.currentPage?.language || webChatRuntimePersona?.configuration?.language || 'en',
+      });
+      if (demoIntro?.welcome_message) {
+        addWebMemory(userId, "assistant", demoIntro.welcome_message, webChatKnowledgeAuthority, {
+          message_type: 'ASSISTANT',
+        });
+        if (webChatIntegration && webChatSession?.sessionId && webChatInboundState?.conversation?.id) {
+          try {
+            await persistAssistantResponseIfCurrent({
+              tenantId: webChatIntegration.tenant_id,
+              conversationId: webChatInboundState.conversation.id,
+              content: demoIntro.welcome_message,
+              handlingVersion: webChatInboundState.handlingVersion,
+              database: pool,
+            });
+          } catch (outboundErr) {
+            console.warn('WEB_CHAT_DEMO_OUTBOUND_PERSIST_WARN:', outboundErr.message);
+          }
+        }
+        return res.status(200).json({
+          reply: demoIntro.welcome_message,
+          response: demoIntro.welcome_message,
+          text: demoIntro.welcome_message,
+          session: webChatSession?.sessionId || null,
+          quick_questions: demoIntro.chips || [],
+        });
+      }
     }
 
     const messages = [

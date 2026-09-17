@@ -90,6 +90,51 @@ async function bootstrapTask8Demo(options = {}) {
     }
 
     // 3. Provision Web Chat Integration and Channel
+    const task8DemoModeConfig = {
+      enabled: true,
+      platform_name: 'SamChe AI',
+      business_name: 'SamChe Technology',
+      business_type: 'e-commerce store',
+      business_context: 'For this demonstration, SamChe Technology represents an e-commerce electronics and consumer tech store.',
+      disclosure: 'This is an e-commerce demonstration experience powered by SamChe AI.',
+      transition_behavior: 'continue_as_tenant_assistant',
+      welcome_title: 'Welcome to the SamChe AI Demo',
+      webchat_welcome: "Welcome to the SamChe AI Demo\n\nYou're exploring SamChe Technology, an e-commerce demo powered by SamChe AI. I can help you discover and compare products, answer questions about the products you're viewing, and assist with orders, delivery, returns and other support questions.\n\nTry one of the examples below or ask me anything.",
+      scenarios: [
+        { id: 'compare_products', label: 'Compare products', prompt: 'Can you compare the top products in your catalog?' },
+        { id: 'choose_product', label: 'Help me choose a product', prompt: 'Help me choose the right product for my needs.' },
+        { id: 'order_status', label: 'Where is my order?', prompt: 'Where is my order and how can I track it?' },
+        { id: 'product_problem', label: 'I have a problem with a product', prompt: 'I have a problem with a product I received.' },
+        { id: 'return_policy', label: 'What is your return policy?', prompt: 'What is your return and refund policy?' },
+      ],
+      translations: {
+        tr: {
+          welcome_title: 'SamChe AI Demosuna Hoş Geldiniz',
+          webchat_welcome: "SamChe AI Demosuna Hoş Geldiniz\n\nSamChe AI tarafından desteklenen bir e-ticaret demosu olan SamChe Teknoloji'yi keşfediyorsunuz. Ürünleri keşfetmenize ve karşılaştırmanıza, görüntülediğiniz ürünlerle ilgili soruları yanıtlamanıza ve siparişler, teslimat, iadeler ve diğer destek sorularında yardımcı olabilirim.\n\nAşağıdaki örneklerden birini deneyin veya bana herhangi bir şey sorun.",
+          chips: ['Ürünleri karşılaştır', 'Ürün seçmeme yardım et', 'Siparişim nerede?', 'Ürünümle ilgili bir sorun var', 'İade politikanız nedir?'],
+          scenarios: [
+            { id: 'compare_products', label: 'Ürünleri karşılaştır', prompt: 'Katalogdaki popüler ürünleri karşılaştırabilir misiniz?' },
+            { id: 'choose_product', label: 'Ürün seçmeme yardım et', prompt: 'İhtiyacıma uygun doğru ürünü seçmeme yardımcı olur musunuz?' },
+            { id: 'order_status', label: 'Siparişim nerede?', prompt: 'Siparişim nerede ve nasıl takip edebilirim?' },
+            { id: 'product_problem', label: 'Ürünümle ilgili bir sorun var', prompt: 'Satın aldığım bir ürünle ilgili sorun yaşıyorum.' },
+            { id: 'return_policy', label: 'İade politikanız nedir?', prompt: 'İade ve değişim politikanız nedir?' },
+          ],
+        },
+        ar: {
+          welcome_title: 'مرحباً بكم في عرض SamChe AI التجريبي',
+          webchat_welcome: "مرحباً بكم في عرض SamChe AI التجريبي\n\nأنت تستكشف الآن SamChe Technology، وهو عرض تجريبي للتجارة الإلكترونية مدعوم بـ SamChe AI. يمكنني مساعدتك في استكشاف المنتجات ومقارنتها، والإجابة على الأسئلة المتعلقة بالمنتجات التي تتصفحها، والمساعدة في الطلبات والتوصيل والإرجاع واستفسارات الدعم الأخرى.\n\nجرّب أحد الأمثلة أدناه أو اسألني أي شيء.",
+          chips: ['مقارنة المنتجات', 'ساعدني في اختيار منتج', 'أين طلبي؟', 'لدي مشكلة في منتج', 'ما هي سياسة الإرجاع؟'],
+          scenarios: [
+            { id: 'compare_products', label: 'مقارنة المنتجات', prompt: 'هل يمكنك مقارنة أبرز المنتجات في الكتالوج؟' },
+            { id: 'choose_product', label: 'ساعدني في اختيار منتج', prompt: 'ساعدني في اختيار المنتج المناسب لاحتياجاتي.' },
+            { id: 'order_status', label: 'أين طلبي؟', prompt: 'أين طلبي وكيف يمكنني تتبعه؟' },
+            { id: 'product_problem', label: 'لدي مشكلة في منتج', prompt: 'لدي مشكلة في منتج استلمته.' },
+            { id: 'return_policy', label: 'ما هي سياسة الإرجاع؟', prompt: 'ما هي سياسة الإرجاع واسترداد الأموال لديكم؟' },
+          ],
+        },
+      },
+    };
+
     const integrationOutcome = await ensureWebChatIntegration({
       database: client,
       tenantId,
@@ -98,7 +143,8 @@ async function bootstrapTask8Demo(options = {}) {
       channelName: 'SamChe Teknoloji Web Chat',
       displayName: 'SamChe Teknoloji Web Chat',
       allowedOrigins: ['*'],
-      welcomeMessage: 'Hello! How can I help you today?',
+      welcomeMessage: task8DemoModeConfig.webchat_welcome,
+      demoMode: task8DemoModeConfig,
       appearance: {
         launcher_label: 'SamChe Support',
         launcher_theme_mode: 'follow_theme',
@@ -134,6 +180,7 @@ async function bootstrapTask8Demo(options = {}) {
       industry: 'Consumer Electronics & Marketplace',
       businessType: 'Retail & Distribution',
       language: 'en',
+      demoMode: task8DemoModeConfig,
       supportEmail: 'support@samche.ae',
       supportPhone: '+971 50 212 71 61',
       businessHours: 'Daily 08:00 - 22:00 GST',
