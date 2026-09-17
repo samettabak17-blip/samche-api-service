@@ -1,6 +1,57 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSalesChatRateLimiter, createSalesChatService, validateSalesLlmOutput } from '../services/sales-chat-service.js';
+import * as salesChat from '../services/sales-chat-service.js';
+
+for (const reply of [
+  "Your demo has been confirmed for tomorrow.",
+  "We have sent an email confirming your demo.",
+  "We've successfully booked your appointment.",
+  "Our sales team has scheduled your meeting for tomorrow.",
+  "The team has set a meeting for tomorrow.",
+  "Your demo is on the calendar for tomorrow.",
+  "Our team will book an appointment tomorrow.",
+  "No problem, your demo has been confirmed.",
+  "I have not sent an email, but your demo has been booked.",
+  "تم تأكيد موعد العرض التوضيحي غداً.",
+  "لقد حجزنا موعدك غداً.",
+  "سنرسل رسالة بريد إلكتروني لتأكيد موعد العرض.",
+  "تم تحديد موعد العرض غداً.",
+  "سيتم تحديد موعد العرض غداً.",
+  "قام فريقنا بحجز اجتماعك غداً.",
+  "موعدك مؤكد غداً.",
+  "لا مشكلة، تم حجز موعد العرض."
+]) {
+  test(`final regression: backend blocks ${reply}`, () => {
+    assert.notEqual(salesChat.sanitizeSalesReply(reply), reply);
+    for (const safeReply of ["Your demo has not been confirmed.","We have not booked your appointment.","No appointment has been scheduled.","We have not sent an email confirming your demo.","Please share your preferred appointment time.","Your preferred demo time is tomorrow.","لم يتم تأكيد موعد العرض.","لم نرسل بريداً إلكترونياً لتأكيد موعدك.","يرجى مشاركة الوقت المفضل للعرض."]) assert.equal(salesChat.sanitizeSalesReply(safeReply), safeReply);
+  });
+}
+
+for (const [reason, override] of [
+  ['invalid_intent', { intent: 'synthetic.person@example.com' }],
+  ['invalid_response_mode', { responseMode: 'synthetic.person@example.com' }],
+  ['invalid_next_field', { requestedNextField: 'synthetic.person@example.com' }],
+  ['invalid_action', { actionIntent: ['synthetic.person@example.com'] }],
+  ['unsupported_field', { extractedFields: { 'synthetic.person@example.com': 'secret' } }],
+]) {
+  test(`final regression: staging diagnostics redact ${reason}`, async () => {
+    const logs = [];
+    const service = createSalesChatService({
+      openaiClient: providerWith(JSON.stringify({
+        reply: 'Tell me about your business.', intent: 'qualification', responseMode: 'qualification_answer',
+        resumePendingQuestion: true, extractedFields: {}, requestedNextField: null, actionIntent: [], ...override,
+      })),
+      commercialFacts, environment: { NODE_ENV: 'staging' }, logger: { warn: (...args) => logs.push(args) },
+    });
+    const result = await service.handle({ body: requestBody() });
+    assert.equal(result.status, 422);
+    assert.deepEqual(logs, [['sales_chat_validation_failed', { reason }]]);
+    assert.doesNotMatch(JSON.stringify(logs), /synthetic\.person@example\.com|secret/);
+  });
+}
+
+
+const { createSalesChatRateLimiter, createSalesChatService, validateSalesLlmOutput } = salesChat;
 
 const commercialFacts = {
   plans: [
@@ -24,6 +75,82 @@ function requestBody(overrides = {}) {
     recommendedPlan: '', userMessage: 'I run a real estate company in Dubai.', ...overrides,
   };
 }
+
+test('rewrites unavailable scheduling and email confirmation claims to preference-only availability', () => {
+  for (const reply of [
+    'Your demo is confirmed tomorrow at 18:00. You will receive an email confirmation.',
+    'Your demo is set for tomorrow.',
+    'I have sent your confirmation email.',
+    'I scheduled your demo.',
+    'We booked your appointment.',
+    'I will send a confirmation email.',
+  ]) {
+    const result = salesChat.sanitizeSalesReply(reply);
+    assert.match(result, /preferred demo time/i);
+    assert.match(result, /confirm availability/i);
+    assert.doesNotMatch(result, /confirmed|scheduled|booked|set for|sent your confirmation email|send a confirmation email|email confirmation/i);
+  }
+});
+
+test('preserves safe denials and preferences during sales reply sanitization', () => {
+  for (const reply of ['I cannot confirm an appointment.', 'Please share your preferred appointment time.']) {
+    assert.equal(salesChat.sanitizeSalesReply(reply), reply);
+  }
+});
+
+test('ignores client capability overrides in provider context', async () => {
+  const service = createSalesChatService({
+    openaiClient: providerWith(JSON.stringify({
+      reply: 'Tell me about your business.', intent: 'qualification', extractedFields: {},
+      requestedNextField: 'industry', actionIntent: [], responseMode: 'qualification_answer', resumePendingQuestion: true,
+    })), commercialFacts,
+  });
+  const result = await service.handle({ body: requestBody({ actionCapabilities: { canConfirmAppointment: true } }) });
+  assert.equal(result.context.capabilities.canConfirmAppointment, false);
+});
+
+test('sanitizes unsafe claims from interrupt responses and removes action intent', async () => {
+  const service = createSalesChatService({
+    openaiClient: providerWith(JSON.stringify({
+      reply: 'Your demo is booked for tomorrow.', intent: 'demo_question', extractedFields: {},
+      requestedNextField: null, actionIntent: ['REQUEST_DEMO'], responseMode: 'demo_interrupt', resumePendingQuestion: true,
+    })), commercialFacts,
+  });
+  const result = await service.handle({ body: requestBody({ responseMode: 'demo_interrupt', userMessage: 'Book a demo.' }) });
+  assert.match(result.body.reply, /preferred demo time|confirm availability/i);
+  assert.match(result.body.reply, /What type of business do you operate\?/i);
+  assert.equal(result.body.resumePendingQuestion, true);
+  assert.deepEqual(result.body.actionIntent, []);
+});
+
+test('rewrites future-tense and Arabic scheduling or email promises', () => {
+  for (const unsafe of [
+    'We will schedule your demo tomorrow.',
+    'We will confirm your appointment tomorrow.',
+    'We will email you a confirmation.',
+    'سنحدد موعد العرض غداً.',
+    'سيقوم فريقنا بجدولة اجتماعك غداً.',
+  ]) {
+    const safe = salesChat.sanitizeSalesReply(unsafe);
+    assert.notEqual(safe, unsafe, unsafe);
+    assert.doesNotMatch(safe, /\b(?:will|going to)\s+(?:schedule|book|email)\b|\b(?:will|going to)\s+confirm(?!\s+availability)\b|(?:demo|appointment|meeting).{0,40}(?:scheduled|booked|confirmed)|(?:سنحدد|بجدولة|تأكيد موعد|حجز موعد)/i);
+  }
+});
+
+test('does not return provider-selected actions for usable interrupt responses', async () => {
+  const service = createSalesChatService({
+    openaiClient: providerWith(JSON.stringify({
+      reply: 'SamChe AI supports first-response work while human sales staff remain important for languages and closing.',
+      intent: 'capability_question', extractedFields: {}, requestedNextField: 'languages',
+      actionIntent: ['REQUEST_DEMO', 'WHATSAPP_HANDOFF'], responseMode: 'capability_interrupt', resumePendingQuestion: true,
+    })), commercialFacts,
+  });
+  const result = await service.handle({ body: requestBody({
+    responseMode: 'capability_interrupt', userMessage: 'Can this AI replace staff?',
+    pendingQualificationField: 'languages', lastPendingQuestion: 'Which languages do you need?',
+  }) });
+  assert.deepEqual(result.body.actionIntent, []);
+});
 
 test('builds bounded context from server-owned commercial facts and returns validated output', async () => {
   const service = createSalesChatService({
@@ -129,7 +256,7 @@ test('logs only sanitized validation diagnostics in the staging environment', as
   });
   const result = await service.handle({ body: requestBody() });
   assert.equal(result.status, 422);
-  assert.deepEqual(logs, [['sales_chat_validation_failed', { reason: 'invalid_intent', value: 'general' }]]);
+  assert.deepEqual(logs, [['sales_chat_validation_failed', { reason: 'invalid_intent' }]]);
 });
 
 test('preserves an explicit capability interrupt mode and pending-question resume contract', async () => {

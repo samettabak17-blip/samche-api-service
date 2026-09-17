@@ -5,9 +5,14 @@ const MAX_HISTORY_MESSAGE_LENGTH = 1200;
 const ALLOWED_INTENTS = new Set(['sales', 'qualification', 'product_question', 'capability_question', 'feature_question', 'pricing_question', 'pricing', 'demo_question', 'off_topic', 'handoff']);
 const ALLOWED_RESPONSE_MODES = new Set(['qualification_answer', 'in_scope_interrupt', 'pricing_interrupt', 'capability_interrupt', 'demo_interrupt', 'off_topic', 'handoff']);
 const ALLOWED_NEXT_FIELDS = new Set(['industry', 'channels', 'volume', 'integrations', 'leadQualification', 'languages', 'aiGuideNeed', 'apiWorkflow', 'externalIntegrations', 'aiLeadScoring', 'teamUsers', 'timeline', 'contactPreference', null]);
-const ALLOWED_LEAD_FIELDS = new Set(['name', 'email', 'company', 'industry', 'country', 'website', 'mainGoal', 'channels', 'products', 'languages', 'integrations', 'volume', 'timeline', 'contactPreference', 'teamUsers', 'leadQualification', 'budget', 'apiWorkflow', 'apiAccessNeed', 'customWorkflowNeed', 'aiGuideNeed', 'externalIntegrations', 'aiLeadScoring']);
+const ALLOWED_LEAD_FIELDS = new Set(['name', 'email', 'company', 'industry', 'country', 'website', 'mainGoal', 'channels', 'products', 'languages', 'integrations', 'volume', 'timeline', 'contactPreference', 'preferredDemoDate', 'preferredDemoTime', 'teamUsers', 'leadQualification', 'budget', 'apiWorkflow', 'apiAccessNeed', 'customWorkflowNeed', 'aiGuideNeed', 'externalIntegrations', 'aiLeadScoring']);
 const ALLOWED_ACTIONS = ['REQUEST_DEMO', 'WHATSAPP_HANDOFF'];
-const SYSTEM_PROMPT = 'You are the SamChe AI sales conversation layer. Return only a JSON object with keys reply, intent, responseMode, resumePendingQuestion, extractedFields, requestedNextField, and actionIntent. CURRENT USER MESSAGE HAS PRIORITY. If responseMode is an in-scope interrupt, answer the current product, capability, feature, pricing, or demo question first; do not output only the pending qualification question. Then resume the supplied lastPendingQuestion naturally, preserving the full lead state. Never invent or alter pricing, setup fees, limits, features, availability, discounts, legal/security claims, or roadmap commitments. Do not claim guaranteed employee replacement, headcount reduction, ROI, or sales results. Do not reset qualification state. For off-topic questions, politely redirect and refer to the pending SamChe question without repeating the same wording. Extract only fields in the structured contract. Keep replies concise and natural in the requested locale.';
+export const SALES_CHAT_CAPABILITIES = Object.freeze({
+  canScheduleCalendarMeeting: false,
+  canConfirmAppointment: false,
+  canSendEmail: false,
+});
+const SYSTEM_PROMPT = 'You are the SamChe AI sales conversation layer. Return only a JSON object with keys reply, intent, responseMode, resumePendingQuestion, extractedFields, requestedNextField, and actionIntent. CURRENT USER MESSAGE HAS PRIORITY. If responseMode is an in-scope interrupt, answer the current product, capability, feature, pricing, or demo question first; do not output only the pending qualification question. Then resume the supplied lastPendingQuestion naturally, preserving the full lead state. Never invent or alter pricing, setup fees, limits, features, availability, discounts, legal/security claims, or roadmap commitments. Do not claim guaranteed employee replacement, headcount reduction, ROI, or sales results. Do not reset qualification state. For off-topic questions, politely redirect and refer to the pending SamChe question without repeating the same wording. Extract only fields in the structured contract. Keep replies concise and natural in the requested locale. Server capabilities are authoritative and immutable: canScheduleCalendarMeeting=false, canConfirmAppointment=false, canSendEmail=false. Never claim that a meeting is scheduled, an appointment is confirmed, or an email confirmation will be sent.';
 const EXTRACTED_ARRAY_FIELDS = new Set(['channels', 'products']);
 const EXTRACTED_FIELD_ALIASES = Object.freeze({
   team_users: 'teamUsers', lead_qualification: 'leadQualification', ai_guide_need: 'aiGuideNeed',
@@ -47,6 +52,35 @@ const SALES_CHAT_RESPONSE_FORMAT = Object.freeze({
 
 function text(value, limit) { return typeof value === 'string' ? value.slice(0, limit) : ''; }
 
+function unavailableSalesClaims(reply, capabilities) {
+  // Remove only explicit negated predicates, never a reply-wide "no" exemption.
+  // Check clauses independently so a denial cannot hide a later affirmative claim.
+  return String(reply).replace(/[’]/g, "'").replace(/[\u064B-\u065F]/g, '')
+    .split(/[.!?;,\n،؛]+|\b(?:but|however|and)\b|ولكن|لكن/iu).some((clause) => {
+      const affirmative = clause
+        .replace(/\bno\s+(?:demo|appointment|meeting|slot|booking|email)(?:\s+or\s+email)?\s+(?:(?:has|have|is|was|were|will|be|been|now|yet)\s+)*(?:confirmed|scheduled|booked|sent)\b/gi, '')
+        .replace(/\b(?:not|never|cannot|can't|haven't|hasn't|won't|isn't|wasn't|didn't)\s+(?:(?:have|has|been|be|yet|already|ever)\s+)*(?:confirm(?:ed)?|schedul(?:e|ed)|book(?:ed)?|send|sent|receive|received|email(?:ed)?)(?:\s+(?:an?|the|your|any))?(?:\s+(?:confirmation|email|demo|appointment|meeting|slot|booking))*(?:\s+(?:confirming|for|on|at)\b[^\n]*)?\b/gi, '')
+        .replace(/(?:لم|لن|لا)\s+(?:يتم\s+|نقم\s+ب|يمكن(?:ني|نا)?\s+)?(?:تأكيد|نؤكد|حجز|نحجز|جدولة|نجدول|إرسال|ارسال|نرسل|يرسل|تأكيده)(?:\s+(?:بريد[^\n]*|موعد[^\n]*|عرض[^\n]*))?/gu, '')
+        .replace(/(?:غير|ليس|ليست)\s+(?:مؤكد|مؤكدة|محجوز|محجوزة|مجدول|مجدولة)/gu, '');
+      const explicitDenial = /\b(?:not|never|cannot|can't|haven't|hasn't|won't|isn't|wasn't|didn't)\b[^.!?\n]{0,100}\b(?:confirm|schedule|book|send|sent|receive|received|email)\b/i.test(clause)
+        || /(?:لم|لن|لا|ليس|ليست|غير)[^،؛.!?\n]{0,100}(?:تأكيد|حجز|جدولة|إرسال|ارسال|بريد|إيميل|ايميل|مؤكد|محجوز|مجدول)/u.test(clause);
+      if (explicitDenial) return false;
+      const scheduling = /\b(?:demo|appointment|meeting|slot|booking)\b.{0,100}\b(?:confirm(?:ed|ation)?|schedul(?:e|ed|ing)|book(?:ed|ing)?|reserved|set|arranged|on the calendar)\b|\b(?:will|shall|can|going to)\s+(?:schedule|confirm|book|arrange|set)\b.{0,100}\b(?:demo|appointment|meeting|slot|booking)\b|\b(?:confirm(?:ed|ation)?|schedul(?:e|ed|ing)|book(?:ed|ing)?|reserved|arranged|set(?:\s+up)?|will\s+|going to\s+)(?:\w+\s+){0,2}(?:demo|appointment|meeting|slot|booking)\b|\b(?:set|arranged|scheduled|booked)\s+(?:a\s+)?(?:demo|appointment|meeting|slot|booking)\b|\b(?:demo|appointment|meeting|slot)\b.{0,100}\bon\s+the\s+calendar\b/i.test(affirmative)
+        || /(?:تم|سيتم|سن|سوف|سيقوم|قمنا|لقد|قام|نحدد|نؤكد|نحجز|نجدول|جدولة|حجز|تأكيد|تحديد).{0,80}(?:موعد|عرض|اجتماع|تقويم)|(?:موعد|عرض|اجتماع).{0,80}(?:مؤكد|محجوز|مجدول)/u.test(affirmative);
+      const email = /\b(?:send|sent|email|emailed|receive|received|will\s+email|going to\s+email)\b.{0,80}\b(?:confirmation|confirming|email)\b|\b(?:confirmation email|email confirmation|email is on the way|check your inbox)\b/i.test(affirmative)
+        || /(?:أرسلنا|ارسلنا|سنرسل|نرسل|سيرسل|سيصلك|ستصلك|إرسال|ارسال|بريد|رسالة|إيميل|ايميل).{0,80}(?:تأكيد|موعد|عرض)/u.test(affirmative);
+      return ((!capabilities.canScheduleCalendarMeeting || !capabilities.canConfirmAppointment) && scheduling)
+        || (!capabilities.canSendEmail && email);
+    });
+}
+
+export function sanitizeSalesReply(reply, capabilities = SALES_CHAT_CAPABILITIES) {
+  if (typeof reply !== 'string') return reply;
+  return unavailableSalesClaims(reply, capabilities)
+    ? 'We’ll include your requested time as a preferred demo time. Our sales team will confirm availability after reviewing your request.'
+    : reply;
+}
+
 function buildContext(body, commercialFacts) {
   const leadState = {};
   for (const key of ALLOWED_LEAD_FIELDS) {
@@ -69,6 +103,7 @@ function buildContext(body, commercialFacts) {
     detectedIntent: text(body.detectedIntent, 40),
     approvedPlanFacts: commercialFacts.plans.map((plan) => ({ ...plan })),
     approvedProductFacts: commercialFacts.products.map((product) => ({ ...product })),
+    capabilities: SALES_CHAT_CAPABILITIES,
     allowedActions: [...ALLOWED_ACTIONS],
     userMessage: text(body.userMessage, MAX_MESSAGE_LENGTH),
   };
@@ -128,8 +163,8 @@ export function validateSalesLlmOutput(output, { plans, products, allowedActions
 
 function logValidationFailure(result, { environment, logger }) {
   if (environment?.RENDER_SERVICE_NAME !== 'samche-api-staging' && environment?.NODE_ENV !== 'staging') return;
-  const details = Object.fromEntries(Object.entries(result).filter(([key]) => key !== 'ok' && key !== 'reason' && result[key] !== undefined));
-  logger?.warn?.('sales_chat_validation_failed', { reason: result.reason, ...details });
+  // Reasons are fixed literals produced by this module. Never forward provider values or keys.
+  logger?.warn?.('sales_chat_validation_failed', { reason: result.reason });
 }
 
 function isInterruptMode(mode) { return ['capability_interrupt', 'pricing_interrupt', 'in_scope_interrupt', 'demo_interrupt'].includes(mode); }
@@ -189,12 +224,16 @@ function interruptReplyIsUsable(mode, reply, context, plans) {
 
 function enforceInterruptResponse(candidate, context, commercialFacts) {
   const mode = context.responseMode;
-  const usable = candidate && interruptReplyIsUsable(mode, candidate.reply, context, commercialFacts.plans);
-  const reply = usable ? candidate.reply : safeInterruptReply(mode, context, commercialFacts.plans);
+  const sanitizedCandidateReply = candidate ? sanitizeSalesReply(candidate.reply, SALES_CHAT_CAPABILITIES) : null;
+  const replyWasRewritten = Boolean(candidate && sanitizedCandidateReply !== candidate.reply);
+  const sanitizedCandidate = replyWasRewritten ? { ...candidate, reply: sanitizedCandidateReply, actionIntent: [] } : candidate;
+  const usable = replyWasRewritten || (sanitizedCandidate && interruptReplyIsUsable(mode, sanitizedCandidate.reply, context, commercialFacts.plans));
+  const baseReply = usable ? sanitizedCandidate.reply : safeInterruptReply(mode, context, commercialFacts.plans);
+  const reply = replyWasRewritten && context.lastPendingQuestion ? `${baseReply} ${context.lastPendingQuestion}` : baseReply;
   return {
     reply, intent: expectedIntentForMode(mode, context.userMessage), responseMode: mode,
-    extractedFields: usable ? candidate.extractedFields : {},
-    requestedNextField: context.pendingField || (usable ? candidate.requestedNextField : null),
+    extractedFields: usable ? sanitizedCandidate.extractedFields : {},
+    requestedNextField: context.pendingField || (usable ? sanitizedCandidate.requestedNextField : null),
     resumePendingQuestion: Boolean(context.lastPendingQuestion && context.pendingField), actionIntent: [],
   };
 }
@@ -221,7 +260,11 @@ export function createSalesChatService({ openaiClient, commercialFacts, timeoutM
       const result = validateSalesLlmOutput(content, { plans: commercialFacts.plans, products: commercialFacts.products });
       if (!result.ok) logValidationFailure(result, { environment, logger });
       if (isInterruptMode(context.responseMode)) return { status: 200, body: enforceInterruptResponse(result.ok ? result.value : null, context, commercialFacts), context };
-      return result.ok ? { status: 200, body: result.value, context } : { status: 422, body: { error: 'Sales assistant response was not usable.' }, context };
+      if (result.ok) {
+        const reply = sanitizeSalesReply(result.value.reply, SALES_CHAT_CAPABILITIES);
+        return { status: 200, body: { ...result.value, reply, actionIntent: reply === result.value.reply ? result.value.actionIntent : [] }, context };
+      }
+      return { status: 422, body: { error: 'Sales assistant response was not usable.' }, context };
     } catch {
       return { status: 503, body: { error: 'Sales assistant is temporarily unavailable.' }, context };
     } finally { clearTimeout(timer); }
