@@ -14,6 +14,23 @@ export async function scheduleContextualFollowUp({
   return { scheduled: result.rowCount === 1, id: result.rows[0]?.id ?? null };
 }
 
+export async function cancelConversationContextualFollowUps({
+  database = null,
+  tenantId,
+  conversationId,
+} = {}) {
+  const result = await (database ?? await defaultDatabase()).query(
+    `UPDATE conversation_scheduled_jobs
+        SET status = 'CANCELLED', processing_started_at = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE tenant_id = $1
+        AND conversation_id = $2
+        AND job_type = 'CONTEXTUAL_FOLLOW_UP'
+        AND status IN ('PENDING', 'RETRY')`,
+    [tenantId, conversationId],
+  );
+  return { cancelledCount: result.rowCount };
+}
+
 export async function claimDueContextualFollowUps({ database = null, now = new Date() } = {}) {
   const client = await (database ?? await defaultDatabase()).connect();
   try {
@@ -53,6 +70,8 @@ export async function claimDueContextualFollowUps({ database = null, now = new D
   }
 }
 
+export const MAX_FOLLOW_UP_ATTEMPTS = 3;
+
 /**
  * Executes the durable portion of a contextual follow-up. Context, provider
  * and channel adapters remain injected so the worker keeps the tenant/channel
@@ -62,6 +81,7 @@ export async function claimDueContextualFollowUps({ database = null, now = new D
 export async function processDueContextualFollowUps({
   database = null,
   now = new Date(),
+  maxAttempts = MAX_FOLLOW_UP_ATTEMPTS,
   resolveContext,
   generate,
   persistCanonical,
@@ -117,13 +137,25 @@ export async function processDueContextualFollowUps({
       );
       result.completed += 1;
     } catch {
-      await db.query(
-        `UPDATE conversation_scheduled_jobs
-            SET status = 'RETRY', processing_started_at = NULL, updated_at = CURRENT_TIMESTAMP
-          WHERE id = $1 AND tenant_id = $2 AND status = 'PROCESSING'`,
-        [job.id, job.tenant_id],
-      );
-      result.retried += 1;
+      const currentAttempts = Number(job.attempts ?? 0) + 1;
+      const limit = Number(job.max_attempts ?? maxAttempts);
+      if (currentAttempts >= limit) {
+        await db.query(
+          `UPDATE conversation_scheduled_jobs
+              SET status = 'FAILED', attempts = $1, processing_started_at = NULL, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $2 AND tenant_id = $3 AND status = 'PROCESSING'`,
+          [currentAttempts, job.id, job.tenant_id],
+        );
+        result.failed = (result.failed || 0) + 1;
+      } else {
+        await db.query(
+          `UPDATE conversation_scheduled_jobs
+              SET status = 'RETRY', attempts = $1, processing_started_at = NULL, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $2 AND tenant_id = $3 AND status = 'PROCESSING'`,
+          [currentAttempts, job.id, job.tenant_id],
+        );
+        result.retried += 1;
+      }
     }
   }
   return result;

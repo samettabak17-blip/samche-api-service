@@ -1,5 +1,6 @@
 import { loadPlatformLifecycleMessages, renderPlatformLifecycleMessage } from './platform-lifecycle-message-service.js';
 import { canOperateConversation } from './conversation-permissions.js';
+import { cancelConversationContextualFollowUps } from './durable-follow-up-service.js';
 
 async function defaultDatabase() {
   return (await import('../config/db.js')).default;
@@ -191,6 +192,7 @@ export async function requestCustomerHumanSupport({
     // Durable domain event for the notification/escalation worker. Transport
     // adapters consume this event asynchronously; they never gate the handoff.
     await audit(client, { tenantId, conversationId, eventType: 'HUMAN_SUPPORT_REQUESTED' });
+    await cancelConversationContextualFollowUps({ database: client, tenantId, conversationId }).catch(() => {});
     await client.query(
       `INSERT INTO human_support_escalations
          (tenant_id, conversation_id, policy_id, status, current_level, next_due_at, idempotency_key)

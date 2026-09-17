@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { claimDueContextualFollowUps, processDueContextualFollowUps, scheduleContextualFollowUp } from '../services/durable-follow-up-service.js';
+import {
+  cancelConversationContextualFollowUps,
+  claimDueContextualFollowUps,
+  processDueContextualFollowUps,
+  scheduleContextualFollowUp,
+} from '../services/durable-follow-up-service.js';
 
 test('scheduling a contextual follow-up records one tenant-scoped durable idempotency identity', async () => {
   const calls = [];
@@ -92,4 +97,25 @@ test('a delivery retry reuses the persisted canonical follow-up without invoking
   assert.equal(generated, false);
   assert.equal(deliveredContent, 'Already generated.');
   assert.equal(result.completed, 1);
+});
+
+test('cancelConversationContextualFollowUps cancels pending and retry jobs scoped to tenant and conversation', async () => {
+  const calls = [];
+  const database = {
+    async query(sql, params) {
+      calls.push({ sql, params });
+      return { rowCount: 2 };
+    },
+  };
+  const result = await cancelConversationContextualFollowUps({
+    database,
+    tenantId: 'tenant-a',
+    conversationId: 'conversation-a',
+  });
+  assert.equal(result.cancelledCount, 2);
+  assert.match(calls[0].sql, /UPDATE conversation_scheduled_jobs/);
+  assert.match(calls[0].sql, /status = 'CANCELLED'/);
+  assert.match(calls[0].sql, /job_type = 'CONTEXTUAL_FOLLOW_UP'/);
+  assert.match(calls[0].sql, /status IN \('PENDING', 'RETRY'\)/);
+  assert.deepEqual(calls[0].params, ['tenant-a', 'conversation-a']);
 });

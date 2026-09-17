@@ -14,6 +14,7 @@ import { normalizeOperatorVoiceNote, OperatorVoiceNormalizationError } from './o
 import { isSameKnowledgeAuthority, resolveConversationKnowledgeAuthority } from './knowledge-authority-service.js';
 import { loadPlatformLifecycleMessages, renderPlatformLifecycleMessage } from './platform-lifecycle-message-service.js';
 import { normalizeWhatsAppExternalId } from './whatsapp-channel-ownership-service.js';
+import { cancelConversationContextualFollowUps } from './durable-follow-up-service.js';
 
 export class ConversationOperationError extends Error {
   constructor(status, message, code = 'CONVERSATION_OPERATION_FAILED') {
@@ -625,6 +626,7 @@ export async function operateConversation({
         `UPDATE human_support_notification_outbox SET status = 'CANCELLED'
          WHERE tenant_id = $1 AND conversation_id = $2 AND status = 'PENDING'`, [tenantId, conversationId]
       );
+      await cancelConversationContextualFollowUps({ database: client, tenantId, conversationId }).catch(() => {});
       console.info('TAKEOVER_CANCELLED_ESCALATION = tenant=' + String(tenantId).slice(0, 8) + ' conversation=' + String(conversationId).slice(0, 8));
       console.info('TAKEOVER_STAGE stage=ASSIGNED tenant=' + String(tenantId).slice(0, 8));
       // The customer-request transfer has already been delivered. Only a voluntary
@@ -730,6 +732,7 @@ export async function operateConversation({
 
     if (action === 'pause') {
       if (conversation.handling_mode !== 'AI') throw new ConversationOperationError(409, 'Only AI-handled conversations can be paused', 'CONVERSATION_NOT_AI');
+      await cancelConversationContextualFollowUps({ database: client, tenantId, conversationId }).catch(() => {});
       const updated = await client.query(
         `UPDATE conversations
             SET handling_mode = 'PAUSED',
@@ -766,6 +769,7 @@ export async function operateConversation({
     }
 
     if (action === 'close') {
+      await cancelConversationContextualFollowUps({ database: client, tenantId, conversationId }).catch(() => {});
       const updated = await client.query(
         `UPDATE conversations
             SET status = 'closed',

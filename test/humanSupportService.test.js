@@ -47,6 +47,13 @@ test('customer-requested support persists one unresolved attention state and sup
   assert.ok(lifecycleEvent, 'the durable canonical escalation event is recorded in the same transaction');
   assert.ok(fixture.calls.some(({ sql }) => sql.includes('INSERT INTO human_support_escalations')),
     'the request creates a durable tenant-scoped escalation instance');
+
+  const followUpCancellation = fixture.calls.find(({ sql }) =>
+    sql.includes('UPDATE conversation_scheduled_jobs') && sql.includes("status = 'CANCELLED'")
+  );
+  assert.ok(followUpCancellation, 'human support request cancels pending contextual follow-ups');
+  assert.equal(followUpCancellation.params[0], tenantId);
+  assert.equal(followUpCancellation.params[1], conversationId);
 });
 
 test('repeated customer support request does not duplicate attention or lifecycle messages', async () => {

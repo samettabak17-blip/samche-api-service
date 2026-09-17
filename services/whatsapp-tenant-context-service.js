@@ -37,6 +37,7 @@ export function buildWhatsAppActivePersonaTenantContext({
     // identity. Mapped V2 traffic accepts deterministic wording only from the
     // ACTIVE tenant configuration.
     deterministicTemplates: activeConfigurationTemplates,
+    demoMode: persona.demoMode || null,
     knowledge: [],
     communicationLanguage,
   };

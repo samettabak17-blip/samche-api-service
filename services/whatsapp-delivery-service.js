@@ -2,6 +2,8 @@ import axios from 'axios';
 import FormData from 'form-data';
 import https from 'https';
 import { applyWhatsAppAdaptivePacing } from './whatsapp-response-pacing-service.js';
+import { metaGraphApiBase } from './meta-graph-api-version.js';
+import { resolveWhatsAppOutboundCredential } from './whatsapp-credential-resolution-service.js';
 
 export class WhatsAppDeliveryError extends Error {
   constructor(code, message = 'WhatsApp delivery failed', diagnostic = {}) {
@@ -38,6 +40,18 @@ function configuredValue(value) {
   return normalized || null;
 }
 
+/**
+ * Canonical outbound credential for a provider call.
+ *
+ * `integrationConfig` is the tenant's canonical channel-integration
+ * configuration. When absent (every existing call site today) resolution falls
+ * back to the shared platform credential, so current behavior is preserved
+ * exactly while multi-tenant credential scoping becomes available.
+ */
+function outboundAccessToken(env, integrationConfig = null) {
+  return resolveWhatsAppOutboundCredential({ integrationConfig, env }).accessToken;
+}
+
 function trustedRecipient(value) {
   const digits = String(value ?? '').replace(/^whatsapp:/, '').replace(/[^0-9]/g, '');
   return digits.length >= 7 && digits.length <= 20 ? digits : null;
@@ -65,8 +79,9 @@ export async function deliverWhatsAppText({
   httpsAgent = whatsappHttpsAgent,
   continueOnChunkFailure = false,
   requireProviderMessageId = false,
+  integrationConfig = null,
 }) {
-  const accessToken = configuredValue(env.WHATSAPP_TOKEN);
+  const accessToken = outboundAccessToken(env, integrationConfig);
   const destination = trustedRecipient(recipient);
   const targetPhoneNumberId = configuredValue(phoneNumberId);
   const body = String(content ?? '');
@@ -84,7 +99,7 @@ export async function deliverWhatsAppText({
   for (const chunk of chunksFor(body)) {
     try {
       const providerResponse = await httpClient.post(
-        `https://graph.facebook.com/v20.0/${targetPhoneNumberId}/messages`,
+        `${metaGraphApiBase(env)}/${targetPhoneNumberId}/messages`,
         {
           messaging_product: 'whatsapp',
           to: destination,
@@ -157,8 +172,9 @@ export async function deliverWhatsAppMedia({
   env = process.env,
   httpClient = axios,
   httpsAgent = whatsappHttpsAgent,
+  integrationConfig = null,
 }) {
-  const accessToken = configuredValue(env.WHATSAPP_TOKEN);
+  const accessToken = outboundAccessToken(env, integrationConfig);
   const destination = trustedRecipient(recipient);
   const targetPhoneNumberId = configuredValue(phoneNumberId);
   const buffer = file?.buffer;
@@ -183,7 +199,7 @@ export async function deliverWhatsAppMedia({
     // Node form-data preserves the binary stream, multipart boundary, and per-file Content-Type.
     form.append('file', buffer, { filename, contentType: mimeType, knownLength: buffer.length });
     upload = await httpClient.post(
-      `https://graph.facebook.com/v20.0/${targetPhoneNumberId}/media`,
+      `${metaGraphApiBase(env)}/${targetPhoneNumberId}/media`,
       form,
       { httpsAgent, headers: { Authorization: `Bearer ${accessToken}`, ...form.getHeaders() }, timeout: 20000 }
     );
@@ -213,7 +229,7 @@ export async function deliverWhatsAppMedia({
     timing('WHATSAPP_SEND_STARTED');
     voiceStage('META_MESSAGE_SEND_STARTED');
     submission = await httpClient.post(
-      `https://graph.facebook.com/v20.0/${targetPhoneNumberId}/messages`,
+      `${metaGraphApiBase(env)}/${targetPhoneNumberId}/messages`,
       payload,
       { httpsAgent, headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 20000 }
     );
@@ -248,8 +264,9 @@ export async function sendWhatsAppTypingIndicator({
   env = process.env,
   httpClient = axios,
   httpsAgent = whatsappHttpsAgent,
+  integrationConfig = null,
 }) {
-  const accessToken = configuredValue(env.WHATSAPP_TOKEN);
+  const accessToken = outboundAccessToken(env, integrationConfig);
   const targetPhoneNumberId = configuredValue(phoneNumberId);
   const messageId = configuredValue(incomingMessageId);
 
@@ -262,7 +279,7 @@ export async function sendWhatsAppTypingIndicator({
 
   try {
     const response = await httpClient.post(
-      `https://graph.facebook.com/v20.0/${targetPhoneNumberId}/messages`,
+      `${metaGraphApiBase(env)}/${targetPhoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
         status: 'read',

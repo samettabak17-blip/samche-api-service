@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { metaGraphApiBase } from './meta-graph-api-version.js';
 
 export class WhatsAppMultimodalError extends Error {
   constructor(code, message) {
@@ -99,7 +100,7 @@ function safeMetaRetrievalDiagnostic({ phase, error }) {
   };
 }
 
-export function createWhatsAppMediaRetriever({ http, accessToken, graphApiBase = 'https://graph.facebook.com/v20.0', timeoutMs = 20_000, maxBytes = 10 * 1024 * 1024 }) {
+export function createWhatsAppMediaRetriever({ http, accessToken, graphApiBase = metaGraphApiBase(), timeoutMs = 20_000, maxBytes = 10 * 1024 * 1024 }) {
   if (!http?.get || !accessToken) throw new WhatsAppMultimodalError('WHATSAPP_MEDIA_CLIENT_CONFIG_REQUIRED', 'WhatsApp media client is not configured');
   return async function retrieve(externalMediaId) {
     const mediaId = String(externalMediaId ?? '').trim();

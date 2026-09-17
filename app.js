@@ -12,6 +12,7 @@ import OpenAI from "openai";
 import cron from "node-cron";
 import path from 'node:path';
 import { deliverWhatsAppText, whatsappHttpsAgent, sendWhatsAppTypingIndicator } from "./services/whatsapp-delivery-service.js";
+import { resolveWhatsAppOutboundCredential } from "./services/whatsapp-credential-resolution-service.js";
 import { applyWhatsAppAdaptivePacing, MIN_COMPOSE_WINDOW_MS, MAX_ARTIFICIAL_DELAY_MS } from "./services/whatsapp-response-pacing-service.js";
 import { orchestrateWhatsAppInboundAiResponse } from './services/whatsapp-inbound-ai-orchestrator.js';
 import { verifyWhatsAppSignature } from "./middleware/whatsappSignature.js";
@@ -24,13 +25,15 @@ import conversationRoutes from "./routes/conversationRoutes.js";
 import knowledgeIntelligenceRoutes from "./routes/knowledgeIntelligenceRoutes.js";
 import guideExperienceRoutes from "./routes/guideExperienceRoutes.js";
 import { getSamcheguidePublicFeed, getWebChatPublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, persistWebChatInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus, resetWebChatConversation } from "./services/live-inbox-service.js";
-import { persistWhatsAppInbound } from "./services/whatsapp-live-inbox-service.js";
+import { persistWhatsAppInbound, whatsappPhoneNumberFingerprint } from "./services/whatsapp-live-inbox-service.js";
+import { resolveMetaGraphApiVersion } from "./services/meta-graph-api-version.js";
+import { WHATSAPP_INGRESS_EVENTS, appSecretFingerprint, logWhatsAppIngressEvent } from "./services/whatsapp-webhook-ingress-observability.js";
 import { claimDueCustomerSupportLifecycle, claimDueHumanSupportEscalations, requestCustomerHumanSupport, triggerImmediateHumanSupportNotificationPipeline } from "./services/human-support-service.js";
 import { processHumanSupportNotificationOutbox } from './services/human-support-notification-outbox-service.js';
 import { resolveHumanSupportRecipients } from './services/human-support-recipient-service.js';
 import { enqueueHumanHandoffPushNotification, processPushNotificationOutbox } from './services/push-notification-service.js';
 import { createWebPushDeliveryAdapter, getLatestWebPushDeliveryAttempt } from './services/web-push-delivery-adapter.js';
-import { processDueContextualFollowUps, scheduleContextualFollowUp } from './services/durable-follow-up-service.js';
+import { cancelConversationContextualFollowUps, processDueContextualFollowUps, scheduleContextualFollowUp } from './services/durable-follow-up-service.js';
 import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
 import { summarizeWhatsAppHumanSupportTopic } from './services/whatsapp-human-support-policy-service.js';
 import { resolvePlatformHumanSupportPolicy } from './services/platform-lifecycle-message-service.js';
@@ -68,7 +71,7 @@ import { normalizeGuideExperience, resolvePublishedGuideExperience } from "./ser
 import { configuredManagedGuideDomainSuffix, configuredManagedGuideHostname, isManagedGuidePlatformHost, repairEligibleGuideDomains, resolveGuideRuntimeScopeFromRequest } from './services/guide-domain-service.js';
 import { getPublicGuideExperienceAsset } from "./services/guide-experience-asset-service.js";
 import { samcheguideRuntimeSessionKey } from "./services/samcheguide-runtime-session-service.js";
-import { buildTenantFollowUpRequest, resolveTenantFollowUpPolicy } from "./services/tenant-follow-up-service.js";
+import { buildTenantFollowUpRequest, evaluateWhatsAppFollowUpSendGate, isCustomerOptOut, resolveTenantFollowUpPolicy } from "./services/tenant-follow-up-service.js";
 import { isSameKnowledgeAuthority, resolveAssistantKnowledgeAuthority } from "./services/knowledge-authority-service.js";
 import { filterProviderMemoryByAuthority, stampProviderMemoryEntry } from "./services/channel-knowledge-authority-memory.js";
 import { configuredPublicWebChatSessionSecret, issuePublicWebChatSession, PublicWebChatSessionError, verifyPublicWebChatSession } from "./services/public-web-chat-session.js";
@@ -78,6 +81,8 @@ import {
   normalizeWebChatBehavior,
 } from "./services/public-web-chat-integration-service.js";
 import { resolveInitialWebChatGreeting } from "./services/tenant-web-chat-provisioning-service.js";
+import { formatGuideDemoWelcome, formatWebChatDemoWelcome, normalizeDemoModeConfig } from './services/tenant-demo-mode-service.js';
+
 import { getPublicWebChatAsset } from './services/web-chat-asset-service.js';
 import { createSalesChatRateLimiter, createSalesChatService, registerSalesChatRoute } from './services/sales-chat-service.js';
 import { salesChatCommercialFacts } from './config/sales-chat-commercial.js';
@@ -311,6 +316,84 @@ app.get("/api/v1/health/push-diagnostics", async (_req, res) => {
   }
 });
 
+// Canonical, generic WhatsApp channel readiness diagnostics.
+//
+// Real WhatsApp integration failures are otherwise invisible: an unmapped Meta
+// phone number, a disabled integration, an inactive assistant, and a missing
+// provider credential all present identically as "the customer received no
+// reply". This endpoint exposes only non-sensitive structural readiness so any
+// tenant's WhatsApp channel can be verified without database access.
+//
+// SAFETY: emits no secrets, tokens, customer data, message content, or raw
+// phone numbers. Tenant identifiers are truncated and phone-number IDs are
+// reduced to non-reversible fingerprints, so it is safe multi-tenant output.
+app.get("/api/v1/health/whatsapp-diagnostics", async (_req, res) => {
+  try {
+    const channels = await pool.query(
+      `SELECT tc.tenant_id, tc.id AS channel_id, tc.external_channel_id, tc.status AS channel_status,
+              t.status AS tenant_status, a.id AS assistant_id, a.status AS assistant_status,
+              ci.id AS integration_id, ci.enabled AS integration_enabled, ci.integration_key,
+              ci.config AS integration_config
+         FROM tenant_channels tc
+         LEFT JOIN tenants t ON t.id = tc.tenant_id
+         LEFT JOIN ai_assistants a ON a.id = tc.assistant_id AND a.tenant_id = tc.tenant_id
+         LEFT JOIN channel_integrations ci
+                ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.integration_type = 'WHATSAPP'
+        WHERE tc.channel_type = 'WHATSAPP'
+        ORDER BY tc.updated_at DESC
+        LIMIT 50`
+    );
+
+    const platformCredential = resolveWhatsAppOutboundCredential();
+
+    res.json({
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      graph_api_version: resolveMetaGraphApiVersion(),
+      webhook: {
+        verify_token_configured: Boolean(process.env.WHATSAPP_VERIFY_TOKEN),
+        app_secret_configured: Boolean(process.env.WHATSAPP_APP_SECRET),
+        // Non-reversible. Lets an operator compare the deployed App Secret with
+        // the Meta App Dashboard value without either ever being exposed.
+        app_secret_fingerprint: appSecretFingerprint(process.env.WHATSAPP_APP_SECRET),
+      },
+      platform_credential: {
+        source: platformCredential.source,
+        configured: Boolean(platformCredential.accessToken),
+        credential_fingerprint: platformCredential.fingerprint,
+      },
+      whatsapp_channels: channels.rows.map((row) => {
+        const credential = resolveWhatsAppOutboundCredential({ integrationConfig: row.integration_config });
+        return {
+          tenant_id: String(row.tenant_id).slice(0, 8),
+          channel_id: String(row.channel_id).slice(0, 8),
+          phone_number_id_fingerprint: whatsappPhoneNumberFingerprint(
+            String(row.external_channel_id ?? '').replace(/^whatsapp:\s*/i, '').replace(/[^0-9]/g, '')
+          ),
+          phone_number_id_digits: String(row.external_channel_id ?? '').replace(/[^0-9]/g, '').length,
+          tenant_status: row.tenant_status,
+          channel_status: row.channel_status,
+          assistant_present: Boolean(row.assistant_id),
+          assistant_status: row.assistant_status,
+          integration_present: Boolean(row.integration_id),
+          integration_enabled: row.integration_enabled === true,
+          integration_key_canonical: typeof row.integration_key === 'string'
+            && row.integration_key.startsWith('whatsapp:'),
+          credential_source: credential.source,
+          credential_configured: Boolean(credential.accessToken),
+          // Inbound resolution requires ALL of these to be true.
+          inbound_resolvable: row.tenant_status === 'active'
+            && row.channel_status === 'active'
+            && String(row.assistant_status ?? '').toLowerCase() === 'active'
+            && /^\d{6,32}$/.test(String(row.external_channel_id ?? '').replace(/^whatsapp:\s*/i, '').replace(/[^0-9]/g, '')),
+        };
+      }),
+    });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: error?.code ?? "WHATSAPP_DIAGNOSTICS_FAILED" });
+  }
+});
+
 
 // One public Guide shell is served for every tenant.  Its visual identity is
 // resolved solely from the configured Guide integration, never a browser tenant
@@ -400,6 +483,33 @@ const handleGuideBootstrap = async (req, res) => {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(503).json({ error: 'Guide experience is temporarily unavailable.', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
     const { resolved } = await resolveGuideExperienceForRequest({ req, integration });
+    let persona = null;
+    try {
+      persona = await resolveTenantRuntimePersona({
+        database: pool,
+        tenantId: integration.tenant_id,
+        assistantId: integration.assistant_id,
+      });
+    } catch {}
+    const demoMode = persona?.demoMode
+      || normalizeDemoModeConfig(persona?.configuration?.demo_mode || resolved.experience?.demo_mode, persona?.profile, persona?.configuration);
+    if (demoMode?.enabled) {
+      const demoGuide = formatGuideDemoWelcome({ demoMode, language: 'en' });
+      if (demoGuide) {
+        resolved.experience = {
+          ...resolved.experience,
+          welcome_title: demoGuide.welcome_title,
+          welcome_message: demoGuide.welcome_message,
+          hero: {
+            ...resolved.experience.hero,
+            title: demoGuide.hero_title,
+            message: demoGuide.hero_message,
+          },
+          demo_mode: demoMode,
+        };
+      }
+    }
+
     const session = await issueOrResolvePublicConversationSession(req, integration, resolved);
     res.set('Cache-Control', 'no-store');
     return res.json({ experience: resolved.experience, source: resolved.source, version: resolved.experience.version, cache_key: resolved.cache_key, conversation_session: session.token, guide_v1: { renderer: 'GUIDE_V1', modules: resolved.experience.modules, session_context: true, sector_configured: Boolean(resolved.experience.classification?.sector), roadmap_initialized: Boolean(resolved.experience.roadmap?.steps?.length), tool_initialized: Boolean(resolved.experience.interactive_tool?.fields?.length), assistant_initialized: Boolean(resolved.experience.modules?.chat), theme_initialized: Boolean(resolved.experience.theme?.primary_color) } });
@@ -1019,8 +1129,14 @@ const FOLLOW_UP_STAGES = Object.freeze([
   ['7d', 7 * 24 * 60 * 60 * 1000],
 ]);
 
-async function scheduleTenantContextualFollowUps({ whatsappInbox, persona }) {
+async function scheduleTenantContextualFollowUps({ whatsappInbox, persona, customerText = '' }) {
   if (!persona?.available) return;
+  await cancelConversationContextualFollowUps({
+    database: pool,
+    tenantId: whatsappInbox.integration.tenant_id,
+    conversationId: whatsappInbox.conversation.id,
+  });
+  if (isCustomerOptOut(customerText)) return;
   const scheduledAt = Date.now();
   for (const [stage, delay] of FOLLOW_UP_STAGES) {
     if (!resolveTenantFollowUpPolicy({ persona, stage }).enabled) continue;
@@ -1041,9 +1157,11 @@ async function resolveContextualFollowUpWorkerContext(job) {
   const conversationResult = await pool.query(
     `SELECT c.id, c.tenant_id, c.customer_external_id, c.handling_version, c.communication_language,
             c.status, c.handling_mode, c.human_attention_state,
-            tc.channel_type, tc.status AS channel_status, tc.external_channel_id AS phone_number_id
+            tc.channel_type, tc.status AS channel_status, tc.external_channel_id AS phone_number_id,
+            ci.enabled AS integration_enabled
        FROM conversations c
        JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
+       LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = c.tenant_id
       WHERE c.id = $1 AND c.tenant_id = $2 AND c.channel_id = $3`,
     [job.conversation_id, job.tenant_id, job.channel_id],
   );
@@ -1051,24 +1169,42 @@ async function resolveContextualFollowUpWorkerContext(job) {
   if (!conversation || conversation.status !== 'open' || conversation.handling_mode !== 'AI'
     || ['REQUESTED', 'ACKNOWLEDGED'].includes(conversation.human_attention_state)
     || conversation.channel_type !== 'WHATSAPP' || conversation.channel_status !== 'active'
+    || conversation.integration_enabled === false
     || !conversation.customer_external_id) return null;
 
   const persona = await resolveTenantRuntimePersona({
     database: pool, tenantId: job.tenant_id, assistantId: job.assistant_id,
   });
-  const language = ['tr', 'ar', 'en'].includes(conversation.communication_language)
-    ? conversation.communication_language : 'en';
+  if (!persona?.available) return null;
+
   const history = await pool.query(
-    `SELECT sender_type, content FROM conversation_messages
+    `SELECT sender_type, content, created_at FROM conversation_messages
       WHERE tenant_id = $1 AND conversation_id = $2
       ORDER BY created_at DESC, id DESC LIMIT 12`,
     [job.tenant_id, job.conversation_id],
   );
-  const conversationContext = history.rows.reverse()
+
+  const lastCustomerMessage = history.rows.find((message) => message.sender_type === 'CUSTOMER');
+  if (lastCustomerMessage && isCustomerOptOut(lastCustomerMessage.content)) {
+    return null; // Customer opted out; suppress follow-up
+  }
+
+  const sendGate = evaluateWhatsAppFollowUpSendGate({
+    lastCustomerMessageAt: lastCustomerMessage?.created_at,
+    stage: job.stage,
+    templates: persona.configuration?.whatsapp_response_templates,
+  });
+  if (!sendGate.allowed) {
+    return null; // Suppressed by WhatsApp session window/template send gate
+  }
+
+  const language = ['tr', 'ar', 'en'].includes(conversation.communication_language)
+    ? conversation.communication_language : 'en';
+  const conversationContext = history.rows.slice().reverse()
     .map((message) => `${message.sender_type}: ${String(message.content ?? '')}`).join('\n');
   const prompt = buildTenantFollowUpRequest({ persona, stage: job.stage, language, conversationContext });
   if (typeof prompt !== 'string' || !prompt.trim()) return null;
-  return { conversation, language, prompt };
+  return { conversation, language, prompt, sendGate };
 }
 
 async function processContextualFollowUpJobs() {
@@ -1151,181 +1287,6 @@ async function callWpGemini(prompt, multimodalParts = null, systemInstruction = 
     console.error(`WHATSAPP_GEMINI_RUNTIME_FAILURE code=${safeCode} http_status=${safeStatus} model=${runtimeModel} endpoint_class=${safeEndpointClass}`);
     return null;
   }
-}
-
-function detectTopic(text) {
-  const t = text.toLowerCase();
-  if (t.includes("şirket") || t.includes("company") || t.includes("business setup") || t.includes("company setup")) return "company";
-  if (t.includes("oturum") || t.includes("residency") || t.includes("visa") || t.includes("ikamet")) return "residency";
-  if (t.includes("ai") || t.includes("bot") || t.includes("chatbot") || t.includes("webchat")) return "ai";
-  if (t.includes("maliyet") || t.includes("cost") || t.includes("price") || t.includes("ücret") || t.includes("bütçe") || t.includes("budget")) return "cost";
-  return "other";
-}
-
-function calculateIntentScore(text, currentScore = 0) {
-  const t = text.toLowerCase();
-  let score = currentScore;
-  if (t.includes("şirket kurmak istiyorum") || t.includes("company setup") || t.includes("i want to open a company")) score += 30;
-  if (t.includes("oturum almak istiyorum") || t.includes("residency") || t.includes("visa application")) score += 25;
-  if (t.includes("bütçe") || t.includes("budget") || t.includes("fiyat") || t.includes("price")) score += 15;
-  if (t.includes("ne kadar sürer") || t.includes("timeline") || t.includes("kaç günde")) score += 10;
-  if (t.includes("merak ettim") || t.includes("sadece soruyorum") || t.includes("just curious")) score -= 10;
-  if (score < 0) score = 0;
-  if (score > 100) score = 100;
-  return score;
-}
-
-function detectLanguage(text) {
-  if (!text) return "en";
-  const ar = /[\u0600-\u06FF]/;
-  const tr = /[ığüşöçİĞÜŞÖÇ]/i;
-  if (ar.test(text)) return "ar";
-  if (tr.test(text)) return "tr";
-  return "en";
-}
-
-function getPingMessage(lang, topic) {
-  const messages = {
-    tr: {
-      general: "Merhaba. SamChe AI olarak, kısa süre önce Dubai hakkında sorularınızı cevaplamıştım ve size bilgi vermiştim. Kafanıza takılan başka herhangi bir soru varsa lütfen bana sormaktan çekinmeyin. Dubai’deki planlarınıza sizi gerçekten yaklaştıracak adımları birlikte netleştirebiliriz. Dilediğiniz zaman ben buradayım ve Dubai hakkında danışmak istediğiniz her konuda size her zaman yardımcı olmaya hazırım.",
-      company: "Merhaba. Kısa süre önce Dubai’de şirket kuruluşu hakkında konuşmuştuk. Dubai'de şirket kurma planınız için doğru şirket yapısını planlamak ve sizin için en uygun maliyet yapısını belirlemek adına size her zaman destek olmak için buradayım. Paylaştığım bilgiler dışında kafanıza takılan herhangi bir soru olursa her zaman bana sorabilirsiniz.",
-      residency: "Merhaba. Kısa süre önce Dubai’de oturum süreci hakkında konuşmuştuk. Sizin için en uygun oturum planlamasını daha net bir çerçevede yapmak adına size her zaman yardımcı olmaya hazırım. Paylaştığım bilgiler dışında kafanıza takılan herhangi bir soru olursa bana sorabilirsiniz.",
-      cost: "Merhaba. Kısa süre önce Dubai’deki maliyetler hakkında konuşmuştuk. Maliyet planlamanızı daha net bir çerçevede yapmanız için size her zaman yardımcı olmaya hazırım. Paylaştığım bilgiler dışında kafanıza takılan herhangi bir soru olursa bana sorabilirsiniz.",
-      AI: "Merhaba. Kısa süre önce AI ve otomasyon çözümleri hakkında konuşmuştuk. Projenizi daha verimli ve ölçeklenebilir bir yapıya dönüştürmek isterseniz yardımcı olmaya hazırım."
-    },
-    en: {
-      general: "Hello. I noticed we haven’t been in touch for a short while. If you have any additional questions about Dubai, feel free to ask. I’m here to help you move closer to your plans.",
-      company: "Hello. We recently discussed company formation in Dubai. If you're ready, I can help you determine the right structure.",
-      residency: "Hello. We recently discussed the residency process in Dubai. If you're ready, I can help you choose the right path.",
-      cost: "Hello. We recently discussed Dubai’s cost structure. I’m here to help you plan with clarity whenever you’re ready.",
-      AI: "Hello. We recently discussed your AI project. If you're ready, I can help you build a more efficient and scalable structure."
-    },
-    ar: {
-      general: "مرحبًا. تحدثنا مؤخرًا عن دبي. إذا كان لديك أي أسئلة إضافية، فلا تتردد في طرحها. أنا هنا دائمًا لمساعدتك.",
-      company: "مرحبًا. تحدثنا مؤخرًا عن تأسيس شركة في دبي. إذا كنت جاهزًا، يمكنني مساعدتك في اختيار الهيكل المناسب.",
-      residency: "مرحبًا. تحدثنا مؤخرًا عن إجراءات الإقامة في دبي. إذا كنت جاهزًا، يمكنني مساعدتك في اختيار الطريق الأنسب.",
-      cost: "مرحبًا. تحدثنا مؤخرًا عن تكاليف دبي. أنا هنا لمساعدتك في التخطيط بوضوح.",
-      AI: "مرحبًا. تحدثنا مؤخرًا عن مشروع الذكاء الاصطناعي. إذا كنت جاهزًا، يمكنني مساعدتك في تطويره."
-    }
-  };
-  const langSet = messages[lang] || messages["en"];
-  return langSet[topic] || langSet["general"];
-}
-
-function getFollowUpMessage(lang, topic, stage) {
-  const messages = {
-    "3h": {
-      general: {
-        tr: "Merhaba. Bir süredir iletişimde olmadığımızı fark ettim. Dubai ile ilgili konuştuğumuz konular ve sorduğunuz sorular dışında kafanıza takılan başka herhangi bir soru varsa lütfen bana sormaktan çekinmeyin..Dilediğiniz zaman ben buradayım ve Dubai planlarınız hakkında danışmak istediğiniz her konuda size her zaman yardımcı olmaya hazırım.",
-        en: "Hello. I noticed we haven’t been in touch for a while. If you’re ready, we can clarify your next step regarding your Dubai plans.",
-        ar: "مرحبًا. لاحظت أننا لم نتواصل منذ فترة. إذا كنت جاهزًا، يمكننا توضيح خطوتك التالية بخصوص خططك في دبي."
-      },
-      company: {
-        tr: "Merhaba. Bir süredir Dubai'de şirket kurma planlarınız ile ilgili iletişimde olmadığımızı fark ettim. Hazırsanız, şirket yapınızı ve sonraki adımları birlikte netleştirebiliriz.Dilediğiniz zaman ben buradayım ve Dubai planlarınız hakkında danışmak istediğiniz her konuda size her zaman yardımcı olmaya hazırım.",
-        en: "Hello. I noticed we haven’t been in touch regarding your company setup. If you're ready, we can clarify the next steps together.",
-        ar: "مرحبًا. لاحظت أننا لم نتواصل بخصوص تأسيس الشركة منذ فترة. إذا كنت جاهزًا، يمكننا توضيح الخطوات التالية معًا."
-      },
-      residency: {
-        tr: "Merhaba. Bir süredir Dubai'de oturum alma sürecinizle ilgili iletişim sağlayamadığımızı fark ettim. Dilerseniz, oturum alma planlarınız üzerine konuşmaya devam edebilir ve size en uygun oturum türünü belirleyebiliriz. Ben buradayım ve Dubai planlarınız hakkında danışmak istediğiniz her konuda size her zaman yardımcı olmaya hazırım.",
-        en: "Hello. I noticed we haven’t been in touch regarding your residency process. If you're ready, we can define the right path together.",
-        ar: "مرحبًا. لاحظت أننا لم نتواصل بخصوص إجراءات الإقامة منذ فترة. إذا كنت جاهزًا، يمكننا تحديد الطريق الأنسب معًا."
-      },
-      cost: {
-        tr: "Merhaba. Konuştuğumuz konular üzerinden maliyet planlamalarınızla ilgili bir süredir iletişimde olmadığımızı fark ettim. Hazırsanız, maliyet planlamalarınız üzerine konuşmaya devam edebiliriz.Dilediğiniz zaman ben buradayım ve Dubai planlarınız hakkında danışmak istediğiniz her konuda size her zaman yardımcı olmaya hazırım.",
-        en: "Hello. I noticed we haven’t been in touch about your cost planning. If you're ready, we can clarify the numbers together.",
-        ar: "مرحبًا. لاحظت أننا لم نتواصل بخصوص تخطيط التكاليف منذ فترة. إذا كنت جاهزًا، يمكننا توضيح الأرقام معًا."
-      },
-      AI: {
-        tr: "Merhaba. Bir süredir AI projenizle ilgili iletişimde olmadığımızı fark ettim. Hazırsanız, projenizin bir sonraki adımını birlikte netleştirebiliriz.",
-        en: "Hello. I noticed we haven’t been in touch regarding your AI project. If you're ready, we can clarify the next step.",
-        ar: "مرحبًا. لاحظت أننا لم نتواصل بخصوص مشروع الذكاء الاصطناعي منذ فترة. إذا كنت جاهزًا، يمكننا توضيح الخطوة التالية."
-      }
-    },
-    "24h": {
-      general: {
-        tr: "Merhaba. Dün Dubai planlarınız hakkında konuşmuştuk. Dubai planlarınız hakkında daha fazla bilgiye ihtiyacınız olursa lütfen bana sormaktan çekinmeyin. Dubaiye yerleşme sürecinizde size her zaman yardımcı olmaya hazırım. Ayrıca Canlı destek almak isterseniz bu sohbete canlı destek yazabilirsiniz.",
-        en: "Hello. Yesterday we discussed your Dubai plans. If you’re still considering them, we can move forward together. For live support, simply type 'live support'.",
-        ar: "مرحبًا. تحدثنا بالأمس عن خططك في دبي. إذا كنت لا تزال تفكر في الأمر، يمكننا المتابعة معًا. للحصول على دعم مباشر، فقط اكتب 'دعم مباشر'."
-      },
-      company: {
-        tr: "Merhaba. Dün şirket kuruluşu hakkında konuşmuştuk. Şirket kurulum adımları ve süreçleri ile ilgili daha fazla bilgiye ihtiyacınız olursa lütfen bana sormaktan çekinmeyin. Size en uygun şirket türü ve maliyetini belirleyebilir ve bu süreçte size destek sağlayabilirim. Ayrıca Canlı destek almak isterseniz bu sohbete canlı destek yazabilirsiniz.",
-        en: "Hello. Yesterday we discussed your company setup. If you're ready, we can define the right structure. Type 'live support' for assistance.",
-        ar: "مرحبًا. تحدثنا بالأمس عن تأسيس الشركة. إذا كنت جاهزًا، يمكننا تحديد الهيكل الصحيح. للحصول على دعم مباشر، اكتب 'دعم مباشر'."
-      },
-      residency: {
-        tr: "Merhaba. Dün oturum süreci hakkında konuşmuştuk. Oturum süreçleri ile ilgili daha fazla bilgiye ihtiyacınız olursa lütfen bana sormaktan çekinmeyin. Size en uygun oturum türlerini belirleyebilir ve bu süreçte size destek sağlayabilirim. Ayrıca Canlı destek almak isterseniz bu sohbete canlı destek yazabilirsiniz.",
-        en: "Hello. Yesterday we discussed your residency process. If you're ready, we can move the steps forward. Type 'live support' for help.",
-        ar: "مرحبًا. تحدثنا بالأمس عن إجراءات الإقامة. إذا كنت جاهزًا، يمكننا متابعة الخطوات. للحصول على دعم مباشر، اكتب 'دعم مباشر'."
-      },
-      cost: {
-        tr: "Merhaba. Dün maliyet planlamanız hakkında konuşmuştuk. Maliyet ve bütçe planları ile ilgili daha fazla bilgiye ihtiyacınız olursa lütfen bana sormaktan çekinmeyin. Ayrıca Canlı destek almak isterseniz bu sohbete canlı destek yazabilirsiniz.",
-        en: "Hello. Yesterday we discussed your cost planning. If you're ready, we can clarify your budget. Type 'live support' for assistance.",
-        ar: "مرحبًا. تحدثنا بالأمس عن تخطيط التكاليف. إذا كنت جاهزًا، يمكننا توضيح ميزانيتك. للحصول على دعم مباشر، اكتب 'دعم مباشر'."
-      },
-      AI: {
-        tr: "Merhaba. Dün AI projeniz hakkında konuşmuştuk. Hazırsanız, projenizi daha uygulanabilir bir yapıya dönüştürebiliriz. Canlı destek için 'canlı destek' yazabilirsiniz.",
-        en: "Hello. Yesterday we discussed your AI project. If you're ready, we can turn it into a more actionable plan. Type 'live support' for help.",
-        ar: "مرحبًا. تحدثنا بالأمس عن مشروع الذكاء الاصطناعي. إذا كنت جاهزًا، يمكننا تحويله إلى خطة قابلة للتنفيذ. للحصول على دعم مباشر، اكتب 'دعم مباشر'."
-      }
-    },
-    "72h": {
-      general: {
-        tr: "Merhaba. Birkaç gündür iletişimde olmadığımızı fark ettim. Dubai’deki planlarınızın askıda kalmasını istemem. Hazırsanız, sizin için en doğru yolu birlikte netleştirebiliriz.",
-        en: "Hello. I noticed we haven’t been in touch for a few days. I don’t want your Dubai plans to remain on hold. If you're ready, we can clarify the best path forward.",
-        ar: "مرحبًا. لاحظت أننا لم نتواصل منذ عدة أيام. لا أرغب أن تبقى خططكم في دبي معلّقة. إذا كنتم جاهزين، يمكننا تحديد المسار الأنسب لكم."
-      },
-      company: {
-        tr: "Merhaba. Şirket kuruluşu planlarınızın birkaç gündür ilerlemediğini fark ettim. Dubai’de doğru yapı büyük fark yaratır. Hazırsanız, süreci birlikte hızlandırabiliriz.",
-        en: "Hello. I noticed your company setup process hasn’t progressed in the last few days. The right structure in Dubai makes a major difference. If you're ready, we can move forward together.",
-        ar: "مرحبًا. لاحظت أن عملية تأسيس الشركة لم تتقدم منذ عدة أيام. الهيكل الصحيح في دبي يحدث فرقًا كبيرًا. إذا كنتم جاهزين، يمكننا المتابعة معًا."
-      },
-      residency: {
-        tr: "Merhaba. Oturum sürecinizin birkaç gündür ilerlemediğini fark ettim. Dubai’de oturum almak düşündüğünüzden daha hızlı tamamlanabilir. Hazırsanız, süreci netleştirebiliriz.",
-        en: "Hello. I noticed your residency process hasn’t progressed for a few days. Residency in Dubai can be completed faster than expected. If you're ready, we can clarify the next steps.",
-        ar: "مرحبًا. لاحظت أن عملية الإقامة لم تتقدم منذ عدة أيام. يمكن إنهاء الإقامة في دبي أسرع مما تتوقعون. إذا كنتم جاهزين، يمكننا تحديد الخطوات التالية."
-      },
-      cost: {
-        tr: "Merhaba. Bütçe planlamanızın birkaç gündür askıda kaldığını fark ettim. Dubai’de maliyetleri doğru yönetmek önemli avantaj sağlar. Hazırsanız, sizin için en uygun yapıyı belirleyebiliriz.",
-        en: "Hello. I noticed your budgeting process has been on hold for a few days. Managing costs correctly in Dubai provides major advantages. If you're ready, we can define the best structure for you.",
-        ar: "مرحبًا. لاحظت أن خطتكم المالية معلّقة منذ عدة أيام. إدارة التكاليف بشكل صحيح في دبي يمنحكم مزايا كبيرة. إذا كنتم جاهزين، يمكننا تحديد الهيكل الأنسب لكم."
-      },
-      AI: {
-        tr: "Merhaba. AI projenizin birkaç gündür ilerlemediğini fark ettim. Doğru otomasyon yapısı işinizi hızla ileri taşır. Hazırsanız, projenizi birlikte netleştirebiliriz.",
-        en: "Hello. I noticed your AI project hasn’t progressed for a few days. The right automation structure accelerates your business significantly. If you're ready, we can refine your project together.",
-        ar: "مرحبًا. لاحظت أن مشروع الذكاء الاصطناعي لم يتقدم منذ عدة أيام. الهيكل الصحيح للأتمتة يدفع عملكم بسرعة إلى الأمام. إذا كنتم جاهزين، يمكننا تطوير المشروع معًا."
-      }
-    },
-    "7d": {
-      general: {
-        tr: "Merhaba. Bir haftadır iletişimde olmadığımızı fark ettim. Dubai ile ilgili planlarınız hâlâ geçerliyse, sizin için en doğru yolu birlikte belirleyebiliriz. Hazır olduğunuzda buradayım.",
-        en: "Hello. I noticed we haven’t been in touch for a week. If your Dubai plans are still active, we can define the best path together. I’m here whenever you're ready.",
-        ar: "مرحبًا. لاحظت أننا لم نتواصل منذ أسبوع. إذا كانت خططكم في دبي ما زالت قائمة، يمكننا تحديد المسار الأنسب لكم. أنا هنا متى ما كنتم جاهزين."
-      },
-      company: {
-        tr: "Merhaba. Şirket kuruluşu planlarınızla ilgili bir haftadır iletişimde olmadığımızı fark ettim. Dubai’de doğru yapı uzun vadeli avantaj sağlar. Hazır olduğunuzda süreci birlikte ilerletebiliriz.",
-        en: "Hello. I noticed we haven’t followed up on your company setup for a week. The right structure in Dubai provides long-term advantages. Whenever you're ready, we can move forward.",
-        ar: "مرحبًا. لاحظت أننا لم نتابع بخصوص تأسيس الشركة منذ أسبوع. الهيكل الصحيح في دبي يمنحكم مزايا طويلة المدى. أنا هنا متى ما كنتم جاهزين."
-      },
-      residency: {
-        tr: "Merhaba. Oturum sürecinizle ilgili bir haftadır iletişimde olmadığımızı fark ettim. Dubai’de oturum almak düşündüğünüzden daha hızlı ilerleyebilir. Hazır olduğunuzda devam edebiliriz.",
-        en: "Hello. I noticed we haven’t followed up on your residency process for a week. Residency in Dubai can progress faster than expected. We can continue whenever you're ready.",
-        ar: "مرحبًا. لاحظت أننا لم نتابع بخصوص الإقامة منذ أسبوع. يمكن أن تتقدم الإقامة في دبي أسرع مما تتوقعون. أنا هنا متى ما كنتم جاهزين."
-      },
-      cost: {
-        tr: "Merhaba. Bütçe planlamanızla ilgili bir haftadır iletişimde olmadığımızı fark ettim. Dubai’de maliyetleri doğru yönetmek önemli avantaj sağlar. Hazır olduğunuzda sizin için en uygun yapıyı belirleyebiliriz.",
-        en: "Hello. I noticed we haven’t discussed your budgeting for a week. Managing costs correctly in Dubai provides major advantages. We can define the best structure whenever you're ready.",
-        ar: "مرحبًا. لاحظت أننا لم نناقش خطتكم المالية منذ أسبوع. إدارة التكاليف بشكل صحيح في دبي يمنحكم مزايا كبيرة. أنا هنا متى ما كنتم جاهزين."
-      },
-      AI: {
-        tr: "Merhaba. AI projenizle ilgili bir haftadır iletişimde olmadığımızı fark ettim. Doğru otomasyon yapısı işinizi hızla ileri taşır. Hazır olduğunuzda projenizi birlikte netleştirebiliriz.",
-        en: "Hello. I noticed we haven’t followed up on your AI project for a week. The right automation structure can rapidly move your business forward. Whenever you're ready, we can refine your project.",
-        ar: "مرحبًا. لاحظت أننا لم نتابع بخصوص مشروع الذكاء الاصطناعي منذ أسبوع. الهيكل الصحيح للأتمتة يمكن أن يدفع عملكم بسرعة إلى الأمام. أنا هنا متى ما كنتم جاهزين."
-      }
-    }
-  };
-  const stageSet = messages[stage] || messages["3h"];
-  const topicSet = stageSet[topic] || stageSet["general"];
-  return topicSet[lang] || topicSet["en"];
 }
 
 // ============================================================================
@@ -1900,9 +1861,10 @@ app.post("/api/chat/bootstrap", async (req, res) => {
     const appearance = normalizeWebChatAppearance(appearanceInput, integration.channel_name);
     const behavior = normalizeWebChatBehavior(rawConfig.behavior);
 
+    let persona = null;
     let personaGreeting = null;
     try {
-      const persona = await resolveTenantRuntimePersona({
+      persona = await resolveTenantRuntimePersona({
         database: pool,
         tenantId: integration.tenant_id,
         assistantId: integration.assistant_id,
@@ -1912,12 +1874,19 @@ app.post("/api/chat/bootstrap", async (req, res) => {
       }
     } catch {}
 
-    const resolvedGreeting = resolveInitialWebChatGreeting({
+    const demoMode = persona?.demoMode
+      || normalizeDemoModeConfig(persona?.configuration?.demo_mode || rawConfig?.demo_mode, persona?.profile, persona?.configuration);
+    const demoWelcome = demoMode?.enabled
+      ? formatWebChatDemoWelcome({ demoMode, language: behavior.language })
+      : null;
+
+    const resolvedGreeting = demoWelcome?.welcome_message || resolveInitialWebChatGreeting({
       configuredGreeting: appearance.greeting || personaGreeting || null,
       brandName: appearance.brand_name || integration.channel_name || 'Asistan',
       assistantName: integration.assistant_name || appearance.title,
       language: behavior.language,
     });
+
 
     appearance.greeting = resolvedGreeting;
     const publicAssistant = {
@@ -2024,7 +1993,10 @@ app.post("/api/chat/bootstrap", async (req, res) => {
           }
 
           let bootstrapQuickQuestions = [];
-          if (browsingState?.currentEntity) {
+          if (demoWelcome?.chips && demoWelcome.chips.length > 0 && deduplicatedHistory.filter(m => m.role === 'user').length === 0) {
+            bootstrapQuickQuestions = demoWelcome.chips;
+          } else if (browsingState?.currentEntity) {
+
             try {
               let bPersona = null;
               try {
@@ -2057,6 +2029,8 @@ app.post("/api/chat/bootstrap", async (req, res) => {
             config_version: configVersion,
             assistant: publicAssistant,
             quick_questions: bootstrapQuickQuestions,
+            demo_mode: demoMode?.enabled ? demoMode : null,
+
             browsing_state: {
               current_entity: browsingState?.currentEntity || null,
               previous_entities: browsingState?.previousEntities || [],
@@ -2077,7 +2051,9 @@ app.post("/api/chat/bootstrap", async (req, res) => {
     });
 
     let freshQuickQuestions = [];
-    if (req.body?.page_context) {
+    if (demoWelcome?.chips && demoWelcome.chips.length > 0) {
+      freshQuickQuestions = demoWelcome.chips;
+    } else if (req.body?.page_context) {
       try {
         const norm = validateAndNormalizePageContext(req.body.page_context);
         const ent = resolvePageEntity(norm);
@@ -2119,6 +2095,8 @@ app.post("/api/chat/bootstrap", async (req, res) => {
       behavior,
       config_version: configVersion,
       assistant: publicAssistant,
+      demo_mode: demoMode?.enabled ? demoMode : null,
+
       quick_questions: freshQuickQuestions,
     });
   } catch (error) {
@@ -3863,6 +3841,17 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
     try {
       const change = req.body.entry?.[0]?.changes?.[0]?.value ?? {};
       const phoneNumberId = change.metadata?.phone_number_id;
+      // Signature-validated business handler reached. Records only structural
+      // evidence (never message content, phone numbers, or customer data) so a
+      // delivered-and-processed webhook is distinguishable from a rejected one.
+      logWhatsAppIngressEvent({ event: WHATSAPP_INGRESS_EVENTS.HANDLER_REACHED });
+      console.info(
+        'WHATSAPP_WEBHOOK_PAYLOAD_SHAPE'
+        + ' phone_id_present=' + (phoneNumberId ? '1' : '0')
+        + ' phone_id_hash=' + (phoneNumberId ? whatsappPhoneNumberFingerprint(phoneNumberId) : 'none')
+        + ' messages=' + (Array.isArray(change.messages) ? change.messages.length : 0)
+        + ' statuses=' + (Array.isArray(change.statuses) ? change.statuses.length : 0)
+      );
       const deliveryStatuses = Array.isArray(change.statuses) ? change.statuses : [];
       if (deliveryStatuses.length) {
         for (const status of deliveryStatuses) {
@@ -3909,9 +3898,12 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         }
         let mediaBytes = null;
         if (mediaDescriptor) {
+          // Inbound media retrieval uses the same canonical credential
+          // resolution as outbound delivery, so a tenant with a dedicated
+          // WABA credential downloads its own media with its own authorization.
           const retrieveMedia = createWhatsAppMediaRetriever({
             http: axios,
-            accessToken: process.env.WHATSAPP_TOKEN,
+            accessToken: resolveWhatsAppOutboundCredential().accessToken,
           });
           const media = await retrieveMedia(mediaDescriptor.externalMediaId);
           logWhatsAppTiming('media_download_complete');
@@ -3944,6 +3936,13 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           return;
         }
         if (whatsappInbox.duplicate) return;
+
+        // Any customer reply immediately cancels stale pending/retry follow-ups
+        await cancelConversationContextualFollowUps({
+          database: pool,
+          tenantId: whatsappInbox.integration.tenant_id,
+          conversationId: whatsappInbox.conversation.id,
+        });
 
         // Human support is an ownership transition, not an AI response. Resolve
         // it before persona, retrieval or provider work so an AI outage or
@@ -4166,7 +4165,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           ' retrieval_available=' + (runtime.knowledge.retrievalAvailable ? '1' : '0') +
           ' provider_mode=' + runtime.mode + ' model=' + runtime.model
         );
-        await scheduleTenantContextualFollowUps({ whatsappInbox, persona: runtime.persona });
+        await scheduleTenantContextualFollowUps({ whatsappInbox, persona: runtime.persona, customerText: text });
       } catch (error) {
         console.error('KNOWLEDGE_RUNTIME_CONTEXT_UNAVAILABLE code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
         const unavailableFallback = resolveWhatsAppPersonaUnavailableResponse(tenantContext.communicationLanguage);
@@ -4197,7 +4196,10 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         );
         await applyWhatsAppAdaptivePacing({ generationStartedAt: aiResponseStartedAt, content: deterministicSocialResponse.content });
         const result = await persistAndSendWhatsAppAssistant(whatsappInbox, cleanFrom, deterministicSocialResponse.content);
-        const kindPath = deterministicSocialResponse.kind === 'FIRST_CONTACT_GREETING' ? 'DETERMINISTIC_GREETING' : 'DETERMINISTIC_SOCIAL';
+        const kindPath = deterministicSocialResponse.kind === 'DEMO_ENTRY_INTRODUCTION'
+          ? 'DEMO_ENTRY_INTRODUCTION'
+          : (deterministicSocialResponse.kind === 'FIRST_CONTACT_GREETING' ? 'DETERMINISTIC_GREETING' : 'DETERMINISTIC_SOCIAL');
+
         return { ...result, aiResponsePath: kindPath };
       }
 

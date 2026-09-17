@@ -3,7 +3,12 @@ process.env.JWT_SECRET ||= 'test-secret';
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-const { appendAgentMessage, ConversationOperationError, getHumanDeliveryCapability } = await import('../services/live-inbox-service.js');
+const {
+  appendAgentMessage,
+  ConversationOperationError,
+  getHumanDeliveryCapability,
+  operateConversation,
+} = await import('../services/live-inbox-service.js');
 const { WhatsAppDeliveryError, deliverWhatsAppText } = await import('../services/whatsapp-delivery-service.js');
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
@@ -118,7 +123,7 @@ test('WhatsApp delivery uses the canonical per-channel phone id instead of a dif
     env: { WHATSAPP_PHONE_ID: '111111111111111', WHATSAPP_TOKEN: 'test-token' },
     httpClient: { async post(url) { calls.push(url); return { data: { messages: [{ id: 'wamid.operator' }] } }; } },
   });
-  assert.deepEqual(calls, ['https://graph.facebook.com/v20.0/222222222222222/messages']);
+  assert.deepEqual(calls, ['https://graph.facebook.com/v23.0/222222222222222/messages']);
 });
 
 
@@ -206,4 +211,162 @@ test('a post-delivery acknowledgement persistence failure never triggers an auto
   );
   assert.equal(providerCalls, 1);
   assert.ok(calls.some(({ sql }) => sql === 'ROLLBACK'));
+});
+
+test('operateConversation takeover cancels pending contextual follow-ups', async () => {
+  const calls = [];
+  const client = {
+    async query(sql, parameters = []) {
+      calls.push({ sql, parameters });
+      if (sql.includes('FROM conversations c')) {
+        return {
+          rows: [{
+            id: conversationId,
+            tenant_id: tenantId,
+            status: 'open',
+            channel_type: 'WHATSAPP',
+            channel_id: '44444444-4444-4444-8444-444444444444',
+            external_channel_id: '948536645017374',
+            handling_mode: 'AI',
+            human_attention_state: 'REQUESTED',
+            assigned_agent_user_id: null,
+            handling_version: 1,
+          }],
+        };
+      }
+      if (sql.includes('UPDATE conversations')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: conversationId,
+            tenant_id: tenantId,
+            status: 'open',
+            handling_mode: 'HUMAN',
+            channel_type: 'WHATSAPP',
+            external_channel_id: '948536645017374',
+            human_attention_state: 'ACKNOWLEDGED',
+          }],
+        };
+      }
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  };
+  const database = { async connect() { return client; } };
+  await operateConversation({
+    tenantId,
+    conversationId,
+    actor,
+    action: 'takeover',
+    database,
+  });
+  const cancelCall = calls.find(({ sql }) =>
+    sql.includes('UPDATE conversation_scheduled_jobs') && sql.includes("status = 'CANCELLED'")
+  );
+  assert.ok(cancelCall, 'takeover cancels pending contextual follow-ups');
+  assert.equal(cancelCall.parameters[0], tenantId);
+  assert.equal(cancelCall.parameters[1], conversationId);
+});
+
+test('operateConversation pause cancels pending contextual follow-ups', async () => {
+  const calls = [];
+  const client = {
+    async query(sql, parameters = []) {
+      calls.push({ sql, parameters });
+      if (sql.includes('FROM conversations c')) {
+        return {
+          rows: [{
+            id: conversationId,
+            tenant_id: tenantId,
+            status: 'open',
+            channel_type: 'WHATSAPP',
+            channel_id: '44444444-4444-4444-8444-444444444444',
+            external_channel_id: '948536645017374',
+            handling_mode: 'AI',
+            human_attention_state: 'NONE',
+            assigned_agent_user_id: null,
+            handling_version: 1,
+          }],
+        };
+      }
+      if (sql.includes('UPDATE conversations')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: conversationId,
+            tenant_id: tenantId,
+            status: 'open',
+            handling_mode: 'PAUSED',
+          }],
+        };
+      }
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  };
+  const database = { async connect() { return client; } };
+  await operateConversation({
+    tenantId,
+    conversationId,
+    actor,
+    action: 'pause',
+    database,
+  });
+  const cancelCall = calls.find(({ sql }) =>
+    sql.includes('UPDATE conversation_scheduled_jobs') && sql.includes("status = 'CANCELLED'")
+  );
+  assert.ok(cancelCall, 'pause cancels pending contextual follow-ups');
+  assert.equal(cancelCall.parameters[0], tenantId);
+  assert.equal(cancelCall.parameters[1], conversationId);
+});
+
+test('operateConversation close cancels pending contextual follow-ups', async () => {
+  const calls = [];
+  const client = {
+    async query(sql, parameters = []) {
+      calls.push({ sql, parameters });
+      if (sql.includes('FROM conversations c')) {
+        return {
+          rows: [{
+            id: conversationId,
+            tenant_id: tenantId,
+            status: 'open',
+            channel_type: 'WHATSAPP',
+            channel_id: '44444444-4444-4444-8444-444444444444',
+            external_channel_id: '948536645017374',
+            handling_mode: 'HUMAN',
+            human_attention_state: 'NONE',
+            assigned_agent_user_id: actor.userId,
+            handling_version: 1,
+          }],
+        };
+      }
+      if (sql.includes('UPDATE conversations')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: conversationId,
+            tenant_id: tenantId,
+            status: 'closed',
+          }],
+        };
+      }
+      return { rowCount: 1, rows: [] };
+    },
+    release() {},
+  };
+  const database = { async connect() { return client; } };
+  await operateConversation({
+    tenantId,
+    conversationId,
+    actor,
+    action: 'close',
+    database,
+  });
+  const cancelCall = calls.find(({ sql }) =>
+    sql.includes('UPDATE conversation_scheduled_jobs') && sql.includes("status = 'CANCELLED'")
+  );
+  assert.ok(cancelCall, 'close cancels pending contextual follow-ups');
+  assert.equal(cancelCall.parameters[0], tenantId);
+  assert.equal(cancelCall.parameters[1], conversationId);
 });

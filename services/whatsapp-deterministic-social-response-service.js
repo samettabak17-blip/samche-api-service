@@ -1,4 +1,5 @@
 import { inferConservativeWhatsAppLanguage } from './conversation-communication-language.js';
+import { formatWhatsAppDemoIntroduction, isDemoEntryIntent } from './tenant-demo-mode-service.js';
 
 /**
  * Deterministic templates deliberately use the current inbound turn, not
@@ -49,6 +50,17 @@ export function planWhatsAppDeterministicSocialResponse({
 }) {
   const templates = tenant?.deterministicTemplates;
   const language = resolveWhatsAppDeterministicTemplateLanguage({ currentInboundMessage, detectedLanguage });
+
+  if (tenant?.demoMode?.enabled) {
+    const isDemoEntry = isDemoEntryIntent(currentInboundMessage);
+    const isFirstGreetingInDemo = firstAssistantResponse && currentIntent === 'GREETING_ONLY';
+    if (isDemoEntry || isFirstGreetingInDemo) {
+      const content = formatWhatsAppDemoIntroduction({ demoMode: tenant.demoMode, language });
+      if (content) {
+        return { kind: 'DEMO_ENTRY_INTRODUCTION', content, shouldInvokeGemini: false };
+      }
+    }
+  }
 
   if (firstAssistantResponse && currentIntent === 'GREETING_ONLY') {
     const content = renderIdentityTemplate(languageTemplate(templates?.first_contact, language), tenant);

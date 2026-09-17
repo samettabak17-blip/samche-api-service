@@ -1,4 +1,5 @@
 import { resolveActiveAssistantKnowledgeConfiguration } from './knowledge-configuration-service.js';
+import { buildDemoRuntimeGuidance, normalizeDemoModeConfig } from './tenant-demo-mode-service.js';
 
 const PROFILE_FIELDS = Object.freeze([
   'company_identity', 'company_display_name', 'company_summary', 'industry', 'business_type',
@@ -45,12 +46,14 @@ export async function resolveTenantRuntimePersona({ database, tenantId, assistan
   if (!active?.id || !active?.active_business_profile_version_id || profileVersion !== 2 || configurationVersion !== 2 || !companyIdentity || !assistantIdentity || isPlatformMetadataLeak) {
     return { available: false, code: 'TENANT_PERSONA_NOT_ACTIVE' };
   }
+  const demoMode = normalizeDemoModeConfig(configuration?.demo_mode, profile, configuration);
   return {
     available: true,
     companyIdentity,
     assistantIdentity,
     profile,
     configuration,
+    demoMode,
     profileVersionId: active.active_business_profile_version_id,
     configurationVersionId: active.id,
   };
@@ -100,6 +103,7 @@ export function buildTenantRuntimeSystemInstruction({
     'ACTIVE ASSISTANT CONFIGURATION — approved tenant-specific behavior:',
     ...render(persona.configuration, CONFIGURATION_FIELDS),
     `RUNTIME IDENTITY: You are ${persona.assistantIdentity}, the AI assistant for ${persona.companyIdentity}. Never claim another company or Assistant identity.`,
+    persona.demoMode?.enabled ? buildDemoRuntimeGuidance({ demoMode: persona.demoMode, companyIdentity: persona.companyIdentity }) : '',
     text(channelRules) ? `CHANNEL PRESENTATION RULES:\n${text(channelRules)}` : '',
     text(conversationIntelligence, 4000) ? text(conversationIntelligence, 4000) : '',
     text(contextualIntelligence, 8000) ? text(contextualIntelligence, 8000) : '',
