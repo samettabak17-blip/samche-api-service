@@ -1143,6 +1143,11 @@ export async function ensureTenantWebChatPersona(databaseOrOptions, maybeOptions
       escalation_guidance: opts.escalationGuidance || opts.escalation_guidance || null,
       customer_handling: opts.customerHandling || opts.customer_handling || null,
       proactive_engagement: resolveTenantProactiveConfig(proactiveEngagement ? { proactive_engagement: proactiveEngagement } : null),
+      follow_up_behavior: opts.followUpBehavior || opts.follow_up_behavior || {
+        enabled: true,
+        timing_strategy: ['3h', '24h'],
+        cta_behavior: 'Offer the next documented step and answer any questions.',
+      },
       ...(opts.configurationData || {}),
     };
 

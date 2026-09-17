@@ -491,3 +491,63 @@ test('Milestone B Point 25: JIT generation only when an eligible message actuall
   assert.equal(generateCount, 1, 'Generate must be called exactly once for eligible JIT job');
 });
 
+test('Milestone B Point 26: canonical stage_delays_ms override in follow_up_behavior configures custom stage delays without hardcoding', () => {
+  const customPersona = {
+    ...mockPersona,
+    configuration: {
+      ...mockPersona.configuration,
+      follow_up_behavior: {
+        enabled: true,
+        timing_strategy: ['3h', '24h'],
+        stage_delays_ms: {
+          '3h': 120000,
+        },
+      },
+    },
+  };
+  const policy3h = resolveTenantFollowUpPolicy({ persona: customPersona, stage: '3h' });
+  assert.equal(policy3h.enabled, true);
+  assert.equal(policy3h.policy.stage_delays_ms['3h'], 120000);
+
+  const policy24h = resolveTenantFollowUpPolicy({ persona: customPersona, stage: '24h' });
+  assert.equal(policy24h.enabled, true);
+  assert.equal(policy24h.policy.stage_delays_ms?.['24h'], undefined);
+});
+
+test('Milestone B Point 27: structured observability logs emitted on due job lifecycle events', async () => {
+  const logged = [];
+  const originalInfo = console.info;
+  console.info = (...args) => {
+    logged.push(args.join(' '));
+    originalInfo.apply(console, args);
+  };
+  try {
+    const job = { id: 'job-obs-1', tenant_id: 'tenant-bd-1234', stage: '3h', attempts: 0 };
+    const database = {
+      async query() { return { rowCount: 1, rows: [] }; },
+      async connect() {
+        return {
+          async query(sql) {
+            if (sql.includes('FROM conversation_scheduled_jobs')) return { rows: [job] };
+            return { rowCount: 1, rows: [] };
+          },
+          release() {},
+        };
+      },
+    };
+    await processDueContextualFollowUps({
+      database,
+      resolveContext: async () => ({ prompt: 'obs prompt' }),
+      generate: async () => 'obs content',
+      persistCanonical: async ({ content }) => ({ id: 'msg-obs-1', content }),
+      deliver: async () => ({ delivered: true }),
+    });
+
+    assert.ok(logged.some((log) => log.includes('FOLLOWUP_CLAIMED') && log.includes('count=1')));
+    assert.ok(logged.some((log) => log.includes('FOLLOWUP_DUE') && log.includes('job-obs-1')));
+    assert.ok(logged.some((log) => log.includes('FOLLOWUP_COMPLETED') && log.includes('job-obs-1')));
+  } finally {
+    console.info = originalInfo;
+  }
+});
+

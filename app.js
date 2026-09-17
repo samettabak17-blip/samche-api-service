@@ -211,6 +211,19 @@ app.use(express.json({
 // ROOT / HEALTH ROUTES
 // ==========================================
 
+let followUpWorkerDiagnostics = {
+  state: 'RUNNING',
+  last_tick_at: null,
+  last_claimed_count: 0,
+  last_completed_at: null,
+  last_failure_at: null,
+  last_failure_reason: null,
+};
+
+function followUpWorkerStatus() {
+  return { ...followUpWorkerDiagnostics };
+}
+
 app.get("/api/v1/health", (req, res) => {
   res.json({
     status: "ok",
@@ -219,6 +232,7 @@ app.get("/api/v1/health", (req, res) => {
     managed_guide_domain_suffix: configuredManagedGuideDomainSuffix(),
     onboarding_outbox_worker: customerInvitationOutboxStartup?.status() ?? 'NOT_STARTED',
     semantic_generation_worker: imageSemanticGenerationWorker?.status?.() ?? { state: 'NOT_STARTED' },
+    follow_up_worker: followUpWorkerStatus(),
     push_service: {
       vapid_configured: Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT),
       vapid_public_key_present: Boolean(process.env.VAPID_PUBLIC_KEY),
@@ -1093,12 +1107,13 @@ async function sendMessage(to, body, phoneNumberId) {
   }
 }
 
-async function deliverWhatsAppAssistantText(phoneNumberId, to, body) {
+async function deliverWhatsAppAssistantText(phoneNumberId, to, body, integrationConfig = null) {
   return deliverWhatsAppText({
     phoneNumberId,
     recipient: to,
     content: body,
     requireProviderMessageId: true,
+    integrationConfig,
   });
 }
 
@@ -1117,6 +1132,7 @@ async function persistAndSendWhatsAppAssistant(whatsappInbox, recipient, content
       whatsappInbox.integration.external_channel_id,
       to,
       body,
+      whatsappInbox.integration.config,
     ),
   });
 }
@@ -1131,25 +1147,44 @@ const FOLLOW_UP_STAGES = Object.freeze([
 
 async function scheduleTenantContextualFollowUps({ whatsappInbox, persona, customerText = '' }) {
   if (!persona?.available) return;
-  await cancelConversationContextualFollowUps({
+  const tenantId = whatsappInbox.integration.tenant_id;
+  const conversationId = whatsappInbox.conversation.id;
+  const cancelResult = await cancelConversationContextualFollowUps({
     database: pool,
-    tenantId: whatsappInbox.integration.tenant_id,
-    conversationId: whatsappInbox.conversation.id,
+    tenantId,
+    conversationId,
   });
-  if (isCustomerOptOut(customerText)) return;
+  if (cancelResult.cancelledCount > 0) {
+    console.info(`FOLLOWUP_CANCELLED tenant=${String(tenantId).slice(0, 8)} conversation=${String(conversationId).slice(0, 8)} count=${cancelResult.cancelledCount}`);
+  }
+  if (isCustomerOptOut(customerText)) {
+    console.info(`FOLLOWUP_ELIGIBILITY tenant=${String(tenantId).slice(0, 8)} eligible=false reason=CUSTOMER_OPT_OUT`);
+    return;
+  }
   const scheduledAt = Date.now();
-  for (const [stage, delay] of FOLLOW_UP_STAGES) {
-    if (!resolveTenantFollowUpPolicy({ persona, stage }).enabled) continue;
-    await scheduleContextualFollowUp({
+  for (const [stage, defaultDelay] of FOLLOW_UP_STAGES) {
+    const policyResult = resolveTenantFollowUpPolicy({ persona, stage });
+    if (!policyResult.enabled) {
+      console.info(`FOLLOWUP_ELIGIBILITY tenant=${String(tenantId).slice(0, 8)} stage=${stage} eligible=false reason=${policyResult.code}`);
+      continue;
+    }
+    console.info(`FOLLOWUP_ELIGIBILITY tenant=${String(tenantId).slice(0, 8)} stage=${stage} eligible=true`);
+    const configuredDelay = Number(policyResult.policy?.stage_delays_ms?.[stage] ?? policyResult.policy?.stage_delays?.[stage]);
+    const delay = Number.isFinite(configuredDelay) && configuredDelay > 0 ? configuredDelay : defaultDelay;
+    const dueAt = new Date(scheduledAt + delay);
+    const scheduleResult = await scheduleContextualFollowUp({
       database: pool,
-      tenantId: whatsappInbox.integration.tenant_id,
-      conversationId: whatsappInbox.conversation.id,
+      tenantId,
+      conversationId,
       assistantId: whatsappInbox.integration.assistant_id,
       channelId: whatsappInbox.integration.channel_id,
       stage,
-      dueAt: new Date(scheduledAt + delay),
+      dueAt,
       idempotencyKey: `contextual-follow-up:${whatsappInbox.conversation.id}:${whatsappInbox.customerMessage.id}:${stage}`,
     });
+    if (scheduleResult.scheduled) {
+      console.info(`FOLLOWUP_SCHEDULED tenant=${String(tenantId).slice(0, 8)} job_id=${scheduleResult.id} stage=${stage} due_at=${dueAt.toISOString()}`);
+    }
   }
 }
 
@@ -1158,7 +1193,7 @@ async function resolveContextualFollowUpWorkerContext(job) {
     `SELECT c.id, c.tenant_id, c.customer_external_id, c.handling_version, c.communication_language,
             c.status, c.handling_mode, c.human_attention_state,
             tc.channel_type, tc.status AS channel_status, tc.external_channel_id AS phone_number_id,
-            ci.enabled AS integration_enabled
+            ci.enabled AS integration_enabled, ci.config AS integration_config
        FROM conversations c
        JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
        LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = c.tenant_id
@@ -1170,12 +1205,18 @@ async function resolveContextualFollowUpWorkerContext(job) {
     || ['REQUESTED', 'ACKNOWLEDGED'].includes(conversation.human_attention_state)
     || conversation.channel_type !== 'WHATSAPP' || conversation.channel_status !== 'active'
     || conversation.integration_enabled === false
-    || !conversation.customer_external_id) return null;
+    || !conversation.customer_external_id) {
+    console.info(`FOLLOWUP_CANCELLED tenant=${String(job.tenant_id).slice(0, 8)} job_id=${job.id} reason=CONVERSATION_STATE_SUPPRESSED`);
+    return null;
+  }
 
   const persona = await resolveTenantRuntimePersona({
     database: pool, tenantId: job.tenant_id, assistantId: job.assistant_id,
   });
-  if (!persona?.available) return null;
+  if (!persona?.available) {
+    console.info(`FOLLOWUP_CANCELLED tenant=${String(job.tenant_id).slice(0, 8)} job_id=${job.id} reason=PERSONA_UNAVAILABLE`);
+    return null;
+  }
 
   const history = await pool.query(
     `SELECT sender_type, content, created_at FROM conversation_messages
@@ -1186,6 +1227,7 @@ async function resolveContextualFollowUpWorkerContext(job) {
 
   const lastCustomerMessage = history.rows.find((message) => message.sender_type === 'CUSTOMER');
   if (lastCustomerMessage && isCustomerOptOut(lastCustomerMessage.content)) {
+    console.info(`FOLLOWUP_CANCELLED tenant=${String(job.tenant_id).slice(0, 8)} job_id=${job.id} reason=CUSTOMER_OPT_OUT`);
     return null; // Customer opted out; suppress follow-up
   }
 
@@ -1194,6 +1236,7 @@ async function resolveContextualFollowUpWorkerContext(job) {
     stage: job.stage,
     templates: persona.configuration?.whatsapp_response_templates,
   });
+  console.info(`FOLLOWUP_POLICY_GATE tenant=${String(job.tenant_id).slice(0, 8)} job_id=${job.id} allowed=${sendGate.allowed} mode=${sendGate.mode ?? 'REJECTED'}`);
   if (!sendGate.allowed) {
     return null; // Suppressed by WhatsApp session window/template send gate
   }
@@ -1203,7 +1246,11 @@ async function resolveContextualFollowUpWorkerContext(job) {
   const conversationContext = history.rows.slice().reverse()
     .map((message) => `${message.sender_type}: ${String(message.content ?? '')}`).join('\n');
   const prompt = buildTenantFollowUpRequest({ persona, stage: job.stage, language, conversationContext });
-  if (typeof prompt !== 'string' || !prompt.trim()) return null;
+  if (typeof prompt !== 'string' || !prompt.trim()) {
+    console.info(`FOLLOWUP_CANCELLED tenant=${String(job.tenant_id).slice(0, 8)} job_id=${job.id} reason=PROMPT_UNAVAILABLE`);
+    return null;
+  }
+  console.info(`FOLLOWUP_REVALIDATED tenant=${String(job.tenant_id).slice(0, 8)} job_id=${job.id} language=${language}`);
   return { conversation, language, prompt, sendGate };
 }
 
@@ -1211,7 +1258,13 @@ async function processContextualFollowUpJobs() {
   return processDueContextualFollowUps({
     database: pool,
     resolveContext: resolveContextualFollowUpWorkerContext,
-    generate: async ({ prompt }) => callWpGemini(prompt, null, null),
+    generate: async ({ job, prompt }) => {
+      const generated = await callWpGemini(prompt, null, null);
+      if (generated) {
+        console.info(`FOLLOWUP_GENERATED tenant=${String(job.tenant_id).slice(0, 8)} job_id=${job.id} length=${generated.length}`);
+      }
+      return generated;
+    },
     persistCanonical: async ({ job, context, content, idempotencyKey }) => {
       const persisted = await persistAssistantResponseIfCurrent({
         tenantId: job.tenant_id,
@@ -1222,21 +1275,25 @@ async function processContextualFollowUpJobs() {
       });
       return persisted?.message ?? null;
     },
-    deliver: async ({ context, message, content }) => {
+    deliver: async ({ job, context, message, content }) => {
       if (message.external_message_id) return { delivered: true };
+      console.info(`FOLLOWUP_PROVIDER_REQUEST tenant=${String(context.conversation.tenant_id).slice(0, 8)} job_id=${job.id} phone_number_id=${context.conversation.phone_number_id}`);
       const delivery = await deliverWhatsAppAssistantText(
         context.conversation.phone_number_id,
         context.conversation.customer_external_id,
         content,
+        context.conversation.integration_config,
       );
       const providerMessageId = String(delivery?.providerMessageId ?? delivery?.providerMessageIds?.[0] ?? '').trim();
       if (!providerMessageId) return { delivered: false };
+      console.info(`FOLLOWUP_PROVIDER_ACCEPTED tenant=${String(context.conversation.tenant_id).slice(0, 8)} job_id=${job.id} wamid=${providerMessageId}`);
       await recordWhatsAppAssistantProviderAcceptance({
         tenantId: context.conversation.tenant_id,
         conversationId: context.conversation.id,
         messageId: message.id,
         providerMessageId,
       });
+      console.info(`FOLLOWUP_WAMID_PERSISTED tenant=${String(context.conversation.tenant_id).slice(0, 8)} job_id=${job.id} message_id=${message.id} wamid=${providerMessageId}`);
       return { delivered: true };
     },
   });
@@ -4357,8 +4414,15 @@ cron.schedule("* * * * *", async () => {
       console.error('PUSH_NOTIFICATION_WORKER status=FAIL reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     }
     try {
-      await processContextualFollowUpJobs();
+      followUpWorkerDiagnostics.last_tick_at = new Date().toISOString();
+      const outcome = await processContextualFollowUpJobs();
+      if (outcome?.completed > 0) {
+        followUpWorkerDiagnostics.last_completed_at = new Date().toISOString();
+      }
+      followUpWorkerDiagnostics.last_claimed_count = (outcome?.completed ?? 0) + (outcome?.retried ?? 0) + (outcome?.cancelled ?? 0);
     } catch (error) {
+      followUpWorkerDiagnostics.last_failure_at = new Date().toISOString();
+      followUpWorkerDiagnostics.last_failure_reason = error?.code ?? error?.name ?? 'UNKNOWN';
       console.error('CONTEXTUAL_FOLLOW_UP_WORKER status=FAIL reason=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     }
   } catch (err) {

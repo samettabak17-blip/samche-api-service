@@ -61,6 +61,9 @@ export async function claimDueContextualFollowUps({ database = null, now = new D
       );
     }
     await client.query('COMMIT');
+    if (due.rows.length > 0) {
+      console.info(`FOLLOWUP_CLAIMED count=${due.rows.length} job_ids=${due.rows.map((j) => String(j.id).slice(0, 8)).join(',')}`);
+    }
     return due.rows;
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
@@ -96,6 +99,7 @@ export async function processDueContextualFollowUps({
   const result = { completed: 0, retried: 0, cancelled: 0 };
 
   for (const job of jobs) {
+    console.info(`FOLLOWUP_DUE tenant=${String(job.tenant_id).slice(0, 8)} job_id=${job.id} stage=${job.stage}`);
     try {
       const context = await resolveContext(job);
       if (!context) {
@@ -105,6 +109,7 @@ export async function processDueContextualFollowUps({
             WHERE id = $1 AND tenant_id = $2 AND status = 'PROCESSING'`,
           [job.id, job.tenant_id],
         );
+        console.info(`FOLLOWUP_CANCELLED tenant=${String(job.tenant_id).slice(0, 8)} job_id=${job.id} reason=REVALIDATION_SUPPRESSED`);
         result.cancelled += 1;
         continue;
       }
@@ -135,6 +140,7 @@ export async function processDueContextualFollowUps({
           WHERE id = $1 AND tenant_id = $2 AND status = 'PROCESSING'`,
         [job.id, job.tenant_id],
       );
+      console.info(`FOLLOWUP_COMPLETED tenant=${String(job.tenant_id).slice(0, 8)} job_id=${job.id}`);
       result.completed += 1;
     } catch {
       const currentAttempts = Number(job.attempts ?? 0) + 1;
@@ -146,6 +152,7 @@ export async function processDueContextualFollowUps({
             WHERE id = $2 AND tenant_id = $3 AND status = 'PROCESSING'`,
           [currentAttempts, job.id, job.tenant_id],
         );
+        console.info(`FOLLOWUP_FAILED tenant=${String(job.tenant_id).slice(0, 8)} job_id=${job.id} attempts=${currentAttempts}`);
         result.failed = (result.failed || 0) + 1;
       } else {
         await db.query(
@@ -154,6 +161,7 @@ export async function processDueContextualFollowUps({
             WHERE id = $2 AND tenant_id = $3 AND status = 'PROCESSING'`,
           [currentAttempts, job.id, job.tenant_id],
         );
+        console.info(`FOLLOWUP_RETRY tenant=${String(job.tenant_id).slice(0, 8)} job_id=${job.id} attempt=${currentAttempts}`);
         result.retried += 1;
       }
     }
