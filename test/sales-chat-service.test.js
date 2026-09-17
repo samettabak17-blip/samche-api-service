@@ -128,6 +128,7 @@ test('rewrites future-tense and Arabic scheduling or email promises', () => {
     'We will schedule your demo tomorrow.',
     'We will confirm your appointment tomorrow.',
     'We will email you a confirmation.',
+    'Would you like to proceed with setting up a demo tomorrow at 18:00?',
     'سنحدد موعد العرض غداً.',
     'سيقوم فريقنا بجدولة اجتماعك غداً.',
   ]) {
