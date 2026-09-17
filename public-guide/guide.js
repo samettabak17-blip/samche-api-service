@@ -23,6 +23,24 @@ const resumeStorageKey = previewToken
   ? `samcheguide-preview-resume:${previewToken.slice(-16)}`
   : `samcheguide-public-resume${guideBasePath ? `:${guideBasePath.slice(1)}` : ''}`;
 try { session = window.localStorage?.getItem(resumeStorageKey) || ''; } catch { session = ''; }
+let updateGuideVv = () => {};
+if (typeof window !== 'undefined' && window.visualViewport) {
+  updateGuideVv = () => {
+    try {
+      if (window.visualViewport && window.visualViewport.height) {
+        document.documentElement.style.setProperty('--guide-vv-height', `${Math.round(window.visualViewport.height)}px`);
+        const vvBottom = Math.max(0, window.innerHeight - (window.visualViewport.offsetTop + window.visualViewport.height));
+        document.documentElement.style.setProperty('--guide-vv-bottom', `${Math.round(vvBottom)}px`);
+      }
+    } catch {}
+  };
+  try {
+    window.visualViewport.addEventListener('resize', updateGuideVv);
+    window.visualViewport.addEventListener('scroll', updateGuideVv);
+    updateGuideVv();
+  } catch {}
+}
+
 
 const MODULES = Object.freeze({ ROADMAP: 'ROADMAP', INTERACTIVE_TOOL: 'INTERACTIVE_TOOL', AI_ASSISTANT: 'AI_ASSISTANT' });
 export const PRESENTATION_TIMING = Object.freeze({
@@ -404,6 +422,20 @@ function renderConversationalRoadmap(container) {
   if (!guideState.roadmap_result && guideState.roadmap_goal) {
     input.value = guideState.roadmap_goal;
   }
+  input.addEventListener('focus', () => {
+    if (typeof updateGuideVv === 'function') {
+      setTimeout(updateGuideVv, 50);
+      setTimeout(updateGuideVv, 250);
+    }
+    setTimeout(() => {
+      if (resultBoard) resultBoard.scrollTop = resultBoard.scrollHeight;
+    }, 100);
+  });
+  input.addEventListener('blur', () => {
+    if (typeof updateGuideVv === 'function') {
+      setTimeout(updateGuideVv, 100);
+    }
+  });
   const submit = element("button", "guide-button guide-chat-form__send", guideState.roadmap_result ? "Send" : "Analyze");
   submit.type = "submit";
   form.append(input, submit);
@@ -724,6 +756,21 @@ function renderAssistant(container) {
     guideState.assistant_draft_origin = 'USER';
     persistState();
   });
+  input.addEventListener('focus', () => {
+    if (typeof updateGuideVv === 'function') {
+      setTimeout(updateGuideVv, 50);
+      setTimeout(updateGuideVv, 250);
+    }
+    setTimeout(() => {
+      const b = preservedAssistantChat || root?.querySelector('.guide-chat-messages');
+      if (b) b.scrollTop = b.scrollHeight;
+    }, 100);
+  });
+  input.addEventListener('blur', () => {
+    if (typeof updateGuideVv === 'function') {
+      setTimeout(updateGuideVv, 100);
+    }
+  });
   const button = element('button', 'guide-button guide-chat-form__send', experience.launcher_label || 'Send');
   button.type = 'submit';
   form.append(input, button);
@@ -862,6 +909,7 @@ export function applyExperience(value, targetRoot = null) {
   if (!root || !value || typeof value !== 'object') throw new Error('invalid guide experience');
   experience = value; guideState = loadState(); if (!enabledModules().includes(guideState.active_module)) guideState.active_module = firstAvailableModule();
   const theme = experience.theme || {}; const styles = document.documentElement.style; styles.setProperty('--guide-primary', theme.primary_color || '#1F4B99'); styles.setProperty('--guide-accent', theme.accent_color || '#4F7FD8'); styles.setProperty('--guide-background', theme.background_color || '#0E1522'); styles.setProperty('--guide-foreground', theme.foreground_color || '#F8FAFC'); styles.setProperty('--guide-surface', theme.surface_color || '#18212F'); styles.setProperty('--guide-border', theme.border_color || '#334155'); styles.setProperty('--guide-button-foreground', theme.button_foreground || '#FFFFFF'); styles.setProperty('--guide-radius', theme.corner_radius === 'LARGE' ? '1.4rem' : theme.corner_radius === 'SMALL' ? '.65rem' : '1rem'); document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme.background_color || '#0E1522'); document.title = text(experience.brand_name, 'AI Guide');
+  const isArabic = experience.language === 'ar' || experience.locale === 'ar' || /[\u0600-\u06FF]/.test(experience.welcome_title || '') || /[\u0600-\u06FF]/.test(experience.brand_name || ''); if (typeof document !== 'undefined' && document.documentElement) { document.documentElement.dir = isArabic ? 'rtl' : 'ltr'; if (isArabic) document.documentElement.lang = 'ar'; }
   const shell = element('main', 'guide-shell'); const canvas = element('section', 'guide-canvas'); canvas.setAttribute('aria-label', text(experience.brand_name, 'AI Guide'));
   const header = element('header', 'guide-header'); const identity = element('div', 'guide-identity'); if (experience.logo_url) { const logo = document.createElement('img'); logo.className = 'guide-logo'; setAsset(logo, experience.logo_url, `${text(experience.brand_name)} logo`); identity.append(logo); } const names = element('div', 'guide-names'); names.append(element('p', 'guide-brand-name', experience.brand_name || 'AI Guide'), element('p', 'guide-status', experience.assistant_status_label || 'Online')); identity.append(names); header.append(identity); if (experience.avatar_url) { const avatar = document.createElement('img'); avatar.className = 'guide-avatar'; setAsset(avatar, experience.avatar_url, `${text(experience.assistant_display_name)} avatar`); header.append(avatar); } canvas.append(header);
   const hero = element('section', 'guide-hero'); hero.append(element('p', 'guide-hero__eyebrow', 'AI GUIDE'), element('h1', 'guide-hero__title', experience.hero?.title || experience.welcome_title || 'How can we help?'), element('p', 'guide-hero__message', experience.hero?.message || experience.welcome_message || 'Choose a path or ask a question to get started.')); canvas.append(hero); const outlet = element('section', 'guide-module'); canvas.append(outlet);
