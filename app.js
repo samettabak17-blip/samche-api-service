@@ -71,7 +71,7 @@ import { normalizeGuideExperience, resolvePublishedGuideExperience } from "./ser
 import { configuredManagedGuideDomainSuffix, configuredManagedGuideHostname, isManagedGuidePlatformHost, repairEligibleGuideDomains, resolveGuideRuntimeScopeFromRequest } from './services/guide-domain-service.js';
 import { getPublicGuideExperienceAsset } from "./services/guide-experience-asset-service.js";
 import { samcheguideRuntimeSessionKey } from "./services/samcheguide-runtime-session-service.js";
-import { buildTenantFollowUpRequest, evaluateWhatsAppFollowUpSendGate, isCustomerOptOut, normalizeGeneratedFollowUpText, resolveTenantFollowUpPolicy } from "./services/tenant-follow-up-service.js";
+import { DEFAULT_FOLLOW_UP_STAGES, buildTenantFollowUpRequest, evaluateWhatsAppFollowUpSendGate, isCustomerOptOut, normalizeGeneratedFollowUpText, resolveTenantFollowUpPolicy } from "./services/tenant-follow-up-service.js";
 import { isSameKnowledgeAuthority, resolveAssistantKnowledgeAuthority } from "./services/knowledge-authority-service.js";
 import { filterProviderMemoryByAuthority, stampProviderMemoryEntry } from "./services/channel-knowledge-authority-memory.js";
 import { configuredPublicWebChatSessionSecret, issuePublicWebChatSession, PublicWebChatSessionError, verifyPublicWebChatSession } from "./services/public-web-chat-session.js";
@@ -1137,13 +1137,7 @@ async function persistAndSendWhatsAppAssistant(whatsappInbox, recipient, content
   });
 }
 
-const FOLLOW_UP_STAGES = Object.freeze([
-  ['3h', 3 * 60 * 60 * 1000],
-  ['24h', 24 * 60 * 60 * 1000],
-  ['48h', 48 * 60 * 60 * 1000],
-  ['72h', 72 * 60 * 60 * 1000],
-  ['7d', 7 * 24 * 60 * 60 * 1000],
-]);
+const FOLLOW_UP_STAGES = DEFAULT_FOLLOW_UP_STAGES;
 
 async function scheduleTenantContextualFollowUps({ whatsappInbox, persona, customerText = '' }) {
   if (!persona?.available) return;

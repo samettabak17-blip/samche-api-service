@@ -230,6 +230,15 @@ export function evaluateWhatsAppFollowUpSendGate({
   };
 }
 
+export const DEFAULT_FOLLOW_UP_STAGES = Object.freeze([
+  ['10m', 10 * 60 * 1000],
+  ['3h', 3 * 60 * 60 * 1000],
+  ['24h', 24 * 60 * 60 * 1000],
+  ['48h', 48 * 60 * 60 * 1000],
+  ['72h', 72 * 60 * 60 * 1000],
+  ['7d', 7 * 24 * 60 * 60 * 1000],
+]);
+
 export function resolveTenantFollowUpPolicy({ persona, stage, scheduled = false }) {
   if (!persona?.available) return { enabled: false, code: 'TENANT_PERSONA_NOT_ACTIVE' };
   const key = scheduled ? 'scheduled_messaging_behavior' : 'follow_up_behavior';

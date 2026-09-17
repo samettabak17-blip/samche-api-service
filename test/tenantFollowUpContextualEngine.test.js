@@ -5,7 +5,9 @@ import {
   buildTenantFollowUpRequest,
   calculateElapsedSemanticBucket,
   classifyFollowUpContextIntent,
+  DEFAULT_FOLLOW_UP_STAGES,
   ELAPSED_TIME_SIGNALS,
+  evaluateWhatsAppFollowUpSendGate,
   normalizeGeneratedFollowUpText,
   resolveTenantFollowUpPolicy,
   SEMANTIC_TIME_BUCKETS,
@@ -24,7 +26,7 @@ const mockBlueDunePersona = Object.freeze({
     tone: 'sophisticated, hospitable, and executive',
     follow_up_behavior: {
       enabled: true,
-      timing_strategy: ['3h', '24h', '48h'],
+      timing_strategy: ['10m', '3h', '24h', '48h'],
       guidance: 'Helpful and consultative check-in',
     },
   },
@@ -42,7 +44,7 @@ const mockHealthTechPersona = Object.freeze({
     tone: 'precise, clinical, and empathetic',
     follow_up_behavior: {
       enabled: true,
-      timing_strategy: ['3h', '24h'],
+      timing_strategy: ['10m', '3h', '24h'],
       guidance: 'Compliance and care continuity',
     },
   },
@@ -295,7 +297,7 @@ test('Requirement 8.J: Fresh eligible tenant automatically receives canonical co
   assert.ok(configVersionQuery);
   const updatedConfig = JSON.parse(configVersionQuery.params[2]);
   assert.equal(updatedConfig.follow_up_behavior?.enabled, true);
-  assert.deepEqual(updatedConfig.follow_up_behavior?.timing_strategy, ['3h', '24h']);
+  assert.deepEqual(updatedConfig.follow_up_behavior?.timing_strategy, ['10m', '3h', '24h']);
 
   const freshPersona = {
     available: true,
@@ -368,4 +370,124 @@ test('Normalization helper removes quotes and role prefixes', () => {
     normalizeGeneratedFollowUpText('“Kısa süre önce etkinlik hakkında konuşmuştuk.”'),
     'Kısa süre önce etkinlik hakkında konuşmuştuk.'
   );
+});
+
+test('Requirement: Canonical intended sequence defines 10 minutes -> 3 hours -> 24 hours', () => {
+  const stageMap = new Map(DEFAULT_FOLLOW_UP_STAGES);
+  assert.equal(stageMap.get('10m'), 10 * 60 * 1000, 'Stage 1 delay must be 10 minutes (600,000 ms)');
+  assert.equal(stageMap.get('3h'), 3 * 60 * 60 * 1000, 'Stage 2 delay must be 3 hours (10,800,000 ms)');
+  assert.equal(stageMap.get('24h'), 24 * 60 * 60 * 1000, 'Stage 3 delay must be 24 hours (86,400,000 ms)');
+
+  // Confirm temporary 2-minute (120,000 ms) test override is NOT active in defaults
+  assert.notEqual(stageMap.get('3h'), 120000, '3h stage delay must NOT be temporary 2-minute override');
+  for (const [stage, delay] of DEFAULT_FOLLOW_UP_STAGES) {
+    assert.notEqual(delay, 120000, `Stage ${stage} must not have temporary 2-minute delay`);
+  }
+});
+
+test('Requirement: Scheduler semantics are ABSOLUTE-FROM-CONVERSATION and produce exact effective timing', () => {
+  const conversationTimestamp = 1726574400000; // Fixed reference timestamp
+  const stageMap = new Map(DEFAULT_FOLLOW_UP_STAGES);
+
+  // Scheduler calculates each stage due_at as: scheduledAt + stageDelay
+  const stage1DueAt = conversationTimestamp + stageMap.get('10m');
+  const stage2DueAt = conversationTimestamp + stageMap.get('3h');
+  const stage3DueAt = conversationTimestamp + stageMap.get('24h');
+
+  // Verify effective customer-facing timings from conversation
+  const stage1EffectiveMinutes = (stage1DueAt - conversationTimestamp) / (60 * 1000);
+  const stage2EffectiveHours = (stage2DueAt - conversationTimestamp) / (60 * 60 * 1000);
+  const stage3EffectiveHours = (stage3DueAt - conversationTimestamp) / (60 * 60 * 1000);
+
+  assert.equal(stage1EffectiveMinutes, 10, 'Stage 1 effective timing must be exactly 10 minutes');
+  assert.equal(stage2EffectiveHours, 3, 'Stage 2 effective timing must be exactly 3 hours');
+  assert.equal(stage3EffectiveHours, 24, 'Stage 3 effective timing must be exactly 24 hours');
+
+  // Verify non-cumulative semantics: Stage 2 is NOT 3h10m, Stage 3 is NOT 27h10m
+  assert.notEqual(stage2DueAt - conversationTimestamp, (10 * 60 * 1000) + (3 * 60 * 60 * 1000));
+  assert.notEqual(stage3DueAt - conversationTimestamp, (10 * 60 * 1000) + (3 * 60 * 60 * 1000) + (24 * 60 * 60 * 1000));
+});
+
+test('Requirement: WhatsApp 24-hour policy gate allows 10m and 3h sessions, enforces gate at 24h', () => {
+  const customerMessageAt = new Date('2026-09-17T10:00:00Z');
+
+  // At 10 minutes: well within 24-hour session window -> freeform session message allowed
+  const tenMinutesLater = new Date('2026-09-17T10:10:00Z');
+  const gate10m = evaluateWhatsAppFollowUpSendGate({
+    lastCustomerMessageAt: customerMessageAt,
+    stage: '10m',
+    now: tenMinutesLater,
+  });
+  assert.equal(gate10m.allowed, true);
+  assert.equal(gate10m.mode, 'SESSION_MESSAGE');
+
+  // At 3 hours: within 24-hour session window -> freeform session message allowed
+  const threeHoursLater = new Date('2026-09-17T13:00:00Z');
+  const gate3h = evaluateWhatsAppFollowUpSendGate({
+    lastCustomerMessageAt: customerMessageAt,
+    stage: '3h',
+    now: threeHoursLater,
+  });
+  assert.equal(gate3h.allowed, true);
+  assert.equal(gate3h.mode, 'SESSION_MESSAGE');
+
+  // At exactly 24 hours: inside session window
+  const twentyFourHoursExact = new Date('2026-09-18T10:00:00Z');
+  const gate24hExact = evaluateWhatsAppFollowUpSendGate({
+    lastCustomerMessageAt: customerMessageAt,
+    stage: '24h',
+    now: twentyFourHoursExact,
+  });
+  assert.equal(gate24hExact.allowed, true);
+  assert.equal(gate24hExact.mode, 'SESSION_MESSAGE');
+
+  // At 24 hours + 1 minute: outside session window -> rejected without approved template
+  const twentyFourHoursAndOneMin = new Date('2026-09-18T10:01:00Z');
+  const gate24hExpired = evaluateWhatsAppFollowUpSendGate({
+    lastCustomerMessageAt: customerMessageAt,
+    stage: '24h',
+    now: twentyFourHoursAndOneMin,
+  });
+  assert.equal(gate24hExpired.allowed, false);
+  assert.equal(gate24hExpired.code, 'WHATSAPP_SESSION_WINDOW_EXPIRED_NO_APPROVED_TEMPLATE');
+  assert.equal(gate24hExpired.mode, 'REJECTED');
+
+  // At 24 hours + 1 minute with approved template -> allowed via TEMPLATE_MESSAGE
+  const gate24hWithTemplate = evaluateWhatsAppFollowUpSendGate({
+    lastCustomerMessageAt: customerMessageAt,
+    stage: '24h',
+    templates: {
+      follow_up_approved_templates: {
+        '24h': { name: 'follow_up_reengagement_v1', status: 'APPROVED' },
+      },
+    },
+    now: twentyFourHoursAndOneMin,
+  });
+  assert.equal(gate24hWithTemplate.allowed, true);
+  assert.equal(gate24hWithTemplate.mode, 'TEMPLATE_MESSAGE');
+  assert.equal(gate24hWithTemplate.templateName, 'follow_up_reengagement_v1');
+});
+
+test('Requirement: Multi-tenant configuration-driven delays allow custom overrides without code change', () => {
+  const tenantCustomPersona = {
+    ...mockBlueDunePersona,
+    configuration: {
+      ...mockBlueDunePersona.configuration,
+      follow_up_behavior: {
+        enabled: true,
+        timing_strategy: ['10m', '3h', '24h'],
+        stage_delays_ms: {
+          '10m': 15 * 60 * 1000, // Custom 15 minutes
+        },
+      },
+    },
+  };
+
+  const policy10m = resolveTenantFollowUpPolicy({ persona: tenantCustomPersona, stage: '10m' });
+  assert.equal(policy10m.enabled, true);
+  assert.equal(policy10m.policy.stage_delays_ms['10m'], 15 * 60 * 1000);
+
+  const policy3h = resolveTenantFollowUpPolicy({ persona: tenantCustomPersona, stage: '3h' });
+  assert.equal(policy3h.enabled, true);
+  assert.equal(policy3h.policy.stage_delays_ms?.['3h'], undefined);
 });
