@@ -64,7 +64,8 @@ export async function resolveWhatsAppIntegration(client, phoneNumberId) {
   const directChannel = await client.query(
     `SELECT tc.tenant_id, tc.id AS channel_id, tc.assistant_id, tc.assistant_id AS channel_assistant_id,
             tc.external_channel_id, tc.channel_type, tc.status AS channel_status, a.status AS assistant_status,
-            t.name AS tenant_name, a.name AS assistant_name, a.system_prompt AS assistant_system_prompt,
+            t.name AS tenant_name, a.name AS assistant_name, a.model AS assistant_model,
+            a.system_prompt AS assistant_system_prompt,
             a.whatsapp_response_templates AS assistant_whatsapp_response_templates
        FROM tenant_channels tc
        JOIN tenants t ON t.id = tc.tenant_id AND t.status = 'active'

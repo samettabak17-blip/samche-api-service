@@ -81,7 +81,7 @@ export async function resolveChannelAssistantRuntime({
     throw new AssistantRuntimeResolutionError('ACTIVE_PROFILE_UNAVAILABLE');
   }
 
-  const providerRuntime = normalizeModel(resolveModel());
+  const providerRuntime = normalizeModel(resolveModel({ assistantModel: scope.assistant_model ?? null }));
   const health = {
     status: 'HEALTHY',
     provider: providerRuntime.provider,

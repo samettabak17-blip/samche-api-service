@@ -41,6 +41,55 @@ test('shared runtime resolver returns a platform-selected model and matching ACT
   assert.equal(result.persona.companyIdentity, 'Example Events LLC');
 });
 
+test('WhatsApp runtime resolves each tenant assistant model without cross-tenant inheritance', async () => {
+  const resolveForScope = (assistantScope) => resolveChannelAssistantRuntime({
+    database: {},
+    scope: { ...scope, ...assistantScope, channel_type: 'WHATSAPP' },
+    query: 'event planning',
+    channelType: 'WHATSAPP',
+    resolvePersona: async () => ({
+      available: true,
+      profileVersionId: '44444444-4444-4444-8444-444444444444',
+      configurationVersionId: '55555555-5555-4555-8555-555555555555',
+    }),
+    resolveKnowledge: async () => ({
+      activeConfiguration: {
+        id: '55555555-5555-4555-8555-555555555555',
+        active_business_profile_version_id: '44444444-4444-4444-8444-444444444444',
+      },
+      knowledge: [],
+      knowledgeContext: '',
+      retrievalAvailable: true,
+    }),
+    resolveModel: ({ assistantModel }) => ({
+      provider: 'GOOGLE_GEMINI',
+      mode: 'vertex',
+      model: assistantModel || 'gemini-3-flash-preview',
+    }),
+  });
+
+  const runtimeA = await resolveForScope({
+    tenant_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    assistant_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    channel_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    channel_assistant_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    assistant_model: 'gemini-2.5-pro',
+  });
+  const runtimeB = await resolveForScope({
+    tenant_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    assistant_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    channel_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    channel_assistant_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    assistant_model: 'gemini-2.5-flash',
+  });
+
+  assert.equal(runtimeA.model, 'gemini-2.5-pro');
+  assert.equal(runtimeB.model, 'gemini-2.5-flash');
+  assert.notEqual(runtimeA.model, runtimeB.model);
+  assert.notEqual(runtimeA.model, 'gemini-2.5-flash');
+  assert.notEqual(runtimeB.model, 'gemini-2.5-pro');
+});
+
 test('shared runtime resolver fails closed without invoking provider selection for mismatched channel ownership', async () => {
   let modelResolved = false;
   await assert.rejects(
