@@ -306,11 +306,11 @@ test('ARABIC RTL MOBILE EXPERIENCE: Complete RTL Direction, Alignment & Zero Ove
   assert.ok(rtlMetrics.headerWidth <= 390 + 1, 'Arabic header exceeds viewport width');
 });
 
-test('VIRTUAL KEYBOARD SIMULATION: Reduced Viewport Height Preserves Composer Access', async () => {
+test('KEYBOARD FOCUS & VIEWPORT CONTRACTION: Header Remains Pinned, Composer Above Keyboard, Zero Window Shift', async () => {
   if (!browser) return;
   currentExperience = standardExperience;
 
-  await browser.setViewport({ width: 390, height: 450, isMobile: true });
+  await browser.setViewport({ width: 390, height: 844, isMobile: true });
   await browser.navigate(`${baseUrl}/bluedune`);
   await new Promise((r) => setTimeout(r, 500));
 
@@ -321,28 +321,120 @@ test('VIRTUAL KEYBOARD SIMULATION: Reduced Viewport Height Preserves Composer Ac
   })()`);
   await new Promise((r) => setTimeout(r, 300));
 
-  const keyboardMetrics = await browser.evaluate(`(() => {
-    const doc = document.documentElement;
-    const form = document.querySelector('.guide-chat-form');
+  // Focus textarea and simulate visual viewport contraction (keyboard opens: 844 -> 494)
+  await browser.evaluate(`(() => {
     const textarea = document.querySelector('.guide-chat-form textarea');
-    const sendBtn = document.querySelector('.guide-chat-form__send');
+    if (textarea) textarea.focus();
+  })()`);
+  await browser.setViewport({ width: 390, height: 494, isMobile: true });
+  await new Promise((r) => setTimeout(r, 400));
 
-    const formRect = form ? form.getBoundingClientRect() : null;
-    const sendRect = sendBtn ? sendBtn.getBoundingClientRect() : null;
-
+  // Measure contracted bounds while keyboard is open
+  const keyboardOpenMetrics = await browser.evaluate(`(() => {
+    const shell = document.querySelector('.guide-shell');
+    const header = document.querySelector('.guide-header');
+    const form = document.querySelector('.guide-chat-form');
+    const nav = document.querySelector('.guide-navigation');
+    const messages = document.querySelector('.guide-chat-messages');
     return {
-      docScrollWidth: doc.scrollWidth,
-      docClientWidth: doc.clientWidth,
-      formTop: formRect ? formRect.top : 0,
-      formBottom: formRect ? formRect.bottom : 0,
-      sendBottom: sendRect ? sendRect.bottom : 0,
+      shellTop: shell.getBoundingClientRect().top,
+      shellHeight: shell.getBoundingClientRect().height,
+      headerTop: header.getBoundingClientRect().top,
+      headerBottom: header.getBoundingClientRect().bottom,
+      formTop: form.getBoundingClientRect().top,
+      formBottom: form.getBoundingClientRect().bottom,
+      navBottom: nav.getBoundingClientRect().bottom,
+      messagesHeight: messages ? messages.getBoundingClientRect().height : 0,
+      scrollY: window.scrollY,
       windowHeight: window.innerHeight,
-      isSendVisible: sendRect ? (sendRect.bottom <= window.innerHeight && sendRect.top >= 0) : false,
     };
   })()`);
 
-  assert.ok(keyboardMetrics.docScrollWidth <= keyboardMetrics.docClientWidth + 1, 'Reduced height caused horizontal overflow');
-  assert.ok(keyboardMetrics.isSendVisible, 'Send button must remain visible when virtual keyboard opens (reduced height)');
+  // 1. Header MUST remain at top of screen (NOT pushed off-screen above viewport)
+  assert.equal(keyboardOpenMetrics.headerTop, 0, 'Header top must stay at y=0 when keyboard opens');
+  assert.equal(keyboardOpenMetrics.shellTop, 0, 'Shell top must stay at y=0 when keyboard opens');
+  assert.equal(keyboardOpenMetrics.scrollY, 0, 'Window scrollY must stay 0 when keyboard opens');
+
+  // 2. Shell height must match the usable visual viewport (494px)
+  assert.ok(Math.abs(keyboardOpenMetrics.shellHeight - 494) <= 2, `Shell height (${keyboardOpenMetrics.shellHeight}) must match contracted viewport (494)`);
+
+  // 3. Navigation and Composer must be inside the contracted viewport (sitting directly above keyboard)
+  assert.ok(keyboardOpenMetrics.navBottom <= 495, `Nav bottom (${keyboardOpenMetrics.navBottom}) must be anchored within contracted viewport (494)`);
+  assert.ok(keyboardOpenMetrics.formTop > keyboardOpenMetrics.headerBottom, 'Composer must sit below header and remain visible');
+
+  // 4. Message area must be positive height (not collapsed or pushed away)
+  assert.ok(keyboardOpenMetrics.messagesHeight > 80, `Message list must retain visible area (got ${keyboardOpenMetrics.messagesHeight}px)`);
+});
+
+test('KEYBOARD BLUR & VIEWPORT RESTORATION: Exact Original Bounds Restored', async () => {
+  if (!browser) return;
+
+  // Blur textarea and restore viewport (keyboard closes: 494 -> 844)
+  await browser.evaluate(`(() => {
+    const textarea = document.querySelector('.guide-chat-form textarea');
+    if (textarea) textarea.blur();
+  })()`);
+  await browser.setViewport({ width: 390, height: 844, isMobile: true });
+  await new Promise((r) => setTimeout(r, 400));
+
+  const restoredMetrics = await browser.evaluate(`(() => {
+    const shell = document.querySelector('.guide-shell');
+    const header = document.querySelector('.guide-header');
+    const nav = document.querySelector('.guide-navigation');
+    return {
+      shellTop: shell.getBoundingClientRect().top,
+      shellHeight: shell.getBoundingClientRect().height,
+      headerTop: header.getBoundingClientRect().top,
+      navBottom: nav.getBoundingClientRect().bottom,
+      scrollY: window.scrollY,
+    };
+  })()`);
+
+  assert.equal(restoredMetrics.headerTop, 0, 'Header top must restore to y=0');
+  assert.equal(restoredMetrics.shellTop, 0, 'Shell top must restore to y=0');
+  assert.equal(restoredMetrics.scrollY, 0, 'Window scrollY must be 0 after keyboard close');
+  assert.ok(Math.abs(restoredMetrics.shellHeight - 844) <= 2, 'Shell height must restore to 844px');
+  assert.ok(Math.abs(restoredMetrics.navBottom - 844) <= 2, 'Nav bottom must restore to 844px');
+});
+
+test('REPEATED FOCUS/BLUR CYCLES: Zero Drift or Accumulated Viewport Offset', async () => {
+  if (!browser) return;
+
+  for (let cycle = 1; cycle <= 5; cycle++) {
+    // Open keyboard
+    await browser.evaluate(`(() => {
+      const textarea = document.querySelector('.guide-chat-form textarea');
+      if (textarea) textarea.focus();
+    })()`);
+    await browser.setViewport({ width: 390, height: 494, isMobile: true });
+    await new Promise((r) => setTimeout(r, 80));
+
+    // Close keyboard
+    await browser.evaluate(`(() => {
+      const textarea = document.querySelector('.guide-chat-form textarea');
+      if (textarea) textarea.blur();
+    })()`);
+    await browser.setViewport({ width: 390, height: 844, isMobile: true });
+    await new Promise((r) => setTimeout(r, 80));
+  }
+
+  const cycleMetrics = await browser.evaluate(`(() => {
+    const shell = document.querySelector('.guide-shell');
+    const header = document.querySelector('.guide-header');
+    const nav = document.querySelector('.guide-navigation');
+    return {
+      shellTop: shell.getBoundingClientRect().top,
+      shellHeight: shell.getBoundingClientRect().height,
+      headerTop: header.getBoundingClientRect().top,
+      navBottom: nav.getBoundingClientRect().bottom,
+      scrollY: window.scrollY,
+    };
+  })()`);
+
+  assert.equal(cycleMetrics.headerTop, 0, 'Header top must be exactly 0 after 5 focus/blur cycles');
+  assert.equal(cycleMetrics.shellTop, 0, 'Shell top must be exactly 0 after 5 focus/blur cycles');
+  assert.equal(cycleMetrics.scrollY, 0, 'Window scrollY must be exactly 0 after 5 focus/blur cycles');
+  assert.ok(Math.abs(cycleMetrics.shellHeight - 844) <= 2, 'Zero height drift after 5 cycles');
 });
 
 test('CLEANUP: Teardown Server & Headless Browser', async () => {

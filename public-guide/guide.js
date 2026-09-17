@@ -27,16 +27,25 @@ let updateGuideVv = () => {};
 if (typeof window !== 'undefined' && window.visualViewport) {
   updateGuideVv = () => {
     try {
-      if (window.visualViewport && window.visualViewport.height) {
-        document.documentElement.style.setProperty('--guide-vv-height', `${Math.round(window.visualViewport.height)}px`);
-        const vvBottom = Math.max(0, window.innerHeight - (window.visualViewport.offsetTop + window.visualViewport.height));
-        document.documentElement.style.setProperty('--guide-vv-bottom', `${Math.round(vvBottom)}px`);
+      const vv = window.visualViewport;
+      if (vv && vv.height) {
+        document.documentElement.style.setProperty('--guide-vv-height', `${Math.round(vv.height)}px`);
+        const vvTop = Math.max(0, Math.round(vv.offsetTop || 0));
+        document.documentElement.style.setProperty('--guide-vv-top', `${vvTop}px`);
+        const vvBottom = Math.max(0, Math.round(window.innerHeight - (vv.offsetTop + vv.height)));
+        document.documentElement.style.setProperty('--guide-vv-bottom', `${vvBottom}px`);
+      }
+      if (window.scrollY !== 0) {
+        window.scrollTo(0, 0);
       }
     } catch {}
   };
   try {
     window.visualViewport.addEventListener('resize', updateGuideVv);
     window.visualViewport.addEventListener('scroll', updateGuideVv);
+    window.addEventListener('scroll', () => {
+      if (window.scrollY !== 0) window.scrollTo(0, 0);
+    });
     updateGuideVv();
   } catch {}
 }

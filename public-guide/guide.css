@@ -155,8 +155,9 @@ button,input,select,textarea{font:inherit}
 
 /* RESPONSIVE */
 @media(max-width:540px){
-  .guide-shell{display:flex;flex-direction:column;width:100%;padding:0;min-height:100dvh;min-height:var(--guide-vv-height,100dvh);height:100%}
-  .guide-canvas{display:flex;width:100%;max-width:100%;height:100dvh;height:var(--guide-vv-height,100dvh);min-height:0;border:0;border-radius:0}
+  html,body{position:fixed;width:100%;height:100%;height:100dvh;height:var(--guide-vv-height,100dvh);overflow:hidden;inset:0}
+  .guide-shell{position:fixed;top:var(--guide-vv-top,0px);left:0;right:0;width:100%;height:100%;height:100dvh;height:var(--guide-vv-height,100dvh);max-height:var(--guide-vv-height,100dvh);display:flex;flex-direction:column;padding:0;overflow:hidden}
+  .guide-canvas{display:flex;flex-direction:column;width:100%;max-width:100%;height:100%;flex:1 1 auto;min-height:0;border:0;border-radius:0;overflow:hidden}
   .guide-shell--content-active{min-height:0}
   .guide-canvas--content-active{height:auto;min-height:0}
   .guide-module--content-active,.guide-module--content-active .guide-module-layer:not([hidden]),.guide-module--content-active .guide-tool-form{flex:none;min-height:0;overflow:visible}
