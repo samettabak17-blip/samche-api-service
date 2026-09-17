@@ -71,7 +71,7 @@ import { normalizeGuideExperience, resolvePublishedGuideExperience } from "./ser
 import { configuredManagedGuideDomainSuffix, configuredManagedGuideHostname, isManagedGuidePlatformHost, repairEligibleGuideDomains, resolveGuideRuntimeScopeFromRequest } from './services/guide-domain-service.js';
 import { getPublicGuideExperienceAsset } from "./services/guide-experience-asset-service.js";
 import { samcheguideRuntimeSessionKey } from "./services/samcheguide-runtime-session-service.js";
-import { buildTenantFollowUpRequest, evaluateWhatsAppFollowUpSendGate, isCustomerOptOut, resolveTenantFollowUpPolicy } from "./services/tenant-follow-up-service.js";
+import { buildTenantFollowUpRequest, evaluateWhatsAppFollowUpSendGate, isCustomerOptOut, normalizeGeneratedFollowUpText, resolveTenantFollowUpPolicy } from "./services/tenant-follow-up-service.js";
 import { isSameKnowledgeAuthority, resolveAssistantKnowledgeAuthority } from "./services/knowledge-authority-service.js";
 import { filterProviderMemoryByAuthority, stampProviderMemoryEntry } from "./services/channel-knowledge-authority-memory.js";
 import { configuredPublicWebChatSessionSecret, issuePublicWebChatSession, PublicWebChatSessionError, verifyPublicWebChatSession } from "./services/public-web-chat-session.js";
@@ -1243,9 +1243,20 @@ async function resolveContextualFollowUpWorkerContext(job) {
 
   const language = ['tr', 'ar', 'en'].includes(conversation.communication_language)
     ? conversation.communication_language : 'en';
-  const conversationContext = history.rows.slice().reverse()
+  const chronologicalMessages = history.rows.slice().reverse();
+  const conversationContext = chronologicalMessages
     .map((message) => `${message.sender_type}: ${String(message.content ?? '')}`).join('\n');
-  const prompt = buildTenantFollowUpRequest({ persona, stage: job.stage, language, conversationContext });
+  const timezone = persona.profile?.timezone || persona.configuration?.timezone || 'UTC';
+  const prompt = buildTenantFollowUpRequest({
+    persona,
+    stage: job.stage,
+    language,
+    conversationContext,
+    messages: chronologicalMessages,
+    lastCustomerMessageAt: lastCustomerMessage?.created_at,
+    now: new Date(),
+    timezone,
+  });
   if (typeof prompt !== 'string' || !prompt.trim()) {
     console.info(`FOLLOWUP_CANCELLED tenant=${String(job.tenant_id).slice(0, 8)} job_id=${job.id} reason=PROMPT_UNAVAILABLE`);
     return null;
@@ -1259,7 +1270,8 @@ async function processContextualFollowUpJobs() {
     database: pool,
     resolveContext: resolveContextualFollowUpWorkerContext,
     generate: async ({ job, prompt }) => {
-      const generated = await callWpGemini(prompt, null, null);
+      const rawGenerated = await callWpGemini(prompt, null, null);
+      const generated = normalizeGeneratedFollowUpText(rawGenerated);
       if (generated) {
         console.info(`FOLLOWUP_GENERATED tenant=${String(job.tenant_id).slice(0, 8)} job_id=${job.id} length=${generated.length}`);
       }
