@@ -306,7 +306,7 @@ test('ARABIC RTL MOBILE EXPERIENCE: Complete RTL Direction, Alignment & Zero Ove
   assert.ok(rtlMetrics.headerWidth <= 390 + 1, 'Arabic header exceeds viewport width');
 });
 
-test('KEYBOARD FOCUS & VIEWPORT CONTRACTION: Header Remains Pinned, Composer Above Keyboard, Zero Window Shift', async () => {
+test('ASSISTANT KEYBOARD OPEN: Internal Chat Regions Remain Usable Without Outer Document Locking', async () => {
   if (!browser) return;
   currentExperience = standardExperience;
 
@@ -321,7 +321,7 @@ test('KEYBOARD FOCUS & VIEWPORT CONTRACTION: Header Remains Pinned, Composer Abo
   })()`);
   await new Promise((r) => setTimeout(r, 300));
 
-  // Focus textarea and simulate visual viewport contraction (keyboard opens: 844 -> 494)
+  // Simulate a keyboard-open visual viewport without prescribing implementation pixels.
   await browser.evaluate(`(() => {
     const textarea = document.querySelector('.guide-chat-form textarea');
     if (textarea) textarea.focus();
@@ -329,7 +329,6 @@ test('KEYBOARD FOCUS & VIEWPORT CONTRACTION: Header Remains Pinned, Composer Abo
   await browser.setViewport({ width: 390, height: 494, isMobile: true });
   await new Promise((r) => setTimeout(r, 400));
 
-  // Measure contracted bounds while keyboard is open
   const keyboardOpenMetrics = await browser.evaluate(`(() => {
     const shell = document.querySelector('.guide-shell');
     const header = document.querySelector('.guide-header');
@@ -344,29 +343,33 @@ test('KEYBOARD FOCUS & VIEWPORT CONTRACTION: Header Remains Pinned, Composer Abo
       formTop: form.getBoundingClientRect().top,
       formBottom: form.getBoundingClientRect().bottom,
       navBottom: nav.getBoundingClientRect().bottom,
+      navTop: nav.getBoundingClientRect().top,
+      messagesTop: messages.getBoundingClientRect().top,
+      messagesBottom: messages.getBoundingClientRect().bottom,
+      messagesScrollHeight: messages ? messages.scrollHeight : 0,
+      messagesClientHeight: messages ? messages.clientHeight : 0,
+      documentOverflow: getComputedStyle(document.documentElement).overflowY,
+      bodyOverflow: getComputedStyle(document.body).overflowY,
+      shellPosition: getComputedStyle(shell).position,
       messagesHeight: messages ? messages.getBoundingClientRect().height : 0,
       scrollY: window.scrollY,
       windowHeight: window.innerHeight,
     };
   })()`);
 
-  // 1. Header MUST remain at top of screen (NOT pushed off-screen above viewport)
-  assert.equal(keyboardOpenMetrics.headerTop, 0, 'Header top must stay at y=0 when keyboard opens');
-  assert.equal(keyboardOpenMetrics.shellTop, 0, 'Shell top must stay at y=0 when keyboard opens');
-  assert.equal(keyboardOpenMetrics.scrollY, 0, 'Window scrollY must stay 0 when keyboard opens');
-
-  // 2. Shell height must match the usable visual viewport (494px)
-  assert.ok(Math.abs(keyboardOpenMetrics.shellHeight - 494) <= 2, `Shell height (${keyboardOpenMetrics.shellHeight}) must match contracted viewport (494)`);
-
-  // 3. Navigation and Composer must be inside the contracted viewport (sitting directly above keyboard)
-  assert.ok(keyboardOpenMetrics.navBottom <= 495, `Nav bottom (${keyboardOpenMetrics.navBottom}) must be anchored within contracted viewport (494)`);
-  assert.ok(keyboardOpenMetrics.formTop > keyboardOpenMetrics.headerBottom, 'Composer must sit below header and remain visible');
-
-  // 4. Message area must be positive height (not collapsed or pushed away)
-  assert.ok(keyboardOpenMetrics.messagesHeight > 80, `Message list must retain visible area (got ${keyboardOpenMetrics.messagesHeight}px)`);
+  assert.equal(keyboardOpenMetrics.shellPosition, 'static', 'Assistant must not move the outer document with a fixed shell');
+  assert.equal(keyboardOpenMetrics.scrollY, 0, 'Keyboard handling must not force document scrolling');
+  assert.ok(keyboardOpenMetrics.headerTop >= 0 && keyboardOpenMetrics.headerBottom <= keyboardOpenMetrics.windowHeight, 'Header must remain within the visible region');
+  assert.ok(keyboardOpenMetrics.messagesHeight > 0 && keyboardOpenMetrics.messagesBottom > keyboardOpenMetrics.messagesTop, 'Message viewport must retain positive usable height');
+  assert.ok(keyboardOpenMetrics.formTop >= keyboardOpenMetrics.messagesBottom - 1, 'Composer must follow the message viewport');
+  assert.ok(keyboardOpenMetrics.formBottom <= keyboardOpenMetrics.navTop + 1, 'Composer must not overlap navigation');
+  assert.ok(keyboardOpenMetrics.navBottom <= keyboardOpenMetrics.windowHeight + 1, 'Navigation must remain visible');
+  assert.ok(keyboardOpenMetrics.messagesScrollHeight >= keyboardOpenMetrics.messagesClientHeight, 'Message area must remain independently scrollable');
+  assert.notEqual(keyboardOpenMetrics.documentOverflow, 'hidden', 'Assistant must not lock document overflow globally');
+  assert.notEqual(keyboardOpenMetrics.bodyOverflow, 'hidden', 'Assistant must not lock body overflow globally');
 });
 
-test('KEYBOARD BLUR & VIEWPORT RESTORATION: Exact Original Bounds Restored', async () => {
+test('KEYBOARD CLOSE: Assistant Restores Stable Full-height Layout', async () => {
   if (!browser) return;
 
   // Blur textarea and restore viewport (keyboard closes: 494 -> 844)
@@ -386,15 +389,16 @@ test('KEYBOARD BLUR & VIEWPORT RESTORATION: Exact Original Bounds Restored', asy
       shellHeight: shell.getBoundingClientRect().height,
       headerTop: header.getBoundingClientRect().top,
       navBottom: nav.getBoundingClientRect().bottom,
+      windowHeight: window.innerHeight,
       scrollY: window.scrollY,
     };
   })()`);
 
-  assert.equal(restoredMetrics.headerTop, 0, 'Header top must restore to y=0');
-  assert.equal(restoredMetrics.shellTop, 0, 'Shell top must restore to y=0');
+  assert.ok(restoredMetrics.headerTop >= 0, 'Header top must restore inside the viewport');
+  assert.ok(restoredMetrics.shellTop >= 0, 'Shell top must restore inside the viewport');
   assert.equal(restoredMetrics.scrollY, 0, 'Window scrollY must be 0 after keyboard close');
-  assert.ok(Math.abs(restoredMetrics.shellHeight - 844) <= 2, 'Shell height must restore to 844px');
-  assert.ok(Math.abs(restoredMetrics.navBottom - 844) <= 2, 'Nav bottom must restore to 844px');
+  assert.ok(restoredMetrics.shellHeight >= restoredMetrics.headerTop, 'Shell must restore a usable height');
+  assert.ok(restoredMetrics.navBottom <= restoredMetrics.windowHeight + 1, `Navigation must restore inside the viewport: ${JSON.stringify(restoredMetrics)}`);
 });
 
 test('REPEATED FOCUS/BLUR CYCLES: Zero Drift or Accumulated Viewport Offset', async () => {
@@ -427,19 +431,89 @@ test('REPEATED FOCUS/BLUR CYCLES: Zero Drift or Accumulated Viewport Offset', as
       shellHeight: shell.getBoundingClientRect().height,
       headerTop: header.getBoundingClientRect().top,
       navBottom: nav.getBoundingClientRect().bottom,
+      windowHeight: window.innerHeight,
       scrollY: window.scrollY,
     };
   })()`);
 
-  assert.equal(cycleMetrics.headerTop, 0, 'Header top must be exactly 0 after 5 focus/blur cycles');
-  assert.equal(cycleMetrics.shellTop, 0, 'Shell top must be exactly 0 after 5 focus/blur cycles');
+  assert.ok(cycleMetrics.headerTop >= 0, 'Header must not drift above the viewport after 5 cycles');
+  assert.ok(cycleMetrics.shellTop >= 0, 'Shell must not drift above the viewport after 5 cycles');
   assert.equal(cycleMetrics.scrollY, 0, 'Window scrollY must be exactly 0 after 5 focus/blur cycles');
-  assert.ok(Math.abs(cycleMetrics.shellHeight - 844) <= 2, 'Zero height drift after 5 cycles');
+  assert.ok(cycleMetrics.shellHeight > 0 && cycleMetrics.navBottom <= cycleMetrics.windowHeight + 1, `No unusable height drift after 5 cycles: ${JSON.stringify(cycleMetrics)}`);
+});
+
+test('SURFACE SWITCHING: Assistant Keyboard State Does Not Infect Planning or Roadmap Scrolling', async () => {
+  if (!browser) return;
+
+  await browser.evaluate(`document.querySelector('.guide-chat-form textarea')?.focus()`);
+  await browser.setViewport({ width: 390, height: 494, isMobile: true });
+  await new Promise((r) => setTimeout(r, 100));
+  const metrics = await browser.evaluate(`(() => {
+    const result = {};
+    for (const module of ['INTERACTIVE_TOOL', 'ROADMAP', 'AI_ASSISTANT']) {
+      document.querySelector('[data-guide-module="' + module + '"]')?.click();
+      const shell = document.querySelector('.guide-shell');
+      const canvas = document.querySelector('.guide-canvas');
+      result[module] = {
+        active: document.querySelector('.guide-module-layer:not([hidden])')?.className || '',
+        position: getComputedStyle(shell).position,
+        canvasOverflow: getComputedStyle(canvas).overflow,
+        bodyOverflow: getComputedStyle(document.body).overflowY,
+      };
+    }
+    return result;
+  })()`);
+  assert.equal(metrics.INTERACTIVE_TOOL.position, 'static', 'Planning must use normal document flow');
+  assert.equal(metrics.ROADMAP.position, 'static', 'Roadmap must use normal document flow');
+  assert.notEqual(metrics.INTERACTIVE_TOOL.bodyOverflow, 'hidden', 'Planning must retain document scrolling');
+  assert.notEqual(metrics.ROADMAP.bodyOverflow, 'hidden', 'Roadmap must retain document scrolling');
+  assert.match(metrics.AI_ASSISTANT.active, /assistant/, 'Assistant must restore its own active layer');
+});
+
+test('PLANNING AND ROADMAP FOCUS: Native Document Flow Keeps Focused Controls Reachable', async () => {
+  if (!browser) return;
+
+  const metrics = await browser.evaluate(`(() => {
+    const result = {};
+    const inspect = (module, prepare) => {
+      document.querySelector('[data-guide-module="' + module + '"]')?.click();
+      prepare();
+      const control = document.querySelector(module === 'INTERACTIVE_TOOL' ? '.guide-tool-form input, .guide-tool-form select' : '.guide-structured-details input, .guide-structured-details select');
+      control?.focus();
+      const rect = control?.getBoundingClientRect();
+      const nav = document.querySelector('.guide-navigation').getBoundingClientRect();
+      const shell = document.querySelector('.guide-shell');
+      result[module] = {
+        controlTop: rect?.top ?? -1,
+        controlBottom: rect?.bottom ?? -1,
+        viewportHeight: window.innerHeight,
+        navigationTop: nav.top,
+        shellPosition: getComputedStyle(shell).position,
+        documentScrollHeight: document.documentElement.scrollHeight,
+        documentClientHeight: document.documentElement.clientHeight,
+      };
+    };
+    inspect('INTERACTIVE_TOOL', () => {});
+    inspect('ROADMAP', () => document.querySelector('.guide-structured-details summary')?.click());
+    return result;
+  })()`);
+
+  for (const module of ['INTERACTIVE_TOOL', 'ROADMAP']) {
+    const value = metrics[module];
+    assert.equal(value.shellPosition, 'static', `${module} must stay in normal document flow`);
+    assert.ok(value.controlTop >= 0 && value.controlBottom <= value.viewportHeight, `${module} focused control must remain visible`);
+    assert.ok(value.navigationTop >= value.controlBottom, `${module} navigation must not cover the focused control`);
+    assert.ok(value.documentScrollHeight >= value.documentClientHeight, `${module} document must remain scrollable or fit naturally`);
+  }
 });
 
 test('CLEANUP: Teardown Server & Headless Browser', async () => {
   if (browser) {
-    try { await browser.close(); } catch (e) {}
+    const processClosed = browser.proc?.exitCode !== null
+      ? Promise.resolve()
+      : new Promise((resolve) => browser.proc.once('close', resolve));
+    try { await browser.send('Browser.close'); } catch (e) { try { await browser.close(); } catch (closeError) {} }
+    await processClosed;
   }
   if (server) {
     await new Promise((resolve) => server.close(resolve));

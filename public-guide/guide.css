@@ -11,8 +11,8 @@
 html,body{min-width:320px;margin:0;padding:0;width:100%;height:100%;background:radial-gradient(circle at 50% -12%,color-mix(in srgb,var(--guide-primary,#1f4b99) 28%,transparent),transparent 38rem),#070b12;color:var(--guide-foreground,#f8fafc);overflow-x:hidden}
 button,input,select,textarea{font:inherit}
 
-.guide-shell{display:grid;min-height:100svh;min-height:var(--guide-vv-height,100dvh);place-items:center;padding:.35rem}
-.guide-canvas{display:flex;width:min(100%,35rem);height:min(48rem,calc(var(--guide-vv-height,100svh) - 2rem));min-height:0;flex-direction:column;overflow:hidden;border:1px solid color-mix(in srgb,var(--guide-border,#334155) 85%,transparent);border-radius:1.15rem;background:linear-gradient(180deg,color-mix(in srgb,var(--guide-surface,#18212f) 94%,#04070c),color-mix(in srgb,var(--guide-background,#0e1522) 92%,#04070c));box-shadow:0 24px 64px #0009}
+.guide-shell{display:grid;min-height:100svh;place-items:center;padding:.35rem}
+.guide-canvas{display:flex;width:min(100%,35rem);height:min(48rem,calc(100svh - 2rem));min-height:0;flex-direction:column;overflow:hidden;border:1px solid color-mix(in srgb,var(--guide-border,#334155) 85%,transparent);border-radius:1.15rem;background:linear-gradient(180deg,color-mix(in srgb,var(--guide-surface,#18212f) 94%,#04070c),color-mix(in srgb,var(--guide-background,#0e1522) 92%,#04070c));box-shadow:0 24px 64px #0009}
 
 /* HEADER: logo 32px, brand 14px, status 9.5px, padding 6-10px */
 .guide-header{display:flex;flex:none;align-items:center;justify-content:space-between;gap:.5rem;padding:max(6px,env(safe-area-inset-top,0px)) max(10px,env(safe-area-inset-right,0px)) 6px max(10px,env(safe-area-inset-left,0px));border-bottom:1px solid var(--guide-border,#334155);background:color-mix(in srgb,var(--guide-surface,#18212f) 75%,transparent)}
@@ -155,12 +155,15 @@ button,input,select,textarea{font:inherit}
 
 /* RESPONSIVE */
 @media(max-width:540px){
-  html,body{position:fixed;width:100%;height:100%;height:100dvh;height:var(--guide-vv-height,100dvh);overflow:hidden;inset:0}
-  .guide-shell{position:fixed;top:var(--guide-vv-top,0px);left:0;right:0;width:100%;height:100%;height:100dvh;height:var(--guide-vv-height,100dvh);max-height:var(--guide-vv-height,100dvh);display:flex;flex-direction:column;padding:0;overflow:hidden}
-  .guide-canvas{display:flex;flex-direction:column;width:100%;max-width:100%;height:100%;flex:1 1 auto;min-height:0;border:0;border-radius:0;overflow:hidden}
-  .guide-shell--content-active{min-height:0}
-  .guide-canvas--content-active{height:auto;min-height:0}
-  .guide-module--content-active,.guide-module--content-active .guide-module-layer:not([hidden]),.guide-module--content-active .guide-tool-form{flex:none;min-height:0;overflow:visible}
+  html,body{width:100%;min-height:100%;height:auto;overflow-x:hidden;overflow-y:auto}
+  .guide-shell{position:static;width:100%;min-height:100svh;height:auto;max-height:none;display:flex;flex-direction:column;padding:0;overflow:visible}
+  .guide-canvas{display:flex;flex-direction:column;width:100%;max-width:100%;height:auto;min-height:100svh;flex:none;border:0;border-radius:0;overflow:visible}
+  .guide-module{overflow:visible}
+  .guide-module-layer{flex:none;overflow:visible}
+  .guide-shell--assistant{height:100dvh;min-height:100dvh;overflow:hidden}
+  .guide-shell--assistant .guide-canvas{height:100%;min-height:0;overflow:hidden}
+  .guide-shell--assistant .guide-module{overflow:hidden}
+  .guide-shell--assistant .guide-module-layer:not([hidden]){display:flex;flex:1;min-height:0;overflow:hidden}
   .guide-header,.guide-hero{padding:max(6px,env(safe-area-inset-top,0px)) max(8px,env(safe-area-inset-right,0px)) 6px max(8px,env(safe-area-inset-left,0px))}
   .guide-module{padding:6px max(8px,env(safe-area-inset-right,0px)) 6px max(8px,env(safe-area-inset-left,0px))}
   .guide-actions .guide-button{flex:1;min-height:36px;height:auto;padding:6px 10px;white-space:normal;text-align:center;line-height:1.2}

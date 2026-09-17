@@ -23,34 +23,6 @@ const resumeStorageKey = previewToken
   ? `samcheguide-preview-resume:${previewToken.slice(-16)}`
   : `samcheguide-public-resume${guideBasePath ? `:${guideBasePath.slice(1)}` : ''}`;
 try { session = window.localStorage?.getItem(resumeStorageKey) || ''; } catch { session = ''; }
-let updateGuideVv = () => {};
-if (typeof window !== 'undefined' && window.visualViewport) {
-  updateGuideVv = () => {
-    try {
-      const vv = window.visualViewport;
-      if (vv && vv.height) {
-        document.documentElement.style.setProperty('--guide-vv-height', `${Math.round(vv.height)}px`);
-        const vvTop = Math.max(0, Math.round(vv.offsetTop || 0));
-        document.documentElement.style.setProperty('--guide-vv-top', `${vvTop}px`);
-        const vvBottom = Math.max(0, Math.round(window.innerHeight - (vv.offsetTop + vv.height)));
-        document.documentElement.style.setProperty('--guide-vv-bottom', `${vvBottom}px`);
-      }
-      if (window.scrollY !== 0) {
-        window.scrollTo(0, 0);
-      }
-    } catch {}
-  };
-  try {
-    window.visualViewport.addEventListener('resize', updateGuideVv);
-    window.visualViewport.addEventListener('scroll', updateGuideVv);
-    window.addEventListener('scroll', () => {
-      if (window.scrollY !== 0) window.scrollTo(0, 0);
-    });
-    updateGuideVv();
-  } catch {}
-}
-
-
 const MODULES = Object.freeze({ ROADMAP: 'ROADMAP', INTERACTIVE_TOOL: 'INTERACTIVE_TOOL', AI_ASSISTANT: 'AI_ASSISTANT' });
 export const PRESENTATION_TIMING = Object.freeze({
   chunk_words: 2,
@@ -432,18 +404,7 @@ function renderConversationalRoadmap(container) {
     input.value = guideState.roadmap_goal;
   }
   input.addEventListener('focus', () => {
-    if (typeof updateGuideVv === 'function') {
-      setTimeout(updateGuideVv, 50);
-      setTimeout(updateGuideVv, 250);
-    }
-    setTimeout(() => {
-      if (resultBoard) resultBoard.scrollTop = resultBoard.scrollHeight;
-    }, 100);
-  });
-  input.addEventListener('blur', () => {
-    if (typeof updateGuideVv === 'function') {
-      setTimeout(updateGuideVv, 100);
-    }
+    resultBoard.scrollTop = resultBoard.scrollHeight;
   });
   const submit = element("button", "guide-button guide-chat-form__send", guideState.roadmap_result ? "Send" : "Analyze");
   submit.type = "submit";
@@ -766,19 +727,8 @@ function renderAssistant(container) {
     persistState();
   });
   input.addEventListener('focus', () => {
-    if (typeof updateGuideVv === 'function') {
-      setTimeout(updateGuideVv, 50);
-      setTimeout(updateGuideVv, 250);
-    }
-    setTimeout(() => {
-      const b = preservedAssistantChat || root?.querySelector('.guide-chat-messages');
-      if (b) b.scrollTop = b.scrollHeight;
-    }, 100);
-  });
-  input.addEventListener('blur', () => {
-    if (typeof updateGuideVv === 'function') {
-      setTimeout(updateGuideVv, 100);
-    }
+    const b = preservedAssistantChat || root?.querySelector('.guide-chat-messages');
+    if (b) b.scrollTop = b.scrollHeight;
   });
   const button = element('button', 'guide-button guide-chat-form__send', experience.launcher_label || 'Send');
   button.type = 'submit';
@@ -910,7 +860,7 @@ function syncAssistantReminder() {
 }
 
 let __moduleLayersCreated = false;
-function renderActiveModule() { const outlet = root.querySelector('.guide-module'); if (!outlet) return; if (!__moduleLayersCreated) { outlet.append(element('div', 'guide-module-layer guide-module-layer--roadmap'), element('div', 'guide-module-layer guide-module-layer--tool'), element('div', 'guide-module-layer guide-module-layer--assistant')); __moduleLayersCreated = true; } const layerRoadmap = outlet.querySelector('.guide-module-layer--roadmap'); const layerTool = outlet.querySelector('.guide-module-layer--tool'); const layerAssistant = outlet.querySelector('.guide-module-layer--assistant'); const contentActive = guideState.active_module !== MODULES.AI_ASSISTANT; outlet.classList.toggle('guide-module--content-active', contentActive); outlet.closest('.guide-canvas')?.classList.toggle('guide-canvas--content-active', contentActive); outlet.closest('.guide-shell')?.classList.toggle('guide-shell--content-active', contentActive); layerRoadmap.hidden = guideState.active_module !== MODULES.ROADMAP; layerTool.hidden = guideState.active_module !== MODULES.INTERACTIVE_TOOL; layerAssistant.hidden = guideState.active_module !== MODULES.AI_ASSISTANT; if (guideState.active_module === MODULES.ROADMAP) { clear(layerRoadmap); renderRoadmap(layerRoadmap); } else if (guideState.active_module === MODULES.INTERACTIVE_TOOL) { clear(layerTool); renderInteractiveTool(layerTool); } else { clear(layerAssistant); renderAssistant(layerAssistant); renderConversationReminder(layerAssistant); } for (const button of root.querySelectorAll('[data-guide-module]')) { const active = button.dataset.guideModule === guideState.active_module; button.classList.toggle('is-active', active); button.setAttribute('aria-current', active ? 'page' : 'false'); } syncAssistantReminder(); }
+function renderActiveModule() { const outlet = root.querySelector('.guide-module'); if (!outlet) return; if (!__moduleLayersCreated) { outlet.append(element('div', 'guide-module-layer guide-module-layer--roadmap'), element('div', 'guide-module-layer guide-module-layer--tool'), element('div', 'guide-module-layer guide-module-layer--assistant')); __moduleLayersCreated = true; } const layerRoadmap = outlet.querySelector('.guide-module-layer--roadmap'); const layerTool = outlet.querySelector('.guide-module-layer--tool'); const layerAssistant = outlet.querySelector('.guide-module-layer--assistant'); const assistantActive = guideState.active_module === MODULES.AI_ASSISTANT; outlet.classList.toggle('guide-module--assistant-active', assistantActive); outlet.closest('.guide-canvas')?.classList.toggle('guide-canvas--assistant-active', assistantActive); outlet.closest('.guide-shell')?.classList.toggle('guide-shell--assistant', assistantActive); layerRoadmap.hidden = guideState.active_module !== MODULES.ROADMAP; layerTool.hidden = guideState.active_module !== MODULES.INTERACTIVE_TOOL; layerAssistant.hidden = !assistantActive; if (guideState.active_module === MODULES.ROADMAP) { clear(layerRoadmap); renderRoadmap(layerRoadmap); } else if (guideState.active_module === MODULES.INTERACTIVE_TOOL) { clear(layerTool); renderInteractiveTool(layerTool); } else { clear(layerAssistant); renderAssistant(layerAssistant); renderConversationReminder(layerAssistant); } for (const button of root.querySelectorAll('[data-guide-module]')) { const active = button.dataset.guideModule === guideState.active_module; button.classList.toggle('is-active', active); button.setAttribute('aria-current', active ? 'page' : 'false'); } syncAssistantReminder(); }
 
 export function applyExperience(value, targetRoot = null) {
   if (targetRoot) root = targetRoot;
