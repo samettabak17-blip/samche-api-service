@@ -68,6 +68,17 @@ button,input,select,textarea{font:inherit}
 .guide-tool-actions{display:flex;margin-top:6px;flex:none}
 .guide-tool-ask-button{width:100%;height:31px;min-height:31px;font-size:11.5px}
 .guide-validation{margin:3px 0 0;font-size:11.5px;font-weight:700;color:#f87171}
+/* ATTACHMENT CONTROLS */
+.guide-chat-form-bar{display:flex;align-items:flex-end;gap:6px;width:100%}
+.guide-attach-btn{display:inline-flex;width:31px;height:31px;min-height:31px;align-items:center;justify-content:center;border:1px solid var(--guide-border,#334155);border-radius:.55rem;background:color-mix(in srgb,var(--guide-surface,#18212f) 90%,#05080d);color:var(--guide-muted);cursor:pointer;flex-shrink:0;padding:0;transition:border-color .15s,color .15s}
+.guide-attach-btn:hover:not(:disabled){border-color:var(--guide-accent,#8ab4ff);color:var(--guide-foreground,#f8fafc)}
+.guide-attach-btn svg{width:15px;height:15px;stroke:currentColor;fill:none}
+.guide-attachment-preview{padding:4px 8px;margin-bottom:6px;background:rgba(255,255,255,0.06);border:1px solid var(--guide-border,#334155);border-radius:.5rem;display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:11px;color:var(--guide-foreground,#f8fafc)}
+.guide-attachment-chip{display:flex;align-items:center;gap:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.guide-attachment-thumb{width:22px;height:22px;border-radius:4px;object-fit:cover;flex-shrink:0}
+.guide-attachment-remove{background:transparent;border:none;color:var(--guide-muted);cursor:pointer;font-size:14px;line-height:1;padding:1px 4px;border-radius:3px}
+.guide-attachment-remove:hover{color:#f87171;background:rgba(248,113,113,0.15)}
+
 
 /* INTERACTIVE TOOL RESULTS */
 .guide-tool-result{margin-top:4px;padding:6px 8px;border:1px solid var(--guide-border,#334155);border-radius:.55rem;background:color-mix(in srgb,var(--guide-surface,#18212f) 70%,transparent)}

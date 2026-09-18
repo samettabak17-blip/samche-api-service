@@ -278,8 +278,132 @@ export async function playGuideResponseEvents(board, events, { signal } = {}) {
     }
   }
 }
-async function submitGuideRequest({ value, module, board, input, submit, idempotencyKey, onResponse, onFailure }) {
+const ATTACH_ICON_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
+
+function attachGuideAttachmentControls(form, input, submitButton) {
+  const previewEl = element('div', 'guide-attachment-preview');
+  previewEl.style.display = 'none';
+
+  const bar = element('div', 'guide-chat-form-bar');
+  const attachBtn = element('button', 'guide-attach-btn');
+  attachBtn.type = 'button';
+  attachBtn.setAttribute('aria-label', 'Attach file');
+  attachBtn.setAttribute('title', 'Attach file');
+  attachBtn.innerHTML = ATTACH_ICON_SVG;
+
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.className = 'guide-file-input';
+  fileInput.accept = 'image/jpeg,image/png,image/webp,application/pdf';
+  fileInput.style.display = 'none';
+
+  let pendingFile = null;
+
+  function clearFile() {
+    pendingFile = null;
+    fileInput.value = '';
+    previewEl.innerHTML = '';
+    previewEl.style.display = 'none';
+  }
+
+  function renderPreview(file) {
+    previewEl.innerHTML = '';
+    previewEl.style.display = 'flex';
+    const chip = element('div', 'guide-attachment-chip');
+
+    if (file.type && file.type.indexOf('image/') === 0) {
+      const img = document.createElement('img');
+      img.className = 'guide-attachment-thumb';
+      img.src = URL.createObjectURL(file);
+      chip.append(img);
+    } else {
+      const icon = element('span', '', '📄');
+      chip.append(icon);
+    }
+
+    const nameEl = element('span', '', `${file.name} (${Math.round(file.size / 1024)} KB)`);
+    chip.append(nameEl);
+
+    const removeBtn = element('button', 'guide-attachment-remove', '×');
+    removeBtn.type = 'button';
+    removeBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      clearFile();
+    });
+
+    previewEl.append(chip, removeBtn);
+  }
+
+  function handleFile(file) {
+    if (!file) return;
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+    if (!allowed.includes(file.type)) {
+      alert('Supported formats: JPEG, PNG, WebP, PDF');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File size exceeds 10MB limit.');
+      return;
+    }
+    pendingFile = file;
+    renderPreview(file);
+  }
+
+  attachBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    fileInput.value = '';
+    fileInput.click();
+  });
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files?.[0]) handleFile(fileInput.files[0]);
+  });
+
+  input.addEventListener('paste', (e) => {
+    if (e.clipboardData?.items) {
+      for (const item of e.clipboardData.items) {
+        if (item.type && item.type.indexOf('image/') === 0) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            handleFile(file);
+            return;
+          }
+        }
+      }
+    }
+  });
+
+  bar.append(attachBtn, fileInput, input, submitButton);
+  form.append(previewEl, bar);
+
+  return {
+    getPendingFile: () => pendingFile,
+    clearFile,
+  };
+}
+
+async function submitGuideRequest({ value, module, board, input, submit, idempotencyKey, attachmentFile = null, onResponse, onFailure }) {
   const thinking = addThinking(board); const startedAt = Date.now(); submit.disabled = true;
+  let attachmentResourceIds = [];
+  if (attachmentFile) {
+    try {
+      const formData = new FormData();
+      formData.append('file', attachmentFile);
+      const headers = {
+        ...(session ? { "X-Samcheguide-Session": session } : {}),
+        ...(previewToken ? { "X-Samcheguide-Preview": previewToken } : {}),
+      };
+      const uploadRes = await fetch(guideApi('/attachments'), { method: 'POST', headers, body: formData });
+      const uploadData = await uploadRes.json().catch(() => ({}));
+      if (uploadRes.ok && uploadData.resource_id) {
+        attachmentResourceIds.push(uploadData.resource_id);
+      }
+    } catch (upErr) {
+      console.warn('GUIDE_ATTACHMENT_UPLOAD_WARN:', upErr);
+    }
+  }
+
   try {
     const response = await fetch(guideApi('/chat'), { // fetch("/chat"
       method: "POST",
@@ -289,6 +413,7 @@ async function submitGuideRequest({ value, module, board, input, submit, idempot
         guide_module: module,
         guide_context: guideContext(),
         guide_session_state: guideSessionPayloadState(),
+        attachment_resource_ids: attachmentResourceIds,
       }),
     });
     const payload = await response.json().catch(() => ({}));
@@ -408,7 +533,7 @@ function renderConversationalRoadmap(container) {
   });
   const submit = element("button", "guide-button guide-chat-form__send", guideState.roadmap_result ? "Send" : "Analyze");
   submit.type = "submit";
-  form.append(input, submit);
+  const roadmapAttach = attachGuideAttachmentControls(form, input, submit);
   bindEnterToSubmit(input, form);
 
   let pendingIdempotencyKey = null;
@@ -416,29 +541,35 @@ function renderConversationalRoadmap(container) {
     event.preventDefault();
     if (form.dataset.submitting) return;
     const value = input.value.trim();
-    if (!value) return;
+    const pendingFile = roadmapAttach.getPendingFile();
+    if (!value && !pendingFile) return;
     form.dataset.submitting = "true";
 
     const isInitialAnalyze = !guideState.roadmap_result;
     if (isInitialAnalyze) {
-      guideState.roadmap_goal = value;
-      guideState.shared_context = { ...(guideState.shared_context || {}), goal: value };
+      guideState.roadmap_goal = value || (pendingFile ? `[Attached: ${pendingFile.name}]` : '');
+      guideState.shared_context = { ...(guideState.shared_context || {}), goal: guideState.roadmap_goal };
     }
 
     const empty = resultBoard.querySelector(".guide-empty-state");
     empty?.remove();
-    const submittedMessage = element("p", "guide-message guide-message--user", value);
+    const displayValue = value || (pendingFile ? `[Attached: ${pendingFile.name}]` : '');
+    const submittedMessage = element("p", "guide-message guide-message--user", displayValue);
     resultBoard.append(submittedMessage);
     input.value = "";
 
+    const attachedFile = pendingFile;
+    roadmapAttach.clearFile();
+
     try {
       await submitGuideRequest({
-        value,
+        value: value || displayValue,
         module: "ROADMAP",
         board: resultBoard,
         input,
         submit,
         idempotencyKey: pendingIdempotencyKey ||= crypto.randomUUID(),
+        attachmentFile: attachedFile,
         onResponse: (payload) => {
           pendingIdempotencyKey = null;
           const aiResponseText = payload.candidates?.[0]?.content?.parts?.[0]?.text
@@ -651,38 +782,45 @@ async function submitMessage(event) {
   if (form?.dataset?.submitting) return;
   const input = form.querySelector('textarea');
   const value = text(input?.value).trim();
-  if (!value) return;
+  const pendingFile = form.__assistantAttach?.getPendingFile?.();
+  if (!value && !pendingFile) return;
   form.dataset.submitting = 'true';
   guideState.assistant_draft = '';
   guideState.assistant_draft_origin = 'NONE';
   persistState();
-  input.value = '';
+  if (input) input.value = '';
   const board = preservedAssistantChat || root.querySelector('.guide-chat-messages');
   const empty = board?.querySelector('.guide-empty-state');
   empty?.remove();
-  const submittedMessage = element('p', 'guide-message guide-message--user', value);
-  board.append(submittedMessage);
+  const displayValue = value || (pendingFile ? `[Attached: ${pendingFile.name}]` : '');
+  const submittedMessage = element('p', 'guide-message guide-message--user', displayValue);
+  if (board) board.append(submittedMessage);
   const pendingIdempotencyKey = form.dataset.pendingIdempotencyKey || crypto.randomUUID();
   form.dataset.pendingIdempotencyKey = pendingIdempotencyKey;
+
+  const attachedFile = pendingFile;
+  if (form.__assistantAttach) form.__assistantAttach.clearFile();
+
   try {
     await submitGuideRequest({
-      value,
+      value: value || displayValue,
       module: MODULES.AI_ASSISTANT,
       board,
       input,
       submit: form.querySelector('button[type="submit"]'),
       idempotencyKey: pendingIdempotencyKey,
+      attachmentFile: attachedFile,
       onResponse: (payload) => {
         delete form.dataset.pendingIdempotencyKey;
         const aiResponseText = payload.candidates?.[0]?.content?.parts?.[0]?.text
           || (payload.guide_events || []).filter((e) => e.type === "TEXT_DELTA").map((e) => e.text).join(" ");
-        messages.push({ value, kind: 'user' });
+        messages.push({ value: displayValue, kind: 'user' });
         if (aiResponseText) {
           messages.push({ value: aiResponseText, kind: 'assistant' });
         }
         syncAssistantReminder();
       },
-      onFailure: () => { submittedMessage.remove(); input.value = value; },
+      onFailure: () => { submittedMessage.remove(); if (input) input.value = value; },
     });
   } finally {
     delete form.dataset.submitting;
@@ -732,7 +870,7 @@ function renderAssistant(container) {
   });
   const button = element('button', 'guide-button guide-chat-form__send', experience.launcher_label || 'Send');
   button.type = 'submit';
-  form.append(input, button);
+  form.__assistantAttach = attachGuideAttachmentControls(form, input, button);
   bindEnterToSubmit(input, form);
   form.addEventListener('submit', submitMessage);
   chat.append(form);

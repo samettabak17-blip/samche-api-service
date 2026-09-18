@@ -46,6 +46,13 @@ import {
   getSafeStorageFailureDiagnostic,
   createConversationResourceStorage,
 } from "./services/conversation-resource-storage.js";
+import {
+  ingestConversationAttachment,
+  resolveConversationMultimodalContext,
+  formatOpenAiMultimodalContent,
+  formatGeminiMultimodalParts,
+} from "./services/conversation-multimodal-context-service.js";
+import { ConversationResourceValidationError } from "./services/conversation-resource-validation.js";
 import { createWhatsAppMediaRetriever, extractWhatsAppMediaDescriptor } from "./services/whatsapp-multimodal-service.js";
 import { planStandaloneWhatsAppMediaResponse } from "./services/whatsapp-standalone-media-ack.js";
 import { planLatestExplicitResource, planWhatsAppResourceFollowUp, resourceFailureAcknowledgement, resourceProcessingAcknowledgement } from "./services/whatsapp-resource-follow-up-routing.js";
@@ -2165,6 +2172,90 @@ app.post("/api/chat/bootstrap", async (req, res) => {
   } catch (error) {
     console.error('WEB_CHAT_BOOTSTRAP_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return res.status(503).json({ error: 'Web Chat is temporarily unavailable.' });
+  }
+});
+
+const webChatAttachmentUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+app.post(['/api/v1/public/web-chat/attachments', '/api/v1/public/web-chat/sessions/:sessionId/attachments'], webChatAttachmentUpload.single('file'), async (req, res) => {
+  try {
+    const sessionToken = extractWebChatSessionToken(req) || req.params.sessionId;
+    const secret = configuredPublicWebChatSessionSecret();
+    if (!sessionToken || !secret) return res.status(401).json({ error: 'Web Chat session token is required.' });
+
+    let session;
+    try {
+      session = verifyPublicWebChatSession(sessionToken, { secret });
+    } catch {
+      return res.status(401).json({ error: 'Web Chat session is invalid.' });
+    }
+
+    const integration = await resolvePublicWebChatIntegration({ database: pool, widgetKey: session.widgetKey });
+    if (!integration) return res.status(401).json({ error: 'Web Chat integration is unavailable.' });
+
+    if (!req.file || !Buffer.isBuffer(req.file.buffer)) {
+      return res.status(400).json({ error: 'A valid file attachment is required.' });
+    }
+
+    const storage = createConversationResourceStorage();
+    const resource = await ingestConversationAttachment({
+      database: pool,
+      storage,
+      tenantId: integration.tenant_id,
+      conversationId: session.sessionId,
+      file: req.file,
+      sourceType: 'UPLOAD',
+    });
+
+    res.status(201).json({
+      resource_id: resource.id,
+      original_filename: resource.original_filename,
+      media_category: resource.media_category,
+      mime_type: resource.mime_type,
+      size_bytes: resource.size_bytes,
+      status: resource.processing_status,
+    });
+  } catch (err) {
+    const status = err instanceof ConversationResourceValidationError ? 400 : 500;
+    res.status(status).json({ error: err.message || 'Attachment upload failed', code: err.code || 'ATTACHMENT_UPLOAD_FAILED' });
+  }
+});
+
+const guideAttachmentUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+app.post(['/guide/attachments', '/:slug/guide/attachments', '/guide/:slug/attachments'], guideAttachmentUpload.single('file'), async (req, res) => {
+  try {
+    const guideRuntimeIntegration = await resolveGuideRuntimeScope(req);
+    if (!guideRuntimeIntegration) return res.status(503).json({ error: 'Guide runtime is unavailable.' });
+
+    const { resolved: publishedExperience } = await resolveGuideExperienceForRequest({ req, integration: guideRuntimeIntegration });
+    const publicSession = await issueOrResolvePublicConversationSession(req, guideRuntimeIntegration, publishedExperience);
+
+    if (!req.file || !Buffer.isBuffer(req.file.buffer)) {
+      return res.status(400).json({ error: 'A valid file attachment is required.' });
+    }
+
+    const storage = createConversationResourceStorage();
+    const resource = await ingestConversationAttachment({
+      database: pool,
+      storage,
+      tenantId: guideRuntimeIntegration.tenant_id,
+      conversationId: publicSession.sessionId,
+      file: req.file,
+      sourceType: 'UPLOAD',
+    });
+
+    res.status(201).json({
+      resource_id: resource.id,
+      original_filename: resource.original_filename,
+      media_category: resource.media_category,
+      mime_type: resource.mime_type,
+      size_bytes: resource.size_bytes,
+      status: resource.processing_status,
+    });
+  } catch (err) {
+    const status = err instanceof ConversationResourceValidationError ? 400 : 500;
+    res.status(status).json({ error: err.message || 'Attachment upload failed', code: err.code || 'ATTACHMENT_UPLOAD_FAILED' });
   }
 });
 

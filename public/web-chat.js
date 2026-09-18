@@ -1281,7 +1281,17 @@
     '.samche-chip { font-family: inherit; font-size: 12px; line-height: 1.3; padding: 5px 11px; border-radius: 9999px; background: rgba(255,255,255,0.07); color: var(--chat-text, #F8FAFC); border: 1px solid var(--chat-border, rgba(255,255,255,0.12)); cursor: pointer; transition: background .15s ease, border-color .15s ease, transform .15s ease; outline: none; white-space: nowrap; max-width: 100%; text-overflow: ellipsis; overflow: hidden; box-sizing: border-box; text-align: left; }',
     '.samche-chip:hover, .samche-chip:focus-visible { background: rgba(255,255,255,0.15); border-color: var(--chat-border, rgba(255,255,255,0.25)); transform: translateY(-1px); }',
     '.samche-chip:active { transform: translateY(0); }',
-    '.samche-composer { padding: 14px 16px; border-top: 1px solid var(--chat-border, rgba(255,255,255,0.08)); background: rgba(0,0,0,0.15); display: flex; align-items: flex-end; gap: 10px; flex-shrink: 0; }',
+    '.samche-composer { padding: 12px 14px; border-top: 1px solid var(--chat-border, rgba(255,255,255,0.08)); background: rgba(0,0,0,0.15); display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }',
+    '.samche-composer-bar { display: flex; align-items: flex-end; gap: 8px; width: 100%; }',
+    '.samche-attach-btn { width: 42px !important; height: 42px !important; border-radius: 12px; background: var(--chat-input-bg, rgba(255,255,255,0.06)); color: var(--chat-muted, #94A3B8) !important; border: 1px solid var(--chat-input-border, rgba(255,255,255,0.14)); cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; outline: none; transition: opacity .15s, transform .15s, border-color .15s; padding: 0; }',
+    '.samche-attach-btn:hover:not(:disabled) { border-color: var(--chat-accent, #60A5FA); color: var(--chat-text, #F8FAFC) !important; transform: scale(1.05); }',
+    '.samche-attach-btn:disabled { opacity: 0.45; cursor: not-allowed; }',
+    '.samche-attach-btn svg { width: 18px !important; height: 18px !important; stroke: currentColor; fill: none; }',
+    '.samche-attachment-preview { padding: 6px 10px; background: rgba(255,255,255,0.08); border: 1px solid var(--chat-border, rgba(255,255,255,0.14)); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--chat-text, #F8FAFC); }',
+    '.samche-attachment-chip { display: flex; align-items: center; gap: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }',
+    '.samche-attachment-thumb { width: 28px; height: 28px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }',
+    '.samche-attachment-remove { background: transparent; border: none; color: var(--chat-muted, #94A3B8); cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 4px; border-radius: 4px; }',
+    '.samche-attachment-remove:hover { color: #EF4444; background: rgba(239,68,68,0.15); }',
     '.samche-composer-input { flex: 1; background: var(--chat-input-bg, rgba(255,255,255,0.06)); border: 1px solid var(--chat-input-border, rgba(255,255,255,0.14)); border-radius: 12px; color: var(--chat-text, #F8FAFC) !important; padding: 10px 14px; font-size: 14px; line-height: 1.4; resize: none; max-height: 110px; min-height: 42px; outline: none; }',
     '.samche-composer-input:focus { border-color: var(--chat-accent, #60A5FA); }',
     '.samche-composer-input::placeholder { color: var(--chat-muted, #94A3B8) !important; }',
@@ -1327,6 +1337,7 @@
   var CLOSE_ICON_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
   var MINIMIZE_ICON_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
   var SEND_ICON_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>';
+  var ATTACH_ICON_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
   var TRASH_ICON_SVG = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>';
 
   var I18N = {
@@ -1671,8 +1682,13 @@
       var composer = document.createElement('div');
       composer.className = 'samche-composer';
       composer.innerHTML = [
-        '<textarea class="samche-composer-input" placeholder="' + escapeHtml(initDict.composerPlaceholder) + '" rows="1" aria-label="' + escapeHtml(initDict.composerPlaceholder) + '"></textarea>',
-        '<button class="samche-send-btn" aria-label="' + escapeHtml(initDict.sendLabel) + '" disabled>' + SEND_ICON_SVG + '</button>'
+        '<div class="samche-attachment-preview" style="display:none;"></div>',
+        '<div class="samche-composer-bar">',
+        '  <button class="samche-attach-btn" type="button" aria-label="Attach file" title="Attach file">' + ATTACH_ICON_SVG + '</button>',
+        '  <input type="file" class="samche-file-input" accept="image/jpeg,image/png,image/webp,application/pdf" style="display:none">',
+        '  <textarea class="samche-composer-input" placeholder="' + escapeHtml(initDict.composerPlaceholder) + '" rows="1" aria-label="' + escapeHtml(initDict.composerPlaceholder) + '"></textarea>',
+        '  <button class="samche-send-btn" aria-label="' + escapeHtml(initDict.sendLabel) + '" disabled>' + SEND_ICON_SVG + '</button>',
+        '</div>'
       ].join('');
       panel.appendChild(composer);
       wrap.appendChild(panel);
@@ -1699,6 +1715,103 @@
       var confirmDescEl = confirmDialog.querySelector('.samche-confirm-message');
       var confirmCancelBtn = confirmDialog.querySelector('.samche-confirm-cancel');
       var confirmProceedBtn = confirmDialog.querySelector('.samche-confirm-proceed');
+      var attachBtn = composer.querySelector('.samche-attach-btn');
+      var fileInput = composer.querySelector('.samche-file-input');
+      var previewEl = composer.querySelector('.samche-attachment-preview');
+      var pendingFile = null;
+
+      function clearPendingAttachment() {
+        pendingFile = null;
+        if (fileInput) fileInput.value = '';
+        if (previewEl) {
+          previewEl.innerHTML = '';
+          previewEl.style.display = 'none';
+        }
+        if (sendBtn) sendBtn.disabled = !textarea.value.trim();
+      }
+
+      function renderAttachmentPreview(file) {
+        if (!previewEl) return;
+        previewEl.innerHTML = '';
+        previewEl.style.display = 'flex';
+        var chip = document.createElement('div');
+        chip.className = 'samche-attachment-chip';
+
+        if (file.type && file.type.indexOf('image/') === 0) {
+          var img = document.createElement('img');
+          img.className = 'samche-attachment-thumb';
+          img.src = URL.createObjectURL(file);
+          chip.appendChild(img);
+        } else {
+          var icon = document.createElement('span');
+          icon.textContent = '📄';
+          chip.appendChild(icon);
+        }
+
+        var nameEl = document.createElement('span');
+        nameEl.textContent = file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
+        chip.appendChild(nameEl);
+
+        var removeBtn = document.createElement('button');
+        removeBtn.className = 'samche-attachment-remove';
+        removeBtn.innerHTML = '×';
+        removeBtn.type = 'button';
+        removeBtn.title = 'Remove file';
+        removeBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          clearPendingAttachment();
+        });
+
+        previewEl.appendChild(chip);
+        previewEl.appendChild(removeBtn);
+      }
+
+      function handleFileSelected(file) {
+        if (!file) return;
+        var allowed = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+        if (allowed.indexOf(file.type) === -1) {
+          alert('Supported file formats: JPEG, PNG, WebP, PDF.');
+          return;
+        }
+        if (file.size > 10 * 1024 * 1024) {
+          alert('File size exceeds maximum limit of 10MB.');
+          return;
+        }
+        pendingFile = file;
+        renderAttachmentPreview(file);
+        if (sendBtn) sendBtn.disabled = false;
+      }
+
+      if (attachBtn && fileInput) {
+        attachBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          fileInput.value = '';
+          fileInput.click();
+        });
+        fileInput.addEventListener('change', function() {
+          if (fileInput.files && fileInput.files[0]) {
+            handleFileSelected(fileInput.files[0]);
+          }
+        });
+      }
+
+      if (textarea) {
+        textarea.addEventListener('paste', function(e) {
+          if (e.clipboardData && e.clipboardData.items) {
+            for (var i = 0; i < e.clipboardData.items.length; i++) {
+              var item = e.clipboardData.items[i];
+              if (item.type && item.type.indexOf('image/') === 0) {
+                var file = item.getAsFile();
+                if (file) {
+                  e.preventDefault();
+                  handleFileSelected(file);
+                  return;
+                }
+              }
+            }
+          }
+        });
+      }
 
       function setLanguage(lang) {
         if (!lang || typeof lang !== 'string') return;
@@ -2273,15 +2386,42 @@
 
       async function handleSend() {
         var text = textarea.value.trim();
-        if (!text || isSending || isResetting) return;
+        if ((!text && !pendingFile) || isSending || isResetting) return;
         isSending = true;
         clearBtn.disabled = true;
         textarea.value = '';
         textarea.style.height = 'auto';
         sendBtn.disabled = true;
+
+        var currentFile = pendingFile;
+        clearPendingAttachment();
+
+        var attachmentResourceIds = [];
+        if (currentFile) {
+          try {
+            var formData = new FormData();
+            formData.append('file', currentFile);
+            var uploadHeaders = {};
+            if (sessionToken) uploadHeaders['X-Samche-Web-Chat-Session'] = sessionToken;
+
+            var uploadRes = await fetch(resolveApiBaseUrl() + '/api/v1/public/web-chat/attachments', {
+              method: 'POST',
+              headers: uploadHeaders,
+              body: formData,
+            });
+            var uploadData = await uploadRes.json();
+            if (uploadRes.ok && uploadData.resource_id) {
+              attachmentResourceIds.push(uploadData.resource_id);
+            }
+          } catch (upErr) {
+            console.warn('WEB_CHAT_ATTACHMENT_UPLOAD_WARN:', upErr);
+          }
+        }
+
         recordUserMessage();
 
-        appendMessage('user', text, { message_type: 'USER' });
+        var userDisplay = text || (currentFile ? '[Attached: ' + currentFile.name + ']' : '');
+        appendMessage('user', userDisplay, { message_type: 'USER', file_name: currentFile ? currentFile.name : null });
         var indicator = createTypingIndicator({ className: 'samche-msg samche-msg-bot' });
         messages.appendChild(indicator);
         smartScrollToBottom(messages, true);
@@ -2295,8 +2435,9 @@
             method: 'POST',
             headers: headers,
             body: JSON.stringify({
-              message: text,
+              message: text || userDisplay,
               conversation_session: sessionToken,
+              attachment_resource_ids: attachmentResourceIds,
               page_context: ctx,
               current_url: ctx.url,
               canonical_url: ctx.canonical_url,
