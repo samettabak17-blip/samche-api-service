@@ -10,6 +10,7 @@ import axios from "axios";
 import dotenv from "dotenv";
 import OpenAI from "openai";
 import cron from "node-cron";
+import multer from "multer";
 import path from 'node:path';
 import { deliverWhatsAppText, whatsappHttpsAgent, sendWhatsAppTypingIndicator } from "./services/whatsapp-delivery-service.js";
 import { resolveWhatsAppOutboundCredential } from "./services/whatsapp-credential-resolution-service.js";
