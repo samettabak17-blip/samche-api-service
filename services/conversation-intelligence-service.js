@@ -63,16 +63,17 @@ export const POLICY_SUBJECTS = Object.freeze({
 
 // Semantic signal patterns across multiple industries
 const EXPLICIT_HUMAN_PATTERNS = [
-  /(?:^|\s)(?:speak|talk|chat|connect)\s+(?:to|with)\s+(?:a\s+)?(?:human|live\s+agent|agent|representative|person|someone)(?:\s|$)/iu,
-  /(?:^|\s)(?:want|need|give\s+me|get)\s+(?:a\s+)?(?:human|live\s+agent|real\s+person|agent|representative|someone)(?:\s|$)/iu,
-  /(?:^|\s)talk\s+to\s+(?:a\s+)?human(?:\s|$)/iu,
-  /(?:^|\s)(?:connect|transfer)\s+me\s+to\s+(?:an?\s+)?(?:human|live\s+agent|agent|representative|someone)(?:\s|$)/iu,
-  /(?:^|\s)(?:live\s+support|live\s+agent|human\s+support|talk\s+to\s+a\s+live\s+person)(?:\s|$)/iu,
-  /(?:^|\s)(?:canlı|canli)\s+destek(?:\s|$)/iu,
-  /(?:^|\s)(?:müşteri|musteri)\s+(?:temsilcisi|hizmetleri)(?:\s|$)/iu,
-  /(?:^|\s)temsilci(?:ye)?\s+(?:bağlanmak|baglanmak|aktar|görüşmek|gorusmek)(?:\s|$)/iu,
-  /(?:^|\s)(?:bir\s+)?insanla\s+(?:görüşmek|gorusmek|konuşmak|konusmak)(?:\s|$)/iu,
-  /(?:^|\s)(?:دعم\s+مباشر|موظف|ممثل\s+بşري|أريد\s+(?:التحدث\s+مع\s+)?(?:إنسان|شخص|موظف|ممثل)|تحدث\s+مع\s+(?:إنسان|موظف)|خدمة\s+العملاء)(?:\s|$)/iu,
+  /(?:^|\s)(?:speak|talk|chat)\s+(?:to|with)\s+(?:a\s+)?(?:human|live\s+agent|real\s+person|human\s+agent|live\s+person)(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)(?:want|need|give\s+me|get)\s+(?:a\s+)?(?:human|live\s+agent|real\s+person|human\s+agent|live\s+person)(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)talk\s+to\s+(?:a\s+)?(?:human|real\s+person|human\s+agent)(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)(?:connect|transfer)\s+me\s+to\s+(?:an?\s+)?(?:human|live\s+agent|real\s+person|human\s+agent|live\s+person|representative)(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)(?:live\s+agent|human\s+agent|talk\s+to\s+a\s+live\s+person|talk\s+to\s+a\s+human|not\s+ai|real\s+person)(?:\s|[.,!?]|$)/iu,
+  /(?:canlı|canli)\s+temsilci/iu,
+  /(?:müşteri|musteri)\s+temsilcisine\s+(?:aktar|bağla|bagla|görüş)/iu,
+  /temsilci(?:ye)?\s+(?:bağlanmak|baglanmak|aktar|görüşmek|gorusmek)/iu,
+  /(?:bir\s+)?insanla\s+(?:görüşmek|gorusmek|konuşmak|konusmak)/iu,
+  /(?:gerçek\s+bir\s+(?:müşteri\s+)?(?:insan|kişi|temsilci)|bot\s+istemiyorum|bot\s+değil\s+insan)/iu,
+  /(?:موظف\s+بشري|ممثل\s+بشري|أريد\s+(?:التحدث\s+مع\s+)?(?:إنسان|شخص\s+حقيقي)|تحدث\s+مع\s+إنسان)/iu,
 ];
 
 const SUPPORT_ACCOUNT_PATTERN = /(?:log\s*in|sign\s*in|sign\s*up|passwords?|workspace|accounts?|credentials?|reset\s+password|verify\s+account|giriş|şifre|parola|hesap|üyelik)/i;

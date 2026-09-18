@@ -1,0 +1,217 @@
+import crypto from 'node:crypto';
+import { assertTenantVisualAiEntitlement, enqueueVisualAiGenerationJob } from './visual-ai-job-service.js';
+import { safeFetchRemoteImage, validateSafeUrl } from './url-intelligence-service.js';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export const VISUAL_INTENT_TYPES = Object.freeze({
+  VISUAL_GENERATION: 'VISUAL_GENERATION',
+  MULTIMODAL_SUPPORT_OR_QA: 'MULTIMODAL_SUPPORT_OR_QA',
+  GENERAL_CONVERSATION: 'GENERAL_CONVERSATION',
+});
+
+const VISUAL_GENERATION_PATTERNS = [
+  /(?:make|turn|transform|redesign|redecorate|style|visualize|render|convert|apply)\s+this/i,
+  /(?:look\s+like|design\s+as\s+inspiration|how\s+would\s+this\s+look|show\s+me\s+how\s+.*would\s+look|show\s+me\s+this)/i,
+  /(?:modern|scandinavian|mediterranean|rustic|minimalist|industrial|boho|luxury|contemporary)\s+(?:style|look|design|theme)/i,
+  /(?:garden|room|kitchen|bedroom|living\s+room|wall|wallpaper|car|vehicle|furniture)\s+(?:redesign|transformation|concept|preview|pattern)/i,
+  /(?:wallpaper\s+.*on\s+(?:my\s+)?(?:wall|room))/i,
+  /(?:bunu\s+şuna\s+dönüştür|yeniden\s+tasarla|böyle\s+görünmesini\s+sağla|nasıl\s+durur\s+göster|tasarım\s+önerisi\s+oluştur)/i,
+];
+
+const SUPPORT_OR_QA_PATTERNS = [
+  /(?:damaged|broken|defect|faulty|error|malfunction|not\s+working|won't\s+turn\s+on|issue|problem)/i,
+  /(?:what\s+does\s+this\s+mean|what\s+is\s+written\s+here|read\s+this|explain\s+this\s+screen|why\s+is\s+this\s+blinking)/i,
+  /(?:invoice|receipt|order\s+slip|bill|tracking\s+number|fatura|dekont|kargo\s+fişi)/i,
+  /(?:hasarlı|kırık|bozuk|arızalı|çalışmıyor|hata|bu\s+ne\s+anlama\s+geliyor|ekranda\s+ne\s+yazıyor)/i,
+];
+
+export function classifyVisualIntent({
+  message = '',
+  hasTargetImage = false,
+  hasReferenceImage = false,
+  hasDocument = false,
+  recentHistory = [],
+}) {
+  const text = String(message || '').trim();
+
+  // 1. Check for Support or Q&A patterns first
+  const isSupportOrQa = SUPPORT_OR_QA_PATTERNS.some((p) => p.test(text)) || hasDocument;
+  if (isSupportOrQa) {
+    return {
+      intent: VISUAL_INTENT_TYPES.MULTIMODAL_SUPPORT_OR_QA,
+      isVisualGeneration: false,
+      isSupport: true,
+      confidence: 0.95,
+      targetStatus: hasTargetImage ? 'PRESENT' : 'NOT_REQUIRED',
+    };
+  }
+
+  // 2. Check for explicit Visual Generation patterns
+  const isGenerationPattern = VISUAL_GENERATION_PATTERNS.some((p) => p.test(text));
+  const hasTransformationVerb = /(?:redesign|transform|make|visualize|dönüştür|tasarla)/i.test(text);
+
+  // 3. Multi-turn context check: Did the assistant ask for a photo on the previous turn?
+  const lastAssistantMsg = [...recentHistory].reverse().find((m) => m.role === 'assistant' || m.sender_type === 'ASSISTANT');
+  const wasPromptedForPhoto = lastAssistantMsg && /(?:send\s+(?:a\s+)?photo|upload\s+(?:a\s+)?photo|resim\s+gönderin|fotoğraf\s+atın)/i.test(String(lastAssistantMsg.content || ''));
+
+  if (isGenerationPattern || (hasTransformationVerb && (hasTargetImage || hasReferenceImage)) || (wasPromptedForPhoto && hasTargetImage)) {
+    return {
+      intent: VISUAL_INTENT_TYPES.VISUAL_GENERATION,
+      isVisualGeneration: true,
+      isSupport: false,
+      confidence: 0.9,
+      targetStatus: hasTargetImage ? 'PRESENT' : (wasPromptedForPhoto ? 'CORRELATED_FROM_HISTORY' : 'MISSING'),
+      styleStatus: text.length > 5 ? 'PRESENT' : 'MISSING',
+    };
+  }
+
+  return {
+    intent: VISUAL_INTENT_TYPES.GENERAL_CONVERSATION,
+    isVisualGeneration: false,
+    isSupport: false,
+    confidence: 0.7,
+    targetStatus: hasTargetImage ? 'PRESENT' : 'NOT_REQUIRED',
+  };
+}
+
+/**
+ * Safely resolves and downloads a remote reference image with SSRF and MIME validation
+ */
+export async function resolveSafeReferenceUrl({ url, timeoutMs = 5000, fetchImpl = null }) {
+  if (typeof url !== 'string' || !url.trim()) {
+    return { ok: false, error: 'URL_REQUIRED', bytes: null, mimeType: null };
+  }
+
+  try {
+    const fetchResult = await safeFetchRemoteImage(url.trim(), {
+      timeoutMs,
+      fetchImpl,
+      maxSizeBytes: 10 * 1024 * 1024,
+    });
+
+    if (!fetchResult.bytes) {
+      return { ok: false, error: 'NOT_AN_IMAGE', bytes: null, mimeType: null };
+    }
+
+    return {
+      ok: true,
+      error: null,
+      bytes: fetchResult.bytes,
+      mimeType: fetchResult.mimeType,
+      finalUrl: fetchResult.url,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error?.code || 'REFERENCE_URL_FETCH_FAILED',
+      bytes: null,
+      mimeType: null,
+    };
+  }
+}
+
+/**
+ * Resolves multi-turn WhatsApp visual request state and parameters
+ */
+export async function resolveWhatsAppVisualRequestState({
+  database,
+  tenantId,
+  conversationId,
+  message = '',
+  currentResourceIds = [],
+  recentHistory = [],
+}) {
+  if (!database?.query || !UUID_REGEX.test(String(tenantId || '')) || !UUID_REGEX.test(String(conversationId || ''))) {
+    return { state: 'INVALID', targetResourceId: null, referenceResourceId: null };
+  }
+
+  // Load latest images for this conversation
+  const resourcesResult = await database.query(
+    `SELECT id, media_category, mime_type, original_filename, storage_key, created_at
+       FROM conversation_resources
+      WHERE tenant_id = $1 AND conversation_id = $2 AND media_category = 'IMAGE' AND processing_status = 'READY'
+      ORDER BY created_at DESC LIMIT 4`,
+    [tenantId, conversationId]
+  );
+  const images = resourcesResult.rows || [];
+
+  const classification = classifyVisualIntent({
+    message,
+    hasTargetImage: images.length > 0,
+    hasReferenceImage: images.length > 1,
+    hasDocument: false,
+    recentHistory,
+  });
+
+  if (!classification.isVisualGeneration) {
+    return {
+      state: 'NOT_VISUAL_GENERATION',
+      intentClassification: classification,
+      targetResourceId: null,
+      referenceResourceId: null,
+    };
+  }
+
+  if (images.length === 0) {
+    return {
+      state: 'WAITING_FOR_TARGET',
+      intentClassification: classification,
+      promptSuggestion: 'Lütfen dönüştürmek istediğiniz mekanın veya alanın bir fotoğrafını gönderin.',
+      targetResourceId: null,
+      referenceResourceId: null,
+    };
+  }
+
+  const targetResourceId = images[images.length - 1]?.id || images[0]?.id;
+  const referenceResourceId = images.length > 1 ? images[0].id : null;
+
+  return {
+    state: 'READY_FOR_GENERATION',
+    intentClassification: classification,
+    targetResourceId,
+    referenceResourceId,
+    promptInstruction: message || 'Transform this scene in the requested aesthetic style.',
+  };
+}
+
+/**
+ * Orchestrates WhatsApp Visual AI job enqueueing with entitlement checks
+ */
+export async function orchestrateWhatsAppVisualAiJob({
+  database,
+  storage,
+  tenantId,
+  conversationId,
+  messageId = null,
+  targetResourceId,
+  referenceResourceId = null,
+  referenceUrl = null,
+  promptInstruction,
+  groundingContext = {},
+  provider = 'MOCK',
+  model = 'mock-visual-v1',
+}) {
+  await assertTenantVisualAiEntitlement({ database, tenantId });
+
+  const job = await enqueueVisualAiGenerationJob({
+    database,
+    tenantId,
+    conversationId,
+    messageId,
+    targetResourceId,
+    referenceResourceId,
+    referenceUrl,
+    promptInstruction,
+    groundingContext,
+    provider,
+    model,
+  });
+
+  return {
+    job,
+    status: 'QUEUED',
+    acknowledgmentText: 'Görsel konsept önizlemeniz oluşturuluyor, lütfen bekleyin...',
+  };
+}
+
