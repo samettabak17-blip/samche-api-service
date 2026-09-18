@@ -289,6 +289,7 @@
 
     var rawCards = Array.prototype.slice.call(document.querySelectorAll(cardSelectors.join(', ')));
     var candidateCards = rawCards.filter(function(c) {
+      if (c.offsetParent === null && (!c.getClientRects || c.getClientRects().length === 0)) return false;
       return !rawCards.some(function(other) { return other !== c && other.contains(c); });
     });
 
@@ -509,7 +510,7 @@
       safeAttributes.page_headings = cleanHeadings.slice(0, 10);
     }
 
-    if (visibleProducts.length > 1) {
+    if (visibleProducts.length > 1 && (!hostExplicit.entity_type || hostExplicit.entity_type === 'Catalog' || hostExplicit.entity_type === 'PAGE' || hostExplicit.entity_type === 'PRODUCT_LIST')) {
       safeAttributes.page_type = 'PRODUCT_LIST';
       safeAttributes.visible_products = visibleProducts;
       safeAttributes.visible_product_names = visibleProducts.map(function(p) { return p.name; });

@@ -277,7 +277,10 @@ test('SCENARIO B — HIGH INTENT: Visitor navigates to product and dwells -> aut
     if (check.isOpen && check.botMsgs.length > 0) {
       opened = true;
       botMessage = check.botMsgs[check.botMsgs.length - 1];
-      break;
+      if (botMessage.includes('Titan Akıllı Saat Pro')) {
+
+        break;
+      }
     }
   }
 
