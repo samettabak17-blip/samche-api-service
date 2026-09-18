@@ -716,7 +716,14 @@ app.use(['/guide', '/:slug/guide'], async (req, res, next) => {
 }, sharedGuideStatic);
 
 app.use('/public', express.static('public'));
-app.get(['/web-chat.js', '/public/web-chat.js'], (req, res) => {
+app.get('/web-chat.js', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  return res.sendFile(path.resolve('public', 'web-chat.js'));
+});
+app.get('/public/web-chat.js', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
