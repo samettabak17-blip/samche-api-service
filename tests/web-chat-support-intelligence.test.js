@@ -424,5 +424,48 @@ test('CONTACT DISCLOSURE GATES: Contact details policy only permits phone/email 
   assert.match(prompt, /You MUST ONLY disclose support contact information \(support email\/phone\) when/);
   assert.match(prompt, /\(A\) the customer explicitly asks for contact details/i);
 });
+test('SUPPORT RESPONSE SANITIZATION: Trailing deflection contact blocks are stripped during active diagnosis turns', async () => {
+  const { sanitizeSupportResponse, SUPPORT_STATES } = await import('../services/conversation-intelligence-service.js');
+
+  const rawAiTroubleshootResponse = [
+    'Kulaklığınızın şarjını kontrol edin ve güç düğmesine 7 saniye basılı tutarak eşleştirme moduna alın.',
+    'Lütfen bu adımı deneyip LED ışığının durumunu bana iletir misiniz?',
+    '',
+    'Eğer bu adımlar sorunu çözmezse, garanti kapsamında destek almak için bizimle iletişime geçmenizi öneririm: support@samche.com / +971 50 694 1372',
+  ].join('\n');
+
+  const sanitized = sanitizeSupportResponse({
+    text: rawAiTroubleshootResponse,
+    supportState: SUPPORT_STATES.DIAGNOSING,
+    isExplicitContactRequest: false,
+  });
+
+  assert.match(sanitized, /Kulaklığınızın şarjını kontrol edin/);
+  assert.match(sanitized, /Lütfen bu adımı deneyip LED ışığının durumunu bana iletir misiniz/);
+  assert.doesNotMatch(sanitized, /support@samche\.com/);
+  assert.doesNotMatch(sanitized, /\+971 50 694 1372/);
+  assert.doesNotMatch(sanitized, /bizimle iletişime geçmenizi öneririm/);
+});
+
+test('EXPLICIT CONTACT REQUEST: Contact queries preserve email and phone without stripping', async () => {
+  const { sanitizeSupportResponse, SUPPORT_STATES } = await import('../services/conversation-intelligence-service.js');
+
+  const contactResponse = [
+    'Destek ekibimize aşağıdaki kanallardan ulaşabilirsiniz:',
+    'E-posta: support@samche.com',
+    'Telefon: +971 50 694 1372',
+    'Çalışma Saatleri: 08:00 - 22:00 GST',
+  ].join('\n');
+
+  const sanitized = sanitizeSupportResponse({
+    text: contactResponse,
+    supportState: SUPPORT_STATES.EXPLICIT_CONTACT_REQUEST,
+    isExplicitContactRequest: true,
+  });
+
+  assert.match(sanitized, /support@samche\.com/);
+  assert.match(sanitized, /\+971 50 694 1372/);
+});
+
 
 

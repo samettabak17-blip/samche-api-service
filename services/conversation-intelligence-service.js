@@ -25,6 +25,17 @@ export const INTENT_TYPES = Object.freeze({
   GENERAL_CONVERSATION: 'GENERAL_CONVERSATION',
 });
 
+export const SUPPORT_STATES = Object.freeze({
+  DIAGNOSING: 'DIAGNOSING',
+  TROUBLESHOOTING: 'TROUBLESHOOTING',
+  AWAITING_CUSTOMER_RESULT: 'AWAITING_CUSTOMER_RESULT',
+  RESOLVED: 'RESOLVED',
+  HUMAN_REQUIRED: 'HUMAN_REQUIRED',
+  EXPLICIT_HUMAN_REQUEST: 'EXPLICIT_HUMAN_REQUEST',
+  EXPLICIT_CONTACT_REQUEST: 'EXPLICIT_CONTACT_REQUEST',
+  GENERAL_SUPPORT: 'GENERAL_SUPPORT',
+});
+
 export const RESOLUTION_ACTIONS = Object.freeze({
   AI_FIRST_RESOLVE: 'AI_FIRST_RESOLVE',
   EXPLAIN_LIMITATION_AND_GUIDE: 'EXPLAIN_LIMITATION_AND_GUIDE',
@@ -447,6 +458,8 @@ export function evaluateSupportResolutionPlan({
       action: RESOLUTION_ACTIONS.HUMAN_ESCALATION,
       intent: INTENT_TYPES.HUMAN_ESCALATION,
       supportCase: SUPPORT_CASES.EXPLICIT_HUMAN_REQUEST,
+      supportState: SUPPORT_STATES.EXPLICIT_HUMAN_REQUEST,
+      contactDisclosureAllowed: true,
       stage: 'ESCALATE',
       canResolveSafely: false,
       requiresHandoff: true,
@@ -463,12 +476,14 @@ export function evaluateSupportResolutionPlan({
       action: RESOLUTION_ACTIONS.EXPLAIN_LIMITATION_AND_GUIDE,
       intent: INTENT_TYPES.SUPPORT_PRIVATE_STATE,
       supportCase: SUPPORT_CASES.ORDER_STATUS,
+      supportState: SUPPORT_STATES.DIAGNOSING,
+      contactDisclosureAllowed: false,
       stage: 'GUIDE',
       canResolveSafely: true,
       requiresHandoff: false,
       groundingSources: ['APPROVED_BUSINESS_POLICIES', 'SUPPORT_CONTACT_CHANNELS'],
       reason: 'PRIVATE_CUSTOMER_DATA_UNAVAILABLE_IN_SESSION',
-      guidance: 'Explain clearly that live customer order/account databases cannot be queried directly in this chat session for security. Provide verified standard fulfillment timelines, delivery cutoff rules, and guide the user to check their email tracking link or contact the official support desk with their order ID.',
+      guidance: 'Explain clearly that live customer order/account databases cannot be queried directly in this chat session for security. Provide verified standard fulfillment timelines, delivery cutoff rules, and guide the user to check their email tracking link or provide their order ID for assistance.',
     };
   }
 
@@ -478,6 +493,8 @@ export function evaluateSupportResolutionPlan({
       action: RESOLUTION_ACTIONS.COEXISTENCE_RESOLVE,
       intent: intent.primaryIntent,
       supportCase,
+      supportState: SUPPORT_STATES.GENERAL_SUPPORT,
+      contactDisclosureAllowed: false,
       stage: 'RESOLVE',
       canResolveSafely: true,
       requiresHandoff: false,
@@ -498,6 +515,8 @@ export function evaluateSupportResolutionPlan({
         action: RESOLUTION_ACTIONS.AI_FIRST_RESOLVE,
         intent: intent.primaryIntent,
         supportCase: SUPPORT_CASES.DEFECTIVE_OR_MALFUNCTION,
+        supportState: SUPPORT_STATES.DIAGNOSING,
+        contactDisclosureAllowed: false,
         stage: 'DIAGNOSE_AND_RESOLVE',
         canResolveSafely: true,
         requiresHandoff: false,
@@ -527,6 +546,8 @@ export function evaluateSupportResolutionPlan({
         action: RESOLUTION_ACTIONS.AI_FIRST_RESOLVE,
         intent: intent.primaryIntent,
         supportCase: SUPPORT_CASES.DAMAGED_ON_ARRIVAL,
+        supportState: SUPPORT_STATES.DIAGNOSING,
+        contactDisclosureAllowed: false,
         stage: 'ASSESS_AND_GUIDE',
         canResolveSafely: true,
         requiresHandoff: false,
@@ -552,6 +573,8 @@ export function evaluateSupportResolutionPlan({
         action: RESOLUTION_ACTIONS.AI_FIRST_RESOLVE,
         intent: intent.primaryIntent,
         supportCase: SUPPORT_CASES.WRONG_ITEM,
+        supportState: SUPPORT_STATES.DIAGNOSING,
+        contactDisclosureAllowed: false,
         stage: 'ASSESS_AND_GUIDE',
         canResolveSafely: true,
         requiresHandoff: false,
@@ -576,6 +599,8 @@ export function evaluateSupportResolutionPlan({
         action: RESOLUTION_ACTIONS.AI_FIRST_RESOLVE,
         intent: intent.primaryIntent,
         supportCase: SUPPORT_CASES.NORMAL_RETURN,
+        supportState: SUPPORT_STATES.DIAGNOSING,
+        contactDisclosureAllowed: false,
         stage: 'RESOLVE',
         canResolveSafely: true,
         requiresHandoff: false,
@@ -597,6 +622,8 @@ export function evaluateSupportResolutionPlan({
 
     let guidance = 'Provide the verified policy, procedure, or timeframe directly using current page context, site-wide intelligence, and approved business profile facts.';
     let stage = 'RESOLVE';
+    let supportState = isContact ? SUPPORT_STATES.EXPLICIT_CONTACT_REQUEST : (isTroubleshoot ? SUPPORT_STATES.TROUBLESHOOTING : SUPPORT_STATES.DIAGNOSING);
+    let contactDisclosureAllowed = isContact;
 
     if (isTroubleshoot) {
       stage = 'DIAGNOSE_AND_RESOLVE';
@@ -619,6 +646,8 @@ export function evaluateSupportResolutionPlan({
       action: RESOLUTION_ACTIONS.AI_FIRST_RESOLVE,
       intent: intent.primaryIntent,
       supportCase,
+      supportState,
+      contactDisclosureAllowed,
       stage,
       canResolveSafely: true,
       requiresHandoff: false,
@@ -636,6 +665,8 @@ export function evaluateSupportResolutionPlan({
       action: RESOLUTION_ACTIONS.SALES_ENGAGE,
       intent: intent.primaryIntent,
       supportCase,
+      supportState: SUPPORT_STATES.GENERAL_SUPPORT,
+      contactDisclosureAllowed: false,
       stage: 'GUIDE',
       canResolveSafely: true,
       requiresHandoff: false,
@@ -650,6 +681,8 @@ export function evaluateSupportResolutionPlan({
     action: RESOLUTION_ACTIONS.AI_FIRST_RESOLVE,
     intent: INTENT_TYPES.GENERAL_CONVERSATION,
     supportCase: SUPPORT_CASES.GENERAL_SUPPORT,
+    supportState: SUPPORT_STATES.GENERAL_SUPPORT,
+    contactDisclosureAllowed: false,
     stage: 'RESOLVE',
     canResolveSafely: true,
     requiresHandoff: false,
@@ -675,7 +708,16 @@ export function buildConversationIntelligencePromptSection(plan = null) {
     `RESOLUTION STAGE: ${plan.stage}`,
     `SAFE DIRECT RESOLUTION: ${plan.canResolveSafely ? 'YES (MANDATORY AI-FIRST DIRECT RESOLUTION)' : 'NO'}`,
     `HUMAN ESCALATION REQUIRED: ${plan.requiresHandoff ? 'YES' : 'NO (PREVENT DEFLECTION)'}`,
+    `SUPPORT RESOLUTION STATE: ${plan.supportState || 'GENERAL_SUPPORT'}`,
+    `CONTACT DISCLOSURE AUTHORIZATION: ${plan.contactDisclosureAllowed ? 'AUTHORIZED' : 'FORBIDDEN (PROACTIVE CONTACT INFO / DEFLECTION STRICTLY FORBIDDEN)'}`,
   ];
+
+  if (!plan.contactDisclosureAllowed) {
+    lines.push('CONTACT DISCLOSURE RESTRICTION (MANDATORY INVARIANT):');
+    lines.push('- Proactively appending support email, support phone number, or "contact our support team if this doesn\'t work" is STRICTLY FORBIDDEN during active diagnosis and troubleshooting.');
+    lines.push('- Do NOT provide contact details unless the customer explicitly asks for contact information.');
+    lines.push('- Guide the customer through the specific troubleshooting step, and ask them to confirm what happens directly in this chat.');
+  }
 
   if (plan.guidance) {
     lines.push(`OPERATIONAL GUIDANCE:\n${plan.guidance}`);
@@ -719,10 +761,36 @@ export function buildConversationIntelligencePromptSection(plan = null) {
     lines.push('CRITICAL CONTRACT (NO PRIVATE DATA FABRICATION):');
     lines.push('1. Do NOT invent order status, delivery progress, or tracking numbers. Clearly state that live order/account databases cannot be queried directly in this chat session for security/privacy.');
     lines.push('2. Explain the verified standard delivery timeframes and dispatch cutoffs from site policies.');
-    lines.push('3. Instruct the customer on the official next step (checking their confirmation email link or contacting support with their order ID).');
+    lines.push('3. Instruct the customer on the official next step (checking their confirmation email link or providing their order ID).');
   }
 
   lines.push('================================================================================');
   return lines.join('\n');
+}
+
+/**
+ * Deterministically sanitize assistant response to prevent unsolicited support contact deflection
+ * when in active diagnosing or troubleshooting states.
+ */
+export function sanitizeSupportResponse({ text = '', supportState = null, isExplicitContactRequest = false } = {}) {
+  if (!text || typeof text !== 'string') return text;
+  if (isExplicitContactRequest) return text;
+  if (supportState === SUPPORT_STATES.EXPLICIT_CONTACT_REQUEST || supportState === SUPPORT_STATES.HUMAN_REQUIRED || supportState === SUPPORT_STATES.EXPLICIT_HUMAN_REQUEST) {
+    return text;
+  }
+
+  let cleaned = text;
+  const trailingDeflectionPatterns = [
+    /(?:\n\s*|\.\s+)(?:Eğer\s+bu\s+adımlar[^\n]*çözmezse|Bu\s+adımlar\s+sonuç\s+vermezse|Sorun\s+devam\s+ederse)[^\n]*(?:support@|bizimle\s+iletişime|garanti\s+kapsamında)[^\n]*(?:\n[^\n]*)*(?:\+?\d{2,}[\d\s-]{6,}|\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b)[^\n]*/gi,
+    /(?:\n\s*|\.\s+)(?:If\s+(?:these\s+steps\s+)?(?:do\s*n['’]t|do\s+not)\s+resolve|If\s+the\s+issue\s+persists)[^\n]*(?:support@|contact\s+(?:our\s+)?support|warranty\s+support)[^\n]*(?:\n[^\n]*)*(?:\+?\d{2,}[\d\s-]{6,}|\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b)[^\n]*/gi,
+    /(?:\n\s*|\.\s+)(?:Email:\s*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\s*(?:\n|\s+)*Phone:\s*\+?[\d\s-]{8,})/gi,
+    /(?:\n\s*|\.\s+)(?:E-posta:\s*[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\s*(?:\n|\s+)*Telefon:\s*\+?[\d\s-]{8,})/gi,
+  ];
+
+  for (const pattern of trailingDeflectionPatterns) {
+    cleaned = cleaned.replace(pattern, '');
+  }
+
+  return cleaned.trim();
 }
 

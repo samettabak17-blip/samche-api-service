@@ -132,8 +132,10 @@ import {
   classifyConversationIntent,
   evaluateSupportResolutionPlan,
   buildConversationIntelligencePromptSection,
+  sanitizeSupportResponse,
   INTENT_TYPES,
   RESOLUTION_ACTIONS,
+  SUPPORT_STATES,
 } from './services/conversation-intelligence-service.js';
 import {
   retrieveRelevantTenantSiteContext,
@@ -2332,7 +2334,7 @@ app.post(['/api/v1/public/web-chat/attachments', '/api/v1/public/web-chat/sessio
 
 const guideAttachmentUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
-app.post(['/guide/attachments', '/:slug/guide/attachments', '/guide/:slug/attachments'], guideAttachmentUpload.single('file'), async (req, res) => {
+app.post(['/attachments', '/:slug/attachments', '/guide/attachments', '/:slug/guide/attachments', '/guide/:slug/attachments'], guideAttachmentUpload.single('file'), async (req, res) => {
   try {
     const guideRuntimeIntegration = await resolveGuideRuntimeScope(req);
     if (!guideRuntimeIntegration) return res.status(503).json({ error: 'Guide runtime is unavailable.' });
@@ -4173,7 +4175,12 @@ If the user already provided sector info, NEVER ask again.`
       messages
     });
 
-    const aiReply = completion.choices[0].message.content;
+    let aiReply = completion.choices[0].message.content;
+    aiReply = sanitizeSupportResponse({
+      text: aiReply,
+      supportState: resolutionPlan?.supportState,
+      isExplicitContactRequest: conversationIntent?.primaryIntent === INTENT_TYPES.SUPPORT_CONTACT_INFO,
+    });
     if (webChatIntegration && webChatKnowledgeAuthority) {
       const currentKnowledgeAuthority = await resolveAssistantKnowledgeAuthority(database, {
         tenantId: webChatIntegration.tenant_id,

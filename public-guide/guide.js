@@ -1,6 +1,6 @@
 const guideBasePath = (() => {
   const parts = (typeof window !== 'undefined' ? window.location?.pathname || '' : '').split('/').filter(Boolean);
-  return (parts.length > 0 && !['guide', 'chat', 'api', 'webhook', 'ping', 'plan', 'health'].includes(parts[0])) ? `/${parts[0]}` : '';
+  return (parts.length > 0 && !['guide', 'chat', 'api', 'webhook', 'ping', 'plan', 'health', 'attachments'].includes(parts[0])) ? `/${parts[0]}` : '';
 })();
 function guideApi(path) {
   return guideBasePath ? `${guideBasePath}${path}` : path;
@@ -394,7 +394,10 @@ async function submitGuideRequest({ value, module, board, input, submit, idempot
         ...(session ? { "X-Samcheguide-Session": session } : {}),
         ...(previewToken ? { "X-Samcheguide-Preview": previewToken } : {}),
       };
-      const uploadRes = await fetch(guideApi('/attachments'), { method: 'POST', headers, body: formData });
+      let uploadRes = await fetch(guideApi('/attachments'), { method: 'POST', headers, body: formData });
+      if (!uploadRes.ok) {
+        uploadRes = await fetch(guideApi('/guide/attachments'), { method: 'POST', headers, body: formData });
+      }
       const uploadData = await uploadRes.json().catch(() => ({}));
       if (uploadRes.ok && uploadData.resource_id) {
         attachmentResourceIds.push(uploadData.resource_id);

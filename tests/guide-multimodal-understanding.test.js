@@ -50,6 +50,7 @@ function createMockGuideDb({ resourceRow }) {
       return {
         rowCount: 1,
         rows: [{
+          id: domainId,
           domain_id: domainId,
           tenant_id: tenantId,
           assistant_id: assistantId,
@@ -60,6 +61,8 @@ function createMockGuideDb({ resourceRow }) {
           assistant_status: 'active',
           integration_enabled: true,
           hostname: 'guide.example.com',
+          slug: 'blue-dune-event-management',
+          domain_mode: 'MANAGED',
           status: 'ACTIVE',
         }],
       };
@@ -108,6 +111,7 @@ function createMockGuideDb({ resourceRow }) {
         rowCount: 1,
         rows: [{
           session_id: conversationId,
+          tenant_id: tenantId,
           experience_version: 1,
           experience_version_id: expVersionId,
           preview_mode: false,
@@ -594,4 +598,92 @@ test('AI GUIDE VISUAL GROUNDING: Visual question with unique marker VISUAL_TEST_
     delete app.locals.storage;
     delete app.locals.googleGeminiProvider;
   }
+});
+
+test('GUIDE PUBLIC ROUTE: POST /attachments and POST /:slug/attachments successfully upload files and return resource_id', async () => {
+  const secret = 'test-secret-at-least-32-chars-long-12345';
+  process.env.SAMCHEGUIDE_PUBLIC_SESSION_SECRET = secret;
+
+  const session = issuePublicConversationSession({
+    secret,
+    scope: {
+      domainId,
+      tenantId,
+      assistantId,
+      channelId: 'channel-guide-1',
+    },
+  });
+
+  const mockDatabase = createMockGuideDb({
+    resourceRow: {
+      id: resourceId,
+      tenant_id: tenantId,
+      conversation_id: conversationId,
+      media_category: 'IMAGE',
+      original_filename: 'uploaded_screen.png',
+      mime_type: 'image/png',
+      storage_key: `conversation-resources/${tenantId}/${conversationId}/${resourceId}.png`,
+      processing_status: 'READY',
+    },
+  });
+
+  const mockStorage = {
+    put: async () => {},
+  };
+
+  app.locals.database = mockDatabase;
+  app.locals.storage = mockStorage;
+
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  const { port } = server.address();
+
+  try {
+    const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+    const formData = new FormData();
+    formData.append('file', new Blob([pngBuffer], { type: 'image/png' }), 'uploaded_screen.png');
+
+    // Test POST /attachments (root domain)
+    const res1 = await fetch(`http://127.0.0.1:${port}/attachments`, {
+      method: 'POST',
+      headers: {
+        'Host': 'guide.example.com',
+        'X-Samcheguide-Session': session.token,
+      },
+      body: formData,
+    });
+    assert.equal(res1.status, 201, 'POST /attachments must succeed with 201');
+    const data1 = await res1.json();
+    assert.ok(data1.resource_id, 'Must return valid resource_id');
+
+    // Test POST /:slug/attachments (slug-based path)
+    const formData2 = new FormData();
+    formData2.append('file', new Blob([pngBuffer], { type: 'image/png' }), 'uploaded_screen.png');
+    const res2 = await fetch(`http://127.0.0.1:${port}/blue-dune-event-management/attachments`, {
+      method: 'POST',
+      headers: {
+        'Host': 'guide.example.com',
+        'X-Samcheguide-Session': session.token,
+      },
+      body: formData2,
+    });
+    assert.equal(res2.status, 201, 'POST /:slug/attachments must succeed with 201');
+    const data2 = await res2.json();
+    assert.ok(data2.resource_id, 'Must return valid resource_id on slug route');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    delete app.locals.database;
+    delete app.locals.storage;
+  }
+});
+
+test('GUIDE COMPOSER CSS: guide.css ensures textarea receives flexible width and preview is bounded', async () => {
+  const fs = await import('node:fs');
+  const css = fs.readFileSync(new URL('../public-guide/guide.css', import.meta.url), 'utf8');
+
+  assert.match(css, /\.guide-chat-form\{display:flex;flex-direction:column/);
+  assert.match(css, /\.guide-chat-form-bar\{display:flex;align-items:flex-end/);
+  assert.match(css, /\.guide-chat-form textarea\{flex:1 1 auto;width:100%/);
+  assert.match(css, /\.guide-attachment-preview/);
+  assert.match(css, /\.guide-attachment-chip/);
 });

@@ -92,6 +92,7 @@ export const TENANT_MULTIMODAL_ATTACHMENT_POLICY = Object.freeze([
   '3. NO INVENTED VISUAL OBSERVATIONS: Never say "In this image, I see [Company Name]\'s corporate events / services" unless those exact words, logos, or UI elements are actually legible and visible in the uploaded image itself. If the image shows an unrelated diagram, error message, UI screenshot, or object, report ONLY what is actually depicted in the image.',
   '4. ROLE OF BUSINESS PROFILE & KNOWLEDGE: Business Profile and Knowledge Intelligence serve as supporting context (e.g. to relate a visible diagram or error to known tenant procedures or product catalog) AFTER accurately describing visual observations, and MUST be clearly distinguished from visual evidence (e.g., "In the image, I see [X]. In relation to our company [Y]...").',
   '5. ACCURATE LIMITATION REPORTING: If an attachment cannot be inspected or is unreadable, state that clearly rather than substituting tenant profile descriptions.',
+  '6. ABSENCE OF ATTACHMENT: If the user asks what is in an image or screenshot (e.g. "ne görüyorsun", "what do you see in this screenshot"), but no attachment is present in the turn, state clearly and politely that no image was received in this message, and ask them to attach it. NEVER describe your company background, profile, or services as if they were the image content.',
 ].join('\n'));
 
 export const TENANT_PRODUCT_AWARE_SUPPORT_POLICY = Object.freeze([
