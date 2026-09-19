@@ -25,7 +25,8 @@ import crmRoutes from "./routes/crmRoutes.js";
 import conversationRoutes from "./routes/conversationRoutes.js";
 import knowledgeIntelligenceRoutes from "./routes/knowledgeIntelligenceRoutes.js";
 import guideExperienceRoutes from "./routes/guideExperienceRoutes.js";
-import { getSamcheguidePublicFeed, getWebChatPublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, persistWebChatInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus, resetWebChatConversation } from "./services/live-inbox-service.js";
+import { fileURLToPath } from 'node:url';
+import { getSamcheguidePublicFeed, getWebChatPublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, persistWebChatInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus, resetWebChatConversation, ensureWebChatConversation, ensureGuideConversation, linkConversationResourcesToMessage } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound, whatsappPhoneNumberFingerprint } from "./services/whatsapp-live-inbox-service.js";
 import { resolveMetaGraphApiVersion } from "./services/meta-graph-api-version.js";
 import { WHATSAPP_INGRESS_EVENTS, appSecretFingerprint, logWhatsAppIngressEvent } from "./services/whatsapp-webhook-ingress-observability.js";
@@ -421,7 +422,7 @@ app.get("/api/v1/health/whatsapp-diagnostics", async (_req, res) => {
 // resolved solely from the configured Guide integration, never a browser tenant
 // identifier.  Runtime intelligence remains resolved later by /chat.
 async function resolveGuideRuntimeScope(req) {
-  return resolveGuideRuntimeScopeFromRequest({ database: pool, req });
+  return resolveGuideRuntimeScopeFromRequest({ database: req.app?.locals?.database || pool, req });
 }
 
 function guideSessionScope(scope) {
@@ -430,16 +431,16 @@ function guideSessionScope(scope) {
 
 // Preview tickets are only a selector for an already-authorized private draft.
 // Hostname ownership remains the authority for tenant and assistant scope.
-async function resolveGuideExperienceForScope({ integration, previewToken }) {
+async function resolveGuideExperienceForScope({ integration, previewToken, database = pool }) {
   if (!previewToken) {
-    return resolvePublishedGuideExperience({ database: pool, tenantId: integration.tenant_id, assistantId: integration.assistant_id });
+    return resolvePublishedGuideExperience({ database, tenantId: integration.tenant_id, assistantId: integration.assistant_id });
   }
 
   const claims = verifyGuidePreviewToken(String(previewToken));
   if (claims.tenant_id !== integration.tenant_id || claims.assistant_id !== integration.assistant_id) {
     throw new GuidePreviewError('GUIDE_PREVIEW_SCOPE_MISMATCH');
   }
-  const draft = await pool.query(
+  const draft = await database.query(
     `SELECT id, tenant_id, assistant_id, version, status, experience, created_at, published_at
        FROM guide_experience_versions
       WHERE id=$1 AND tenant_id=$2 AND assistant_id=$3 AND status='DRAFT'`,
@@ -462,14 +463,15 @@ function previewModeForExperience(resolvedExperience) {
 }
 
 async function resolveGuideExperienceForRequest({ req, integration }) {
+  const database = req.app?.locals?.database || pool;
   const sessionToken = req.get('X-Samcheguide-Session');
-  const durableSession = await resolveGuideResumeSessionByToken({ database: pool, token: sessionToken, scope: integration });
+  const durableSession = await resolveGuideResumeSessionByToken({ database, token: sessionToken, scope: integration });
   if (!durableSession) {
-    return { resolved: await resolveGuideExperienceForScope({ integration, previewToken: req.get('X-Samcheguide-Preview') || req.query?.preview }), durableSession: null };
+    return { resolved: await resolveGuideExperienceForScope({ integration, previewToken: req.get('X-Samcheguide-Preview') || req.query?.preview, database }), durableSession: null };
   }
 
   if (durableSession.previewMode) {
-    const draft = await pool.query(
+    const draft = await database.query(
       `SELECT id, tenant_id, assistant_id, version, status, experience, created_at, published_at
          FROM guide_experience_versions
         WHERE tenant_id=$1 AND assistant_id=$2 AND version=$3
@@ -490,7 +492,7 @@ async function resolveGuideExperienceForRequest({ req, integration }) {
     };
   }
 
-  const resolved = await resolvePublishedGuideExperience({ database: pool, tenantId: integration.tenant_id, assistantId: integration.assistant_id });
+  const resolved = await resolvePublishedGuideExperience({ database, tenantId: integration.tenant_id, assistantId: integration.assistant_id });
   if (resolved.experience.version !== durableSession.experienceVersion || (durableSession.experienceVersionId && resolved.version?.id !== durableSession.experienceVersionId)) throw new GuideConversationError('GUIDE_SESSION_EXPERIENCE_REVOKED');
   return { resolved, durableSession };
 }
@@ -787,7 +789,14 @@ const processedWpMessages = new Set();
 // ============================================================================
 // 1. GENEL API YAPILANDIRMALARI
 // ============================================================================
-const googleGeminiProvider = createGoogleGeminiProvider();
+let googleGeminiProvider = null;
+try {
+  googleGeminiProvider = createGoogleGeminiProvider();
+} catch (geminiInitErr) {
+  if (process.env.NODE_ENV === 'production') {
+    throw geminiInitErr;
+  }
+}
 const googleGeminiEnabled = process.env.GOOGLE_GENAI_MODE?.trim().toLowerCase() === 'vertex' || Boolean(process.env.GEMINI_API_KEY);
 const knowledgeGenerationProviderName = String(process.env.KNOWLEDGE_GENERATION_PROVIDER || 'GEMINI').trim().toUpperCase();
 const knowledgeGenerationEnabled = knowledgeGenerationProviderName === 'OPENAI'
@@ -797,9 +806,14 @@ const knowledgeGenerationEnabled = knowledgeGenerationProviderName === 'OPENAI'
 // the accepted Knowledge Intelligence generation paths. The environment may
 // choose another platform-approved model without exposing that choice to tenants.
 
-const openaiClient = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+let openaiClient = null;
+try {
+  openaiClient = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY || 'dummy-test-key'
+  });
+} catch (openaiInitErr) {
+  if (process.env.NODE_ENV === 'production') throw openaiInitErr;
+}
 const salesChatService = createSalesChatService({ openaiClient, commercialFacts: salesChatCommercialFacts });
 const salesChatRateLimiter = createSalesChatRateLimiter();
 registerSalesChatRoute({ app, service: salesChatService, rateLimiter: salesChatRateLimiter });
@@ -851,11 +865,12 @@ const parseLinksToHTML = (text) => {
 
 const GEMINI_REQUEST_TIMEOUT_MS = 20000;
 
-async function requestGemini(payload, runtimeModel = googleGeminiProvider.runtimeMetadata().model) {
+async function requestGemini(payload, runtimeModel = googleGeminiProvider.runtimeMetadata().model, provider = googleGeminiProvider) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), GEMINI_REQUEST_TIMEOUT_MS);
   try {
-    return await googleGeminiProvider.generateContent({
+    const activeProvider = provider || googleGeminiProvider;
+    return await activeProvider.generateContent({
       model: runtimeModel,
       contents: payload.contents,
       generationConfig: payload.generationConfig,
@@ -867,7 +882,7 @@ async function requestGemini(payload, runtimeModel = googleGeminiProvider.runtim
     const safeCode = typeof error?.code === 'string' && /^GOOGLE_(?:VERTEX|GEMINI)_[A-Z0-9_]+$/.test(error.code)
       ? error.code
       : 'GOOGLE_GEMINI_REQUEST_FAILED';
-    console.error(`SAMCHE_GOOGLE_GEMINI_ERROR mode=${googleGeminiProvider.mode} model=${runtimeModel} code=${safeCode}`);
+    console.error(`SAMCHE_GOOGLE_GEMINI_ERROR mode=${(provider || googleGeminiProvider).mode} model=${runtimeModel} code=${safeCode}`);
     const upstreamError = new Error("Gemini request failed.");
     upstreamError.status = 502;
     upstreamError.code = safeCode;
@@ -1377,13 +1392,15 @@ async function callWpGemini(prompt, multimodalParts = null, systemInstruction = 
 async function resolvePublicConversationSession(req, scope, resolvedExperience) {
   const token = req.get('X-Samcheguide-Session');
   if (!token) return null;
-  return resolveGuideResumeSession({ database: pool, token, scope, experienceVersion: resolvedExperience.experience.version, previewMode: previewModeForExperience(resolvedExperience) });
+  const database = req?.app?.locals?.database || pool;
+  return resolveGuideResumeSession({ database, token, scope, experienceVersion: resolvedExperience.experience.version, previewMode: previewModeForExperience(resolvedExperience) });
 }
 
 async function issueOrResolvePublicConversationSession(req, scope, resolvedExperience) {
   const current = await resolvePublicConversationSession(req, scope, resolvedExperience);
   if (current) return current;
-  return issueGuideResumeSession({ database: pool, scope, experienceVersion: resolvedExperience.experience.version, experienceVersionId: resolvedExperience.experienceVersionId ?? resolvedExperience.version?.id ?? null, previewMode: previewModeForExperience(resolvedExperience) });
+  const database = req?.app?.locals?.database || pool;
+  return issueGuideResumeSession({ database, scope, experienceVersion: resolvedExperience.experience.version, experienceVersionId: resolvedExperience.experienceVersionId ?? resolvedExperience.version?.id ?? null, previewMode: previewModeForExperience(resolvedExperience) });
 }
 
 app.get(["/chat/history", "/:slug/chat/history"], async (req, res) => {
@@ -1563,7 +1580,12 @@ let chatPostHandler;
 app.post("/chat", chatPostHandler = async (req, res) => {
   console.info('CHAT_REQUEST_RECEIVED');
   try {
-    const { text, guide_module: clientModule, guide_session_state: clientGuideSessionState } = req.body;
+    const {
+      text,
+      guide_module: clientModule,
+      guide_session_state: clientGuideSessionState,
+      attachment_resource_ids: attachmentResourceIds = [],
+    } = req.body;
     if (typeof text !== "string") {
       return res.status(400).json({ error: "Message text must be a non-empty string." });
     }
@@ -1591,9 +1613,10 @@ app.post("/chat", chatPostHandler = async (req, res) => {
       if (error?.status === 503) console.error('CHAT_RESPONSE_503 stage=PUBLIC_SESSION_CONFIGURATION');
       throw error;
     }
+    const database = req.app?.locals?.database || pool;
     const userId = publicSession.sessionId;
     // --- Start: Load and Initialize Full Guide Session State ---
-    let persistedGuideState = await loadGuideResumeState({ database: pool, token: publicSession.token, scope: guideRuntimeIntegration, experienceVersion: publishedExperience.experience.version, previewMode: previewModeForExperience(publishedExperience) });
+    let persistedGuideState = await loadGuideResumeState({ database, token: publicSession.token, scope: guideRuntimeIntegration, experienceVersion: publishedExperience.experience.version, previewMode: previewModeForExperience(publishedExperience) });
 
     // Initialize default guideSessionState if not fully present
     const defaultGuideSessionState = {
@@ -1627,11 +1650,21 @@ app.post("/chat", chatPostHandler = async (req, res) => {
       content: cleanText,
       idempotencyKey: req.get("Idempotency-Key") || null,
       integration: guideRuntimeIntegration,
+      database,
     });
     if (inboxState && !inboxState.shouldInvokeAi) {
       return res.status(409).json({
         error: 'AI Guide response is unavailable while human support is active.',
         conversation_session: publicSession.token,
+      });
+    }
+
+    if (inboxState?.customerMessage?.id && Array.isArray(attachmentResourceIds) && attachmentResourceIds.length > 0) {
+      await linkConversationResourcesToMessage({
+        database,
+        tenantId: guideRuntimeIntegration.tenant_id,
+        messageId: inboxState.customerMessage.id,
+        resourceIds: attachmentResourceIds,
       });
     }
 
@@ -1688,14 +1721,14 @@ app.post("/chat", chatPostHandler = async (req, res) => {
     let runtime;
     try {
       runtime = await resolveChannelAssistantRuntime({
-        database: pool,
+        database,
         embed: knowledgeEmbedder,
         scope: guideRuntimeIntegration,
         query: cleanText,
         channelType: 'SAMCHEGUIDE',
         resolvePersona: resolveTenantRuntimePersona,
         resolveKnowledge: resolveAssistantRuntimeKnowledgeContext,
-        resolveModel: () => googleGeminiProvider.runtimeMetadata(),
+        resolveModel: () => (req.app?.locals?.googleGeminiProvider || googleGeminiProvider).runtimeMetadata(),
       });
     } catch (error) {
       console.error('CHAT_RESPONSE_503 stage=RUNTIME_CONTEXT_UNAVAILABLE code=' + (error?.code ?? 'UNKNOWN'));
@@ -1706,10 +1739,58 @@ app.post("/chat", chatPostHandler = async (req, res) => {
     }
 
     const contents = conversationHistory.length ? conversationHistory : [{ role: 'user', parts: [{ text: cleanText }] }];
+
+    let guideMultimodal = { documents: [], images: [], promptSection: '' };
+    if (guideRuntimeIntegration) {
+      try {
+        let storage = req.app?.locals?.storage || null;
+        if (!storage) {
+          try { storage = createConversationResourceStorage(); } catch {}
+        }
+        guideMultimodal = await resolveConversationMultimodalContext({
+          database,
+          storage,
+          tenantId: guideRuntimeIntegration.tenant_id,
+          conversationId: inboxState?.conversation?.id || userId,
+          conversationIds: [inboxState?.conversation?.id, userId].filter(Boolean),
+          currentResourceIds: Array.isArray(attachmentResourceIds) ? attachmentResourceIds : [],
+          maxAttachments: 3,
+        });
+      } catch (mmErr) {
+        console.warn('GUIDE_MULTIMODAL_RESOLVE_WARN:', mmErr?.message);
+      }
+    }
+
+    if (guideMultimodal.images.length > 0 || guideMultimodal.documents.length > 0) {
+      const guidePromptText = (cleanText && !/^\[Attached: .*\]$/i.test(cleanText))
+        ? cleanText
+        : 'Please analyze this attached file or image and assist me with it.';
+
+      const formattedParts = formatGeminiMultimodalParts({
+        text: guidePromptText,
+        images: guideMultimodal.images,
+        documentContext: guideMultimodal.documents.map((d) => d.safeContextText).join('\n\n'),
+      });
+
+      if (formattedParts.length > 0) {
+        let replaced = false;
+        for (let i = contents.length - 1; i >= 0; i--) {
+          if (contents[i].role === 'user') {
+            contents[i].parts = formattedParts;
+            replaced = true;
+            break;
+          }
+        }
+        if (!replaced) {
+          contents.push({ role: 'user', parts: formattedParts });
+        }
+      }
+    }
+
     const guidePageContextSummary = buildGuidePageContextSummary(guideSessionState?.sharedContext?.page_context || guideSessionState?.page_context);
     const runtimeSystemInstruction = buildTenantRuntimeSystemInstruction({
       persona: runtime.persona,
-      knowledgeContext: [guideContextSummary, runtime.knowledge.knowledgeContext].filter(Boolean).join('\n\n'),
+      knowledgeContext: [guideContextSummary, runtime.knowledge.knowledgeContext, guideMultimodal.promptSection].filter(Boolean).join('\n\n'),
       channelRules: "Return safe, readable HTML suitable for the AI Guide interface.",
       contextualIntelligence: guidePageContextSummary,
     });
@@ -1728,10 +1809,11 @@ app.post("/chat", chatPostHandler = async (req, res) => {
       console.info('CHAT_GEMINI_STARTED');
       let data;
       try {
+        const activeGeminiProvider = req.app?.locals?.googleGeminiProvider || googleGeminiProvider;
         data = await requestGemini({
           contents,
           systemInstruction: { parts: [{ text: runtimeSystemInstruction }] }
-        }, runtime.model);
+        }, runtime.model, activeGeminiProvider);
       } catch (error) {
         const code = typeof error?.code === 'string' && /^GOOGLE_(?:VERTEX|GEMINI)_[A-Z0-9_]+$/.test(error.code)
           ? error.code
@@ -1760,6 +1842,7 @@ app.post("/chat", chatPostHandler = async (req, res) => {
         handlingVersion: inboxState.handlingVersion,
         knowledgeAuthority: inboxState.knowledgeAuthority,
         idempotencyKey: req.get("Idempotency-Key") ? `samcheguide-assistant:${req.get("Idempotency-Key")}` : null,
+        database,
       });
       if (!persisted.delivered) {
         return res.status(202).json({
@@ -1782,7 +1865,7 @@ app.post("/chat", chatPostHandler = async (req, res) => {
 
     // --- Start: Save Full Guide Session State ---
     await saveGuideResumeState({
-      database: pool,
+      database,
       token: publicSession.token,
       scope: guideRuntimeIntegration,
       experienceVersion: publishedExperience.experience.version,
@@ -2198,19 +2281,34 @@ app.post(['/api/v1/public/web-chat/attachments', '/api/v1/public/web-chat/sessio
       return res.status(401).json({ error: 'Web Chat session is invalid.' });
     }
 
-    const integration = await resolvePublicWebChatIntegration({ database: pool, widgetKey: session.widgetKey });
+    const database = req.app?.locals?.database || pool;
+    const integration = await resolvePublicWebChatIntegration({ database, widgetKey: session.widgetKey });
     if (!integration) return res.status(401).json({ error: 'Web Chat integration is unavailable.' });
 
     if (!req.file || !Buffer.isBuffer(req.file.buffer)) {
       return res.status(400).json({ error: 'A valid file attachment is required.' });
     }
 
-    const storage = createConversationResourceStorage();
+    const conversation = await ensureWebChatConversation({
+      database,
+      integration,
+      externalSessionId: session.sessionId,
+    });
+
+    let storage = req.app?.locals?.storage || null;
+    if (!storage) {
+      try {
+        storage = createConversationResourceStorage();
+      } catch (storageErr) {
+        console.warn('STORAGE_CLIENT_INIT_WARN:', storageErr?.message);
+      }
+    }
+
     const resource = await ingestConversationAttachment({
-      database: pool,
+      database,
       storage,
       tenantId: integration.tenant_id,
-      conversationId: session.sessionId,
+      conversationId: conversation?.id || session.sessionId,
       file: req.file,
       sourceType: 'UPLOAD',
     });
@@ -2243,12 +2341,27 @@ app.post(['/guide/attachments', '/:slug/guide/attachments', '/guide/:slug/attach
       return res.status(400).json({ error: 'A valid file attachment is required.' });
     }
 
-    const storage = createConversationResourceStorage();
+    const database = req.app?.locals?.database || pool;
+    const conversation = await ensureGuideConversation({
+      database,
+      integration: guideRuntimeIntegration,
+      externalSessionId: publicSession.sessionId,
+    });
+
+    let storage = req.app?.locals?.storage || null;
+    if (!storage) {
+      try {
+        storage = createConversationResourceStorage();
+      } catch (storageErr) {
+        console.warn('STORAGE_CLIENT_INIT_WARN:', storageErr?.message);
+      }
+    }
+
     const resource = await ingestConversationAttachment({
-      database: pool,
+      database,
       storage,
       tenantId: guideRuntimeIntegration.tenant_id,
-      conversationId: publicSession.sessionId,
+      conversationId: conversation?.id || publicSession.sessionId,
       file: req.file,
       sourceType: 'UPLOAD',
     });
@@ -3190,7 +3303,11 @@ app.post("/api/chat/reset", async (req, res) => {
 
 app.post("/api/chat", async (req, res) => {
   try {
+    const database = req.app?.locals?.database || pool;
     const userMessage = req.body.message;
+    const attachmentResourceIds = Array.isArray(req.body.attachment_resource_ids)
+      ? req.body.attachment_resource_ids
+      : (req.body.attachment_resource_id ? [req.body.attachment_resource_id] : []);
 
     if (typeof userMessage !== "string" || userMessage.trim().length === 0) {
       return res.status(400).json({ error: "A non-empty message is required." });
@@ -3205,7 +3322,7 @@ app.post("/api/chat", async (req, res) => {
           secret: configuredPublicWebChatSessionSecret(),
         });
         webChatIntegration = await resolvePublicWebChatIntegration({
-          database: pool,
+          database,
           widgetKey: webChatSession.widgetKey,
         });
       } catch (error) {
@@ -3217,7 +3334,7 @@ app.post("/api/chat", async (req, res) => {
     const userId = webChatSession?.sessionId ?? getUserId(req);
     const normalizedMessage = userMessage.trim();
     const webChatKnowledgeAuthority = webChatIntegration
-      ? await resolveAssistantKnowledgeAuthority(pool, {
+      ? await resolveAssistantKnowledgeAuthority(database, {
         tenantId: webChatIntegration.tenant_id,
         assistantId: webChatIntegration.assistant_id,
       })
@@ -3236,7 +3353,7 @@ app.post("/api/chat", async (req, res) => {
       : rawMemory;
     const cleanMemory = authorityMemory.map(msg => ({
       role: msg.role,
-      content: msg.content ? String(msg.content) : ""
+      content: Array.isArray(msg.content) ? msg.content : (msg.content ? String(msg.content) : "")
     }));
 
     let webChatRuntimeKnowledge = null;
@@ -3244,7 +3361,7 @@ app.post("/api/chat", async (req, res) => {
     if (webChatIntegration) {
       try {
         webChatRuntimePersona = await resolveTenantRuntimePersona({
-          database: pool,
+          database,
           tenantId: webChatIntegration.tenant_id,
           assistantId: webChatIntegration.assistant_id,
         });
@@ -3252,7 +3369,7 @@ app.post("/api/chat", async (req, res) => {
           return res.status(503).json({ error: 'Web Chat assistant configuration is temporarily unavailable.' });
         }
         webChatRuntimeKnowledge = await resolveAssistantRuntimeKnowledgeContext({
-          database: pool,
+          database,
           embed: knowledgeEmbedder,
           tenantId: webChatIntegration.tenant_id,
           assistantId: webChatIntegration.assistant_id,
@@ -3445,8 +3562,16 @@ app.post("/api/chat", async (req, res) => {
           content: normalizedMessage,
           integration: webChatIntegration,
           visitorContext: visitorHandoffContext,
-          database: pool,
+          database,
         });
+        if (webChatInboundState?.customerMessage?.id && attachmentResourceIds.length > 0) {
+          await linkConversationResourcesToMessage({
+            database,
+            tenantId: webChatIntegration.tenant_id,
+            messageId: webChatInboundState.customerMessage.id,
+            resourceIds: attachmentResourceIds,
+          });
+        }
       } catch (inboundErr) {
         console.warn('WEB_CHAT_INBOUND_PERSIST_WARN:', inboundErr.message);
       }
@@ -3458,6 +3583,27 @@ app.post("/api/chat", async (req, res) => {
           text: "Temsilcimiz şu anda görüşmede, mesajınız iletildi.",
           session: webChatSession?.sessionId || null,
         });
+      }
+    }
+
+    let multimodalContext = { documents: [], images: [], promptSection: '' };
+    if (webChatIntegration) {
+      try {
+        let storage = req.app?.locals?.storage || null;
+        if (!storage) {
+          try { storage = createConversationResourceStorage(); } catch {}
+        }
+        multimodalContext = await resolveConversationMultimodalContext({
+          database,
+          storage,
+          tenantId: webChatIntegration.tenant_id,
+          conversationId: webChatInboundState?.conversation?.id || webChatSession?.sessionId,
+          conversationIds: [webChatInboundState?.conversation?.id, webChatSession?.sessionId].filter(Boolean),
+          currentResourceIds: attachmentResourceIds,
+          maxAttachments: 3,
+        });
+      } catch (mmErr) {
+        console.warn('WEBCHAT_MULTIMODAL_RESOLVE_WARN:', mmErr?.message);
       }
     }
 
@@ -3959,7 +4105,7 @@ If the user already provided sector info, NEVER ask again.`
     if (webChatIntegration && webChatRuntimePersona) {
       messages[0].content = buildTenantRuntimeSystemInstruction({
         persona: webChatRuntimePersona,
-        knowledgeContext: webChatRuntimeKnowledge?.knowledgeContext ?? '',
+        knowledgeContext: [webChatRuntimeKnowledge?.knowledgeContext, multimodalContext.promptSection].filter(Boolean).join('\n\n'),
         channelRules: 'Return safe HTML suitable for Web Chat. Do not reveal internal metadata.',
         contextualIntelligence: webChatContextualSection,
         conversationIntelligence: conversationIntelligenceSection,
@@ -3967,6 +4113,9 @@ If the user already provided sector info, NEVER ask again.`
       });
     } else if (webChatRuntimeKnowledge) {
       messages[0].content = appendRuntimeKnowledgeToSystemInstruction(messages[0].content, webChatRuntimeKnowledge);
+      if (multimodalContext.promptSection) {
+        messages[0].content = messages[0].content + '\n\n' + multimodalContext.promptSection;
+      }
       if (webChatContextualSection) {
         messages[0].content = messages[0].content + '\n\n' + webChatContextualSection;
       }
@@ -3977,6 +4126,9 @@ If the user already provided sector info, NEVER ask again.`
         messages[0].content = messages[0].content + '\n\n' + conversationIntelligenceSection;
       }
     } else {
+      if (multimodalContext.promptSection) {
+        messages[0].content = messages[0].content + '\n\n' + multimodalContext.promptSection;
+      }
       if (webChatContextualSection) {
         messages[0].content = messages[0].content + '\n\n' + webChatContextualSection;
       }
@@ -3988,14 +4140,39 @@ If the user already provided sector info, NEVER ask again.`
       }
     }
 
-    const completion = await openaiClient.chat.completions.create({
+    if (multimodalContext.images.length > 0 || multimodalContext.documents.length > 0) {
+      const promptText = (normalizedMessage && !/^\[Attached: .*\]$/i.test(normalizedMessage))
+        ? normalizedMessage
+        : 'Please analyze this attached file or image and assist me with it.';
+
+      const formattedContent = formatOpenAiMultimodalContent({
+        text: promptText,
+        images: multimodalContext.images,
+        documentContext: multimodalContext.documents.map((d) => d.safeContextText).join('\n\n'),
+      });
+
+      let replaced = false;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'user') {
+          messages[i].content = formattedContent;
+          replaced = true;
+          break;
+        }
+      }
+      if (!replaced) {
+        messages.push({ role: 'user', content: formattedContent });
+      }
+    }
+
+    const activeOpenai = req.app?.locals?.openaiClient || openaiClient;
+    const completion = await activeOpenai.chat.completions.create({
       model: "gpt-4o-mini",
       messages
     });
 
     const aiReply = completion.choices[0].message.content;
     if (webChatIntegration && webChatKnowledgeAuthority) {
-      const currentKnowledgeAuthority = await resolveAssistantKnowledgeAuthority(pool, {
+      const currentKnowledgeAuthority = await resolveAssistantKnowledgeAuthority(database, {
         tenantId: webChatIntegration.tenant_id,
         assistantId: webChatIntegration.assistant_id,
       });
@@ -4014,7 +4191,7 @@ If the user already provided sector info, NEVER ask again.`
           conversationId: webChatInboundState.conversation.id,
           content: aiReply,
           handlingVersion: webChatInboundState.handlingVersion,
-          database: pool,
+          database,
         });
       } catch (outboundErr) {
         console.warn('WEB_CHAT_OUTBOUND_PERSIST_WARN:', outboundErr.message);
@@ -4630,4 +4807,9 @@ async function startServer() {
   }
 }
 
-startServer();
+const isDirectExecution = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+if (isDirectExecution && process.env.NODE_ENV !== 'test') {
+  startServer();
+}
+
+export { app, openaiClient, requestGemini, googleGeminiProvider, chatPostHandler };

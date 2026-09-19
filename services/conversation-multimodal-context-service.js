@@ -104,28 +104,42 @@ export async function resolveConversationMultimodalContext({
   storage,
   tenantId,
   conversationId,
+  conversationIds = [],
   currentResourceIds = [],
   maxAttachments = 2,
   maxDocumentChars = 4000,
 }) {
-  if (!database?.query || !UUID_REGEX.test(String(tenantId || '')) || !UUID_REGEX.test(String(conversationId || ''))) {
+  if (!database?.query || !UUID_REGEX.test(String(tenantId || ''))) {
     return { documents: [], images: [], promptSection: '' };
   }
+
+  const allConvIds = [...(Array.isArray(conversationIds) ? conversationIds : []), conversationId].filter((id) => UUID_REGEX.test(String(id || '')));
+  const uniqueConvIds = Array.from(new Set(allConvIds));
 
   let querySql;
   let queryParams;
 
-  if (Array.isArray(currentResourceIds) && currentResourceIds.length > 0) {
-    const validIds = currentResourceIds.filter((id) => UUID_REGEX.test(String(id)));
+  const validResourceIds = (Array.isArray(currentResourceIds) ? currentResourceIds : []).filter((id) => UUID_REGEX.test(String(id || '')));
+
+  if (validResourceIds.length > 0) {
+    if (uniqueConvIds.length > 0) {
+      querySql = `SELECT * FROM conversation_resources
+        WHERE tenant_id = $1 AND (conversation_id = ANY($2::uuid[]) OR id = ANY($3::uuid[])) AND id = ANY($3::uuid[])
+        ORDER BY created_at DESC LIMIT $4`;
+      queryParams = [tenantId, uniqueConvIds, validResourceIds, maxAttachments];
+    } else {
+      querySql = `SELECT * FROM conversation_resources
+        WHERE tenant_id = $1 AND id = ANY($2::uuid[])
+        ORDER BY created_at DESC LIMIT $3`;
+      queryParams = [tenantId, validResourceIds, maxAttachments];
+    }
+  } else if (uniqueConvIds.length > 0) {
     querySql = `SELECT * FROM conversation_resources
-      WHERE tenant_id = $1 AND conversation_id = $2 AND id = ANY($3::uuid[])
-      ORDER BY created_at DESC LIMIT $4`;
-    queryParams = [tenantId, conversationId, validIds, maxAttachments];
-  } else {
-    querySql = `SELECT * FROM conversation_resources
-      WHERE tenant_id = $1 AND conversation_id = $2 AND processing_status = 'READY'
+      WHERE tenant_id = $1 AND conversation_id = ANY($2::uuid[]) AND processing_status = 'READY'
       ORDER BY created_at DESC LIMIT $3`;
-    queryParams = [tenantId, conversationId, maxAttachments];
+    queryParams = [tenantId, uniqueConvIds, maxAttachments];
+  } else {
+    return { documents: [], images: [], promptSection: '' };
   }
 
   const result = await database.query(querySql, queryParams);
@@ -154,10 +168,21 @@ export async function resolveConversationMultimodalContext({
       if (storage && typeof storage.get === 'function' && res.storage_key) {
         try {
           const stream = await storage.get({ key: res.storage_key });
-          const chunks = [];
-          for await (const chunk of stream) chunks.push(chunk);
-          buffer = Buffer.concat(chunks);
-        } catch {}
+          if (Buffer.isBuffer(stream)) {
+            buffer = stream;
+          } else if (Array.isArray(stream)) {
+            buffer = Buffer.concat(stream.map((b) => (Buffer.isBuffer(b) ? b : Buffer.from(b))));
+          } else if (stream && typeof stream.transformToByteArray === 'function') {
+            const bytes = await stream.transformToByteArray();
+            buffer = Buffer.from(bytes);
+          } else if (stream && (typeof stream[Symbol.asyncIterator] === 'function' || typeof stream[Symbol.iterator] === 'function')) {
+            const chunks = [];
+            for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            buffer = Buffer.concat(chunks);
+          }
+        } catch (storageErr) {
+          console.warn('STORAGE_IMAGE_RETRIEVAL_WARN:', storageErr?.message || storageErr);
+        }
       }
       images.push({
         id: res.id,
@@ -203,8 +228,9 @@ export function formatGeminiMultimodalParts({ text, images = [], documentContext
   if (combinedText) parts.push({ text: combinedText });
 
   for (const img of images) {
-    if (img.buffer && Buffer.isBuffer(img.buffer)) {
-      parts.push(buildGeminiImagePart({ mimeType: img.mimeType, bytes: img.buffer }));
+    const buffer = img.buffer || (img.base64 ? Buffer.from(img.base64, 'base64') : null);
+    if (buffer && Buffer.isBuffer(buffer)) {
+      parts.push(buildGeminiImagePart({ mimeType: img.mimeType, bytes: buffer }));
     }
   }
   return parts;

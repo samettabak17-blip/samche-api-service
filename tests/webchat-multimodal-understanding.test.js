@@ -1,3 +1,8 @@
+process.env.DATABASE_URL ||= 'postgres://test:test@127.0.0.1:5432/test';
+process.env.JWT_SECRET ||= 'test-jwt-secret-at-least-32-chars-long';
+process.env.OPENAI_API_KEY ||= 'test-openai-key';
+process.env.NODE_ENV = 'test';
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -6,10 +11,13 @@ import {
   resolveConversationMultimodalContext,
 } from '../services/conversation-multimodal-context-service.js';
 import { classifyConversationIntent, evaluateSupportResolutionPlan, RESOLUTION_ACTIONS } from '../services/conversation-intelligence-service.js';
+import { issuePublicWebChatSession } from '../services/public-web-chat-session.js';
+import { app } from '../app.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
 const conversationId = '22222222-2222-4222-8222-222222222222';
 const crossTenantId = '99999999-9999-4999-8999-999999999999';
+const resourceId = '33333333-3333-4333-8333-333333333333';
 
 test('WEBCHAT MULTIMODAL: Screenshot and image upload is ingested and persisted with tenant isolation', async () => {
   const dbCalls = [];
@@ -142,4 +150,258 @@ test('WEBCHAT MULTIMODAL ISOLATION: Cross-tenant attachment resolution fails clo
 
   assert.equal(isolated.images.length, 0);
   assert.equal(isolated.documents.length, 0);
+});
+
+const assistantId = '44444444-4444-4444-8444-444444444444';
+const profileId = '55555555-5555-4555-8555-555555555555';
+const configId = '66666666-6666-4666-8666-666666666666';
+
+function createMockWebChatDb({ resourceRow }) {
+  return {
+    connect: async () => ({
+      query: async (sql) => {
+        if (sql.includes('SELECT * FROM conversations')) {
+          return { rowCount: 1, rows: [{ id: conversationId, tenant_id: tenantId, channel_id: 'channel-1', handling_mode: 'AI', status: 'open', handling_version: 1 }] };
+        }
+        if (sql.includes('INSERT INTO conversation_messages') || sql.includes('conversation_messages')) {
+          return { rows: [{ id: 'msg-1', tenant_id: tenantId, conversation_id: conversationId, sender_type: 'CUSTOMER', content: 'What is this?' }] };
+        }
+        return { rowCount: 1, rows: [] };
+      },
+      release: () => {},
+    }),
+    query: async (sql) => {
+      if (sql.includes('channel_integrations') || sql.includes('integration_key') || sql.includes('widget_key')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            tenant_id: tenantId,
+            channel_id: 'channel-1',
+            assistant_id: assistantId,
+            channel_type: 'WEB_CHAT',
+            channel_status: 'active',
+            channel_name: 'Web Chat',
+            assistant_status: 'active',
+            assistant_name: 'SamChe Assistant',
+            config: {},
+          }],
+        };
+      }
+      if (sql.includes('ai_assistants') && (sql.includes('knowledge_authority_version') || sql.includes('active_configuration_version_id') || sql.includes('assistant_configuration_versions'))) {
+        if (sql.includes('knowledge_authority_version') && !sql.includes('assistant_configuration_versions')) {
+          return {
+            rowCount: 1,
+            rows: [{
+              assistant_id: assistantId,
+              knowledge_authority_version: '1',
+            }],
+          };
+        }
+        return {
+          rowCount: 1,
+          rows: [{
+            id: configId,
+            configuration_data: { assistant_identity: 'SamChe AI', supported_languages: ['en', 'tr'] },
+            configuration_schema_version: 2,
+            source_profile_version_id: profileId,
+            assistant_metadata_name: 'SamChe AI',
+            active_business_profile_version_id: profileId,
+            active_business_profile: { company_identity: 'SamChe LLC', company_display_name: 'SamChe LLC' },
+            profile_schema_version: 2,
+          }],
+        };
+      }
+      if (sql.includes('conversation_resources')) {
+        return {
+          rowCount: resourceRow ? 1 : 0,
+          rows: resourceRow ? [resourceRow] : [],
+        };
+      }
+      if (sql.includes('conversations')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: conversationId,
+            tenant_id: tenantId,
+            channel_id: 'channel-1',
+            handling_mode: 'AI',
+            status: 'open',
+            handling_version: 1,
+          }],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+}
+
+test('WEBCHAT RUNTIME BOUNDARY: Browser message with conversation image resource invokes OpenAI provider with real image_url payload', async () => {
+  const secret = 'test-secret-at-least-32-chars-long-12345';
+  process.env.WEB_CHAT_PUBLIC_SESSION_SECRET = secret;
+
+  const session = issuePublicWebChatSession({
+    widgetKey: 'wch_live_widget_123',
+    secret,
+  });
+
+  const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xaa, 0xbb, 0xcc]);
+  let capturedOpenAiPayload = null;
+
+  const mockOpenai = {
+    chat: {
+      completions: {
+        create: async (payload) => {
+          capturedOpenAiPayload = payload;
+          return {
+            choices: [{
+              message: {
+                content: '<p>I see the error screenshot showing connection timeout on port 443.</p>',
+              },
+            }],
+          };
+        },
+      },
+    },
+  };
+
+  const mockStorage = {
+    get: async () => pngBytes,
+  };
+
+  const mockDatabase = createMockWebChatDb({
+    resourceRow: {
+      id: resourceId,
+      tenant_id: tenantId,
+      conversation_id: conversationId,
+      media_category: 'IMAGE',
+      original_filename: 'error_screenshot.png',
+      mime_type: 'image/png',
+      storage_key: `conversation-resources/${tenantId}/${conversationId}/${resourceId}.png`,
+      processing_status: 'READY',
+    },
+  });
+
+  app.locals.database = mockDatabase;
+  app.locals.storage = mockStorage;
+  app.locals.openaiClient = mockOpenai;
+
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  const { port } = server.address();
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Samche-Web-Chat-Session': session.token,
+      },
+      body: JSON.stringify({
+        message: '[Attached: error_screenshot.png]',
+        attachment_resource_ids: [resourceId],
+      }),
+    });
+
+    const body = await res.json();
+    if (res.status !== 200) {
+      console.error('CHAT_ERROR_RESPONSE status=' + res.status, body);
+    }
+    assert.equal(res.status, 200);
+    assert.match(body.reply, /error screenshot showing connection timeout/);
+
+    assert.ok(capturedOpenAiPayload, 'OpenAI completions create MUST be called');
+    assert.equal(capturedOpenAiPayload.model, 'gpt-4o-mini');
+
+    const userMessage = capturedOpenAiPayload.messages.find((m) => m.role === 'user');
+    assert.ok(userMessage, 'User message must be present in messages array');
+    assert.ok(Array.isArray(userMessage.content), 'Active model user content MUST be a multimodal array, not a flattened string');
+
+    const textPart = userMessage.content.find((part) => part.type === 'text');
+    const imagePart = userMessage.content.find((part) => part.type === 'image_url');
+
+    assert.ok(textPart, 'Multimodal payload must contain text part');
+    assert.ok(imagePart, 'Multimodal payload must contain image_url part');
+    assert.equal(imagePart.image_url.url, `data:image/png;base64,${pngBytes.toString('base64')}`);
+    assert.notEqual(userMessage.content, '[Attached: error_screenshot.png]', 'Must NOT be filename-only text fallback');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    delete app.locals.database;
+    delete app.locals.storage;
+    delete app.locals.openaiClient;
+  }
+});
+test('WEBCHAT RUNTIME BOUNDARY: Browser message with PDF document invokes OpenAI provider with extracted document text', async () => {
+  const secret = 'test-secret-at-least-32-chars-long-12345';
+  process.env.WEB_CHAT_PUBLIC_SESSION_SECRET = secret;
+
+  const session = issuePublicWebChatSession({
+    widgetKey: 'wch_live_widget_123',
+    secret,
+  });
+
+  let capturedOpenAiPayload = null;
+  const mockOpenai = {
+    chat: {
+      completions: {
+        create: async (payload) => {
+          capturedOpenAiPayload = payload;
+          return {
+            choices: [{
+              message: {
+                content: '<p>Invoice #INV-2026-90 is confirmed for $450.00.</p>',
+              },
+            }],
+          };
+        },
+      },
+    },
+  };
+
+  const mockDatabase = createMockWebChatDb({
+    resourceRow: {
+      id: resourceId,
+      tenant_id: tenantId,
+      conversation_id: conversationId,
+      media_category: 'DOCUMENT',
+      original_filename: 'invoice_90.pdf',
+      mime_type: 'application/pdf',
+      extracted_text: 'Invoice #INV-2026-90: Total $450.00 for AC Service',
+      processing_status: 'READY',
+    },
+  });
+
+  app.locals.database = mockDatabase;
+  app.locals.storage = { get: async () => null };
+  app.locals.openaiClient = mockOpenai;
+
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  const { port } = server.address();
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Samche-Web-Chat-Session': session.token,
+      },
+      body: JSON.stringify({
+        message: 'Can you check this invoice?',
+        attachment_resource_ids: [resourceId],
+      }),
+    });
+
+    assert.equal(res.status, 200);
+    assert.ok(capturedOpenAiPayload, 'OpenAI completions create MUST be called');
+
+    const userMessage = capturedOpenAiPayload.messages.find((m) => m.role === 'user');
+    assert.ok(userMessage, 'User message must be present');
+    assert.match(userMessage.content, /Invoice #INV-2026-90/);
+    assert.match(userMessage.content, /<customer_document_evidence>/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    delete app.locals.database;
+    delete app.locals.storage;
+    delete app.locals.openaiClient;
+  }
 });

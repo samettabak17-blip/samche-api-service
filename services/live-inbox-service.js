@@ -139,8 +139,23 @@ export async function getSamcheguidePublicHistory({ externalSessionId, integrati
   }));
 }
 
-export async function persistSamcheguideInbound({ externalSessionId, content, idempotencyKey = null, integration: suppliedIntegration = null, visitorContext = null }) {
-  const client = await pool.connect();
+export async function ensureGuideConversation({ database = pool, integration, externalSessionId }) {
+  if (!integration || !externalSessionId) return null;
+  const externalConversationId = publicConversationKey(externalSessionId);
+  const insertResult = await database.query(
+    `INSERT INTO conversations
+      (tenant_id, channel_id, external_conversation_id, customer_external_id, last_activity_at)
+     VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+     ON CONFLICT (channel_id, external_conversation_id)
+     DO UPDATE SET last_activity_at = CURRENT_TIMESTAMP
+     RETURNING *`,
+    [integration.tenant_id, integration.channel_id, externalConversationId, customerReference(externalSessionId)]
+  );
+  return insertResult.rows[0];
+}
+
+export async function persistSamcheguideInbound({ externalSessionId, content, idempotencyKey = null, integration: suppliedIntegration = null, visitorContext = null, database = pool }) {
+  const client = await database.connect();
   try {
     await client.query('BEGIN');
     const integration = suppliedIntegration === null ? await loadSamcheguideIntegration(client) : resolvedGuideIntegration(suppliedIntegration);
@@ -321,6 +336,48 @@ export async function resetWebChatConversation({ externalSessionId, integration,
   } finally {
     client.release();
   }
+}
+
+export async function ensureWebChatConversation({ database = pool, integration, externalSessionId, visitorContext = null }) {
+  if (!integration || !externalSessionId) return null;
+  const directKey = String(externalSessionId);
+  const hashedKey = publicConversationKey(externalSessionId);
+
+  const existingCheck = await database.query(
+    `SELECT * FROM conversations
+      WHERE tenant_id = $1 AND channel_id = $2
+        AND (external_conversation_id = $3 OR external_conversation_id = $4)
+      LIMIT 1`,
+    [integration.tenant_id, integration.channel_id, directKey, hashedKey]
+  );
+
+  if (existingCheck.rowCount > 0) {
+    return existingCheck.rows[0];
+  }
+
+  const insertResult = await database.query(
+    `INSERT INTO conversations
+      (tenant_id, channel_id, external_conversation_id, customer_external_id, last_activity_at, visitor_context)
+     VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5::jsonb)
+     ON CONFLICT (channel_id, external_conversation_id)
+     DO UPDATE SET last_activity_at = CURRENT_TIMESTAMP
+     RETURNING *`,
+    [integration.tenant_id, integration.channel_id, directKey, customerReference(externalSessionId), visitorContext ? JSON.stringify(visitorContext) : null]
+  );
+  return insertResult.rows[0];
+}
+
+export async function linkConversationResourcesToMessage({ database = pool, tenantId, messageId, resourceIds = [] }) {
+  if (!database?.query || !messageId || !Array.isArray(resourceIds) || resourceIds.length === 0) return 0;
+  const validIds = resourceIds.filter(id => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(id)));
+  if (validIds.length === 0) return 0;
+  const res = await database.query(
+    `UPDATE conversation_resources
+        SET message_id = $1, updated_at = CURRENT_TIMESTAMP
+      WHERE tenant_id = $2 AND id = ANY($3::uuid[])`,
+    [messageId, tenantId, validIds]
+  );
+  return res.rowCount || 0;
 }
 
 export async function persistWebChatInbound({ externalSessionId, content, idempotencyKey = null, integration, visitorContext = null, database = pool }) {

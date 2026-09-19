@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS conversation_resources (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
   conversation_id UUID NOT NULL,
-  message_id UUID NOT NULL,
+  message_id UUID,
   source_type VARCHAR(32) NOT NULL CHECK (source_type IN ('UPLOAD', 'WHATSAPP_MEDIA', 'URL')),
   media_category VARCHAR(24) NOT NULL CHECK (media_category IN ('DOCUMENT', 'IMAGE', 'LINK')),
   original_filename VARCHAR(255),
