@@ -1977,21 +1977,28 @@ function extractWebChatSessionToken(req) {
 app.get("/api/chat/history", async (req, res) => {
   const sessionToken = extractWebChatSessionToken(req);
   const secret = configuredPublicWebChatSessionSecret();
+  const database = req.app?.locals?.database || pool;
 
   if (sessionToken && secret) {
     try {
       const session = verifyPublicWebChatSession(sessionToken, { secret });
-      const integration = await resolvePublicWebChatIntegration({ database: pool, widgetKey: session.widgetKey });
+      const integration = await resolvePublicWebChatIntegration({ database, widgetKey: session.widgetKey });
       if (!integration) return res.status(401).json({ error: 'Web Chat session is invalid.' });
 
       const feed = await getWebChatPublicFeed({
         externalSessionId: session.sessionId,
         integration,
-        database: pool,
+        database,
       });
 
       if (feed && feed.messages.length > 0) {
-        return res.json(feed.messages.map(({ role, content, created_at }) => ({ role, content, created_at })));
+        return res.json(feed.messages.map(({ id, role, sender_type, content, created_at }) => ({
+          id,
+          role,
+          sender_type,
+          content,
+          created_at,
+        })));
       }
 
       const mem = webMemoryStore[session.sessionId] || [];
@@ -2005,6 +2012,92 @@ app.get("/api/chat/history", async (req, res) => {
 
   const userId = getUserId(req);
   res.json((webMemoryStore[userId] || []).map(({ role, content }) => ({ role, content })));
+});
+
+app.get(["/api/chat/live", "/api/v1/public/web-chat/live"], async (req, res) => {
+  const sessionToken = extractWebChatSessionToken(req);
+  const secret = configuredPublicWebChatSessionSecret();
+
+  if (!sessionToken || !secret) {
+    return res.status(401).json({ error: 'Web Chat session is required.' });
+  }
+
+  let session;
+  try {
+    session = verifyPublicWebChatSession(sessionToken, { secret });
+  } catch (err) {
+    return res.status(401).json({ error: 'Web Chat session is invalid.' });
+  }
+
+  const database = req.app?.locals?.database || pool;
+  const integration = await resolvePublicWebChatIntegration({ database, widgetKey: session.widgetKey });
+  if (!integration) return res.status(404).json({ error: 'Web Chat integration is unavailable.' });
+
+  const feed = await getWebChatPublicFeed({
+    externalSessionId: session.sessionId,
+    integration,
+    database,
+  });
+
+  if (!feed?.conversationId) {
+    return res.status(404).json({ error: 'Conversation is unavailable.' });
+  }
+
+  await startLiveEventListener();
+
+  res.status(200);
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders?.();
+  res.write('event: connected\ndata: {}\n\n');
+
+  const unsubscribe = subscribeTenantEvents(feed.tenantId, async (event) => {
+    if (event.conversation_id !== feed.conversationId) return;
+
+    if (event.type === 'AGENT_MESSAGE') {
+      try {
+        const client = await database.connect();
+        try {
+          const msgResult = await client.query(
+            `SELECT id, sender_type, content, created_at
+               FROM conversation_messages
+              WHERE conversation_id = $1 AND tenant_id = $2 AND sender_type = 'AGENT'
+              ORDER BY created_at DESC, id DESC
+              LIMIT 1`,
+            [feed.conversationId, feed.tenantId]
+          );
+          if (msgResult.rows[0]) {
+            const m = msgResult.rows[0];
+            res.write(`event: message\ndata: ${JSON.stringify({
+              id: m.id,
+              sender_type: m.sender_type,
+              role: 'agent',
+              content: m.content,
+              created_at: m.created_at,
+            })}\n\n`);
+          }
+        } finally {
+          client.release();
+        }
+      } catch (err) {
+        console.warn('WEBCHAT_LIVE_AGENT_FETCH_WARN:', err?.message);
+      }
+    } else if (event.type === 'RETURN_TO_AI') {
+      res.write(`event: mode_change\ndata: ${JSON.stringify({ handling_mode: 'AI' })}\n\n`);
+    } else if (event.type === 'TAKEOVER') {
+      res.write(`event: mode_change\ndata: ${JSON.stringify({ handling_mode: 'HUMAN' })}\n\n`);
+    }
+  });
+
+  const heartbeat = setInterval(() => res.write(': keepalive\n\n'), 25000);
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
 });
 
 app.post("/api/chat/bootstrap", async (req, res) => {

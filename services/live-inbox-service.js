@@ -273,7 +273,7 @@ export async function getWebChatPublicFeed({ externalSessionId, integration, dat
       handlingMode: result.rows[0]?.handling_mode ?? 'AI',
       messages: result.rows.map(({ id, sender_type, content, created_at }) => ({
         id,
-        role: sender_type === 'CUSTOMER' ? 'user' : 'assistant',
+        role: sender_type === 'CUSTOMER' ? 'user' : (sender_type === 'AGENT' ? 'agent' : 'assistant'),
         sender_type,
         content,
         created_at,

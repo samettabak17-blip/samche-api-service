@@ -1113,7 +1113,7 @@
       for (var i = 0; i < messages.length; i++) {
         var item = messages[i];
         if (!item) continue;
-        var role = (item.role === 'user' || item.sender_type === 'CUSTOMER') ? 'user' : 'bot';
+        var role = (item.role === 'user' || item.sender_type === 'CUSTOMER') ? 'user' : ((item.role === 'agent' || item.sender_type === 'AGENT') ? 'agent' : 'bot');
         var text = typeof item.content === 'string' ? item.content : (item.text || '');
         var isGreeting = Boolean(item.message_type === 'INITIAL_GREETING' || item.is_greeting);
         var isProactive = Boolean(item.message_type === 'PROACTIVE' || item.is_proactive || item.proactive_event_id);
@@ -1704,6 +1704,7 @@
       var isSending = false;
       var isResetting = false;
       var isHumanTakeoverActive = false;
+      var liveEventSource = null;
       var currentLang = initLang;
       var lastKnownResetTime = SamcheChatPersistence.getLastResetTime(widgetKey);
       var nudgeTimer = null;
@@ -1720,6 +1721,54 @@
       var fileInput = composer.querySelector('.samche-file-input');
       var previewEl = composer.querySelector('.samche-attachment-preview');
       var pendingFile = null;
+
+      function initRealtimeStream() {
+        if (!sessionToken || typeof window.EventSource !== 'function') return;
+        if (liveEventSource) {
+          try { liveEventSource.close(); } catch {}
+          liveEventSource = null;
+        }
+        var sseUrl = resolveApiBaseUrl() + '/api/chat/live?session_token=' + encodeURIComponent(sessionToken);
+        try {
+          liveEventSource = new window.EventSource(sseUrl);
+          liveEventSource.addEventListener('message', function(evt) {
+            if (!evt.data) return;
+            try {
+              var data = JSON.parse(evt.data);
+              if (!data || !data.content) return;
+              if (data.id && messages.querySelector('[data-message-id="' + data.id + '"]')) return;
+              if (data.role === 'agent' || data.sender_type === 'AGENT') {
+                isHumanTakeoverActive = true;
+                clearBtn.disabled = true;
+                clearBtn.setAttribute('title', (I18N[currentLang] || I18N.tr).cannotClearHuman);
+                clearTypingIndicator(messages);
+                appendMessage('agent', data.content, {
+                  id: data.id,
+                  message_type: 'AGENT',
+                  sender_type: 'AGENT',
+                });
+              }
+            } catch (pErr) {}
+          });
+          liveEventSource.addEventListener('mode_change', function(evt) {
+            if (!evt.data) return;
+            try {
+              var data = JSON.parse(evt.data);
+              if (data.handling_mode === 'AI') {
+                isHumanTakeoverActive = false;
+                clearBtn.disabled = false;
+                clearBtn.removeAttribute('title');
+              } else if (data.handling_mode === 'HUMAN') {
+                isHumanTakeoverActive = true;
+                clearBtn.disabled = true;
+                clearBtn.setAttribute('title', (I18N[currentLang] || I18N.tr).cannotClearHuman);
+              }
+            } catch (pErr) {}
+          });
+        } catch (sErr) {
+          console.warn('WEBCHAT_SSE_INIT_WARN:', sErr);
+        }
+      }
 
       function clearPendingAttachment() {
         pendingFile = null;
@@ -1953,6 +2002,12 @@
           sendBtn.disabled = !textarea.value.trim();
 
           if (!data || data.status !== 'ok') return data;
+
+          if (liveEventSource) {
+            try { liveEventSource.close(); } catch {}
+            liveEventSource = null;
+          }
+          initRealtimeStream();
 
           // 1. Clear visible messages
           messages.innerHTML = '';
@@ -2356,12 +2411,14 @@
 
       function appendMessage(role, text, meta) {
         var msg = document.createElement('div');
-        var msgType = (meta && meta.message_type) || (role === 'user' ? 'USER' : 'ASSISTANT');
+        var isUser = role === 'user';
+        var isAgent = role === 'agent' || (meta && (meta.sender_type === 'AGENT' || meta.message_type === 'AGENT'));
+        var msgType = (meta && meta.message_type) || (isUser ? 'USER' : (isAgent ? 'AGENT' : 'ASSISTANT'));
         if (meta && (meta.is_greeting || meta.message_type === 'INITIAL_GREETING')) msgType = 'INITIAL_GREETING';
         if (meta && (meta.is_proactive || meta.proactive_event_id || meta.message_type === 'PROACTIVE')) msgType = 'PROACTIVE';
         if (meta && meta.message_type === 'CONTEXTUAL_OPEN') msgType = 'CONTEXTUAL_OPEN';
 
-        msg.className = 'samche-msg ' + (role === 'user' ? 'samche-msg-user' : 'samche-msg-bot');
+        msg.className = 'samche-msg ' + (isUser ? 'samche-msg-user' : (isAgent ? 'samche-msg-bot samche-msg-agent' : 'samche-msg-bot'));
         msg.setAttribute('data-message-type', msgType);
         if (meta && meta.proactive_event_id) {
           msg.setAttribute('data-proactive-event-id', meta.proactive_event_id);
@@ -2375,7 +2432,7 @@
         if (meta && meta.id) {
           msg.setAttribute('data-message-id', meta.id);
         }
-        if (role === 'user') {
+        if (isUser) {
           msg.textContent = text;
         } else {
           renderAssistantMessage(msg, text);
@@ -2461,7 +2518,13 @@
             return;
           }
 
-          if (data && (data.handling_mode === 'HUMAN' || (data.reply && data.reply.indexOf('Temsilcimiz şu anda görüşmede') !== -1))) {
+          if (data && data.session) {
+            sessionToken = data.session;
+            SamcheChatPersistence.storeSession(widgetKey, sessionToken);
+            initRealtimeStream();
+          }
+
+          if (data && (data.handling_mode === 'HUMAN' || (data.handoff && data.handoff.mode === 'HUMAN') || (data.reply && (data.reply.indexOf('Temsilcimiz şu anda görüşmede') !== -1 || data.reply.indexOf('Our representative is currently') !== -1)))) {
             isHumanTakeoverActive = true;
             clearBtn.disabled = true;
             clearBtn.setAttribute('title', (I18N[currentLang] || I18N.tr).cannotClearHuman);
@@ -2538,6 +2601,7 @@
         if (data.session) {
           sessionToken = data.session;
           SamcheChatPersistence.storeSession(widgetKey, sessionToken);
+          initRealtimeStream();
 
           var initialCtx = capturePageContext();
           if (initialCtx) {

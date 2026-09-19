@@ -52,3 +52,7 @@ export function subscribeTenantEvents(tenantId, callback) {
   events.on(tenantId, callback);
   return () => events.off(tenantId, callback);
 }
+
+export function emitTenantEvent(tenantId, event) {
+  events.emit(tenantId, event);
+}
