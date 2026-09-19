@@ -15,6 +15,13 @@ test('AI-FIRST AUDIT: Ordinary support inquiries must NOT automatically trigger 
     'Can someone help me understand how to setup this device?',
     'Yardım eder misiniz, cihaz çalışmıyor.',
     'Siparişimle ilgili destek almak istiyorum.',
+    'I need customer service with this problem.',
+    'I need support',
+    'help me with this product',
+    'I have a problem',
+    'destek istiyorum',
+    'müşteri hizmetlerine ihtiyacım var',
+    'bununla ilgili yardıma ihtiyacım var',
   ];
 
   for (const query of normalSupportInquiries) {
@@ -43,6 +50,7 @@ test('AI-FIRST AUDIT: Explicit human insistence triggers canonical human handoff
     'Bot istemiyorum, bir insanla görüşmek istiyorum.',
     'Beni gerçek bir müşteri temsilcisine aktarın.',
     'Canlı bir temsilciye bağlanmak istiyorum.',
+    "I don't want AI. Connect me to a real person.",
   ];
 
   for (const query of explicitHumanRequests) {

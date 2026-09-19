@@ -374,7 +374,7 @@ async function verifyStagingTask8Demo() {
     if (!cResPrivate.ok) throw new Error(`Probe F HTTP error: ${cResPrivate.status}`);
     const dataPrivate = await cResPrivate.json();
     const replyPrivate = (dataPrivate.reply || dataPrivate.response || dataPrivate.text || '').toLowerCase();
-    const explainsLimitation = replyPrivate.includes('cannot') || replyPrivate.includes('do not have') || replyPrivate.includes('access') || replyPrivate.includes('tracking link') || replyPrivate.includes('email') || replyPrivate.includes('support@samche.ae');
+    const explainsLimitation = replyPrivate.includes('cannot') || replyPrivate.includes('do not have') || replyPrivate.includes('access') || replyPrivate.includes('tracking link') || replyPrivate.includes('email') || replyPrivate.includes('support@samche.com') || replyPrivate.includes('support@samche.ae');
     results.ai_private_state_grounding = explainsLimitation;
     if (!results.ai_private_state_grounding) {
       throw new Error(`Probe F FAILED: Model fabricated or failed to explain limitation: "${replyPrivate}"`);

@@ -63,16 +63,17 @@ export const POLICY_SUBJECTS = Object.freeze({
 
 // Semantic signal patterns across multiple industries
 const EXPLICIT_HUMAN_PATTERNS = [
-  /(?:^|\s)(?:speak|talk|chat)\s+(?:to|with)\s+(?:a\s+)?(?:human|live\s+agent|real\s+person|human\s+agent|live\s+person)(?:\s|[.,!?]|$)/iu,
-  /(?:^|\s)(?:want|need|give\s+me|get)\s+(?:a\s+)?(?:human|live\s+agent|real\s+person|human\s+agent|live\s+person)(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)(?:speak|talk|chat)\s+(?:to|with)\s+(?:a\s+)?(?:human|live\s+agent|real\s+person|human\s+agent|live\s+person|human\s+representative)(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)(?:want|need|give\s+me|get)\s+(?:a\s+)?(?:human|live\s+agent|real\s+person|live\s+person)(?:\s|[.,!?]|$)/iu,
   /(?:^|\s)talk\s+to\s+(?:a\s+)?(?:human|real\s+person|human\s+agent)(?:\s|[.,!?]|$)/iu,
-  /(?:^|\s)(?:connect|transfer)\s+me\s+to\s+(?:an?\s+)?(?:human|live\s+agent|real\s+person|human\s+agent|live\s+person|representative)(?:\s|[.,!?]|$)/iu,
-  /(?:^|\s)(?:live\s+agent|human\s+agent|talk\s+to\s+a\s+live\s+person|talk\s+to\s+a\s+human|not\s+ai|real\s+person)(?:\s|[.,!?]|$)/iu,
-  /(?:canlı|canli)\s+temsilci/iu,
-  /(?:müşteri|musteri)\s+temsilcisine\s+(?:aktar|bağla|bagla|görüş)/iu,
+  /(?:^|\s)(?:connect|transfer)\s+me\s+to\s+(?:a\s+|an\s+)?(?:human|live\s+agent|real\s+person|human\s+agent|live\s+person|human\s+representative|operator|agent|representative|someone)(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)(?:live\s+agent|human\s+agent|talk\s+to\s+a\s+live\s+person|talk\s+to\s+a\s+human|not\s+ai|real\s+person|real\s+human)(?:\s|[.,!?]|$)/iu,
+  /(?:canlı|canli)\s+(?:temsilci|destek)/iu,
+  /(?:müşteri|musteri)\s+temsilcisi(?:ne|yle|ine)?(?:\s+(?:ile|yle|ne))?\s+(?:aktar\w*|bağla\w*|bagla\w*|görüş\w*|gorus\w*|konuş\w*|konus\w*)/iu,
   /temsilci(?:ye)?\s+(?:bağlanmak|baglanmak|aktar|görüşmek|gorusmek)/iu,
   /(?:bir\s+)?insanla\s+(?:görüşmek|gorusmek|konuşmak|konusmak)/iu,
   /(?:gerçek\s+bir\s+(?:müşteri\s+)?(?:insan|kişi|temsilci)|bot\s+istemiyorum|bot\s+değil\s+insan)/iu,
+  /(?:not\s+ai|no\s+bot|bot\s+değil|bot\s+degil|gerçek\s+insan|gercek\s+insan|real\s+human)/iu,
   /(?:موظف\s+بشري|ممثل\s+بشري|أريد\s+(?:التحدث\s+مع\s+)?(?:إنسان|شخص\s+حقيقي)|تحدث\s+مع\s+إنسان)/iu,
 ];
 

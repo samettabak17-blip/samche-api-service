@@ -309,3 +309,76 @@ test('NO_HARDCODED_CUSTOMER_CODE: Production conversation-intelligence-service h
   assert.match(serviceSource, /COEXISTENCE_RESOLVE/);
 });
 
+// ============================================================================
+// 11. PRODUCT-AWARE SUPPORT & FIRST-LINE AI CUSTOMER SERVICE CONTRACT
+// ============================================================================
+test('PRODUCT-AWARE FIRST-LINE SUPPORT: Common support phrases do not deflect to external support and correlate active product', () => {
+  const browsingState = {
+    currentPage: {
+      url: 'https://demo.samchecompany.com/wireless-noise-cancelling-headphones',
+      path: '/wireless-noise-cancelling-headphones',
+      title: 'Wireless Noise-Cancelling Headphones',
+      page_type: 'PRODUCT',
+    },
+    currentEntity: {
+      entity_name: 'Wireless Noise-Cancelling Headphones',
+      entity_type: 'PRODUCT',
+      canonical_url: 'https://demo.samchecompany.com/wireless-headphones',
+      attributes: { bluetooth: '5.2', anc: 'Active Noise Cancellation' },
+    },
+    previousEntities: [],
+  };
+
+  // A) "I need customer service with this problem"
+  const turnA = classifyConversationIntent({
+    message: 'I need customer service with this problem.',
+    browsingState,
+  });
+  assert.equal(turnA.isHumanRequest, false, 'Must NOT be classified as explicit human escalation');
+  assert.equal(turnA.isSupport, true, 'Must be classified as support');
+  const planA = evaluateSupportResolutionPlan({ intentClassification: turnA, browsingState });
+  assert.equal(planA.action, RESOLUTION_ACTIONS.AI_FIRST_RESOLVE, 'Must be AI-first resolved');
+  assert.equal(planA.requiresHandoff, false, 'Must NOT trigger human handoff');
+
+  // B) "I have a problem with this." on known product page
+  const turnB = classifyConversationIntent({
+    message: 'I have a problem with this.',
+    browsingState,
+  });
+  assert.equal(turnB.isHumanRequest, false);
+  assert.equal(turnB.isSupport, true);
+  const planB = evaluateSupportResolutionPlan({ intentClassification: turnB, browsingState });
+  assert.equal(planB.action, RESOLUTION_ACTIONS.AI_FIRST_RESOLVE);
+  assert.equal(planB.requiresHandoff, false);
+
+  // C) Ambiguous product (no active browsing state entity, no attachment)
+  const turnC = classifyConversationIntent({
+    message: 'I have a problem with a product I bought.',
+    browsingState: null,
+  });
+  assert.equal(turnC.isHumanRequest, false);
+  assert.equal(turnC.isSupport, true);
+  const planC = evaluateSupportResolutionPlan({ intentClassification: turnC, browsingState: null });
+  assert.equal(planC.action, RESOLUTION_ACTIONS.AI_FIRST_RESOLVE);
+  assert.equal(planC.requiresHandoff, false);
+
+  // D) Explicit non-AI human insistence: "I don't want AI. Connect me to a real person."
+  const turnD = classifyConversationIntent({
+    message: "I don't want AI. Connect me to a real person.",
+  });
+  assert.equal(turnD.isHumanRequest, true, 'Must detect explicit human refusal of AI');
+  const planD = evaluateSupportResolutionPlan({ intentClassification: turnD });
+  assert.equal(planD.action, RESOLUTION_ACTIONS.HUMAN_ESCALATION);
+  assert.equal(planD.requiresHandoff, true);
+
+  // E) Explicit contact details query
+  const turnE = classifyConversationIntent({
+    message: 'What is your customer support email and phone number?',
+  });
+  assert.equal(turnE.isHumanRequest, false);
+  assert.equal(turnE.primaryIntent, INTENT_TYPES.SUPPORT_CONTACT_INFO);
+  const planE = evaluateSupportResolutionPlan({ intentClassification: turnE });
+  assert.equal(planE.action, RESOLUTION_ACTIONS.AI_FIRST_RESOLVE);
+});
+
+

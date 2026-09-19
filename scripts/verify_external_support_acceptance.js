@@ -158,7 +158,7 @@ async function main() {
     const hasHub = lowerB.includes('dubai') || lowerB.includes('fulfillment') || lowerB.includes('hub') || lowerB.includes('dispatch');
     const hasHours = lowerB.includes('8:00') || lowerB.includes('10:00') || lowerB.includes('gst') || lowerB.includes('daily');
 
-    if (hasHub && (hasHours || lowerB.includes('support@samche.ae'))) {
+    if (hasHub && (hasHours || lowerB.includes('support@samche.com') || lowerB.includes('support@samche.ae'))) {
       results.SCENARIO_B_CURRENT_PAGE_SUPPORT = 'PASS';
       console.log('   ✓ SCENARIO B: PASS (Answered with verified Dubai Fulfillment Hub & support hours)\n');
     } else {
@@ -204,7 +204,7 @@ async function main() {
     logs.replyD = replyD;
 
     const lowerD = replyD.toLowerCase();
-    const explainsLimitation = lowerD.includes('cannot') || lowerD.includes('do not have') || lowerD.includes('access') || lowerD.includes('unable') || lowerD.includes('email') || lowerD.includes('support@samche.ae') || lowerD.includes('tracking link');
+    const explainsLimitation = lowerD.includes('cannot') || lowerD.includes('do not have') || lowerD.includes('access') || lowerD.includes('unable') || lowerD.includes('email') || lowerD.includes('support@samche.com') || lowerD.includes('support@samche.ae') || lowerD.includes('tracking link');
     const noFakeCourier = !lowerD.includes('courier aramex') && !lowerD.includes('driver on the way');
 
     if (explainsLimitation && noFakeCourier) {

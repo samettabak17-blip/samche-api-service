@@ -17,7 +17,7 @@ const domainId = '77777777-7777-4777-8777-777777777777';
 const expVersionId = '88888888-8888-4888-8888-888888888888';
 
 function createMockGuideDb({ resourceRow }) {
-  const queryHandler = async (sql) => {
+  const queryHandler = async (sql, params = []) => {
     // console.log('GUIDE_DB_QUERY:', sql);
     if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK' || sql.startsWith('SELECT pg_notify')) {
       return { rowCount: 1, rows: [] };
@@ -146,14 +146,21 @@ function createMockGuideDb({ resourceRow }) {
       };
     }
     if (sql.includes('INSERT INTO conversation_messages') || sql.includes('conversation_messages')) {
+      const isAssistant = params?.[2] === 'ASSISTANT' || sql.includes("'ASSISTANT'");
+      const isPdfSpec = Boolean(resourceRow?.extracted_text);
+      const assistantText = isPdfSpec
+        ? 'Extracted from PDF: 4 nodes required for high availability.'
+        : 'Observed in uploaded image: Architecture diagram with 3 microservices.';
+      const msgContent = params?.[3]
+        || (isAssistant ? assistantText : 'What is this diagram?');
       return {
         rowCount: 1,
         rows: [{
-          id: 'msg-guide-1',
+          id: isAssistant ? 'msg-guide-ai-1' : 'msg-guide-1',
           tenant_id: tenantId,
           conversation_id: conversationId,
-          sender_type: 'CUSTOMER',
-          content: 'What is this diagram?',
+          sender_type: isAssistant ? 'ASSISTANT' : 'CUSTOMER',
+          content: msgContent,
           authority_assistant_id: assistantId,
           knowledge_authority_version: '1',
         }],
@@ -245,11 +252,24 @@ test('GUIDE RUNTIME BOUNDARY: Guide message with conversation image resource inv
     runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'developer', model: 'gemini-3-flash-preview' }),
     generateContent: async (payload) => {
       capturedGeminiPayload = payload;
+      const userMsg = payload.contents?.find((m) => m.role === 'user');
+      const hasImage = userMsg?.parts?.some((p) => p.inlineData?.data === pngBytes.toString('base64') || p.inline_data?.data === pngBytes.toString('base64'));
+      if (hasImage) {
+        return {
+          candidates: [{
+            content: {
+              parts: [{
+                text: '<p>Observed in uploaded image: Architecture diagram with 3 microservices.</p>',
+              }],
+            },
+          }],
+        };
+      }
       return {
         candidates: [{
           content: {
             parts: [{
-              text: '<p>The architecture diagram shows 3 core components.</p>',
+              text: '<p>Blue Dune Event Management LLC corporate profile overview.</p>',
             }],
           },
         }],
@@ -298,11 +318,10 @@ test('GUIDE RUNTIME BOUNDARY: Guide message with conversation image resource inv
     });
 
     const body = await res.json();
-    if (res.status !== 200) {
-      console.error('GUIDE_ERROR_RESPONSE status=' + res.status, body);
-    }
     assert.equal(res.status, 200);
     assert.ok(Array.isArray(body.candidates), 'Guide response must contain candidates array');
+    assert.match(body.candidates[0].content.parts[0].text, /Architecture diagram with 3 microservices/);
+    assert.doesNotMatch(body.candidates[0].content.parts[0].text, /Blue Dune Event Management/);
 
     assert.ok(capturedGeminiPayload, 'Gemini provider generateContent MUST be called');
 
@@ -343,11 +362,24 @@ test('GUIDE RUNTIME BOUNDARY: Guide message with PDF document invokes Gemini pro
     runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'developer', model: 'gemini-3-flash-preview' }),
     generateContent: async (payload) => {
       capturedGeminiPayload = payload;
+      const userMsg = payload.contents?.find((m) => m.role === 'user');
+      const hasPdfText = userMsg?.parts?.some((p) => typeof p.text === 'string' && p.text.includes('Project Alpha Spec: 4 nodes'));
+      if (hasPdfText) {
+        return {
+          candidates: [{
+            content: {
+              parts: [{
+                text: '<p>Extracted from PDF: 4 nodes required for high availability.</p>',
+              }],
+            },
+          }],
+        };
+      }
       return {
         candidates: [{
           content: {
             parts: [{
-              text: '<p>Project Alpha requirements noted.</p>',
+              text: '<p>Generic Blue Dune Event Management overview.</p>',
             }],
           },
         }],
@@ -392,6 +424,11 @@ test('GUIDE RUNTIME BOUNDARY: Guide message with PDF document invokes Gemini pro
     });
 
     assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.ok(Array.isArray(body.candidates), 'Guide response must contain candidates array');
+    assert.match(body.candidates[0].content.parts[0].text, /Extracted from PDF: 4 nodes/);
+    assert.doesNotMatch(body.candidates[0].content.parts[0].text, /Generic Blue Dune/);
+
     assert.ok(capturedGeminiPayload, 'Gemini provider generateContent MUST be called');
 
     const userMessage = capturedGeminiPayload.contents.find((m) => m.role === 'user');
