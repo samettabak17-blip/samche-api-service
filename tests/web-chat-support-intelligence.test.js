@@ -466,6 +466,62 @@ test('EXPLICIT CONTACT REQUEST: Contact queries preserve email and phone without
   assert.match(sanitized, /support@samche\.com/);
   assert.match(sanitized, /\+971 50 694 1372/);
 });
+test('MULTI-TURN SUPPORT CONTINUATION: "I need customer service with this problem" continues existing diagnostic flow without restarting', async () => {
+  const { SUPPORT_STATES } = await import('../services/conversation-intelligence-service.js');
+
+  const priorHistory = [
+    { role: 'user', content: 'Bu kulaklık çalışmıyor, yardımcı olur musun?' },
+    { role: 'assistant', content: 'Kulaklığınızı şarj kutusuna taktığınızda LED ışığı yanıyor mu?' },
+  ];
+
+  const continuationIntent = classifyConversationIntent({
+    message: 'I need customer service with this problem',
+    conversationHistory: priorHistory,
+  });
+
+  assert.equal(continuationIntent.isHumanRequest, false);
+  assert.equal(continuationIntent.isSupport, true);
+
+  const continuationPlan = evaluateSupportResolutionPlan({
+    intentClassification: continuationIntent,
+    conversationHistory: priorHistory,
+  });
+
+  assert.equal(continuationPlan.action, RESOLUTION_ACTIONS.AI_FIRST_RESOLVE);
+  assert.equal(continuationPlan.requiresHandoff, false);
+  assert.equal(continuationPlan.stage, 'CONTINUE_DIAGNOSIS');
+  assert.equal(continuationPlan.supportState, SUPPORT_STATES.AWAITING_CUSTOMER_RESULT);
+  assert.equal(continuationPlan.contactDisclosureAllowed, false);
+  assert.match(continuationPlan.guidance, /do NOT repeat previous troubleshooting lists or restart from scratch/i);
+});
+
+test('EXPLICIT HUMAN HANDOFF PARSING: Detects explicit human requests in Turkish and English', () => {
+  const explicitPhrases = [
+    'I don\'t want AI. Connect me to a real person.',
+    'Canlı temsilciye bağla.',
+    'Canlı temsilciye bağla',
+    'Bot istemiyorum, insanla görüşmek istiyorum.',
+    'Gerçek bir temsilci istiyorum.',
+    'I want a human.',
+    'Connect me to a real person.',
+    'I want to speak to an agent, not the assistant.',
+    'Canlı desteğe bağlanmak istiyorum',
+    'Canlı destek temsilcisi',
+    'أريد التحدث مع موظف',
+  ];
+
+  for (const phrase of explicitPhrases) {
+    const classification = classifyConversationIntent({ message: phrase });
+    assert.equal(classification.isHumanRequest, true, `Expected isHumanRequest=true for: "${phrase}"`);
+    assert.equal(classification.primaryIntent, INTENT_TYPES.HUMAN_ESCALATION);
+
+    const plan = evaluateSupportResolutionPlan({ intentClassification: classification });
+    assert.equal(plan.action, RESOLUTION_ACTIONS.HUMAN_ESCALATION);
+    assert.equal(plan.requiresHandoff, true);
+    assert.equal(plan.contactDisclosureAllowed, true);
+  }
+});
+
 
 
 

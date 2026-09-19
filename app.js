@@ -3582,10 +3582,16 @@ app.post("/api/chat", async (req, res) => {
       }
 
       if (webChatInboundState && !webChatInboundState.shouldInvokeAi) {
+        const detectedLang = ['tr', 'en', 'ar'].includes(webChatBrowsingState?.currentPage?.language)
+          ? webChatBrowsingState.currentPage.language
+          : (webChatRuntimePersona?.configuration?.language || 'en');
+        const activeHumanMsg = detectedLang === 'tr'
+          ? "Temsilcimiz şu anda görüşmede, mesajınız iletildi."
+          : "Our representative is currently in this conversation. Your message has been received.";
         return res.status(200).json({
-          reply: "Temsilcimiz şu anda görüşmede, mesajınız iletildi.",
-          response: "Temsilcimiz şu anda görüşmede, mesajınız iletildi.",
-          text: "Temsilcimiz şu anda görüşmede, mesajınız iletildi.",
+          reply: activeHumanMsg,
+          response: activeHumanMsg,
+          text: activeHumanMsg,
           session: webChatSession?.sessionId || null,
         });
       }
@@ -3622,6 +3628,7 @@ app.post("/api/chat", async (req, res) => {
     const resolutionPlan = evaluateSupportResolutionPlan({
       intentClassification: conversationIntent,
       browsingState: webChatBrowsingState,
+      conversationHistory: cleanMemory,
       hasRuntimeKnowledge: Boolean(webChatRuntimeKnowledge?.knowledge?.length),
       hasPersona: Boolean(webChatRuntimePersona?.available),
     });
@@ -3635,7 +3642,7 @@ app.post("/api/chat", async (req, res) => {
         : (webChatRuntimePersona?.configuration?.language || 'en');
       let handoffPolicy;
       try {
-        handoffPolicy = await resolvePlatformHumanSupportPolicy({ database: pool, locale: detectedLang });
+        handoffPolicy = await resolvePlatformHumanSupportPolicy({ database, locale: detectedLang });
       } catch {
         handoffPolicy = {
           defaultTopic: 'Customer Support Request',
@@ -3644,10 +3651,14 @@ app.post("/api/chat", async (req, res) => {
             : 'We have received your request. I am connecting you with a representative, please hold on.',
         };
       }
-      const handoffAck = handoffPolicy.acknowledgement(conversationIntent.signals.join(', ') || handoffPolicy.defaultTopic);
+      const handoffAck = typeof handoffPolicy?.acknowledgement === 'function'
+        ? handoffPolicy.acknowledgement(conversationIntent.signals.join(', ') || handoffPolicy.defaultTopic)
+        : (detectedLang === 'tr'
+            ? 'Talebinizi aldık. Sizi bir müşteri temsilcisine aktarıyorum, lütfen hatta kalın.'
+            : 'We have received your request. I am connecting you with a representative, please hold on.');
 
       const handoffVisitorContext = formatVisitorContextForHandoff(webChatBrowsingState, {
-        supportTopic: handoffPolicy.defaultTopic,
+        supportTopic: handoffPolicy?.defaultTopic || 'Customer Support Request',
         lastIntent: conversationIntent.primaryIntent,
         resolutionAttempts: ['EXPLICIT_HUMAN_REQUEST'],
       });
@@ -3656,12 +3667,12 @@ app.post("/api/chat", async (req, res) => {
         tenantId: webChatIntegration.tenant_id,
         conversationId: webChatInboundState.conversation.id,
         acknowledgement: handoffAck,
-        topicSummary: handoffPolicy.defaultTopic,
-        database: pool,
+        topicSummary: handoffPolicy?.defaultTopic || 'Customer Support Request',
+        database,
       });
 
       try {
-        await pool.query(
+        await database.query(
           `UPDATE conversations SET visitor_context = $1::jsonb WHERE id = $2 AND tenant_id = $3`,
           [JSON.stringify(handoffVisitorContext), webChatInboundState.conversation.id, webChatIntegration.tenant_id]
         );

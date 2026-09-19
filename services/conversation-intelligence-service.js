@@ -74,18 +74,17 @@ export const POLICY_SUBJECTS = Object.freeze({
 
 // Semantic signal patterns across multiple industries
 const EXPLICIT_HUMAN_PATTERNS = [
-  /(?:^|\s)(?:speak|talk|chat)\s+(?:to|with)\s+(?:a\s+)?(?:human|live\s+agent|real\s+person|human\s+agent|live\s+person|human\s+representative)(?:\s|[.,!?]|$)/iu,
-  /(?:^|\s)(?:want|need|give\s+me|get)\s+(?:a\s+)?(?:human|live\s+agent|real\s+person|live\s+person)(?:\s|[.,!?]|$)/iu,
-  /(?:^|\s)talk\s+to\s+(?:a\s+)?(?:human|real\s+person|human\s+agent)(?:\s|[.,!?]|$)/iu,
-  /(?:^|\s)(?:connect|transfer)\s+me\s+to\s+(?:a\s+|an\s+)?(?:human|live\s+agent|real\s+person|human\s+agent|live\s+person|human\s+representative|operator|agent|representative|someone)(?:\s|[.,!?]|$)/iu,
-  /(?:^|\s)(?:live\s+agent|human\s+agent|talk\s+to\s+a\s+live\s+person|talk\s+to\s+a\s+human|not\s+ai|real\s+person|real\s+human)(?:\s|[.,!?]|$)/iu,
-  /(?:canlı|canli)\s+(?:temsilci|destek)/iu,
-  /(?:müşteri|musteri)\s+temsilcisi(?:ne|yle|ine)?(?:\s+(?:ile|yle|ne))?\s+(?:aktar\w*|bağla\w*|bagla\w*|görüş\w*|gorus\w*|konuş\w*|konus\w*)/iu,
-  /temsilci(?:ye)?\s+(?:bağlanmak|baglanmak|aktar|görüşmek|gorusmek)/iu,
-  /(?:bir\s+)?insanla\s+(?:görüşmek|gorusmek|konuşmak|konusmak)/iu,
-  /(?:gerçek\s+bir\s+(?:müşteri\s+)?(?:insan|kişi|temsilci)|bot\s+istemiyorum|bot\s+değil\s+insan)/iu,
-  /(?:not\s+ai|no\s+bot|bot\s+değil|bot\s+degil|gerçek\s+insan|gercek\s+insan|real\s+human)/iu,
-  /(?:موظف\s+بشري|ممثل\s+بشري|أريد\s+(?:التحدث\s+مع\s+)?(?:إنسان|شخص\s+حقيقي)|تحدث\s+مع\s+إنسان)/iu,
+  /(?:^|\s)(?:canlı|canli)\s+(?:destek|desteğ\w*|desteg\w*|temsilci\w*|operatör\w*|operator\w*|yetkili\w*)(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)(?:müşteri|musteri|canlı|canli|gerçek|gercek)?\s*temsilci\w*(?:\s+(?:ile|yle|ne|ye|ine))?\s+(?:aktar\w*|bağla\w*|bagla\w*|görüş\w*|gorus\w*|konuş\w*|konus\w*|yönlendir\w*)/iu,
+  /(?:^|\s)temsilci\w*\s+(?:bağlanmak|baglanmak|bağla\w*|bagla\w*|aktar\w*|görüş\w*|gorus\w*|istiyorum)/iu,
+  /(?:^|\s)(?:live\s+agent|human\s+support|human\s+agent|human\s+representative|human\s+operator|real\s+person)(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)(?:speak|talk|chat)\s+(?:to|with)\s+(?:a\s+)?(?:human|live\s+agent|real\s+person|human\s+agent|live\s+person|human\s+representative|representative|agent|operator|person)(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)(?:want|need|give\s+me|get)\s+(?:a\s+)?(?:human|live\s+agent|real\s+person|live\s+person|human\s+representative|human\s+operator)(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)(?:connect|transfer|escalate)\s+(?:me\s+)?(?:to\s+)?(?:an?\s+)?(?:human|live\s+agent|real\s+person|human\s+representative|human\s+operator|agent|representative|operator|person|someone)(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)(?:bir\s+)?insanla\s+(?:görüşmek|gorusmek|konuşmak|konusmak|bağla\w*)(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)(?:gerçek\s+bir\s+(?:müşteri\s+)?(?:insan|kişi|kisi|temsilci)|bot\s+istemiyorum|bot\s+değil|bot\s+degil)(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)(?:not\s+ai|no\s+bot|no\s+ai|bot\s+değil\s+insan|gerçek\s+insan|gercek\s+insan|real\s+human|not\s+(?:the\s+)?(?:ai|assistant|bot))(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)(?:دعم\s+مباشر|موظف\s+بشري|ممثل\s+بشري|أريد\s+(?:التحدث\s+مع\s+)?(?:إنسان|شخص\s+حقيقي|موظف|خدمة\s+العملاء|ممثل)|تحدث\s+مع\s+(?:إنسان|موظف|شخص\s+حقيقي|ممثل)|حولني\s+إلى\s+(?:موظف|إنسان))(?:\s|[.,!?]|$)/iu,
 ];
 
 const SUPPORT_ACCOUNT_PATTERN = /(?:log\s*in|sign\s*in|sign\s*up|passwords?|workspace|accounts?|credentials?|reset\s+password|verify\s+account|giriş|şifre|parola|hesap|üyelik)/i;
@@ -268,6 +267,7 @@ export function classifyConversationIntent({
   if (humanReq.requested || explicitPatternMatch) {
     signals.push('EXPLICIT_HUMAN_REQUEST_SIGNAL');
     return {
+      message: text,
       primaryIntent: INTENT_TYPES.HUMAN_ESCALATION,
       supportCase: SUPPORT_CASES.EXPLICIT_HUMAN_REQUEST,
       secondaryIntents: [],
@@ -413,6 +413,7 @@ export function classifyConversationIntent({
   const confidence = signals.length > 0 ? Math.min(1.0, 0.6 + signals.length * 0.15) : 0.5;
 
   return {
+    message: text,
     primaryIntent,
     supportCase,
     secondaryIntents,
@@ -438,6 +439,7 @@ export function classifyConversationIntent({
 export function evaluateSupportResolutionPlan({
   intentClassification = null,
   browsingState = null,
+  conversationHistory = [],
   hasRuntimeKnowledge = false,
   hasPersona = false,
 } = {}) {
@@ -465,6 +467,29 @@ export function evaluateSupportResolutionPlan({
       requiresHandoff: true,
       groundingSources: [],
       reason: 'CUSTOMER_EXPLICIT_HUMAN_REQUEST',
+    };
+  }
+
+  // Check if conversation history already has active diagnostic turns
+  const hasPriorDiagnosticTurn = Array.isArray(conversationHistory) && conversationHistory.some(
+    (m) => (m.role === 'assistant' || m.sender_type === 'ASSISTANT') && /(?:adım|step|led|ışık|isik|şarj|charge|bağlan|pair|bluetooth|power|düğme|button|priz|kablo|cable|deneyip|reset|sıfırla)/i.test(m.content || '')
+  );
+
+  const isGenericSupportContinuation = /(?:customer\s+service|need\s+support|help\s+me|destek\s+istiyorum|yardımcı\s+ol|yardimci\s+ol|yardım\s+istiyorum|sorunum\s+var|problemim\s+var|bana\s+yardım)/i.test(intent.message || '');
+
+  if (hasPriorDiagnosticTurn && isGenericSupportContinuation && !intent.isHumanRequest) {
+    return {
+      action: RESOLUTION_ACTIONS.AI_FIRST_RESOLVE,
+      intent: INTENT_TYPES.SUPPORT_TROUBLESHOOTING,
+      supportCase: SUPPORT_CASES.DEFECTIVE_OR_MALFUNCTION,
+      supportState: SUPPORT_STATES.AWAITING_CUSTOMER_RESULT,
+      contactDisclosureAllowed: false,
+      stage: 'CONTINUE_DIAGNOSIS',
+      canResolveSafely: true,
+      requiresHandoff: false,
+      groundingSources: ['APPROVED_KNOWLEDGE', 'ACTIVE_BUSINESS_PROFILE', 'CURRENT_PAGE_CONTEXT'],
+      reason: 'ONGOING_DIAGNOSTIC_CONTINUATION',
+      guidance: 'The customer is confirming they want support for their ongoing troubleshooting issue. Acknowledge that you are actively assisting them here, do NOT repeat previous troubleshooting lists or restart from scratch, and smoothly continue from the pending diagnostic check (e.g. asking whether the LED turned on, if charging worked, or what symptom occurred).',
     };
   }
 

@@ -482,3 +482,161 @@ test('WEBCHAT MULTIMODAL PDF: Unique marker DOCUMENT_TEST_48217 reaches model co
     delete app.locals.openaiClient;
   }
 });
+
+test('WEBCHAT HUMAN HANDOFF EXECUTION: Explicit human request triggers canonical Live Inbox handoff and returns handoff payload', async () => {
+  const secret = 'test-secret-at-least-32-chars-long-12345';
+  process.env.WEB_CHAT_PUBLIC_SESSION_SECRET = secret;
+
+  const session = issuePublicWebChatSession({
+    widgetKey: 'wch_live_widget_123',
+    secret,
+  });
+
+  const dbUpdates = [];
+  const mockDatabase = {
+    connect: async () => ({
+      query: async (sql, params = []) => {
+        dbUpdates.push({ sql, params });
+        if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK' || sql.startsWith('SELECT pg_notify')) {
+          return { rowCount: 1, rows: [] };
+        }
+        if (sql.includes('SELECT * FROM conversations WHERE id = $1 AND tenant_id = $2 FOR UPDATE') || sql.includes('SELECT * FROM conversations')) {
+          return {
+            rowCount: 1,
+            rows: [{
+              id: conversationId,
+              tenant_id: tenantId,
+              channel_id: 'channel-1',
+              handling_mode: 'AI',
+              status: 'open',
+              handling_version: 1,
+              human_attention_state: 'NONE',
+            }],
+          };
+        }
+        if (sql.includes('UPDATE conversations')) {
+          return {
+            rowCount: 1,
+            rows: [{
+              id: conversationId,
+              tenant_id: tenantId,
+              handling_mode: 'HUMAN',
+              human_attention_state: 'REQUESTED',
+              assigned_agent_user_id: 'agent-123',
+            }],
+          };
+        }
+        if (sql.includes('INSERT INTO conversation_messages') || sql.includes('conversation_messages')) {
+          return { rows: [{ id: 'msg-1', tenant_id: tenantId, conversation_id: conversationId, sender_type: 'ASSISTANT', content: 'Connecting to agent...' }] };
+        }
+        if (sql.includes('users') || sql.includes('tenant_users')) {
+          return { rowCount: 1, rows: [{ id: 'agent-123', system_role: 'ADMIN', tenant_role: 'ADMIN' }] };
+        }
+        return { rowCount: 1, rows: [] };
+      },
+      release: () => {},
+    }),
+    query: async (sql, params = []) => {
+      dbUpdates.push({ sql, params });
+      if (sql.includes('channel_integrations') || sql.includes('integration_key') || sql.includes('widget_key')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            tenant_id: tenantId,
+            channel_id: 'channel-1',
+            assistant_id: assistantId,
+            channel_type: 'WEB_CHAT',
+            channel_status: 'active',
+            channel_name: 'Web Chat',
+            assistant_status: 'active',
+            assistant_name: 'SamChe AI',
+            config: {},
+          }],
+        };
+      }
+      if (sql.includes('ai_assistants') && (sql.includes('knowledge_authority_version') || sql.includes('active_configuration_version_id') || sql.includes('assistant_configuration_versions'))) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: configId,
+            configuration_data: { assistant_identity: 'SamChe AI', supported_languages: ['en', 'tr'] },
+            configuration_schema_version: 2,
+            source_profile_version_id: profileId,
+            assistant_metadata_name: 'SamChe AI',
+            active_business_profile_version_id: profileId,
+            active_business_profile: { company_identity: 'SamChe LLC', company_display_name: 'SamChe LLC' },
+            profile_schema_version: 2,
+          }],
+        };
+      }
+      if (sql.includes('conversations')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: conversationId,
+            tenant_id: tenantId,
+            channel_id: 'channel-1',
+            handling_mode: 'AI',
+            status: 'open',
+            handling_version: 1,
+          }],
+        };
+      }
+      if (sql.includes('conversation_resources')) {
+        return { rowCount: 0, rows: [] };
+      }
+      return { rowCount: 1, rows: [] };
+    },
+  };
+
+  app.locals.database = mockDatabase;
+  app.locals.storage = { get: async () => null };
+
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  const { port } = server.address();
+
+  try {
+    // English explicit request
+    const res = await fetch(`http://127.0.0.1:${port}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Samche-Web-Chat-Session': session.token,
+      },
+      body: JSON.stringify({
+        message: "I don't want AI. Connect me to a real person.",
+      }),
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.ok(body.handoff, 'Response must contain handoff object');
+    assert.equal(body.handoff.requested, true);
+    assert.equal(body.handoff.mode, 'HUMAN');
+    assert.equal(body.handoff.attentionState, 'REQUESTED');
+    assert.doesNotMatch(body.reply, /support@samche\.com/);
+
+    // Turkish explicit request
+    const resTr = await fetch(`http://127.0.0.1:${port}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Samche-Web-Chat-Session': session.token,
+      },
+      body: JSON.stringify({
+        message: 'Canlı temsilciye bağla.',
+      }),
+    });
+
+    assert.equal(resTr.status, 200);
+    const bodyTr = await resTr.json();
+    assert.ok(bodyTr.handoff, 'Turkish handoff must contain handoff object');
+    assert.equal(bodyTr.handoff.requested, true);
+    assert.equal(bodyTr.handoff.mode, 'HUMAN');
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    delete app.locals.database;
+    delete app.locals.storage;
+  }
+});
