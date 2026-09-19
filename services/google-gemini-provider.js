@@ -51,8 +51,19 @@ export function resolveGoogleGeminiRuntimeModel(env = process.env) {
 
 function normalizePart(part) {
   if (!part || typeof part !== 'object') return part;
-  if (part.inline_data) {
-    return { ...part, inlineData: { mimeType: part.inline_data.mime_type, data: part.inline_data.data } };
+  if (part.inline_data || part.inlineData) {
+    const source = part.inlineData || part.inline_data;
+    const mimeType = source?.mimeType || source?.mime_type;
+    const data = source?.data;
+    const normalized = {
+      inlineData: {
+        mimeType,
+        data,
+      },
+    };
+    if (part.thought !== undefined) normalized.thought = part.thought;
+    if (part.text !== undefined) normalized.text = part.text;
+    return normalized;
   }
   return part;
 }

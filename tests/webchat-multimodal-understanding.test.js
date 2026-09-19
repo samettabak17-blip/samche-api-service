@@ -405,3 +405,80 @@ test('WEBCHAT RUNTIME BOUNDARY: Browser message with PDF document invokes OpenAI
     delete app.locals.openaiClient;
   }
 });
+
+test('WEBCHAT MULTIMODAL PDF: Unique marker DOCUMENT_TEST_48217 reaches model context and extracted evidence', async () => {
+  const secret = 'test-secret-at-least-32-chars-long-12345';
+  process.env.WEB_CHAT_PUBLIC_SESSION_SECRET = secret;
+
+  const session = issuePublicWebChatSession({
+    widgetKey: 'wch_live_widget_123',
+    secret,
+  });
+
+  let capturedOpenAiPayload = null;
+  const mockOpenai = {
+    chat: {
+      completions: {
+        create: async (payload) => {
+          capturedOpenAiPayload = payload;
+          return {
+            choices: [{
+              message: {
+                content: '<p>Found unique test code: DOCUMENT_TEST_48217 in uploaded PDF.</p>',
+              },
+            }],
+          };
+        },
+      },
+    },
+  };
+
+  const mockDatabase = createMockWebChatDb({
+    resourceRow: {
+      id: resourceId,
+      tenant_id: tenantId,
+      conversation_id: conversationId,
+      media_category: 'DOCUMENT',
+      original_filename: 'unique_marker.pdf',
+      mime_type: 'application/pdf',
+      extracted_text: 'Confidential Audit Document with code: DOCUMENT_TEST_48217',
+      processing_status: 'READY',
+    },
+  });
+
+  app.locals.database = mockDatabase;
+  app.locals.storage = { get: async () => null };
+  app.locals.openaiClient = mockOpenai;
+
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  const { port } = server.address();
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Samche-Web-Chat-Session': session.token,
+      },
+      body: JSON.stringify({
+        message: 'What unique test code appears in the uploaded document?',
+        attachment_resource_ids: [resourceId],
+      }),
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.match(body.reply, /DOCUMENT_TEST_48217/);
+
+    const userMessage = capturedOpenAiPayload.messages.find((m) => m.role === 'user');
+    assert.ok(userMessage, 'User message must be present in messages array');
+    assert.match(userMessage.content, /DOCUMENT_TEST_48217/);
+    assert.match(userMessage.content, /<customer_document_evidence>/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    delete app.locals.database;
+    delete app.locals.storage;
+    delete app.locals.openaiClient;
+  }
+});

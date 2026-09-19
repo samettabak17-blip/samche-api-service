@@ -84,7 +84,11 @@ export function buildGeminiImagePart({ mimeType, bytes }) {
   if (!imageExtensions[mimeType]) {
     throw new WhatsAppMultimodalError('WHATSAPP_IMAGE_TYPE_UNSUPPORTED', 'Image type is not supported');
   }
-  return { inline_data: { mime_type: mimeType, data: bytes.toString('base64') } };
+  const base64Data = bytes.toString('base64');
+  return {
+    inlineData: { mimeType, data: base64Data },
+    inline_data: { mime_type: mimeType, data: base64Data },
+  };
 }
 
 function safeMetaRetrievalDiagnostic({ phase, error }) {

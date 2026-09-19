@@ -517,7 +517,7 @@ export function evaluateSupportResolutionPlan({
           '3. SAFE TROUBLESHOOTING: Provide safe product-specific troubleshooting steps ONLY if verified in approved knowledge/product specifications. If none are verified, ask relevant diagnostic questions (what symptoms occur, what indicator lights show) without fabricating troubleshooting steps.',
           '4. NO UNVERIFIED REPLACEMENT PROMISES: Do NOT promise a replacement or exchange unless an approved replacement policy is explicitly verified in tenant knowledge. If unverified, clarify that replacement eligibility must be confirmed with the support team.',
           '5. NO INVENTED PHYSICAL RETURN LOCATIONS: Never tell the customer to visit a fulfillment center, warehouse, or office in person unless verified tenant knowledge explicitly states customer walk-in drop-offs are accepted there.',
-          '6. CONCRETE NEXT STEPS: Provide verified next steps (e.g. sharing order number and symptoms with verified support email/phone for warranty review or replacement confirmation).',
+          '6. INTERACTIVE CONTINUATION: Guide the customer through the specific troubleshooting step and ask them to confirm what happens when they try it. Do NOT append support email/phone contact details unless troubleshooting has been fully exhausted or the customer explicitly requests contact details.',
         ].join('\n'),
       };
     }
@@ -542,7 +542,7 @@ export function evaluateSupportResolutionPlan({
           '1. UNDERSTAND & ACKNOWLEDGE: Acknowledge that the item arrived damaged in transit. Do not deflect.',
           '2. POLICY APPLICABILITY GUARD: Transit damage is NOT a normal change-of-mind return. Do NOT apply unopened return policy restrictions.',
           '3. EVIDENCE & NEXT STEPS: Advise the customer to keep the original shipping box/packaging and take photos of the damaged item and packaging for carrier claim verification.',
-          '4. VERIFIED CHANNELS ONLY: Direct customer to report through verified support channels with their order details. Do not invent replacement promises or physical walk-in locations.',
+          '4. INTERACTIVE DIAGNOSIS: Ask the customer to describe the visible damage or share photos so you can guide them on verified next steps. Do not invent replacement promises or physical walk-in locations.',
         ].join('\n'),
       };
     }
@@ -566,7 +566,7 @@ export function evaluateSupportResolutionPlan({
           'WRONG ITEM RECEIVED RESOLUTION CONTRACT:',
           '1. ACKNOWLEDGE FULFILLMENT ERROR: Acknowledge that an incorrect item was received. Do not deflect.',
           '2. POLICY APPLICABILITY GUARD: A dispatch error is NOT a standard customer return. Do not impose unopened return restrictions or fees.',
-          '3. VERIFICATION & NEXT STEPS: Ask the customer to provide photos of the item received and the packing slip/order number to verified support for resolution.',
+          '3. VERIFICATION & NEXT STEPS: Ask the customer to describe the incorrect item received and check their packing slip/order details directly in chat.',
         ].join('\n'),
       };
     }
@@ -600,7 +600,7 @@ export function evaluateSupportResolutionPlan({
 
     if (isTroubleshoot) {
       stage = 'DIAGNOSE_AND_RESOLVE';
-      guidance = 'Diagnose the technical problem step-by-step and provide grounded troubleshooting steps using approved knowledge and product specifications. Do NOT deflect to customer support when instructions exist.';
+      guidance = 'Diagnose the technical problem step-by-step and provide grounded troubleshooting steps using approved knowledge and product specifications. Ask the user for the result of the diagnostic step. Do NOT deflect or append support email/phone to initial troubleshooting advice.';
     } else if (isPayment) {
       stage = 'RESOLVE';
       guidance = 'Provide clear self-service payment troubleshooting steps (verifying card details, checking with issuing bank, trying alternative payment methods, checking billing address). Do NOT deflect prematurely.';
@@ -609,7 +609,7 @@ export function evaluateSupportResolutionPlan({
       guidance = 'Provide clear, step-by-step instructions on how to use, configure, or clean the product based on verified specifications and approved facts.';
     } else if (isContact) {
       stage = 'RESOLVE';
-      guidance = 'Provide verified contact information, support channels, email, phone, operating hours, and fulfillment hub address directly from site intelligence without deflection.';
+      guidance = 'Provide verified contact information, support channels, email, phone, operating hours, and fulfillment hub address directly from site intelligence because the customer explicitly requested contact details.';
     } else if (isOrderProcess) {
       stage = 'RESOLVE';
       guidance = 'Explain standard fulfillment steps, delivery timeframes, dispatch cutoffs, and how tracking links are provided via confirmation email.';
@@ -685,8 +685,9 @@ export function buildConversationIntelligencePromptSection(plan = null) {
     lines.push('AI-FIRST SUPPORT RESOLUTION CONTRACT:');
     lines.push('1. Under NO circumstances should you deflect this resolvable support request with "Please contact customer support", "Visit our website", or "Reach out to our team". Resolve it directly with verified knowledge, current page information, and site-wide intelligence.');
     lines.push('2. Provide concrete, step-by-step instructions (e.g. return process steps, packaging requirements, delivery timelines and cutoffs, cancellation procedure, account recovery steps, troubleshooting instructions).');
-    lines.push('3. Cross-page intelligence must be utilized: answer return, shipping, warranty, FAQ, or contact questions even if the customer is on a product page.');
-    lines.push('4. Conclude with a helpful follow-up to confirm resolution or offer immediate next steps.');
+    lines.push('3. INTERACTIVE DIAGNOSTIC ENGAGEMENT: Treat troubleshooting as an active conversation. Give the first troubleshooting step, ask the customer to try it, and ask for their result. Do NOT automatically append support phone/email unless troubleshooting is exhausted or the customer explicitly asked for contact details.');
+    lines.push('4. Cross-page intelligence must be utilized: answer return, shipping, warranty, FAQ, or contact questions even if the customer is on a product page.');
+    lines.push('5. Conclude with a helpful follow-up to confirm resolution or offer immediate next steps.');
 
     if (plan.supportCase === SUPPORT_CASES.DEFECTIVE_OR_MALFUNCTION) {
       lines.push('CRITICAL POLICY APPLICABILITY INVARIANTS FOR DEFECTIVE PRODUCTS:');
@@ -698,11 +699,11 @@ export function buildConversationIntelligencePromptSection(plan = null) {
     } else if (plan.supportCase === SUPPORT_CASES.DAMAGED_ON_ARRIVAL) {
       lines.push('CRITICAL POLICY APPLICABILITY INVARIANTS FOR DAMAGED ARRIVAL:');
       lines.push('- Transit damage is NOT a standard change-of-mind return. Do NOT apply unopened return restrictions.');
-      lines.push('- Guide the customer to document damage (take photos of packaging and item) and report through verified support channels.');
+      lines.push('- Guide the customer to document damage (take photos of packaging and item).');
     } else if (plan.supportCase === SUPPORT_CASES.WRONG_ITEM) {
       lines.push('CRITICAL POLICY APPLICABILITY INVARIANTS FOR WRONG ITEM:');
       lines.push('- Fulfillment error is NOT a normal return or product defect.');
-      lines.push('- Request order details and photos of incorrect item received, and provide verified support contact channels.');
+      lines.push('- Request order details and photos of incorrect item received directly in chat.');
     }
   } else if (plan.action === RESOLUTION_ACTIONS.SALES_ENGAGE) {
     lines.push('ACTIVE SALES CONSULTANT CONTRACT:');

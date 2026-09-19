@@ -10,7 +10,7 @@ const HUMAN_SUPPORT_PATTERNS = [
   /(?:^|\s)(?:bir\s+)?insanla\s+(?:görüşmek|gorusmek|konuşmak|konusmak)(?:\s|[.,!?]|$)/iu,
   /(?:^|\s)(?:gerçek\s+bir\s+(?:müşteri\s+)?(?:insan|kişi|temsilci)|bot\s+istemiyorum|bot\s+değil\s+insan)(?:\s|[.,!?]|$)/iu,
   /(?:^|\s)(?:not\s+ai|no\s+bot|bot\s+değil|bot\s+degil|gerçek\s+insan|gercek\s+insan|real\s+human)(?:\s|[.,!?]|$)/iu,
-  /(?:^|\s)(?:دعم\s+مباشر|موظف\s+بشري|ممثل\s+بشري|أريد\s+(?:التحدث\s+مع\s+)?(?:إنسان|شخص\s+حقيقي)|تحدث\s+مع\s+إنسان)(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)(?:دعم\s+مباشر|موظف\s+بشري|ممثل\s+بشري|أريد\s+(?:التحدث\s+مع\s+)?(?:إنسان|شخص\s+حقيقي|موظف|خدمة\s+العملاء)|تحدث\s+مع\s+(?:إنسان|موظف))(?:\s|[.,!?]|$)/iu,
   /^\/(?:w|n)$/iu,
 ];
 

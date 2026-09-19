@@ -1803,7 +1803,10 @@ app.post("/chat", chatPostHandler = async (req, res) => {
         'CHAT_GEMINI_RUNTIME_CONTEXT channel=SAMCHEGUIDE active_configuration=' + (runtime.knowledge.activeConfiguration ? '1' : '0') +
         ' retrieved_chunks=' + runtime.knowledge.knowledge.length +
         ' retrieval_available=' + (runtime.knowledge.retrievalAvailable ? '1' : '0') +
-        ' provider_mode=' + runtime.mode + ' model=' + runtime.model
+        ' provider_mode=' + runtime.mode + ' model=' + runtime.model +
+        ' attachments_doc_count=' + guideMultimodal.documents.length +
+        ' attachments_img_count=' + guideMultimodal.images.length +
+        (guideMultimodal.images.length > 0 ? (' img_mimes=' + guideMultimodal.images.map((img) => img.mimeType).join(',') + ' img_bytes=' + guideMultimodal.images.map((img) => (img.buffer?.length ?? 0)).join(',')) : '')
       );
 
       console.info('CHAT_GEMINI_STARTED');

@@ -381,4 +381,48 @@ test('PRODUCT-AWARE FIRST-LINE SUPPORT: Common support phrases do not deflect to
   assert.equal(planE.action, RESOLUTION_ACTIONS.AI_FIRST_RESOLVE);
 });
 
+// ============================================================================
+// 12. INTERACTIVE DIAGNOSTIC CONTINUATION (NO PREMATURE DEFLECTION / CONTACT INFO)
+// ============================================================================
+test('INTERACTIVE DIAGNOSTIC SUPPORT: Product troubleshooting keeps conversation in interactive resolution loop', () => {
+  const headphoneIssue = classifyConversationIntent({
+    message: 'Kulaklıklarım çalışmıyor, telefona bağlanmıyor.',
+  });
+  assert.equal(headphoneIssue.isSupport, true);
+  assert.equal(headphoneIssue.primaryIntent, INTENT_TYPES.SUPPORT_TROUBLESHOOTING);
+
+  const plan = evaluateSupportResolutionPlan({ intentClassification: headphoneIssue });
+  assert.equal(plan.action, RESOLUTION_ACTIONS.AI_FIRST_RESOLVE);
+  assert.equal(plan.requiresHandoff, false);
+
+  const promptSection = buildConversationIntelligencePromptSection(plan);
+  assert.match(promptSection, /INTERACTIVE DIAGNOSTIC ENGAGEMENT/);
+  assert.match(promptSection, /Treat troubleshooting as an active conversation/);
+  assert.match(promptSection, /Do NOT automatically append support phone\/email unless troubleshooting is exhausted/);
+});
+
+test('CONTACT DISCLOSURE GATES: Contact details policy only permits phone/email disclosure under explicit gates', () => {
+  const mockPersona = {
+    available: true,
+    companyIdentity: 'SamChe LLC',
+    assistantIdentity: 'SamChe AI',
+    profile: {
+      company_identity: 'SamChe LLC',
+      support_email: 'support@samche.com',
+      support_phone: '+971 50 694 1372',
+    },
+    configuration: {
+      assistant_identity: 'SamChe AI',
+    },
+  };
+
+  const prompt = buildTenantRuntimeSystemInstruction({
+    persona: mockPersona,
+  });
+
+  assert.match(prompt, /INTERACTIVE DIAGNOSIS & CONTACT DISCLOSURE GATES/);
+  assert.match(prompt, /You MUST ONLY disclose support contact information \(support email\/phone\) when/);
+  assert.match(prompt, /\(A\) the customer explicitly asks for contact details/i);
+});
+
 

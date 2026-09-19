@@ -444,3 +444,154 @@ test('GUIDE RUNTIME BOUNDARY: Guide message with PDF document invokes Gemini pro
     delete app.locals.googleGeminiProvider;
   }
 });
+
+test('GEMINI PROVIDER ADAPTER: Payload after provider normalization contains canonical inlineData schema and survives transformation', async () => {
+  const { createGoogleGeminiProvider } = await import('../services/google-gemini-provider.js');
+
+  const capturedClientRequests = [];
+  const fakeGenAiClient = {
+    models: {
+      generateContent: async (req) => {
+        capturedClientRequests.push(req);
+        return {
+          candidates: [{
+            content: { parts: [{ text: 'Visual test response' }] },
+          }],
+        };
+      },
+    },
+  };
+
+  const provider = createGoogleGeminiProvider({
+    env: {
+      GEMINI_API_KEY: 'test-key-12345',
+      GOOGLE_GEMINI_RUNTIME_MODEL: 'gemini-3-flash-preview',
+    },
+    clientFactory: () => fakeGenAiClient,
+  });
+
+  const testBytes = Buffer.from('TEST_PNG_BYTES_VISUAL_TEST_73921');
+  const inputParts = formatGeminiMultimodalParts({
+    text: 'What exact text/objects are visible in this image?',
+    images: [{ mimeType: 'image/png', buffer: testBytes }],
+  });
+
+  const response = await provider.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: [{ role: 'user', parts: inputParts }],
+  });
+
+  assert.ok(response);
+  assert.equal(capturedClientRequests.length, 1);
+
+  const clientReq = capturedClientRequests[0];
+  const userContent = clientReq.contents.find((c) => c.role === 'user');
+  assert.ok(userContent, 'User content must be present in client request');
+
+  const imagePart = userContent.parts.find((p) => p.inlineData);
+  assert.ok(imagePart, 'inlineData must survive provider normalization');
+  assert.equal(imagePart.inlineData.mimeType, 'image/png');
+  assert.equal(imagePart.inlineData.data, testBytes.toString('base64'));
+  assert.equal(imagePart.inline_data, undefined, 'snake_case inline_data must be normalized to clean SDK inlineData');
+});
+
+test('AI GUIDE VISUAL GROUNDING: Visual question with unique marker VISUAL_TEST_73921 enforces attachment priority and prevents BP masquerade', async () => {
+  const secret = 'test-secret-at-least-32-chars-long-12345';
+  process.env.SAMCHEGUIDE_PUBLIC_SESSION_SECRET = secret;
+
+  const session = issuePublicConversationSession({
+    secret,
+    scope: {
+      domainId,
+      tenantId,
+      assistantId,
+      channelId: 'channel-guide-1',
+    },
+  });
+
+  const visualMarkerBytes = Buffer.from('IMAGE_BYTES_WITH_MARKER_VISUAL_TEST_73921');
+  let capturedGeminiPayload = null;
+
+  const mockGemini = {
+    mode: 'developer',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'developer', model: 'gemini-3-flash-preview' }),
+    generateContent: async (payload) => {
+      capturedGeminiPayload = payload;
+      const userMsg = payload.contents?.find((m) => m.role === 'user');
+      const hasImage = userMsg?.parts?.some((p) => p.inlineData?.data === visualMarkerBytes.toString('base64') || p.inline_data?.data === visualMarkerBytes.toString('base64'));
+      if (hasImage) {
+        return {
+          candidates: [{
+            content: {
+              parts: [{
+                text: '<p>Observed in uploaded image: VISUAL_TEST_73921 badge and diagram elements.</p>',
+              }],
+            },
+          }],
+        };
+      }
+      return {
+        candidates: [{
+          content: {
+            parts: [{
+              text: '<p>Blue Dune Event Management LLC profile.</p>',
+            }],
+          },
+        }],
+      };
+    },
+  };
+
+  const mockDatabase = createMockGuideDb({
+    resourceRow: {
+      id: resourceId,
+      tenant_id: tenantId,
+      conversation_id: conversationId,
+      media_category: 'IMAGE',
+      original_filename: 'visual_test.png',
+      mime_type: 'image/png',
+      storage_key: `conversation-resources/${tenantId}/${conversationId}/${resourceId}.png`,
+      processing_status: 'READY',
+    },
+  });
+
+  app.locals.database = mockDatabase;
+  app.locals.storage = { get: async () => visualMarkerBytes };
+  app.locals.googleGeminiProvider = mockGemini;
+
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  const { port } = server.address();
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/chat`, {
+      method: 'POST',
+      headers: {
+        'Host': 'guide.example.com',
+        'Content-Type': 'application/json',
+        'X-Samcheguide-Session': session.token,
+      },
+      body: JSON.stringify({
+        text: 'What exact text/objects are visible in this image?',
+        guide_module: 'AI_ASSISTANT',
+        attachment_resource_ids: [resourceId],
+      }),
+    });
+
+    const body = await res.json();
+    assert.equal(res.status, 200);
+    assert.match(body.candidates[0].content.parts[0].text, /VISUAL_TEST_73921/);
+    assert.doesNotMatch(body.candidates[0].content.parts[0].text, /Blue Dune Event Management LLC profile/);
+
+    // Verify system instruction has the strict visual grounding policy
+    const systemInstructionText = capturedGeminiPayload?.systemInstruction?.parts?.[0]?.text || '';
+    assert.match(systemInstructionText, /MULTIMODAL ATTACHMENT & VISUAL GROUNDING INVARIANTS/);
+    assert.match(systemInstructionText, /STRICT DISTINCTION BETWEEN VISUAL EVIDENCE AND TENANT BUSINESS PROFILE/);
+    assert.match(systemInstructionText, /You MUST NEVER masquerade, project, or invent Business Profile facts/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    delete app.locals.database;
+    delete app.locals.storage;
+    delete app.locals.googleGeminiProvider;
+  }
+});
