@@ -5,8 +5,9 @@ process.env.NODE_ENV = 'test';
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { issuePublicWebChatSession } from '../services/public-web-chat-session.js';
-import { appendAgentMessage, operateConversation } from '../services/live-inbox-service.js';
+import { appendAgentMessage, operateConversation, persistAssistantResponseIfCurrent } from '../services/live-inbox-service.js';
 import { emitTenantEvent } from '../services/live-event-bus.js';
 import { app } from '../app.js';
 
@@ -16,6 +17,12 @@ const assistantId = '44444444-4444-4444-8444-444444444444';
 const profileId = '55555555-5555-4555-8555-555555555555';
 const configId = '66666666-6666-4666-8666-666666666666';
 const operatorUserId = '33333333-3333-4333-8333-333333333333';
+
+test('PUBLIC SESSION LIFECYCLE: chat responses cannot replace the signed session with a raw UUID', async () => {
+  const source = await readFile(new URL('../public/web-chat.js', import.meta.url), 'utf8');
+  const assignments = source.match(/sessionToken\s*=\s*data\.session/g) || [];
+  assert.equal(assignments.length, 1, 'only bootstrap may establish the signed WebChat session token');
+});
 
 function createMockDeliveryDb() {
   const conversationState = {
@@ -43,6 +50,32 @@ function createMockDeliveryDb() {
       } catch {}
       return { rowCount: 1, rows: [] };
     }
+    if (sql.includes('SELECT id, tenant_id, customer_external_id, contact_id')) {
+      return {
+        rowCount: 1,
+        rows: [{ ...conversationState, customer_external_id: 'customer-1', contact_id: null }],
+      };
+    }
+    if (sql.includes('INSERT INTO crm_contacts')) {
+      return { rowCount: 1, rows: [{ id: 'contact-1' }] };
+    }
+    if (sql.includes('SELECT id, tenant_id, contact_id, conversation_id')) {
+      return { rowCount: 1, rows: [{ id: 'lead-1', tenant_id: tenantId, contact_id: 'contact-1', conversation_id: conversationId }] };
+    }
+    if (sql.includes('FROM conversations c') && sql.includes('conversation_messages')) {
+      return {
+        rowCount: 1,
+        rows: [{
+          ...conversationState,
+          conversation_id: conversationId,
+          channel_type: 'WEB_CHAT',
+          external_channel_id: 'web-1',
+        }],
+      };
+    }
+    if (sql.includes('FROM guide_domains')) {
+      return { rowCount: 0, rows: [] };
+    }
     if (sql.includes('channel_integrations') || sql.includes('integration_key') || sql.includes('widget_key')) {
       return {
         rowCount: 1,
@@ -63,6 +96,8 @@ function createMockDeliveryDb() {
       return {
         rowCount: 1,
         rows: [{
+          assistant_id: assistantId,
+          knowledge_authority_version: 1,
           id: configId,
           configuration_data: { assistant_identity: 'SamChe AI', supported_languages: ['en', 'tr'] },
           configuration_schema_version: 2,
@@ -79,6 +114,7 @@ function createMockDeliveryDb() {
         rowCount: 1,
         rows: [{
           ...conversationState,
+          conversation_id: conversationId,
           channel_type: 'WEB_CHAT',
           external_channel_id: 'web-1',
         }],
@@ -114,11 +150,11 @@ function createMockDeliveryDb() {
       messagesStore.push(msg);
       return { rowCount: 1, rows: [msg] };
     }
-    if (sql.includes('SELECT id, sender_type, content, created_at') && sql.includes("sender_type = 'AGENT'")) {
-      const agentMsgs = messagesStore.filter((m) => m.sender_type === 'AGENT');
+    if (sql.includes('SELECT id, sender_type, content, created_at') && sql.includes('sender_type = $3')) {
+      const matchingMsgs = messagesStore.filter((m) => m.sender_type === params[2]);
       return {
-        rowCount: agentMsgs.length,
-        rows: agentMsgs.slice(-1),
+        rowCount: matchingMsgs.length,
+        rows: matchingMsgs.slice(-1),
       };
     }
     if (sql.includes('users') || sql.includes('tenant_users')) {
@@ -172,7 +208,7 @@ test('HUMAN OUTBOUND DELIVERY: Agent message from Dashboard reaches WebChat SSE 
     });
 
     assert.equal(sseRes.status, 200, 'SSE stream must connect with 200 OK');
-    assert.equal(sseRes.headers.get('content-type'), 'text/event-stream');
+    assert.match(sseRes.headers.get('content-type') || '', /^text\/event-stream(?:;|$)/);
 
     const reader = sseRes.body.getReader();
     const decoder = new TextDecoder();
@@ -241,6 +277,65 @@ test('HUMAN OUTBOUND DELIVERY: Agent message from Dashboard reaches WebChat SSE 
     await new Promise((resolve) => server.close(resolve));
     delete app.locals.database;
     delete app.locals.storage;
+  }
+});
+
+test('AI OUTBOUND DELIVERY: Assistant message reaches the same WebChat SSE stream after Return AI', async () => {
+  const secret = 'test-secret-at-least-32-chars-long-12345';
+  process.env.WEB_CHAT_PUBLIC_SESSION_SECRET = secret;
+  const session = issuePublicWebChatSession({ widgetKey: 'wch_live_widget_123', secret });
+  const mockDb = createMockDeliveryDb();
+  app.locals.database = mockDb;
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  const { port } = server.address();
+  const controller = new AbortController();
+
+  try {
+    const sseRes = await fetch(`http://127.0.0.1:${port}/api/chat/live`, {
+      headers: { Accept: 'text/event-stream', 'X-Samche-Web-Chat-Session': session.token },
+      signal: controller.signal,
+    });
+    assert.equal(sseRes.status, 200);
+    const reader = sseRes.body.getReader();
+    const decoder = new TextDecoder();
+    await reader.read();
+
+    const returned = await operateConversation({
+      tenantId,
+      conversationId,
+      actor: { userId: operatorUserId, systemRole: 'ADMIN', tenantRole: 'ADMIN' },
+      action: 'return_to_ai',
+      database: mockDb,
+    });
+    assert.equal(returned.handling_mode, 'AI');
+    const modeResult = await reader.read();
+    assert.match(decoder.decode(modeResult.value), /"handling_mode":"AI"/);
+
+    const persisted = await persistAssistantResponseIfCurrent({
+      tenantId,
+      conversationId,
+      content: 'AI_RETURN_TEST_RESPONSE',
+      handlingVersion: returned.handling_version,
+      database: mockDb,
+    });
+    assert.equal(persisted.delivered, true);
+    assert.equal(persisted.message.sender_type, 'ASSISTANT');
+
+    const result = await Promise.race([
+      reader.read(),
+      new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 500)),
+    ]);
+    assert.notEqual(result.timeout, true, 'assistant message must be delivered through the public stream');
+    const text = decoder.decode(result.value);
+    assert.match(text, /event: message/);
+    assert.match(text, /AI_RETURN_TEST_RESPONSE/);
+    assert.match(text, /"sender_type":"ASSISTANT"/);
+  } finally {
+    controller.abort();
+    server.closeAllConnections?.();
+    await new Promise((resolve) => server.close(resolve));
+    delete app.locals.database;
   }
 });
 

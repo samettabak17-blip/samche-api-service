@@ -1747,6 +1747,13 @@
                   message_type: 'AGENT',
                   sender_type: 'AGENT',
                 });
+              } else if (data.role === 'assistant' || data.sender_type === 'ASSISTANT') {
+                clearTypingIndicator(messages);
+                appendMessage('bot', data.content, {
+                  id: data.id,
+                  message_type: 'ASSISTANT',
+                  sender_type: 'ASSISTANT',
+                });
               }
             } catch (pErr) {}
           });
@@ -2516,12 +2523,6 @@
           if (!res.ok && !data.reply && !data.response && !data.text) {
             appendMessage('bot', data.error || 'Üzgünüm, şu anda yanıt verilemiyor. Lütfen tekrar deneyin.', { message_type: 'ASSISTANT' });
             return;
-          }
-
-          if (data && data.session) {
-            sessionToken = data.session;
-            SamcheChatPersistence.storeSession(widgetKey, sessionToken);
-            initRealtimeStream();
           }
 
           if (data && (data.handling_mode === 'HUMAN' || (data.handoff && data.handoff.mode === 'HUMAN') || (data.reply && (data.reply.indexOf('Temsilcimiz şu anda görüşmede') !== -1 || data.reply.indexOf('Our representative is currently') !== -1)))) {

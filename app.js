@@ -1405,7 +1405,8 @@ async function issueOrResolvePublicConversationSession(req, scope, resolvedExper
   return issueGuideResumeSession({ database, scope, experienceVersion: resolvedExperience.experience.version, experienceVersionId: resolvedExperience.experienceVersionId ?? resolvedExperience.version?.id ?? null, previewMode: previewModeForExperience(resolvedExperience) });
 }
 
-app.get(["/chat/history", "/:slug/chat/history"], async (req, res) => {
+app.get(["/chat/history", "/:slug/chat/history"], async (req, res, next) => {
+  if (req.params?.slug && isReservedGuideSlug(req.params.slug)) return next();
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ error: "Conversation is unavailable." });
@@ -1420,7 +1421,8 @@ app.get(["/chat/history", "/:slug/chat/history"], async (req, res) => {
   }
 });
 
-app.get(["/chat/live", "/:slug/chat/live"], async (req, res) => {
+app.get(["/chat/live", "/:slug/chat/live"], async (req, res, next) => {
+  if (req.params?.slug && isReservedGuideSlug(req.params.slug)) return next();
   try {
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ error: "Conversation is unavailable." });
@@ -2058,24 +2060,25 @@ app.get(["/api/chat/live", "/api/v1/public/web-chat/live"], async (req, res) => 
   const unsubscribe = subscribeTenantEvents(feed.tenantId, async (event) => {
     if (event.conversation_id !== feed.conversationId) return;
 
-    if (event.type === 'AGENT_MESSAGE') {
+    if (event.type === 'AGENT_MESSAGE' || event.type === 'ASSISTANT_MESSAGE') {
       try {
         const client = await database.connect();
         try {
+          const senderType = event.type === 'ASSISTANT_MESSAGE' ? 'ASSISTANT' : 'AGENT';
           const msgResult = await client.query(
             `SELECT id, sender_type, content, created_at
                FROM conversation_messages
-              WHERE conversation_id = $1 AND tenant_id = $2 AND sender_type = 'AGENT'
+              WHERE conversation_id = $1 AND tenant_id = $2 AND sender_type = $3
               ORDER BY created_at DESC, id DESC
               LIMIT 1`,
-            [feed.conversationId, feed.tenantId]
+            [feed.conversationId, feed.tenantId, senderType]
           );
           if (msgResult.rows[0]) {
             const m = msgResult.rows[0];
             res.write(`event: message\ndata: ${JSON.stringify({
               id: m.id,
               sender_type: m.sender_type,
-              role: 'agent',
+              role: m.sender_type === 'AGENT' ? 'agent' : 'assistant',
               content: m.content,
               created_at: m.created_at,
             })}\n\n`);

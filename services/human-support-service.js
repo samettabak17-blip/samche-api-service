@@ -225,10 +225,13 @@ export async function requestCustomerHumanSupport({
 export async function listHumanAttentionSummary({ tenantId, database = null }) {
   const result = await (database ?? await defaultDatabase()).query(
     `SELECT COUNT(*)::integer AS unresolved_count
-       FROM conversations
+      FROM conversations
       WHERE tenant_id = $1
         AND status = 'open'
-        AND human_attention_state = 'REQUESTED'`,
+        AND handling_mode = 'HUMAN'
+        AND human_attention_state = 'REQUESTED'
+        AND handoff_requested = TRUE
+        AND human_support_closed_at IS NULL`,
     [tenantId]
   );
   const unresolvedCount = Number(result.rows[0]?.unresolved_count ?? 0);
