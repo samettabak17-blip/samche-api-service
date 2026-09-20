@@ -20,8 +20,8 @@ test('human attention summary counts only the canonical active waiting state', a
 
   assert.equal(summary.unresolvedCount, 2);
   assert.match(sql, /status = 'open'/i);
-  assert.match(sql, /handling_mode = 'HUMAN'/i);
   assert.match(sql, /human_attention_state = 'REQUESTED'/i);
-  assert.match(sql, /handoff_requested = TRUE/i);
-  assert.match(sql, /human_support_closed_at IS NULL/i);
+  assert.doesNotMatch(sql, /handling_mode/i, 'handling ownership must not become a second waiting-state authority');
+  assert.doesNotMatch(sql, /handoff_requested/i, 'legacy handoff flags must not control waiting eligibility');
+  assert.doesNotMatch(sql, /human_support_closed_at/i, 'historical close timestamps must not control waiting eligibility');
 });

@@ -2039,11 +2039,24 @@ app.get(["/api/chat/live", "/api/v1/public/web-chat/live"], async (req, res) => 
   const integration = await resolvePublicWebChatIntegration({ database, widgetKey: session.widgetKey });
   if (!integration) return res.status(404).json({ error: 'Web Chat integration is unavailable.' });
 
-  const feed = await getWebChatPublicFeed({
+  let feed = await getWebChatPublicFeed({
     externalSessionId: session.sessionId,
     integration,
     database,
   });
+
+  if (!feed?.conversationId) {
+    await ensureWebChatConversation({
+      database,
+      integration,
+      externalSessionId: session.sessionId,
+    });
+    feed = await getWebChatPublicFeed({
+      externalSessionId: session.sessionId,
+      integration,
+      database,
+    });
+  }
 
   if (!feed?.conversationId) {
     return res.status(404).json({ error: 'Conversation is unavailable.' });

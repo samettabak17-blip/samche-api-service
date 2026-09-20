@@ -260,7 +260,7 @@ export async function getWebChatPublicFeed({ externalSessionId, integration, dat
     const result = await client.query(
       `SELECT c.id AS conversation_id, c.handling_mode, m.id, m.sender_type, m.content, m.created_at
          FROM conversations c
-         JOIN conversation_messages m ON m.conversation_id = c.id AND m.tenant_id = c.tenant_id
+         LEFT JOIN conversation_messages m ON m.conversation_id = c.id AND m.tenant_id = c.tenant_id
         WHERE c.tenant_id = $1 AND c.channel_id = $2
           AND (c.external_conversation_id = $3 OR c.external_conversation_id = $4)
         ORDER BY m.created_at ASC, m.id ASC
@@ -271,7 +271,7 @@ export async function getWebChatPublicFeed({ externalSessionId, integration, dat
       tenantId: integration.tenant_id,
       conversationId: result.rows[0]?.conversation_id ?? null,
       handlingMode: result.rows[0]?.handling_mode ?? 'AI',
-      messages: result.rows.map(({ id, sender_type, content, created_at }) => ({
+      messages: result.rows.filter(({ id }) => id !== null).map(({ id, sender_type, content, created_at }) => ({
         id,
         role: sender_type === 'CUSTOMER' ? 'user' : (sender_type === 'AGENT' ? 'agent' : 'assistant'),
         sender_type,

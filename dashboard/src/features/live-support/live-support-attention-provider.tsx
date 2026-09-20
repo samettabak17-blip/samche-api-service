@@ -142,7 +142,7 @@ export function LiveSupportAttentionProvider({ tenantId, userId, children }: { t
           buffer = frames.pop() ?? '';
           for (const frame of frames) {
             const event = parseLiveEvent(frame);
-            if (event?.tenant_id === tenantId && event.type?.startsWith('HUMAN_SUPPORT_')) {
+            if (event?.tenant_id === tenantId && (event.type?.startsWith('HUMAN_SUPPORT_') || ['TAKEOVER', 'RETURN_TO_AI', 'CLOSE'].includes(event.type ?? ''))) {
               console.info('DASHBOARD_ATTENTION_SSE received=' + event.type);
               void refreshAttention('SSE');
             }

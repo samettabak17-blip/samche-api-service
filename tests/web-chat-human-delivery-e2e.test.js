@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { issuePublicWebChatSession } from '../services/public-web-chat-session.js';
-import { appendAgentMessage, operateConversation, persistAssistantResponseIfCurrent } from '../services/live-inbox-service.js';
+import { appendAgentMessage, getWebChatPublicFeed, operateConversation, persistAssistantResponseIfCurrent } from '../services/live-inbox-service.js';
 import { emitTenantEvent } from '../services/live-event-bus.js';
 import { app } from '../app.js';
 
@@ -17,6 +17,40 @@ const assistantId = '44444444-4444-4444-8444-444444444444';
 const profileId = '55555555-5555-4555-8555-555555555555';
 const configId = '66666666-6666-4666-8666-666666666666';
 const operatorUserId = '33333333-3333-4333-8333-333333333333';
+
+test('PUBLIC SSE SUBSCRIBER: an authorized empty WebChat conversation has a stable live feed before its first message', async () => {
+  const database = {
+    connect: async () => ({
+      query: async (sql) => {
+        // An empty conversation is returned only by the required LEFT JOIN.
+        if (/LEFT JOIN conversation_messages/i.test(sql)) {
+          return {
+            rows: [{
+              conversation_id: conversationId,
+              handling_mode: 'AI',
+              id: null,
+              sender_type: null,
+              content: null,
+              created_at: null,
+            }],
+          };
+        }
+        return { rows: [] };
+      },
+      release: () => {},
+    }),
+  };
+
+  const feed = await getWebChatPublicFeed({
+    externalSessionId: 'empty-session',
+    integration: { tenant_id: tenantId, channel_id: 'channel-1', channel_status: 'active' },
+    database,
+  });
+
+  assert.equal(feed.conversationId, conversationId);
+  assert.equal(feed.handlingMode, 'AI');
+  assert.deepEqual(feed.messages, []);
+});
 
 test('PUBLIC SESSION LIFECYCLE: chat responses cannot replace the signed session with a raw UUID', async () => {
   const source = await readFile(new URL('../public/web-chat.js', import.meta.url), 'utf8');

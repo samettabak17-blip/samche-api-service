@@ -228,10 +228,7 @@ export async function listHumanAttentionSummary({ tenantId, database = null }) {
       FROM conversations
       WHERE tenant_id = $1
         AND status = 'open'
-        AND handling_mode = 'HUMAN'
-        AND human_attention_state = 'REQUESTED'
-        AND handoff_requested = TRUE
-        AND human_support_closed_at IS NULL`,
+        AND human_attention_state = 'REQUESTED'`,
     [tenantId]
   );
   const unresolvedCount = Number(result.rows[0]?.unresolved_count ?? 0);
