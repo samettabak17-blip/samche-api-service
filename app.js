@@ -1967,6 +1967,10 @@ function extractWebChatSessionToken(req) {
   if (authHeader && /^Bearer\s+/i.test(authHeader)) {
     return authHeader.replace(/^Bearer\s+/i, '').trim();
   }
+  const queryToken = req.query?.session_token;
+  if (typeof queryToken === 'string' && queryToken.trim()) {
+    return queryToken.trim();
+  }
   if (typeof req.body?.conversation_session === 'string' && req.body.conversation_session.trim()) {
     return req.body.conversation_session.trim();
   }

@@ -24,6 +24,27 @@ test('PUBLIC SESSION LIFECYCLE: chat responses cannot replace the signed session
   assert.equal(assignments.length, 1, 'only bootstrap may establish the signed WebChat session token');
 });
 
+test('PUBLIC SSE SESSION BOUNDARY: missing, invalid, and expired query tokens are rejected', async () => {
+  const secret = 'test-secret-at-least-32-chars-long-12345';
+  process.env.WEB_CHAT_PUBLIC_SESSION_SECRET = secret;
+  const expired = issuePublicWebChatSession({ widgetKey: 'wch_live_widget_123', secret, now: 100, ttlSeconds: 1 });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  const { port } = server.address();
+
+  try {
+    const missing = await fetch(`http://127.0.0.1:${port}/api/chat/live?session_token=`);
+    assert.equal(missing.status, 401);
+    const invalid = await fetch(`http://127.0.0.1:${port}/api/chat/live?session_token=not-a-signed-session`);
+    assert.equal(invalid.status, 401);
+    const expiredResponse = await fetch(`http://127.0.0.1:${port}/api/chat/live?session_token=${encodeURIComponent(expired.token)}`);
+    assert.equal(expiredResponse.status, 401);
+  } finally {
+    server.closeAllConnections?.();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 function createMockDeliveryDb() {
   const conversationState = {
     id: conversationId,
@@ -198,11 +219,10 @@ test('HUMAN OUTBOUND DELIVERY: Agent message from Dashboard reaches WebChat SSE 
 
   try {
     // 1. Connect customer to WebChat live stream
-    const sseRes = await fetch(`http://127.0.0.1:${port}/api/chat/live`, {
+    const sseRes = await fetch(`http://127.0.0.1:${port}/api/chat/live?session_token=${encodeURIComponent(session.token)}`, {
       method: 'GET',
       headers: {
         'Accept': 'text/event-stream',
-        'X-Samche-Web-Chat-Session': session.token,
       },
       signal: controller.signal,
     });
@@ -292,8 +312,8 @@ test('AI OUTBOUND DELIVERY: Assistant message reaches the same WebChat SSE strea
   const controller = new AbortController();
 
   try {
-    const sseRes = await fetch(`http://127.0.0.1:${port}/api/chat/live`, {
-      headers: { Accept: 'text/event-stream', 'X-Samche-Web-Chat-Session': session.token },
+    const sseRes = await fetch(`http://127.0.0.1:${port}/api/chat/live?session_token=${encodeURIComponent(session.token)}`, {
+      headers: { Accept: 'text/event-stream' },
       signal: controller.signal,
     });
     assert.equal(sseRes.status, 200);

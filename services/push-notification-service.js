@@ -150,12 +150,21 @@ export async function enqueueHumanHandoffPushNotification({
   const recipientUserIds = recipientIds(Array.isArray(recipients) ? recipients.map((recipient) => recipient?.id) : recipients);
   const eventId = `human-handoff:${String(handoffOutboxId ?? '').trim()}`;
   if (!/^human-handoff:[A-Za-z0-9_.:-]{1,240}$/.test(eventId)) throw new PushNotificationError('PUSH_HANDOFF_EVENT_INVALID');
+  const channelResult = await database.query(
+    `SELECT tc.channel_type
+       FROM conversations c
+       JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
+      WHERE c.id = $1 AND c.tenant_id = $2`,
+    [conversation, tenant],
+  );
+  const channelType = String(channelResult.rows[0]?.channel_type ?? '').toUpperCase();
+  const channelRoute = channelType === 'WEB_CHAT' ? 'web-chat' : channelType === 'SAMCHEGUIDE' ? 'guide' : 'whatsapp';
   return createPushNotificationIntent({
     database,
     tenantId: tenant,
     eventId,
     eventType: 'HUMAN_HANDOFF_REQUESTED',
-    deepLink: `/app/${tenant}/conversations/whatsapp/${conversation}`,
+    deepLink: `/app/${tenant}/conversations/${channelRoute}/${conversation}`,
     recipientUserIds,
   });
 }
