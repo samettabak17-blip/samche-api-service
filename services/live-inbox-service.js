@@ -284,6 +284,44 @@ export async function getWebChatPublicFeed({ externalSessionId, integration, dat
   }
 }
 
+async function notifyHumanTyping(client, tenantId, conversationId, active) {
+  const expiresAt = active ? new Date(Date.now() + 5000).toISOString() : null;
+  await client.query('SELECT pg_notify($1, $2)', [
+    'samche_live_events',
+    JSON.stringify({ tenant_id: tenantId, conversation_id: conversationId, type: 'HUMAN_TYPING', active: Boolean(active), expires_at: expiresAt }),
+  ]);
+}
+
+export async function publishHumanTyping({ database = pool, tenantId, conversationId, actor, active = true } = {}) {
+  const client = await database.connect();
+  try {
+    const result = await client.query(
+      `SELECT id, status, handling_mode, assigned_agent_user_id
+         FROM conversations
+        WHERE id = $1 AND tenant_id = $2`,
+      [conversationId, tenantId],
+    );
+    const conversation = result.rows[0];
+    if (!conversation) throw new ConversationOperationError(404, 'Conversation not found', 'CONVERSATION_NOT_FOUND');
+    if (conversation.status !== 'open' || conversation.handling_mode !== 'HUMAN') {
+      throw new ConversationOperationError(409, 'Human typing is unavailable for this conversation', 'HUMAN_TYPING_NOT_AVAILABLE');
+    }
+    if (!canOperateConversation({
+      systemRole: actor?.systemRole,
+      tenantRole: actor?.tenantRole,
+      action: 'send_message',
+      assignedAgentUserId: conversation.assigned_agent_user_id,
+      actorUserId: actor?.userId,
+    })) {
+      throw new ConversationOperationError(403, 'Human typing is not permitted for this operator', 'HUMAN_TYPING_NOT_ALLOWED');
+    }
+    await notifyHumanTyping(client, tenantId, conversationId, active);
+    return { active: Boolean(active) };
+  } finally {
+    client.release();
+  }
+}
+
 export async function resolveWebChatAiEligibility({ tenantId, conversationId, handlingVersion, database = pool }) {
   if (!tenantId || !conversationId) {
     return { allowed: false, reason: 'CONVERSATION_UNAVAILABLE' };
@@ -736,6 +774,7 @@ export async function operateConversation({
         await insertMessage(client, { tenantId, conversationId, senderType: 'ASSISTANT', content });
       }
       await writeAuditEvent(client, { tenantId, conversationId, actorUserId, eventType: 'TAKEOVER' });
+      await notifyHumanTyping(client, tenantId, conversationId, false);
       console.info('TAKEOVER_STAGE stage=ACKNOWLEDGED tenant=' + String(tenantId).slice(0, 8));
       await notify(client, tenantId, conversationId, 'TAKEOVER');
       console.info('TAKEOVER_STAGE stage=SSE_PUBLISHED tenant=' + String(tenantId).slice(0, 8));
@@ -808,6 +847,7 @@ export async function operateConversation({
         publicLifecycleMessagePersisted = true;
       }
       await writeAuditEvent(client, { tenantId, conversationId, actorUserId, eventType: 'RETURN_TO_AI' });
+      await notifyHumanTyping(client, tenantId, conversationId, false);
       await notify(client, tenantId, conversationId, 'RETURN_TO_AI');
       if (publicLifecycleMessagePersisted) await notify(client, tenantId, conversationId, 'ASSISTANT_MESSAGE');
       console.info('TAKEOVER_CANCELLED_ESCALATION = tenant=' + String(tenantId).slice(0, 8) + ' conversation=' + String(conversationId).slice(0, 8));
@@ -866,6 +906,7 @@ export async function operateConversation({
         [conversationId, tenantId]
       );
       await writeAuditEvent(client, { tenantId, conversationId, actorUserId, eventType: 'CLOSE' });
+      await notifyHumanTyping(client, tenantId, conversationId, false);
       await notify(client, tenantId, conversationId, 'CLOSE');
       await client.query('COMMIT');
       return updated.rows[0];
@@ -1152,6 +1193,7 @@ export async function appendAgentMessage({
     }
 
     traceStage('AGENT_PERSIST_SUCCEEDED');
+    await notifyHumanTyping(client, tenantId, conversationId, false);
     await client.query(
       'UPDATE conversations SET last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2',
       [conversationId, tenantId]
@@ -1334,6 +1376,7 @@ export async function appendAgentMediaMessage({
       await client.query('COMMIT');
       return { duplicate: true, delivery: 'SENT_TO_WHATSAPP' };
     }
+    await notifyHumanTyping(client, tenantId, conversationId, false);
     if (isVoiceMessage && conversation.channel_type === 'WHATSAPP') console.info('VOICE_SEND stage=WAMID_PERSISTED');
 
     traceMediaStage('RESOURCE_STORAGE');

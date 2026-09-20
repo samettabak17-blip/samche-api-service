@@ -321,7 +321,8 @@ test('HUMAN OUTBOUND DELIVERY: Agent message from Dashboard reaches WebChat SSE 
 
     assert.equal(chatRes.status, 200);
     const chatBody = await chatRes.json();
-    assert.match(chatBody.reply, /representative is currently/i);
+    assert.equal(chatBody.suppress_reply, true);
+    assert.equal(chatBody.reply, '');
 
     // 5. Operator returns conversation to AI
     await operateConversation({
@@ -343,6 +344,53 @@ test('HUMAN OUTBOUND DELIVERY: Agent message from Dashboard reaches WebChat SSE 
     await new Promise((resolve) => server.close(resolve));
     delete app.locals.database;
     delete app.locals.storage;
+  }
+});
+
+test('PUBLIC SSE: human typing is transient, scoped to the current conversation, and never exposes an operator identity', async () => {
+  const secret = 'test-secret-at-least-32-chars-long-12345';
+  process.env.WEB_CHAT_PUBLIC_SESSION_SECRET = secret;
+  const session = issuePublicWebChatSession({ widgetKey: 'wch_live_widget_123', secret });
+  const mockDb = createMockDeliveryDb();
+  app.locals.database = mockDb;
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  const { port } = server.address();
+  const controller = new AbortController();
+
+  try {
+    const sseRes = await fetch(`http://127.0.0.1:${port}/api/chat/live?session_token=${encodeURIComponent(session.token)}`, {
+      headers: { Accept: 'text/event-stream' },
+      signal: controller.signal,
+    });
+    assert.equal(sseRes.status, 200);
+    const reader = sseRes.body.getReader();
+    const decoder = new TextDecoder();
+    await reader.read();
+
+    emitTenantEvent(tenantId, {
+      tenant_id: tenantId,
+      conversation_id: conversationId,
+      type: 'HUMAN_TYPING',
+      active: true,
+      expires_at: new Date(Date.now() + 5000).toISOString(),
+      actor_user_id: operatorUserId,
+    });
+
+    const result = await Promise.race([
+      reader.read(),
+      new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 500)),
+    ]);
+    assert.notEqual(result.timeout, true, 'typing activity must reach the active customer stream');
+    const eventText = decoder.decode(result.value);
+    assert.match(eventText, /event: human_typing/);
+    assert.match(eventText, /"active":true/);
+    assert.doesNotMatch(eventText, new RegExp(operatorUserId));
+  } finally {
+    controller.abort();
+    server.closeAllConnections?.();
+    await new Promise((resolve) => server.close(resolve));
+    delete app.locals.database;
   }
 });
 

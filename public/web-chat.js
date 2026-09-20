@@ -868,6 +868,12 @@
       dotsWrap.appendChild(dot);
     }
     el.appendChild(dotsWrap);
+    if (options.text) {
+      var text = document.createElement('span');
+      text.className = 'typing-text';
+      text.textContent = options.text;
+      el.appendChild(text);
+    }
     return el;
   }
 
@@ -1356,6 +1362,7 @@
       clearBtn: 'Temizle',
       clearingText: 'Temizleniyor...',
       cannotClearHuman: 'Canlı destek temsilcisi görüşmesinde sohbet temizlenemez.',
+      humanTypingLabel: 'Canlı müşteri temsilcisi yazıyor…',
       cannotClearSending: 'Mesaj iletilirken sohbet temizlenemez.',
       browsingPrefix: 'Gözatılan: ',
       botGreeting: 'Merhaba! Size nasıl yardımcı olabilirim?',
@@ -1375,6 +1382,7 @@
       clearBtn: 'Clear',
       clearingText: 'Clearing...',
       cannotClearHuman: 'Cannot clear conversation while human support is active.',
+      humanTypingLabel: 'Live customer representative is typing…',
       cannotClearSending: 'Cannot clear conversation while sending a message.',
       browsingPrefix: 'Viewing: ',
       botGreeting: 'Hello! How can I help you today?',
@@ -1394,6 +1402,7 @@
       clearBtn: 'مسح',
       clearingText: 'جارٍ المسح...',
       cannotClearHuman: 'لا يمكن مسح المحادثة أثناء اتصال الدعم البشري.',
+      humanTypingLabel: 'ممثل خدمة العملاء يكتب الآن…',
       cannotClearSending: 'لا يمكن مسح المحادثة أثناء إرسال الرسالة.',
       browsingPrefix: 'المعروض: ',
       botGreeting: 'مرحباً! كيف يمكنني مساعدتك اليوم؟',
@@ -1705,6 +1714,7 @@
       var isResetting = false;
       var isHumanTakeoverActive = false;
       var liveEventSource = null;
+      var humanTypingExpiryTimer = null;
       var currentLang = initLang;
       var lastKnownResetTime = SamcheChatPersistence.getLastResetTime(widgetKey);
       var nudgeTimer = null;
@@ -1763,6 +1773,7 @@
               var data = JSON.parse(evt.data);
               if (data.handling_mode === 'AI') {
                 isHumanTakeoverActive = false;
+                clearHumanTyping();
                 clearBtn.disabled = false;
                 clearBtn.removeAttribute('title');
               } else if (data.handling_mode === 'HUMAN') {
@@ -1772,9 +1783,44 @@
               }
             } catch (pErr) {}
           });
+          liveEventSource.addEventListener('human_typing', function(evt) {
+            if (!evt.data) return;
+            try {
+              var data = JSON.parse(evt.data);
+              if (!data.active) {
+                clearHumanTyping();
+                return;
+              }
+              showHumanTyping(data.expires_at);
+            } catch (pErr) {}
+          });
         } catch (sErr) {
           console.warn('WEBCHAT_SSE_INIT_WARN:', sErr);
         }
+      }
+
+      function clearHumanTyping() {
+        if (humanTypingExpiryTimer) {
+          window.clearTimeout(humanTypingExpiryTimer);
+          humanTypingExpiryTimer = null;
+        }
+        var existing = messages.querySelectorAll('.samche-human-typing');
+        for (var i = 0; i < existing.length; i++) existing[i].remove();
+      }
+
+      function showHumanTyping(expiresAt) {
+        clearHumanTyping();
+        var dict = I18N[currentLang] || I18N.tr;
+        var label = dict.humanTypingLabel || 'Live customer representative is typing…';
+        var indicator = createTypingIndicator({
+          className: 'samche-msg samche-msg-bot samche-human-typing',
+          label: label,
+          text: label,
+        });
+        messages.appendChild(indicator);
+        smartScrollToBottom(messages, true);
+        var delay = Math.max(0, Math.min(6000, new Date(expiresAt || Date.now() + 5000).getTime() - Date.now()));
+        humanTypingExpiryTimer = window.setTimeout(clearHumanTyping, delay || 5000);
       }
 
       function clearPendingAttachment() {
@@ -2531,6 +2577,7 @@
             clearBtn.setAttribute('title', (I18N[currentLang] || I18N.tr).cannotClearHuman);
           }
 
+          if (data && data.suppress_reply) return;
           var reply = data.reply || data.response || data.text || 'Anlaşıldı, size nasıl yardımcı olabilirim?';
           var botBubble = appendMessage('bot', '', { message_type: 'ASSISTANT' });
           await progressiveReveal(botBubble, reply, { container: messages });

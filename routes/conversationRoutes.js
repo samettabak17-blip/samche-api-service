@@ -9,6 +9,7 @@ import {
   getHumanDeliveryCapability,
   listConversationEvents,
   operateConversation,
+  publishHumanTyping,
 } from '../services/live-inbox-service.js';
 import { listHumanAttentionSummary } from '../services/human-support-service.js';
 import { startLiveEventListener, subscribeTenantEvents } from '../services/live-event-bus.js';
@@ -392,6 +393,23 @@ for (const [path, action] of [
     }
   });
 }
+
+router.post('/:tenantId/conversations/:conversationId/human-typing', requireTenantAccess, async (req, res) => {
+  const currentTenantId = tenantId(req, res);
+  if (!currentTenantId) return;
+  if (!isValidUUID(req.params.conversationId)) return res.status(400).json({ error: 'Invalid conversation ID' });
+  if (typeof req.body?.active !== 'boolean') return res.status(400).json({ error: 'Typing state must be boolean' });
+  try {
+    return res.json(await publishHumanTyping({
+      tenantId: currentTenantId,
+      conversationId: req.params.conversationId,
+      actor: actor(req),
+      active: req.body.active,
+    }));
+  } catch (error) {
+    return operationError(res, error, 'Human typing event error:');
+  }
+});
 
 router.post('/:tenantId/conversations/:conversationId/messages', requireTenantAccess, async (req, res) => {
   const currentTenantId = tenantId(req, res);

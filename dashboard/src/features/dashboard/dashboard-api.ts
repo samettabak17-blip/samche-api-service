@@ -265,6 +265,7 @@ export const tenantApi = {
   getConversationAttachment: (tenantId: string, conversationId: string, resourceId: string, download = false) => apiClient.getBlob(`${tenantRoot(tenantId)}/conversations/${conversationId}/resources/${resourceId}${download ? '?download=1' : ''}`),
   takeoverConversation: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/takeover`, {}),
   returnConversationToAi: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/return-to-ai`, {}),
+  setHumanTyping: (tenantId: string, conversationId: string, active: boolean) => apiClient.post<{ active: boolean }>(`${tenantRoot(tenantId)}/conversations/${conversationId}/human-typing`, { active }),
   pauseConversationAi: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/pause`, {}),
   resumeConversationAi: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/resume`, {}),
   closeConversation: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/close`, {}),

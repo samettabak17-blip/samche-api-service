@@ -2110,6 +2110,10 @@ app.get(["/api/chat/live", "/api/v1/public/web-chat/live"], async (req, res) => 
       res.write(`event: mode_change\ndata: ${JSON.stringify({ handling_mode: 'AI' })}\n\n`);
     } else if (event.type === 'TAKEOVER') {
       res.write(`event: mode_change\ndata: ${JSON.stringify({ handling_mode: 'HUMAN' })}\n\n`);
+    } else if (event.type === 'HUMAN_TYPING') {
+      res.write(`event: human_typing\ndata: ${JSON.stringify({ active: event.active === true, expires_at: event.expires_at || null })}\n\n`);
+    } else if (event.type === 'CLOSE') {
+      res.write(`event: human_typing\ndata: ${JSON.stringify({ active: false })}\n\n`);
     }
   });
 
@@ -3679,9 +3683,11 @@ app.post("/api/chat", async (req, res) => {
         ? "Temsilcimiz şu anda görüşmede, mesajınız iletildi."
         : "Our representative is currently in this conversation. Your message has been received.";
       return res.status(200).json({
-        reply: activeHumanMsg,
-        response: activeHumanMsg,
-        text: activeHumanMsg,
+        reply: '',
+        response: '',
+        text: '',
+        suppress_reply: true,
+        handling_mode: 'HUMAN',
         session: webChatSession?.sessionId || null,
       });
     };
