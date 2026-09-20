@@ -64,6 +64,18 @@ function createMockDeliveryDb() {
     if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
       return { rowCount: 1, rows: [] };
     }
+    if (sql.includes('platform_lifecycle_message_templates')) {
+      return {
+        rowCount: 15,
+        rows: [
+          ...['tr', 'en', 'ar'].map((locale) => ({ message_key: 'human_support_default_topic', locale, body: locale === 'en' ? 'General support' : 'Genel destek', allowed_variables: [] })),
+          ...['tr', 'en', 'ar'].map((locale) => ({ message_key: 'human_support_request', locale, body: '{TOPIC}', allowed_variables: ['TOPIC'] })),
+          ...['tr', 'en', 'ar'].map((locale) => ({ message_key: 'human_session_warning', locale, body: 'Human support remains open.', allowed_variables: [] })),
+          ...['tr', 'en', 'ar'].map((locale) => ({ message_key: 'human_takeover', locale, body: 'Human support has taken over.', allowed_variables: [] })),
+          ...['tr', 'en', 'ar'].map((locale) => ({ message_key: 'return_to_ai', locale, body: locale === 'en' ? 'The human-support session has ended. You may continue with the AI assistant.' : 'AI devam.', allowed_variables: [] })),
+        ],
+      };
+    }
     if (sql.startsWith('SELECT pg_notify')) {
       try {
         const payload = JSON.parse(params[1]);
@@ -330,7 +342,11 @@ test('AI OUTBOUND DELIVERY: Assistant message reaches the same WebChat SSE strea
     });
     assert.equal(returned.handling_mode, 'AI');
     const modeResult = await reader.read();
-    assert.match(decoder.decode(modeResult.value), /"handling_mode":"AI"/);
+    const lifecycleEventText = decoder.decode(modeResult.value);
+    assert.match(lifecycleEventText, /"handling_mode":"AI"/);
+    assert.match(lifecycleEventText, /event: message/);
+    assert.match(lifecycleEventText, /The human-support session has ended/);
+    assert.match(lifecycleEventText, /"sender_type":"ASSISTANT"/);
 
     const persisted = await persistAssistantResponseIfCurrent({
       tenantId,

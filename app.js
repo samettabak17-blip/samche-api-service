@@ -26,7 +26,7 @@ import conversationRoutes from "./routes/conversationRoutes.js";
 import knowledgeIntelligenceRoutes from "./routes/knowledgeIntelligenceRoutes.js";
 import guideExperienceRoutes from "./routes/guideExperienceRoutes.js";
 import { fileURLToPath } from 'node:url';
-import { getSamcheguidePublicFeed, getWebChatPublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, persistWebChatInbound, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus, resetWebChatConversation, ensureWebChatConversation, ensureGuideConversation, linkConversationResourcesToMessage } from "./services/live-inbox-service.js";
+import { getSamcheguidePublicFeed, getWebChatPublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, persistWebChatInbound, resolveWebChatAiEligibility, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus, resetWebChatConversation, ensureWebChatConversation, ensureGuideConversation, linkConversationResourcesToMessage } from "./services/live-inbox-service.js";
 import { persistWhatsAppInbound, whatsappPhoneNumberFingerprint } from "./services/whatsapp-live-inbox-service.js";
 import { resolveMetaGraphApiVersion } from "./services/meta-graph-api-version.js";
 import { WHATSAPP_INGRESS_EVENTS, appSecretFingerprint, logWhatsAppIngressEvent } from "./services/whatsapp-webhook-ingress-observability.js";
@@ -3658,7 +3658,23 @@ app.post("/api/chat", async (req, res) => {
       }
     }
 
+    const webChatHumanResponse = () => {
+      const detectedLang = ['tr', 'en', 'ar'].includes(webChatBrowsingState?.currentPage?.language)
+        ? webChatBrowsingState.currentPage.language
+        : (webChatRuntimePersona?.configuration?.language || 'en');
+      const activeHumanMsg = detectedLang === 'tr'
+        ? "Temsilcimiz şu anda görüşmede, mesajınız iletildi."
+        : "Our representative is currently in this conversation. Your message has been received.";
+      return res.status(200).json({
+        reply: activeHumanMsg,
+        response: activeHumanMsg,
+        text: activeHumanMsg,
+        session: webChatSession?.sessionId || null,
+      });
+    };
+
     let webChatInboundState = null;
+    let webChatInboundPersistenceFailed = false;
     if (webChatIntegration && webChatSession?.sessionId) {
       try {
         const visitorHandoffContext = formatVisitorContextForHandoff(webChatBrowsingState);
@@ -3678,22 +3694,19 @@ app.post("/api/chat", async (req, res) => {
           });
         }
       } catch (inboundErr) {
+        webChatInboundPersistenceFailed = true;
         console.warn('WEB_CHAT_INBOUND_PERSIST_WARN:', inboundErr.message);
       }
 
-      if (webChatInboundState && !webChatInboundState.shouldInvokeAi) {
-        const detectedLang = ['tr', 'en', 'ar'].includes(webChatBrowsingState?.currentPage?.language)
-          ? webChatBrowsingState.currentPage.language
-          : (webChatRuntimePersona?.configuration?.language || 'en');
-        const activeHumanMsg = detectedLang === 'tr'
-          ? "Temsilcimiz şu anda görüşmede, mesajınız iletildi."
-          : "Our representative is currently in this conversation. Your message has been received.";
-        return res.status(200).json({
-          reply: activeHumanMsg,
-          response: activeHumanMsg,
-          text: activeHumanMsg,
-          session: webChatSession?.sessionId || null,
+      if (webChatInboundPersistenceFailed) {
+        return res.status(503).json({
+          error: 'Message could not be persisted. Please try again.',
+          reply: 'Sorry, I could not process that right now. Please try again.',
         });
+      }
+
+      if (webChatInboundState && !webChatInboundState.shouldInvokeAi) {
+        return webChatHumanResponse();
       }
     }
 
@@ -4280,6 +4293,25 @@ If the user already provided sector info, NEVER ask again.`
       }
     }
 
+    if (webChatIntegration && webChatInboundState?.conversation?.id) {
+      let eligibility;
+      try {
+        eligibility = await resolveWebChatAiEligibility({
+          tenantId: webChatIntegration.tenant_id,
+          conversationId: webChatInboundState.conversation.id,
+          handlingVersion: webChatInboundState.handlingVersion,
+          database,
+        });
+      } catch (eligibilityErr) {
+        console.warn('WEB_CHAT_AI_ELIGIBILITY_WARN:', eligibilityErr.message);
+        return res.status(503).json({
+          error: 'Message could not be verified. Please try again.',
+          reply: 'Sorry, I could not process that right now. Please try again.',
+        });
+      }
+      if (!eligibility.allowed) return webChatHumanResponse();
+    }
+
     const activeOpenai = req.app?.locals?.openaiClient || openaiClient;
     const completion = await activeOpenai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -4301,23 +4333,29 @@ If the user already provided sector info, NEVER ask again.`
         return res.status(409).json({ error: 'Knowledge changed while generating the response. Please retry.' });
       }
     }
-    addWebMemory(userId, "assistant", aiReply, webChatKnowledgeAuthority, {
-      message_type: 'ASSISTANT',
-    });
-
+    let persistedAssistantResponse = { delivered: true };
     if (webChatIntegration && webChatSession?.sessionId && webChatInboundState?.conversation?.id) {
       try {
-        await persistAssistantResponseIfCurrent({
+        persistedAssistantResponse = await persistAssistantResponseIfCurrent({
           tenantId: webChatIntegration.tenant_id,
           conversationId: webChatInboundState.conversation.id,
           content: aiReply,
           handlingVersion: webChatInboundState.handlingVersion,
           database,
         });
+        if (!persistedAssistantResponse?.delivered) return webChatHumanResponse();
       } catch (outboundErr) {
         console.warn('WEB_CHAT_OUTBOUND_PERSIST_WARN:', outboundErr.message);
+        return res.status(503).json({
+          error: 'Response could not be delivered. Please try again.',
+          reply: 'Sorry, I could not process that right now. Please try again.',
+        });
       }
     }
+
+    addWebMemory(userId, "assistant", aiReply, webChatKnowledgeAuthority, {
+      message_type: 'ASSISTANT',
+    });
 
     res.json({
       reply: aiReply,

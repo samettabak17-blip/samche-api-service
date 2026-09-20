@@ -13,6 +13,7 @@ import {
   formatVisitorContextForHandoff,
 } from '../services/contextual-intelligence-service.js';
 import { evaluateVisitorIntent } from '../services/visitor-intent-service.js';
+import { resolveWebChatAiEligibility } from '../services/live-inbox-service.js';
 import '../public/web-chat.js';
 
 const appSource = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
@@ -228,6 +229,40 @@ test('app.js: POST /api/chat persists inbound & outbound and protects human take
   assert.match(appSource, /persistAssistantResponseIfCurrent\(/);
   assert.match(appSource, /webChatInboundState && !webChatInboundState\.shouldInvokeAi/);
   assert.match(appSource, /Temsilcimiz şu anda görüşmede, mesajınız iletildi/);
+});
+
+test('WebChat AI eligibility: current HUMAN ownership denies provider invocation even with a stale AI snapshot', async () => {
+  const queries = [];
+  const database = {
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      return {
+        rowCount: 1,
+        rows: [{ status: 'open', handling_mode: 'HUMAN', handling_version: 8 }],
+      };
+    },
+  };
+
+  const result = await resolveWebChatAiEligibility({
+    tenantId: '11111111-1111-4111-8111-111111111111',
+    conversationId: '22222222-2222-4222-8222-222222222222',
+    handlingVersion: 7,
+    database,
+  });
+
+  assert.equal(result.allowed, false);
+  assert.equal(result.reason, 'HUMAN_HANDLING');
+  assert.equal(queries.length, 1);
+  assert.deepEqual(queries[0].params, [
+    '22222222-2222-4222-8222-222222222222',
+    '11111111-1111-4111-8111-111111111111',
+  ]);
+});
+
+test('app.js: WebChat fails closed before and after provider generation when canonical ownership changes', () => {
+  assert.match(appSource, /webChatInboundPersistenceFailed/);
+  assert.match(appSource, /resolveWebChatAiEligibility\(/);
+  assert.match(appSource, /persistedAssistantResponse\??\.delivered/);
 });
 
 // ============================================================================

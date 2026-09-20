@@ -284,6 +284,29 @@ export async function getWebChatPublicFeed({ externalSessionId, integration, dat
   }
 }
 
+export async function resolveWebChatAiEligibility({ tenantId, conversationId, handlingVersion, database = pool }) {
+  if (!tenantId || !conversationId) {
+    return { allowed: false, reason: 'CONVERSATION_UNAVAILABLE' };
+  }
+
+  const result = await database.query(
+    `SELECT status, handling_mode, handling_version
+       FROM conversations
+      WHERE id = $1 AND tenant_id = $2
+      LIMIT 1`,
+    [conversationId, tenantId]
+  );
+  const conversation = result.rows[0];
+  if (!conversation) return { allowed: false, reason: 'CONVERSATION_UNAVAILABLE' };
+  if (conversation.status !== 'open') return { allowed: false, reason: 'CONVERSATION_CLOSED' };
+  if (conversation.handling_mode !== 'AI') return { allowed: false, reason: 'HUMAN_HANDLING' };
+  if (handlingVersion !== null && handlingVersion !== undefined
+      && String(conversation.handling_version) !== String(handlingVersion)) {
+    return { allowed: false, reason: 'HANDLING_VERSION_CHANGED' };
+  }
+  return { allowed: true, reason: null };
+}
+
 export async function resetWebChatConversation({ externalSessionId, integration, database = pool }) {
   if (!integration || !externalSessionId) return { reset: false, reason: 'INVALID_ARGUMENTS' };
   if (!database || typeof database.connect !== 'function') {
@@ -689,7 +712,7 @@ export async function operateConversation({
       // The customer-request transfer has already been delivered. Only a voluntary
       // manual takeover receives the separate deterministic manual-takeover notice.
       if (String(takenOver.channel_type ?? '').toUpperCase() === 'WHATSAPP' && conversation.human_attention_state !== 'REQUESTED' && conversation.human_attention_state !== 'ACKNOWLEDGED') {
-        const content = await loadWhatsAppHumanSupportNotice(client, takenOver, 'manual_takeover');
+        const content = await loadHumanSupportLifecycleNotice(client, takenOver, 'manual_takeover');
         const integration = await loadWhatsAppAgentDelivery(client, takenOver);
         if (!content || !integration) {
           throw new ConversationOperationError(409, 'WhatsApp human delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
@@ -755,8 +778,9 @@ export async function operateConversation({
         `UPDATE human_support_notification_outbox SET status = 'CANCELLED'
          WHERE tenant_id = $1 AND conversation_id = $2 AND status = 'PENDING'`, [tenantId, conversationId]
       );
+      let publicLifecycleMessagePersisted = false;
       if (String(returned.channel_type ?? '').toUpperCase() === 'WHATSAPP') {
-        const content = await loadWhatsAppHumanSupportNotice(client, returned, 'return_to_ai');
+        const content = await loadHumanSupportLifecycleNotice(client, returned, 'return_to_ai');
         const integration = await loadWhatsAppAgentDelivery(client, returned);
         if (!content || !integration) {
           throw new ConversationOperationError(409, 'WhatsApp human delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
@@ -778,9 +802,14 @@ export async function operateConversation({
           throw new ConversationOperationError(code === 'WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH' ? 409 : 502, 'WhatsApp delivery could not be completed', code);
         }
         await insertMessage(client, { tenantId, conversationId, senderType: 'ASSISTANT', content });
+      } else {
+        const content = await loadHumanSupportLifecycleNotice(client, returned, 'return_to_ai');
+        await insertMessage(client, { tenantId, conversationId, senderType: 'ASSISTANT', content });
+        publicLifecycleMessagePersisted = true;
       }
       await writeAuditEvent(client, { tenantId, conversationId, actorUserId, eventType: 'RETURN_TO_AI' });
       await notify(client, tenantId, conversationId, 'RETURN_TO_AI');
+      if (publicLifecycleMessagePersisted) await notify(client, tenantId, conversationId, 'ASSISTANT_MESSAGE');
       console.info('TAKEOVER_CANCELLED_ESCALATION = tenant=' + String(tenantId).slice(0, 8) + ' conversation=' + String(conversationId).slice(0, 8));
       console.info('LIFECYCLE_MESSAGE_SENT = tenant=' + String(tenantId).slice(0, 8) + ' conversation=' + String(conversationId).slice(0, 8) + ' event_type=return_to_ai');
       await client.query('COMMIT');
@@ -915,7 +944,7 @@ async function deliverWhatsAppLifecycleNotice({
   });
 }
 
-async function loadWhatsAppHumanSupportNotice(client, conversation, templateKey) {
+async function loadHumanSupportLifecycleNotice(client, conversation, templateKey) {
   try {
     const key = templateKey === 'manual_takeover' ? 'human_takeover' : templateKey;
     const templates = await loadPlatformLifecycleMessages({ database: client });
