@@ -43,6 +43,9 @@ function convergenceDatabase({ failMessageInsertOnce = false, failTerminalComple
       if (sql.includes("WHERE status = 'PROCESSING' AND (locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP)")) {
         return { rows: [] };
       }
+      if (sql.includes('SELECT status, handling_mode FROM conversations')) {
+        return { rowCount: 1, rows: [{ status: 'open', handling_mode: 'AI' }] };
+      }
       if (sql.includes('SELECT id, storage_key, mime_type, original_filename FROM conversation_resources')) {
         return { rowCount: 1, rows: [{ id: targetResourceId, storage_key: 'target-image', mime_type: 'image/jpeg', original_filename: 'garden.jpg' }] };
       }
