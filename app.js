@@ -2072,7 +2072,7 @@ app.get(["/api/chat/live", "/api/v1/public/web-chat/live"], async (req, res) => 
     'X-Accel-Buffering': 'no',
   });
   res.flushHeaders?.();
-  res.write('event: connected\ndata: {}\n\n');
+  res.write(`event: connected\ndata: ${JSON.stringify({ handling_mode: feed.handlingMode, messages: feed.messages })}\n\n`);
 
   const unsubscribe = subscribeTenantEvents(feed.tenantId, async (event) => {
     if (event.conversation_id !== feed.conversationId) return;

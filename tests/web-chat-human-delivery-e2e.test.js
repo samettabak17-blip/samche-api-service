@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { issuePublicWebChatSession } from '../services/public-web-chat-session.js';
 import { appendAgentMessage, getWebChatPublicFeed, operateConversation, persistAssistantResponseIfCurrent } from '../services/live-inbox-service.js';
+import { claimDueCustomerSupportLifecycle } from '../services/human-support-service.js';
 import { emitTenantEvent } from '../services/live-event-bus.js';
 import { app } from '../app.js';
 
@@ -89,6 +90,7 @@ function createMockDeliveryDb() {
     handling_version: 1,
     assigned_agent_user_id: operatorUserId,
     human_attention_state: 'REQUESTED',
+    human_attention_requested_at: new Date(Date.now() - (11 * 60 * 1000)).toISOString(),
     external_conversation_id: 'sess-123',
   };
 
@@ -130,11 +132,29 @@ function createMockDeliveryDb() {
       return { rowCount: 1, rows: [{ id: 'lead-1', tenant_id: tenantId, contact_id: 'contact-1', conversation_id: conversationId }] };
     }
     if (sql.includes('FROM conversations c') && sql.includes('conversation_messages')) {
+      if (sql.includes('LEFT JOIN conversation_messages')) {
+        return {
+          rowCount: Math.max(messagesStore.length, 1),
+          rows: messagesStore.length
+            ? messagesStore.map((message) => ({ ...message, conversation_id: conversationId, handling_mode: conversationState.handling_mode }))
+            : [{ conversation_id: conversationId, handling_mode: conversationState.handling_mode, id: null, sender_type: null, content: null, created_at: null }],
+        };
+      }
       return {
         rowCount: 1,
         rows: [{
           ...conversationState,
           conversation_id: conversationId,
+          channel_type: 'WEB_CHAT',
+          external_channel_id: 'web-1',
+        }],
+      };
+    }
+    if (sql.includes('FOR UPDATE OF c') && sql.includes('human_support_closed_at')) {
+      return {
+        rowCount: 1,
+        rows: [{
+          ...conversationState,
           channel_type: 'WEB_CHAT',
           external_channel_id: 'web-1',
         }],
@@ -197,6 +217,8 @@ function createMockDeliveryDb() {
       if (sql.includes("handling_mode = 'AI'")) {
         conversationState.handling_mode = 'AI';
         conversationState.assigned_agent_user_id = null;
+        conversationState.human_attention_state = 'RESOLVED';
+        conversationState.handoff_requested = false;
       } else if (sql.includes("handling_mode = 'HUMAN'")) {
         conversationState.handling_mode = 'HUMAN';
       }
@@ -449,6 +471,71 @@ test('AI OUTBOUND DELIVERY: Assistant message reaches the same WebChat SSE strea
     assert.match(text, /event: message/);
     assert.match(text, /AI_RETURN_TEST_RESPONSE/);
     assert.match(text, /"sender_type":"ASSISTANT"/);
+  } finally {
+    controller.abort();
+    server.closeAllConnections?.();
+    await new Promise((resolve) => server.close(resolve));
+    delete app.locals.database;
+  }
+});
+
+test('AUTOMATIC RETURN TO AI: WebChat receives the canonical session-ended message once and reconnecting state is AI', async () => {
+  const secret = 'test-secret-at-least-32-chars-long-12345';
+  process.env.WEB_CHAT_PUBLIC_SESSION_SECRET = secret;
+  const session = issuePublicWebChatSession({ widgetKey: 'wch_live_widget_123', secret });
+  const mockDb = createMockDeliveryDb();
+  app.locals.database = mockDb;
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => server.once('listening', resolve));
+  const { port } = server.address();
+  const controller = new AbortController();
+
+  try {
+    const sseRes = await fetch(`http://127.0.0.1:${port}/api/chat/live?session_token=${encodeURIComponent(session.token)}`, {
+      headers: { Accept: 'text/event-stream' }, signal: controller.signal,
+    });
+    assert.equal(sseRes.status, 200);
+    const reader = sseRes.body.getReader();
+    const decoder = new TextDecoder();
+    await reader.read();
+
+    await claimDueCustomerSupportLifecycle({ database: mockDb, now: new Date() });
+    assert.equal(mockDb.conversationState.handling_mode, 'AI');
+    assert.equal(mockDb.conversationState.human_attention_state, 'RESOLVED');
+    assert.equal(mockDb.conversationState.handoff_requested, false);
+
+    let received = '';
+    for (let attempt = 0; attempt < 3 && (!received.includes('mode_change') || !received.includes('The human-support session has ended')); attempt++) {
+      const result = await Promise.race([
+        reader.read(),
+        new Promise((resolve) => setTimeout(() => resolve({ timeout: true }), 750)),
+      ]);
+      if (result.timeout) break;
+      received += decoder.decode(result.value);
+    }
+    assert.match(received, /event: mode_change/);
+    assert.match(received, /"handling_mode":"AI"/);
+    assert.match(received, /The human-support session has ended/);
+    assert.equal((received.match(/The human-support session has ended/g) || []).length, 1);
+
+    const reconnectController = new AbortController();
+    const reconnectRes = await fetch(`http://127.0.0.1:${port}/api/chat/live?session_token=${encodeURIComponent(session.token)}`, {
+      headers: { Accept: 'text/event-stream' }, signal: reconnectController.signal,
+    });
+    const reconnectReader = reconnectRes.body.getReader();
+    const reconnectSnapshot = decoder.decode((await reconnectReader.read()).value);
+    assert.match(reconnectSnapshot, /event: connected/);
+    assert.match(reconnectSnapshot, /"handling_mode":"AI"/);
+    assert.match(reconnectSnapshot, /The human-support session has ended/);
+    reconnectController.abort();
+
+    const feed = await getWebChatPublicFeed({
+      externalSessionId: 'sess-123',
+      integration: { tenant_id: tenantId, channel_id: 'channel-1', channel_status: 'active' },
+      database: mockDb,
+    });
+    assert.equal(feed.handlingMode, 'AI', 'reconnect state must be read from canonical server state');
+    assert.equal(mockDb.messagesStore.filter((message) => message.content === 'The human-support session has ended. You may continue with the AI assistant.').length, 1);
   } finally {
     controller.abort();
     server.closeAllConnections?.();

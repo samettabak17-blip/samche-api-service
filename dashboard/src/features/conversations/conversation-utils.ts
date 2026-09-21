@@ -54,8 +54,12 @@ export function canTakeOverConversation({
   return handlingMode === 'AI' || (handlingMode === 'HUMAN' && humanAttentionState === 'REQUESTED');
 }
 
-export function displayConversationCustomerIdentifier(value?: string | null): string {
+export function displayConversationCustomerIdentifier(value?: string | null, channelType?: string | null): string {
   if (!value) return 'Customer conversation';
+  // Channel metadata is authoritative: legacy public session keys are shared
+  // implementation details and cannot distinguish Web Chat from AI Guide.
+  if (channelType === 'WEB_CHAT') return 'Web Chat conversation';
+  if (channelType === 'SAMCHEGUIDE') return 'Guide conversation';
   if (value.startsWith('whatsapp:')) return '+' + value.slice('whatsapp:'.length);
   if (value.startsWith('samcheguide:')) return 'Guide conversation';
   return value;

@@ -77,9 +77,16 @@ describe('customer-requested live-support ownership', () => {
 
 
 describe('customer identifier presentation', () => {
-  it('does not expose internal WhatsApp or Guide prefixes as the primary identity', () => {
+  it('uses canonical channel metadata instead of a legacy session-key prefix', () => {
     expect(displayConversationCustomerIdentifier('whatsapp:971501234567')).toBe('+971501234567');
-    expect(displayConversationCustomerIdentifier('samcheguide:opaque-session')).toBe('Guide conversation');
+    expect(displayConversationCustomerIdentifier('samcheguide:opaque-session', 'SAMCHEGUIDE')).toBe('Guide conversation');
+    expect(displayConversationCustomerIdentifier('samcheguide:opaque-session', 'WEB_CHAT')).toBe('Web Chat conversation');
+  });
+
+  it('cannot relabel Web Chat and AI Guide conversations as one another', () => {
+    const sharedLegacyReference = 'samcheguide:historical-session';
+    expect(displayConversationCustomerIdentifier(sharedLegacyReference, 'WEB_CHAT')).toBe('Web Chat conversation');
+    expect(displayConversationCustomerIdentifier(sharedLegacyReference, 'SAMCHEGUIDE')).toBe('Guide conversation');
   });
 });
 

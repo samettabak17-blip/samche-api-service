@@ -658,6 +658,8 @@ export async function operateConversation({
   actor,
   action,
   reason = null,
+  systemInitiated = false,
+  transitionSource = 'OPERATOR',
   deliverWhatsApp = deliverWhatsAppText,
   sendTyping = sendWhatsAppTypingIndicator,
   applyPacing = applyWhatsAppAdaptivePacing,
@@ -675,20 +677,21 @@ export async function operateConversation({
       throw new ConversationOperationError(409, 'Conversation is closed', 'CONVERSATION_CLOSED');
     }
 
-    const actorUserId = actor.userId;
-    const isPrivilegedOperator = actor.systemRole === 'OWNER' || actor.tenantRole === 'ADMIN';
+    const actorUserId = actor?.userId ?? null;
+    const isPrivilegedOperator = actor?.systemRole === 'OWNER' || actor?.tenantRole === 'ADMIN';
     if (action === 'takeover' && !isPrivilegedOperator && conversation.assigned_agent_user_id && conversation.assigned_agent_user_id !== actorUserId) {
       throw new ConversationOperationError(409, 'Conversation is already handled by another agent', 'CONVERSATION_ALREADY_ASSIGNED');
     }
 
     const permission = canOperateConversation({
-      systemRole: actor.systemRole,
-      tenantRole: actor.tenantRole,
+      systemRole: actor?.systemRole,
+      tenantRole: actor?.tenantRole,
       action,
       assignedAgentUserId: conversation.assigned_agent_user_id,
       actorUserId,
     });
-    if (!permission) {
+    const isCanonicalSystemReturn = systemInitiated === true && action === 'return_to_ai';
+    if (!permission && !isCanonicalSystemReturn) {
       if (action === 'takeover') {
         throw new ConversationOperationError(403, 'Takeover is not permitted for this operator', 'TAKEOVER_NOT_ALLOWED');
       }
@@ -846,7 +849,7 @@ export async function operateConversation({
         await insertMessage(client, { tenantId, conversationId, senderType: 'ASSISTANT', content });
         publicLifecycleMessagePersisted = true;
       }
-      await writeAuditEvent(client, { tenantId, conversationId, actorUserId, eventType: 'RETURN_TO_AI' });
+      await writeAuditEvent(client, { tenantId, conversationId, actorUserId, eventType: 'RETURN_TO_AI', metadata: { source: transitionSource } });
       await notifyHumanTyping(client, tenantId, conversationId, false);
       await notify(client, tenantId, conversationId, 'RETURN_TO_AI');
       if (publicLifecycleMessagePersisted) await notify(client, tenantId, conversationId, 'ASSISTANT_MESSAGE');

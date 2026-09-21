@@ -1741,6 +1741,30 @@
         var sseUrl = resolveApiBaseUrl() + '/api/chat/live?session_token=' + encodeURIComponent(sessionToken);
         try {
           liveEventSource = new window.EventSource(sseUrl);
+          liveEventSource.addEventListener('connected', function(evt) {
+            if (!evt.data) return;
+            try {
+              var data = JSON.parse(evt.data);
+              if (data.handling_mode === 'AI') {
+                isHumanTakeoverActive = false;
+                clearHumanTyping();
+                clearBtn.disabled = false;
+                clearBtn.removeAttribute('title');
+              } else if (data.handling_mode === 'HUMAN') {
+                isHumanTakeoverActive = true;
+                clearBtn.disabled = true;
+                clearBtn.setAttribute('title', (I18N[currentLang] || I18N.tr).cannotClearHuman);
+              }
+              (Array.isArray(data.messages) ? data.messages : []).forEach(function(message) {
+                if (!message || !message.content || (message.id && messages.querySelector('[data-message-id="' + message.id + '"]'))) return;
+                appendMessage(message.sender_type === 'CUSTOMER' ? 'user' : (message.sender_type === 'AGENT' ? 'agent' : 'bot'), message.content, {
+                  id: message.id,
+                  message_type: message.sender_type === 'AGENT' ? 'AGENT' : (message.sender_type === 'CUSTOMER' ? 'USER' : 'ASSISTANT'),
+                  sender_type: message.sender_type,
+                });
+              });
+            } catch (pErr) {}
+          });
           liveEventSource.addEventListener('message', function(evt) {
             if (!evt.data) return;
             try {

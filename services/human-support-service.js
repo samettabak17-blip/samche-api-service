@@ -1,6 +1,7 @@
 import { loadPlatformLifecycleMessages, renderPlatformLifecycleMessage } from './platform-lifecycle-message-service.js';
 import { canOperateConversation } from './conversation-permissions.js';
 import { cancelConversationContextualFollowUps } from './durable-follow-up-service.js';
+import { operateConversation } from './live-inbox-service.js';
 
 async function defaultDatabase() {
   return (await import('../config/db.js')).default;
@@ -244,21 +245,30 @@ export async function claimDueCustomerSupportLifecycle({ database = null, now = 
     await client.query('BEGIN');
     const lifecycleTemplates = await loadPlatformLifecycleMessages({ database: client });
     const due = await client.query(
-      `SELECT c.*, tc.external_channel_id
+      `SELECT c.*, tc.external_channel_id, tc.channel_type
          FROM conversations c
          JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
-         JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id
-         JOIN ai_assistants a ON a.id = ci.assistant_id AND a.tenant_id = ci.tenant_id
         WHERE c.status = 'open'
           AND c.handling_mode = 'HUMAN'
           AND c.human_attention_state IN ('REQUESTED', 'ACKNOWLEDGED')
           AND c.human_attention_requested_at IS NOT NULL
           AND c.human_support_closed_at IS NULL
-          AND ci.integration_type = 'WHATSAPP' AND ci.enabled = TRUE
+          AND tc.status = 'active'
+          AND (
+            tc.channel_type IN ('WEB_CHAT', 'SAMCHEGUIDE')
+            OR (tc.channel_type = 'WHATSAPP' AND EXISTS (
+              SELECT 1 FROM channel_integrations ci
+               WHERE ci.channel_id = tc.id
+                 AND ci.tenant_id = tc.tenant_id
+                 AND ci.integration_type = 'WHATSAPP'
+                 AND ci.enabled = TRUE
+            ))
+          )
         ORDER BY c.human_attention_requested_at ASC
         FOR UPDATE OF c SKIP LOCKED`
     );
     const actions = [];
+    const dueReturns = [];
     let warnings = 0;
     let timeouts = 0;
     console.info('HUMAN_SUPPORT_LIFECYCLE_SCAN requested=' + due.rows.filter((row) => row.human_attention_state === 'REQUESTED').length + ' acknowledged=' + due.rows.filter((row) => row.human_attention_state === 'ACKNOWLEDGED').length);
@@ -266,23 +276,7 @@ export async function claimDueCustomerSupportLifecycle({ database = null, now = 
       const requestedAt = new Date(conversation.human_attention_requested_at);
       const elapsed = now.getTime() - requestedAt.getTime();
       if (elapsed >= 10 * 60 * 1000) {
-        const content = renderPlatformLifecycleMessage({ templates: lifecycleTemplates, key: 'return_to_ai', locale: conversation.communication_language });
-        await client.query(
-          `UPDATE conversations SET handling_mode = 'AI', assigned_agent_user_id = NULL,
-              human_attention_state = 'RESOLVED', handoff_requested = FALSE, handoff_reason = NULL,
-              human_support_closed_at = $1, handling_version = handling_version + 1,
-              last_activity_at = $1, updated_at = $1
-            WHERE id = $2 AND tenant_id = $3 AND human_support_closed_at IS NULL`,
-          [now, conversation.id, conversation.tenant_id]
-        );
-        await client.query(`INSERT INTO conversation_messages (tenant_id, conversation_id, sender_type, content)
-          VALUES ($1, $2, 'ASSISTANT', $3)`, [conversation.tenant_id, conversation.id, content]);
-        await audit(client, { tenantId: conversation.tenant_id, conversationId: conversation.id, eventType: 'RETURN_TO_AI', metadata: { source: 'LEGACY_TIMEOUT' } });
-        await notify(client, conversation.tenant_id, conversation.id, 'HUMAN_SUPPORT_TIMEOUT');
-        timeouts += 1;
-        console.info('HUMAN_SUPPORT_TIMEOUT status=CLAIMED tenant=' + String(conversation.tenant_id).slice(0, 8));
-        console.info('LIFECYCLE_MESSAGE_SENT = tenant=' + String(conversation.tenant_id).slice(0, 8) + ' conversation=' + String(conversation.id).slice(0, 8) + ' event_type=return_to_ai');
-        actions.push({ type: 'TIMEOUT_CLOSE', tenantId: conversation.tenant_id, conversationId: conversation.id, recipient: conversation.customer_external_id, phoneNumberId: conversation.external_channel_id, content });
+        dueReturns.push(conversation);
       } else if (elapsed >= 5 * 60 * 1000 && !conversation.human_support_warning_sent_at) {
         const content = renderPlatformLifecycleMessage({ templates: lifecycleTemplates, key: 'human_session_warning', locale: conversation.communication_language });
         await client.query(
@@ -296,10 +290,29 @@ export async function claimDueCustomerSupportLifecycle({ database = null, now = 
         warnings += 1;
         console.info('HUMAN_SUPPORT_WARNING status=CLAIMED tenant=' + String(conversation.tenant_id).slice(0, 8));
         console.info('LIFECYCLE_MESSAGE_SENT = tenant=' + String(conversation.tenant_id).slice(0, 8) + ' conversation=' + String(conversation.id).slice(0, 8) + ' event_type=human_session_warning');
-        actions.push({ type: 'WARNING_5M', tenantId: conversation.tenant_id, conversationId: conversation.id, recipient: conversation.customer_external_id, phoneNumberId: conversation.external_channel_id, content });
+        if (conversation.channel_type === 'WHATSAPP') {
+          actions.push({ type: 'WARNING_5M', tenantId: conversation.tenant_id, conversationId: conversation.id, recipient: conversation.customer_external_id, phoneNumberId: conversation.external_channel_id, content });
+        }
       }
     }
     await client.query('COMMIT');
+    for (const conversation of dueReturns) {
+      try {
+        await operateConversation({
+          database: database ?? await defaultDatabase(),
+          tenantId: conversation.tenant_id,
+          conversationId: conversation.id,
+          actor: { userId: null, systemRole: 'SYSTEM', tenantRole: null },
+          action: 'return_to_ai',
+          systemInitiated: true,
+          transitionSource: 'HUMAN_SUPPORT_TIMEOUT',
+        });
+        timeouts += 1;
+        console.info('HUMAN_SUPPORT_TIMEOUT status=CLAIMED tenant=' + String(conversation.tenant_id).slice(0, 8));
+      } catch (error) {
+        if (error?.code !== 'HUMAN_SUPPORT_STATE_INVALID') throw error;
+      }
+    }
     console.info('HUMAN_SUPPORT_LIFECYCLE_CRON status=OK claimed=' + actions.length + ' warnings=' + warnings + ' timeouts=' + timeouts);
     return actions;
   } catch (error) {
