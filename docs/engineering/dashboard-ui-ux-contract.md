@@ -132,6 +132,26 @@ Avoid:
 - No floating UI behind page content.
 - Mobile layouts must prioritize the primary action rather than forcing users through excessive decorative content.
 
+### Permanent responsive shell contract
+
+- The authenticated Dashboard shell is the canonical page-width boundary. It
+  must use structural containment (`min-width: 0`, available-width sizing and
+  responsive layout), never global `overflow-x: hidden` or clipping to conceal
+  a broken child layout.
+- Verify 320, 360, 375, 390, 393, 414, 430, 768, 820, 1024 and 1280 pixel
+  widths. At each width, the page document must satisfy
+  `scrollWidth <= clientWidth`; an intentionally scrollable data table or
+  code/data viewer must own its scrolling region without widening the page.
+- Header controls must choose a responsive action surface before a desktop row
+  can overflow. Tenant/workspace identity, notifications, navigation,
+  authorized owner actions and sign-out must remain reachable at every width.
+- Mobile dialogs, drawers and fixed/sticky surfaces must use dynamic viewport
+  sizing with safe-area-aware spacing. Their content may scroll internally,
+  but controls must not be clipped by browser chrome, keyboard changes or the
+  iPhone home-indicator area.
+- No device-name, user-agent or one-off iPhone CSS is permitted. Use layout
+  capability and the shared responsive shell primitives instead.
+
 ## Accessibility
 
 - Target WCAG AA contrast.

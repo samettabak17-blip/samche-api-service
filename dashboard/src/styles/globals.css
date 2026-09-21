@@ -16,15 +16,13 @@
 
 * { box-sizing: border-box; }
 html {
-  overflow-x: hidden;
   -webkit-text-size-adjust: 100%;
 }
 body {
-  min-width: 320px;
+  min-width: 0;
   min-height: 100vh;
   min-height: 100dvh;
   margin: 0;
-  overflow-x: hidden;
   background:
     radial-gradient(circle at 82% -12%, rgba(212, 33, 41, 0.11), transparent 30rem),
     radial-gradient(circle at 15% 85%, rgba(15, 88, 132, 0.10), transparent 32rem),
@@ -41,7 +39,8 @@ button.bg-ink:hover { background: #b81920; }
 
 /* Authenticated Dashboard safety net: utility hover/disabled styles must never
    fall back to a light native surface while retaining light foreground text. */
-.dashboard-shell { color-scheme: dark; }
+.dashboard-shell { color-scheme: dark; min-inline-size: 0; inline-size: 100%; min-block-size: 100vh; min-block-size: 100dvh; }
+.dashboard-main-content { min-inline-size: 0; }
 .dashboard-shell button[class*="hover:bg-white"]:hover {
   background-color: rgba(212, 33, 41, 0.14) !important;
   color: #f4f7fb !important;

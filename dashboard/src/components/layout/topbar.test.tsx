@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Topbar } from './topbar';
@@ -126,6 +127,20 @@ describe('Topbar global navigation search', () => {
     renderTopbar('OWNER');
     expect(screen.getByRole('button', { name: 'Create company' })).toHaveClass('whitespace-nowrap', 'shrink-0', 'h-10');
     expect(screen.getByRole('button', { name: 'Assign customer' })).toHaveClass('whitespace-nowrap', 'shrink-0', 'h-10');
+  });
+
+  it('keeps every OWNER workspace action reachable from the compact action surface', () => {
+    renderTopbar('OWNER');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+
+    const actionSurface = screen.getByRole('dialog', { name: 'Workspace actions' });
+    expect(actionSurface).toBeVisible();
+    expect(within(actionSurface).getByRole('combobox', { name: 'Selected tenant' })).toBeVisible();
+    expect(within(actionSurface).getByRole('button', { name: 'Upgrade requests' })).toBeVisible();
+    expect(within(actionSurface).getByRole('button', { name: 'Create company' })).toBeVisible();
+    expect(within(actionSurface).getByRole('button', { name: 'Assign customer' })).toBeVisible();
+    expect(within(actionSurface).getByRole('button', { name: 'Sign out' })).toBeVisible();
   });
 
   it('keeps overview date and notification controls visibly outlined', () => {

@@ -258,19 +258,23 @@ export function useLiveSupportAttention() {
   return value;
 }
 
-export function GlobalLiveSupportIndicator({ tenantId }: { tenantId: string }) {
-  const { requestedCount, muted, audioState, setMuted } = useLiveSupportAttention();
+export function LiveSupportIndicator({ tenantId, requestedCount, muted, audioState, setMuted }: { tenantId: string; requestedCount: number; muted: boolean; audioState: 'OFF' | 'ARMED' | 'PLAYING' | 'BLOCKED'; setMuted: (muted: boolean) => void }) {
   if (requestedCount < 1) return null;
-  return <div role="status" className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-2.5 border-b border-red-400/40 bg-red-500/10 px-4 py-2 text-sm text-red-100 sm:gap-3 sm:px-7 lg:px-10">
-    <Link to={'/app/' + tenantId + '/conversations'} className="inline-flex items-center gap-3 font-semibold">
+  return <div role="status" className="live-support-indicator mx-auto grid w-full max-w-7xl gap-2 border-b border-red-400/40 bg-red-500/10 px-4 py-2 text-sm text-red-100 sm:flex sm:items-center sm:justify-between sm:gap-3 sm:px-7 lg:px-10">
+    <Link to={'/app/' + tenantId + '/conversations'} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-semibold">
       <span className="h-2.5 w-2.5 rounded-full bg-red-400 motion-safe:animate-pulse" />
       <span className="tracking-[0.12em]">LIVE SUPPORT</span>
       <span>{requestedCount} CUSTOMER{requestedCount === 1 ? '' : 'S'} WAITING</span>
     </Link>
-    <div className="flex items-center gap-2 text-xs">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
       <span className={muted ? 'text-stone-300' : 'text-gold'}>Sound notifications: {muted ? 'MUTED' : 'ON'}</span>
-      <button type="button" onClick={() => setMuted(!muted)} className="underline underline-offset-4">{muted ? 'Unmute' : 'Mute'}</button>
+      <button type="button" onClick={() => setMuted(!muted)} className="min-h-10 rounded-lg px-2 text-left underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal">{muted ? 'Unmute' : 'Mute'}</button>
       {!muted && audioState === 'BLOCKED' && <span className="text-red-200">Sound will retry after your next interaction.</span>}
     </div>
   </div>;
+}
+
+export function GlobalLiveSupportIndicator({ tenantId }: { tenantId: string }) {
+  const { requestedCount, muted, audioState, setMuted } = useLiveSupportAttention();
+  return <LiveSupportIndicator tenantId={tenantId} requestedCount={requestedCount} muted={muted} audioState={audioState} setMuted={setMuted} />;
 }

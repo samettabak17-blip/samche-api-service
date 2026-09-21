@@ -66,7 +66,7 @@ vi.mock('../../features/dashboard/dashboard-api', () => ({
   },
 }));
 
-const REPRESENTATIVE_WIDTHS = [320, 360, 375, 390, 412, 430, 768] as const;
+const REPRESENTATIVE_WIDTHS = [320, 360, 375, 390, 393, 414, 430, 768, 820, 1024, 1280] as const;
 
 const defaultUser = {
   id: 'user-1',
@@ -154,6 +154,10 @@ describe('GLOBAL_MOBILE_RESPONSIVE contract — representative mobile viewport w
       it(`opens navigation, accesses complete authorized set, reaches lower entries & Settings -> Phone Notifications, closes and reopens cleanly`, async () => {
         setViewport(width, 700);
         renderDashboardWithShell();
+
+        // The compact action surface is the responsive replacement for a
+        // desktop-only action row; it remains reachable at every viewport.
+        expect(screen.getByRole('button', { name: 'Workspace actions' })).toBeVisible();
 
         // 1. Open navigation
         const openNavBtn = screen.getByRole('button', { name: 'Open navigation' });
@@ -317,19 +321,20 @@ describe('Orientation, desktop preservation, and security contracts', () => {
     }
   });
 
-  it('prevents horizontal shell overflow with min-w-0, w-full, and max-w-full overflow-x-hidden', () => {
+  it('uses structural containment instead of masking a too-wide Dashboard page', () => {
     renderDashboardWithShell();
 
     const shell = document.querySelector('.dashboard-shell');
     expect(shell).toBeTruthy();
     expect(shell?.className).toContain('w-full');
-    expect(shell?.className).toContain('max-w-full');
-    expect(shell?.className).toContain('overflow-x-hidden');
+    expect(shell?.className).toContain('min-h-[100dvh]');
+    expect(shell?.className).not.toContain('overflow-x-hidden');
 
     const main = document.querySelector('main');
     expect(main).toBeTruthy();
     expect(main?.className).toContain('w-full');
     expect(main?.className).toContain('min-w-0');
+    expect(main?.className).toContain('dashboard-main-content');
   });
 });
 
