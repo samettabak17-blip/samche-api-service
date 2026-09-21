@@ -180,8 +180,10 @@ export async function resolveWhatsAppVisualRequestState({
     };
   }
 
-  const targetResourceId = images[images.length - 1]?.id || images[0]?.id;
-  const referenceResourceId = images.length > 1 ? images[0].id : null;
+  const currentResourceIdSet = new Set(currentResourceIds.filter((id) => UUID_REGEX.test(String(id))));
+  const currentImage = images.find((image) => currentResourceIdSet.has(image.id)) || null;
+  const targetResourceId = currentImage?.id || images[0]?.id;
+  const referenceResourceId = images.find((image) => image.id !== targetResourceId)?.id || null;
 
   return {
     state: 'READY_FOR_GENERATION',

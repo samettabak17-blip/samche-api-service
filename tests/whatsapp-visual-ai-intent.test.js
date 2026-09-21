@@ -105,6 +105,27 @@ test('WHATSAPP VISUAL MULTI-TURN: Prompts for target photo on Turn 1 and correla
   assert.equal(turn2.targetResourceId, targetResourceId);
 });
 
+test('WHATSAPP VISUAL MULTI-TURN: current persisted image is the generation target, never an older conversation image', async () => {
+  const currentResourceId = '44444444-4444-4444-8444-444444444444';
+  const state = await resolveWhatsAppVisualRequestState({
+    database: {
+      query: async () => ({
+        rows: [
+          { id: currentResourceId, media_category: 'IMAGE', mime_type: 'image/jpeg', created_at: new Date('2026-09-21T12:00:00Z') },
+          { id: targetResourceId, media_category: 'IMAGE', mime_type: 'image/jpeg', created_at: new Date('2026-09-21T11:00:00Z') },
+        ],
+      }),
+    },
+    tenantId,
+    conversationId,
+    currentResourceIds: [currentResourceId],
+    message: 'Make this garden look modern Mediterranean',
+  });
+
+  assert.equal(state.state, 'READY_FOR_GENERATION');
+  assert.equal(state.targetResourceId, currentResourceId);
+});
+
 test('WHATSAPP REFERENCE URL: Rejects SSRF loopback/private IP targets', async () => {
   const result = await resolveSafeReferenceUrl({
     url: 'http://127.0.0.1:8080/internal.png',

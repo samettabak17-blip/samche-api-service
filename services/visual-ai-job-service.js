@@ -105,7 +105,11 @@ export async function completeVisualAiGenerationJob({ database, storage, tenantI
     throw new VisualAiJobError('INVALID_RESULT_PAYLOAD', 'Valid image generation result buffer is required.');
   }
 
-  const generatedResourceId = crypto.randomUUID();
+  // The job is the durable output authority. Reusing its UUID as the generated
+  // resource identifier makes a retry after a process crash converge on the
+  // same storage object and row instead of allocating a second customer-visible
+  // image.
+  const generatedResourceId = jobId;
   const storageKey = buildConversationStorageKey({ tenantId, conversationId, resourceId: generatedResourceId });
 
   if (storage && typeof storage.put === 'function') {
@@ -119,18 +123,29 @@ export async function completeVisualAiGenerationJob({ database, storage, tenantI
        original_filename, mime_type, size_bytes, storage_key, content_hash,
        metadata, processing_status, processed_at
      ) VALUES ($1, $2, $3, NULL, 'VISUAL_AI_GENERATED', 'IMAGE', $4, $5, $6, $7, $8, $9::jsonb, 'READY', CURRENT_TIMESTAMP)
+     ON CONFLICT (id) DO UPDATE
+       SET updated_at = conversation_resources.updated_at
+       WHERE conversation_resources.tenant_id = EXCLUDED.tenant_id
+         AND conversation_resources.conversation_id = EXCLUDED.conversation_id
+         AND conversation_resources.source_type = 'VISUAL_AI_GENERATED'
      RETURNING *`,
     [generatedResourceId, tenantId, conversationId, `visual-concept-${generatedResourceId.slice(0, 8)}.png`, result.mimeType || 'image/png', result.imageBuffer.length, storageKey, contentHash, JSON.stringify({ job_id: jobId, provider: result.provider, model: result.model, provider_request_id: result.providerRequestId || null, cost_metadata: result.costMetadata || {} })]
   );
   const resource = resourceResult.rows[0];
+  if (!resource) {
+    throw new VisualAiJobError('GENERATED_RESOURCE_ID_CONFLICT', 'Generated resource identity is not safe for this job.');
+  }
 
   const updatedJob = await database.query(
     `UPDATE visual_ai_generation_jobs
-        SET status = 'COMPLETED', generated_resource_id = $1, cost_metadata = $2::jsonb,
-            locked_at = NULL, locked_until = NULL, last_error_code = NULL, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $3 AND tenant_id = $4 RETURNING *`,
+        SET generated_resource_id = COALESCE(generated_resource_id, $1), cost_metadata = $2::jsonb,
+            last_error_code = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $3 AND tenant_id = $4 AND status = 'PROCESSING' RETURNING *`,
     [resource.id, JSON.stringify(result.costMetadata || {}), jobId, tenantId]
   );
+  if (!updatedJob.rows[0]) {
+    throw new VisualAiJobError('JOB_LEASE_LOST', 'Visual generation job lease is no longer active.');
+  }
   return { job: updatedJob.rows[0], resource };
 }
 
@@ -139,7 +154,9 @@ export async function failVisualAiGenerationJob({ database, tenantId, jobId, err
     throw new VisualAiJobError('INVALID_IDENTIFIER', 'Valid tenant and job UUIDs are required.');
   }
   const classification = classifyVisualAIError(error);
-  const isRetry = typeof retryable === 'boolean' ? retryable : classification.retryable;
+  const isRetry = typeof retryable === 'boolean'
+    ? retryable
+    : (typeof error?.retryable === 'boolean' ? error.retryable : classification.retryable);
   const errorCode = classification.code || error?.code || 'VISUAL_AI_ERROR';
   const failureDetails = { message: String(error?.message || error || '').slice(0, 500), code: errorCode, timestamp: new Date().toISOString() };
 
