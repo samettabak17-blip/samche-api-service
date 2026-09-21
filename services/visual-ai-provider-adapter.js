@@ -116,14 +116,18 @@ export function createDeterministicMockVisualProvider(options = {}) {
       });
     },
     getProviderIdentity() { return { provider: providerName, model: modelName }; },
+    getCapabilities() {
+      return Object.freeze({ textToImage: true, imageConditionedGeneration: true, referenceImages: true });
+    },
   });
 }
 
 export function createVisualAIProvider(options = {}) {
-  const providerType = String(options.providerType || process.env.VISUAL_AI_PROVIDER || 'MOCK').toUpperCase();
+  const env = options.env || process.env;
+  const providerType = String(options.providerType || env.VISUAL_AI_PROVIDER || 'UNAVAILABLE').toUpperCase();
   if (providerType === 'MOCK' || providerType === 'DETERMINISTIC') return createDeterministicMockVisualProvider(options.mockOptions);
   if (providerType === 'GOOGLE_GENAI' || providerType === 'GEMINI') {
-    const model = String(process.env.VISUAL_AI_GOOGLE_IMAGE_MODEL || 'imagen-3.0-generate-002');
+    const model = String(env.VISUAL_AI_GOOGLE_IMAGE_MODEL || 'UNCONFIGURED');
     return Object.freeze({
       provider: 'GOOGLE_GENAI',
       model,
@@ -132,6 +136,18 @@ export function createVisualAIProvider(options = {}) {
         throw new VisualAIProviderError('VISUAL_AI_LIVE_CALLS_DISABLED_IN_PHASE1', 'Live image generation API calls are prohibited in Phase 1. Use the deterministic mock provider.', { retryable: false });
       },
       getProviderIdentity() { return { provider: 'GOOGLE_GENAI', model }; },
+      getCapabilities() { return Object.freeze({ textToImage: false, imageConditionedGeneration: false, referenceImages: false }); },
+    });
+  }
+  if (providerType === 'UNAVAILABLE' || providerType === 'NONE') {
+    return Object.freeze({
+      provider: 'UNAVAILABLE',
+      model: null,
+      async generateConcept() {
+        throw new VisualAIProviderError('VISUAL_AI_PROVIDER_UNAVAILABLE', 'Visual generation is not configured for this environment.', { retryable: false, status: 503 });
+      },
+      getProviderIdentity() { return { provider: 'UNAVAILABLE', model: null }; },
+      getCapabilities() { return Object.freeze({ textToImage: false, imageConditionedGeneration: false, referenceImages: false }); },
     });
   }
   throw new VisualAIProviderError('VISUAL_AI_PROVIDER_UNSUPPORTED', `Visual AI provider "${providerType}" is not supported.`);

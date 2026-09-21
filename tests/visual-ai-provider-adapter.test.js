@@ -106,3 +106,31 @@ test('createVisualAIProvider blocks live API calls in Phase 1', async () => {
     (err) => err instanceof VisualAIProviderError && err.code === 'VISUAL_AI_LIVE_CALLS_DISABLED_IN_PHASE1'
   );
 });
+
+test('createVisualAIProvider fails closed by default while explicit mock reports editing capabilities', async () => {
+  const unavailable = createVisualAIProvider({ env: {} });
+  assert.deepEqual(unavailable.getCapabilities(), {
+    textToImage: false,
+    imageConditionedGeneration: false,
+    referenceImages: false,
+  });
+  await assert.rejects(
+    () => unavailable.generateConcept({
+      targetImage: { buffer: Buffer.from('target'), mimeType: 'image/jpeg' },
+      instruction: 'Generate room',
+    }),
+    (err) => err instanceof VisualAIProviderError && err.code === 'VISUAL_AI_PROVIDER_UNAVAILABLE'
+  );
+
+  const mock = createVisualAIProvider({ providerType: 'MOCK', env: {} });
+  assert.deepEqual(mock.getCapabilities(), {
+    textToImage: true,
+    imageConditionedGeneration: true,
+    referenceImages: true,
+  });
+  const result = await mock.generateConcept({
+    targetImage: { buffer: Buffer.from('target'), mimeType: 'image/jpeg' },
+    instruction: 'Generate room',
+  });
+  assert.equal(result.provider, 'MOCK');
+});
