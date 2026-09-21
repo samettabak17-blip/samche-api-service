@@ -21,6 +21,20 @@ export async function processOneVisualAiGenerationJob({ database, storage, visua
   const job = await claimNextVisualAiGenerationJob(database);
   if (!job) return { processed: false };
   try {
+    const ownership = await database.query(
+      `SELECT status, handling_mode FROM conversations WHERE id = $1 AND tenant_id = $2`,
+      [job.conversation_id, job.tenant_id]
+    );
+    if (ownership.rowCount !== 1 || ownership.rows[0].status !== 'open' || ownership.rows[0].handling_mode !== 'AI') {
+      await database.query(
+        `UPDATE visual_ai_generation_jobs
+            SET status = 'CANCELLED', delivery_status = 'NOT_REQUIRED', last_error_code = 'VISUAL_AI_HUMAN_OWNERSHIP_SUPPRESSED',
+                locked_at = NULL, locked_until = NULL, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1 AND tenant_id = $2 AND status = 'PROCESSING'`,
+        [job.id, job.tenant_id]
+      );
+      return { processed: true, status: 'CANCELLED', jobId: job.id };
+    }
     const capabilities = visualProvider?.getCapabilities?.() || {};
     if (!capabilities.imageConditionedGeneration) {
       await database.query(
@@ -38,7 +52,8 @@ export async function processOneVisualAiGenerationJob({ database, storage, visua
     const messageResult = await database.query(
     `INSERT INTO conversation_messages (tenant_id, conversation_id, sender_type, content, idempotency_key)
      VALUES ($1, $2, 'ASSISTANT', $3, $4)
-     ON CONFLICT (conversation_id, idempotency_key) DO UPDATE SET content = conversation_messages.content
+     ON CONFLICT (conversation_id, idempotency_key) WHERE idempotency_key IS NOT NULL
+     DO UPDATE SET content = conversation_messages.content
      RETURNING *`,
     [job.tenant_id, job.conversation_id, 'Your visual concept preview is ready.', `${OUTPUT_KEY_PREFIX}${job.id}`]
   );

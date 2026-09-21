@@ -20,7 +20,7 @@ BEGIN
 
   ALTER TABLE conversation_resources
     ADD CONSTRAINT ck_conversation_resources_source_type
-      CHECK (source_type IN ('UPLOAD', 'WHATSAPP_MEDIA', 'AGENT_UPLOAD', 'URL'));
+      CHECK (source_type IN ('UPLOAD', 'WHATSAPP_MEDIA', 'AGENT_UPLOAD', 'URL', 'VISUAL_AI_GENERATED'));
 
   ALTER TABLE conversation_resources
     ADD CONSTRAINT ck_conversation_resources_media_category
