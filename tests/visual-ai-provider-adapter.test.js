@@ -96,15 +96,13 @@ test('classifyVisualAIError distinguishes retryable vs terminal errors', () => {
   assert.deepEqual(classifyVisualAIError({ code: 'ETIMEDOUT' }), { retryable: true, code: 'VISUAL_AI_PROVIDER_UNAVAILABLE' });
 });
 
-test('createVisualAIProvider blocks live API calls in Phase 1', async () => {
-  const liveProvider = createVisualAIProvider({ providerType: 'GOOGLE_GENAI' });
-  await assert.rejects(
-    () => liveProvider.generateConcept({
-      targetImage: { buffer: Buffer.from('target'), mimeType: 'image/jpeg' },
-      instruction: 'Generate room',
-    }),
-    (err) => err instanceof VisualAIProviderError && err.code === 'VISUAL_AI_LIVE_CALLS_DISABLED_IN_PHASE1'
-  );
+test('createVisualAIProvider supports GOOGLE_GENAI as an explicit Google selection alias', () => {
+  const provider = createVisualAIProvider({
+    providerType: 'GOOGLE_GENAI',
+    env: { GOOGLE_GENAI_MODE: 'developer', GEMINI_API_KEY: 'test-key' },
+    googleClientFactory: () => ({ interactions: { create: async () => ({}) } }),
+  });
+  assert.equal(provider.getProviderIdentity().provider, 'GOOGLE');
 });
 
 test('createVisualAIProvider fails closed by default while explicit mock reports editing capabilities', async () => {
@@ -133,4 +131,31 @@ test('createVisualAIProvider fails closed by default while explicit mock reports
     instruction: 'Generate room',
   });
   assert.equal(result.provider, 'MOCK');
+});
+
+test('createVisualAIProvider selects Google only explicitly and resolves the Visual AI Gemini image default', () => {
+  const unavailable = createVisualAIProvider({
+    env: { GEMINI_API_KEY: 'credentials-must-not-select-provider' },
+  });
+  assert.equal(unavailable.getProviderIdentity().provider, 'UNAVAILABLE');
+
+  const provider = createVisualAIProvider({
+    providerType: 'GOOGLE',
+    env: {
+      GOOGLE_GENAI_MODE: 'developer',
+      GEMINI_API_KEY: 'test-key',
+    },
+    googleClientFactory: () => ({ interactions: { create: async () => ({}) } }),
+  });
+
+  assert.deepEqual(provider.getProviderIdentity(), {
+    provider: 'GOOGLE',
+    model: 'gemini-3.1-flash-image',
+  });
+  assert.deepEqual(provider.getCapabilities(), {
+    textToImage: true,
+    imageConditionedGeneration: true,
+    imageEditing: true,
+    referenceImages: true,
+  });
 });

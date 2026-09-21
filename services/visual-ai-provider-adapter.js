@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { createGoogleVisualAIProvider } from './google-visual-ai-provider.js';
 
 export class VisualAIProviderError extends Error {
   constructor(code, message, options = {}) {
@@ -126,18 +127,18 @@ export function createVisualAIProvider(options = {}) {
   const env = options.env || process.env;
   const providerType = String(options.providerType || env.VISUAL_AI_PROVIDER || 'UNAVAILABLE').toUpperCase();
   if (providerType === 'MOCK' || providerType === 'DETERMINISTIC') return createDeterministicMockVisualProvider(options.mockOptions);
-  if (providerType === 'GOOGLE_GENAI' || providerType === 'GEMINI') {
-    const model = String(env.VISUAL_AI_GOOGLE_IMAGE_MODEL || 'UNCONFIGURED');
-    return Object.freeze({
-      provider: 'GOOGLE_GENAI',
-      model,
-      async generateConcept(request) {
-        validateVisualGenerationInput(request);
-        throw new VisualAIProviderError('VISUAL_AI_LIVE_CALLS_DISABLED_IN_PHASE1', 'Live image generation API calls are prohibited in Phase 1. Use the deterministic mock provider.', { retryable: false });
-      },
-      getProviderIdentity() { return { provider: 'GOOGLE_GENAI', model }; },
-      getCapabilities() { return Object.freeze({ textToImage: false, imageConditionedGeneration: false, referenceImages: false }); },
-    });
+  if (providerType === 'GOOGLE' || providerType === 'GOOGLE_GENAI' || providerType === 'GEMINI') {
+    try {
+      return createGoogleVisualAIProvider({
+        env,
+        clientFactory: options.googleClientFactory,
+        validateInput: validateVisualGenerationInput,
+        ProviderError: VisualAIProviderError,
+      });
+    } catch (error) {
+      if (error instanceof VisualAIProviderError) throw error;
+      throw new VisualAIProviderError('VISUAL_AI_PROVIDER_CONFIGURATION_INVALID', 'Google Visual AI configuration is unavailable.', { retryable: false, status: 503 });
+    }
   }
   if (providerType === 'UNAVAILABLE' || providerType === 'NONE') {
     return Object.freeze({
