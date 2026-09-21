@@ -227,9 +227,19 @@ export async function processVisualAiGenerationJob({ database, storage, job, vis
       }
     }
 
+    const targetImage = {
+      buffer: targetBuffer,
+      mimeType: targetRow.rows[0].mime_type || 'image/jpeg',
+      originalFilename: targetRow.rows[0].original_filename,
+    };
+    const referenceImages = referenceImage ? [referenceImage] : [];
+    const sourceImages = [targetImage];
+
     const providerResult = await visualProvider.generateConcept({
-      targetImage: { buffer: targetBuffer, mimeType: targetRow.rows[0].mime_type || 'image/jpeg', originalFilename: targetRow.rows[0].original_filename },
+      targetImage,
       referenceImage,
+      sourceImages,
+      referenceImages,
       instruction: job.prompt_instruction,
       groundingContext: job.grounding_context,
     });

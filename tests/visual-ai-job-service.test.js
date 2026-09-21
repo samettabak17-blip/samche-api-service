@@ -275,3 +275,65 @@ test('processVisualAiGenerationJob executes full mock pipeline', async () => {
   assert.equal(result.job.status, 'COMPLETED');
   assert.equal(storagePuts.length, 1);
 });
+
+test('processVisualAiGenerationJob passes canonical source and reference image collections to visualProvider', async () => {
+  const providerRequests = [];
+  const database = {
+    query: async (sql, params = []) => {
+      if (sql.includes('SELECT id, storage_key, mime_type') && params[0] === targetResourceId) {
+        return { rowCount: 1, rows: [{ id: targetResourceId, storage_key: 'target-key', mime_type: 'image/jpeg', original_filename: 'target.jpg' }] };
+      }
+      if (sql.includes('SELECT id, storage_key, mime_type') && params[0] === referenceResourceId) {
+        return { rowCount: 1, rows: [{ id: referenceResourceId, storage_key: 'ref-key', mime_type: 'image/png', original_filename: 'ref.png' }] };
+      }
+      if (sql.includes('INSERT INTO conversation_resources')) {
+        return { rows: [{ id: 'res-gen-3', source_type: 'VISUAL_AI_GENERATED' }] };
+      }
+      if (sql.includes('UPDATE visual_ai_generation_jobs')) {
+        return { rows: [{ id: jobId, status: 'COMPLETED' }] };
+      }
+      return { rows: [] };
+    },
+  };
+  const storage = {
+    get: async ({ key }) => [Buffer.from(`bytes-for-${key}`)],
+    put: async () => {},
+  };
+  const mockProvider = {
+    async generateConcept(req) {
+      providerRequests.push(req);
+      return {
+        imageBuffer: DETERMINISTIC_MOCK_PNG,
+        mimeType: 'image/png',
+        provider: 'GOOGLE',
+        model: 'gemini-3.1-flash-image',
+        providerRequestId: 'req-123',
+        finishReason: 'SUCCESS',
+      };
+    },
+  };
+
+  await processVisualAiGenerationJob({
+    database,
+    storage,
+    job: {
+      id: jobId,
+      tenant_id: tenantA,
+      conversation_id: conversationId,
+      target_resource_id: targetResourceId,
+      reference_resource_id: referenceResourceId,
+      prompt_instruction: 'Apply modern style',
+      grounding_context: { theme: 'modern' },
+      max_attempts: 2,
+    },
+    visualProvider: mockProvider,
+  });
+
+  assert.equal(providerRequests.length, 1);
+  assert.equal(providerRequests[0].sourceImages.length, 1);
+  assert.equal(providerRequests[0].sourceImages[0].mimeType, 'image/jpeg');
+  assert.equal(providerRequests[0].referenceImages.length, 1);
+  assert.equal(providerRequests[0].referenceImages[0].mimeType, 'image/png');
+  assert.equal(providerRequests[0].targetImage.mimeType, 'image/jpeg');
+  assert.equal(providerRequests[0].referenceImage.mimeType, 'image/png');
+});

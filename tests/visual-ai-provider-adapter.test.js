@@ -159,3 +159,178 @@ test('createVisualAIProvider selects Google only explicitly and resolves the Vis
     referenceImages: true,
   });
 });
+
+test('Google Visual AI maps canonical source and reference image collections into an image interaction and normalizes its output', async () => {
+  const requests = [];
+  const generatedBytes = Buffer.from('generated-image-bytes');
+  const provider = createVisualAIProvider({
+    providerType: 'GOOGLE',
+    env: { GOOGLE_GENAI_MODE: 'developer', GEMINI_API_KEY: 'test-key', VISUAL_AI_GOOGLE_IMAGE_MODEL: 'gemini-3.1-flash-image' },
+    googleClientFactory: () => ({
+      interactions: {
+        create: async (request) => {
+          requests.push(request);
+          return {
+            id: 'interaction-safe-123',
+            model: 'gemini-3.1-flash-image',
+            output_image: { data: generatedBytes.toString('base64'), mime_type: 'image/webp' },
+            usage: { input_tokens: 12, output_tokens: 34 },
+            unsafe_raw_payload: { credential: 'must-not-leak' },
+          };
+        },
+      },
+    }),
+  });
+
+  const result = await provider.generateConcept({
+    instruction: 'Place the catalog material onto the supplied room wall.',
+    sourceImages: [{ buffer: Buffer.from('room'), mimeType: 'image/jpeg', originalFilename: 'room.jpg' }],
+    referenceImages: [
+      { buffer: Buffer.from('material-a'), mimeType: 'image/png', originalFilename: 'material-a.png' },
+      { buffer: Buffer.from('material-b'), mimeType: 'image/webp', originalFilename: 'material-b.webp' },
+    ],
+    outputOptions: { aspectRatio: '16:9', imageSize: '2K', mimeType: 'image/webp' },
+    metadata: { requestPurpose: 'tenant-visual-concept' },
+  });
+
+  assert.equal(requests.length, 1);
+  assert.deepEqual(requests[0], {
+    model: 'gemini-3.1-flash-image',
+    input: [
+      { type: 'image', data: Buffer.from('room').toString('base64'), mime_type: 'image/jpeg' },
+      { type: 'image', data: Buffer.from('material-a').toString('base64'), mime_type: 'image/png' },
+      { type: 'image', data: Buffer.from('material-b').toString('base64'), mime_type: 'image/webp' },
+      { type: 'text', text: 'Place the catalog material onto the supplied room wall.' },
+    ],
+    response_format: { type: 'image', mime_type: 'image/webp', aspect_ratio: '16:9', image_size: '2K' },
+  });
+  assert.deepEqual(result, {
+    imageBuffer: generatedBytes,
+    mimeType: 'image/webp',
+    provider: 'GOOGLE',
+    model: 'gemini-3.1-flash-image',
+    providerRequestId: 'interaction-safe-123',
+    finishReason: 'SUCCESS',
+    costMetadata: { provider: 'GOOGLE', model: 'gemini-3.1-flash-image', inputTokens: 12, outputTokens: 34 },
+  });
+  assert.equal(result.unsafe_raw_payload, undefined);
+});
+
+test('Google Visual AI supports canonical text-to-image requests without weakening legacy target-image validation', async () => {
+  const provider = createVisualAIProvider({
+    providerType: 'GOOGLE',
+    env: { GOOGLE_GENAI_MODE: 'developer', GEMINI_API_KEY: 'test-key' },
+    googleClientFactory: () => ({ interactions: { create: async () => ({ output_image: { data: DETERMINISTIC_MOCK_PNG.toString('base64'), mime_type: 'image/png' } }) } }),
+  });
+  const result = await provider.generateConcept({
+    instruction: 'Create a safe generic product concept.',
+    sourceImages: [],
+    referenceImages: [],
+  });
+  assert.equal(result.mimeType, 'image/png');
+  assert.throws(
+    () => validateVisualGenerationInput({ instruction: 'Legacy visual request without a target.' }),
+    (err) => err instanceof VisualAIValidationError && err.code === 'TARGET_IMAGE_REQUIRED'
+  );
+});
+
+test('Google Visual AI normalizes provider failures and rejects responses that contain no image', async () => {
+  const makeProvider = (failure) => createVisualAIProvider({
+    providerType: 'GOOGLE',
+    env: { GOOGLE_GENAI_MODE: 'developer', GEMINI_API_KEY: 'test-key' },
+    googleClientFactory: () => ({ interactions: { create: async () => {
+      if (failure instanceof Error) throw failure;
+      return failure;
+    } } }),
+  });
+  const request = { instruction: 'Transform safely.', sourceImages: [{ buffer: Buffer.from('source'), mimeType: 'image/jpeg' }] };
+
+  await assert.rejects(() => makeProvider({ output_text: 'No image.' }).generateConcept(request), (err) => err instanceof VisualAIProviderError && err.code === 'VISUAL_AI_PROVIDER_RESPONSE_INVALID' && !err.retryable);
+  for (const [status, code, retryable] of [[401, 'VISUAL_AI_AUTHENTICATION_FAILED', false], [429, 'VISUAL_AI_RATE_LIMITED', true], [503, 'VISUAL_AI_PROVIDER_UNAVAILABLE', true], [400, 'VISUAL_AI_SAFETY_BLOCKED', false]]) {
+    const error = new Error(status === 400 ? 'safety policy blocked output' : 'provider failure');
+    error.status = status;
+    await assert.rejects(() => makeProvider(error).generateConcept(request), (err) => err instanceof VisualAIProviderError && err.code === code && err.retryable === retryable);
+  }
+});
+
+test('Google Visual AI supports Vertex mode configuration and custom image model override', () => {
+  let capturedOptions = null;
+  const provider = createVisualAIProvider({
+    providerType: 'GOOGLE',
+    env: {
+      GOOGLE_GENAI_MODE: 'vertex',
+      GOOGLE_CLOUD_PROJECT: 'samche-staging',
+      GOOGLE_CLOUD_LOCATION: 'us-central1',
+      VISUAL_AI_GOOGLE_IMAGE_MODEL: 'gemini-3.1-flash-image-custom',
+    },
+    googleClientFactory: (options) => {
+      capturedOptions = options;
+      return { interactions: { create: async () => ({}) } };
+    },
+  });
+
+  assert.deepEqual(capturedOptions, {
+    vertexai: true,
+    project: 'samche-staging',
+    location: 'us-central1',
+  });
+  assert.deepEqual(provider.getProviderIdentity(), {
+    provider: 'GOOGLE',
+    model: 'gemini-3.1-flash-image-custom',
+  });
+});
+
+test('Google Visual AI rejects invalid configuration and invalid model identifiers', () => {
+  assert.throws(
+    () => createVisualAIProvider({
+      providerType: 'GOOGLE',
+      env: { GOOGLE_GENAI_MODE: 'developer', GEMINI_API_KEY: '' },
+    }),
+    (err) => err instanceof VisualAIProviderError && err.code === 'VISUAL_AI_PROVIDER_CONFIGURATION_INVALID'
+  );
+
+  assert.throws(
+    () => createVisualAIProvider({
+      providerType: 'GOOGLE',
+      env: { GOOGLE_GENAI_MODE: 'vertex', GOOGLE_CLOUD_PROJECT: 'proj' }, // missing location
+    }),
+    (err) => err instanceof VisualAIProviderError && err.code === 'VISUAL_AI_PROVIDER_CONFIGURATION_INVALID'
+  );
+
+  assert.throws(
+    () => createVisualAIProvider({
+      providerType: 'GOOGLE',
+      env: { GOOGLE_GENAI_MODE: 'developer', GEMINI_API_KEY: 'test', VISUAL_AI_GOOGLE_IMAGE_MODEL: '$$$invalid-model$$$' },
+    }),
+    (err) => err instanceof VisualAIProviderError && err.code === 'VISUAL_AI_PROVIDER_CONFIGURATION_INVALID'
+  );
+});
+
+test('Google Visual AI validates image inputs, sizes, and MIME types strictly', async () => {
+  const provider = createVisualAIProvider({
+    providerType: 'GOOGLE',
+    env: { GOOGLE_GENAI_MODE: 'developer', GEMINI_API_KEY: 'test-key' },
+    googleClientFactory: () => ({ interactions: { create: async () => ({}) } }),
+  });
+
+  await assert.rejects(
+    () => provider.generateConcept({ instruction: '' }),
+    (err) => err instanceof VisualAIValidationError && err.code === 'INSTRUCTION_REQUIRED'
+  );
+
+  await assert.rejects(
+    () => provider.generateConcept({
+      instruction: 'Test',
+      sourceImages: [{ buffer: Buffer.from('data'), mimeType: 'image/gif' }],
+    }),
+    (err) => err instanceof VisualAIValidationError && err.code === 'SOURCE_IMAGE_MIME_UNSUPPORTED'
+  );
+
+  await assert.rejects(
+    () => provider.generateConcept({
+      instruction: 'Test',
+      referenceImages: [{ buffer: Buffer.alloc(11 * 1024 * 1024), mimeType: 'image/jpeg' }],
+    }),
+    (err) => err instanceof VisualAIValidationError && err.code === 'REFERENCE_IMAGE_TOO_LARGE'
+  );
+});

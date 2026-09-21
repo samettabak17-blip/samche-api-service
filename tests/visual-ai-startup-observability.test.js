@@ -14,3 +14,15 @@ test('formats visual worker startup without secrets or tenant data', () => {
 test('formats disabled visual worker without selecting a provider', () => {
   assert.equal(formatVisualAiWorkerStartup({ enabled: false }), 'VISUAL_AI_WORKER_RUNTIME enabled=0 started=0 provider=UNSELECTED model=NONE image_conditioned=0 reference_images=0');
 });
+
+test('formats Google visual AI worker startup with safe identity and capabilities', () => {
+  const line = formatVisualAiWorkerStartup({
+    enabled: true,
+    provider: {
+      getProviderIdentity: () => ({ provider: 'GOOGLE', model: 'gemini-3.1-flash-image' }),
+      getCapabilities: () => ({ textToImage: true, imageConditionedGeneration: true, imageEditing: true, referenceImages: true }),
+    },
+  });
+  assert.equal(line, 'VISUAL_AI_WORKER_RUNTIME enabled=1 started=1 provider=GOOGLE model=gemini-3.1-flash-image image_conditioned=1 reference_images=1');
+  assert.doesNotMatch(line, /token|secret|password|tenant|key/i);
+});
