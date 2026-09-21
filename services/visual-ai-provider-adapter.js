@@ -99,13 +99,24 @@ export function createDeterministicMockVisualProvider(options = {}) {
     provider: providerName,
     model: modelName,
     async generateConcept(request) {
-      const validated = validateVisualGenerationInput(request);
       if (options.simulateError === 'SAFETY') throw new VisualAISafetyError('VISUAL_AI_SAFETY_BLOCKED', 'Simulated safety rejection.');
       if (options.simulateError === 'RATE_LIMIT') throw new VisualAIProviderError('VISUAL_AI_RATE_LIMITED', 'Simulated 429 Rate Limit.', { retryable: true, status: 429 });
       if (options.simulateError === 'TIMEOUT') throw new VisualAIProviderError('VISUAL_AI_TIMEOUT', 'Simulated generation timeout.', { retryable: true, status: 504 });
       if (options.simulateError) throw new VisualAIProviderError('VISUAL_AI_MOCK_ERROR', 'Simulated unhandled error.', { retryable: false });
 
-      const hashSeed = crypto.createHash('sha256').update(validated.targetImage.buffer).update(validated.instruction).digest('hex').slice(0, 16);
+      const instruction = String(request?.instruction || '').trim();
+      if (!instruction) throw new VisualAIValidationError('INSTRUCTION_REQUIRED', 'Instruction required');
+
+      let targetBuffer = Buffer.from('default-seed');
+      if (request?.targetImage?.buffer) {
+        targetBuffer = request.targetImage.buffer;
+      } else if (Array.isArray(request?.sourceImages) && request.sourceImages[0]?.buffer) {
+        targetBuffer = request.sourceImages[0].buffer;
+      } else if (!request?.targetImage && !Array.isArray(request?.sourceImages)) {
+        validateVisualGenerationInput(request);
+      }
+
+      const hashSeed = crypto.createHash('sha256').update(targetBuffer).update(instruction).digest('hex').slice(0, 16);
       return Object.freeze({
         imageBuffer: DETERMINISTIC_MOCK_PNG,
         mimeType: 'image/png',

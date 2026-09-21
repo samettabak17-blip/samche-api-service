@@ -20,10 +20,10 @@ export const CANONICAL_VISUAL_INTENT_TYPES = Object.freeze({
 });
 
 const VISUAL_GENERATION_PATTERNS = [
-  /(?:make|turn|transform|redesign|redecorate|style|visualize|render|convert|apply)\s+this/i,
-  /(?:look\s+like|design\s+as\s+inspiration|how\s+would\s+this\s+look|show\s+me\s+how\s+.*would\s+look|show\s+me\s+this)/i,
+  /(?:make|turn|transform|redesign|redecorate|style|visualize|render|convert|apply|show)\s+this/i,
+  /(?:look\s+like|design\s+as\s+inspiration|how\s+.*would\s+look|how\s+.*looks|show\s+me\s+how|show\s+me\s+this|show\s+this)/i,
   /(?:modern|scandinavian|mediterranean|rustic|minimalist|industrial|boho|luxury|contemporary)\s+(?:style|look|design|theme)/i,
-  /(?:garden|room|kitchen|bedroom|living\s+room|wall|wallpaper|car|vehicle|furniture)\s+(?:redesign|transformation|concept|preview|pattern)/i,
+  /(?:garden|room|kitchen|bedroom|living\s+room|wall|wallpaper|car|vehicle|furniture|stage|product|garment|unit)\s+(?:redesign|transformation|concept|preview|pattern)/i,
   /(?:wallpaper\s+.*on\s+(?:my\s+)?(?:wall|room))/i,
   /(?:bunu\s+.*dönüştür|yeniden\s+tasarla|böyle\s+görünmesini\s+sağla|nasıl\s+durur\s+göster|tasarım\s+önerisi\s+oluştur)/i,
   /(?:أعد\s+تصميم|حول\s+.*|غير\s+تصميم|صمم\s+لي|كيف\s+يبدو)/u,
