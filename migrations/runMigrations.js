@@ -17,6 +17,9 @@ export async function runMigrations() {
     await client.query('SELECT pg_advisory_lock(918246731)');
     for (const file of migrationFiles) {
       await client.query(fs.readFileSync(path.join(migrationsDirectory, file), 'utf8'));
+      if (file === '088_visual_ai_phase3_delivery_orchestration.sql') {
+        console.info('MIGRATION_088_RUNTIME status=CURRENT');
+      }
     }
   } finally {
     try {

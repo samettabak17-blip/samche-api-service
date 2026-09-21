@@ -61,6 +61,7 @@ import { planLatestExplicitResource, planWhatsAppResourceFollowUp, resourceFailu
 import { resolveWhatsAppVisualRequestState, orchestrateWhatsAppVisualAiJob } from './services/visual-intelligence-intent-service.js';
 import { createVisualAIProvider } from './services/visual-ai-provider-adapter.js';
 import { processOneVisualAiGenerationJob } from './services/visual-ai-generation-worker.js';
+import { formatVisualAiWorkerStartup } from './services/visual-ai-runtime-observability-service.js';
 import { ensureConversationCrmIdentity } from "./services/crm-lead-service.js";
 import { queueLeadQualification } from "./services/lead-qualification-runner.js";
 import { startLiveEventListener, subscribeTenantEvents } from "./services/live-event-bus.js";
@@ -860,8 +861,12 @@ function startKnowledgeWorkers() {
 }
 
 function startVisualAiWorker() {
-  if (process.env.VISUAL_AI_WORKER_ENABLED !== 'true') return () => {};
+  if (process.env.VISUAL_AI_WORKER_ENABLED !== 'true') {
+    console.info(formatVisualAiWorkerStartup({ enabled: false }));
+    return () => {};
+  }
   const provider = createVisualAIProvider({ env: process.env });
+  console.info(formatVisualAiWorkerStartup({ enabled: true, provider }));
   const timer = setInterval(() => {
     processOneVisualAiGenerationJob({ database: pool, storage: createConversationResourceStorage(), visualProvider: provider, deliverWhatsAppMedia })
       .catch((error) => console.info('VISUAL_AI_WORKER_ERROR code=' + String(error?.code ?? 'UNKNOWN').slice(0, 80)));
