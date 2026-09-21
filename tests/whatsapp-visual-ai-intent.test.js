@@ -228,3 +228,50 @@ test('WHATSAPP VISUAL LOCALIZATION: Accurately localizes lifecycle copy for EN, 
   });
   assert.equal(arWaiting.promptSuggestion, 'يرجى إرسال صورة للمكان أو المساحة التي ترغب في تحويلها.');
 });
+
+test('WHATSAPP VISUAL LOCALIZATION: English requests strictly prevent Turkish leakage and preserve multi-turn stability', async () => {
+  const database = {
+    query: async (sql) => {
+      if (sql.includes('tenant_visual_ai_config')) return { rows: [{ tenant_id: tenantId, enabled: true }] };
+      if (sql.includes('conversation_resources')) return { rowCount: 1, rows: [{ id: targetResourceId, storage_key: 'k1', mime_type: 'image/jpeg' }] };
+      if (sql.includes('INSERT INTO visual_ai_generation_jobs')) return { rows: [{ id: 'job-en-1', status: 'PENDING', tenant_id: tenantId }] };
+      return { rows: [] };
+    },
+  };
+
+  const enOrch = await orchestrateWhatsAppVisualAiJob({
+    database, tenantId, conversationId, targetResourceId, promptInstruction: 'Restyle this room in a minimalist Nordic design', language: 'en',
+  });
+
+  // 1. Must be English
+  assert.equal(enOrch.acknowledgmentText, 'Your visual concept preview is being created, please wait...');
+  // 2. Strict non-leakage: must not contain Turkish words
+  assert.doesNotMatch(enOrch.acknowledgmentText, /Görsel|konsept|önizleme|oluşturuluyor|bekleyin/i);
+});
+
+test('WHATSAPP VISUAL LOCALIZATION: Tenant default language cannot override resolved conversation language', async () => {
+  // Even if tenant default / fallback is configured differently, resolved conversation language governs
+  const database = {
+    query: async (sql) => {
+      if (sql.includes('tenant_visual_ai_config')) return { rows: [{ tenant_id: tenantId, enabled: true }] };
+      if (sql.includes('conversation_resources')) return { rowCount: 1, rows: [{ id: targetResourceId, storage_key: 'k1', mime_type: 'image/jpeg' }] };
+      if (sql.includes('INSERT INTO visual_ai_generation_jobs')) return { rows: [{ id: 'job-lang-1', status: 'PENDING', tenant_id: tenantId }] };
+      return { rows: [] };
+    },
+  };
+
+  const enResult = await orchestrateWhatsAppVisualAiJob({
+    database, tenantId, conversationId, targetResourceId, promptInstruction: 'Make this kitchen modern', language: 'en',
+  });
+  assert.equal(enResult.acknowledgmentText, 'Your visual concept preview is being created, please wait...');
+
+  const arResult = await orchestrateWhatsAppVisualAiJob({
+    database, tenantId, conversationId, targetResourceId, promptInstruction: 'أعد تصميم المطبخ', language: 'ar',
+  });
+  assert.equal(arResult.acknowledgmentText, 'جارٍ إنشاء معاينة المفهوم المرئي الخاص بك، يرجى الانتظار...');
+
+  const trResult = await orchestrateWhatsAppVisualAiJob({
+    database, tenantId, conversationId, targetResourceId, promptInstruction: 'Mutfağı modern yap', language: 'tr',
+  });
+  assert.equal(trResult.acknowledgmentText, 'Görsel konsept önizlemeniz oluşturuluyor, lütfen bekleyin...');
+});

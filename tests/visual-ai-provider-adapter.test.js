@@ -369,3 +369,43 @@ test('Google Visual AI validates image inputs, sizes, and MIME types strictly', 
     (err) => err instanceof VisualAIValidationError && err.code === 'REFERENCE_IMAGE_TOO_LARGE'
   );
 });
+
+test('Google Visual AI exclusively calls models.generateContent and never calls interactions.create', async () => {
+  let generateContentCalled = 0;
+  let interactionsCreateCalled = 0;
+  const provider = createVisualAIProvider({
+    providerType: 'GOOGLE',
+    env: { GOOGLE_GENAI_MODE: 'developer', GEMINI_API_KEY: 'test-key' },
+    googleClientFactory: () => ({
+      models: {
+        generateContent: async () => {
+          generateContentCalled += 1;
+          return {
+            candidates: [
+              {
+                content: {
+                  parts: [{ inlineData: { data: DETERMINISTIC_MOCK_PNG.toString('base64'), mimeType: 'image/png' } }],
+                },
+              },
+            ],
+          };
+        },
+      },
+      interactions: {
+        create: async () => {
+          interactionsCreateCalled += 1;
+          throw new Error('interactions.create must never be called');
+        },
+      },
+    }),
+  });
+
+  const result = await provider.generateConcept({
+    instruction: 'Create concept',
+    sourceImages: [{ buffer: Buffer.from('img'), mimeType: 'image/jpeg' }],
+  });
+
+  assert.equal(generateContentCalled, 1);
+  assert.equal(interactionsCreateCalled, 0);
+  assert.equal(result.mimeType, 'image/png');
+});
