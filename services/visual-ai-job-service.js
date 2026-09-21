@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { createConversationResource } from './conversation-resource-service.js';
 import { buildConversationStorageKey } from './conversation-resource-validation.js';
 import { classifyVisualAIError } from './visual-ai-provider-adapter.js';
+import { buildGroundedVisualInstruction } from './visual-intelligence-intent-service.js';
 import {
   UUID_REGEX,
   VisualAiJobError,
@@ -235,12 +236,17 @@ export async function processVisualAiGenerationJob({ database, storage, job, vis
     const referenceImages = referenceImage ? [referenceImage] : [];
     const sourceImages = [targetImage];
 
+    const groundedInstruction = buildGroundedVisualInstruction({
+      instruction: job.prompt_instruction,
+      groundingContext: job.grounding_context,
+    });
+
     const providerResult = await visualProvider.generateConcept({
       targetImage,
       referenceImage,
       sourceImages,
       referenceImages,
-      instruction: job.prompt_instruction,
+      instruction: groundedInstruction,
       groundingContext: job.grounding_context,
     });
 

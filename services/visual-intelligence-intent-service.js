@@ -187,6 +187,89 @@ export function formatVisualAiSafetyMessage(language) {
 }
 
 /**
+ * Resolves generic canonical grounding context for visual AI requests:
+ * 1. Explicit customer attachments / references
+ * 2. Resolved product / catalog / entity context (from page context or visitor context)
+ * 3. Approved Knowledge Intelligence evidence (strictly tenant-scoped and approved only)
+ * 4. Business Profile / tenant context
+ */
+export async function resolveVisualAiGroundingContext({
+  database,
+  tenantId,
+  assistantId = null,
+  instruction = '',
+  entity = null,
+  visitorContext = null,
+  businessProfile = null,
+  retrieveKnowledge = null,
+}) {
+  const grounding = {
+    entity: null,
+    approvedKnowledge: [],
+    businessContext: null,
+  };
+
+  const resolvedEntity = entity || visitorContext?.current_entity || visitorContext?.currentEntity || null;
+  if (resolvedEntity && typeof resolvedEntity === 'object') {
+    grounding.entity = {
+      name: resolvedEntity.entity_name || resolvedEntity.name || resolvedEntity.title || null,
+      type: resolvedEntity.entity_type || resolvedEntity.type || null,
+      description: resolvedEntity.description || resolvedEntity.summary || null,
+      attributes: resolvedEntity.attributes || {},
+    };
+  }
+
+  if (database && tenantId && typeof retrieveKnowledge === 'function' && instruction) {
+    try {
+      const chunks = await retrieveKnowledge({ database, tenantId, assistantId, query: instruction });
+      if (Array.isArray(chunks)) {
+        grounding.approvedKnowledge = chunks
+          .filter((c) => c?.approval_status === 'APPROVED' || c?.status === 'active' || c?.approved === true)
+          .map((c) => ({
+            title: c.title || c.source_title || null,
+            content: String(c.chunk_content || c.content || c.text || '').trim(),
+          }))
+          .filter((c) => Boolean(c.content))
+          .slice(0, 3);
+      }
+    } catch {
+      // Grounding failures must fail safely without breaking generation
+    }
+  }
+
+  if (businessProfile && typeof businessProfile === 'object') {
+    grounding.businessContext = {
+      companyName: businessProfile.company_display_name || businessProfile.company_identity || null,
+      businessType: businessProfile.business_type || businessProfile.industry || null,
+    };
+  }
+
+  return grounding;
+}
+
+/**
+ * Formats a provider-neutral composite prompt instruction combining
+ * customer instruction with canonical grounding context.
+ * Customer instructions strictly outrank generic knowledge.
+ */
+export function buildGroundedVisualInstruction({ instruction, groundingContext = {} }) {
+  const normalizedInstruction = String(instruction || '').trim();
+  const sections = [normalizedInstruction];
+
+  if (groundingContext.entity?.name) {
+    sections.push(`[Referenced Product/Entity: ${groundingContext.entity.name}${groundingContext.entity.description ? ` - ${groundingContext.entity.description}` : ''}]`);
+  }
+
+  if (Array.isArray(groundingContext.approvedKnowledge) && groundingContext.approvedKnowledge.length > 0) {
+    const knowledgeSnippets = groundingContext.approvedKnowledge.map((k) => k.content).join('; ');
+    sections.push(`[Approved Tenant Knowledge: ${knowledgeSnippets}]`);
+  }
+
+  return sections.join('\n\n');
+}
+
+
+/**
  * Resolves multi-turn WhatsApp visual request state and parameters
  */
 export async function resolveWhatsAppVisualRequestState({

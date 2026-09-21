@@ -7,12 +7,14 @@ import {
   VisualAIValidationError,
 } from '../services/visual-ai-provider-adapter.js';
 import {
+  buildGroundedVisualInstruction,
   classifyVisualIntent,
   formatVisualAiAcknowledgement,
   formatVisualAiPromptSuggestion,
   formatVisualAiReadyMessage,
   normalizeVisualAiLanguage,
   orchestrateWhatsAppVisualAiJob,
+  resolveVisualAiGroundingContext,
   resolveWhatsAppVisualRequestState,
 } from '../services/visual-intelligence-intent-service.js';
 import {
@@ -167,4 +169,61 @@ test('GENERIC VISUAL AI: verification of generic domain agnosticism (no hardcode
     assert.equal(classification.isVisualGeneration, true);
     assert.equal(classification.intent, expectedIntent);
   }
+});
+
+test('GENERIC VISUAL AI: relevant approved tenant knowledge grounds generation while unapproved knowledge is excluded', async () => {
+  const retrieveKnowledge = async ({ query }) => {
+    return [
+      { id: 'k1', chunk_content: 'Approved Product Spec: Matte black powder-coated steel frame.', approval_status: 'APPROVED' },
+      { id: 'k2', chunk_content: 'Unapproved Candidate: Experimental neon pink coating.', approval_status: 'CANDIDATE' },
+    ];
+  };
+
+  const grounding = await resolveVisualAiGroundingContext({
+    database: {},
+    tenantId: tenantA,
+    instruction: 'Make this sofa matte black',
+    entity: { entity_name: 'Nordic Sofa Model X', description: '3-seater minimalist sofa' },
+    retrieveKnowledge,
+  });
+
+  assert.equal(grounding.approvedKnowledge.length, 1);
+  assert.match(grounding.approvedKnowledge[0].content, /Matte black/);
+  assert.doesNotMatch(grounding.approvedKnowledge[0].content, /neon pink/);
+
+  const groundedInstruction = buildGroundedVisualInstruction({
+    instruction: 'Make this sofa matte black',
+    groundingContext: grounding,
+  });
+
+  assert.match(groundedInstruction, /^Make this sofa matte black/);
+  assert.match(groundedInstruction, /Referenced Product\/Entity: Nordic Sofa Model X/);
+  assert.match(groundedInstruction, /Approved Tenant Knowledge: Approved Product Spec/);
+  assert.doesNotMatch(groundedInstruction, /neon pink/);
+});
+
+test('GENERIC VISUAL AI: cross-conversation private resources cannot be accessed accidentally', async () => {
+  const database = {
+    query: async (sql, params = []) => {
+      // Resource exists in convA, but caller requests convB
+      if (sql.includes('conversation_resources') && params[0] === targetResA && params[2] === convB) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('tenant_visual_ai_config')) {
+        return { rows: [{ tenant_id: tenantA, enabled: true }] };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  await assert.rejects(
+    () => enqueueVisualAiGenerationJob({
+      database,
+      tenantId: tenantA,
+      conversationId: convB,
+      targetResourceId: targetResA,
+      promptInstruction: 'Private conversation resource isolation check',
+    }),
+    (err) => err instanceof VisualAiJobError && err.code === 'TARGET_RESOURCE_NOT_FOUND'
+  );
 });

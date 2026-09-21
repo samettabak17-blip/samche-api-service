@@ -4612,6 +4612,12 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         });
         if (visualRequest.state === 'READY_FOR_GENERATION') {
           try {
+            if (whatsappInbox.integration?.external_channel_id && wpMessageId) {
+              sendWhatsAppTypingIndicator({
+                phoneNumberId: whatsappInbox.integration.external_channel_id,
+                incomingMessageId: wpMessageId,
+              }).catch(() => {});
+            }
             const queued = await orchestrateWhatsAppVisualAiJob({
               database: pool,
               tenantId: whatsappInbox.integration.tenant_id,
@@ -4620,7 +4626,11 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
               targetResourceId: visualRequest.targetResourceId,
               referenceResourceId: visualRequest.referenceResourceId,
               promptInstruction: visualRequest.promptInstruction,
-              groundingContext: { source: 'WHATSAPP_CONVERSATION_RESOURCE', language: visualLanguage },
+              groundingContext: {
+                source: 'WHATSAPP_CONVERSATION_RESOURCE',
+                language: visualLanguage,
+                businessProfile: whatsappInbox.tenantContext,
+              },
               language: visualLanguage,
             });
             const persisted = await persistAssistantResponseIfCurrent({ tenantId: whatsappInbox.integration.tenant_id, conversationId: whatsappInbox.conversation.id, content: queued.acknowledgmentText, handlingVersion: whatsappInbox.handlingVersion, knowledgeAuthority: whatsappInbox.knowledgeAuthority });
