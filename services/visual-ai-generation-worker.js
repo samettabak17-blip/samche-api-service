@@ -9,6 +9,7 @@ import {
   formatVisualAiReadyMessage,
   normalizeVisualAiLanguage,
 } from './visual-intelligence-intent-service.js';
+import { sendWhatsAppTypingIndicator } from './whatsapp-delivery-service.js';
 
 const OUTPUT_KEY_PREFIX = 'visual-ai-output:';
 
@@ -20,10 +21,57 @@ async function readStorage(storage, key) {
   return Buffer.concat(chunks);
 }
 
-export async function processOneVisualAiGenerationJob({ database, storage, visualProvider, deliverWhatsAppMedia }) {
+export function startVisualAiTypingPresence({
+  phoneNumberId,
+  incomingMessageId,
+  integrationConfig = null,
+  sendTyping = sendWhatsAppTypingIndicator,
+  intervalMs = 12000,
+  maxDurationMs = 60000,
+}) {
+  if (!phoneNumberId || !incomingMessageId || typeof sendTyping !== 'function') {
+    return () => {};
+  }
+  let stopped = false;
+  const send = () => {
+    if (stopped) return;
+    try {
+      const promise = sendTyping({ phoneNumberId, incomingMessageId, integrationConfig });
+      if (promise?.catch) promise.catch(() => {});
+    } catch {}
+  };
+
+  send();
+
+  const startTime = Date.now();
+  const intervalId = setInterval(() => {
+    if (stopped || Date.now() - startTime > maxDurationMs) {
+      clearInterval(intervalId);
+      return;
+    }
+    send();
+  }, intervalMs);
+
+  intervalId.unref?.();
+
+  return () => {
+    stopped = true;
+    clearInterval(intervalId);
+  };
+}
+
+export async function processOneVisualAiGenerationJob({
+  database,
+  storage,
+  visualProvider,
+  deliverWhatsAppMedia,
+  sendWhatsAppTyping = sendWhatsAppTypingIndicator,
+}) {
   await recoverStaleVisualAiGenerationJobs(database);
   const job = await claimNextVisualAiGenerationJob(database);
   if (!job) return { processed: false };
+
+  let stopTyping = () => {};
   try {
     const ownership = await database.query(
       `SELECT status, handling_mode FROM conversations WHERE id = $1 AND tenant_id = $2`,
@@ -39,8 +87,47 @@ export async function processOneVisualAiGenerationJob({ database, storage, visua
       );
       return { processed: true, status: 'CANCELLED', jobId: job.id };
     }
+
+    const route = await database.query(
+      `SELECT c.customer_external_id, tc.external_channel_id, ci.config, c.communication_language
+         FROM conversations c JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
+         LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.enabled = TRUE
+        WHERE c.id = $1 AND c.tenant_id = $2 AND tc.channel_type = 'WHATSAPP'`, [job.conversation_id, job.tenant_id]);
+    const delivery = route.rows[0];
+
+    // Look up incoming message id for typing presence
+    let incomingMessageId = null;
+    if (job.message_id) {
+      try {
+        const msgCheck = await database.query(
+          `SELECT external_message_id FROM conversation_messages WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          [job.message_id, job.tenant_id]
+        );
+        incomingMessageId = msgCheck.rows[0]?.external_message_id || null;
+      } catch {}
+    }
+    if (!incomingMessageId) {
+      try {
+        const latestCustMsg = await database.query(
+          `SELECT external_message_id FROM conversation_messages WHERE conversation_id = $1 AND tenant_id = $2 AND sender_type = 'CUSTOMER' AND external_message_id IS NOT NULL ORDER BY created_at DESC LIMIT 1`,
+          [job.conversation_id, job.tenant_id]
+        );
+        incomingMessageId = latestCustMsg.rows[0]?.external_message_id || null;
+      } catch {}
+    }
+
+    if (delivery?.external_channel_id && incomingMessageId) {
+      stopTyping = startVisualAiTypingPresence({
+        phoneNumberId: delivery.external_channel_id,
+        incomingMessageId,
+        integrationConfig: delivery.config,
+        sendTyping: sendWhatsAppTyping,
+      });
+    }
+
     const capabilities = visualProvider?.getCapabilities?.() || {};
     if (!capabilities.imageConditionedGeneration) {
+      stopTyping();
       await database.query(
         `UPDATE visual_ai_generation_jobs SET status = 'FAILED', last_error_code = 'VISUAL_AI_CAPABILITY_UNSUPPORTED', locked_at = NULL, locked_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2 AND status = 'PROCESSING'`,
         [job.id, job.tenant_id]
@@ -53,12 +140,6 @@ export async function processOneVisualAiGenerationJob({ database, storage, visua
     const resource = output.resource;
     if (!resource) throw new VisualAIProviderError('VISUAL_AI_OUTPUT_RESOURCE_MISSING', 'Generated output resource is unavailable.');
 
-    const route = await database.query(
-      `SELECT c.customer_external_id, tc.external_channel_id, ci.config, c.communication_language
-         FROM conversations c JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
-         LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.enabled = TRUE
-        WHERE c.id = $1 AND c.tenant_id = $2 AND tc.channel_type = 'WHATSAPP'`, [job.conversation_id, job.tenant_id]);
-    const delivery = route.rows[0];
     if (!delivery) throw new VisualAIProviderError('WHATSAPP_DELIVERY_UNAVAILABLE', 'WhatsApp delivery is unavailable.', { retryable: true });
 
     const language = normalizeVisualAiLanguage(job.grounding_context?.language || delivery?.communication_language || 'en');
@@ -82,9 +163,11 @@ export async function processOneVisualAiGenerationJob({ database, storage, visua
       if (!sent?.providerMessageId) throw new VisualAIProviderError('WHATSAPP_MEDIA_SEND_UNCORRELATED', 'WhatsApp delivery did not return a durable provider correlation.', { retryable: true });
       await database.query(`UPDATE visual_ai_generation_jobs SET provider_message_id = $1, delivery_status = 'SENT' WHERE id = $2 AND tenant_id = $3 AND provider_message_id IS NULL AND status = 'PROCESSING'`, [sent.providerMessageId, job.id, job.tenant_id]);
     }
+    stopTyping();
     await database.query(`UPDATE visual_ai_generation_jobs SET status = 'COMPLETED', delivery_status = 'SENT', locked_at = NULL, locked_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2 AND status = 'PROCESSING'`, [job.id, job.tenant_id]);
     return { processed: true, status: 'COMPLETED', jobId: job.id, resourceId: resource.id, messageId: message.id };
   } catch (error) {
+    stopTyping();
     // Infrastructure failures (including an interrupted database write) are
     // retried. Explicit provider, validation, safety, and delivery boundary
     // classifications retain their declared retryability.

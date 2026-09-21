@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { processOneVisualAiGenerationJob } from '../services/visual-ai-generation-worker.js';
+import { processOneVisualAiGenerationJob, startVisualAiTypingPresence } from '../services/visual-ai-generation-worker.js';
 import { createDeterministicMockVisualProvider, VisualAIProviderError } from '../services/visual-ai-provider-adapter.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
@@ -69,6 +69,9 @@ function convergenceDatabase({ failMessageInsertOnce = false, failTerminalComple
       if (sql.includes('UPDATE conversation_resources SET message_id')) {
         state.resource.message_id = params[0];
         return { rows: [{ ...state.resource }] };
+      }
+      if (sql.includes('SELECT external_message_id FROM conversation_messages')) {
+        return { rowCount: 1, rows: [{ external_message_id: 'wamid.customer-inbound-123' }] };
       }
       if (sql.includes('SELECT c.customer_external_id')) {
         return { rowCount: 1, rows: [{ customer_external_id: '15551234567', external_channel_id: 'phone-id', config: {} }] };
@@ -195,4 +198,63 @@ test('worker localizes ready caption according to job/conversation language', as
     assert.equal(database.state.message.content, expected);
     assert.equal(deliveredCaption, expected);
   }
+});
+
+
+test('startVisualAiTypingPresence sends initial typing, periodic refresh, and cleans up without orphan timers', async () => {
+  const sent = [];
+  const sendTyping = async (args) => {
+    sent.push({ ...args, time: Date.now() });
+    return { ok: true };
+  };
+
+  const stop = startVisualAiTypingPresence({
+    phoneNumberId: 'phone-123',
+    incomingMessageId: 'wamid.inbound-1',
+    integrationConfig: { cred: 'test' },
+    sendTyping,
+    intervalMs: 20,
+    maxDurationMs: 100,
+  });
+
+  // Initial call was made synchronously
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].phoneNumberId, 'phone-123');
+  assert.equal(sent[0].incomingMessageId, 'wamid.inbound-1');
+
+  // Wait for 1-2 intervals
+  await new Promise((resolve) => setTimeout(resolve, 55));
+  assert.ok(sent.length >= 2, 'Typing indicator was refreshed during active period');
+
+  // Stop typing presence
+  stop();
+  const countAtStop = sent.length;
+
+  await new Promise((resolve) => setTimeout(resolve, 55));
+  assert.equal(sent.length, countAtStop, 'No further typing events sent after stop');
+});
+
+test('processOneVisualAiGenerationJob integrates typing presence and safely ignores typing transport errors', async () => {
+  const database = convergenceDatabase();
+  const storage = {
+    get: async () => [Buffer.from('target-image')],
+    put: async () => {},
+  };
+  const typingCalls = [];
+  const failingSendTyping = async (args) => {
+    typingCalls.push(args);
+    throw new Error('Simulated Meta API transient 500 error');
+  };
+
+  const result = await processOneVisualAiGenerationJob({
+    database,
+    storage,
+    visualProvider: createDeterministicMockVisualProvider(),
+    deliverWhatsAppMedia: async () => ({ providerMessageId: 'wamid.typing-test' }),
+    sendWhatsAppTyping: failingSendTyping,
+  });
+
+  assert.equal(result.status, 'COMPLETED');
+  assert.ok(typingCalls.length >= 1, 'Typing presence was attempted');
+  assert.equal(database.state.job.status, 'COMPLETED', 'Typing failure did not prevent job completion');
 });
