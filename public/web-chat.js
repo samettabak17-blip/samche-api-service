@@ -1306,8 +1306,9 @@
     '.samche-send-btn:hover:not(:disabled) { transform: scale(1.05); }',
     '.samche-send-btn:disabled { opacity: 0.45; cursor: not-allowed; }',
     '.samche-send-btn svg { width: 18px !important; height: 18px !important; max-width: 18px !important; max-height: 18px !important; fill: currentColor; }',
-    '.msg-typing-indicator { display: inline-flex !important; align-items: center; gap: 4px; min-height: 20px; padding: 0.6rem 0.9rem !important; }',
-    '.typing-dots { display: inline-flex; align-items: center; gap: 4px; }',
+    '.samche-msg.msg-typing-indicator { display: flex !important; align-items: center; align-self: flex-start; gap: 8px; width: fit-content; max-width: 100% !important; min-width: 0; flex: 0 1 auto; height: auto; min-height: 20px; padding: 8px 12px !important; box-sizing: border-box; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }',
+    '.typing-dots { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }',
+    '.typing-text { min-width: 0; max-width: 100%; flex: 1 1 auto; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }',
     '.typing-dot { width: 6px; height: 6px; border-radius: 50%; background-color: var(--chat-muted, #94a3b8); display: inline-block; animation: samche-typing-bounce 1.4s infinite ease-in-out both; }',
     '.typing-dot:nth-child(1) { animation-delay: -0.32s; }',
     '.typing-dot:nth-child(2) { animation-delay: -0.16s; }',
@@ -1382,7 +1383,7 @@
       clearBtn: 'Clear',
       clearingText: 'Clearing...',
       cannotClearHuman: 'Cannot clear conversation while human support is active.',
-      humanTypingLabel: 'Live customer representative is typing…',
+      humanTypingLabel: 'Live agent is typing…',
       cannotClearSending: 'Cannot clear conversation while sending a message.',
       browsingPrefix: 'Viewing: ',
       botGreeting: 'Hello! How can I help you today?',
@@ -1835,7 +1836,7 @@
       function showHumanTyping(expiresAt) {
         clearHumanTyping();
         var dict = I18N[currentLang] || I18N.tr;
-        var label = dict.humanTypingLabel || 'Live customer representative is typing…';
+        var label = dict.humanTypingLabel || 'Live agent is typing…';
         var indicator = createTypingIndicator({
           className: 'samche-msg samche-msg-bot samche-human-typing',
           label: label,

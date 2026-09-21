@@ -409,9 +409,12 @@ test('REAL BROWSER E2E: Responsive Viewports (Desktop, Tablet, Mobile, Mobile La
     { name: 'Desktop 1440x900', width: 1440, height: 900, isMobile: false, expectedLauncherSize: 60 },
     { name: 'Tablet 768x1024', width: 768, height: 1024, isMobile: false, expectedLauncherSize: 60 },
     { name: 'Mobile 430x932', width: 430, height: 932, isMobile: true, expectedLauncherSize: 52 },
+    { name: 'Mobile 414x896', width: 414, height: 896, isMobile: true, expectedLauncherSize: 52 },
+    { name: 'Mobile 393x852', width: 393, height: 852, isMobile: true, expectedLauncherSize: 52 },
     { name: 'Mobile 390x844', width: 390, height: 844, isMobile: true, expectedLauncherSize: 52 },
     { name: 'Mobile 375x812', width: 375, height: 812, isMobile: true, expectedLauncherSize: 52 },
-    { name: 'Mobile 320x568', width: 320, height: 568, isMobile: true, expectedLauncherSize: 52 },
+    { name: 'Mobile 360x800', width: 360, height: 800, isMobile: true, expectedLauncherSize: 50 },
+    { name: 'Mobile 320x568', width: 320, height: 568, isMobile: true, expectedLauncherSize: 50 },
     { name: 'Landscape 812x375', width: 812, height: 375, isMobile: true, expectedLauncherSize: 60 },
   ];
 
@@ -430,6 +433,47 @@ test('REAL BROWSER E2E: Responsive Viewports (Desktop, Tablet, Mobile, Mobile La
           launcher.click();
           await new Promise(r => setTimeout(r, 80));
           const openRect = panel.getBoundingClientRect();
+          const messages = shadow.querySelector('.samche-messages');
+          const composer = shadow.querySelector('.samche-composer');
+          const chips = document.createElement('div');
+          chips.className = 'samche-chips';
+          chips.dataset.layoutProbe = 'typing-ui';
+          chips.textContent = 'Quick action';
+          panel.insertBefore(chips, composer);
+          const indicator = window.SamcheChatUX.createTypingIndicator({
+            className: 'samche-msg samche-msg-bot samche-human-typing',
+            label: 'Live agent is typing…',
+            text: 'Live agent is typing…',
+          });
+          messages.appendChild(indicator);
+          const typingRect = indicator.getBoundingClientRect();
+          const typingText = indicator.querySelector('.typing-text');
+          const textRect = typingText.getBoundingClientRect();
+          const indicatorStyle = window.getComputedStyle(indicator);
+          const textStyle = window.getComputedStyle(typingText);
+          const messagesRect = messages.getBoundingClientRect();
+          const chipsRect = chips ? chips.getBoundingClientRect() : null;
+          const layout = {
+            typingWidth: Math.round(typingRect.width),
+            typingHeight: Math.round(typingRect.height),
+            typingRight: Math.round(typingRect.right),
+            typingBottom: Math.round(typingRect.bottom),
+            textHeight: Math.round(textRect.height),
+            messagesRight: Math.round(messagesRect.right),
+            chipsTop: chipsRect ? Math.round(chipsRect.top) : null,
+            messagesBottom: Math.round(messagesRect.bottom),
+            messagesScrollWidth: messages.scrollWidth,
+            messagesClientWidth: messages.clientWidth,
+            text: indicator.querySelector('.typing-text').textContent,
+            indicatorMaxWidth: indicatorStyle.maxWidth,
+            indicatorMinWidth: indicatorStyle.minWidth,
+            indicatorBoxSizing: indicatorStyle.boxSizing,
+            indicatorWhiteSpace: indicatorStyle.whiteSpace,
+            textMinWidth: textStyle.minWidth,
+            textOverflowWrap: textStyle.overflowWrap,
+          };
+          indicator.remove();
+          chips.remove();
 
           shadow.querySelector('.samche-close-btn').click();
           await new Promise(r => setTimeout(r, 80));
@@ -438,7 +482,8 @@ test('REAL BROWSER E2E: Responsive Viewports (Desktop, Tablet, Mobile, Mobile La
             launcherWidth: Math.round(launcherRect.width),
             launcherHeight: Math.round(launcherRect.height),
             panelWidth: Math.round(openRect.width),
-            panelHeight: Math.round(openRect.height)
+            panelHeight: Math.round(openRect.height),
+            typing: layout,
           };
         })()
       `);
@@ -461,6 +506,20 @@ test('REAL BROWSER E2E: Responsive Viewports (Desktop, Tablet, Mobile, Mobile La
           measurement.panelWidth >= 370 && measurement.panelWidth <= 420,
           `${vp.name}: desktop/tablet panel width must be ~400px (got ${measurement.panelWidth}px)`
         );
+      }
+
+      assert.equal(measurement.typing.text, 'Live agent is typing…', `${vp.name}: human typing copy must be compact and exact`);
+      assert.equal(measurement.typing.indicatorMaxWidth, '100%', `${vp.name}: typing indicator must be bounded by available width`);
+      assert.equal(measurement.typing.indicatorMinWidth, '0px', `${vp.name}: typing indicator must allow flex shrinking`);
+      assert.equal(measurement.typing.indicatorBoxSizing, 'border-box', `${vp.name}: typing indicator sizing must include padding`);
+      assert.equal(measurement.typing.indicatorWhiteSpace, 'normal', `${vp.name}: typing indicator must wrap safely only when necessary`);
+      assert.equal(measurement.typing.textMinWidth, '0px', `${vp.name}: typing text must allow flex shrinking`);
+      assert.equal(measurement.typing.textOverflowWrap, 'anywhere', `${vp.name}: typing text must not overflow narrow widths`);
+      assert.ok(measurement.typing.typingRight <= measurement.typing.messagesRight + 1, `${vp.name}: typing indicator must stay within message content width`);
+      assert.ok(measurement.typing.messagesScrollWidth <= measurement.typing.messagesClientWidth + 1, `${vp.name}: typing indicator must not create horizontal overflow`);
+      assert.ok(measurement.typing.typingBottom <= measurement.typing.messagesBottom + 1, `${vp.name}: typing indicator must stay in normal message flow`);
+      if (measurement.typing.chipsTop !== null) {
+        assert.ok(measurement.typing.typingBottom <= measurement.typing.chipsTop + 1, `${vp.name}: typing indicator must not collide with quick actions`);
       }
     } catch (err) {
       console.error(`VIEWPORT FAIL on ${vp.name}:`, err);
