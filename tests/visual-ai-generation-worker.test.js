@@ -165,3 +165,34 @@ test('worker returns a temporary WhatsApp delivery failure to the bounded durabl
   assert.equal(database.state.job.status, 'PENDING');
   assert.equal(database.state.resource.message_id, database.state.message.id);
 });
+
+test('worker localizes ready caption according to job/conversation language', async () => {
+  for (const [lang, expected] of [
+    ['en', 'Your visual concept preview is ready.'],
+    ['tr', 'Görsel konsept önizlemeniz hazır.'],
+    ['ar', 'معاينة المفهوم المرئي الخاص بك جاهزة.'],
+  ]) {
+    const database = convergenceDatabase();
+    database.state.job.grounding_context = { language: lang };
+    const storage = {
+      get: async () => [Buffer.from('target-image')],
+      put: async () => {},
+    };
+    let deliveredCaption = null;
+    const deliverWhatsAppMedia = async (args) => {
+      deliveredCaption = args.caption;
+      return { providerMessageId: `wamid.lang-${lang}` };
+    };
+
+    const result = await processOneVisualAiGenerationJob({
+      database,
+      storage,
+      visualProvider: createDeterministicMockVisualProvider(),
+      deliverWhatsAppMedia,
+    });
+
+    assert.equal(result.status, 'COMPLETED');
+    assert.equal(database.state.message.content, expected);
+    assert.equal(deliveredCaption, expected);
+  }
+});

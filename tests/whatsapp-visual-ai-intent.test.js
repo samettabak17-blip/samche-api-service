@@ -79,7 +79,7 @@ test('WHATSAPP VISUAL MULTI-TURN: Prompts for target photo on Turn 1 and correla
   });
 
   assert.equal(turn1.state, 'WAITING_FOR_TARGET');
-  assert.match(turn1.promptSuggestion, /fotoğraf/i);
+  assert.match(turn1.promptSuggestion, /photo/i);
 
   // Turn 2: User uploads photo following prompt
   const dbTurn2 = {
@@ -162,7 +162,7 @@ test('WHATSAPP VISUAL ENQUEUE: Enforces entitlement check and enqueues job with 
 
   assert.equal(orchestrated.status, 'QUEUED');
   assert.equal(orchestrated.job.id, 'job-123');
-  assert.match(orchestrated.acknowledgmentText, /bekleyin/i);
+  assert.match(orchestrated.acknowledgmentText, /being created|please wait/i);
 });
 
 test('WHATSAPP VISUAL ENQUEUE: Blocks enqueue when tenant entitlement is disabled', async () => {
@@ -180,4 +180,51 @@ test('WHATSAPP VISUAL ENQUEUE: Blocks enqueue when tenant entitlement is disable
     }),
     (err) => err instanceof VisualAiJobError && err.code === 'VISUAL_AI_NOT_ENABLED'
   );
+});
+
+test('WHATSAPP VISUAL LOCALIZATION: Accurately localizes lifecycle copy for EN, TR, and AR', async () => {
+  const database = {
+    query: async (sql) => {
+      if (sql.includes('tenant_visual_ai_config')) return { rows: [{ tenant_id: tenantId, enabled: true }] };
+      if (sql.includes('conversation_resources')) return { rowCount: 1, rows: [{ id: targetResourceId, storage_key: 'k1', mime_type: 'image/jpeg' }] };
+      if (sql.includes('INSERT INTO visual_ai_generation_jobs')) return { rows: [{ id: 'job-1', status: 'PENDING', tenant_id: tenantId }] };
+      return { rows: [] };
+    },
+  };
+
+  // EN Acknowledgement & Prompt
+  const enOrch = await orchestrateWhatsAppVisualAiJob({
+    database, tenantId, conversationId, targetResourceId, promptInstruction: 'Make Nordic room', language: 'en',
+  });
+  assert.equal(enOrch.acknowledgmentText, 'Your visual concept preview is being created, please wait...');
+
+  const enWaiting = await resolveWhatsAppVisualRequestState({
+    database: { query: async () => ({ rows: [] }) },
+    tenantId, conversationId, message: 'Make this bedroom look modern Scandinavian', language: 'en',
+  });
+  assert.equal(enWaiting.promptSuggestion, 'Please send a photo of the space or area you would like to transform.');
+
+  // TR Acknowledgement & Prompt
+  const trOrch = await orchestrateWhatsAppVisualAiJob({
+    database, tenantId, conversationId, targetResourceId, promptInstruction: 'Odayı yenile', language: 'tr',
+  });
+  assert.equal(trOrch.acknowledgmentText, 'Görsel konsept önizlemeniz oluşturuluyor, lütfen bekleyin...');
+
+  const trWaiting = await resolveWhatsAppVisualRequestState({
+    database: { query: async () => ({ rows: [] }) },
+    tenantId, conversationId, message: 'Bunu modern iskandinav tarzına dönüştür', language: 'tr',
+  });
+  assert.equal(trWaiting.promptSuggestion, 'Lütfen dönüştürmek istediğiniz mekanın veya alanın bir fotoğrafını gönderin.');
+
+  // AR Acknowledgement & Prompt
+  const arOrch = await orchestrateWhatsAppVisualAiJob({
+    database, tenantId, conversationId, targetResourceId, promptInstruction: 'أعد تصميم الغرفة', language: 'ar',
+  });
+  assert.equal(arOrch.acknowledgmentText, 'جارٍ إنشاء معاينة المفهوم المرئي الخاص بك، يرجى الانتظار...');
+
+  const arWaiting = await resolveWhatsAppVisualRequestState({
+    database: { query: async () => ({ rows: [] }) },
+    tenantId, conversationId, message: 'حول هذا التصميم إلى نمط حديث', language: 'ar',
+  });
+  assert.equal(arWaiting.promptSuggestion, 'يرجى إرسال صورة للمكان أو المساحة التي ترغب في تحويلها.');
 });

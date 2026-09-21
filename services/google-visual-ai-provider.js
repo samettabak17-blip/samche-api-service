@@ -110,7 +110,7 @@ export function createGoogleVisualAIProvider({ env = process.env, clientFactory,
   } catch {
     throw new ErrorClass('VISUAL_AI_PROVIDER_CONFIGURATION_INVALID', 'Google Visual AI configuration is unavailable.', { retryable: false, status: 503 });
   }
-  if (!client?.interactions?.create) {
+  if (!client?.models?.generateContent) {
     throw new ErrorClass('VISUAL_AI_PROVIDER_CONFIGURATION_INVALID', 'Google Visual AI client is unavailable.', { retryable: false, status: 503 });
   }
 
@@ -142,49 +142,93 @@ export function createGoogleVisualAIProvider({ env = process.env, clientFactory,
       const sources = validateAndNormalizeImages(rawSources, 'SOURCE_IMAGE');
       const references = validateAndNormalizeImages(rawReferences, 'REFERENCE_IMAGE');
 
-      const input = [];
+      const parts = [];
       for (const img of sources) {
-        input.push({ type: 'image', data: img.buffer.toString('base64'), mime_type: img.mimeType });
+        parts.push({
+          inlineData: {
+            mimeType: img.mimeType,
+            data: img.buffer.toString('base64'),
+          },
+        });
       }
       for (const img of references) {
-        input.push({ type: 'image', data: img.buffer.toString('base64'), mime_type: img.mimeType });
+        parts.push({
+          inlineData: {
+            mimeType: img.mimeType,
+            data: img.buffer.toString('base64'),
+          },
+        });
       }
-      input.push({ type: 'text', text: instruction });
+      parts.push({ text: instruction });
 
-      const response_format = { type: 'image' };
-      if (request.outputOptions?.mimeType) response_format.mime_type = request.outputOptions.mimeType;
-      if (request.outputOptions?.aspectRatio) response_format.aspect_ratio = request.outputOptions.aspectRatio;
-      if (request.outputOptions?.imageSize) response_format.image_size = request.outputOptions.imageSize;
+      const contents = [{ role: 'user', parts }];
+
+      const generateConfig = {
+        responseModalities: ['IMAGE'],
+      };
+      if (request.outputOptions?.aspectRatio || request.outputOptions?.imageSize) {
+        generateConfig.imageConfig = {};
+        if (request.outputOptions.aspectRatio) generateConfig.imageConfig.aspectRatio = request.outputOptions.aspectRatio;
+        if (request.outputOptions.imageSize) generateConfig.imageConfig.imageSize = request.outputOptions.imageSize;
+      }
 
       let response;
       try {
-        response = await client.interactions.create({ model, input, response_format });
+        response = await client.models.generateContent({
+          model,
+          contents,
+          config: generateConfig,
+        });
       } catch (err) {
         throw normalizeGoogleError(err);
       }
 
-      if (!response?.output_image?.data) {
-        throw new ErrorClass('VISUAL_AI_PROVIDER_RESPONSE_INVALID', 'Google Visual AI response did not contain a valid image.', { retryable: false, status: 502 });
+      let imageBuffer = null;
+      let mimeType = request.outputOptions?.mimeType || 'image/png';
+      const candidate = response?.candidates?.[0];
+      const responseParts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+      for (const part of responseParts) {
+        const inlineData = part?.inlineData || part?.inline_data;
+        if (inlineData?.data) {
+          imageBuffer = Buffer.from(inlineData.data, 'base64');
+          mimeType = inlineData.mimeType || inlineData.mime_type || mimeType;
+          break;
+        }
       }
 
-      const imageBuffer = Buffer.from(response.output_image.data, 'base64');
-      if (imageBuffer.length === 0) {
-        throw new ErrorClass('VISUAL_AI_PROVIDER_RESPONSE_INVALID', 'Google Visual AI response image buffer was empty.', { retryable: false, status: 502 });
+      if (!imageBuffer && response?.output_image?.data) {
+        imageBuffer = Buffer.from(response.output_image.data, 'base64');
+        mimeType = response.output_image.mime_type || mimeType;
       }
 
-      const mimeType = response.output_image.mime_type || request.outputOptions?.mimeType || 'image/png';
-      const providerRequestId = response.id || null;
-      const costMetadata = { provider: 'GOOGLE', model: response.model || model };
-      if (typeof response.usage?.input_tokens === 'number') costMetadata.inputTokens = response.usage.input_tokens;
-      if (typeof response.usage?.output_tokens === 'number') costMetadata.outputTokens = response.usage.output_tokens;
+      if (!imageBuffer || imageBuffer.length === 0) {
+        throw new ErrorClass(
+          'VISUAL_AI_PROVIDER_RESPONSE_INVALID',
+          'Google Visual AI response did not contain a valid image.',
+          { retryable: false, status: 502 }
+        );
+      }
+
+      const providerRequestId = response?.id || null;
+      const usage = response?.usageMetadata || response?.usage_metadata || response?.usage;
+      const costMetadata = {
+        provider: 'GOOGLE',
+        model: response?.model || model,
+      };
+      if (typeof usage?.promptTokenCount === 'number') costMetadata.inputTokens = usage.promptTokenCount;
+      else if (typeof usage?.prompt_token_count === 'number') costMetadata.inputTokens = usage.prompt_token_count;
+      else if (typeof usage?.input_tokens === 'number') costMetadata.inputTokens = usage.input_tokens;
+      if (typeof usage?.candidatesTokenCount === 'number') costMetadata.outputTokens = usage.candidatesTokenCount;
+      else if (typeof usage?.candidates_token_count === 'number') costMetadata.outputTokens = usage.candidates_token_count;
+      else if (typeof usage?.output_tokens === 'number') costMetadata.outputTokens = usage.output_tokens;
 
       return Object.freeze({
         imageBuffer,
         mimeType,
         provider: 'GOOGLE',
-        model: response.model || model,
+        model: response?.model || model,
         providerRequestId,
-        finishReason: 'SUCCESS',
+        finishReason: candidate?.finishReason || candidate?.finish_reason || 'SUCCESS',
         costMetadata: Object.freeze(costMetadata),
       });
     },

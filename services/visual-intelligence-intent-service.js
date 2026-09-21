@@ -25,7 +25,8 @@ const VISUAL_GENERATION_PATTERNS = [
   /(?:modern|scandinavian|mediterranean|rustic|minimalist|industrial|boho|luxury|contemporary)\s+(?:style|look|design|theme)/i,
   /(?:garden|room|kitchen|bedroom|living\s+room|wall|wallpaper|car|vehicle|furniture)\s+(?:redesign|transformation|concept|preview|pattern)/i,
   /(?:wallpaper\s+.*on\s+(?:my\s+)?(?:wall|room))/i,
-  /(?:bunu\s+şuna\s+dönüştür|yeniden\s+tasarla|böyle\s+görünmesini\s+sağla|nasıl\s+durur\s+göster|tasarım\s+önerisi\s+oluştur)/i,
+  /(?:bunu\s+.*dönüştür|yeniden\s+tasarla|böyle\s+görünmesini\s+sağla|nasıl\s+durur\s+göster|tasarım\s+önerisi\s+oluştur)/i,
+  /(?:أعد\s+تصميم|حول\s+.*|غير\s+تصميم|صمم\s+لي|كيف\s+يبدو)/u,
 ];
 
 const SUPPORT_OR_QA_PATTERNS = [
@@ -128,6 +129,63 @@ export async function resolveSafeReferenceUrl({ url, timeoutMs = 5000, fetchImpl
   }
 }
 
+export function normalizeVisualAiLanguage(language) {
+  const code = String(language ?? '').trim().toLowerCase().slice(0, 2);
+  if (code === 'tr') return 'tr';
+  if (code === 'ar') return 'ar';
+  return 'en';
+}
+
+export function formatVisualAiPromptSuggestion(language) {
+  const lang = normalizeVisualAiLanguage(language);
+  const messages = {
+    en: 'Please send a photo of the space or area you would like to transform.',
+    tr: 'Lütfen dönüştürmek istediğiniz mekanın veya alanın bir fotoğrafını gönderin.',
+    ar: 'يرجى إرسال صورة للمكان أو المساحة التي ترغب في تحويلها.',
+  };
+  return messages[lang] ?? messages.en;
+}
+
+export function formatVisualAiAcknowledgement(language) {
+  const lang = normalizeVisualAiLanguage(language);
+  const messages = {
+    en: 'Your visual concept preview is being created, please wait...',
+    tr: 'Görsel konsept önizlemeniz oluşturuluyor, lütfen bekleyin...',
+    ar: 'جارٍ إنشاء معاينة المفهوم المرئي الخاص بك، يرجى الانتظار...',
+  };
+  return messages[lang] ?? messages.en;
+}
+
+export function formatVisualAiReadyMessage(language) {
+  const lang = normalizeVisualAiLanguage(language);
+  const messages = {
+    en: 'Your visual concept preview is ready.',
+    tr: 'Görsel konsept önizlemeniz hazır.',
+    ar: 'معاينة المفهوم المرئي الخاص بك جاهزة.',
+  };
+  return messages[lang] ?? messages.en;
+}
+
+export function formatVisualAiFailureMessage(language) {
+  const lang = normalizeVisualAiLanguage(language);
+  const messages = {
+    en: 'Your visual concept preview could not be generated right now. Please try again with a different image or description.',
+    tr: 'Görsel konsept önizlemeniz şu anda oluşturulamadı. Lütfen farklı bir görsel veya açıklamayla tekrar deneyin.',
+    ar: 'تعذر إنشاء معاينة المفهوم المرئي الخاص بك حالياً. يرجى المحاولة مرة أخرى باستخدام صورة أو وصف مختلف.',
+  };
+  return messages[lang] ?? messages.en;
+}
+
+export function formatVisualAiSafetyMessage(language) {
+  const lang = normalizeVisualAiLanguage(language);
+  const messages = {
+    en: 'Your visual generation request could not be completed because it did not comply with our safety policy.',
+    tr: 'Görsel üretim talebiniz güvenlik politikalarımıza uymadığı için tamamlanamadı.',
+    ar: 'تعذر إكمال طلب الإنشاء المرئي الخاص بك لعدم توافقه مع سياسة الأمان الخاصة بنا.',
+  };
+  return messages[lang] ?? messages.en;
+}
+
 /**
  * Resolves multi-turn WhatsApp visual request state and parameters
  */
@@ -138,6 +196,7 @@ export async function resolveWhatsAppVisualRequestState({
   message = '',
   currentResourceIds = [],
   recentHistory = [],
+  language = 'en',
 }) {
   if (!database?.query || !UUID_REGEX.test(String(tenantId || '')) || !UUID_REGEX.test(String(conversationId || ''))) {
     return { state: 'INVALID', targetResourceId: null, referenceResourceId: null };
@@ -174,7 +233,7 @@ export async function resolveWhatsAppVisualRequestState({
     return {
       state: 'WAITING_FOR_TARGET',
       intentClassification: classification,
-      promptSuggestion: 'Lütfen dönüştürmek istediğiniz mekanın veya alanın bir fotoğrafını gönderin.',
+      promptSuggestion: formatVisualAiPromptSuggestion(language),
       targetResourceId: null,
       referenceResourceId: null,
     };
@@ -210,8 +269,15 @@ export async function orchestrateWhatsAppVisualAiJob({
   groundingContext = {},
   provider = 'MOCK',
   model = 'mock-visual-v1',
+  language = 'en',
 }) {
   await assertTenantVisualAiEntitlement({ database, tenantId });
+
+  const resolvedLanguage = normalizeVisualAiLanguage(language || groundingContext?.language);
+  const resolvedGroundingContext = {
+    ...groundingContext,
+    language: resolvedLanguage,
+  };
 
   const job = await enqueueVisualAiGenerationJob({
     database,
@@ -222,7 +288,7 @@ export async function orchestrateWhatsAppVisualAiJob({
     referenceResourceId,
     referenceUrl,
     promptInstruction,
-    groundingContext,
+    groundingContext: resolvedGroundingContext,
     provider,
     model,
   });
@@ -230,7 +296,7 @@ export async function orchestrateWhatsAppVisualAiJob({
   return {
     job,
     status: 'QUEUED',
-    acknowledgmentText: 'Görsel konsept önizlemeniz oluşturuluyor, lütfen bekleyin...',
+    acknowledgmentText: formatVisualAiAcknowledgement(resolvedLanguage),
   };
 }
 
