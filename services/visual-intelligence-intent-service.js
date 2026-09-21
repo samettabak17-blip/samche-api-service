@@ -10,6 +10,15 @@ export const VISUAL_INTENT_TYPES = Object.freeze({
   GENERAL_CONVERSATION: 'GENERAL_CONVERSATION',
 });
 
+export const CANONICAL_VISUAL_INTENT_TYPES = Object.freeze({
+  UNDERSTAND_IMAGE: 'UNDERSTAND_IMAGE',
+  SUPPORT_WITH_IMAGE: 'SUPPORT_WITH_IMAGE',
+  DOCUMENT_UNDERSTANDING: 'DOCUMENT_UNDERSTANDING',
+  VISUAL_GENERATION: 'VISUAL_GENERATION',
+  VISUAL_EDIT: 'VISUAL_EDIT',
+  INSUFFICIENT_CONTEXT: 'INSUFFICIENT_CONTEXT',
+});
+
 const VISUAL_GENERATION_PATTERNS = [
   /(?:make|turn|transform|redesign|redecorate|style|visualize|render|convert|apply)\s+this/i,
   /(?:look\s+like|design\s+as\s+inspiration|how\s+would\s+this\s+look|show\s+me\s+how\s+.*would\s+look|show\s+me\s+this)/i,
@@ -40,6 +49,7 @@ export function classifyVisualIntent({
   if (isSupportOrQa) {
     return {
       intent: VISUAL_INTENT_TYPES.MULTIMODAL_SUPPORT_OR_QA,
+      canonicalIntent: hasDocument ? CANONICAL_VISUAL_INTENT_TYPES.DOCUMENT_UNDERSTANDING : CANONICAL_VISUAL_INTENT_TYPES.SUPPORT_WITH_IMAGE,
       isVisualGeneration: false,
       isSupport: true,
       confidence: 0.95,
@@ -49,15 +59,17 @@ export function classifyVisualIntent({
 
   // 2. Check for explicit Visual Generation patterns
   const isGenerationPattern = VISUAL_GENERATION_PATTERNS.some((p) => p.test(text));
-  const hasTransformationVerb = /(?:redesign|transform|make|visualize|dönüştür|tasarla)/i.test(text);
+  const hasTransformationVerb = /(?:redesign|transform|make|visualize|edit|modify|change|dönüştür|tasarla|düzenle|değiştir)/i.test(text);
 
   // 3. Multi-turn context check: Did the assistant ask for a photo on the previous turn?
   const lastAssistantMsg = [...recentHistory].reverse().find((m) => m.role === 'assistant' || m.sender_type === 'ASSISTANT');
   const wasPromptedForPhoto = lastAssistantMsg && /(?:send\s+(?:a\s+)?photo|upload\s+(?:a\s+)?photo|resim\s+gönderin|fotoğraf\s+atın)/i.test(String(lastAssistantMsg.content || ''));
 
   if (isGenerationPattern || (hasTransformationVerb && (hasTargetImage || hasReferenceImage)) || (wasPromptedForPhoto && hasTargetImage)) {
+    const isEdit = /(?:edit|darker|lighter|change|replace|modify|düzenle|değiştir)/i.test(text);
     return {
       intent: VISUAL_INTENT_TYPES.VISUAL_GENERATION,
+      canonicalIntent: isEdit ? CANONICAL_VISUAL_INTENT_TYPES.VISUAL_EDIT : CANONICAL_VISUAL_INTENT_TYPES.VISUAL_GENERATION,
       isVisualGeneration: true,
       isSupport: false,
       confidence: 0.9,
@@ -68,6 +80,11 @@ export function classifyVisualIntent({
 
   return {
     intent: VISUAL_INTENT_TYPES.GENERAL_CONVERSATION,
+    canonicalIntent: hasTargetImage
+      ? CANONICAL_VISUAL_INTENT_TYPES.UNDERSTAND_IMAGE
+      : (/visualize|redesign|transform|dönüştür|tasarla/i.test(text)
+        ? CANONICAL_VISUAL_INTENT_TYPES.INSUFFICIENT_CONTEXT
+        : null),
     isVisualGeneration: false,
     isSupport: false,
     confidence: 0.7,

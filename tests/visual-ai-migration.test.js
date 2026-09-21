@@ -30,3 +30,11 @@ test('migration 087 exists and defines visual AI tables, constraints and indexes
   assert.match(content, /idx_visual_ai_jobs_claim/);
   assert.match(content, /idx_visual_ai_jobs_conversation/);
 });
+
+test('migration 088 adds durable generated-message and WhatsApp delivery correlation', () => {
+  const migrationPath = path.join(__dirname, '../migrations/088_visual_ai_phase3_delivery_orchestration.sql');
+  const content = fs.readFileSync(migrationPath, 'utf8');
+  assert.match(content, /output_message_id/);
+  assert.match(content, /provider_message_id/);
+  assert.match(content, /uq_visual_ai_jobs_generated_resource/);
+});

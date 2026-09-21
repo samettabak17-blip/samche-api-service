@@ -57,6 +57,14 @@ test('WHATSAPP VISUAL INTENT: Distinguishes support/understanding photos from vi
   assert.equal(wallpaperGen.isVisualGeneration, true);
 });
 
+test('WHATSAPP VISUAL INTENT: exposes canonical understanding, edit and insufficient-context classes', () => {
+  assert.equal(classifyVisualIntent({ message: 'What is this?', hasTargetImage: true }).canonicalIntent, 'UNDERSTAND_IMAGE');
+  assert.equal(classifyVisualIntent({ message: 'This product arrived broken', hasTargetImage: true }).canonicalIntent, 'SUPPORT_WITH_IMAGE');
+  assert.equal(classifyVisualIntent({ message: 'Summarize this PDF', hasDocument: true }).canonicalIntent, 'DOCUMENT_UNDERSTANDING');
+  assert.equal(classifyVisualIntent({ message: 'Edit this room to be darker', hasTargetImage: true }).canonicalIntent, 'VISUAL_EDIT');
+  assert.equal(classifyVisualIntent({ message: 'Visualize a new room' }).canonicalIntent, 'INSUFFICIENT_CONTEXT');
+});
+
 test('WHATSAPP VISUAL MULTI-TURN: Prompts for target photo on Turn 1 and correlates photo on Turn 2', async () => {
   // Turn 1: User asks for redesign without photo
   const dbTurn1 = {

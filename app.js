@@ -12,7 +12,7 @@ import OpenAI from "openai";
 import cron from "node-cron";
 import multer from "multer";
 import path from 'node:path';
-import { deliverWhatsAppText, whatsappHttpsAgent, sendWhatsAppTypingIndicator } from "./services/whatsapp-delivery-service.js";
+import { deliverWhatsAppText, deliverWhatsAppMedia, whatsappHttpsAgent, sendWhatsAppTypingIndicator } from "./services/whatsapp-delivery-service.js";
 import { resolveWhatsAppOutboundCredential } from "./services/whatsapp-credential-resolution-service.js";
 import { applyWhatsAppAdaptivePacing, MIN_COMPOSE_WINDOW_MS, MAX_ARTIFICIAL_DELAY_MS } from "./services/whatsapp-response-pacing-service.js";
 import { orchestrateWhatsAppInboundAiResponse } from './services/whatsapp-inbound-ai-orchestrator.js';
@@ -58,6 +58,9 @@ import { ConversationResourceValidationError } from "./services/conversation-res
 import { createWhatsAppMediaRetriever, extractWhatsAppMediaDescriptor } from "./services/whatsapp-multimodal-service.js";
 import { planStandaloneWhatsAppMediaResponse } from "./services/whatsapp-standalone-media-ack.js";
 import { planLatestExplicitResource, planWhatsAppResourceFollowUp, resourceFailureAcknowledgement, resourceProcessingAcknowledgement } from "./services/whatsapp-resource-follow-up-routing.js";
+import { resolveWhatsAppVisualRequestState, orchestrateWhatsAppVisualAiJob } from './services/visual-intelligence-intent-service.js';
+import { createVisualAIProvider } from './services/visual-ai-provider-adapter.js';
+import { processOneVisualAiGenerationJob } from './services/visual-ai-generation-worker.js';
 import { ensureConversationCrmIdentity } from "./services/crm-lead-service.js";
 import { queueLeadQualification } from "./services/lead-qualification-runner.js";
 import { startLiveEventListener, subscribeTenantEvents } from "./services/live-event-bus.js";
@@ -854,6 +857,17 @@ function startKnowledgeWorkers() {
   } else {
     console.info('KNOWLEDGE_SEMANTIC_GENERATION_WORKER_DISABLED');
   }
+}
+
+function startVisualAiWorker() {
+  if (process.env.VISUAL_AI_WORKER_ENABLED !== 'true') return () => {};
+  const provider = createVisualAIProvider({ env: process.env });
+  const timer = setInterval(() => {
+    processOneVisualAiGenerationJob({ database: pool, storage: createConversationResourceStorage(), visualProvider: provider, deliverWhatsAppMedia })
+      .catch((error) => console.info('VISUAL_AI_WORKER_ERROR code=' + String(error?.code ?? 'UNKNOWN').slice(0, 80)));
+  }, 1000);
+  timer.unref?.();
+  return () => clearInterval(timer);
 }
 
 // Ortak Link Dönüştürücü
@@ -4578,6 +4592,34 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
         }
 
         if (!whatsappInbox.shouldInvokeAi) return;
+        const visualRequest = await resolveWhatsAppVisualRequestState({
+          database: pool,
+          tenantId: whatsappInbox.integration.tenant_id,
+          conversationId: whatsappInbox.conversation.id,
+          message: text,
+          currentResourceIds: whatsappInbox.resource ? [whatsappInbox.resource.id] : [],
+          recentHistory: whatsappInbox.conversationHistory,
+        });
+        if (visualRequest.state === 'READY_FOR_GENERATION') {
+          try {
+            const queued = await orchestrateWhatsAppVisualAiJob({
+              database: pool,
+              tenantId: whatsappInbox.integration.tenant_id,
+              conversationId: whatsappInbox.conversation.id,
+              messageId: whatsappInbox.customerMessage?.id ?? null,
+              targetResourceId: visualRequest.targetResourceId,
+              referenceResourceId: visualRequest.referenceResourceId,
+              promptInstruction: visualRequest.promptInstruction,
+              groundingContext: { source: 'WHATSAPP_CONVERSATION_RESOURCE' },
+            });
+            const persisted = await persistAssistantResponseIfCurrent({ tenantId: whatsappInbox.integration.tenant_id, conversationId: whatsappInbox.conversation.id, content: queued.acknowledgmentText, handlingVersion: whatsappInbox.handlingVersion, knowledgeAuthority: whatsappInbox.knowledgeAuthority });
+            if (persisted.delivered) await sendMessage(cleanFrom, queued.acknowledgmentText, whatsappInbox.integration.external_channel_id);
+            return;
+          } catch (visualError) {
+            if (visualError?.code === 'VISUAL_AI_NOT_ENABLED') return;
+            console.info('WHATSAPP_VISUAL_AI_QUEUE_FAILED code=' + String(visualError?.code ?? 'UNKNOWN').slice(0, 80));
+          }
+        }
         resourceFollowUp = planWhatsAppResourceFollowUp({
           customerText: text,
           readyResourceCount: whatsappInbox.aiContextParts?.length ?? 0,
@@ -4968,6 +5010,7 @@ async function startServer() {
       console.error('GUIDE_DOMAIN_REPAIR_FAILED:', error?.message || error);
     });
     startKnowledgeWorkers();
+    const stopVisualAiWorker = startVisualAiWorker();
     customerInvitationOutboxStartup = createCustomerInvitationOutboxStartup({
       database: pool,
       environment: process.env,
@@ -4979,6 +5022,7 @@ async function startServer() {
     });
     server.on('close', () => customerInvitationOutboxStartup?.stop());
     server.on('close', () => imageSemanticGenerationWorker?.());
+    server.on('close', stopVisualAiWorker);
   } catch (error) {
     console.error('Database migration failed:', error);
     process.exit(1);
