@@ -132,15 +132,35 @@ describe('Topbar global navigation search', () => {
   it('keeps every OWNER workspace action reachable from the compact action surface', () => {
     renderTopbar('OWNER');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+    const trigger = screen.getByRole('button', { name: 'Workspace actions' });
+    trigger.focus();
+    fireEvent.click(trigger);
 
     const actionSurface = screen.getByRole('dialog', { name: 'Workspace actions' });
     expect(actionSurface).toBeVisible();
-    expect(within(actionSurface).getByRole('combobox', { name: 'Selected tenant' })).toBeVisible();
+    const tenantSelect = within(actionSurface).getByRole('combobox', { name: 'Selected tenant' });
+    expect(tenantSelect).toBeVisible();
+    expect(tenantSelect).toHaveFocus();
     expect(within(actionSurface).getByRole('button', { name: 'Upgrade requests' })).toBeVisible();
     expect(within(actionSurface).getByRole('button', { name: 'Create company' })).toBeVisible();
     expect(within(actionSurface).getByRole('button', { name: 'Assign customer' })).toBeVisible();
     expect(within(actionSurface).getByRole('button', { name: 'Sign out' })).toBeVisible();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Workspace actions' })).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('does not select an invalid workspace from the compact action surface', () => {
+    const onSelectTenant = vi.fn();
+    renderTopbar('OWNER', onSelectTenant);
+    fireEvent.click(screen.getByRole('button', { name: 'Workspace actions' }));
+
+    const actionSurface = screen.getByRole('dialog', { name: 'Workspace actions' });
+    const tenantSelect = within(actionSurface).getByRole('combobox', { name: 'Selected tenant' });
+    expect(within(tenantSelect).queryByRole('option', { name: 'Select workspace' })).toBeNull();
+    fireEvent.change(tenantSelect, { target: { value: 'tenant-1' } });
+    expect(onSelectTenant).toHaveBeenCalledWith('tenant-1');
   });
 
   it('keeps overview date and notification controls visibly outlined', () => {

@@ -41,6 +41,11 @@ button.bg-ink:hover { background: #b81920; }
    fall back to a light native surface while retaining light foreground text. */
 .dashboard-shell { color-scheme: dark; min-inline-size: 0; inline-size: 100%; min-block-size: 100vh; min-block-size: 100dvh; }
 .dashboard-main-content { min-inline-size: 0; }
+.dashboard-modal {
+  max-block-size: calc(100vh - 2rem);
+  max-block-size: calc(100dvh - 2rem);
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom, 1.25rem));
+}
 .dashboard-shell button[class*="hover:bg-white"]:hover {
   background-color: rgba(212, 33, 41, 0.14) !important;
   color: #f4f7fb !important;
