@@ -232,6 +232,18 @@ export async function processPdfCatalogIngestion({
   let totalEntities = 0;
   let totalMedia = 0;
 
+  if (database && typeof database.query === 'function' && sourceId && tenantId) {
+    try {
+      await database.query(
+        `DELETE FROM knowledge_entities
+          WHERE source_id = $1 AND tenant_id = $2 AND approval_status = 'PENDING'`,
+        [sourceId, tenantId]
+      );
+    } catch {
+      // Best-effort cleanup of previous unapproved candidates
+    }
+  }
+
   // 3. Process each page to generate candidates
   for (const page of pages) {
     const pageNum = page.pageNumber || 1;

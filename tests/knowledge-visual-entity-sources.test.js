@@ -19,6 +19,8 @@ import {
   createUploadedKnowledgeSource,
   createManualKnowledgeSource,
   createVisualEntityKnowledgeSource,
+  enqueueKnowledgeIndexJob,
+
 } from '../services/knowledge-source-service.js';
 import {
   validateKnowledgeUpload,
@@ -162,6 +164,35 @@ function createMockDatabase() {
         sources.push(row);
         return { rowCount: 1, rows: [row] };
       }
+
+      if (normalizedSql.includes('INSERT INTO knowledge_source_assistants')) {
+        return { rowCount: 1, rows: [{ id: crypto.randomUUID(), status: 'PENDING' }] };
+      }
+      if (normalizedSql.includes('INSERT INTO knowledge_processing_jobs')) {
+        const [tId, sId, cHash, , , , force] = params;
+        let job = jobs.find((j) => j.tenant_id === tId && j.source_id === sId);
+        if (!job) {
+          job = {
+            id: crypto.randomUUID(),
+            tenant_id: tId,
+            source_id: sId,
+            job_type: 'INDEX_SOURCE',
+            content_hash: cHash,
+            status: 'PENDING',
+            attempts: 0,
+            locked_at: null,
+            locked_until: null,
+          };
+          jobs.push(job);
+        } else if (force) {
+          job.status = 'PENDING';
+          job.attempts = 0;
+          job.locked_at = null;
+          job.locked_until = null;
+        }
+        return { rowCount: 1, rows: [job] };
+      }
+
 
       if (normalizedSql.includes('INSERT INTO knowledge_source_assistants') || normalizedSql.includes('INSERT INTO knowledge_processing_jobs')) {
         return { rowCount: 1, rows: [{ id: crypto.randomUUID(), status: 'PENDING' }] };
@@ -984,6 +1015,97 @@ test('38: Knowledge processing worker emits structured observability on claim, p
   assert.ok(eventNames.includes('KNOWLEDGE_PROCESSING_JOB_CLAIMED'));
   assert.ok(eventNames.includes('KNOWLEDGE_PROCESSING_STAGE_STARTED'));
   assert.ok(eventNames.includes('KNOWLEDGE_PROCESSING_JOB_COMPLETED'));
+});
+
+test('39: Re-index forces stuck job to PENDING and clears stale locks', async () => {
+  const database = createMockDatabase();
+  const sourceId = crypto.randomUUID();
+  const contentHash = 'f'.repeat(64);
+
+  // Pre-existing stuck job
+  database.jobs.push({
+    id: crypto.randomUUID(),
+    tenant_id: tenantA,
+    source_id: sourceId,
+    job_type: 'INDEX_SOURCE',
+    content_hash: contentHash,
+    status: 'PROCESSING',
+    attempts: 2,
+    locked_at: new Date().toISOString(),
+    locked_until: new Date(Date.now() + 60000).toISOString(),
+  });
+
+  const job = await enqueueKnowledgeIndexJob({
+    database,
+    tenantId: tenantA,
+    sourceId,
+    contentHash,
+    force: true,
+  });
+
+  assert.equal(job.status, 'PENDING');
+  assert.equal(database.jobs[0].status, 'PENDING');
+  assert.equal(database.jobs[0].attempts, 0);
+  assert.equal(database.jobs[0].locked_at, null);
+  assert.equal(database.jobs[0].locked_until, null);
+});
+
+test('40: Multi-page catalog extraction creates candidate entities and links visual page references', async () => {
+  const database = createMockDatabase();
+  const storage = createMockStorage();
+  const sourceId = crypto.randomUUID();
+
+  const page1Text = 'Product: BILLY Bookcase\nSKU: 002.638.50\nPrice: $69.00\nDimensions: 80x28x202 cm\nClassic bookshelf with adjustable shelves.';
+  const page2Text = 'Product: STRANDMON Armchair\nSKU: 503.004.32\nPrice: $299.00\nComfortable high-back wing armchair.';
+
+  const result = await processPdfCatalogIngestion({
+    database,
+    storage,
+    tenantId: tenantA,
+    sourceId,
+    bytes: SAMPLE_PDF,
+    contentHash: 'a'.repeat(64),
+    extractPdfText: async () => ({
+      text: `${page1Text}\n\n${page2Text}`,
+      pages: [
+        { pageNumber: 1, text: page1Text },
+        { pageNumber: 2, text: page2Text },
+      ],
+    }),
+    extractPdfImages: async () => [
+      {
+        pageNumber: 1,
+        buffer: SAMPLE_PNG,
+        mimeType: 'image/png',
+        width: 400,
+        height: 400,
+        originalFilename: 'billy_ref.png',
+      },
+      {
+        pageNumber: 2,
+        buffer: SAMPLE_PNG,
+        mimeType: 'image/png',
+        width: 400,
+        height: 400,
+        originalFilename: 'strandmon_ref.png',
+      },
+    ],
+  });
+
+  assert.equal(result.entityCount, 2);
+  assert.equal(result.mediaCount, 2);
+
+  const entities = await listKnowledgeEntities({ database, tenantId: tenantA, sourceId });
+  assert.equal(entities.length, 2);
+  assert.equal(entities[0].name, 'BILLY Bookcase');
+  assert.equal(entities[0].external_code, '002.638.50');
+  assert.equal(entities[0].media.length, 1);
+  assert.equal(entities[0].media[0].original_filename, 'billy_ref.png');
+
+  assert.equal(entities[1].name, 'STRANDMON Armchair');
+  assert.equal(entities[1].external_code, '503.004.32');
+  assert.equal(entities[1].media.length, 1);
+  assert.equal(entities[1].media[0].original_filename, 'strandmon_ref.png');
 });
 
 

@@ -82,25 +82,37 @@ export async function enqueueKnowledgeIndexJob({
      ) VALUES ($1, $2, 'INDEX_SOURCE', $3, $4, $5, 'PENDING', $6::jsonb)
      ON CONFLICT (tenant_id, source_id, job_type, content_hash, embedding_model, embedding_version)
      DO UPDATE SET
-       status = CASE
-         WHEN knowledge_processing_jobs.status = 'PROCESSING' THEN knowledge_processing_jobs.status
-         WHEN $7 THEN 'PENDING'
-         WHEN knowledge_processing_jobs.status = 'READY' THEN knowledge_processing_jobs.status
-         ELSE 'PENDING'
-       END,
-       available_at = CASE
-         WHEN knowledge_processing_jobs.status = 'PROCESSING' THEN knowledge_processing_jobs.available_at
-         WHEN $7 THEN CURRENT_TIMESTAMP
-         WHEN knowledge_processing_jobs.status = 'READY' THEN knowledge_processing_jobs.available_at
-         ELSE CURRENT_TIMESTAMP
-       END,
-       updated_at = CURRENT_TIMESTAMP,
-       last_error_code = CASE
-         WHEN knowledge_processing_jobs.status = 'PROCESSING' THEN knowledge_processing_jobs.last_error_code
-         WHEN $7 THEN NULL
-         WHEN knowledge_processing_jobs.status = 'READY' THEN knowledge_processing_jobs.last_error_code
-         ELSE NULL
-       END
+        status = CASE
+          WHEN $7 THEN 'PENDING'
+          WHEN knowledge_processing_jobs.status = 'PROCESSING' THEN knowledge_processing_jobs.status
+          WHEN knowledge_processing_jobs.status = 'READY' THEN knowledge_processing_jobs.status
+          ELSE 'PENDING'
+        END,
+        attempts = CASE
+          WHEN $7 THEN 0
+          ELSE knowledge_processing_jobs.attempts
+        END,
+        locked_at = CASE
+          WHEN $7 THEN NULL
+          ELSE knowledge_processing_jobs.locked_at
+        END,
+        locked_until = CASE
+          WHEN $7 THEN NULL
+          ELSE knowledge_processing_jobs.locked_until
+        END,
+        available_at = CASE
+          WHEN $7 THEN CURRENT_TIMESTAMP
+          WHEN knowledge_processing_jobs.status = 'PROCESSING' THEN knowledge_processing_jobs.available_at
+          WHEN knowledge_processing_jobs.status = 'READY' THEN knowledge_processing_jobs.available_at
+          ELSE CURRENT_TIMESTAMP
+        END,
+        updated_at = CURRENT_TIMESTAMP,
+        last_error_code = CASE
+          WHEN $7 THEN NULL
+          WHEN knowledge_processing_jobs.status = 'PROCESSING' THEN knowledge_processing_jobs.last_error_code
+          WHEN knowledge_processing_jobs.status = 'READY' THEN knowledge_processing_jobs.last_error_code
+          ELSE NULL
+        END
      RETURNING id, status`,
     [
       tenantId,
