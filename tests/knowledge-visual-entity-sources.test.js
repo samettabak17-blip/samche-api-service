@@ -260,9 +260,9 @@ function createMockDatabase() {
             .forEach((m) => { m.approval_status = 'APPROVED'; m.is_runtime_eligible = true; });
           return { rowCount: 1, rows: [] };
         }
-        if (params.length === 2 && normalizedSql.includes('WHERE id = $1')) {
-          const [mediaId, tenantId] = params;
-          const media = entityMedia.find((m) => m.id === mediaId && m.tenant_id === tenantId);
+        if (params.length === 3 && normalizedSql.includes('WHERE id = $1')) {
+          const [mediaId, tenantId, entityId] = params;
+          const media = entityMedia.find((m) => m.id === mediaId && m.tenant_id === tenantId && m.entity_id === entityId);
           if (!media) return { rowCount: 0, rows: [] };
           media.approval_status = 'APPROVED';
           media.is_runtime_eligible = true;
@@ -277,9 +277,9 @@ function createMockDatabase() {
             .forEach((m) => { m.approval_status = 'REJECTED'; m.is_runtime_eligible = false; });
           return { rowCount: 1, rows: [] };
         }
-        if (params.length === 2 && normalizedSql.includes('WHERE id = $1')) {
-          const [mediaId, tenantId] = params;
-          const media = entityMedia.find((m) => m.id === mediaId && m.tenant_id === tenantId);
+        if (params.length === 3 && normalizedSql.includes('WHERE id = $1')) {
+          const [mediaId, tenantId, entityId] = params;
+          const media = entityMedia.find((m) => m.id === mediaId && m.tenant_id === tenantId && m.entity_id === entityId);
           if (!media) return { rowCount: 0, rows: [] };
           media.approval_status = 'REJECTED';
           media.is_runtime_eligible = false;
@@ -1265,6 +1265,17 @@ test('44: getEntityMedia retrieves specific media record with tenant isolation',
     getEntityMedia({ database, tenantId: tenantB, mediaId: media.id }),
     (err) => err instanceof KnowledgeEntityError && err.code === 'KNOWLEDGE_MEDIA_NOT_FOUND'
   );
+});
+
+test('media review cannot cross entity or tenant boundaries', async () => {
+  const database = createMockDatabase();
+  const first = await createKnowledgeEntity({ database, tenantId: tenantA, name: 'First item' });
+  const second = await createKnowledgeEntity({ database, tenantId: tenantA, name: 'Second item' });
+  const media = await addEntityMedia({ database, storage: createMockStorage(), tenantId: tenantA, entityId: first.id, file: { buffer: SAMPLE_PNG, mimetype: 'image/png', originalname: 'first.png', size: SAMPLE_PNG.length }, mediaRole: 'PRIMARY_REFERENCE' });
+
+  await assert.rejects(approveEntityMedia({ database, tenantId: tenantA, entityId: second.id, mediaId: media.id }), (error) => error instanceof KnowledgeEntityError && error.code === 'KNOWLEDGE_MEDIA_NOT_FOUND');
+  await assert.rejects(rejectEntityMedia({ database, tenantId: tenantB, entityId: first.id, mediaId: media.id }), (error) => error instanceof KnowledgeEntityError && error.code === 'KNOWLEDGE_MEDIA_NOT_FOUND');
+  assert.equal(database.entityMedia[0].approval_status, 'PENDING');
 });
 
 

@@ -62,7 +62,7 @@ test('real PostgreSQL persists tenant/user/device push delivery and excludes ano
     await registerPushSubscription({ database: client, tenantId: tenantA.tenantId, userId: tenantA.userId, subscription: { endpoint: endpoint('a'), keys: { p256dh: 'key-a', auth: 'auth-a' } } });
     await registerPushSubscription({ database: client, tenantId: tenantB.tenantId, userId: tenantB.userId, subscription: { endpoint: endpoint('b'), keys: { p256dh: 'key-b', auth: 'auth-b' } } });
     await createPushNotificationIntent({ database: client, tenantId: tenantA.tenantId, eventId: `push-${suffix}`, eventType: 'HUMAN_HANDOFF_REQUESTED', deepLink: `/app/${tenantA.tenantId}/conversations/whatsapp/${crypto.randomUUID()}`, recipientUserIds: [tenantA.userId] });
-    const delivery = await processPushNotificationOutbox({ database, deliver: async () => ({ status: 'DELIVERED' }) });
+    const delivery = await processPushNotificationOutbox({ database, tenantId: tenantA.tenantId, deliver: async () => ({ status: 'DELIVERED' }) });
     assert.equal(delivery.delivered, 1);
     const counts = await client.query(
       `SELECT tenant_id, count(*)::integer AS rows, array_agg(status ORDER BY status) AS statuses

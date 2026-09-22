@@ -432,8 +432,9 @@ export async function getEntityMedia({ database, tenantId, mediaId }) {
   return result.rows[0];
 }
 
-export async function approveEntityMedia({ database, tenantId, mediaId }) {
+export async function approveEntityMedia({ database, tenantId, entityId, mediaId }) {
   requireUuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
+  requireUuid(entityId, 'KNOWLEDGE_ENTITY_INVALID');
   requireUuid(mediaId, 'KNOWLEDGE_MEDIA_INVALID');
 
   const result = await database.query(
@@ -441,9 +442,9 @@ export async function approveEntityMedia({ database, tenantId, mediaId }) {
         SET approval_status = 'APPROVED',
             is_runtime_eligible = TRUE,
             updated_at = CURRENT_TIMESTAMP
-      WHERE id = $1 AND tenant_id = $2
+      WHERE id = $1 AND tenant_id = $2 AND entity_id = $3
       RETURNING *`,
-    [mediaId, tenantId]
+    [mediaId, tenantId, entityId]
   );
 
   if (!result.rowCount) {
@@ -453,8 +454,9 @@ export async function approveEntityMedia({ database, tenantId, mediaId }) {
   return result.rows[0];
 }
 
-export async function rejectEntityMedia({ database, tenantId, mediaId }) {
+export async function rejectEntityMedia({ database, tenantId, entityId, mediaId }) {
   requireUuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
+  requireUuid(entityId, 'KNOWLEDGE_ENTITY_INVALID');
   requireUuid(mediaId, 'KNOWLEDGE_MEDIA_INVALID');
 
   const result = await database.query(
@@ -462,9 +464,9 @@ export async function rejectEntityMedia({ database, tenantId, mediaId }) {
         SET approval_status = 'REJECTED',
             is_runtime_eligible = FALSE,
             updated_at = CURRENT_TIMESTAMP
-      WHERE id = $1 AND tenant_id = $2
+      WHERE id = $1 AND tenant_id = $2 AND entity_id = $3
       RETURNING *`,
-    [mediaId, tenantId]
+    [mediaId, tenantId, entityId]
   );
 
   if (!result.rowCount) {

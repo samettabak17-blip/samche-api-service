@@ -189,7 +189,7 @@ export const CANONICAL_I18N: Record<'tr' | 'en' | 'ar', LocaleDict> = {
     clearBtnLabel: 'Sohbeti Temizle',
     minimizeBtnLabel: 'Küçült',
     closeBtnLabel: 'Kapat',
-    composerPlaceholder: 'Bir mesaj yazın...',
+    composerPlaceholder: 'Mesajınızı yazın...',
     sendLabel: 'Mesaj Gönder',
     confirmText: 'Sohbet geçmişini temizlemek istediğinize emin misiniz?',
     cancelBtn: 'İptal',

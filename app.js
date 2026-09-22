@@ -64,7 +64,7 @@ import { processOneVisualAiGenerationJob } from './services/visual-ai-generation
 import { formatVisualAiWorkerStartup } from './services/visual-ai-runtime-observability-service.js';
 import { ensureConversationCrmIdentity } from "./services/crm-lead-service.js";
 import { queueLeadQualification } from "./services/lead-qualification-runner.js";
-import { startLiveEventListener, subscribeTenantEvents } from "./services/live-event-bus.js";
+import { startLiveEventListener, stopLiveEventListener, subscribeTenantEvents } from "./services/live-event-bus.js";
 import { configuredPublicConversationSessionSecret, issuePublicConversationSession, PublicConversationSessionError, verifyPublicConversationSession } from "./services/public-conversation-session.js";
 import pool from "./config/db.js";
 import { runMigrations } from "./migrations/runMigrations.js";
@@ -770,7 +770,6 @@ app.use((error, req, res, next) => {
   }
   return next(error);
 });
-void startLiveEventListener();
 
 // ============================================================================
 // 🔥 GLOBAL HATA YAKALAYICILAR (SUNUCUNUN ÇÖKMESİNİ KESİN ENGELLER)
@@ -4936,7 +4935,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
 // ============================================================================
 // 6. CRON JOB (WHATSAPP FOLLOW-UP)
 // ============================================================================
-cron.schedule("* * * * *", async () => {
+const lifecycleCronTask = cron.schedule("* * * * *", async () => {
   try {
     let lifecycleActions;
     try {
@@ -5018,7 +5017,7 @@ cron.schedule("* * * * *", async () => {
   } catch (err) {
     console.error("[CRON] Genel hata:", err);
   }
-});
+}, { scheduled: false });
 
 // ============================================================================
 // 7. SUNUCU BAŞLATMA
@@ -5032,6 +5031,7 @@ const PORT = process.env.PORT || 3000;
 async function startServer() {
   try {
     await runMigrations();
+    void startLiveEventListener();
     await repairEligibleGuideDomains({ database: pool }).catch((error) => {
       console.error('GUIDE_DOMAIN_REPAIR_FAILED:', error?.message || error);
     });
@@ -5046,6 +5046,9 @@ async function startServer() {
     const server = app.listen(PORT, () => {
       console.log(`Sunucu ${PORT} portunda başarıyla çalışıyor.`);
     });
+    lifecycleCronTask.start();
+    server.on('close', () => lifecycleCronTask.stop());
+    server.on('close', stopLiveEventListener);
     server.on('close', () => customerInvitationOutboxStartup?.stop());
     server.on('close', () => knowledgeProcessingWorker?.());
     server.on('close', () => imageSemanticGenerationWorker?.());

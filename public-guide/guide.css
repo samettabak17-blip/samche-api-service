@@ -193,9 +193,7 @@ button,input,select,textarea{font:inherit}
   .guide-navigation__item{padding-inline:.1rem}
   .guide-navigation__label{font-size:9px}
   .guide-chat-form{display:flex;flex-direction:column;width:100%}
-  .guide-chat-form__send{width:100%}
   .guide-roadmap-form{grid-template-columns:1fr}
-  .guide-roadmap-form .guide-button{width:100%}
 }
 @media(max-height:500px) and (orientation:landscape){
   .guide-header{padding-block:3px}

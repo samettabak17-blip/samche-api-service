@@ -38,7 +38,7 @@ test('Workstream A - Test A & B & C: sendWhatsAppTypingIndicator invokes provide
   assert.equal(result.ok, true);
   assert.equal(result.messageId, 'wamid.HBgLMTY1MDM4Nzk0MzkVAgARGBJDQjZCMzlEQUE4OTJBMTE4RTUA');
   assert.equal(posted.length, 1);
-  assert.equal(posted[0].url, 'https://graph.facebook.com/v20.0/948536645017374/messages');
+  assert.equal(posted[0].url, 'https://graph.facebook.com/v23.0/948536645017374/messages');
   assert.deepEqual(posted[0].payload, {
     messaging_product: 'whatsapp',
     status: 'read',
@@ -84,7 +84,7 @@ test('Workstream A - Test C: canonical per-channel phone routing is not bound to
     },
   });
 
-  assert.equal(posted[0].url, 'https://graph.facebook.com/v20.0/222222222222222/messages');
+  assert.equal(posted[0].url, 'https://graph.facebook.com/v23.0/222222222222222/messages');
   assert.deepEqual(posted[0].payload.typing_indicator, { type: 'text' });
 });
 

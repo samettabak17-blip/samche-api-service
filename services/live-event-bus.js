@@ -4,9 +4,10 @@ import pool from '../config/db.js';
 const events = new EventEmitter();
 let listenerClient = null;
 let reconnectTimer = null;
+let listenerRunning = false;
 
 function scheduleReconnect() {
-  if (reconnectTimer) return;
+  if (!listenerRunning || reconnectTimer) return;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     void startLiveEventListener();
@@ -14,10 +15,15 @@ function scheduleReconnect() {
 }
 
 export async function startLiveEventListener() {
+  listenerRunning = true;
   if (listenerClient) return;
 
   try {
     const client = await pool.connect();
+    if (!listenerRunning) {
+      client.release(true);
+      return;
+    }
     listenerClient = client;
     client.on('notification', (notification) => {
       if (notification.channel !== 'samche_live_events') return;
@@ -46,6 +52,14 @@ export async function startLiveEventListener() {
     listenerClient = null;
     scheduleReconnect();
   }
+}
+
+export function stopLiveEventListener() {
+  listenerRunning = false;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  if (listenerClient) listenerClient.release(true);
+  listenerClient = null;
 }
 
 export function subscribeTenantEvents(tenantId, callback) {

@@ -40,7 +40,7 @@ test('accepts JPG, JPEG, and PNG with matching MIME and magic bytes', () => {
 
 test('rejects invalid extensions and MIME types', () => {
   assert.throws(() => validateImageKnowledgeInput(file({ name: 'screen.gif' })), { code: 'IMAGE_EXTENSION_UNSUPPORTED' });
-  assert.throws(() => validateImageKnowledgeInput(file({ mime: 'image/webp' })), { code: 'IMAGE_MIME_UNSUPPORTED' });
+  assert.throws(() => validateImageKnowledgeInput(file({ mime: 'image/gif' })), { code: 'IMAGE_MIME_UNSUPPORTED' });
 });
 
 test('rejects MIME/signature mismatches', () => {

@@ -9,7 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { issuePublicWebChatSession } from '../services/public-web-chat-session.js';
 import { appendAgentMessage, getWebChatPublicFeed, operateConversation, persistAssistantResponseIfCurrent } from '../services/live-inbox-service.js';
 import { claimDueCustomerSupportLifecycle } from '../services/human-support-service.js';
-import { emitTenantEvent } from '../services/live-event-bus.js';
+import { emitTenantEvent, stopLiveEventListener } from '../services/live-event-bus.js';
 import { app } from '../app.js';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
@@ -18,6 +18,8 @@ const assistantId = '44444444-4444-4444-8444-444444444444';
 const profileId = '55555555-5555-4555-8555-555555555555';
 const configId = '66666666-6666-4666-8666-666666666666';
 const operatorUserId = '33333333-3333-4333-8333-333333333333';
+
+test.after(() => stopLiveEventListener());
 
 test('PUBLIC SSE SUBSCRIBER: an authorized empty WebChat conversation has a stable live feed before its first message', async () => {
   const database = {

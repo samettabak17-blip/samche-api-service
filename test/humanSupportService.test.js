@@ -66,8 +66,24 @@ test('repeated customer support request does not duplicate attention or lifecycl
   assert.equal(fixture.calls.some(({ sql }) => sql.includes('INSERT INTO conversation_messages')), false);
 });
 
-function lifecycleDatabase({ attention = 'REQUESTED', lastActivityAt, warningSentAt = null } = {}) {
+function lifecycleDatabase({ attention = 'REQUESTED', lastActivityAt, warningSentAt = null, channelType = 'WEB_CHAT' } = {}) {
   const calls = [];
+  const conversation = {
+    id: conversationId,
+    tenant_id: tenantId,
+    customer_external_id: 'whatsapp:15551234567',
+    status: 'open',
+    handling_mode: 'HUMAN',
+    human_attention_state: attention,
+    human_attention_requested_at: lastActivityAt,
+    human_support_started_at: lastActivityAt,
+    human_support_last_activity_at: lastActivityAt,
+    human_support_warning_sent_at: warningSentAt,
+    human_support_closed_at: null,
+    communication_language: 'tr',
+    channel_type: channelType,
+    external_channel_id: channelType === 'WHATSAPP' ? 'phone-id' : null,
+  };
   const client = {
     async query(sql, params = []) {
       calls.push({ sql, params });
@@ -90,27 +106,10 @@ function lifecycleDatabase({ attention = 'REQUESTED', lastActivityAt, warningSen
         return { rowCount: rows.length, rows };
       }
       if (sql.startsWith('SELECT c.*, tc.external_channel_id')) {
-        return {
-          rows: [{
-            id: conversationId,
-            tenant_id: tenantId,
-            customer_external_id: 'whatsapp:15551234567',
-            human_attention_state: attention,
-            human_attention_requested_at: lastActivityAt,
-            human_support_started_at: lastActivityAt,
-            human_support_last_activity_at: lastActivityAt,
-            human_support_warning_sent_at: warningSentAt,
-            human_support_closed_at: null,
-            communication_language: 'tr',
-            whatsapp_response_templates: {
-              human_support: {
-                warning_5m: { tr: 'legacy five minute warning' },
-                timeout_close: { tr: 'legacy timeout close' },
-              },
-            },
-          }],
-        };
+        return { rows: [conversation] };
       }
+      if (sql.startsWith('SELECT c.*, tc.channel_type')) return { rows: [conversation] };
+      if (sql.includes("SET handling_mode = 'AI'")) return { rows: [{ ...conversation, handling_mode: 'AI', human_attention_state: 'RESOLVED' }] };
       return { rows: [] };
     },
     release() {},
@@ -123,12 +122,11 @@ test('unacknowledged customer support requests receive the persisted five-minute
   const fixture = lifecycleDatabase({ lastActivityAt: new Date(now.getTime() - (5 * 60 * 1000 + 1)) });
   const actions = await claimDueCustomerSupportLifecycle({ database: fixture.database, now });
 
-  assert.equal(actions.length, 1);
-  assert.equal(actions[0].type, 'WARNING_5M');
-  assert.equal(actions[0].content, 'canonical warning');
+  assert.equal(actions.length, 0, 'Web Chat warning is persisted for its feed, without an external transport action');
   const dueQuery = fixture.calls.find(({ sql }) => sql.startsWith('SELECT c.*, tc.external_channel_id'));
   assert.match(dueQuery?.sql ?? '', /c\.human_attention_state IN \('REQUESTED', 'ACKNOWLEDGED'\)/);
   assert.ok(fixture.calls.some(({ sql }) => sql.includes('human_support_warning_sent_at')));
+  assert.ok(fixture.calls.some(({ sql, params }) => sql.includes('INSERT INTO conversation_messages') && params?.[2] === 'canonical warning'));
 });
 
 test('unacknowledged customer support requests close at ten minutes and return handling to AI', async () => {
@@ -136,11 +134,10 @@ test('unacknowledged customer support requests close at ten minutes and return h
   const fixture = lifecycleDatabase({ lastActivityAt: new Date(now.getTime() - (10 * 60 * 1000 + 1)) });
   const actions = await claimDueCustomerSupportLifecycle({ database: fixture.database, now });
 
-  assert.equal(actions.length, 1);
-  assert.equal(actions[0].type, 'TIMEOUT_CLOSE');
-  assert.equal(actions[0].content, 'canonical return');
+  assert.equal(actions.length, 0, 'Web Chat timeout is persisted through canonical return-to-AI');
   assert.ok(fixture.calls.some(({ sql }) => sql.includes("SET handling_mode = 'AI'")));
-  assert.ok(fixture.calls.some(({ sql }) => sql.includes("human_attention_state = 'RESOLVED'")));
+  assert.ok(fixture.calls.some(({ sql }) => sql.includes("WHEN human_attention_state IN ('REQUESTED', 'ACKNOWLEDGED') THEN 'RESOLVED'")));
+  assert.ok(fixture.calls.some(({ sql, params }) => sql.includes('INSERT INTO conversation_messages') && params?.[3] === 'canonical return'));
 });
 
 
@@ -163,9 +160,10 @@ test('human attention summary counts only the tenant requested state without emi
 
 test('app-shaped scheduler call accepts its production dependency object and scans requested support', async () => {
   const now = new Date('2026-08-25T12:00:00.000Z');
-  const fixture = lifecycleDatabase({ attention: 'REQUESTED', lastActivityAt: new Date(now.getTime() - (5 * 60 * 1000 + 1)) });
+  const fixture = lifecycleDatabase({ attention: 'REQUESTED', lastActivityAt: new Date(now.getTime() - (5 * 60 * 1000 + 1)), channelType: 'WHATSAPP' });
   const actions = await claimDueCustomerSupportLifecycle({ database: fixture.database, now });
   assert.equal(actions[0]?.type, 'WARNING_5M');
+  assert.equal(actions[0]?.phoneNumberId, 'phone-id');
 });
 
 test('due escalation levels are claimed once from tenant-scoped persisted policy data', async () => {
@@ -235,4 +233,3 @@ test('resets escalation to PENDING on new support request if previous escalation
 });
 
 });
-

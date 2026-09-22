@@ -24,7 +24,7 @@ test('cumulative manifest has unique stable keys and complete release-gate owner
 
   for (const capability of PLATFORM_CAPABILITY_MANIFEST) {
     assert.match(capability.key, /^[a-z][a-z0-9_]+$/);
-    assert.match(capability.introduced_by_task, /^TASK_[1-7]$/);
+    assert.match(capability.introduced_by_task, /^TASK_[1-8]$/);
     assert.ok(capability.canonical_owner_service);
     assert.ok(capability.canonical_source_of_truth);
     assert.ok(capability.canonical_creator);
@@ -61,6 +61,7 @@ test('critical tenant relationships have one documented canonical creator and co
     'business_profile_identity', 'recommendation_profile',
     'configuration_assistant_profile', 'conversation_tenant_channel_assistant',
     'push_subscription_user_device',
+    'tenant_site_pages',
   ];
   assert.deepEqual(PLATFORM_RELATIONSHIP_OWNERSHIP.map((relation) => relation.key), expected);
   for (const relation of PLATFORM_RELATIONSHIP_OWNERSHIP) {

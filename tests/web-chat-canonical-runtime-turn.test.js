@@ -21,7 +21,7 @@ test('REGRESSION CONTRACT: app.js /api/chat returns JSON on all runtime paths an
   // Ensure JSON response methods are used
   assert.match(chatRoute, /res\.json\(\{\s*reply:\s*aiReply/);
   assert.match(chatRoute, /res\.status\(200\)\.json\(\{\s*reply:\s*limitationReply/);
-  assert.match(chatRoute, /res\.status\(200\)\.json\(\{\s*reply:\s*["']Temsilcimiz/);
+  assert.match(chatRoute, /res\.status\(200\)\.json\(\{\s*reply:\s*''[\s\S]*?suppress_reply:\s*true[\s\S]*?handling_mode:\s*'HUMAN'/);
   assert.match(chatRoute, /res\.status\(500\)\.json\(\{/);
 
   // Assert NO legacy raw text sends remain in the Web Chat handler

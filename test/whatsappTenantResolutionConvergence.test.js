@@ -114,7 +114,7 @@ test('WhatsApp native typing indicator: supports multi-tenant phone ID without m
 
   assert.equal(result.ok, true);
   assert.equal(posted.length, 1);
-  assert.equal(posted[0].url, 'https://graph.facebook.com/v20.0/987654321098765/messages');
+  assert.equal(posted[0].url, 'https://graph.facebook.com/v23.0/987654321098765/messages');
   assert.deepEqual(posted[0].payload, {
     messaging_product: 'whatsapp',
     status: 'read',

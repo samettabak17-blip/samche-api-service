@@ -166,6 +166,12 @@ function createMockWebChatDb({ resourceRow }) {
         if (sql.includes('INSERT INTO conversation_messages') || sql.includes('conversation_messages')) {
           return { rows: [{ id: 'msg-1', tenant_id: tenantId, conversation_id: conversationId, sender_type: 'CUSTOMER', content: 'What is this?' }] };
         }
+        if (sql.includes('FROM conversations') || sql.includes('INSERT INTO conversations')) {
+          return { rowCount: 1, rows: [{ id: conversationId, tenant_id: tenantId, channel_id: 'channel-1', customer_external_id: 'customer-1', handling_mode: 'AI', status: 'open', handling_version: 1 }] };
+        }
+        if (sql.includes('crm_contacts') || sql.includes('crm_leads') || sql.includes('crm_activities')) {
+          return { rowCount: 1, rows: [{ id: 'crm-1', tenant_id: tenantId, conversation_id: conversationId }] };
+        }
         return { rowCount: 1, rows: [] };
       },
       release: () => {},
@@ -511,8 +517,15 @@ test('WEBCHAT HUMAN HANDOFF EXECUTION: Explicit human request triggers canonical
               status: 'open',
               handling_version: 1,
               human_attention_state: 'NONE',
+              customer_external_id: 'customer-1',
             }],
           };
+        }
+        if (sql.includes('FROM conversations') || sql.includes('INSERT INTO conversations')) {
+          return { rowCount: 1, rows: [{ id: conversationId, tenant_id: tenantId, channel_id: 'channel-1', customer_external_id: 'customer-1', handling_mode: 'AI', status: 'open', handling_version: 1, human_attention_state: 'NONE' }] };
+        }
+        if (sql.includes('crm_contacts') || sql.includes('crm_leads') || sql.includes('crm_activities')) {
+          return { rowCount: 1, rows: [{ id: 'crm-1', tenant_id: tenantId, conversation_id: conversationId }] };
         }
         if (sql.includes('UPDATE conversations')) {
           return {
@@ -555,6 +568,9 @@ test('WEBCHAT HUMAN HANDOFF EXECUTION: Explicit human request triggers canonical
         };
       }
       if (sql.includes('ai_assistants') && (sql.includes('knowledge_authority_version') || sql.includes('active_configuration_version_id') || sql.includes('assistant_configuration_versions'))) {
+        if (sql.includes('knowledge_authority_version') && !sql.includes('assistant_configuration_versions')) {
+          return { rowCount: 1, rows: [{ assistant_id: assistantId, knowledge_authority_version: '1' }] };
+        }
         return {
           rowCount: 1,
           rows: [{
@@ -609,7 +625,7 @@ test('WEBCHAT HUMAN HANDOFF EXECUTION: Explicit human request triggers canonical
       }),
     });
 
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 200, JSON.stringify(await res.clone().json()));
     const body = await res.json();
     assert.ok(body.handoff, 'Response must contain handoff object');
     assert.equal(body.handoff.requested, true);

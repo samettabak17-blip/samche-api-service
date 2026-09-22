@@ -43,6 +43,29 @@ const tabs = [
   ["retrieval", "Retrieval Test"],
 ] as const;
 
+function EntityMediaPreview({ tenantId, entityId, mediaId, name }: { tenantId: string; entityId: string; mediaId: string; name: string }) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewFailed, setPreviewFailed] = useState(false);
+  useEffect(() => {
+    setPreviewUrl(null);
+    setPreviewFailed(false);
+    let active = true;
+    let objectUrl: string | null = null;
+    void tenantApi.getKnowledgeEntityMedia(tenantId, entityId, mediaId).then((blob) => {
+      if (!active) return;
+      objectUrl = URL.createObjectURL(blob);
+      setPreviewUrl(objectUrl);
+    }).catch(() => { if (active) setPreviewFailed(true); });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [tenantId, entityId, mediaId]);
+  return previewUrl
+    ? <img src={previewUrl} alt={`Reference media: ${name}`} className="mt-2 h-28 w-full rounded-md object-contain" />
+    : <p className="mt-2 text-[10px] text-stone-300">{previewFailed ? "Preview unavailable" : "Loading preview..."}</p>;
+}
+
 function recommendationData(row: KnowledgeRecommendation): Record<string, unknown> {
   return row.recommendation_data && typeof row.recommendation_data === "object" && !Array.isArray(row.recommendation_data)
     ? row.recommendation_data
@@ -1794,16 +1817,19 @@ export function KnowledgeIntelligencePage() {
               </label>
               <div className="text-sm font-medium sm:col-span-2">
                 Reference Images (PNG, JPG, WebP)
-                <input
-                  type="file"
-                  multiple
-                  accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
-                  className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-xs"
-                  onChange={(e) => {
-                    const files = Array.from(e.target.files || []);
-                    setVisualFiles(files);
-                  }}
-                />
+                <label className="mt-2 inline-flex cursor-pointer rounded-lg border border-line bg-elevated px-3 py-2 text-xs focus-within:ring-2 focus-within:ring-primary">
+                  <input
+                    type="file"
+                    multiple
+                    accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+                    className="sr-only"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files || []);
+                      setVisualFiles(files);
+                    }}
+                  />
+                  Choose reference images
+                </label>
                 {visualFiles.length > 0 && (
                   <p className="mt-1 text-xs text-stone-300">{visualFiles.length} image(s) selected: {visualFiles.map((f) => f.name).join(", ")}</p>
                 )}
@@ -2150,7 +2176,7 @@ export function KnowledgeIntelligencePage() {
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div>
                                   <h3 className="text-sm font-semibold text-white">
-                                    Extracted &amp; Resolved Entities ({sourceEntities.data ? sourceEntities.data.length : (selectedSource.data.entity_count ?? 0)})
+                                    Extracted &amp; Resolved Entities{sourceEntities.isLoading || sourceEntities.error ? "" : ` (${selectedSource.data.entity_count ?? sourceEntities.data?.length ?? 0})`}
                                   </h3>
                                   <p className="mt-1 text-xs text-stone-400">
                                     Review canonical entities and reference media before runtime retrieval.
@@ -2167,20 +2193,20 @@ export function KnowledgeIntelligencePage() {
                                 )}
                               </div>
                               {sourceEntities.isLoading ? (
-                                <SkeletonBlock className="mt-3 h-20" />
+                                <p role="status" className="mt-3 text-xs text-stone-300">Loading entities...</p>
                               ) : sourceEntities.error ? (
-                                <QueryErrorState
-                                  error={sourceEntities.error}
-                                  onRetry={() => sourceEntities.refetch()}
-                                />
+                                <div role="alert" className="mt-3 flex flex-wrap items-center gap-3 text-xs text-red-300">
+                                  <span>Unable to load extracted entities.</span>
+                                  <DashboardButton type="button" variant="outline" onClick={() => void sourceEntities.refetch()}>Retry</DashboardButton>
+                                </div>
                               ) : !(sourceEntities.data ?? []).length ? (
                                 <p className="mt-3 text-xs text-stone-400">
-                                  No discrete entities were extracted from this source. You can re-index the source or upload visual items.
+                                  No discrete entities were extracted from this source.
                                 </p>
                               ) : (
                                 <div className="mt-3 divide-y divide-line/60">
-                                  {sourceEntities.data.map((entity) => (
-                                    <div key={entity.id} className="py-3 first:pt-0 last:pb-0">
+                                  {(sourceEntities.data ?? []).map((entity) => (
+                                    <div key={`${tenantId}:${entity.id}`} className="py-3 first:pt-0 last:pb-0">
                                       <div className="flex flex-wrap items-start justify-between gap-2">
                                         <div className="max-w-2xl">
                                           <div className="flex flex-wrap items-center gap-2">
@@ -2192,11 +2218,14 @@ export function KnowledgeIntelligencePage() {
                                           </div>
                                           <p className="mt-1 text-xs text-stone-400">
                                             Status: <span className={entity.approval_status === "APPROVED" ? "text-emerald-300 font-medium" : entity.approval_status === "REJECTED" ? "text-red-300" : "text-amber-300"}>{entity.approval_status}</span>
-                                            {entity.is_runtime_eligible ? " · ACTIVE RUNTIME" : " · NOT RUNTIME ELIGIBLE"}
+                                            {entity.approval_status === "APPROVED" && entity.is_runtime_eligible ? " · ACTIVE RUNTIME" : " · NOT RUNTIME ELIGIBLE"}
                                             {typeof entity.confidence === "number" ? ` · ${Math.round(entity.confidence * 100)}% confidence` : ""}
                                           </p>
                                           {entity.description && (
                                             <p className="mt-1 text-xs text-stone-300 line-clamp-2">{entity.description}</p>
+                                          )}
+                                          {Boolean(entity.provenance?.pageNumber || entity.provenance?.page_number) && (
+                                            <p className="mt-1 text-xs text-stone-300">Source page {String(entity.provenance?.pageNumber ?? entity.provenance?.page_number)}</p>
                                           )}
                                           {entity.attributes && typeof entity.attributes === "object" && Object.keys(entity.attributes).length > 0 && (
                                             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -2212,6 +2241,7 @@ export function KnowledgeIntelligencePage() {
                                           <div className="flex gap-1.5">
                                             {entity.approval_status !== "APPROVED" && (
                                               <button
+                                                aria-label="Approve entity"
                                                 className={primaryActionClass}
                                                 disabled={approveEntity.isPending}
                                                 onClick={() => approveEntity.mutate(entity.id)}
@@ -2221,6 +2251,7 @@ export function KnowledgeIntelligencePage() {
                                             )}
                                             {entity.approval_status !== "REJECTED" && (
                                               <button
+                                                aria-label="Reject entity"
                                                 className={destructiveActionClass}
                                                 disabled={rejectEntity.isPending}
                                                 onClick={() => rejectEntity.mutate(entity.id)}
@@ -2234,7 +2265,7 @@ export function KnowledgeIntelligencePage() {
                                       {Array.isArray(entity.media) && entity.media.length > 0 && (
                                         <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-3">
                                           {entity.media.map((med) => (
-                                            <div key={med.id} className="rounded-lg border border-line/80 bg-stone-900/60 p-2 text-[11px]">
+                                            <div key={`${tenantId}:${med.id}`} className="rounded-lg border border-line/80 bg-stone-900/60 p-2 text-[11px]">
                                               <div className="flex items-center justify-between gap-1">
                                                 <span className="truncate font-medium text-stone-200">{med.original_filename || "Image"}</span>
                                                 <span className={med.approval_status === "APPROVED" ? "text-[10px] text-emerald-400" : med.approval_status === "REJECTED" ? "text-[10px] text-red-400" : "text-[10px] text-amber-400"}>
@@ -2244,11 +2275,14 @@ export function KnowledgeIntelligencePage() {
                                               <p className="mt-0.5 text-[10px] text-stone-400">
                                                 Role: {med.media_role.replace(/_/g, " ")}
                                                 {med.page_number ? ` · Page ${med.page_number}` : ""}
+                                                {entity.approval_status === "APPROVED" && entity.is_runtime_eligible && med.approval_status === "APPROVED" && med.is_runtime_eligible ? " · ACTIVE RUNTIME" : ""}
                                               </p>
+                                              <EntityMediaPreview tenantId={tenantId} entityId={entity.id} mediaId={med.id} name={med.original_filename || entity.name} />
                                               {canManage && (
                                                 <div className="mt-1.5 flex gap-1">
                                                   {med.approval_status !== "APPROVED" && (
                                                     <button
+                                                      aria-label="Approve media"
                                                       className="rounded bg-emerald-800/60 px-1.5 py-0.5 text-[9px] text-emerald-200 hover:bg-emerald-700"
                                                       onClick={() => approveMediaMutation.mutate({ entityId: entity.id, mediaId: med.id })}
                                                     >
@@ -2257,6 +2291,7 @@ export function KnowledgeIntelligencePage() {
                                                   )}
                                                   {med.approval_status !== "REJECTED" && (
                                                     <button
+                                                      aria-label="Reject media"
                                                       className="rounded bg-red-800/60 px-1.5 py-0.5 text-[9px] text-red-200 hover:bg-red-700"
                                                       onClick={() => rejectMediaMutation.mutate({ entityId: entity.id, mediaId: med.id })}
                                                     >

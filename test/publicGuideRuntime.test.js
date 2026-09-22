@@ -111,10 +111,11 @@ test('mobile Roadmap and Interactive Tool use content-driven height without clip
   const css = fs.readFileSync(new URL('../public-guide/guide.css', import.meta.url), 'utf8');
   const mobileRules = css.match(/@media\(max-width:540px\)\{([\s\S]*?)\n\}/)?.[1] ?? '';
 
-  assert.match(source, /guide-module--content-active/);
-  assert.match(source, /guide-canvas--content-active/);
-  assert.match(source, /guide-shell--content-active/);
-  assert.match(mobileRules, /\.guide-module--content-active,\.guide-module--content-active \.guide-module-layer:not\(\[hidden\]\),\.guide-module--content-active \.guide-tool-form\{[^}]*flex:none[^}]*overflow:visible/);
+  assert.match(mobileRules, /\.guide-shell\{[^}]*height:auto[^}]*overflow:visible/);
+  assert.match(mobileRules, /\.guide-canvas\{[^}]*height:auto[^}]*overflow:visible/);
+  assert.match(mobileRules, /\.guide-module\{overflow:visible\}/);
+  assert.match(mobileRules, /\.guide-module-layer\{flex:none;overflow:visible\}/);
+  assert.match(source, /guide-shell--assistant/);
 });
 
 test('tenant header gives multi-word names available space without truncation or aggressive word breaking', () => {
@@ -151,7 +152,11 @@ test('Guide safely formats progressive content, resumes opaque sessions, and sho
   assert.match(source, /localStorage/);
   assert.match(source, /\/chat\/history/);
   assert.match(source, /\/guide\/session-context/);
-  assert.doesNotMatch(source, /innerHTML\s*=/);
+  assert.deepEqual(source.match(/\.innerHTML\s*=\s*[^;]+;/g), [
+    '.innerHTML = ATTACH_ICON_SVG;',
+    ".innerHTML = '';",
+    ".innerHTML = '';",
+  ]);
 });
 
 test('Guide uses compact reusable pacing and consistent keyboard submission semantics', () => {

@@ -26,6 +26,12 @@ vi.mock("../dashboard/dashboard-api", async (importOriginal) => {
       listChannels: vi.fn(),
       listKnowledgeSources: vi.fn(),
       getKnowledgeSource: vi.fn(),
+      listSourceEntities: vi.fn(),
+      getKnowledgeEntityMedia: vi.fn(),
+      approveKnowledgeEntity: vi.fn(),
+      rejectKnowledgeEntity: vi.fn(),
+      approveEntityMedia: vi.fn(),
+      rejectEntityMedia: vi.fn(),
       uploadKnowledgeSource: vi.fn(),
       createManualKnowledgeSource: vi.fn(),
       assignKnowledgeSource: vi.fn(),
@@ -125,6 +131,8 @@ beforeEach(() => {
   mockedApi.listAssistants.mockResolvedValue([]);
   mockedApi.listChannels.mockResolvedValue([]);
   mockedApi.listKnowledgeSources.mockResolvedValue([]);
+  mockedApi.listSourceEntities.mockResolvedValue([]);
+  mockedApi.getKnowledgeEntityMedia.mockResolvedValue(new Blob(["image"], { type: "image/png" }));
   mockedApi.assignKnowledgeSource.mockResolvedValue(undefined);
   mockedApi.assignKnowledgeSourceBusinessIdentity.mockResolvedValue({
     source_id: "source-image",
@@ -1798,6 +1806,7 @@ it("identifies canonical Business Profile sources by fact, source id, and proven
   fireEvent.click(screen.getByRole("checkbox", { name: "BLUE DUNE EVENT MANAGEMENT LLC.pdf" }));
   expect(screen.getByRole("checkbox", { name: /Source 4973d676/ })).toBeChecked();
   expect(screen.getByRole("checkbox", { name: "BLUE DUNE EVENT MANAGEMENT LLC.pdf" })).toBeChecked();
+});
 
 it("renders extracted and resolved entities section with approval controls in source details view", async () => {
   mockedApi.listKnowledgeSources.mockResolvedValue([
@@ -1853,6 +1862,8 @@ it("renders extracted and resolved entities section with approval controls in so
       ],
     },
   ]);
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:reference-media") });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
 
   renderPage(true, "/app/tenant-a/knowledge-base/sources");
   fireEvent.click(await screen.findByRole("button", { name: "View Visual Catalog 2026" }));
@@ -1861,8 +1872,20 @@ it("renders extracted and resolved entities section with approval controls in so
   expect(screen.getByText("Nordic Cloud Sofa")).toBeVisible();
   expect(screen.getByText("SKU: SOFA-NC-01")).toBeVisible();
   expect(screen.getByText("sofa_front.png")).toBeVisible();
-  expect(screen.getAllByRole("button", { name: "Approve" }).length).toBeGreaterThan(0);
-  expect(screen.getAllByRole("button", { name: "Reject" }).length).toBeGreaterThan(0);
+  expect(await screen.findByRole("img", { name: "Reference media: sofa_front.png" })).toHaveAttribute("src", "blob:reference-media");
+  expect(screen.getByText("Source page 1")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Approve entity" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Reject entity" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Approve media" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Reject media" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Approve entity" }));
+  await waitFor(() => expect(mockedApi.approveKnowledgeEntity).toHaveBeenCalledWith("tenant-a", "entity-1"));
+  fireEvent.click(screen.getByRole("button", { name: "Reject entity" }));
+  await waitFor(() => expect(mockedApi.rejectKnowledgeEntity).toHaveBeenCalledWith("tenant-a", "entity-1"));
+  fireEvent.click(screen.getByRole("button", { name: "Approve media" }));
+  await waitFor(() => expect(mockedApi.approveEntityMedia).toHaveBeenCalledWith("tenant-a", "entity-1", "media-1"));
+  fireEvent.click(screen.getByRole("button", { name: "Reject media" }));
+  await waitFor(() => expect(mockedApi.rejectEntityMedia).toHaveBeenCalledWith("tenant-a", "entity-1", "media-1"));
 });
 
 it("renders explicit empty entity state and re-index action when source has 0 entities", async () => {
@@ -1893,8 +1916,23 @@ it("renders explicit empty entity state and re-index action when source has 0 en
   fireEvent.click(await screen.findByRole("button", { name: "View Text Only Guide" }));
 
   expect(await screen.findByText("Extracted & Resolved Entities (0)")).toBeVisible();
-  expect(screen.getByText("No discrete entity candidates have been extracted yet for this document. You can re-index the source or upload visual items.")).toBeVisible();
+  expect(screen.getByText("No discrete entities were extracted from this source.")).toBeVisible();
   expect(screen.getByRole("button", { name: "Re-index source" })).toBeVisible();
 });
 
+it("keeps the entity section visible while its query loads and when it fails", async () => {
+  const source = { id: "source-loading", title: "Catalog", source_type: "DOCUMENT", processing_status: "READY", indexing_status: "READY", enabled: true, assistant_ids: [] };
+  mockedApi.listKnowledgeSources.mockResolvedValue([source]);
+  mockedApi.getKnowledgeSource.mockResolvedValue(source);
+  let rejectEntities!: (reason: Error) => void;
+  mockedApi.listSourceEntities.mockReturnValue(new Promise((_resolve, reject) => { rejectEntities = reject; }));
+
+  renderPage(true, "/app/tenant-a/knowledge-base/sources");
+  fireEvent.click(await screen.findByRole("button", { name: "View Catalog" }));
+  expect(await screen.findByRole("heading", { name: "Extracted & Resolved Entities" })).toBeVisible();
+  expect(screen.getByText("Loading entities...")).toBeVisible();
+
+  rejectEntities(new Error("Network unavailable"));
+  expect(await screen.findByText("Unable to load extracted entities.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
 });

@@ -366,5 +366,8 @@ test('SCENARIO D — REFRESH: Full page refresh does not duplicate proactive mes
 
 test('Proactive E2E Teardown: Close browser and mock server', async () => {
   if (browser) await browser.close();
-  if (server) await new Promise((resolve) => server.close(resolve));
+  if (server) await new Promise((resolve) => {
+    server.close(resolve);
+    server.closeAllConnections();
+  });
 });

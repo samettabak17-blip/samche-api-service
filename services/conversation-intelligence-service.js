@@ -508,7 +508,7 @@ export function evaluateSupportResolutionPlan({
       requiresHandoff: false,
       groundingSources: ['APPROVED_BUSINESS_POLICIES', 'SUPPORT_CONTACT_CHANNELS'],
       reason: 'PRIVATE_CUSTOMER_DATA_UNAVAILABLE_IN_SESSION',
-      guidance: 'Explain clearly that live customer order/account databases cannot be queried directly in this chat session for security. Provide verified standard fulfillment timelines, delivery cutoff rules, and guide the user to check their email tracking link or provide their order ID for assistance.',
+      guidance: 'Explain clearly that live customer order/account databases cannot be queried directly in this chat session for security. Provide verified standard fulfillment timelines and delivery cutoff rules, then guide the user to check their email tracking link or contact official support with their order ID.',
     };
   }
 
@@ -786,7 +786,7 @@ export function buildConversationIntelligencePromptSection(plan = null) {
     lines.push('CRITICAL CONTRACT (NO PRIVATE DATA FABRICATION):');
     lines.push('1. Do NOT invent order status, delivery progress, or tracking numbers. Clearly state that live order/account databases cannot be queried directly in this chat session for security/privacy.');
     lines.push('2. Explain the verified standard delivery timeframes and dispatch cutoffs from site policies.');
-    lines.push('3. Instruct the customer on the official next step (checking their confirmation email link or providing their order ID).');
+    lines.push('3. Instruct the customer on the official next step (checking their confirmation email link or contacting support with their order ID).');
   }
 
   lines.push('================================================================================');
@@ -818,4 +818,3 @@ export function sanitizeSupportResponse({ text = '', supportState = null, isExpl
 
   return cleaned.trim();
 }
-

@@ -182,8 +182,13 @@ export class BrowserCdp {
     } catch {}
     try {
       if (process.platform === 'win32' && this.proc?.pid) {
-        spawn('taskkill', ['/pid', String(this.proc.pid), '/T', '/F']);
-      } else {
+        const killer = spawn('taskkill', ['/pid', String(this.proc.pid), '/T', '/F'], { stdio: 'ignore' });
+        await new Promise((resolve) => {
+          killer.once('exit', resolve);
+          killer.once('error', resolve);
+        });
+      }
+      if (this.proc?.exitCode === null) {
         this.proc.kill();
       }
     } catch {}

@@ -3,6 +3,8 @@ const HUMAN_SUPPORT_PATTERNS = [
   /(?:^|\s)(?:müşteri|musteri|canlı|canli|gerçek|gercek)?\s*temsilci\w*(?:\s+(?:ile|yle|ne|ye|ine))?\s+(?:aktar\w*|bağla\w*|bagla\w*|görüş\w*|gorus\w*|konuş\w*|konus\w*|yönlendir\w*)/iu,
   /(?:^|\s)temsilci\w*\s+(?:bağlanmak|baglanmak|bağla\w*|bagla\w*|aktar\w*|görüş\w*|gorus\w*|istiyorum)/iu,
   /(?:^|\s)(?:live\s+agent|human\s+support|human\s+agent|human\s+representative|human\s+operator|real\s+person)(?:\s|[.,!?]|$)/iu,
+  /(?:^|\s)live\s+support(?:\s|[.,!?]|$)/iu,
+  /^(?:customer\s+support|müşteri\s+hizmetleri|musteri\s+hizmetleri)[.!?]?$/iu,
   /(?:^|\s)(?:speak|talk|chat)\s+(?:to|with)\s+(?:a\s+)?(?:human|live\s+agent|real\s+person|human\s+agent|live\s+person|human\s+representative|representative|agent|operator|person)(?:\s|[.,!?]|$)/iu,
   /(?:^|\s)(?:want|need|give\s+me|get)\s+(?:a\s+)?(?:human|live\s+agent|real\s+person|live\s+person|human\s+representative|human\s+operator)(?:\s|[.,!?]|$)/iu,
   /(?:^|\s)(?:connect|transfer|escalate)\s+(?:me\s+)?(?:to\s+)?(?:an?\s+)?(?:human|live\s+agent|real\s+person|human\s+representative|human\s+operator|agent|representative|operator|person|someone)(?:\s|[.,!?]|$)/iu,

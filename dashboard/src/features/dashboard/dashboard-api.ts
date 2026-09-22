@@ -234,6 +234,7 @@ export const tenantApi = {
     return apiClient.get<{ entities: KnowledgeEntity[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/entities?${params.toString()}`).then((v) => v.entities);
   },
   listSourceEntities: (tenantId: string, sourceId: string) => apiClient.get<{ entities: KnowledgeEntity[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/sources/${sourceId}/entities`).then((v) => v.entities),
+  getKnowledgeEntityMedia: (tenantId: string, entityId: string, mediaId: string) => apiClient.getBlob(`${tenantRoot(tenantId)}/knowledge-intelligence/entities/${entityId}/media/${mediaId}/content`),
   getKnowledgeEntity: (tenantId: string, entityId: string) => apiClient.get<{ entity: KnowledgeEntity }>(`${tenantRoot(tenantId)}/knowledge-intelligence/entities/${entityId}`).then((v) => v.entity),
   createKnowledgeEntity: (tenantId: string, body: Partial<KnowledgeEntity>) => apiClient.post<{ entity: KnowledgeEntity }>(`${tenantRoot(tenantId)}/knowledge-intelligence/entities`, body).then((v) => v.entity),
   updateKnowledgeEntity: (tenantId: string, entityId: string, body: Partial<KnowledgeEntity>) => apiClient.put<{ entity: KnowledgeEntity }>(`${tenantRoot(tenantId)}/knowledge-intelligence/entities/${entityId}`, body).then((v) => v.entity),

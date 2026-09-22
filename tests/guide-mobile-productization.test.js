@@ -208,11 +208,15 @@ for (const vp of mobileViewports) {
         navWidth: nav ? nav.getBoundingClientRect().width : 0,
         brandWidth: brand ? brand.getBoundingClientRect().width : 0,
         viewportWidth: window.innerWidth,
+        overflowElements: [...document.querySelectorAll('body *')]
+          .map((element) => ({ name: element.tagName + '.' + String(element.className || ''), right: Math.round(element.getBoundingClientRect().right), left: Math.round(element.getBoundingClientRect().left), width: Math.round(element.getBoundingClientRect().width), parent: String(element.parentElement?.className || ''), cssWidth: getComputedStyle(element).width }))
+          .filter((element) => element.right > window.innerWidth + 1)
+          .slice(0, 8),
       };
     })()`);
 
     assert.ok(metrics.docScrollWidth <= metrics.docClientWidth + 1, `doc scrollWidth (${metrics.docScrollWidth}) exceeds clientWidth (${metrics.docClientWidth}) at ${vp.name}`);
-    assert.ok(metrics.bodyScrollWidth <= metrics.bodyClientWidth + 1, `body scrollWidth (${metrics.bodyScrollWidth}) exceeds clientWidth (${metrics.bodyClientWidth}) at ${vp.name}`);
+    assert.ok(metrics.bodyScrollWidth <= metrics.bodyClientWidth + 1, `body scrollWidth (${metrics.bodyScrollWidth}) exceeds clientWidth (${metrics.bodyClientWidth}) at ${vp.name}; elements: ${JSON.stringify(metrics.overflowElements)}`);
     assert.ok(metrics.canvasWidth <= vp.width + 1, `canvasWidth (${metrics.canvasWidth}) exceeds viewport (${vp.width}) at ${vp.name}`);
     assert.ok(metrics.headerWidth <= vp.width + 1, `headerWidth (${metrics.headerWidth}) exceeds viewport (${vp.width}) at ${vp.name}`);
   });

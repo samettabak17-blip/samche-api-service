@@ -89,7 +89,8 @@ test('16-17. Clicking Send submits exactly once, creates history, and clears pen
   assert.match(jsSource, /async function submitMessage\(event\)/);
   assert.match(jsSource, /guideState\.assistant_draft = ''/);
   assert.match(jsSource, /guideState\.assistant_draft_origin = 'NONE'/);
-  assert.match(jsSource, /messages\.push\(\{ value, kind: 'user' \}\)/);
+  assert.match(jsSource, /if \(form\?\.dataset\?\.submitting\) return/);
+  assert.match(jsSource, /messages\.push\(\{ value: displayValue, kind: 'user' \}\)/);
 });
 
 test('18. Existing Assistant history remains intact when navigating', () => {

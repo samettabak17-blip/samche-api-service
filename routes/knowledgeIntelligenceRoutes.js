@@ -631,7 +631,7 @@ router.post('/:tenantId/knowledge-intelligence/entities/:entityId/media/:mediaId
   const tenantId = tenant(req, res);
   if (!tenantId || !isValidUUID(req.params.entityId) || !isValidUUID(req.params.mediaId)) return res.status(400).json({ error: 'Invalid ID' });
   try {
-    const media = await approveEntityMedia({ database: pool, tenantId, mediaId: req.params.mediaId });
+    const media = await approveEntityMedia({ database: pool, tenantId, entityId: req.params.entityId, mediaId: req.params.mediaId });
     return res.json({ media });
   } catch (error) {
     return safeError(res, error);
@@ -642,7 +642,7 @@ router.post('/:tenantId/knowledge-intelligence/entities/:entityId/media/:mediaId
   const tenantId = tenant(req, res);
   if (!tenantId || !isValidUUID(req.params.entityId) || !isValidUUID(req.params.mediaId)) return res.status(400).json({ error: 'Invalid ID' });
   try {
-    const media = await rejectEntityMedia({ database: pool, tenantId, mediaId: req.params.mediaId });
+    const media = await rejectEntityMedia({ database: pool, tenantId, entityId: req.params.entityId, mediaId: req.params.mediaId });
     return res.json({ media });
   } catch (error) {
     return safeError(res, error);
@@ -1156,4 +1156,3 @@ router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/configura
 });
 
 export default router;
-

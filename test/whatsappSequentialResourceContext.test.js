@@ -57,6 +57,7 @@ test('selects a recent same-conversation image as a vision part for a sequential
 
   assert.deepEqual(selected.resourceIds, ['resource-image']);
   assert.deepEqual(selected.parts[0], {
+    inlineData: { mimeType: 'image/png', data: Buffer.from('image-bytes').toString('base64') },
     inline_data: { mime_type: 'image/png', data: Buffer.from('image-bytes').toString('base64') },
   });
 });
