@@ -24,9 +24,34 @@ function detectImageMimeAndExtension(buf) {
 }
 
 
+const BOILERPLATE_LINE_REGEX = /^(?:page\s*\d+(?:\s*(?:of|\/|-)\s*\d+)?$|\d{1,4}$|copyright\b|©|all\s*rights\s*reserved|printed\s*in\b|published\s*by\b|https?:\/\/|www\.)/i;
+
+const SKU_REGEX = /(?:sku|code|ref|art(?:icle)?(?:\s*no)?|kod|model|item\s*no)[\s#:]+([A-Za-z0-9_.-]{2,32})/i;
+const DOTTED_ARTICLE_REGEX = /\b([0-9]{3}\.[0-9]{3}\.[0-9]{2})\b/;
+const NUMERIC_ARTICLE_REGEX = /\b([0-9]{8})\b/;
+const HYPHENATED_CODE_REGEX = /\b([A-Z0-9]{2,6}-[A-Z0-9]{2,8})\b/;
+
+const PRICE_REGEX = /(?:price|fiyat|fiyatı)[\s:]+([^\n]+)/i;
+const CURRENCY_INLINE_REGEX = /(?:[$€£¥]|AED|TL|TRY|USD|EUR|GBP)\s*[\d,.]+|\b[\d,.]+\s*(?:TL|TRY|AED|USD|EUR|GBP|USD)\b/i;
+
+const KEY_VALUE_ATTR_REGEX = /^([A-Za-zÇĞİÖŞÜçğıöşü\s_-]{2,32}):\s*(.+)$/i;
+
+function isHeadingLine(line) {
+  if (!line || line.length < 2 || line.length > 100) return false;
+  if (BOILERPLATE_LINE_REGEX.test(line)) return false;
+  if (KEY_VALUE_ATTR_REGEX.test(line)) return false;
+  if (PRICE_REGEX.test(line) || CURRENCY_INLINE_REGEX.test(line)) return false;
+  if (SKU_REGEX.test(line) || DOTTED_ARTICLE_REGEX.test(line) || NUMERIC_ARTICLE_REGEX.test(line) || HYPHENATED_CODE_REGEX.test(line)) return false;
+  if (/^(?:for\s+more|visit|contact|email|phone|terms|conditions)/i.test(line)) return false;
+  if (/^[A-Z0-9ÇĞİÖŞÜ\s&'.-]{2,60}$/.test(line) && /[A-ZÇĞİÖŞÜ]/.test(line)) return true;
+  if (/^[A-ZÇĞİÖŞÜ][a-zçğıöşü0-9]+(?:\s+[A-ZÇĞİÖŞÜ0-9][a-zçğıöşü0-9&'.-]*)*$/.test(line) && line.split(/\s+/).length <= 8) return true;
+  if (/^(?:item|product|ürün|ünite|concept|model|service|package|project|plan)[\s#:]+/i.test(line)) return true;
+  return false;
+}
+
 /**
  * Parses raw text lines on a PDF page to detect candidate entities,
- * attributes, codes, and descriptions.
+ * attributes, codes, and descriptions generically across open domains.
  */
 export function extractPageEntityCandidates(pageText, pageNumber) {
   const normalized = String(pageText ?? '')
@@ -36,16 +61,20 @@ export function extractPageEntityCandidates(pageText, pageNumber) {
 
   if (!normalized) return [];
 
-  const sections = normalized.split(/\n\s*\n+/).map((s) => s.trim()).filter(Boolean);
+  const rawSections = normalized.split(/\n\s*\n+/).map((s) => s.trim()).filter(Boolean);
   const blocks = [];
 
-  for (const section of sections) {
+  for (const section of rawSections) {
     const sectionLines = section.split('\n').map((l) => l.trim()).filter(Boolean);
     let currentBlock = [];
 
     for (const line of sectionLines) {
-      const isExplicitHeader = /^(?:item|product|ürün|ünite|concept)[\s#:]+/i.test(line);
-      if (isExplicitHeader && currentBlock.length > 0) {
+      if (BOILERPLATE_LINE_REGEX.test(line)) continue;
+
+      const isExplicitHeader = /^(?:item|product|ürün|ünite|concept|model|service|package)[\s#:]+/i.test(line);
+      const isAnchorHeading = isHeadingLine(line);
+
+      if ((isExplicitHeader || (isAnchorHeading && currentBlock.length >= 2)) && currentBlock.length > 0) {
         blocks.push(currentBlock);
         currentBlock = [line];
       } else {
@@ -55,12 +84,32 @@ export function extractPageEntityCandidates(pageText, pageNumber) {
     if (currentBlock.length > 0) blocks.push(currentBlock);
   }
 
+  if (blocks.length === 1 && blocks[0].length > 4) {
+    const singleBlock = blocks[0];
+    const subBlocks = [];
+    let curSub = [];
+
+    for (const line of singleBlock) {
+      if (isHeadingLine(line) && curSub.length >= 2) {
+        subBlocks.push(curSub);
+        curSub = [line];
+      } else {
+        curSub.push(line);
+      }
+    }
+    if (curSub.length > 0) subBlocks.push(curSub);
+    if (subBlocks.length > 1) {
+      blocks.length = 0;
+      blocks.push(...subBlocks);
+    }
+  }
+
   const candidates = [];
 
   for (const block of blocks) {
     if (!block.length) continue;
 
-    const validLines = block.filter((l) => !/^(?:page\s*\d+|\d+\s*\/\s*\d+|\d+|copyright|©|all\s*rights\s*reserved)/i.test(l));
+    const validLines = block.filter((l) => !BOILERPLATE_LINE_REGEX.test(l));
     if (!validLines.length) continue;
 
     let title = validLines[0];
@@ -71,38 +120,51 @@ export function extractPageEntityCandidates(pageText, pageNumber) {
     for (let i = 0; i < validLines.length; i++) {
       const line = validLines[i];
 
-      const skuMatch = /(?:sku|code|ref|art(?:icle)?(?:\s*no)?|kod|model)[\s#:]+([A-Za-z0-9_.-]{2,32})/i.exec(line)
-        || /\b([0-9]{3}\.[0-9]{3}\.[0-9]{2})\b/.exec(line);
+      const skuMatch = SKU_REGEX.exec(line)
+        || DOTTED_ARTICLE_REGEX.exec(line)
+        || NUMERIC_ARTICLE_REGEX.exec(line)
+        || HYPHENATED_CODE_REGEX.exec(line);
+
       if (skuMatch && !sku) {
-        sku = skuMatch[1].trim();
+        sku = (skuMatch[1] || skuMatch[0]).trim();
       }
 
-      const priceMatch = /(?:price|fiyat)[\s:]+([^\n]+)/i.exec(line)
-        || /(?:[$€£]|AED|TL|USD|EUR)\s*[\d,.]+|\b[\d,.]+\s*(?:TL|AED|USD|EUR)\b/i.exec(line);
+      const priceMatch = PRICE_REGEX.exec(line) || CURRENCY_INLINE_REGEX.exec(line);
       if (priceMatch && !attributes.price) {
-        attributes.price = priceMatch[0].trim();
+        attributes.price = (priceMatch[1] || priceMatch[0]).trim();
       }
 
-      const attrMatch = /^([A-Za-zÇĞİÖŞÜçğıöşü\s_-]{2,30}):\s*(.+)$/i.exec(line);
+      const attrMatch = KEY_VALUE_ATTR_REGEX.exec(line);
       if (attrMatch) {
         const key = attrMatch[1].trim().toLowerCase().replace(/\s+/g, '_');
         attributes[key] = attrMatch[2].trim();
-      } else if (i > 0 && !skuMatch) {
+      } else if (i > 0 && !skuMatch && (!priceMatch || priceMatch[0] !== line)) {
         descriptionLines.push(line);
       }
     }
 
-    const cleanTitle = title.replace(/^(?:item|product|ürün|model|ünite)[\s#:]+/i, '').trim();
+    const cleanTitle = title
+      .replace(/^(?:item|product|ürün|model|ünite|concept|package|service)[\s#:]+/i, '')
+      .trim();
 
     if (cleanTitle && cleanTitle.length >= 2) {
+      let confidence = 0.70;
+      if (sku && attributes.price) confidence = 0.95;
+      else if (sku || attributes.price) confidence = 0.90;
+      else if (Object.keys(attributes).length > 0) confidence = 0.85;
+      else if (isHeadingLine(title)) confidence = 0.80;
+
       candidates.push({
         name: cleanTitle.slice(0, 255),
-        externalCode: sku,
+        externalCode: sku ? sku.slice(0, 128) : null,
         description: descriptionLines.join(' ').slice(0, 4000) || null,
         attributes,
         textualEvidence: validLines.join('\n').slice(0, 4000),
+        confidence,
         pageNumber,
       });
+
+      if (candidates.length >= 50) break;
     }
   }
 
@@ -130,7 +192,14 @@ export async function processPdfCatalogIngestion({
   contentHash,
   extractPdfText = null,
   extractPdfImages = null,
+  logger = console,
 }) {
+  logger?.info?.('CATALOG_ENTITY_EXTRACTION_STARTED', JSON.stringify({
+    tenant_id: tenantId,
+    source_id: sourceId,
+    bytes_length: bytes?.length ?? 0,
+  }));
+
   let fullText = '';
   let pages = [];
 
@@ -166,6 +235,10 @@ export async function processPdfCatalogIngestion({
 
   // 2. Extract embedded or rendered images from PDF
   let extractedImages = [];
+  let mediaCandidatesCount = 0;
+  let mediaSkippedCount = 0;
+  let pagesPartialCount = 0;
+
   try {
     if (typeof extractPdfImages === 'function') {
       extractedImages = await extractPdfImages(bytes);
@@ -185,6 +258,7 @@ export async function processPdfCatalogIngestion({
               const pageNum = p.pageNumber || 1;
               if (Array.isArray(p.images)) {
                 for (const img of p.images) {
+                  mediaCandidatesCount++;
                   const imgData = img.data ? Buffer.from(img.data) : null;
                   if (imgData && imgData.length > 500 && (img.width >= 48 || !img.width) && (img.height >= 48 || !img.height)) {
                     const format = detectImageMimeAndExtension(imgData);
@@ -197,8 +271,13 @@ export async function processPdfCatalogIngestion({
                         width: img.width,
                         height: img.height,
                         originalFilename: img.name || `pdf_p${pageNum}_img_${extractedImages.length + 1}.${format.extension}`,
+                        isEmbedded: true,
                       });
+                    } else {
+                      mediaSkippedCount++;
                     }
+                  } else {
+                    mediaSkippedCount++;
                   }
                 }
               }
@@ -219,6 +298,7 @@ export async function processPdfCatalogIngestion({
               ).catch(() => null);
 
               if (screenshotResult && Array.isArray(screenshotResult.pages) && screenshotResult.pages[0]?.data) {
+                mediaCandidatesCount++;
                 const pData = screenshotResult.pages[0];
                 const rawData = Buffer.from(pData.data);
                 const format = detectImageMimeAndExtension(rawData);
@@ -231,10 +311,14 @@ export async function processPdfCatalogIngestion({
                     width: pData.width,
                     height: pData.height,
                     originalFilename: `pdf_page_${pageNum}_visual.${format.extension}`,
+                    isEmbedded: false,
                   });
+                } else {
+                  mediaSkippedCount++;
                 }
               }
             } catch (pageShotErr) {
+              pagesPartialCount++;
               console.warn(`PDF_PAGE_${pageNum}_SCREENSHOT_SKIPPED:`, pageShotErr?.message || pageShotErr);
             }
           }
@@ -257,6 +341,7 @@ export async function processPdfCatalogIngestion({
 
   let totalEntities = 0;
   let totalMedia = 0;
+  let totalCandidatesCount = 0;
 
   if (database && typeof database.query === 'function' && sourceId && tenantId) {
     try {
@@ -274,6 +359,7 @@ export async function processPdfCatalogIngestion({
   for (const page of pages) {
     const pageNum = page.pageNumber || 1;
     const candidates = extractPageEntityCandidates(page.text, pageNum);
+    totalCandidatesCount += candidates.length;
     const pageImages = imagesByPage.get(pageNum) || [];
 
     if (!candidates.length && pageImages.length > 0) {
@@ -307,15 +393,16 @@ export async function processPdfCatalogIngestion({
                 originalname: img.originalFilename,
                 size: img.buffer.length,
               },
-              mediaRole: 'PRIMARY_REFERENCE',
+              mediaRole: img.isEmbedded ? 'PRIMARY_REFERENCE' : 'CONTEXT_VIEW',
               pageNumber: pageNum,
-              confidence: 0.90,
+              confidence: img.isEmbedded ? 0.90 : 0.60,
               approvalStatus: 'PENDING',
               isRuntimeEligible: false,
-              provenance: { pageNumber: pageNum, sourceId, width: img.width, height: img.height },
+              provenance: { pageNumber: pageNum, sourceId, width: img.width, height: img.height, isEmbedded: Boolean(img.isEmbedded) },
             });
             totalMedia++;
           } catch (mediaErr) {
+            mediaSkippedCount++;
             console.warn('PDF_MEDIA_PERSISTENCE_SKIPPED:', mediaErr?.message || mediaErr);
           }
         }
@@ -336,7 +423,7 @@ export async function processPdfCatalogIngestion({
             description: candidate.description,
             attributes: candidate.attributes,
             textualEvidence: candidate.textualEvidence,
-            confidence: 0.90,
+            confidence: candidate.confidence ?? 0.90,
             approvalStatus: 'PENDING',
             isRuntimeEligible: false,
             provenance: { pageNumber: pageNum, sourceId, method: 'PDF_CATALOG_EXTRACTION' },
@@ -345,6 +432,7 @@ export async function processPdfCatalogIngestion({
 
           if (pageImages.length === 1 && candidates.length === 1) {
             try {
+              const singleImg = pageImages[0];
               await addEntityMedia({
                 database,
                 storage,
@@ -352,20 +440,21 @@ export async function processPdfCatalogIngestion({
                 entityId: entity.id,
                 sourceId,
                 file: {
-                  buffer: pageImages[0].buffer,
-                  mimetype: pageImages[0].mimeType,
-                  originalname: pageImages[0].originalFilename,
-                  size: pageImages[0].buffer.length,
+                  buffer: singleImg.buffer,
+                  mimetype: singleImg.mimeType,
+                  originalname: singleImg.originalFilename,
+                  size: singleImg.buffer.length,
                 },
-                mediaRole: 'PRIMARY_REFERENCE',
+                mediaRole: singleImg.isEmbedded ? 'PRIMARY_REFERENCE' : 'CONTEXT_VIEW',
                 pageNumber: pageNum,
-                confidence: 0.95,
+                confidence: singleImg.isEmbedded ? 0.95 : 0.60,
                 approvalStatus: 'PENDING',
                 isRuntimeEligible: false,
-                provenance: { pageNumber: pageNum, sourceId, width: pageImages[0].width, height: pageImages[0].height },
+                provenance: { pageNumber: pageNum, sourceId, width: singleImg.width, height: singleImg.height, isEmbedded: Boolean(singleImg.isEmbedded) },
               });
               totalMedia++;
             } catch (mediaErr) {
+              mediaSkippedCount++;
               console.warn('PDF_MEDIA_PERSISTENCE_SKIPPED:', mediaErr?.message || mediaErr);
             }
           } else if (pageImages.length > 0) {
@@ -383,15 +472,16 @@ export async function processPdfCatalogIngestion({
                     originalname: img.originalFilename,
                     size: img.buffer.length,
                   },
-                  mediaRole: candidates.length === 1 ? 'PRIMARY_REFERENCE' : 'UNCERTAIN_ASSOCIATION',
+                  mediaRole: img.isEmbedded ? (candidates.length === 1 ? 'PRIMARY_REFERENCE' : 'SECONDARY_REFERENCE') : 'UNCERTAIN_ASSOCIATION',
                   pageNumber: pageNum,
-                  confidence: candidates.length === 1 ? 0.90 : 0.60,
+                  confidence: img.isEmbedded ? (candidates.length === 1 ? 0.90 : 0.70) : 0.55,
                   approvalStatus: 'PENDING',
                   isRuntimeEligible: false,
-                  provenance: { pageNumber: pageNum, sourceId, uncertain: candidates.length > 1 },
+                  provenance: { pageNumber: pageNum, sourceId, uncertain: candidates.length > 1, isEmbedded: Boolean(img.isEmbedded) },
                 });
                 totalMedia++;
               } catch (mediaErr) {
+                mediaSkippedCount++;
                 console.warn('PDF_MEDIA_PERSISTENCE_SKIPPED:', mediaErr?.message || mediaErr);
               }
             }
@@ -403,11 +493,23 @@ export async function processPdfCatalogIngestion({
     }
   }
 
+  logger?.info?.('CATALOG_ENTITY_EXTRACTION_COMPLETED', JSON.stringify({
+    tenant_id: tenantId,
+    source_id: sourceId,
+    entity_candidates: totalCandidatesCount,
+    entities_persisted: totalEntities,
+    media_candidates: mediaCandidatesCount,
+    media_persisted: totalMedia,
+    media_skipped: mediaSkippedCount,
+    pages_processed: pages.length,
+    pages_partial: pagesPartialCount,
+  }));
+
   return {
     extractedText: fullText,
     entityCount: totalEntities,
     mediaCount: totalMedia,
     method: 'PDF_CATALOG_EXTRACTION',
+    pageCount: pages.length,
   };
-
 }

@@ -205,6 +205,13 @@ function createMockDatabase() {
       }
 
 
+      if (normalizedSql.includes('FROM knowledge_entity_media') && normalizedSql.includes('WHERE id = $1 AND tenant_id = $2')) {
+        const [mediaId, tenantId] = params;
+        const media = entityMedia.find((m) => m.id === mediaId && m.tenant_id === tenantId);
+        if (!media) return { rowCount: 0, rows: [] };
+        return { rowCount: 1, rows: [media] };
+      }
+
       if (normalizedSql.includes('FROM knowledge_entities e') && normalizedSql.includes('WHERE e.id = $1 AND e.tenant_id = $2')) {
         const [entityId, tenantId] = params;
         const entity = entities.find((e) => e.id === entityId && e.tenant_id === tenantId);
@@ -1192,6 +1199,74 @@ test('42: Bounded per-page visual extraction succeeds and isolates single-page r
   assert.equal(entities[1].name, 'LACK Side Table');
   assert.equal(entities[1].media.length, 0);
 });
+
+test('43: Open-domain entities without "product:" or "item:" prefixes are extracted cleanly with SKUs, prices and attributes', () => {
+  const catalogPageText = `BILLY
+Art. no. 002.638.50
+Price: $79.00
+Dimensions: 80x28x202 cm
+Color: White
+A simple unit can be enough storage for a limited space or the foundation for a larger storage solution.
+
+POÄNG
+104.567.89
+1.499 TL
+Material: Layer-glued bent birch frame
+Classic armchair with comfortable resilient cushion.`;
+
+  const candidates = extractPageEntityCandidates(catalogPageText, 1);
+  assert.equal(candidates.length, 2);
+
+  assert.equal(candidates[0].name, 'BILLY');
+  assert.equal(candidates[0].externalCode, '002.638.50');
+  assert.equal(candidates[0].attributes.price, '$79.00');
+  assert.equal(candidates[0].attributes.dimensions, '80x28x202 cm');
+  assert.equal(candidates[0].attributes.color, 'White');
+  assert.ok(candidates[0].description.includes('simple unit can be enough'));
+
+  assert.equal(candidates[1].name, 'POÄNG');
+  assert.equal(candidates[1].externalCode, '104.567.89');
+  assert.equal(candidates[1].attributes.price, '1.499 TL');
+  assert.equal(candidates[1].attributes.material, 'Layer-glued bent birch frame');
+  assert.ok(candidates[1].description.includes('Classic armchair'));
+});
+
+test('44: getEntityMedia retrieves specific media record with tenant isolation', async () => {
+  const database = createMockDatabase();
+  const storage = createMockStorage();
+
+  const entity = await createKnowledgeEntity({
+    database,
+    tenantId: tenantA,
+    name: 'Test Desk',
+  });
+
+  const media = await addEntityMedia({
+    database,
+    storage,
+    tenantId: tenantA,
+    entityId: entity.id,
+    file: {
+      buffer: SAMPLE_PNG,
+      mimetype: 'image/png',
+      originalname: 'desk.png',
+      size: SAMPLE_PNG.length,
+    },
+    mediaRole: 'PRIMARY_REFERENCE',
+  });
+
+  const { getEntityMedia } = await import('../services/knowledge-entity-service.js');
+  const fetched = await getEntityMedia({ database, tenantId: tenantA, mediaId: media.id });
+  assert.equal(fetched.id, media.id);
+  assert.equal(fetched.mime_type, 'image/png');
+
+  // Tenant B cannot access Tenant A media
+  await assert.rejects(
+    getEntityMedia({ database, tenantId: tenantB, mediaId: media.id }),
+    (err) => err instanceof KnowledgeEntityError && err.code === 'KNOWLEDGE_MEDIA_NOT_FOUND'
+  );
+});
+
 
 
 

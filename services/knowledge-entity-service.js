@@ -411,6 +411,27 @@ export async function addEntityMedia({
   return result.rows[0];
 }
 
+export async function getEntityMedia({ database, tenantId, mediaId }) {
+  requireUuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
+  requireUuid(mediaId, 'KNOWLEDGE_MEDIA_INVALID');
+
+  const result = await database.query(
+    `SELECT id, tenant_id, entity_id, source_id, media_type, mime_type, storage_key,
+            original_filename, file_size_bytes, content_hash, media_role, page_number,
+            bounding_box, approval_status, is_runtime_eligible, confidence, provenance,
+            created_at, updated_at
+       FROM knowledge_entity_media
+      WHERE id = $1 AND tenant_id = $2`,
+    [mediaId, tenantId]
+  );
+
+  if (!result.rowCount) {
+    throw new KnowledgeEntityError('KNOWLEDGE_MEDIA_NOT_FOUND', 'Entity media was not found');
+  }
+
+  return result.rows[0];
+}
+
 export async function approveEntityMedia({ database, tenantId, mediaId }) {
   requireUuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
   requireUuid(mediaId, 'KNOWLEDGE_MEDIA_INVALID');

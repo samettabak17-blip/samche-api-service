@@ -2175,28 +2175,37 @@ export function KnowledgeIntelligencePage() {
                                 />
                               ) : !(sourceEntities.data ?? []).length ? (
                                 <p className="mt-3 text-xs text-stone-400">
-                                  No discrete entity candidates have been extracted yet for this document. You can re-index the source or upload visual items.
+                                  No discrete entities were extracted from this source. You can re-index the source or upload visual items.
                                 </p>
                               ) : (
                                 <div className="mt-3 divide-y divide-line/60">
                                   {sourceEntities.data.map((entity) => (
                                     <div key={entity.id} className="py-3 first:pt-0 last:pb-0">
                                       <div className="flex flex-wrap items-start justify-between gap-2">
-                                        <div>
-                                          <div className="flex items-center gap-2">
+                                        <div className="max-w-2xl">
+                                          <div className="flex flex-wrap items-center gap-2">
                                             <strong className="text-sm text-ink">{entity.name}</strong>
                                             <span className="rounded bg-stone-700/60 px-1.5 py-0.5 text-[10px] uppercase text-stone-300">{entity.entity_type}</span>
                                             {entity.external_code && (
-                                              <span className="rounded bg-brand/20 px-1.5 py-0.5 text-[10px] text-brand">SKU: {entity.external_code}</span>
+                                              <span className="rounded bg-brand/20 px-1.5 py-0.5 text-[10px] font-mono text-brand">SKU: {entity.external_code}</span>
                                             )}
                                           </div>
                                           <p className="mt-1 text-xs text-stone-400">
                                             Status: <span className={entity.approval_status === "APPROVED" ? "text-emerald-300 font-medium" : entity.approval_status === "REJECTED" ? "text-red-300" : "text-amber-300"}>{entity.approval_status}</span>
-                                            {entity.is_runtime_eligible ? " · RUNTIME ACTIVE" : " · NOT RUNTIME ELIGIBLE"}
+                                            {entity.is_runtime_eligible ? " · ACTIVE RUNTIME" : " · NOT RUNTIME ELIGIBLE"}
                                             {typeof entity.confidence === "number" ? ` · ${Math.round(entity.confidence * 100)}% confidence` : ""}
                                           </p>
                                           {entity.description && (
                                             <p className="mt-1 text-xs text-stone-300 line-clamp-2">{entity.description}</p>
+                                          )}
+                                          {entity.attributes && typeof entity.attributes === "object" && Object.keys(entity.attributes).length > 0 && (
+                                            <div className="mt-2 flex flex-wrap gap-1.5">
+                                              {Object.entries(entity.attributes).map(([k, v]) => (
+                                                <span key={k} className="rounded border border-line bg-stone-800/80 px-2 py-0.5 text-[10px] text-stone-300">
+                                                  <span className="text-stone-400 uppercase">{k.replace(/_/g, " ")}:</span> {String(v)}
+                                                </span>
+                                              ))}
+                                            </div>
                                           )}
                                         </div>
                                         {canManage && (

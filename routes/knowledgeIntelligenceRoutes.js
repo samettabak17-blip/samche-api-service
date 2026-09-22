@@ -23,6 +23,7 @@ import {
   approveKnowledgeEntity,
   rejectKnowledgeEntity,
   addEntityMedia,
+  getEntityMedia,
   approveEntityMedia,
   rejectEntityMedia,
 } from '../services/knowledge-entity-service.js';
@@ -643,6 +644,30 @@ router.post('/:tenantId/knowledge-intelligence/entities/:entityId/media/:mediaId
   try {
     const media = await rejectEntityMedia({ database: pool, tenantId, mediaId: req.params.mediaId });
     return res.json({ media });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.get('/:tenantId/knowledge-intelligence/entities/:entityId/media/:mediaId/content', requireTenantAccess, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId || !isValidUUID(req.params.entityId) || !isValidUUID(req.params.mediaId)) return res.status(400).json({ error: 'Invalid ID' });
+  try {
+    const media = await getEntityMedia({ database: pool, tenantId, mediaId: req.params.mediaId });
+    if (media.entity_id !== req.params.entityId) return res.status(404).json({ error: 'Media not found for entity' });
+    const storage = createConversationResourceStorage();
+    const stream = await storage.get({ key: media.storage_key });
+    res.set({
+      'Content-Type': media.mime_type,
+      'Content-Length': media.file_size_bytes ? String(media.file_size_bytes) : undefined,
+      'Cache-Control': 'private, max-age=3600',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    stream.on('error', () => {
+      if (!res.headersSent) res.sendStatus(404);
+      else res.end();
+    });
+    return stream.pipe(res);
   } catch (error) {
     return safeError(res, error);
   }

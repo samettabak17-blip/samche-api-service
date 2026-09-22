@@ -7,6 +7,8 @@
   "scripts": {
     "start": "node scripts/migrate.js && node app.js",
     "dev": "nodemon app.js",
+    "build": "cd dashboard && npm install && npm run build",
+    "build:dashboard": "cd dashboard && npm install && npm run build",
     "migrate": "node scripts/migrate.js",
     "bootstrap-owner": "node scripts/bootstrap_owner.js",
     "test:fresh-tenant-golden-path": "node scripts/run-fresh-tenant-golden-path.js"
