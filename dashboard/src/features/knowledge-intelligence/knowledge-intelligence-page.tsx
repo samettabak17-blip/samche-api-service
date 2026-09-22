@@ -2136,10 +2136,38 @@ export function KnowledgeIntelligencePage() {
                                   : "Assign assistant"}
                               </DashboardButton>
                             </form>
-                            {sourceEntities.data && sourceEntities.data.length > 0 && (
-                              <div className="mt-4 rounded-xl border border-line bg-elevated p-4">
-                                <h3 className="text-sm font-semibold text-white">Extracted & Resolved Entities ({sourceEntities.data.length})</h3>
-                                <p className="mt-1 text-xs text-stone-400">Review canonical entities and reference media before runtime retrieval.</p>
+                            <div className="mt-4 rounded-xl border border-line bg-elevated p-4">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                  <h3 className="text-sm font-semibold text-white">
+                                    Extracted &amp; Resolved Entities ({sourceEntities.data ? sourceEntities.data.length : (selectedSource.data.entity_count ?? 0)})
+                                  </h3>
+                                  <p className="mt-1 text-xs text-stone-400">
+                                    Review canonical entities and reference media before runtime retrieval.
+                                  </p>
+                                </div>
+                                {canManage && selectedSource.data.enabled && (
+                                  <DashboardButton
+                                    variant="secondary"
+                                    onClick={() => reindexSource.mutate()}
+                                    disabled={reindexSource.isPending}
+                                  >
+                                    {reindexSource.isPending ? "Re-indexing…" : "Re-index source"}
+                                  </DashboardButton>
+                                )}
+                              </div>
+                              {sourceEntities.isLoading ? (
+                                <SkeletonBlock className="mt-3 h-20" />
+                              ) : sourceEntities.error ? (
+                                <QueryErrorState
+                                  error={sourceEntities.error}
+                                  onRetry={() => sourceEntities.refetch()}
+                                />
+                              ) : !(sourceEntities.data ?? []).length ? (
+                                <p className="mt-3 text-xs text-stone-400">
+                                  No discrete entity candidates have been extracted yet for this document. You can re-index the source or upload visual items.
+                                </p>
+                              ) : (
                                 <div className="mt-3 divide-y divide-line/60">
                                   {sourceEntities.data.map((entity) => (
                                     <div key={entity.id} className="py-3 first:pt-0 last:pb-0">
@@ -2226,8 +2254,8 @@ export function KnowledgeIntelligencePage() {
                                     </div>
                                   ))}
                                 </div>
-                              </div>
-                            )}
+                              )}
+                            </div>
 
                           </>
                         )

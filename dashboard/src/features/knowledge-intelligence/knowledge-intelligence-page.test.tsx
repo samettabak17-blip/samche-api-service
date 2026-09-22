@@ -1798,4 +1798,103 @@ it("identifies canonical Business Profile sources by fact, source id, and proven
   fireEvent.click(screen.getByRole("checkbox", { name: "BLUE DUNE EVENT MANAGEMENT LLC.pdf" }));
   expect(screen.getByRole("checkbox", { name: /Source 4973d676/ })).toBeChecked();
   expect(screen.getByRole("checkbox", { name: "BLUE DUNE EVENT MANAGEMENT LLC.pdf" })).toBeChecked();
+
+it("renders extracted and resolved entities section with approval controls in source details view", async () => {
+  mockedApi.listKnowledgeSources.mockResolvedValue([
+    {
+      id: "catalog-source-1",
+      title: "Visual Catalog 2026",
+      source_type: "DOCUMENT",
+      processing_status: "READY",
+      indexing_status: "READY",
+      entity_count: 1,
+      entity_media_count: 1,
+      enabled: true,
+    },
+  ]);
+  mockedApi.getKnowledgeSource.mockResolvedValue({
+    id: "catalog-source-1",
+    title: "Visual Catalog 2026",
+    source_type: "DOCUMENT",
+    processing_status: "READY",
+    indexing_status: "READY",
+    entity_count: 1,
+    entity_media_count: 1,
+    enabled: true,
+    assistant_ids: [],
+  });
+  mockedApi.listSourceEntities.mockResolvedValue([
+    {
+      id: "entity-1",
+      tenant_id: "tenant-a",
+      source_id: "catalog-source-1",
+      entity_type: "FURNITURE",
+      name: "Nordic Cloud Sofa",
+      external_code: "SOFA-NC-01",
+      description: "Comfortable modular sofa in boucle fabric",
+      attributes: { dimensions: "220x95cm", color: "Beige" },
+      confidence: 0.95,
+      approval_status: "PENDING",
+      is_runtime_eligible: false,
+      provenance: { pageNumber: 1 },
+      media: [
+        {
+          id: "media-1",
+          media_type: "IMAGE",
+          mime_type: "image/png",
+          storage_key: "knowledge/tenant-a/catalog-source-1/img1.png",
+          original_filename: "sofa_front.png",
+          media_role: "PRIMARY_REFERENCE",
+          page_number: 1,
+          approval_status: "PENDING",
+          is_runtime_eligible: false,
+          confidence: 0.95,
+        },
+      ],
+    },
+  ]);
+
+  renderPage(true, "/app/tenant-a/knowledge-base/sources");
+  fireEvent.click(await screen.findByRole("button", { name: "View Visual Catalog 2026" }));
+
+  expect(await screen.findByText("Extracted & Resolved Entities (1)")).toBeVisible();
+  expect(screen.getByText("Nordic Cloud Sofa")).toBeVisible();
+  expect(screen.getByText("SKU: SOFA-NC-01")).toBeVisible();
+  expect(screen.getByText("sofa_front.png")).toBeVisible();
+  expect(screen.getAllByRole("button", { name: "Approve" }).length).toBeGreaterThan(0);
+  expect(screen.getAllByRole("button", { name: "Reject" }).length).toBeGreaterThan(0);
+});
+
+it("renders explicit empty entity state and re-index action when source has 0 entities", async () => {
+  mockedApi.listKnowledgeSources.mockResolvedValue([
+    {
+      id: "doc-source-empty",
+      title: "Text Only Guide",
+      source_type: "DOCUMENT",
+      processing_status: "READY",
+      indexing_status: "READY",
+      entity_count: 0,
+      enabled: true,
+    },
+  ]);
+  mockedApi.getKnowledgeSource.mockResolvedValue({
+    id: "doc-source-empty",
+    title: "Text Only Guide",
+    source_type: "DOCUMENT",
+    processing_status: "READY",
+    indexing_status: "READY",
+    entity_count: 0,
+    enabled: true,
+    assistant_ids: [],
+  });
+  mockedApi.listSourceEntities.mockResolvedValue([]);
+
+  renderPage(true, "/app/tenant-a/knowledge-base/sources");
+  fireEvent.click(await screen.findByRole("button", { name: "View Text Only Guide" }));
+
+  expect(await screen.findByText("Extracted & Resolved Entities (0)")).toBeVisible();
+  expect(screen.getByText("No discrete entity candidates have been extracted yet for this document. You can re-index the source or upload visual items.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Re-index source" })).toBeVisible();
+});
+
 });

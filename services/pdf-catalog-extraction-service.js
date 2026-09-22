@@ -22,41 +22,51 @@ export function extractPageEntityCandidates(pageText, pageNumber) {
 
   if (!normalized) return [];
 
-  const lines = normalized.split('\n').map((l) => l.trim()).filter(Boolean);
-  if (!lines.length) return [];
-
-  // Group lines into entity blocks based on headings, SKUs, or blank lines
+  const sections = normalized.split(/\n\s*\n+/).map((s) => s.trim()).filter(Boolean);
   const blocks = [];
-  let currentBlock = [];
 
-  for (const line of lines) {
-    const isNewEntityHeader = /^(?:item|product|ünite|ürün|parça|concept)[\s#:]+/i.test(line) ||
-      (currentBlock.length > 0 && /^(?:item|product|ünite|ürün)[\s#:]+/i.test(line));
+  for (const section of sections) {
+    const sectionLines = section.split('\n').map((l) => l.trim()).filter(Boolean);
+    let currentBlock = [];
 
-    if (isNewEntityHeader && currentBlock.length > 0) {
-      blocks.push(currentBlock);
-      currentBlock = [line];
-    } else {
-      currentBlock.push(line);
+    for (const line of sectionLines) {
+      const isExplicitHeader = /^(?:item|product|ürün|ünite|concept)[\s#:]+/i.test(line);
+      if (isExplicitHeader && currentBlock.length > 0) {
+        blocks.push(currentBlock);
+        currentBlock = [line];
+      } else {
+        currentBlock.push(line);
+      }
     }
+    if (currentBlock.length > 0) blocks.push(currentBlock);
   }
-  if (currentBlock.length > 0) blocks.push(currentBlock);
 
   const candidates = [];
 
   for (const block of blocks) {
     if (!block.length) continue;
 
-    let title = block[0];
+    const validLines = block.filter((l) => !/^(?:page\s*\d+|\d+\s*\/\s*\d+|\d+|copyright|©|all\s*rights\s*reserved)/i.test(l));
+    if (!validLines.length) continue;
+
+    let title = validLines[0];
     let sku = null;
     const attributes = {};
     const descriptionLines = [];
 
-    for (let i = 0; i < block.length; i++) {
-      const line = block[i];
-      const skuMatch = /(?:sku|code|ref|art|kod|model)[\s#:]+([A-Za-z0-9_-]{2,32})/i.exec(line);
+    for (let i = 0; i < validLines.length; i++) {
+      const line = validLines[i];
+
+      const skuMatch = /(?:sku|code|ref|art(?:icle)?(?:\s*no)?|kod|model)[\s#:]+([A-Za-z0-9_.-]{2,32})/i.exec(line)
+        || /\b([0-9]{3}\.[0-9]{3}\.[0-9]{2})\b/.exec(line);
       if (skuMatch && !sku) {
         sku = skuMatch[1].trim();
+      }
+
+      const priceMatch = /(?:price|fiyat)[\s:]+([^\n]+)/i.exec(line)
+        || /(?:[$€£]|AED|TL|USD|EUR)\s*[\d,.]+|\b[\d,.]+\s*(?:TL|AED|USD|EUR)\b/i.exec(line);
+      if (priceMatch && !attributes.price) {
+        attributes.price = priceMatch[0].trim();
       }
 
       const attrMatch = /^([A-Za-zÇĞİÖŞÜçğıöşü\s_-]{2,30}):\s*(.+)$/i.exec(line);
@@ -68,17 +78,18 @@ export function extractPageEntityCandidates(pageText, pageNumber) {
       }
     }
 
-    // Clean up title if it contains SKU or label prefixes
-    const cleanTitle = title.replace(/^(?:item|product|ürün|model|ünite)[\s#:]+/i, '').trim() || `Entity Page ${pageNumber}`;
+    const cleanTitle = title.replace(/^(?:item|product|ürün|model|ünite)[\s#:]+/i, '').trim();
 
-    candidates.push({
-      name: cleanTitle.slice(0, 255),
-      externalCode: sku,
-      description: descriptionLines.join(' ').slice(0, 4000) || null,
-      attributes,
-      textualEvidence: block.join('\n').slice(0, 4000),
-      pageNumber,
-    });
+    if (cleanTitle && cleanTitle.length >= 2) {
+      candidates.push({
+        name: cleanTitle.slice(0, 255),
+        externalCode: sku,
+        description: descriptionLines.join(' ').slice(0, 4000) || null,
+        attributes,
+        textualEvidence: validLines.join('\n').slice(0, 4000),
+        pageNumber,
+      });
+    }
   }
 
   return candidates;
@@ -151,9 +162,10 @@ export async function processPdfCatalogIngestion({
         if (typeof parser.getImage === 'function') {
           const imgResult = await withTimeout(
             parser.getImage({ imageBuffer: true, imageThreshold: 48 }),
-            10000,
+            6000,
             'IMAGE'
-          );
+          ).catch(() => null);
+
           if (imgResult && Array.isArray(imgResult.pages)) {
             for (const p of imgResult.pages) {
               const pageNum = p.pageNumber || 1;
@@ -167,10 +179,36 @@ export async function processPdfCatalogIngestion({
                       mimeType: img.kind === 'jpeg' ? 'image/jpeg' : (img.kind === 'webp' ? 'image/webp' : 'image/png'),
                       width: img.width,
                       height: img.height,
-                      originalFilename: img.name || `pdf_p${pageNum}_img.png`,
+                      originalFilename: img.name || `pdf_p${pageNum}_img_${extractedImages.length + 1}.png`,
                     });
                   }
                 }
+              }
+            }
+          }
+        }
+
+        // If embedded images extraction returned 0 images, extract rendered page screenshots
+        if (extractedImages.length === 0 && typeof parser.getScreenshot === 'function') {
+          const screenshotResult = await withTimeout(
+            parser.getScreenshot({ imageBuffer: true, scale: 1.0 }),
+            10000,
+            'PAGE_SCREENSHOTS'
+          ).catch(() => null);
+
+          if (screenshotResult && Array.isArray(screenshotResult.pages)) {
+            for (const p of screenshotResult.pages) {
+              const pageNum = p.pageNumber || 1;
+              const imgData = p.data ? Buffer.from(p.data) : null;
+              if (imgData && imgData.length > 500) {
+                extractedImages.push({
+                  pageNumber: pageNum,
+                  buffer: imgData,
+                  mimeType: 'image/png',
+                  width: p.width,
+                  height: p.height,
+                  originalFilename: `pdf_page_${pageNum}_visual.png`,
+                });
               }
             }
           }
