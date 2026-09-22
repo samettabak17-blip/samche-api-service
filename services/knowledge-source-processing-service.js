@@ -37,6 +37,48 @@ export async function streamToBuffer(body) {
   return Buffer.concat(chunks);
 }
 
+export async function recoverStaleKnowledgeProcessingJobs(database) {
+  if (!database || typeof database.query !== 'function') {
+    throw new KnowledgeSourceProcessingError('KNOWLEDGE_DATABASE_UNAVAILABLE', 'Knowledge database is unavailable');
+  }
+  const result = await database.query(
+    `UPDATE knowledge_processing_jobs
+        SET status = CASE WHEN attempts >= 3 THEN 'FAILED' ELSE 'PENDING' END,
+            locked_at = NULL,
+            locked_until = NULL,
+            available_at = CASE WHEN attempts >= 3 THEN available_at ELSE CURRENT_TIMESTAMP END,
+            last_error_code = 'KNOWLEDGE_PROCESSING_LEASE_EXPIRED',
+            metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{stale_recovery_count}', to_jsonb(COALESCE((metadata->>'stale_recovery_count')::integer, 0) + 1), TRUE),
+            updated_at = CURRENT_TIMESTAMP
+      WHERE status = 'PROCESSING'
+        AND job_type NOT IN ('GENERATE_IMAGE_CANDIDATES', 'GENERATE_BUSINESS_PROFILE', 'GENERATE_ASSISTANT_RECOMMENDATION', 'GENERATE_ASSISTANT_CONFIGURATION')
+        AND (locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP)
+      RETURNING id, tenant_id, source_id, status, attempts`
+  );
+
+  const failedJobs = (result.rows ?? []).filter((job) => job.status === 'FAILED');
+  for (const job of failedJobs) {
+    if (job.source_id && job.tenant_id) {
+      await database.query(
+        `UPDATE knowledge_base_documents
+            SET processing_status = 'FAILED',
+                indexing_status = 'FAILED',
+                processing_error_code = 'KNOWLEDGE_PROCESSING_LEASE_EXPIRED',
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1 AND tenant_id = $2 AND processing_status = 'PROCESSING'`,
+        [job.source_id, job.tenant_id]
+      ).catch(() => {});
+    }
+  }
+
+  const recoveredCount = (result.rows ?? []).filter((job) => job.status === 'PENDING').length;
+  const failedCount = failedJobs.length;
+  if (recoveredCount > 0 || failedCount > 0) {
+    console.info('KNOWLEDGE_PROCESSING_STALE_JOBS_RECOVERED', JSON.stringify({ recoveredCount, failedCount }));
+  }
+  return { recovered: recoveredCount, failed: failedCount };
+}
+
 export async function claimNextKnowledgeProcessingJob(database) {
   const result = await dbQuery(database,
     `WITH candidate AS (
@@ -174,14 +216,24 @@ export async function processKnowledgeProcessingJob({
   extract = extractDocumentText,
   imageExtractor = null,
   index = indexKnowledgeSource,
+  logger = console,
 }) {
   if (!job?.id || !job?.tenant_id || !job?.source_id) {
     throw new KnowledgeSourceProcessingError('KNOWLEDGE_JOB_INVALID', 'Knowledge processing job is invalid');
   }
 
+  logger.info('KNOWLEDGE_PROCESSING_JOB_CLAIMED', JSON.stringify({
+    job_id: job.id,
+    tenant_id: job.tenant_id,
+    source_id: job.source_id,
+    job_type: job.job_type,
+    attempt: job.attempts,
+  }));
+
   const source = await sourceForJob(database, job);
   if (!source || !source.enabled || source.status !== 'active') {
     await markJob(database, job, 'CANCELLED');
+    logger.info('KNOWLEDGE_PROCESSING_JOB_CANCELLED', JSON.stringify({ job_id: job.id, tenant_id: job.tenant_id, source_id: job.source_id }));
     return { status: 'CANCELLED' };
   }
 
@@ -242,6 +294,14 @@ export async function processKnowledgeProcessingJob({
         });
         text = catalogResult.extractedText;
         extractionMethod = 'PDF_CATALOG_EXTRACTION';
+        logger.info('KNOWLEDGE_PROCESSING_STAGE_COMPLETED', JSON.stringify({
+          job_id: job.id,
+          tenant_id: source.tenant_id,
+          source_id: source.id,
+          stage: 'PDF_CATALOG_EXTRACTION',
+          entity_count: catalogResult.entityCount,
+          media_count: catalogResult.mediaCount,
+        }));
       } else {
         const extracted = await extract({
           mimeType: source.mime_type,
@@ -277,6 +337,13 @@ export async function processKnowledgeProcessingJob({
         WHERE id = $1 AND tenant_id = $2`,
       [source.id, source.tenant_id, text, source.content_hash, extractionMethod]);
 
+    logger.info('KNOWLEDGE_PROCESSING_STAGE_STARTED', JSON.stringify({
+      job_id: job.id,
+      tenant_id: source.tenant_id,
+      source_id: source.id,
+      stage: 'INDEXING',
+    }));
+
     const indexed = await index({
       database,
       embed,
@@ -286,9 +353,23 @@ export async function processKnowledgeProcessingJob({
     });
 
     await markJob(database, job, 'READY');
+    logger.info('KNOWLEDGE_PROCESSING_JOB_COMPLETED', JSON.stringify({
+      job_id: job.id,
+      tenant_id: source.tenant_id,
+      source_id: source.id,
+      status: 'READY',
+      chunk_count: indexed.chunkCount,
+    }));
     return { status: 'READY', chunkCount: indexed.chunkCount };
   } catch (error) {
     const errorCode = safeErrorCode(error);
+    logger.error('KNOWLEDGE_PROCESSING_JOB_FAILED', JSON.stringify({
+      job_id: job.id,
+      tenant_id: source?.tenant_id ?? job.tenant_id,
+      source_id: source?.id ?? job.source_id,
+      error_code: errorCode,
+      error_message: error?.message,
+    }));
     await dbQuery(database,
       `UPDATE knowledge_base_documents
           SET processing_status = 'FAILED',
@@ -316,16 +397,24 @@ export function startKnowledgeProcessingWorker({
   intervalMs = 2_000,
   logger = console,
 }) {
-  if (!database?.query || typeof createStorage !== 'function' || (typeof embed !== 'function' && typeof imageExtractor?.extract !== 'function')) {
+  if (!database?.query || typeof createStorage !== 'function') {
     throw new KnowledgeSourceProcessingError('KNOWLEDGE_WORKER_CONFIG_INVALID', 'Knowledge processing worker is not configured');
   }
 
   let stopped = false;
   let running = false;
+  let tickCount = 0;
   const tick = async () => {
     if (stopped || running) return;
     running = true;
     try {
+      tickCount++;
+      if (tickCount % 5 === 1) {
+        await recoverStaleKnowledgeProcessingJobs(database).catch((err) => {
+          logger.error('KNOWLEDGE_STALE_RECOVERY_FAILED', safeErrorCode(err));
+        });
+      }
+
       const job = await claimNextKnowledgeProcessingJob(database);
       if (job) {
         await processKnowledgeProcessingJob({
@@ -334,6 +423,7 @@ export function startKnowledgeProcessingWorker({
           imageExtractor,
           job,
           createStorage,
+          logger,
         });
       }
     } catch (error) {

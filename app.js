@@ -247,6 +247,7 @@ app.get("/api/v1/health", (req, res) => {
     managed_guide_domain_suffix: configuredManagedGuideDomainSuffix(),
     onboarding_outbox_worker: customerInvitationOutboxStartup?.status() ?? 'NOT_STARTED',
     semantic_generation_worker: imageSemanticGenerationWorker?.status?.() ?? { state: 'NOT_STARTED' },
+    knowledge_processing_worker: knowledgeProcessingWorker ? 'RUNNING' : 'DISABLED',
     follow_up_worker: followUpWorkerStatus(),
     push_service: {
       vapid_configured: Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT),
@@ -826,14 +827,18 @@ registerSalesChatRoute({ app, service: salesChatService, rateLimiter: salesChatR
 const knowledgeEmbedder = process.env.OPENAI_API_KEY ? createOpenAIEmbedder(openaiClient) : null;
 const knowledgeImageExtractor = googleGeminiEnabled ? createGeminiImageKnowledgeExtractor() : null;
 
+let knowledgeProcessingWorker = null;
+
 function startKnowledgeWorkers() {
-  if ((knowledgeEmbedder || knowledgeImageExtractor) && process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
-    startKnowledgeProcessingWorker({
+  if (process.env.KNOWLEDGE_PROCESSING_ENABLED !== 'false') {
+    knowledgeProcessingWorker = startKnowledgeProcessingWorker({
       database: pool,
       embed: knowledgeEmbedder,
       imageExtractor: knowledgeImageExtractor,
       createStorage: () => createConversationResourceStorage(),
+      logger: console,
     });
+    console.info('KNOWLEDGE_PROCESSING_WORKER_STARTED');
   } else {
     console.info('KNOWLEDGE_PROCESSING_WORKER_DISABLED');
   }
@@ -5042,6 +5047,7 @@ async function startServer() {
       console.log(`Sunucu ${PORT} portunda başarıyla çalışıyor.`);
     });
     server.on('close', () => customerInvitationOutboxStartup?.stop());
+    server.on('close', () => knowledgeProcessingWorker?.());
     server.on('close', () => imageSemanticGenerationWorker?.());
     server.on('close', stopVisualAiWorker);
   } catch (error) {

@@ -84,6 +84,14 @@ export function extractPageEntityCandidates(pageText, pageNumber) {
   return candidates;
 }
 
+async function withTimeout(promise, ms, label = 'TIMEOUT') {
+  let timer;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`PDF_OPERATION_TIMEOUT:${label}`)), ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
+}
+
 /**
  * Ingests a PDF catalog into page-aware text, candidate entities,
  * and extracted visual references.
@@ -116,15 +124,16 @@ export async function processPdfCatalogIngestion({
       const { PDFParse } = await import('pdf-parse');
       const parser = new PDFParse({ data: Buffer.from(bytes) });
       try {
-        const textResult = await parser.getText();
-        fullText = textResult.text;
-        pages = Array.isArray(textResult.pages)
+        const textResult = await withTimeout(parser.getText(), 25000, 'TEXT');
+        fullText = textResult?.text || '';
+        pages = Array.isArray(textResult?.pages)
           ? textResult.pages.map((p, idx) => ({ pageNumber: p.pageNumber || idx + 1, text: p.text }))
           : [{ pageNumber: 1, text: fullText }];
       } finally {
-        await parser.destroy();
+        await parser.destroy().catch(() => {});
       }
-    } catch {
+    } catch (textErr) {
+      console.warn('PDF_TEXT_EXTRACTION_FALLBACK:', textErr?.message || textErr);
       fullText = Buffer.from(bytes).toString('utf8').replace(/[\u0000-\u001f]/g, ' ');
       pages = [{ pageNumber: 1, text: fullText }];
     }
@@ -132,15 +141,19 @@ export async function processPdfCatalogIngestion({
 
   // 2. Extract embedded or rendered images from PDF
   let extractedImages = [];
-  if (typeof extractPdfImages === 'function') {
-    extractedImages = await extractPdfImages(bytes);
-  } else {
-    try {
+  try {
+    if (typeof extractPdfImages === 'function') {
+      extractedImages = await extractPdfImages(bytes);
+    } else {
       const { PDFParse } = await import('pdf-parse');
       const parser = new PDFParse({ data: Buffer.from(bytes) });
       try {
         if (typeof parser.getImage === 'function') {
-          const imgResult = await parser.getImage({ imageBuffer: true, imageThreshold: 48 });
+          const imgResult = await withTimeout(
+            parser.getImage({ imageBuffer: true, imageThreshold: 48 }),
+            10000,
+            'IMAGE'
+          );
           if (imgResult && Array.isArray(imgResult.pages)) {
             for (const p of imgResult.pages) {
               const pageNum = p.pageNumber || 1;
@@ -163,11 +176,11 @@ export async function processPdfCatalogIngestion({
           }
         }
       } finally {
-        await parser.destroy();
+        await parser.destroy().catch(() => {});
       }
-    } catch {
-      // Image extraction failure should fail safely without crashing text ingestion
     }
+  } catch (imgErr) {
+    console.warn('PDF_IMAGE_EXTRACTION_SKIPPED:', imgErr?.message || imgErr);
   }
 
   // Group images by page

@@ -31,6 +31,10 @@ import {
   extractPageEntityCandidates,
 } from '../services/pdf-catalog-extraction-service.js';
 import {
+  recoverStaleKnowledgeProcessingJobs,
+  processKnowledgeProcessingJob,
+} from '../services/knowledge-source-processing-service.js';
+import {
   buildGroundedVisualInstruction,
   formatVisualAiClarification,
   resolveVisualAiGroundingContext,
@@ -77,11 +81,13 @@ function createMockDatabase() {
   const entities = [];
   const entityMedia = [];
   const sources = [];
+  const jobs = [];
 
   return {
     entities,
     entityMedia,
     sources,
+    jobs,
     query: async (sql, params = []) => {
       const normalizedSql = String(sql).replace(/\s+/g, ' ').trim();
 
@@ -160,6 +166,13 @@ function createMockDatabase() {
       if (normalizedSql.includes('INSERT INTO knowledge_source_assistants') || normalizedSql.includes('INSERT INTO knowledge_processing_jobs')) {
         return { rowCount: 1, rows: [{ id: crypto.randomUUID(), status: 'PENDING' }] };
       }
+      if (normalizedSql.includes('FROM knowledge_base_documents') && normalizedSql.includes('WHERE id = $1 AND tenant_id = $2')) {
+        const [sourceId, tenantId] = params;
+        const source = sources.find((s) => s.id === sourceId && s.tenant_id === tenantId);
+        if (!source) return { rowCount: 0, rows: [] };
+        return { rowCount: 1, rows: [source] };
+      }
+
 
       if (normalizedSql.includes('FROM knowledge_entities e') && normalizedSql.includes('WHERE e.id = $1 AND e.tenant_id = $2')) {
         const [entityId, tenantId] = params;
@@ -269,6 +282,21 @@ function createMockDatabase() {
 
       if (normalizedSql.includes('FROM ai_assistants')) {
         return { rowCount: 1, rows: [{ id: assistantA, tenant_id: params[0] }] };
+      }
+
+      if (normalizedSql.includes('stale_recovery_count') && normalizedSql.includes('UPDATE knowledge_processing_jobs')) {
+        const recovered = jobs.filter((j) => j.status === 'PROCESSING');
+        const rows = [];
+        for (const j of recovered) {
+          if (j.attempts >= 3) {
+            j.status = 'FAILED';
+            j.last_error_code = 'KNOWLEDGE_PROCESSING_LEASE_EXPIRED';
+          } else {
+            j.status = 'PENDING';
+          }
+          rows.push({ id: j.id, tenant_id: j.tenant_id, source_id: j.source_id, status: j.status, attempts: j.attempts });
+        }
+        return { rowCount: rows.length, rows };
       }
 
       return { rowCount: 0, rows: [] };
@@ -849,6 +877,113 @@ test('33 & 34 & 35: Evidence precedence, multi-reference generation and provider
     isRuntimeEligible: true,
   });
   assert.equal(entity.name, 'Intact Entity');
+});
+
+test('36: Stale processing jobs are recovered and max-attempt exhausted jobs fail safely', async () => {
+  const database = createMockDatabase();
+  const sourceId1 = crypto.randomUUID();
+  const sourceId2 = crypto.randomUUID();
+
+  // Job 1: 1 attempt, status PROCESSING -> should be recovered to PENDING
+  database.jobs.push({
+    id: crypto.randomUUID(),
+    tenant_id: tenantA,
+    source_id: sourceId1,
+    status: 'PROCESSING',
+    attempts: 1,
+  });
+
+  // Job 2: 3 attempts, status PROCESSING -> should transition to FAILED
+  database.jobs.push({
+    id: crypto.randomUUID(),
+    tenant_id: tenantA,
+    source_id: sourceId2,
+    status: 'PROCESSING',
+    attempts: 3,
+  });
+
+  const outcome = await recoverStaleKnowledgeProcessingJobs(database);
+  assert.equal(outcome.recovered, 1);
+  assert.equal(outcome.failed, 1);
+  assert.equal(database.jobs[0].status, 'PENDING');
+  assert.equal(database.jobs[1].status, 'FAILED');
+});
+
+test('37: PDF catalog extraction recovers gracefully when image extraction fails or times out', async () => {
+  const database = createMockDatabase();
+  const storage = createMockStorage();
+  const sourceId = crypto.randomUUID();
+
+  const mockText = 'Item: Resilient Entity\nSKU: RES-01\nDescription: Text remains extracted even if image extractor fails';
+
+  const result = await processPdfCatalogIngestion({
+    database,
+    storage,
+    tenantId: tenantA,
+    sourceId,
+    bytes: SAMPLE_PDF,
+    contentHash: 'd'.repeat(64),
+    extractPdfText: async () => ({ text: mockText, pages: [{ pageNumber: 1, text: mockText }] }),
+    extractPdfImages: async () => { throw new Error('SIMULATED_PDF_IMAGE_TIMEOUT'); },
+  });
+
+  assert.equal(result.entityCount, 1);
+  assert.equal(result.mediaCount, 0);
+  assert.ok(result.extractedText.includes('Resilient Entity'));
+
+  const entities = await listKnowledgeEntities({ database, tenantId: tenantA, sourceId });
+  assert.equal(entities.length, 1);
+  assert.equal(entities[0].name, 'Resilient Entity');
+});
+
+test('38: Knowledge processing worker emits structured observability on claim, progress, and completion', async () => {
+  const database = createMockDatabase();
+  const storage = createMockStorage();
+  const sourceId = crypto.randomUUID();
+
+  const source = {
+    id: sourceId,
+    tenant_id: tenantA,
+    source_type: 'MANUAL',
+    content: 'Sample structured knowledge content for testing logging.',
+    mime_type: null,
+    storage_key: null,
+    content_hash: 'e'.repeat(64),
+    enabled: true,
+    status: 'active',
+    processing_status: 'PROCESSING',
+    indexing_status: 'INDEXING',
+  };
+  database.sources.push(source);
+
+  const logs = [];
+  const mockLogger = {
+    info: (event, payload) => logs.push({ level: 'info', event, payload: JSON.parse(payload) }),
+    error: (event, payload) => logs.push({ level: 'error', event, payload }),
+  };
+
+  const job = {
+    id: crypto.randomUUID(),
+    tenant_id: tenantA,
+    source_id: sourceId,
+    job_type: 'INDEX_SOURCE',
+    attempts: 1,
+  };
+
+  const result = await processKnowledgeProcessingJob({
+    database,
+    storage,
+    job,
+    embed: async () => new Array(1536).fill(0.01),
+    index: async () => ({ chunkCount: 1, status: 'READY' }),
+    logger: mockLogger,
+  });
+
+  assert.equal(result.status, 'READY');
+  const eventNames = logs.map((l) => l.event);
+  assert.ok(eventNames.includes('KNOWLEDGE_PROCESSING_JOB_CLAIMED'));
+  assert.ok(eventNames.includes('KNOWLEDGE_PROCESSING_STAGE_STARTED'));
+  assert.ok(eventNames.includes('KNOWLEDGE_PROCESSING_JOB_COMPLETED'));
 });
 
 
