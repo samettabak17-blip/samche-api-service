@@ -209,7 +209,7 @@ const tabForRoute: Record<string, string> = Object.fromEntries(
 const actionClass = dashboardButtonClass("secondary");
 const primaryActionClass = dashboardButtonClass("primary");
 const destructiveActionClass = dashboardButtonClass("destructive");
-const knowledgeUploadAccept = ".pdf,.docx,.txt,.jpg,.jpeg,.png,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,image/jpeg,image/png";
+const knowledgeUploadAccept = ".pdf,.docx,.txt,.jpg,.jpeg,.png,.webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,image/jpeg,image/png,image/webp";
 const maxImageUploadBytes = 25 * 1024 * 1024;
 const allowedKnowledgeUploadExtensions = new Set([
   "pdf",
@@ -218,8 +218,9 @@ const allowedKnowledgeUploadExtensions = new Set([
   "jpg",
   "jpeg",
   "png",
+  "webp",
 ]);
-const allowedKnowledgeImageMimeTypes = new Set(["image/jpeg", "image/png"]);
+const allowedKnowledgeImageMimeTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
 const isImageKnowledgeSource = (source: {
   mime_type?: string | null;
   source_type?: string | null;
@@ -245,14 +246,14 @@ function sourceFailureMessage(code?: string | null) {
 function knowledgeUploadValidationError(file: File): string | null {
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
   if (!allowedKnowledgeUploadExtensions.has(extension)) {
-    return "This file type is not supported. Choose PDF, DOCX, TXT, JPG, JPEG or PNG.";
+    return "This file type is not supported. Choose PDF, DOCX, TXT, JPG, JPEG, PNG or WebP.";
   }
   if (file.type && !allowedKnowledgeImageMimeTypes.has(file.type) && ![
     "application/pdf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "text/plain",
   ].includes(file.type)) {
-    return "This file type is not supported. Choose PDF, DOCX, TXT, JPG, JPEG or PNG.";
+    return "This file type is not supported. Choose PDF, DOCX, TXT, JPG, JPEG, PNG or WebP.";
   }
   if (allowedKnowledgeImageMimeTypes.has(file.type) && file.size > maxImageUploadBytes) {
     return "Image files must be 25 MiB or smaller.";
@@ -339,10 +340,16 @@ export function KnowledgeIntelligencePage() {
     warnings: string[];
   } | null>(null);
   const [selectedGapId, setSelectedGapId] = useState("");
-  const [sourceMode, setSourceMode] = useState<"upload" | "manual" | null>(
+  const [sourceMode, setSourceMode] = useState<"upload" | "visual" | "manual" | null>(
     null,
   );
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [visualFiles, setVisualFiles] = useState<File[]>([]);
+  const [visualEntityName, setVisualEntityName] = useState("");
+  const [visualEntityType, setVisualEntityType] = useState("GENERIC");
+  const [visualEntityCode, setVisualEntityCode] = useState("");
+  const [visualEntityDesc, setVisualEntityDesc] = useState("");
+  const [visualEntityAttributes, setVisualEntityAttributes] = useState("");
   const [uploadValidationError, setUploadValidationError] = useState<string | null>(null);
   const [sourceTitle, setSourceTitle] = useState("");
   const [manualContent, setManualContent] = useState("");
@@ -670,6 +677,66 @@ export function KnowledgeIntelligencePage() {
       refreshSources();
     },
   });
+  const sourceEntities = useQuery({
+    queryKey: tenantKeys.knowledgeEntities(tenantId, selectedSourceId),
+    queryFn: () => tenantApi.listSourceEntities(tenantId, selectedSourceId),
+    enabled: Boolean(tenantId && selectedSourceId),
+  });
+  const uploadVisualSource = useMutation({
+    mutationFn: () => {
+      let parsed = {};
+      if (visualEntityAttributes.trim()) {
+        try { parsed = JSON.parse(visualEntityAttributes); } catch { parsed = {}; }
+      }
+      return tenantApi.uploadVisualKnowledgeSource(tenantId, visualFiles, {
+        title: sourceTitle.trim() || visualEntityName.trim() || "Visual Entity",
+        entity_type: visualEntityType || "GENERIC",
+        name: visualEntityName.trim() || sourceTitle.trim(),
+        external_code: visualEntityCode.trim() || undefined,
+        description: visualEntityDesc.trim() || undefined,
+        attributes: parsed,
+        assistant_ids: assistantId ? [assistantId] : [],
+      });
+    },
+    onSuccess: () => {
+      setVisualFiles([]);
+      setVisualEntityName("");
+      setVisualEntityType("GENERIC");
+      setVisualEntityCode("");
+      setVisualEntityDesc("");
+      setVisualEntityAttributes("");
+      setSourceTitle("");
+      setSourceMode(null);
+      refreshSources();
+    },
+  });
+  const approveEntity = useMutation({
+    mutationFn: (entityId: string) => tenantApi.approveKnowledgeEntity(tenantId, entityId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeEntities(tenantId, selectedSourceId) });
+      refreshSources();
+    },
+  });
+  const rejectEntity = useMutation({
+    mutationFn: (entityId: string) => tenantApi.rejectKnowledgeEntity(tenantId, entityId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeEntities(tenantId, selectedSourceId) });
+      refreshSources();
+    },
+  });
+  const approveMediaMutation = useMutation({
+    mutationFn: ({ entityId, mediaId }: { entityId: string; mediaId: string }) => tenantApi.approveEntityMedia(tenantId, entityId, mediaId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeEntities(tenantId, selectedSourceId) });
+    },
+  });
+  const rejectMediaMutation = useMutation({
+    mutationFn: ({ entityId, mediaId }: { entityId: string; mediaId: string }) => tenantApi.rejectEntityMedia(tenantId, entityId, mediaId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: tenantKeys.knowledgeEntities(tenantId, selectedSourceId) });
+    },
+  });
+
   const unassignSource = useMutation({
     mutationFn: (targetAssistantId: string) =>
       tenantApi.unassignKnowledgeSource(
@@ -1534,7 +1601,13 @@ export function KnowledgeIntelligencePage() {
                   className={primaryActionClass}
                   onClick={() => setSourceMode("upload")}
                 >
-                  Upload source
+                  Upload document / catalog
+                </button>
+                <button
+                  className={primaryActionClass}
+                  onClick={() => setSourceMode("visual")}
+                >
+                  Upload visual source
                 </button>
                 <button
                   className={primaryActionClass}
@@ -1544,7 +1617,7 @@ export function KnowledgeIntelligencePage() {
                 </button>
               </div>
               <p className="mt-2 text-xs text-stone-400">
-                Supported files: <span>PDF, DOCX, TXT, JPG, JPEG or PNG</span>. Files are stored
+                Supported files: <span>PDF, DOCX, TXT, JPG, JPEG, PNG or WebP</span>. Files are stored
                 privately and processed asynchronously.
               </p>
             </div>
@@ -1640,6 +1713,111 @@ export function KnowledgeIntelligencePage() {
               </div>
             </form>
           )}
+          {sourceMode === "visual" && (
+            <form
+              className="panel grid gap-4 p-5 sm:grid-cols-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (visualFiles.length > 0) uploadVisualSource.mutate();
+              }}
+            >
+              <label className="text-sm font-medium">
+                Entity / Product Name
+                <input
+                  aria-label="Visual entity name"
+                  required
+                  value={visualEntityName}
+                  onChange={(event) => setVisualEntityName(event.target.value)}
+                  placeholder="e.g. Nordic Cloud Sofa"
+                  className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2"
+                />
+              </label>
+              <label className="text-sm font-medium">
+                Entity Type
+                <select
+                  aria-label="Visual entity type"
+                  value={visualEntityType}
+                  onChange={(event) => setVisualEntityType(event.target.value)}
+                  className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2"
+                >
+                  <option value="GENERIC">Generic</option>
+                  <option value="PRODUCT">Product</option>
+                  <option value="MATERIAL">Material / Swatch</option>
+                  <option value="FURNITURE">Furniture</option>
+                  <option value="ROOM">Room / Concept</option>
+                  <option value="VEHICLE">Vehicle</option>
+                  <option value="PROPERTY">Property / Unit</option>
+                  <option value="EQUIPMENT">Equipment</option>
+                  <option value="BRAND_ASSET">Brand Asset</option>
+                  <option value="VISUAL_SAMPLE">Visual Sample</option>
+                </select>
+              </label>
+              <label className="text-sm font-medium">
+                Reference Code / SKU (optional)
+                <input
+                  aria-label="Visual entity SKU"
+                  value={visualEntityCode}
+                  onChange={(event) => setVisualEntityCode(event.target.value)}
+                  placeholder="e.g. SOFA-NC-01"
+                  className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2"
+                />
+              </label>
+              <label className="text-sm font-medium">
+                Source Title (optional)
+                <input
+                  aria-label="Visual source title"
+                  value={sourceTitle}
+                  onChange={(event) => setSourceTitle(event.target.value)}
+                  placeholder="e.g. Catalog 2026 - Nordic Cloud Sofa"
+                  className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2"
+                />
+              </label>
+              <label className="text-sm font-medium sm:col-span-2">
+                Description (optional)
+                <textarea
+                  aria-label="Visual entity description"
+                  rows={3}
+                  value={visualEntityDesc}
+                  onChange={(event) => setVisualEntityDesc(event.target.value)}
+                  placeholder="Description, dimensions, material specifications..."
+                  className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2"
+                />
+              </label>
+              <div className="text-sm font-medium sm:col-span-2">
+                Reference Images (PNG, JPG, WebP)
+                <input
+                  type="file"
+                  multiple
+                  accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+                  className="mt-2 w-full rounded-lg border border-line bg-elevated px-3 py-2 text-xs"
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files || []);
+                    setVisualFiles(files);
+                  }}
+                />
+                {visualFiles.length > 0 && (
+                  <p className="mt-1 text-xs text-stone-300">{visualFiles.length} image(s) selected: {visualFiles.map((f) => f.name).join(", ")}</p>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2 sm:col-span-2">
+                <DashboardButton
+                  variant="primary"
+                  type="submit"
+                  disabled={visualFiles.length === 0 || !visualEntityName.trim() || uploadVisualSource.isPending}
+                >
+                  {uploadVisualSource.isPending ? "Creating…" : "Create visual entity source"}
+                </DashboardButton>
+                <button
+                  type="button"
+                  className={actionClass}
+                  onClick={() => setSourceMode(null)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+
           {sourceMode === "manual" && (
             <form
               className="panel space-y-4 p-5"
@@ -1754,6 +1932,8 @@ export function KnowledgeIntelligencePage() {
                       <strong className="text-sm text-ink">{row.title}</strong>
                       <p className="mt-1 text-xs text-stone-400">
                         {row.source_type.charAt(0) + row.source_type.slice(1).toLowerCase()} · {sourceProcessingLabel(row.processing_status)}
+                        {typeof row.entity_count === "number" && row.entity_count > 0 ? ` · ${row.entity_count} entit${row.entity_count === 1 ? "y" : "ies"}` : ""}
+                        {typeof row.entity_media_count === "number" && row.entity_media_count > 0 ? ` · ${row.entity_media_count} visual reference${row.entity_media_count === 1 ? "" : "s"}` : ""}
                       </p>
                       <p className="mt-0.5 text-xs text-stone-400">{sourceIndexingLabel(row.indexing_status, row)}</p>
                       {row.processing_error_code && (
@@ -1956,6 +2136,99 @@ export function KnowledgeIntelligencePage() {
                                   : "Assign assistant"}
                               </DashboardButton>
                             </form>
+                            {sourceEntities.data && sourceEntities.data.length > 0 && (
+                              <div className="mt-4 rounded-xl border border-line bg-elevated p-4">
+                                <h3 className="text-sm font-semibold text-white">Extracted & Resolved Entities ({sourceEntities.data.length})</h3>
+                                <p className="mt-1 text-xs text-stone-400">Review canonical entities and reference media before runtime retrieval.</p>
+                                <div className="mt-3 divide-y divide-line/60">
+                                  {sourceEntities.data.map((entity) => (
+                                    <div key={entity.id} className="py-3 first:pt-0 last:pb-0">
+                                      <div className="flex flex-wrap items-start justify-between gap-2">
+                                        <div>
+                                          <div className="flex items-center gap-2">
+                                            <strong className="text-sm text-ink">{entity.name}</strong>
+                                            <span className="rounded bg-stone-700/60 px-1.5 py-0.5 text-[10px] uppercase text-stone-300">{entity.entity_type}</span>
+                                            {entity.external_code && (
+                                              <span className="rounded bg-brand/20 px-1.5 py-0.5 text-[10px] text-brand">SKU: {entity.external_code}</span>
+                                            )}
+                                          </div>
+                                          <p className="mt-1 text-xs text-stone-400">
+                                            Status: <span className={entity.approval_status === "APPROVED" ? "text-emerald-300 font-medium" : entity.approval_status === "REJECTED" ? "text-red-300" : "text-amber-300"}>{entity.approval_status}</span>
+                                            {entity.is_runtime_eligible ? " · RUNTIME ACTIVE" : " · NOT RUNTIME ELIGIBLE"}
+                                            {typeof entity.confidence === "number" ? ` · ${Math.round(entity.confidence * 100)}% confidence` : ""}
+                                          </p>
+                                          {entity.description && (
+                                            <p className="mt-1 text-xs text-stone-300 line-clamp-2">{entity.description}</p>
+                                          )}
+                                        </div>
+                                        {canManage && (
+                                          <div className="flex gap-1.5">
+                                            {entity.approval_status !== "APPROVED" && (
+                                              <button
+                                                className={primaryActionClass}
+                                                disabled={approveEntity.isPending}
+                                                onClick={() => approveEntity.mutate(entity.id)}
+                                              >
+                                                Approve
+                                              </button>
+                                            )}
+                                            {entity.approval_status !== "REJECTED" && (
+                                              <button
+                                                className={destructiveActionClass}
+                                                disabled={rejectEntity.isPending}
+                                                onClick={() => rejectEntity.mutate(entity.id)}
+                                              >
+                                                Reject
+                                              </button>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                      {Array.isArray(entity.media) && entity.media.length > 0 && (
+                                        <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                          {entity.media.map((med) => (
+                                            <div key={med.id} className="rounded-lg border border-line/80 bg-stone-900/60 p-2 text-[11px]">
+                                              <div className="flex items-center justify-between gap-1">
+                                                <span className="truncate font-medium text-stone-200">{med.original_filename || "Image"}</span>
+                                                <span className={med.approval_status === "APPROVED" ? "text-[10px] text-emerald-400" : med.approval_status === "REJECTED" ? "text-[10px] text-red-400" : "text-[10px] text-amber-400"}>
+                                                  {med.approval_status}
+                                                </span>
+                                              </div>
+                                              <p className="mt-0.5 text-[10px] text-stone-400">
+                                                Role: {med.media_role.replace(/_/g, " ")}
+                                                {med.page_number ? ` · Page ${med.page_number}` : ""}
+                                              </p>
+                                              {canManage && (
+                                                <div className="mt-1.5 flex gap-1">
+                                                  {med.approval_status !== "APPROVED" && (
+                                                    <button
+                                                      className="rounded bg-emerald-800/60 px-1.5 py-0.5 text-[9px] text-emerald-200 hover:bg-emerald-700"
+                                                      onClick={() => approveMediaMutation.mutate({ entityId: entity.id, mediaId: med.id })}
+                                                    >
+                                                      Approve
+                                                    </button>
+                                                  )}
+                                                  {med.approval_status !== "REJECTED" && (
+                                                    <button
+                                                      className="rounded bg-red-800/60 px-1.5 py-0.5 text-[9px] text-red-200 hover:bg-red-700"
+                                                      onClick={() => rejectMediaMutation.mutate({ entityId: entity.id, mediaId: med.id })}
+                                                    >
+                                                      Reject
+                                                    </button>
+                                                  )}
+                                                </div>
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
                           </>
                         )
                       )}
@@ -2729,9 +3002,48 @@ export function KnowledgeIntelligencePage() {
             )}
           </form>
           <MutationFeedback error={preview.error} />
+          {preview.data?.isAmbiguous && (
+            <div role="alert" className="panel border-amber-600/60 bg-amber-950/30 p-4 text-amber-200">
+              <strong className="block text-sm font-semibold">Multiple Matching Variants Detected</strong>
+              <p className="mt-1 text-xs">The search query matches multiple entity variants closely. Runtime Visual AI will ask for clarification before generating:</p>
+              <ul className="mt-2 list-inside list-disc text-xs text-amber-100">
+                {preview.data.ambiguousCandidates?.map((c) => (
+                  <li key={c.id}><strong>{c.name}</strong> {c.externalCode ? `(${c.externalCode})` : ""}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {preview.data?.entities && preview.data.entities.length > 0 && (
+            <div className="panel p-5">
+              <h3 className="text-sm font-semibold text-white">Matched Approved Visual Entities ({preview.data.entities.length})</h3>
+              <div className="mt-3 divide-y divide-line">
+                {preview.data.entities.map((ent) => (
+                  <div key={ent.id} className="py-3 first:pt-0 last:pb-0">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <strong className="text-sm text-ink">{ent.name}</strong>
+                        {ent.externalCode && <span className="ml-2 rounded bg-brand/20 px-1.5 py-0.5 text-[10px] text-brand">SKU: {ent.externalCode}</span>}
+                        <p className="mt-1 text-xs text-stone-400">Score: {Math.round((ent.matchScore || 0) * 100)}% · Type: {ent.entityType} · Source: {ent.sourceTitle || "Knowledge"}</p>
+                        {ent.description && <p className="mt-1 text-xs text-stone-300">{ent.description}</p>}
+                      </div>
+                    </div>
+                    {ent.approvedMedia && ent.approvedMedia.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {ent.approvedMedia.map((m) => (
+                          <span key={m.id} className="rounded bg-stone-800 px-2 py-1 text-[10px] text-stone-300">
+                            Visual Ref: {m.original_filename || "media"} ({m.media_role.replace(/_/g, " ")})
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {preview.data && (
             <DataList
-              empty="No matches"
+              empty="No text matches"
               rows={preview.data.matches.map((match) => ({
                 id: match.chunkId,
                 title: match.sourceTitle,

@@ -11,8 +11,21 @@ import {
   KnowledgeSourceServiceError,
   createManualKnowledgeSource,
   createUploadedKnowledgeSource,
+  createVisualEntityKnowledgeSource,
   enqueueKnowledgeIndexJob,
 } from '../services/knowledge-source-service.js';
+import {
+  KnowledgeEntityError,
+  listKnowledgeEntities,
+  getKnowledgeEntity,
+  createKnowledgeEntity,
+  updateKnowledgeEntity,
+  approveKnowledgeEntity,
+  rejectKnowledgeEntity,
+  addEntityMedia,
+  approveEntityMedia,
+  rejectEntityMedia,
+} from '../services/knowledge-entity-service.js';
 import {
   KnowledgeCandidateError,
   approveConversationKnowledgeCandidate,
@@ -61,6 +74,11 @@ const upload = multer({
   limits: { fileSize: 25 * 1024 * 1024, files: 1 },
 });
 
+const multiUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024, files: 10 },
+});
+
 function tenant(req, res) {
   if (!isValidUUID(req.params.tenantId)) {
     res.status(400).json({ error: 'Invalid tenant ID' });
@@ -79,7 +97,7 @@ function sourceId(req, res) {
 
 function safeError(res, error) {
   const code = error?.code;
-  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeCandidateError || error instanceof ImageKnowledgeSemanticError || error instanceof KnowledgeSemanticGenerationJobError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError || error instanceof KnowledgeGenerationError || error instanceof KnowledgeProfileLifecycleError || error instanceof KnowledgeAssistantLifecycleError || error instanceof KnowledgeOverviewError || error instanceof KnowledgeRetrievalPreviewError || error instanceof KnowledgeSourceBusinessIdentityError) {
+  if (error instanceof KnowledgeSourceIngestionError || error instanceof KnowledgeSourceServiceError || error instanceof KnowledgeEntityError || error instanceof KnowledgeCandidateError || error instanceof ImageKnowledgeSemanticError || error instanceof KnowledgeSemanticGenerationJobError || error instanceof KnowledgeConfigurationError || error instanceof KnowledgeGapError || error instanceof KnowledgeGenerationError || error instanceof KnowledgeProfileLifecycleError || error instanceof KnowledgeAssistantLifecycleError || error instanceof KnowledgeOverviewError || error instanceof KnowledgeRetrievalPreviewError || error instanceof KnowledgeSourceBusinessIdentityError) {
     const status = code === 'IDENTITY_RESOLUTION_REQUIRED' ? 409 : /NOT_FOUND|INVALID|EMPTY|UNSUPPORTED|MISMATCH|REQUIRED/.test(code) ? 400 : 503;
     return res.status(status).json({ error: error.message, code, ...(error.details ? { details: error.details } : {}) });
   }
@@ -179,6 +197,8 @@ router.get('/:tenantId/knowledge-intelligence/sources', requireTenantAccess, asy
               extraction_hash, extraction_method,
               (SELECT extraction_version FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = knowledge_base_documents.tenant_id AND segment.source_id = knowledge_base_documents.id AND segment.is_current = TRUE ORDER BY segment.created_at DESC LIMIT 1) AS extraction_version,
               (SELECT COUNT(*)::integer FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = knowledge_base_documents.tenant_id AND segment.source_id = knowledge_base_documents.id AND segment.is_current = TRUE) AS image_segment_count,
+              (SELECT COUNT(*)::integer FROM knowledge_entities e WHERE e.tenant_id = knowledge_base_documents.tenant_id AND e.source_id = knowledge_base_documents.id) AS entity_count,
+              (SELECT COUNT(*)::integer FROM knowledge_entity_media m WHERE m.tenant_id = knowledge_base_documents.tenant_id AND m.source_id = knowledge_base_documents.id) AS entity_media_count,
               COALESCE((SELECT json_object_agg(role, role_count) FROM (SELECT segment.role, COUNT(*)::integer AS role_count FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = knowledge_base_documents.tenant_id AND segment.source_id = knowledge_base_documents.id AND segment.is_current = TRUE GROUP BY segment.role) image_roles), '{}'::json) AS image_role_summary,
               created_at, updated_at, processed_at, indexed_at
          FROM knowledge_base_documents
@@ -221,6 +241,8 @@ router.get('/:tenantId/knowledge-intelligence/sources/:sourceId', requireTenantA
               d.extraction_hash, d.extraction_method,
               (SELECT extraction_version FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = d.tenant_id AND segment.source_id = d.id AND segment.is_current = TRUE ORDER BY segment.created_at DESC LIMIT 1) AS extraction_version,
               (SELECT COUNT(*)::integer FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = d.tenant_id AND segment.source_id = d.id AND segment.is_current = TRUE) AS image_segment_count,
+              (SELECT COUNT(*)::integer FROM knowledge_entities e WHERE e.tenant_id = d.tenant_id AND e.source_id = d.id) AS entity_count,
+              (SELECT COUNT(*)::integer FROM knowledge_entity_media m WHERE m.tenant_id = d.tenant_id AND m.source_id = d.id) AS entity_media_count,
               COALESCE((SELECT json_object_agg(role, role_count) FROM (SELECT segment.role, COUNT(*)::integer AS role_count FROM knowledge_source_extraction_segments segment WHERE segment.tenant_id = d.tenant_id AND segment.source_id = d.id AND segment.is_current = TRUE GROUP BY segment.role) image_roles), '{}'::json) AS image_role_summary,
               d.created_at, d.updated_at, d.processed_at, d.indexed_at,
               COALESCE(json_agg(a.assistant_id) FILTER (WHERE a.assistant_id IS NOT NULL), '[]'::json) AS assistant_ids,
@@ -293,6 +315,44 @@ router.post('/:tenantId/knowledge-intelligence/sources/upload', requireTenantAcc
       assistantIds,
     });
     return res.status(202).json({ source });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/sources/upload-visual', requireTenantAccess, requireTenantAdmin, (req, res, next) => {
+  multiUpload.array('files', 10)(req, res, (error) => {
+    if (error) return res.status(error.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: 'Visual upload is invalid', code: error.code });
+    return next();
+  });
+}, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId) return;
+  try {
+    const assistantIds = req.body.assistant_ids ? JSON.parse(req.body.assistant_ids) : [];
+    let attributes = {};
+    if (req.body.attributes) {
+      try {
+        attributes = typeof req.body.attributes === 'string' ? JSON.parse(req.body.attributes) : req.body.attributes;
+      } catch {
+        attributes = {};
+      }
+    }
+    const result = await createVisualEntityKnowledgeSource({
+      database: pool,
+      storage: createConversationResourceStorage(),
+      tenantId,
+      uploadedBy: req.user.user_id,
+      title: req.body.title,
+      entityType: req.body.entity_type || 'GENERIC',
+      name: req.body.name || req.body.title,
+      externalCode: req.body.external_code || req.body.sku || null,
+      description: req.body.description || null,
+      attributes,
+      files: req.files || [],
+      assistantIds,
+    });
+    return res.status(201).json(result);
   } catch (error) {
     return safeError(res, error);
   }
@@ -439,6 +499,150 @@ router.post('/:tenantId/knowledge-intelligence/sources/:sourceId/reindex', requi
     );
     const job = await enqueueKnowledgeIndexJob({ database: pool, tenantId, sourceId: id, contentHash: source.rows[0].content_hash, metadata: { reindex: true }, force: true });
     return res.status(202).json({ job });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.get('/:tenantId/knowledge-intelligence/entities', requireTenantAccess, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId) return;
+  try {
+    const entities = await listKnowledgeEntities({
+      database: pool,
+      tenantId,
+      sourceId: req.query.source_id || null,
+      approvalStatus: req.query.approval_status || null,
+      isRuntimeEligible: req.query.is_runtime_eligible !== undefined ? req.query.is_runtime_eligible === 'true' : null,
+      entityType: req.query.entity_type || null,
+      limit: req.query.limit,
+      offset: req.query.offset,
+    });
+    return res.json({ entities });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.get('/:tenantId/knowledge-intelligence/sources/:sourceId/entities', requireTenantAccess, async (req, res) => {
+  const tenantId = tenant(req, res);
+  const id = sourceId(req, res);
+  if (!tenantId || !id) return;
+  try {
+    const entities = await listKnowledgeEntities({
+      database: pool,
+      tenantId,
+      sourceId: id,
+      approvalStatus: req.query.approval_status || null,
+      isRuntimeEligible: req.query.is_runtime_eligible !== undefined ? req.query.is_runtime_eligible === 'true' : null,
+      limit: req.query.limit,
+      offset: req.query.offset,
+    });
+    return res.json({ entities });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.get('/:tenantId/knowledge-intelligence/entities/:entityId', requireTenantAccess, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId || !isValidUUID(req.params.entityId)) return res.status(400).json({ error: 'Invalid entity ID' });
+  try {
+    const entity = await getKnowledgeEntity({ database: pool, tenantId, entityId: req.params.entityId });
+    return res.json({ entity });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/entities', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId) return;
+  try {
+    const entity = await createKnowledgeEntity({
+      database: pool,
+      tenantId,
+      sourceId: req.body?.source_id ?? null,
+      businessIdentityId: req.body?.business_identity_id ?? null,
+      entityType: req.body?.entity_type || 'GENERIC',
+      name: req.body?.name,
+      externalCode: req.body?.external_code ?? null,
+      description: req.body?.description ?? null,
+      attributes: req.body?.attributes ?? {},
+      textualEvidence: req.body?.textual_evidence ?? null,
+      confidence: req.body?.confidence ?? 1.0,
+      approvalStatus: req.body?.approval_status || 'PENDING',
+      isRuntimeEligible: req.body?.is_runtime_eligible === true,
+      provenance: req.body?.provenance || {},
+      reviewedBy: req.user.user_id,
+    });
+    return res.status(201).json({ entity });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.put('/:tenantId/knowledge-intelligence/entities/:entityId', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId || !isValidUUID(req.params.entityId)) return res.status(400).json({ error: 'Invalid entity ID' });
+  try {
+    const entity = await updateKnowledgeEntity({
+      database: pool,
+      tenantId,
+      entityId: req.params.entityId,
+      name: req.body?.name,
+      entityType: req.body?.entity_type,
+      externalCode: req.body?.external_code,
+      description: req.body?.description,
+      attributes: req.body?.attributes,
+      textualEvidence: req.body?.textual_evidence,
+      confidence: req.body?.confidence,
+    });
+    return res.json({ entity });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/entities/:entityId/approve', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId || !isValidUUID(req.params.entityId)) return res.status(400).json({ error: 'Invalid entity ID' });
+  try {
+    const entity = await approveKnowledgeEntity({ database: pool, tenantId, entityId: req.params.entityId, reviewedBy: req.user.user_id });
+    return res.json({ entity });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/entities/:entityId/reject', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId || !isValidUUID(req.params.entityId)) return res.status(400).json({ error: 'Invalid entity ID' });
+  try {
+    const entity = await rejectKnowledgeEntity({ database: pool, tenantId, entityId: req.params.entityId, reviewedBy: req.user.user_id });
+    return res.json({ entity });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/entities/:entityId/media/:mediaId/approve', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId || !isValidUUID(req.params.entityId) || !isValidUUID(req.params.mediaId)) return res.status(400).json({ error: 'Invalid ID' });
+  try {
+    const media = await approveEntityMedia({ database: pool, tenantId, mediaId: req.params.mediaId });
+    return res.json({ media });
+  } catch (error) {
+    return safeError(res, error);
+  }
+});
+
+router.post('/:tenantId/knowledge-intelligence/entities/:entityId/media/:mediaId/reject', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res);
+  if (!tenantId || !isValidUUID(req.params.entityId) || !isValidUUID(req.params.mediaId)) return res.status(400).json({ error: 'Invalid ID' });
+  try {
+    const media = await rejectEntityMedia({ database: pool, tenantId, mediaId: req.params.mediaId });
+    return res.json({ media });
   } catch (error) {
     return safeError(res, error);
   }

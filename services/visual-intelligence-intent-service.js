@@ -186,6 +186,17 @@ export function formatVisualAiSafetyMessage(language) {
   return messages[lang] ?? messages.en;
 }
 
+export function formatVisualAiClarification(language, candidateNames = []) {
+  const lang = normalizeVisualAiLanguage(language);
+  const formatted = Array.isArray(candidateNames) ? candidateNames.filter(Boolean).join(', ') : '';
+  const messages = {
+    en: formatted ? `Which option did you mean? (${formatted})` : 'Could you please clarify which option you would like to visualize?',
+    tr: formatted ? `Hangi seçeneği kastettiniz? (${formatted})` : 'Lütfen hangi seçeneği görselleştirmek istediğinizi belirtir misiniz?',
+    ar: formatted ? `أي خيار تقصد؟ (${formatted})` : 'يرجى توضيح الخيار الذي ترغب في تصميمه.',
+  };
+  return messages[lang] ?? messages.en;
+}
+
 /**
  * Resolves generic canonical grounding context for visual AI requests:
  * 1. Explicit customer attachments / references
@@ -207,6 +218,9 @@ export async function resolveVisualAiGroundingContext({
     entity: null,
     approvedKnowledge: [],
     businessContext: null,
+    referenceMedia: [],
+    isAmbiguous: false,
+    ambiguousCandidates: [],
   };
 
   const resolvedEntity = entity || visitorContext?.current_entity || visitorContext?.currentEntity || null;
@@ -216,7 +230,42 @@ export async function resolveVisualAiGroundingContext({
       type: resolvedEntity.entity_type || resolvedEntity.type || null,
       description: resolvedEntity.description || resolvedEntity.summary || null,
       attributes: resolvedEntity.attributes || {},
+      approvedMedia: resolvedEntity.approved_media || resolvedEntity.approvedMedia || [],
     };
+    if (Array.isArray(grounding.entity.approvedMedia) && grounding.entity.approvedMedia.length > 0) {
+      grounding.referenceMedia = grounding.entity.approvedMedia;
+    }
+  }
+
+  // If no explicit entity was provided, attempt to resolve from tenant approved knowledge entities
+  if (!grounding.entity && database && tenantId && instruction) {
+    try {
+      const { retrieveApprovedEntities, detectEntityAmbiguity } = await import('./knowledge-entity-service.js');
+      const entities = await retrieveApprovedEntities({ database, tenantId, assistantId, query: instruction, limit: 5 });
+      if (entities.length > 0) {
+        const ambiguity = detectEntityAmbiguity(entities);
+        if (ambiguity.isAmbiguous) {
+          grounding.isAmbiguous = true;
+          grounding.ambiguousCandidates = ambiguity.candidates;
+        } else {
+          const matched = entities[0];
+          grounding.entity = {
+            id: matched.id,
+            name: matched.name,
+            type: matched.entity_type,
+            externalCode: matched.external_code,
+            description: matched.description,
+            attributes: matched.attributes || {},
+            approvedMedia: matched.approved_media || [],
+          };
+          if (Array.isArray(matched.approved_media) && matched.approved_media.length > 0) {
+            grounding.referenceMedia = matched.approved_media;
+          }
+        }
+      }
+    } catch {
+      // Grounding failures must fail safely without breaking generation
+    }
   }
 
   if (database && tenantId && typeof retrieveKnowledge === 'function' && instruction) {

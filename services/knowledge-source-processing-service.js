@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import { extractDocumentText } from './conversation-document-extraction-service.js';
 import { indexKnowledgeSource } from './knowledge-intelligence-service.js';
 import { validateImageKnowledgeExtraction } from './image-knowledge-extraction.js';
+import { processPdfCatalogIngestion } from './pdf-catalog-extraction-service.js';
+
 
 export class KnowledgeSourceProcessingError extends Error {
   constructor(code, message) {
@@ -187,7 +189,7 @@ export async function processKnowledgeProcessingJob({
     await dbQuery(database,
       `UPDATE knowledge_base_documents
           SET processing_status = 'PROCESSING',
-              indexing_status = CASE WHEN mime_type IN ('image/jpeg', 'image/png') THEN 'DISABLED' ELSE 'INDEXING' END,
+              indexing_status = CASE WHEN mime_type IN ('image/jpeg', 'image/png', 'image/webp') THEN 'DISABLED' ELSE 'INDEXING' END,
               processing_error_code = NULL,
               updated_at = CURRENT_TIMESTAMP
         WHERE id = $1 AND tenant_id = $2`,
@@ -203,7 +205,7 @@ export async function processKnowledgeProcessingJob({
         throw new KnowledgeSourceProcessingError('KNOWLEDGE_SOURCE_STORAGE_UNAVAILABLE', 'Knowledge source storage is unavailable');
       }
       const bytes = await streamToBuffer(await sourceStorage.get({ key: source.storage_key }));
-      if (source.mime_type === 'image/jpeg' || source.mime_type === 'image/png') {
+      if (source.mime_type === 'image/jpeg' || source.mime_type === 'image/png' || source.mime_type === 'image/webp') {
         const originalSourceHash = crypto.createHash('sha256').update(bytes).digest('hex');
         if (originalSourceHash !== String(source.content_hash ?? '').toLowerCase()) {
           throw new KnowledgeSourceProcessingError('IMAGE_SOURCE_HASH_INVALID', 'Image source integrity validation failed');
@@ -224,11 +226,22 @@ export async function processKnowledgeProcessingJob({
         extractionMetadata = {
           extractionVersion: extracted.extractionVersion,
           extractionMethod: extracted.extractionMethod,
-        extractionConfidence: extracted.extractionConfidence,
-        segmentCount: extracted.segments.length,
-        segmentRoles: [...new Set(extracted.segments.map(({ role }) => role))],
+          extractionConfidence: extracted.extractionConfidence,
+          segmentCount: extracted.segments.length,
+          segmentRoles: [...new Set(extracted.segments.map(({ role }) => role))],
           segments: extracted.segments,
         };
+      } else if (source.mime_type === 'application/pdf') {
+        const catalogResult = await processPdfCatalogIngestion({
+          database,
+          storage: sourceStorage,
+          tenantId: source.tenant_id,
+          sourceId: source.id,
+          bytes,
+          contentHash: source.content_hash,
+        });
+        text = catalogResult.extractedText;
+        extractionMethod = 'PDF_CATALOG_EXTRACTION';
       } else {
         const extracted = await extract({
           mimeType: source.mime_type,
@@ -244,7 +257,7 @@ export async function processKnowledgeProcessingJob({
       throw new KnowledgeSourceProcessingError('KNOWLEDGE_SOURCE_EMPTY', 'Knowledge source does not contain readable text');
     }
 
-    if (source.mime_type === 'image/jpeg' || source.mime_type === 'image/png') {
+    if (source.mime_type === 'image/jpeg' || source.mime_type === 'image/png' || source.mime_type === 'image/webp') {
       const persisted = await persistImageExtractionSegments({ database, source, job, extraction: {
         ...extractionMetadata,
         text,

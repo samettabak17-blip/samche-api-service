@@ -238,4 +238,110 @@ export async function createManualKnowledgeSource({
   };
 }
 
+export async function createVisualEntityKnowledgeSource({
+  database,
+  storage,
+  tenantId,
+  uploadedBy = null,
+  title,
+  entityType = 'GENERIC',
+  name,
+  externalCode = null,
+  description = null,
+  attributes = {},
+  files = [],
+  assistantIds = [],
+}) {
+  requireUuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
+  if (uploadedBy) requireUuid(uploadedBy, 'KNOWLEDGE_UPLOADER_INVALID');
+  if (!storage || typeof storage.put !== 'function') {
+    throw new KnowledgeSourceServiceError('KNOWLEDGE_STORAGE_UNAVAILABLE', 'Knowledge source storage is unavailable');
+  }
+
+  const entityName = cleanTitle(name, cleanTitle(title, 'Visual Entity'));
+  const assignments = normalizedAssistantIds(assistantIds);
+  await verifyAssistants(database, tenantId, assignments);
+
+  const { createKnowledgeEntity, addEntityMedia } = await import('./knowledge-entity-service.js');
+
+  const sourceId = crypto.randomUUID();
+  const sourceTitle = cleanTitle(title, entityName);
+
+  const fullContent = [
+    `Entity: ${entityName}`,
+    externalCode ? `Code / SKU: ${externalCode}` : null,
+    description ? `Description: ${description}` : null,
+    attributes && typeof attributes === 'object' && Object.keys(attributes).length ? `Attributes: ${JSON.stringify(attributes)}` : null,
+  ].filter(Boolean).join('\n');
+
+  const contentHash = hashKnowledgeSource(Buffer.from(fullContent, 'utf8'));
+
+  const result = await query(database,
+    `INSERT INTO knowledge_base_documents (
+       id, tenant_id, assistant_id, title, content, status, source_type,
+       mime_type, content_hash, processing_status, indexing_status, enabled, uploaded_by
+     ) VALUES (
+       $1, $2, NULL, $3, $4, 'active', 'VISUAL_ENTITY',
+       'image/png', $5, 'READY', 'PENDING', TRUE, $6
+     )
+     RETURNING id, tenant_id, processing_status, indexing_status`,
+    [sourceId, tenantId, sourceTitle, fullContent, contentHash, uploadedBy ?? null]);
+
+  await insertAssignments(database, tenantId, sourceId, assignments);
+
+  const entity = await createKnowledgeEntity({
+    database,
+    tenantId,
+    sourceId,
+    entityType,
+    name: entityName,
+    externalCode,
+    description,
+    attributes,
+    textualEvidence: fullContent,
+    confidence: 1.0,
+    approvalStatus: 'APPROVED',
+    isRuntimeEligible: true,
+    provenance: { directUpload: true, sourceId },
+    reviewedBy: uploadedBy,
+  });
+
+  const mediaList = [];
+  const imageFiles = Array.isArray(files) ? files : [files].filter(Boolean);
+  for (let idx = 0; idx < imageFiles.length; idx++) {
+    const file = imageFiles[idx];
+    const media = await addEntityMedia({
+      database,
+      storage,
+      tenantId,
+      entityId: entity.id,
+      sourceId,
+      file,
+      mediaRole: idx === 0 ? 'PRIMARY_REFERENCE' : 'SECONDARY_REFERENCE',
+      confidence: 1.0,
+      approvalStatus: 'APPROVED',
+      isRuntimeEligible: true,
+      provenance: { directUpload: true, sourceId },
+    });
+    mediaList.push(media);
+  }
+
+  await enqueueKnowledgeIndexJob({
+    database,
+    tenantId,
+    sourceId,
+    contentHash,
+    metadata: { sourceType: 'VISUAL_ENTITY', entityId: entity.id },
+  });
+
+  return {
+    sourceId,
+    entityId: entity.id,
+    entity,
+    media: mediaList,
+    processingStatus: 'READY',
+  };
+}
+
+
 export { KnowledgeSourceIngestionError };

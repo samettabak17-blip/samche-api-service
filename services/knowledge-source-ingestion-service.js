@@ -35,7 +35,7 @@ function bytesOf(file) {
 export function validateKnowledgeUpload(file) {
   const buffer = bytesOf(file);
   const mimeType = normalizedMime(file?.mimetype);
-  if (mimeType === 'image/jpeg' || mimeType === 'image/png') {
+  if (mimeType === 'image/jpeg' || mimeType === 'image/png' || mimeType === 'image/webp') {
     return validateImageKnowledgeInput(file);
   }
   const definition = SUPPORTED_UPLOADS[mimeType];
@@ -55,7 +55,7 @@ export function validateKnowledgeUpload(file) {
 }
 
 export function buildKnowledgeStorageKey({ tenantId, sourceId, contentHash, extension }) {
-  if (!tenantId || !sourceId || !/^[a-f0-9]{64}$/i.test(String(contentHash)) || !/^(pdf|docx|txt|jpg|jpeg|png)$/.test(String(extension))) {
+  if (!tenantId || !sourceId || !/^[a-f0-9]{64}$/i.test(String(contentHash)) || !/^(pdf|docx|txt|jpg|jpeg|png|webp)$/.test(String(extension))) {
     throw new KnowledgeSourceIngestionError('KNOWLEDGE_SOURCE_KEY_INVALID', 'Knowledge source storage key cannot be created');
   }
   return `knowledge/${tenantId}/${sourceId}/${String(contentHash).toLowerCase()}.${extension}`;
@@ -81,5 +81,5 @@ export function normalizeManualKnowledge(value) {
 
 export const KNOWLEDGE_SOURCE_LIMITS = Object.freeze({
   maxUploadBytes: MAX_KNOWLEDGE_SOURCE_BYTES,
-  supportedMimeTypes: Object.freeze([...Object.keys(SUPPORTED_UPLOADS), 'image/jpeg', 'image/png']),
+  supportedMimeTypes: Object.freeze([...Object.keys(SUPPORTED_UPLOADS), 'image/jpeg', 'image/png', 'image/webp']),
 });

@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { AgentMessageResponse, HumanAttentionSummary, DashboardOverview, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmContact, CrmContactList, CrmDeal, CrmDealList, CrmLead, CrmLeadList, CrmOverviewMetrics, CrmPipelineStage, CrmPipelineSummary, KnowledgeDocument, KnowledgeOverview, KnowledgeSource, KnowledgeCandidate, KnowledgeCandidateEvidence, KnowledgeGap, KnowledgeGapSignal, BusinessIdentity, BusinessIdentityScopeAnalysis, BusinessProfileGenerationJob, BusinessProfileGenerationResult, BusinessProfileVersion, KnowledgeRecommendation, AssistantConfigurationVersion, AssistantRecommendationGenerationJob, AssistantConfigurationGenerationJob, ConfigurationGenerationResult, KnowledgeRetrievalPreview, TeamMember, TenantChannel, Tenant, TenantRole, WebChatAppearanceConfig, WebChatBehaviorConfig, WebChatChannelResponse, WebChatThemePreviewResponse, WebChatLogoUploadResponse } from '../../types/api';
+import type { AgentMessageResponse, HumanAttentionSummary, DashboardOverview, Assistant, Conversation, ConversationAuditEvent, ConversationMessage, ConversationOperationResponse, CrmContact, CrmContactList, CrmDeal, CrmDealList, CrmLead, CrmLeadList, CrmOverviewMetrics, CrmPipelineStage, CrmPipelineSummary, KnowledgeDocument, KnowledgeOverview, KnowledgeSource, KnowledgeCandidate, KnowledgeCandidateEvidence, KnowledgeGap, KnowledgeGapSignal, KnowledgeEntity, KnowledgeEntityMedia, BusinessIdentity, BusinessIdentityScopeAnalysis, BusinessProfileGenerationJob, BusinessProfileGenerationResult, BusinessProfileVersion, KnowledgeRecommendation, AssistantConfigurationVersion, AssistantRecommendationGenerationJob, AssistantConfigurationGenerationJob, ConfigurationGenerationResult, KnowledgeRetrievalPreview, TeamMember, TenantChannel, Tenant, TenantRole, WebChatAppearanceConfig, WebChatBehaviorConfig, WebChatChannelResponse, WebChatThemePreviewResponse, WebChatLogoUploadResponse } from '../../types/api';
 
 const tenantRoot = (tenantId: string) => `/api/v1/tenants/${tenantId}`;
 type CustomerDirectoryUser = Pick<TeamMember, 'id' | 'email' | 'system_role'>;
@@ -114,6 +114,7 @@ export const tenantKeys = {
   businessIdentities: (tenantId: string) => ['tenant', tenantId, 'knowledge-intelligence', 'business-identities'] as const,
   knowledgeRecommendations: (tenantId: string, assistantId: string) => ['tenant', tenantId, 'knowledge-intelligence', 'recommendations', assistantId] as const,
   assistantConfigurations: (tenantId: string, assistantId: string) => ['tenant', tenantId, 'knowledge-intelligence', 'configurations', assistantId] as const,
+  knowledgeEntities: (tenantId: string, sourceId?: string) => ['tenant', tenantId, 'knowledge-intelligence', 'entities', sourceId].filter(Boolean) as string[],
 };
 export interface LeadFilters { limit: number; offset: number; temperature?: string; stage?: string; source?: string; assigned_user_id?: string; conversation_id?: string; }
 export interface DealFilters { limit: number; offset: number; stage?: string; contact_id?: string; owner_user_id?: string; status?: string; source?: string; include_archived?: boolean; }
@@ -213,6 +214,33 @@ export const tenantApi = {
   getKnowledgeSource: (tenantId: string, sourceId: string) => apiClient.get<{ source: KnowledgeSource }>(`${tenantRoot(tenantId)}/knowledge-intelligence/sources/${sourceId}`).then((value) => value.source),
   uploadKnowledgeSource: (tenantId: string, file: File, title: string, assistantIds: string[] = []) => { const form = new FormData(); form.set('file', file); if (title.trim()) form.set('title', title.trim()); form.set('assistant_ids', JSON.stringify(assistantIds)); return apiClient.postForm<{ source: KnowledgeSource }>(`${tenantRoot(tenantId)}/knowledge-intelligence/sources/upload`, form).then((value) => value.source); },
   createManualKnowledgeSource: (tenantId: string, title: string, content: string, assistantIds: string[] = []) => apiClient.post<{ source: KnowledgeSource }>(`${tenantRoot(tenantId)}/knowledge-intelligence/sources/manual`, { title, content, assistant_ids: assistantIds }).then((value) => value.source),
+  uploadVisualKnowledgeSource: (tenantId: string, files: File[], data: { title: string; entity_type?: string; name?: string; external_code?: string; description?: string; attributes?: Record<string, unknown>; assistant_ids?: string[] }) => {
+    const form = new FormData();
+    for (const file of files) form.append('files', file);
+    form.set('title', data.title || data.name || 'Visual Entity');
+    if (data.entity_type) form.set('entity_type', data.entity_type);
+    if (data.name) form.set('name', data.name);
+    if (data.external_code) form.set('external_code', data.external_code);
+    if (data.description) form.set('description', data.description);
+    if (data.attributes) form.set('attributes', JSON.stringify(data.attributes));
+    if (data.assistant_ids?.length) form.set('assistant_ids', JSON.stringify(data.assistant_ids));
+    return apiClient.postForm<{ sourceId: string; entityId: string; entity: KnowledgeEntity; media: KnowledgeEntityMedia[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/sources/upload-visual`, form);
+  },
+  listKnowledgeEntities: (tenantId: string, filters: { source_id?: string; approval_status?: string; is_runtime_eligible?: boolean } = {}) => {
+    const params = new URLSearchParams();
+    if (filters.source_id) params.set('source_id', filters.source_id);
+    if (filters.approval_status) params.set('approval_status', filters.approval_status);
+    if (filters.is_runtime_eligible !== undefined) params.set('is_runtime_eligible', String(filters.is_runtime_eligible));
+    return apiClient.get<{ entities: KnowledgeEntity[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/entities?${params.toString()}`).then((v) => v.entities);
+  },
+  listSourceEntities: (tenantId: string, sourceId: string) => apiClient.get<{ entities: KnowledgeEntity[] }>(`${tenantRoot(tenantId)}/knowledge-intelligence/sources/${sourceId}/entities`).then((v) => v.entities),
+  getKnowledgeEntity: (tenantId: string, entityId: string) => apiClient.get<{ entity: KnowledgeEntity }>(`${tenantRoot(tenantId)}/knowledge-intelligence/entities/${entityId}`).then((v) => v.entity),
+  createKnowledgeEntity: (tenantId: string, body: Partial<KnowledgeEntity>) => apiClient.post<{ entity: KnowledgeEntity }>(`${tenantRoot(tenantId)}/knowledge-intelligence/entities`, body).then((v) => v.entity),
+  updateKnowledgeEntity: (tenantId: string, entityId: string, body: Partial<KnowledgeEntity>) => apiClient.put<{ entity: KnowledgeEntity }>(`${tenantRoot(tenantId)}/knowledge-intelligence/entities/${entityId}`, body).then((v) => v.entity),
+  approveKnowledgeEntity: (tenantId: string, entityId: string) => apiClient.post<{ entity: KnowledgeEntity }>(`${tenantRoot(tenantId)}/knowledge-intelligence/entities/${entityId}/approve`, {}).then((v) => v.entity),
+  rejectKnowledgeEntity: (tenantId: string, entityId: string) => apiClient.post<{ entity: KnowledgeEntity }>(`${tenantRoot(tenantId)}/knowledge-intelligence/entities/${entityId}/reject`, {}).then((v) => v.entity),
+  approveEntityMedia: (tenantId: string, entityId: string, mediaId: string) => apiClient.post<{ media: KnowledgeEntityMedia }>(`${tenantRoot(tenantId)}/knowledge-intelligence/entities/${entityId}/media/${mediaId}/approve`, {}).then((v) => v.media),
+  rejectEntityMedia: (tenantId: string, entityId: string, mediaId: string) => apiClient.post<{ media: KnowledgeEntityMedia }>(`${tenantRoot(tenantId)}/knowledge-intelligence/entities/${entityId}/media/${mediaId}/reject`, {}).then((v) => v.media),
   assignKnowledgeSource: (tenantId: string, sourceId: string, assistantId: string) => apiClient.post<void>(`${tenantRoot(tenantId)}/knowledge-intelligence/sources/${sourceId}/assignments`, { assistant_id: assistantId }),
   unassignKnowledgeSource: (tenantId: string, sourceId: string, assistantId: string) => apiClient.delete<void>(`${tenantRoot(tenantId)}/knowledge-intelligence/sources/${sourceId}/assignments/${assistantId}`),
   assignKnowledgeSourceBusinessIdentity: (tenantId: string, sourceId: string, businessIdentityId: string) => apiClient.put<{ assignment: { source_id: string; business_identity: BusinessIdentity; changed: boolean } }>(`${tenantRoot(tenantId)}/knowledge-intelligence/sources/${sourceId}/business-identity`, { business_identity_id: businessIdentityId, confirmed: true }).then((value) => value.assignment),

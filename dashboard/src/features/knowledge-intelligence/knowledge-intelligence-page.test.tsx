@@ -674,17 +674,19 @@ it("does not label unknown or low-confidence evidence as multiple businesses", a
   ).not.toBeInTheDocument();
 });
 
-it("accepts JPG, JPEG and PNG source uploads with the image size boundary", async () => {
+it("accepts JPG, JPEG, PNG and WebP source uploads with the image size boundary", async () => {
   renderPage(true, "/app/tenant-a/knowledge-base/sources");
   expect(
-    await screen.findByRole("button", { name: "Upload source" }),
+    await screen.findByRole("button", { name: "Upload document / catalog" }),
   ).toBeVisible();
-  expect(screen.getByText("PDF, DOCX, TXT, JPG, JPEG or PNG")).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Upload source" }));
+  expect(screen.getByRole("button", { name: "Upload visual source" })).toBeVisible();
+  expect(screen.getByText("PDF, DOCX, TXT, JPG, JPEG, PNG or WebP")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Upload document / catalog" }));
   const input = screen.getByLabelText("Source file");
   expect(input).toHaveAttribute("accept", expect.stringContaining(".jpg"));
   expect(input).toHaveAttribute("accept", expect.stringContaining(".jpeg"));
   expect(input).toHaveAttribute("accept", expect.stringContaining(".png"));
+  expect(input).toHaveAttribute("accept", expect.stringContaining(".webp"));
   expect(screen.getByText(/25 MiB/)).toBeVisible();
   expect(
     screen.getByRole("button", { name: "Add manual knowledge" }),
@@ -693,7 +695,7 @@ it("accepts JPG, JPEG and PNG source uploads with the image size boundary", asyn
 
 it("keeps unsupported and oversized images out of the upload request", async () => {
   renderPage(true, "/app/tenant-a/knowledge-base/sources");
-  fireEvent.click(await screen.findByRole("button", { name: "Upload source" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Upload document / catalog" }));
   const input = screen.getByLabelText("Source file");
 
   fireEvent.change(input, {
@@ -713,6 +715,20 @@ it("keeps unsupported and oversized images out of the upload request", async () 
   });
   expect(await screen.findByRole("alert")).toHaveTextContent("25 MiB or smaller");
   expect(mockedApi.uploadKnowledgeSource).not.toHaveBeenCalled();
+});
+
+it("renders visual source upload flow with entity fields and multi-image selection", async () => {
+  renderPage(true, "/app/tenant-a/knowledge-base/sources");
+  fireEvent.click(await screen.findByRole("button", { name: "Upload visual source" }));
+
+  expect(screen.getByLabelText("Visual entity name")).toBeVisible();
+  expect(screen.getByLabelText("Visual entity type")).toBeVisible();
+  expect(screen.getByLabelText("Visual entity SKU")).toBeVisible();
+  expect(screen.getByLabelText("Visual entity description")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Create visual entity source" })).toBeDisabled();
+
+  fireEvent.change(screen.getByLabelText("Visual entity name"), { target: { value: "Nordic Cloud Sofa" } });
+  fireEvent.change(screen.getByLabelText("Visual entity SKU"), { target: { value: "SOFA-NC-01" } });
 });
 
 it("shows source detail lifecycle actions and real assignment state", async () => {

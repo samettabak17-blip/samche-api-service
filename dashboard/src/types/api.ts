@@ -337,7 +337,65 @@ export interface AssistantConfigurationVersion { id: string; schema_version?: nu
 export interface RecommendationGenerationResult { recommendation: KnowledgeRecommendation; reused: boolean; run_id: string; }
 export interface ConfigurationGenerationResult { job: AssistantConfigurationGenerationJob; reused: boolean; }
 export interface BusinessIdentityScopeAnalysis { status: 'RESOLVED' | 'IDENTITY_RESOLUTION_REQUIRED'; business_identity: BusinessIdentity; source_ids: string[]; identities: Array<{ business_identity_id?: string; detected_identity: string; normalized_identity: string | null; source_ids: string[] }>; evidence: Array<{ source_id: string; source_title: string; detected_identity: string; confidence: number; safe_evidence: string; resolution_origin?: string; business_identity_id?: string | null }> }
-export interface KnowledgeRetrievalPreview { query: string; matches: Array<{ chunkId: string; sourceId: string; sourceTitle: string; excerpt: string; similarity: number }>; }
+export interface KnowledgeEntityMedia {
+  id: string;
+  media_type: 'IMAGE';
+  mime_type: string;
+  storage_key: string;
+  original_filename: string | null;
+  file_size_bytes?: number | null;
+  content_hash?: string | null;
+  media_role: 'PRIMARY_REFERENCE' | 'SECONDARY_REFERENCE' | 'SWATCH' | 'CONTEXT_VIEW' | 'CANDIDATE_GRAPHIC' | 'UNCERTAIN_ASSOCIATION';
+  page_number?: number | null;
+  bounding_box?: Record<string, unknown> | null;
+  approval_status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ARCHIVED';
+  is_runtime_eligible: boolean;
+  confidence: number;
+  provenance?: Record<string, unknown>;
+  created_at?: string;
+}
+
+export interface KnowledgeEntity {
+  id: string;
+  tenant_id: string;
+  source_id?: string | null;
+  business_identity_id?: string | null;
+  candidate_id?: string | null;
+  entity_type: string;
+  name: string;
+  external_code?: string | null;
+  description?: string | null;
+  attributes: Record<string, unknown>;
+  textual_evidence?: string | null;
+  confidence: number;
+  approval_status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'ARCHIVED';
+  is_runtime_eligible: boolean;
+  provenance?: Record<string, unknown>;
+  media?: KnowledgeEntityMedia[];
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  source_title?: string | null;
+}
+
+export interface KnowledgeRetrievalPreview {
+  query: string;
+  matches: Array<{ chunkId: string; sourceId: string; sourceTitle: string; excerpt: string; similarity: number }>;
+  entities?: Array<{
+    id: string;
+    name: string;
+    entityType: string;
+    externalCode?: string | null;
+    description?: string | null;
+    attributes?: Record<string, unknown>;
+    approvedMedia?: KnowledgeEntityMedia[];
+    matchScore?: number;
+    sourceTitle?: string | null;
+  }>;
+  isAmbiguous?: boolean;
+  ambiguousCandidates?: Array<{ id: string; name: string; externalCode?: string | null; description?: string | null }>;
+}
 export interface TeamMember { id: string; email: string; system_role: SystemRole; tenant_role: TenantRole; created_at?: string; }
 
 export type LeadTemperature = 'HOT' | 'WARM' | 'COLD' | 'UNQUALIFIED';
