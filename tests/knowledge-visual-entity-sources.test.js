@@ -1107,6 +1107,92 @@ test('40: Multi-page catalog extraction creates candidate entities and links vis
   assert.equal(entities[1].media.length, 1);
   assert.equal(entities[1].media[0].original_filename, 'strandmon_ref.png');
 });
+test('41: Corrupted embedded image stream or storage error is isolated and does not fail PDF catalog extraction', async () => {
+  const database = createMockDatabase();
+  const failingStorage = {
+    put: async () => { throw new Error('SIMULATED_R2_STORAGE_PUT_FAILURE'); },
+  };
+  const sourceId = crypto.randomUUID();
+
+  const mockText = 'Product: MALM Bed Frame\nSKU: 700.123.45\nPrice: $199.00\nSturdy modern wooden bed frame.';
+
+  const result = await processPdfCatalogIngestion({
+    database,
+    storage: failingStorage,
+    tenantId: tenantA,
+    sourceId,
+    bytes: SAMPLE_PDF,
+    contentHash: 'b'.repeat(64),
+    extractPdfText: async () => ({
+      text: mockText,
+      pages: [{ pageNumber: 1, text: mockText }],
+    }),
+    extractPdfImages: async () => [
+      {
+        pageNumber: 1,
+        buffer: Buffer.from([0x00, 0x11, 0x22, 0x33]), // Corrupted non-image bytes
+        mimeType: 'image/png',
+        width: 100,
+        height: 100,
+        originalFilename: 'corrupted.png',
+      },
+    ],
+  });
+
+  assert.equal(result.entityCount, 1);
+  assert.equal(result.mediaCount, 0); // Corrupted image safely skipped
+
+  const entities = await listKnowledgeEntities({ database, tenantId: tenantA, sourceId });
+  assert.equal(entities.length, 1);
+  assert.equal(entities[0].name, 'MALM Bed Frame');
+  assert.equal(entities[0].external_code, '700.123.45');
+});
+
+test('42: Bounded per-page visual extraction succeeds and isolates single-page rendering faults', async () => {
+  const database = createMockDatabase();
+  const storage = createMockStorage();
+  const sourceId = crypto.randomUUID();
+
+  const page1 = 'Product: KALLAX Shelf\nSKU: 101.202.30\nPrice: $45.00';
+  const page2 = 'Product: LACK Side Table\nSKU: 404.505.60\nPrice: $12.00';
+
+  const result = await processPdfCatalogIngestion({
+    database,
+    storage,
+    tenantId: tenantA,
+    sourceId,
+    bytes: SAMPLE_PDF,
+    contentHash: 'c'.repeat(64),
+    extractPdfText: async () => ({
+      text: `${page1}\n\n${page2}`,
+      pages: [
+        { pageNumber: 1, text: page1 },
+        { pageNumber: 2, text: page2 },
+      ],
+    }),
+    extractPdfImages: async () => [
+      {
+        pageNumber: 1,
+        buffer: SAMPLE_PNG,
+        mimeType: 'image/png',
+        width: 200,
+        height: 200,
+        originalFilename: 'kallax.png',
+      },
+    ],
+  });
+
+  assert.equal(result.entityCount, 2);
+  assert.equal(result.mediaCount, 1);
+
+  const entities = await listKnowledgeEntities({ database, tenantId: tenantA, sourceId });
+  assert.equal(entities.length, 2);
+  assert.equal(entities[0].name, 'KALLAX Shelf');
+  assert.equal(entities[0].media.length, 1);
+  assert.equal(entities[1].name, 'LACK Side Table');
+  assert.equal(entities[1].media.length, 0);
+});
+
 
 
 

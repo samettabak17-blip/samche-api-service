@@ -238,9 +238,18 @@ function sourceIndexingLabel(status: string, source?: { mime_type?: string | nul
 }
 
 function sourceFailureMessage(code?: string | null) {
+  if (!code) return "This source could not be processed. Retry it or upload the original file again.";
   if (code === "IMAGE_SOURCE_HASH_INVALID") return "The image could not be verified. Re-upload the original file and try again.";
-  if (code?.startsWith("IMAGE_")) return "The image could not be processed. Re-upload the original file and try again.";
-  return "This source could not be processed. Retry it or upload the original file again.";
+  if (code === "IMAGE_SIGNATURE_MISMATCH") return "Image signature does not match the file format. Re-upload the original image.";
+  if (code === "IMAGE_MIME_UNSUPPORTED" || code === "IMAGE_EXTENSION_UNSUPPORTED") return "The image format is not supported (JPG, PNG, WebP supported).";
+  if (code?.startsWith("IMAGE_")) return `Image processing failed (${code}).`;
+  if (code === "PDF_VISUAL_EXTRACTION_FAILED") return "Visual extraction could not complete for this document.";
+  if (code === "PDF_PARSER_ERROR") return "The PDF document could not be parsed. Verify the PDF format.";
+  if (code === "KNOWLEDGE_SOURCE_STORAGE_UNAVAILABLE") return "Document storage is temporarily unavailable.";
+  if (code === "KNOWLEDGE_INDEX_CONFIG_INVALID") return "Knowledge embedding is not configured.";
+  if (code === "KNOWLEDGE_SOURCE_EMPTY") return "No readable text could be extracted from this document.";
+  if (code === "KNOWLEDGE_PROCESSING_LEASE_EXPIRED") return "Processing lease expired. Click Re-index to re-process.";
+  return `Processing failed (${code}).`;
 }
 
 function knowledgeUploadValidationError(file: File): string | null {
@@ -1937,9 +1946,10 @@ export function KnowledgeIntelligencePage() {
                       </p>
                       <p className="mt-0.5 text-xs text-stone-400">{sourceIndexingLabel(row.indexing_status, row)}</p>
                       {row.processing_error_code && (
-                        <p role="alert" className="mt-2 text-sm text-red-400">
-                          {sourceFailureMessage(row.processing_error_code)}
-                        </p>
+                        <div role="alert" className="mt-2 rounded-md border border-red-500/20 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-300">
+                          <p className="font-mono font-semibold text-red-200">Error: {row.processing_error_code}</p>
+                          <p className="mt-0.5 text-red-300/90">{sourceFailureMessage(row.processing_error_code)}</p>
+                        </div>
                       )}
                     </div>
                     <button

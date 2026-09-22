@@ -9,6 +9,20 @@ export class PdfCatalogExtractionError extends Error {
     this.code = code;
   }
 }
+function detectImageMimeAndExtension(buf) {
+  if (!Buffer.isBuffer(buf) || buf.length < 8) return null;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+    return { mimeType: 'image/jpeg', extension: 'jpg' };
+  }
+  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return { mimeType: 'image/png', extension: 'png' };
+  }
+  if (buf.length >= 12 && buf.subarray(0, 4).toString('ascii') === 'RIFF' && buf.subarray(8, 12).toString('ascii') === 'WEBP') {
+    return { mimeType: 'image/webp', extension: 'webp' };
+  }
+  return null;
+}
+
 
 /**
  * Parses raw text lines on a PDF page to detect candidate entities,
@@ -173,14 +187,18 @@ export async function processPdfCatalogIngestion({
                 for (const img of p.images) {
                   const imgData = img.data ? Buffer.from(img.data) : null;
                   if (imgData && imgData.length > 500 && (img.width >= 48 || !img.width) && (img.height >= 48 || !img.height)) {
-                    extractedImages.push({
-                      pageNumber: pageNum,
-                      buffer: imgData,
-                      mimeType: img.kind === 'jpeg' ? 'image/jpeg' : (img.kind === 'webp' ? 'image/webp' : 'image/png'),
-                      width: img.width,
-                      height: img.height,
-                      originalFilename: img.name || `pdf_p${pageNum}_img_${extractedImages.length + 1}.png`,
-                    });
+                    const format = detectImageMimeAndExtension(imgData);
+                    if (format) {
+                      extractedImages.push({
+                        pageNumber: pageNum,
+                        buffer: imgData,
+                        mimeType: format.mimeType,
+                        extension: format.extension,
+                        width: img.width,
+                        height: img.height,
+                        originalFilename: img.name || `pdf_p${pageNum}_img_${extractedImages.length + 1}.${format.extension}`,
+                      });
+                    }
                   }
                 }
               }
@@ -188,28 +206,36 @@ export async function processPdfCatalogIngestion({
           }
         }
 
-        // If embedded images extraction returned 0 images, extract rendered page screenshots
+        // If embedded images extraction returned 0 images, extract rendered page screenshots page-by-page
         if (extractedImages.length === 0 && typeof parser.getScreenshot === 'function') {
-          const screenshotResult = await withTimeout(
-            parser.getScreenshot({ imageBuffer: true, scale: 1.0 }),
-            10000,
-            'PAGE_SCREENSHOTS'
-          ).catch(() => null);
+          const targetPages = pages.slice(0, 5);
+          for (const p of targetPages) {
+            const pageNum = p.pageNumber || 1;
+            try {
+              const screenshotResult = await withTimeout(
+                parser.getScreenshot({ partial: [pageNum], imageBuffer: true, desiredWidth: 800 }),
+                3000,
+                `PAGE_${pageNum}_SCREENSHOT`
+              ).catch(() => null);
 
-          if (screenshotResult && Array.isArray(screenshotResult.pages)) {
-            for (const p of screenshotResult.pages) {
-              const pageNum = p.pageNumber || 1;
-              const imgData = p.data ? Buffer.from(p.data) : null;
-              if (imgData && imgData.length > 500) {
-                extractedImages.push({
-                  pageNumber: pageNum,
-                  buffer: imgData,
-                  mimeType: 'image/png',
-                  width: p.width,
-                  height: p.height,
-                  originalFilename: `pdf_page_${pageNum}_visual.png`,
-                });
+              if (screenshotResult && Array.isArray(screenshotResult.pages) && screenshotResult.pages[0]?.data) {
+                const pData = screenshotResult.pages[0];
+                const rawData = Buffer.from(pData.data);
+                const format = detectImageMimeAndExtension(rawData);
+                if (format) {
+                  extractedImages.push({
+                    pageNumber: pageNum,
+                    buffer: rawData,
+                    mimeType: format.mimeType,
+                    extension: format.extension,
+                    width: pData.width,
+                    height: pData.height,
+                    originalFilename: `pdf_page_${pageNum}_visual.${format.extension}`,
+                  });
+                }
               }
+            } catch (pageShotErr) {
+              console.warn(`PDF_PAGE_${pageNum}_SCREENSHOT_SKIPPED:`, pageShotErr?.message || pageShotErr);
             }
           }
         }
@@ -251,86 +277,24 @@ export async function processPdfCatalogIngestion({
     const pageImages = imagesByPage.get(pageNum) || [];
 
     if (!candidates.length && pageImages.length > 0) {
-      const entity = await createKnowledgeEntity({
-        database,
-        tenantId,
-        sourceId,
-        entityType: 'VISUAL_SAMPLE',
-        name: `Visual Reference (Page ${pageNum})`,
-        description: page.text ? page.text.slice(0, 1000) : 'Visual reference extracted from document',
-        textualEvidence: page.text ? page.text.slice(0, 2000) : null,
-        confidence: 0.85,
-        approvalStatus: 'PENDING',
-        isRuntimeEligible: false,
-        provenance: { pageNumber: pageNum, sourceId, method: 'PDF_VISUAL_EXTRACTION' },
-      });
-      totalEntities++;
-
-      for (const img of pageImages) {
-        await addEntityMedia({
-          database,
-          storage,
-          tenantId,
-          entityId: entity.id,
-          sourceId,
-          file: {
-            buffer: img.buffer,
-            mimetype: img.mimeType,
-            originalname: img.originalFilename,
-            size: img.buffer.length,
-          },
-          mediaRole: 'PRIMARY_REFERENCE',
-          pageNumber: pageNum,
-          confidence: 0.90,
-          approvalStatus: 'PENDING',
-          isRuntimeEligible: false,
-          provenance: { pageNumber: pageNum, sourceId, width: img.width, height: img.height },
-        });
-        totalMedia++;
-      }
-    } else {
-      for (let i = 0; i < candidates.length; i++) {
-        const candidate = candidates[i];
+      try {
         const entity = await createKnowledgeEntity({
           database,
           tenantId,
           sourceId,
-          entityType: 'GENERIC',
-          name: candidate.name,
-          externalCode: candidate.externalCode,
-          description: candidate.description,
-          attributes: candidate.attributes,
-          textualEvidence: candidate.textualEvidence,
-          confidence: 0.90,
+          entityType: 'VISUAL_SAMPLE',
+          name: `Visual Reference (Page ${pageNum})`,
+          description: page.text ? page.text.slice(0, 1000) : 'Visual reference extracted from document',
+          textualEvidence: page.text ? page.text.slice(0, 2000) : null,
+          confidence: 0.85,
           approvalStatus: 'PENDING',
           isRuntimeEligible: false,
-          provenance: { pageNumber: pageNum, sourceId, method: 'PDF_CATALOG_EXTRACTION' },
+          provenance: { pageNumber: pageNum, sourceId, method: 'PDF_VISUAL_EXTRACTION' },
         });
         totalEntities++;
 
-        if (pageImages.length === 1 && candidates.length === 1) {
-          await addEntityMedia({
-            database,
-            storage,
-            tenantId,
-            entityId: entity.id,
-            sourceId,
-            file: {
-              buffer: pageImages[0].buffer,
-              mimetype: pageImages[0].mimeType,
-              originalname: pageImages[0].originalFilename,
-              size: pageImages[0].buffer.length,
-            },
-            mediaRole: 'PRIMARY_REFERENCE',
-            pageNumber: pageNum,
-            confidence: 0.95,
-            approvalStatus: 'PENDING',
-            isRuntimeEligible: false,
-            provenance: { pageNumber: pageNum, sourceId, width: pageImages[0].width, height: pageImages[0].height },
-          });
-          totalMedia++;
-        } else if (pageImages.length > 0) {
-          for (const img of pageImages) {
+        for (const img of pageImages) {
+          try {
             await addEntityMedia({
               database,
               storage,
@@ -343,15 +307,97 @@ export async function processPdfCatalogIngestion({
                 originalname: img.originalFilename,
                 size: img.buffer.length,
               },
-              mediaRole: candidates.length === 1 ? 'PRIMARY_REFERENCE' : 'UNCERTAIN_ASSOCIATION',
+              mediaRole: 'PRIMARY_REFERENCE',
               pageNumber: pageNum,
-              confidence: candidates.length === 1 ? 0.90 : 0.60,
+              confidence: 0.90,
               approvalStatus: 'PENDING',
               isRuntimeEligible: false,
-              provenance: { pageNumber: pageNum, sourceId, uncertain: candidates.length > 1 },
+              provenance: { pageNumber: pageNum, sourceId, width: img.width, height: img.height },
             });
             totalMedia++;
+          } catch (mediaErr) {
+            console.warn('PDF_MEDIA_PERSISTENCE_SKIPPED:', mediaErr?.message || mediaErr);
           }
+        }
+      } catch (entityErr) {
+        console.warn('PDF_ENTITY_CREATION_SKIPPED:', entityErr?.message || entityErr);
+      }
+    } else {
+      for (let i = 0; i < candidates.length; i++) {
+        const candidate = candidates[i];
+        try {
+          const entity = await createKnowledgeEntity({
+            database,
+            tenantId,
+            sourceId,
+            entityType: 'GENERIC',
+            name: candidate.name,
+            externalCode: candidate.externalCode,
+            description: candidate.description,
+            attributes: candidate.attributes,
+            textualEvidence: candidate.textualEvidence,
+            confidence: 0.90,
+            approvalStatus: 'PENDING',
+            isRuntimeEligible: false,
+            provenance: { pageNumber: pageNum, sourceId, method: 'PDF_CATALOG_EXTRACTION' },
+          });
+          totalEntities++;
+
+          if (pageImages.length === 1 && candidates.length === 1) {
+            try {
+              await addEntityMedia({
+                database,
+                storage,
+                tenantId,
+                entityId: entity.id,
+                sourceId,
+                file: {
+                  buffer: pageImages[0].buffer,
+                  mimetype: pageImages[0].mimeType,
+                  originalname: pageImages[0].originalFilename,
+                  size: pageImages[0].buffer.length,
+                },
+                mediaRole: 'PRIMARY_REFERENCE',
+                pageNumber: pageNum,
+                confidence: 0.95,
+                approvalStatus: 'PENDING',
+                isRuntimeEligible: false,
+                provenance: { pageNumber: pageNum, sourceId, width: pageImages[0].width, height: pageImages[0].height },
+              });
+              totalMedia++;
+            } catch (mediaErr) {
+              console.warn('PDF_MEDIA_PERSISTENCE_SKIPPED:', mediaErr?.message || mediaErr);
+            }
+          } else if (pageImages.length > 0) {
+            for (const img of pageImages) {
+              try {
+                await addEntityMedia({
+                  database,
+                  storage,
+                  tenantId,
+                  entityId: entity.id,
+                  sourceId,
+                  file: {
+                    buffer: img.buffer,
+                    mimetype: img.mimeType,
+                    originalname: img.originalFilename,
+                    size: img.buffer.length,
+                  },
+                  mediaRole: candidates.length === 1 ? 'PRIMARY_REFERENCE' : 'UNCERTAIN_ASSOCIATION',
+                  pageNumber: pageNum,
+                  confidence: candidates.length === 1 ? 0.90 : 0.60,
+                  approvalStatus: 'PENDING',
+                  isRuntimeEligible: false,
+                  provenance: { pageNumber: pageNum, sourceId, uncertain: candidates.length > 1 },
+                });
+                totalMedia++;
+              } catch (mediaErr) {
+                console.warn('PDF_MEDIA_PERSISTENCE_SKIPPED:', mediaErr?.message || mediaErr);
+              }
+            }
+          }
+        } catch (entityErr) {
+          console.warn('PDF_ENTITY_CREATION_SKIPPED:', entityErr?.message || entityErr);
         }
       }
     }
