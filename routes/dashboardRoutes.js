@@ -32,6 +32,13 @@ import {
   getPublicWebChatAsset,
 } from '../services/web-chat-asset-service.js';
 import { createConversationResourceStorage } from '../services/conversation-resource-storage.js';
+import {
+  getWhatsAppEmbeddedSignupConfig,
+  exchangeAndOnboardWhatsApp,
+  getWhatsAppChannelStatus,
+  disconnectWhatsAppChannel,
+  WhatsAppEmbeddedSignupError,
+} from '../services/whatsapp-embedded-signup-service.js';
 
 const webChatLogoUpload = multer({
   storage: multer.memoryStorage(),
@@ -107,6 +114,34 @@ const webChatProvisioningErrorResponse = (req, res, error) => {
     error: error.code,
     message: error.message,
   });
+  return true;
+};
+
+const whatsAppEmbeddedSignupErrorResponse = (req, res, error) => {
+  if (!(error instanceof WhatsAppEmbeddedSignupError)) return false;
+  const statuses = {
+    TENANT_ID_REQUIRED: 400,
+    AUTHENTICATION_REQUIRED: 401,
+    AUTHORIZATION_CODE_REQUIRED: 400,
+    WABA_ID_REQUIRED: 400,
+    ASSISTANT_ID_REQUIRED: 400,
+    OAUTH_STATE_INVALID: 400,
+    TENANT_NOT_ENTITLED: 403,
+    WHATSAPP_ASSISTANT_INELIGIBLE: 400,
+    META_APP_NOT_CONFIGURED: 503,
+    META_CODE_EXCHANGE_FAILED: 400,
+    META_WABA_VERIFICATION_FAILED: 400,
+    WHATSAPP_PHONE_NUMBER_NOT_FOUND: 400,
+    WHATSAPP_PHONE_ID_INVALID: 400,
+    WHATSAPP_CHANNEL_OWNERSHIP_CONFLICT: 409,
+    DATABASE_UNAVAILABLE: 500,
+  };
+  const body = {
+    error: error.code,
+    message: error.message,
+    ...(error.details || {}),
+  };
+  res.status(statuses[error.code] ?? 400).json(body);
   return true;
 };
 
@@ -671,6 +706,89 @@ router.post('/:tenantId/channels/transfer-whatsapp', requireOwner, requireTenant
     return res.status(500).json({ error: 'Server error' });
   }
 });
+router.get('/:tenantId/channels/whatsapp/config', requireTenantAccess, async (req, res) => {
+  if (!tenant(req, res)) return;
+  try {
+    const database = req.app?.locals?.database || pool;
+    const config = await getWhatsAppEmbeddedSignupConfig({
+      database,
+      tenantId: req.verified_tenant_id,
+      userId: req.user?.id || req.user?.user_id,
+    });
+    return res.json(config);
+  } catch (error) {
+    if (whatsAppEmbeddedSignupErrorResponse(req, res, error)) return;
+    console.error('Fetch WhatsApp config error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.get('/:tenantId/channels/whatsapp/status', requireTenantAccess, async (req, res) => {
+  if (!tenant(req, res)) return;
+  try {
+    const database = req.app?.locals?.database || pool;
+    const status = await getWhatsAppChannelStatus({
+      database,
+      tenantId: req.verified_tenant_id,
+    });
+    return res.json(status);
+  } catch (error) {
+    if (whatsAppEmbeddedSignupErrorResponse(req, res, error)) return;
+    console.error('Fetch WhatsApp status error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/:tenantId/channels/whatsapp/embedded-signup', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  if (!tenant(req, res)) return;
+  const {
+    code,
+    waba_id: wabaId,
+    phone_number_id: phoneNumberId = null,
+    assistant_id: assistantId,
+    state_token: oauthState,
+  } = req.body ?? {};
+
+  try {
+    const database = req.app?.locals?.database || pool;
+    const httpClient = req.app?.locals?.httpClient || axios;
+    const result = await exchangeAndOnboardWhatsApp({
+      database,
+      tenantId: req.verified_tenant_id,
+      userId: req.user?.id || req.user?.user_id,
+      code,
+      wabaId,
+      phoneNumberId,
+      assistantId,
+      oauthState,
+      httpClient,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    if (whatsAppEmbeddedSignupErrorResponse(req, res, error)) return;
+    console.error('WhatsApp embedded signup error:', error);
+    return res.status(500).json({ error: 'Server error', message: error?.message });
+  }
+});
+
+router.post('/:tenantId/channels/whatsapp/disconnect', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  if (!tenant(req, res)) return;
+  const { channel_id: channelId = null } = req.body ?? {};
+  try {
+    const database = req.app?.locals?.database || pool;
+    const result = await disconnectWhatsAppChannel({
+      database,
+      tenantId: req.verified_tenant_id,
+      channelId,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    if (whatsAppEmbeddedSignupErrorResponse(req, res, error)) return;
+    console.error('WhatsApp disconnect error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
 router.get('/:tenantId/channels/:channelId', requireTenantAccess, async(req,res)=>{if(!tenant(req,res)||!isValidUUID(req.params.channelId))return res.status(400).json({error:'Invalid channel ID'});await reconcileWhatsAppChannelIntegrity({ database: req.app?.locals?.database || pool, tenantId: req.verified_tenant_id }).catch(() => {});const r=await (req.app?.locals?.database?.query?.bind(req.app.locals.database) || req.app?.locals?.query || query)('SELECT * FROM tenant_channels WHERE id=$1 AND tenant_id=$2',[req.params.channelId,req.verified_tenant_id]);if(!r.rowCount)return res.status(404).json({error:'Channel not found'});res.json(r.rows[0]);});
 router.put('/:tenantId/channels/:channelId', requireTenantAccess, requireTenantAdmin, async (req, res) => {
   if (!tenant(req, res) || !isValidUUID(req.params.channelId)) return res.status(400).json({ error: 'Invalid channel ID' });

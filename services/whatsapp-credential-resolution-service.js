@@ -43,6 +43,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { decryptWhatsAppCredential } from './whatsapp-credential-crypto.js';
 
 export const WHATSAPP_CREDENTIAL_SOURCES = Object.freeze({
   INTEGRATION_SCOPED: 'INTEGRATION_SCOPED',
@@ -97,11 +98,39 @@ export function integrationCredentialEnvName(integrationConfig) {
 /**
  * Canonical outbound credential resolution.
  *
+ * Checks:
+ *   1. `integrationConfig.whatsapp.encrypted_access_token`: Encrypted tenant-owned token
+ *      (e.g., from Embedded Signup). Decrypted on-the-fly.
+ *   2. `integrationConfig.whatsapp.access_token_env`: Reference to platform secret store env var.
+ *   3. `WHATSAPP_TOKEN`: Shared platform fallback.
+ *
  * Returns { accessToken, source, envName, fingerprint } and never throws for a
  * missing credential, so callers keep their existing, already-tested provider
  * error semantics.
  */
 export function resolveWhatsAppOutboundCredential({ integrationConfig = null, env = process.env } = {}) {
+  // 1. Check for encrypted tenant token stored in channel_integrations config
+  const encryptedEnvelope = integrationConfig?.whatsapp?.encrypted_access_token;
+  if (encryptedEnvelope) {
+    const decryptedToken = decryptWhatsAppCredential(encryptedEnvelope, { env });
+    if (decryptedToken) {
+      return {
+        accessToken: decryptedToken,
+        source: WHATSAPP_CREDENTIAL_SOURCES.INTEGRATION_SCOPED,
+        envName: null,
+        fingerprint: credentialFingerprint(decryptedToken),
+      };
+    }
+    // Token envelope was present but decryption failed. Fail closed as UNRESOLVED.
+    return {
+      accessToken: null,
+      source: WHATSAPP_CREDENTIAL_SOURCES.UNRESOLVED,
+      envName: null,
+      fingerprint: 'unconfigured',
+    };
+  }
+
+  // 2. Check for integration-scoped environment variable reference
   const scopedEnvName = integrationCredentialEnvName(integrationConfig);
   if (scopedEnvName) {
     const scopedToken = trimmed(env?.[scopedEnvName]);
@@ -124,6 +153,7 @@ export function resolveWhatsAppOutboundCredential({ integrationConfig = null, en
     };
   }
 
+  // 3. Fall back to shared platform credential
   const platformToken = trimmed(env?.[PLATFORM_WHATSAPP_TOKEN_ENV]);
   if (platformToken) {
     return {
@@ -150,3 +180,4 @@ export function describeWhatsAppCredentialResolution(resolution) {
     + ' env_reference=' + (resolution?.envName ?? 'none')
     + ' credential_fingerprint=' + (resolution?.fingerprint ?? 'unconfigured');
 }
+

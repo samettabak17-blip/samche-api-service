@@ -554,3 +554,66 @@ export interface DashboardOverview {
   insights: { peak_hour: string | null; peak_hour_timezone: 'UTC'; best_channel: ConversationChannelType | null; most_active_assistant: { id: string; name: string; channel_types: ConversationChannelType[]; conversation_count: number } | null; growth: number | null; growth_status: 'AVAILABLE' | 'INSUFFICIENT_DATA'; };
   conversation_status_distribution: Array<{ status: ConversationStatus; count: number }>;
 }
+
+export type WhatsAppConnectionStatus = 'NOT_CONNECTED' | 'CONNECTED' | 'ACTION_REQUIRED' | 'ERROR';
+
+export interface WhatsAppConfigResponse {
+  entitled: boolean;
+  min_plan?: PlanCode;
+  reason?: string;
+  message?: string;
+  app_id: string | null;
+  config_id: string | null;
+  graph_api_version: string;
+  state_token: string | null;
+  configured: boolean;
+}
+
+export interface WhatsAppConnectionDetails {
+  waba_id: string | null;
+  phone_number_id: string | null;
+  display_phone_number: string | null;
+  verified_name: string | null;
+  quality_rating: string | null;
+  code_verification_status: string | null;
+  onboarded_via: string;
+  onboarded_at: string | null;
+  has_credentials: boolean;
+}
+
+export interface WhatsAppChannelStatusResponse {
+  status: WhatsAppConnectionStatus;
+  entitled: boolean;
+  action_required: string | null;
+  channel: TenantChannel | null;
+  connection: WhatsAppConnectionDetails | null;
+  assistant: {
+    id: string;
+    name: string;
+    status: string;
+    is_active: boolean;
+  } | null;
+}
+
+export interface WhatsAppEmbeddedSignupPayload {
+  code: string;
+  waba_id: string;
+  phone_number_id?: string | null;
+  assistant_id: string;
+  state_token: string;
+}
+
+export interface WhatsAppEmbeddedSignupResponse {
+  ok: boolean;
+  channel: TenantChannel;
+  connection: {
+    waba_id: string;
+    phone_number_id: string;
+    display_phone_number: string | null;
+    verified_name: string | null;
+    quality_rating: string;
+    code_verification_status: string;
+    status: string;
+  };
+}
+

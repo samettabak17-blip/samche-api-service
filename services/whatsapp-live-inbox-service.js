@@ -66,10 +66,12 @@ export async function resolveWhatsAppIntegration(client, phoneNumberId) {
             tc.external_channel_id, tc.channel_type, tc.status AS channel_status, a.status AS assistant_status,
             t.name AS tenant_name, a.name AS assistant_name, a.model AS assistant_model,
             a.system_prompt AS assistant_system_prompt,
-            a.whatsapp_response_templates AS assistant_whatsapp_response_templates
+            a.whatsapp_response_templates AS assistant_whatsapp_response_templates,
+            ci.config AS config
        FROM tenant_channels tc
        JOIN tenants t ON t.id = tc.tenant_id AND t.status = 'active'
        JOIN ai_assistants a ON a.id = tc.assistant_id AND a.tenant_id = tc.tenant_id
+       LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.integration_type = 'WHATSAPP'
       WHERE tc.channel_type = 'WHATSAPP'
         AND tc.status = 'active'
         AND a.status = 'active'
@@ -83,7 +85,11 @@ export async function resolveWhatsAppIntegration(client, phoneNumberId) {
   );
 
   if (directChannel.rowCount === 1) {
-    const integration = { ...directChannel.rows[0], external_channel_id: cleanPhone };
+    const integration = {
+      ...directChannel.rows[0],
+      external_channel_id: cleanPhone,
+      config: directChannel.rows[0].config || null,
+    };
     try {
       await client.query(
         `INSERT INTO channel_integrations

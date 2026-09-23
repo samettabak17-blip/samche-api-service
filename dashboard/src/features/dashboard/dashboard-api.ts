@@ -87,6 +87,8 @@ export const tenantKeys = {
   channels: (tenantId: string) => ['tenant', tenantId, 'channels'] as const,
   channel: (tenantId: string, channelId: string) => ['tenant', tenantId, 'channel', channelId] as const,
   webChatChannel: (tenantId: string) => ['tenant', tenantId, 'channel', 'web-chat'] as const,
+  whatsappConfig: (tenantId: string) => ['tenant', tenantId, 'whatsapp', 'config'] as const,
+  whatsappStatus: (tenantId: string) => ['tenant', tenantId, 'whatsapp', 'status'] as const,
 
   knowledgeBase: (tenantId: string) => ['tenant', tenantId, 'knowledge-base'] as const,
   knowledgeDocument: (tenantId: string, documentId: string) => ['tenant', tenantId, 'knowledge-document', documentId] as const,
@@ -166,6 +168,10 @@ export const tenantApi = {
   updateChannel: (tenantId: string, channelId: string, body: Partial<Omit<TenantChannel, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>>) => apiClient.put<TenantChannel>(`${tenantRoot(tenantId)}/channels/${channelId}`, body),
   transferWhatsAppChannel: (tenantId: string, body: { external_channel_id: string; expected_source_channel_id: string; target_assistant_id: string; display_name: string; confirmation: 'TRANSFER' }) => apiClient.post<{ channel: TenantChannel; transfer: { source_channel_id: string; source_tenant_id: string; audit_event_id: string; external_channel_id: string } }>(`${tenantRoot(tenantId)}/channels/transfer-whatsapp`, body),
   deleteChannel: (tenantId: string, channelId: string) => apiClient.delete<{ message: string }>(`${tenantRoot(tenantId)}/channels/${channelId}`),
+  getWhatsAppConfig: (tenantId: string) => apiClient.get<import('../../types/api').WhatsAppConfigResponse>(`${tenantRoot(tenantId)}/channels/whatsapp/config`),
+  getWhatsAppStatus: (tenantId: string) => apiClient.get<import('../../types/api').WhatsAppChannelStatusResponse>(`${tenantRoot(tenantId)}/channels/whatsapp/status`),
+  connectWhatsAppEmbeddedSignup: (tenantId: string, payload: import('../../types/api').WhatsAppEmbeddedSignupPayload) => apiClient.post<import('../../types/api').WhatsAppEmbeddedSignupResponse>(`${tenantRoot(tenantId)}/channels/whatsapp/embedded-signup`, payload),
+  disconnectWhatsApp: (tenantId: string, channelId?: string) => apiClient.post<{ ok: boolean; status: string }>(`${tenantRoot(tenantId)}/channels/whatsapp/disconnect`, { channel_id: channelId }),
   getWebChatChannel: (tenantId: string) => apiClient.get<WebChatChannelResponse>(`${tenantRoot(tenantId)}/channels/web-chat`),
   updateWebChatChannel: (tenantId: string, body: {
     widget_key?: string | null;
