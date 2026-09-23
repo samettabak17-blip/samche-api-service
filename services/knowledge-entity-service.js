@@ -555,6 +555,56 @@ export async function retrieveApprovedEntities({
   return result.rows;
 }
 
+export async function listApprovedVisualEntities({ database, tenantId, assistantId = null, entityId = null, limit = 25 }) {
+  if (!database?.query || !tenantId) return [];
+  const boundedLimit = Math.max(1, Math.min(Number(limit) || 25, 50));
+  const result = await database.query(
+    `SELECT e.id, e.tenant_id, e.source_id, e.entity_type, e.name, e.external_code,
+            e.description, e.attributes, e.confidence,
+            COALESCE((
+              SELECT json_agg(json_build_object(
+                'id', m.id, 'mime_type', m.mime_type, 'storage_key', m.storage_key,
+                'original_filename', m.original_filename, 'media_role', m.media_role
+              ) ORDER BY (CASE WHEN m.media_role = 'PRIMARY_REFERENCE' THEN 0 ELSE 1 END), m.created_at ASC)
+              FROM knowledge_entity_media m
+              WHERE m.entity_id = e.id AND m.tenant_id = e.tenant_id
+                AND m.approval_status = 'APPROVED' AND m.is_runtime_eligible = TRUE
+            ), '[]'::json) AS approved_media
+       FROM knowledge_entities e
+       JOIN knowledge_base_documents s ON s.id = e.source_id AND s.tenant_id = e.tenant_id
+      WHERE e.tenant_id = $1
+        AND ($4::uuid IS NULL OR e.id = $4)
+        AND e.approval_status = 'APPROVED' AND e.is_runtime_eligible = TRUE
+        AND s.enabled = TRUE AND s.status = 'active' AND s.processing_status = 'READY'
+        AND EXISTS (
+          SELECT 1 FROM knowledge_entity_media m
+           WHERE m.entity_id = e.id AND m.tenant_id = e.tenant_id
+             AND m.approval_status = 'APPROVED' AND m.is_runtime_eligible = TRUE
+        )
+        AND ($2::uuid IS NULL OR EXISTS (
+          SELECT 1 FROM knowledge_source_assistants ksa
+           WHERE ksa.tenant_id = e.tenant_id AND ksa.source_id = e.source_id AND ksa.assistant_id = $2
+        ))
+      ORDER BY e.confidence DESC NULLS LAST, e.created_at DESC, e.id
+      LIMIT $3`,
+    [tenantId, assistantId, boundedLimit, entityId]
+  );
+  return result.rows || [];
+}
+
+export async function resolveApprovedVisualReference({ database, tenantId, assistantId = null, entityId, mediaIds }) {
+  if (!entityId || !Array.isArray(mediaIds) || mediaIds.length === 0) return null;
+  const entries = await listApprovedVisualEntities({ database, tenantId, assistantId, entityId, limit: 1 });
+  const entity = entries.find((entry) => entry.id === entityId && entry.tenant_id === tenantId);
+  if (!entity) return null;
+  const approvedMedia = Array.isArray(entity.approved_media) ? entity.approved_media : [];
+  const media = mediaIds.map((id) => approvedMedia.find((item) => item.id === id
+    && String(item.storage_key || '').startsWith(`knowledge/${tenantId}/`)
+    && /^image\/(?:png|jpeg|webp)$/.test(String(item.mime_type))));
+  if (media.some((item) => !item)) return null;
+  return { entity, media };
+}
+
 export function detectEntityAmbiguity(matchedEntities = []) {
   if (!Array.isArray(matchedEntities) || matchedEntities.length < 2) {
     return { isAmbiguous: false, candidates: matchedEntities };

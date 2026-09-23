@@ -11,6 +11,7 @@ import { createDeterministicMockVisualProvider } from '../services/visual-ai-pro
 import { enqueueVisualAiGenerationJob } from '../services/visual-ai-job-service.js';
 import { processOneVisualAiGenerationJob } from '../services/visual-ai-generation-worker.js';
 import { selectRecentWhatsAppResourceContext } from '../services/whatsapp-live-inbox-service.js';
+import { resolveApprovedVisualReference } from '../services/knowledge-entity-service.js';
 
 const connectionString = process.env.TEST_DATABASE_URL;
 if (!connectionString || !isSafeTestDatabaseUrl(connectionString)) throw new Error('TEST_DATABASE_URL_REQUIRED');
@@ -109,6 +110,43 @@ test.after(async () => {
       migrationGuard.release();
     }
     await database.end();
+  }
+});
+
+test('PostgreSQL catalog reference lookup enforces approved media, assistant scope, and tenant ownership', async () => {
+  const client = await database.connect();
+  try {
+    await client.query('BEGIN');
+    const assistant = await client.query(`SELECT assistant_id FROM tenant_channels WHERE id = $1 AND tenant_id = $2`, [created.channelId, created.tenantId]);
+    const assistantId = assistant.rows[0].assistant_id;
+    const source = await client.query(
+      `INSERT INTO knowledge_base_documents (tenant_id, assistant_id, title, content, source_type, status, processing_status, enabled)
+       VALUES ($1, $2, 'Approved visual catalog', 'Approved catalog source', 'CATALOG', 'active', 'READY', TRUE) RETURNING id`,
+      [created.tenantId, assistantId]
+    );
+    await client.query(`INSERT INTO knowledge_source_assistants (tenant_id, source_id, assistant_id) VALUES ($1, $2, $3)`,
+      [created.tenantId, source.rows[0].id, assistantId]);
+    const entity = await client.query(
+      `INSERT INTO knowledge_entities (tenant_id, source_id, name, entity_type, approval_status, is_runtime_eligible)
+       VALUES ($1, $2, 'Approved catalog item', 'GENERIC', 'APPROVED', TRUE) RETURNING id`,
+      [created.tenantId, source.rows[0].id]
+    );
+    const media = await client.query(
+      `INSERT INTO knowledge_entity_media (tenant_id, entity_id, source_id, mime_type, storage_key, approval_status, is_runtime_eligible)
+       VALUES ($1, $2, $3, 'image/png', $4, 'APPROVED', TRUE) RETURNING id`,
+      [created.tenantId, entity.rows[0].id, source.rows[0].id, `knowledge/${created.tenantId}/${source.rows[0].id}/approved-reference.png`]
+    );
+    const resolved = await resolveApprovedVisualReference({ database: client, tenantId: created.tenantId,
+      assistantId, entityId: entity.rows[0].id, mediaIds: [media.rows[0].id] });
+    assert.equal(resolved.entity.id, entity.rows[0].id);
+    assert.equal(resolved.media[0].id, media.rows[0].id);
+    assert.equal(await resolveApprovedVisualReference({ database: client, tenantId: created.tenantId,
+      assistantId: crypto.randomUUID(), entityId: entity.rows[0].id, mediaIds: [media.rows[0].id] }), null);
+    assert.equal(await resolveApprovedVisualReference({ database: client, tenantId: crypto.randomUUID(),
+      assistantId, entityId: entity.rows[0].id, mediaIds: [media.rows[0].id] }), null);
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
   }
 });
 

@@ -58,7 +58,7 @@ import { ConversationResourceValidationError } from "./services/conversation-res
 import { createWhatsAppMediaRetriever, extractWhatsAppMediaDescriptor } from "./services/whatsapp-multimodal-service.js";
 import { planStandaloneWhatsAppMediaResponse } from "./services/whatsapp-standalone-media-ack.js";
 import { planLatestExplicitResource, planWhatsAppResourceFollowUp, resourceFailureAcknowledgement, resourceProcessingAcknowledgement } from "./services/whatsapp-resource-follow-up-routing.js";
-import { resolveWhatsAppVisualRequestState, orchestrateWhatsAppVisualAiJob } from './services/visual-intelligence-intent-service.js';
+import { resolveWhatsAppVisualRequestState, orchestrateWhatsAppVisualAiJob, formatVisualCatalogFallback, formatVisualCatalogTargetPrompt } from './services/visual-intelligence-intent-service.js';
 import { createVisualAIProvider } from './services/visual-ai-provider-adapter.js';
 import { processOneVisualAiGenerationJob } from './services/visual-ai-generation-worker.js';
 import { formatVisualAiWorkerStartup } from './services/visual-ai-runtime-observability-service.js';
@@ -4614,6 +4614,12 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           recentHistory: whatsappInbox.conversationHistory,
           language: visualLanguage,
         });
+        if (visualRequest.state === 'WAITING_FOR_TARGET' && visualRequest.catalogRequested) {
+          const suggestion = formatVisualCatalogTargetPrompt(visualLanguage);
+          const persisted = await persistAssistantResponseIfCurrent({ tenantId: whatsappInbox.integration.tenant_id, conversationId: whatsappInbox.conversation.id, content: suggestion, handlingVersion: whatsappInbox.handlingVersion, knowledgeAuthority: whatsappInbox.knowledgeAuthority });
+          if (persisted.delivered) await sendMessage(cleanFrom, suggestion, whatsappInbox.integration.external_channel_id);
+          return;
+        }
         if (visualRequest.state === 'READY_FOR_GENERATION') {
           try {
             if (whatsappInbox.integration?.external_channel_id && wpMessageId) {
@@ -4635,14 +4641,32 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
                 language: visualLanguage,
                 businessProfile: whatsappInbox.tenantContext,
               },
+              assistantId: whatsappInbox.integration.assistant_id,
+              channelId: whatsappInbox.integration.channel_id,
+              catalogRequested: visualRequest.catalogRequested,
+              previousEntityId: visualRequest.previousEntityId,
+              requireDifferentEntity: visualRequest.requireDifferentEntity,
+              targetResourceRole: visualRequest.targetResourceRole,
+              originalCustomerTargetResourceId: visualRequest.originalCustomerTargetResourceId,
               language: visualLanguage,
             });
+            if (queued.status === 'CATALOG_UNRESOLVED') {
+              const persisted = await persistAssistantResponseIfCurrent({ tenantId: whatsappInbox.integration.tenant_id, conversationId: whatsappInbox.conversation.id, content: queued.acknowledgmentText, handlingVersion: whatsappInbox.handlingVersion, knowledgeAuthority: whatsappInbox.knowledgeAuthority });
+              if (persisted.delivered) await sendMessage(cleanFrom, queued.acknowledgmentText, whatsappInbox.integration.external_channel_id);
+              return;
+            }
             const persisted = await persistAssistantResponseIfCurrent({ tenantId: whatsappInbox.integration.tenant_id, conversationId: whatsappInbox.conversation.id, content: queued.acknowledgmentText, handlingVersion: whatsappInbox.handlingVersion, knowledgeAuthority: whatsappInbox.knowledgeAuthority });
             if (persisted.delivered) await sendMessage(cleanFrom, queued.acknowledgmentText, whatsappInbox.integration.external_channel_id);
             return;
           } catch (visualError) {
             if (visualError?.code === 'VISUAL_AI_NOT_ENABLED') return;
             console.info('WHATSAPP_VISUAL_AI_QUEUE_FAILED code=' + String(visualError?.code ?? 'UNKNOWN').slice(0, 80));
+            if (visualRequest.catalogRequested) {
+              const fallback = formatVisualCatalogFallback(visualLanguage, 'TEMPORARILY_UNAVAILABLE');
+              const persisted = await persistAssistantResponseIfCurrent({ tenantId: whatsappInbox.integration.tenant_id, conversationId: whatsappInbox.conversation.id, content: fallback, handlingVersion: whatsappInbox.handlingVersion, knowledgeAuthority: whatsappInbox.knowledgeAuthority });
+              if (persisted.delivered) await sendMessage(cleanFrom, fallback, whatsappInbox.integration.external_channel_id);
+              return;
+            }
           }
         }
         resourceFollowUp = planWhatsAppResourceFollowUp({

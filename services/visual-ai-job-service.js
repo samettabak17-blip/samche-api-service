@@ -3,6 +3,7 @@ import { createConversationResource } from './conversation-resource-service.js';
 import { buildConversationStorageKey } from './conversation-resource-validation.js';
 import { classifyVisualAIError } from './visual-ai-provider-adapter.js';
 import { buildGroundedVisualInstruction } from './visual-intelligence-intent-service.js';
+import { resolveApprovedVisualReference } from './knowledge-entity-service.js';
 import {
   UUID_REGEX,
   VisualAiJobError,
@@ -19,6 +20,46 @@ export {
   upsertTenantVisualAiConfig,
   assertTenantVisualAiEntitlement,
 };
+
+async function assertCatalogTargetRole({ database, tenantId, conversationId, targetResourceId, groundingContext }) {
+  const roleCheck = await database.query(
+    `SELECT source_type, media_category, processing_status FROM conversation_resources WHERE id = $1 AND tenant_id = $2 AND conversation_id = $3`,
+    [targetResourceId, tenantId, conversationId]
+  );
+  const target = roleCheck.rows[0];
+  if (target?.media_category !== 'IMAGE' || target?.processing_status !== 'READY') {
+    throw new VisualAiJobError('CUSTOMER_TARGET_REQUIRED', 'A ready visual target is required.');
+  }
+  if (target.source_type !== 'VISUAL_AI_GENERATED') {
+    if (groundingContext.resourceRoles?.target === 'GENERATED_OUTPUT') {
+      throw new VisualAiJobError('CUSTOMER_TARGET_REQUIRED', 'Target resource role does not match its provenance.');
+    }
+    return;
+  }
+  const originalId = groundingContext.originalCustomerTargetResourceId;
+  if (groundingContext.resourceRoles?.target !== 'GENERATED_OUTPUT' || !UUID_REGEX.test(String(originalId || ''))) {
+    throw new VisualAiJobError('CUSTOMER_TARGET_REQUIRED', 'Generated output cannot replace the customer target image.');
+  }
+  const prior = await database.query(
+    `SELECT target_resource_id, grounding_context FROM visual_ai_generation_jobs
+      WHERE tenant_id = $1 AND conversation_id = $2 AND generated_resource_id = $3
+        AND status = 'COMPLETED' LIMIT 1`,
+    [tenantId, conversationId, targetResourceId]
+  );
+  const original = await database.query(
+    `SELECT source_type, media_category, processing_status FROM conversation_resources
+      WHERE id = $1 AND tenant_id = $2 AND conversation_id = $3`,
+    [originalId, tenantId, conversationId]
+  );
+  const priorOriginalId = prior.rows[0]?.grounding_context?.originalCustomerTargetResourceId
+    || prior.rows[0]?.target_resource_id;
+  if (priorOriginalId !== originalId || !original.rows[0]
+    || original.rows[0].source_type === 'VISUAL_AI_GENERATED'
+    || original.rows[0].media_category !== 'IMAGE'
+    || original.rows[0].processing_status !== 'READY') {
+    throw new VisualAiJobError('CUSTOMER_TARGET_REQUIRED', 'Generated edit lacks a valid prior customer target.');
+  }
+}
 
 export async function enqueueVisualAiGenerationJob({
   database,
@@ -51,6 +92,17 @@ export async function enqueueVisualAiGenerationJob({
   );
   if (targetCheck.rowCount === 0) {
     throw new VisualAiJobError('TARGET_RESOURCE_NOT_FOUND', 'Target resource not found or unauthorized for this tenant conversation.');
+  }
+  if (groundingContext.catalogRequested) {
+    const catalog = groundingContext.catalog;
+    const reference = await resolveApprovedVisualReference({
+      database, tenantId, assistantId: groundingContext.assistantId || null,
+      entityId: catalog?.entityId, mediaIds: catalog?.mediaIds,
+    });
+    if (!reference || !groundingContext.assistantId) {
+      throw new VisualAiJobError('APPROVED_CATALOG_REFERENCE_REQUIRED', 'An approved catalog entity and reference image are required.');
+    }
+    await assertCatalogTargetRole({ database, tenantId, conversationId, targetResourceId, groundingContext });
   }
 
   if (referenceResourceId) {
@@ -203,12 +255,30 @@ export async function processVisualAiGenerationJob({ database, storage, job, vis
       [job.target_resource_id, job.tenant_id, job.conversation_id]
     );
     if (targetRow.rowCount === 0) throw new VisualAiJobError('TARGET_RESOURCE_NOT_FOUND', 'Target resource is unavailable.');
+    let catalogReference = null;
+    if (job.grounding_context?.catalogRequested) {
+      catalogReference = await resolveApprovedVisualReference({
+        database, tenantId: job.tenant_id,
+        assistantId: job.grounding_context.assistantId,
+        entityId: job.grounding_context.catalog?.entityId,
+        mediaIds: job.grounding_context.catalog?.mediaIds,
+      });
+      if (!catalogReference || !job.grounding_context.assistantId) {
+        throw new VisualAiJobError('APPROVED_CATALOG_REFERENCE_REQUIRED', 'Approved catalog reference is unavailable.');
+      }
+      await assertCatalogTargetRole({ database, tenantId: job.tenant_id, conversationId: job.conversation_id,
+        targetResourceId: job.target_resource_id, groundingContext: job.grounding_context });
+      if (!storage || typeof storage.get !== 'function' || !targetRow.rows[0].storage_key) {
+        throw new VisualAiJobError('CUSTOMER_TARGET_UNAVAILABLE', 'Customer target image storage is unavailable.');
+      }
+    }
 
     let targetBuffer;
     if (storage && typeof storage.get === 'function' && targetRow.rows[0].storage_key) {
       const stream = await storage.get({ key: targetRow.rows[0].storage_key });
       const chunks = [];
-      for await (const chunk of stream) chunks.push(chunk);
+      if (Buffer.isBuffer(stream)) chunks.push(stream);
+      else for await (const chunk of stream) chunks.push(Buffer.from(chunk));
       targetBuffer = Buffer.concat(chunks);
     } else {
       targetBuffer = Buffer.from('mock-target-bytes');
@@ -223,7 +293,8 @@ export async function processVisualAiGenerationJob({ database, storage, job, vis
       if (refRow.rowCount > 0 && storage && typeof storage.get === 'function' && refRow.rows[0].storage_key) {
         const stream = await storage.get({ key: refRow.rows[0].storage_key });
         const chunks = [];
-        for await (const chunk of stream) chunks.push(chunk);
+        if (Buffer.isBuffer(stream)) chunks.push(stream);
+        else for await (const chunk of stream) chunks.push(Buffer.from(chunk));
         referenceImage = { buffer: Buffer.concat(chunks), mimeType: refRow.rows[0].mime_type, originalFilename: refRow.rows[0].original_filename };
       }
     }
@@ -234,20 +305,44 @@ export async function processVisualAiGenerationJob({ database, storage, job, vis
       originalFilename: targetRow.rows[0].original_filename,
     };
     const referenceImages = referenceImage ? [referenceImage] : [];
+    if (catalogReference) {
+      if (!storage || typeof storage.get !== 'function') {
+        throw new VisualAiJobError('CATALOG_MEDIA_UNAVAILABLE', 'Catalog reference storage is unavailable.');
+      }
+      for (const media of catalogReference.media) {
+        const value = await storage.get({ key: media.storage_key });
+        const chunks = [];
+        if (Buffer.isBuffer(value)) chunks.push(value);
+        else for await (const chunk of value) chunks.push(Buffer.from(chunk));
+        const buffer = Buffer.concat(chunks);
+        if (!buffer.length) throw new VisualAiJobError('CATALOG_MEDIA_UNAVAILABLE', 'Catalog reference image is empty.');
+        referenceImages.push({ buffer, mimeType: media.mime_type, originalFilename: media.original_filename, mediaId: media.id, entityId: catalogReference.entity.id });
+      }
+    }
     const sourceImages = [targetImage];
 
+    const providerGroundingContext = catalogReference ? {
+      ...job.grounding_context,
+      entity: {
+        id: catalogReference.entity.id,
+        name: catalogReference.entity.name,
+        type: catalogReference.entity.entity_type,
+        description: catalogReference.entity.description,
+        attributes: catalogReference.entity.attributes || {},
+      },
+    } : job.grounding_context;
     const groundedInstruction = buildGroundedVisualInstruction({
       instruction: job.prompt_instruction,
-      groundingContext: job.grounding_context,
+      groundingContext: providerGroundingContext,
     });
 
     const providerResult = await visualProvider.generateConcept({
       targetImage,
-      referenceImage,
+      referenceImage: referenceImages[0] || null,
       sourceImages,
       referenceImages,
       instruction: groundedInstruction,
-      groundingContext: job.grounding_context,
+      groundingContext: providerGroundingContext,
     });
 
     return await completeVisualAiGenerationJob({ database, storage, tenantId: job.tenant_id, jobId: job.id, conversationId: job.conversation_id, result: providerResult });

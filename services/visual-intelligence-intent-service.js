@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { assertTenantVisualAiEntitlement, enqueueVisualAiGenerationJob } from './visual-ai-job-service.js';
 import { safeFetchRemoteImage, validateSafeUrl } from './url-intelligence-service.js';
+import { listApprovedVisualEntities } from './knowledge-entity-service.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -35,6 +36,11 @@ const SUPPORT_OR_QA_PATTERNS = [
   /(?:invoice|receipt|order\s+slip|bill|tracking\s+number|fatura|dekont|kargo\s+fişi)/i,
   /(?:hasarlı|kırık|bozuk|arızalı|çalışmıyor|hata|bu\s+ne\s+anlama\s+geliyor|ekranda\s+ne\s+yazıyor)/i,
 ];
+
+const CATALOG_REFERENCE = /\b(?:catalog(?:ue)?|inventory|your\s+(?:products?|items?|options?))\b|(?:katalog|ürünleriniz|urunleriniz)|(?:كتالوج|منتجاتكم)/iu;
+const DIFFERENT_OPTION = /\b(?:another|different|alternative|other\s+(?:one|option|product|item))\b|(?:başka|farklı|baska|farkli)|(?:آخر|أخرى|مختلف)/iu;
+const VISUAL_CONTINUATION = /\b(?:another|different|alternative|previous|darker|lighter|brighter|style|version|option|matching\s+item)\b|(?:başka|farklı|önceki|koyu|açık|baska|farkli)|(?:آخر|أخرى|مختلف|أغمق|أفتح)/iu;
+const ADDITIVE_VISUAL_EDIT = /\b(?:add|include)\s+(?:another|a\s+matching|an\s+additional)\b|(?:başka\s+bir\s+.*ekle|bir\s+.*daha\s+ekle)|(?:أضف\s+.*آخر)/iu;
 
 export function classifyVisualIntent({
   message = '',
@@ -336,21 +342,42 @@ export async function resolveWhatsAppVisualRequestState({
 
   // Load latest images for this conversation
   const resourcesResult = await database.query(
-    `SELECT id, media_category, mime_type, original_filename, storage_key, created_at
+    `SELECT id, source_type, media_category, mime_type, original_filename, storage_key, created_at
        FROM conversation_resources
       WHERE tenant_id = $1 AND conversation_id = $2 AND media_category = 'IMAGE' AND processing_status = 'READY'
-      ORDER BY created_at DESC LIMIT 4`,
+        AND source_type <> 'VISUAL_AI_GENERATED'
+      ORDER BY created_at DESC LIMIT 8`,
     [tenantId, conversationId]
   );
-  const images = resourcesResult.rows || [];
+  const images = (resourcesResult.rows || []).filter((row) => row.source_type !== 'VISUAL_AI_GENERATED');
+  const priorResult = await database.query(
+    `SELECT target_resource_id, generated_resource_id, grounding_context
+       FROM visual_ai_generation_jobs
+      WHERE tenant_id = $1 AND conversation_id = $2 AND status = 'COMPLETED'
+      ORDER BY created_at DESC, id DESC LIMIT 1`,
+    [tenantId, conversationId]
+  );
+  const previousJob = priorResult.rows?.[0] || null;
+  const previousCatalog = previousJob?.grounding_context?.catalog || null;
+  const catalogRequested = CATALOG_REFERENCE.test(String(message)) || Boolean(previousCatalog && VISUAL_CONTINUATION.test(String(message)));
+  const requireDifferentEntity = Boolean(catalogRequested && DIFFERENT_OPTION.test(String(message)));
 
-  const classification = classifyVisualIntent({
+  let classification = classifyVisualIntent({
     message,
     hasTargetImage: images.length > 0,
     hasReferenceImage: images.length > 1,
     hasDocument: false,
     recentHistory,
   });
+  if (!classification.isSupport && !classification.isVisualGeneration && previousJob && VISUAL_CONTINUATION.test(String(message))) {
+    classification = {
+      ...classification,
+      intent: VISUAL_INTENT_TYPES.VISUAL_GENERATION,
+      canonicalIntent: CANONICAL_VISUAL_INTENT_TYPES.VISUAL_EDIT,
+      isVisualGeneration: true,
+      targetStatus: 'CORRELATED_FROM_HISTORY',
+    };
+  }
 
   if (!classification.isVisualGeneration) {
     return {
@@ -358,7 +385,21 @@ export async function resolveWhatsAppVisualRequestState({
       intentClassification: classification,
       targetResourceId: null,
       referenceResourceId: null,
+      catalogRequested,
     };
+  }
+
+  const priorOriginalTargetId = previousJob?.grounding_context?.originalCustomerTargetResourceId || previousJob?.target_resource_id;
+  if (priorOriginalTargetId && !images.some((image) => image.id === priorOriginalTargetId)) {
+    const priorTarget = await database.query(
+      `SELECT id, source_type, media_category, mime_type, original_filename, storage_key, created_at
+         FROM conversation_resources
+        WHERE id = $1 AND tenant_id = $2 AND conversation_id = $3
+          AND media_category = 'IMAGE' AND processing_status = 'READY'
+          AND source_type <> 'VISUAL_AI_GENERATED'`,
+      [priorOriginalTargetId, tenantId, conversationId]
+    );
+    if (priorTarget.rows?.[0]) images.push(priorTarget.rows[0]);
   }
 
   if (images.length === 0) {
@@ -368,21 +409,137 @@ export async function resolveWhatsAppVisualRequestState({
       promptSuggestion: formatVisualAiPromptSuggestion(language),
       targetResourceId: null,
       referenceResourceId: null,
+      catalogRequested,
     };
   }
 
   const currentResourceIdSet = new Set(currentResourceIds.filter((id) => UUID_REGEX.test(String(id))));
   const currentImage = images.find((image) => currentResourceIdSet.has(image.id)) || null;
-  const targetResourceId = currentImage?.id || images[0]?.id;
-  const referenceResourceId = images.find((image) => image.id !== targetResourceId)?.id || null;
+  const originalCustomerTargetResourceId = priorOriginalTargetId || null;
+  const previousTarget = images.find((image) => image.id === originalCustomerTargetResourceId) || null;
+  let targetResourceId = currentImage?.id || previousTarget?.id || images[0]?.id;
+  let targetResourceRole = 'CUSTOMER_TARGET';
+  if (!currentImage && previousJob?.generated_resource_id && ADDITIVE_VISUAL_EDIT.test(String(message))) {
+    const generated = await database.query(
+      `SELECT id FROM conversation_resources
+        WHERE id = $1 AND tenant_id = $2 AND conversation_id = $3
+          AND source_type = 'VISUAL_AI_GENERATED' AND media_category = 'IMAGE' AND processing_status = 'READY'`,
+      [previousJob.generated_resource_id, tenantId, conversationId]
+    );
+    if (generated.rows?.[0]) {
+      targetResourceId = generated.rows[0].id;
+      targetResourceRole = 'GENERATED_OUTPUT';
+    }
+  }
+  const referenceResourceId = catalogRequested ? null : (images.find((image) => image.id !== targetResourceId)?.id || null);
 
   return {
     state: 'READY_FOR_GENERATION',
     intentClassification: classification,
     targetResourceId,
+    targetResourceRole,
+    originalCustomerTargetResourceId: currentImage?.id || originalCustomerTargetResourceId || targetResourceId,
     referenceResourceId,
     promptInstruction: message || 'Transform this scene in the requested aesthetic style.',
+    catalogRequested,
+    previousEntityId: previousCatalog?.entityId || null,
+    requireDifferentEntity,
   };
+}
+
+const CATALOG_SELECTION_STOPWORDS = new Set([
+  'from', 'your', 'catalog', 'catalogue', 'product', 'products', 'item', 'items',
+  'option', 'options', 'choose', 'select', 'another', 'different', 'suitable',
+  'create', 'make', 'visualize', 'visualization', 'using', 'with', 'this', 'that',
+  'please', 'version', 'same', 'previous', 'image', 'photo',
+]);
+
+function catalogTerms(value) {
+  return new Set(String(value || '').toLocaleLowerCase().match(/[\p{L}\p{N}]{4,}/gu)?.filter((word) => !CATALOG_SELECTION_STOPWORDS.has(word)) || []);
+}
+
+export async function resolveVisualCatalogSelection({
+  database, tenantId, assistantId = null, instruction = '',
+  previousEntityId = null, requireDifferentEntity = false,
+}) {
+  const entries = await listApprovedVisualEntities({ database, tenantId, assistantId });
+  const eligible = entries.filter((entry) => entry.tenant_id === tenantId
+    && Array.isArray(entry.approved_media)
+    && entry.approved_media.some((media) => UUID_REGEX.test(String(media.id))
+      && String(media.storage_key || '').startsWith(`knowledge/${tenantId}/`)
+      && /^image\/(?:png|jpeg|webp)$/.test(String(media.mime_type))));
+  if (!eligible.length) return { state: 'NO_APPROVED_CATALOG' };
+
+  const candidates = requireDifferentEntity && previousEntityId
+    ? eligible.filter((entry) => entry.id !== previousEntityId)
+    : eligible;
+  if (!candidates.length) return { state: 'NO_ALTERNATIVE' };
+
+  const reusePriorSelection = !requireDifferentEntity && previousEntityId
+    && (!CATALOG_REFERENCE.test(instruction) || /\b(?:previous|same|prior)\b|(?:önceki|aynı)|(?:السابق|نفس)/iu.test(instruction));
+  let selected = reusePriorSelection
+    ? candidates.find((entry) => entry.id === previousEntityId)
+    : null;
+  if (!selected && candidates.length === 1) selected = candidates[0];
+  if (!selected) {
+    const terms = catalogTerms(instruction);
+    const ranked = candidates.map((entry) => {
+      const description = [entry.name, entry.description, entry.entity_type, entry.external_code, ...Object.values(entry.attributes || {})].join(' ');
+      const entryTerms = catalogTerms(description);
+      const matches = [...terms].filter((word) => entryTerms.has(word)).length;
+      return { entry, matches };
+    }).sort((a, b) => b.matches - a.matches || String(a.entry.id).localeCompare(String(b.entry.id)));
+    if (ranked[0]?.matches > 0 && ranked[0].matches > (ranked[1]?.matches || 0)) selected = ranked[0].entry;
+  }
+  if (!selected) return { state: 'CLARIFICATION_REQUIRED' };
+
+  const media = selected.approved_media.filter((item) => UUID_REGEX.test(String(item.id))
+    && String(item.storage_key || '').startsWith(`knowledge/${tenantId}/`)
+    && /^image\/(?:png|jpeg|webp)$/.test(String(item.mime_type))).slice(0, 3);
+  return {
+    state: 'SELECTED',
+    entity: {
+      id: selected.id, name: selected.name, type: selected.entity_type,
+      description: selected.description, attributes: selected.attributes || {},
+    },
+    mediaIds: media.map((item) => item.id),
+  };
+}
+
+export function formatVisualCatalogFallback(language, reason) {
+  const lang = normalizeVisualAiLanguage(language);
+  const messages = {
+    NO_ALTERNATIVE: {
+      en: 'I could not find another approved catalog option for this visualization. You can choose a different catalog item when one becomes available.',
+      tr: 'Bu görselleştirme için onaylı başka bir katalog seçeneği bulamadım. Başka bir katalog ürünü kullanılabilir olduğunda onu seçebilirsiniz.',
+      ar: 'لم أجد خياراً آخر معتمداً من الكتالوج لهذا التصور. يمكنك اختيار منتج آخر من الكتالوج عندما يصبح متاحاً.',
+    },
+    NO_APPROVED_CATALOG: {
+      en: 'I could not find an approved catalog item with a usable image for this visualization. Please choose an approved catalog item when one becomes available.',
+      tr: 'Bu görselleştirme için kullanılabilir görseli olan onaylı bir katalog ürünü bulamadım. Onaylı bir katalog ürünü kullanılabilir olduğunda lütfen onu seçin.',
+      ar: 'لم أجد منتجاً معتمداً من الكتالوج مع صورة قابلة للاستخدام لهذا التصور. يرجى اختيار منتج معتمد من الكتالوج عندما يصبح متاحاً.',
+    },
+    CLARIFICATION_REQUIRED: {
+      en: 'I found several approved catalog options. Which one would you like me to use?',
+      tr: 'Birden fazla onaylı katalog seçeneği buldum. Hangisini kullanmamı istersiniz?',
+      ar: 'وجدت عدة خيارات معتمدة من الكتالوج. أيّها تود أن أستخدم؟',
+    },
+    TEMPORARILY_UNAVAILABLE: {
+      en: 'I cannot prepare a catalog-grounded visualization right now. Please try again shortly.',
+      tr: 'Şu anda katalog ürününe dayalı görselleştirme hazırlayamıyorum. Lütfen kısa süre sonra tekrar deneyin.',
+      ar: 'لا أستطيع إعداد تصور مستند إلى الكتالوج الآن. يرجى المحاولة بعد قليل.',
+    },
+  };
+  return (messages[reason] || messages.CLARIFICATION_REQUIRED)[lang];
+}
+
+export function formatVisualCatalogTargetPrompt(language) {
+  const lang = normalizeVisualAiLanguage(language);
+  return {
+    en: 'Please send the image you want me to transform using an approved catalog item.',
+    tr: 'Onaylı bir katalog ürünüyle dönüştürmemi istediğiniz görseli lütfen gönderin.',
+    ar: 'يرجى إرسال الصورة التي تريد تحويلها باستخدام منتج معتمد من الكتالوج.',
+  }[lang];
 }
 
 /**
@@ -399,6 +556,13 @@ export async function orchestrateWhatsAppVisualAiJob({
   referenceUrl = null,
   promptInstruction,
   groundingContext = {},
+  assistantId = null,
+  channelId = null,
+  catalogRequested = false,
+  previousEntityId = null,
+  requireDifferentEntity = false,
+  targetResourceRole = 'CUSTOMER_TARGET',
+  originalCustomerTargetResourceId = null,
   provider = 'MOCK',
   model = 'mock-visual-v1',
   language = 'en',
@@ -406,9 +570,32 @@ export async function orchestrateWhatsAppVisualAiJob({
   await assertTenantVisualAiEntitlement({ database, tenantId });
 
   const resolvedLanguage = normalizeVisualAiLanguage(language || groundingContext?.language);
+  let catalogSelection = null;
+  if (catalogRequested) {
+    catalogSelection = await resolveVisualCatalogSelection({
+      database, tenantId, assistantId, instruction: promptInstruction,
+      previousEntityId, requireDifferentEntity,
+    });
+    if (catalogSelection.state !== 'SELECTED') {
+      return {
+        status: 'CATALOG_UNRESOLVED',
+        reason: catalogSelection.state,
+        acknowledgmentText: formatVisualCatalogFallback(resolvedLanguage, catalogSelection.state),
+      };
+    }
+  }
   const resolvedGroundingContext = {
     ...groundingContext,
     language: resolvedLanguage,
+    ...(catalogSelection ? {
+      catalogRequested: true,
+      catalog: { entityId: catalogSelection.entity.id, mediaIds: catalogSelection.mediaIds },
+      entity: catalogSelection.entity,
+      resourceRoles: { target: targetResourceRole, catalogReferences: 'CATALOG_REFERENCE', output: 'GENERATED_OUTPUT' },
+      originalCustomerTargetResourceId: originalCustomerTargetResourceId || targetResourceId,
+      assistantId,
+      channelId,
+    } : {}),
   };
 
   const job = await enqueueVisualAiGenerationJob({
