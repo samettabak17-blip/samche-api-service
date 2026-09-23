@@ -80,8 +80,18 @@ export async function upsertTenantVisualAiConfig({
 
 export async function assertTenantVisualAiEntitlement({ database, tenantId }) {
   const config = await getTenantVisualAiConfig({ database, tenantId });
-  if (!config.enabled) {
-    throw new VisualAiJobError('VISUAL_AI_NOT_ENABLED', 'Visual AI capability is not enabled for this tenant.');
+  if (config.enabled) return config;
+
+  // Check if effective entitlement grants visual_ai via plan or override
+  try {
+    const { resolveEffectiveTenantEntitlements } = await import('./tenant-entitlement-service.js');
+    const effective = await resolveEffectiveTenantEntitlements({ database, tenantId });
+    if (effective?.capabilities?.visual_ai?.entitled) {
+      return { ...config, enabled: true };
+    }
+  } catch {
+    // If resolution fails, keep config.enabled as strict check
   }
-  return config;
+
+  throw new VisualAiJobError('VISUAL_AI_NOT_ENABLED', 'Visual AI capability is not enabled for this tenant.');
 }

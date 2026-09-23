@@ -1,6 +1,79 @@
 export type SystemRole = 'OWNER' | 'CUSTOMER';
 export type TenantRole = 'ADMIN' | 'AGENT';
 
+export type PlanCode = 'STARTER' | 'GROWTH' | 'BUSINESS' | 'ENTERPRISE';
+export type BillingCycle = 'MONTHLY' | 'ANNUAL';
+
+export interface PlatformPlan {
+  code: PlanCode;
+  rank: number;
+  display_name: string;
+  customer_subtitle: string;
+  monthly_price_aed: number;
+  annual_price_aed: number;
+  setup_fee_aed: number;
+  currency: string;
+  included_capabilities: string[];
+  included_limits: Record<string, number>;
+  metadata?: Record<string, unknown>;
+  active?: boolean;
+}
+
+export interface TenantSubscriptionInfo {
+  code: PlanCode;
+  display_name: string;
+  customer_subtitle: string;
+  rank: number;
+  billing_cycle: BillingCycle;
+  currency: string;
+  monthly_price_aed: number;
+  annual_price_aed: number;
+  setup_fee_aed: number;
+  status: string;
+}
+
+export interface TenantCapabilityState {
+  key: string;
+  name: string;
+  category: string;
+  min_plan: PlanCode;
+  entitled: boolean;
+  source: string;
+  enabled: boolean;
+  reason: string | null;
+  upgrade_required: PlanCode | null;
+}
+
+export interface TenantUsageLimitState {
+  metric_key: string;
+  name: string;
+  limit: number;
+  current: number;
+  remaining: number;
+  reset_interval: string;
+}
+
+export interface LockedCapability {
+  key: string;
+  name: string;
+  category: string;
+  min_plan: PlanCode;
+  description: string;
+}
+
+export interface EffectiveTenantEntitlements {
+  tenant_id: string;
+  plan: TenantSubscriptionInfo;
+  capabilities: Record<string, TenantCapabilityState>;
+  limits: Record<string, TenantUsageLimitState>;
+  locked_capabilities: LockedCapability[];
+  overrides?: Array<{
+    capability_key: string;
+    effect: 'GRANT' | 'DENY';
+    reason?: string;
+  }>;
+}
+
 export interface AuthUser { id: string; email: string; system_role: SystemRole; }
 export interface LoginResponse { token: string; user: AuthUser; }
 export interface Tenant { id: string; name: string; status: string; tenant_role?: TenantRole; created_at?: string; }

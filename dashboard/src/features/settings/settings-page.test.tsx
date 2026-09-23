@@ -8,7 +8,7 @@ vi.mock('../auth/auth-context', () => ({ useAuth: () => authState }));
 vi.mock('../tenants/tenant-context', () => ({ useTenant: () => tenantState }));
 vi.mock('../dashboard/dashboard-api', () => ({
   onboardingApi: { changePassword: vi.fn() },
-  tenantApi: { getTenantPlan: vi.fn(), listPlans: vi.fn(), changeTenantPlanAsOwner: vi.fn() },
+  tenantApi: { getTenantPlan: vi.fn(), listPlans: vi.fn(), changeTenantPlanAsOwner: vi.fn(), getTenantSubscription: vi.fn() },
 }));
 import { tenantApi } from '../dashboard/dashboard-api';
 import { SettingsPage } from './settings-page';
@@ -18,9 +18,15 @@ beforeEach(() => {
   authState.user = { id: 'owner-1', email: 'owner@samche.test', system_role: 'OWNER' };
   tenantState.selectedTenant = { id: 'tenant-1', name: 'Blue Dune Event Management LLC', status: 'active' };
   vi.mocked(tenantApi.getTenantPlan).mockResolvedValue({ plan_code: 'STARTER', display_name: 'Starter Plan', customer_subtitle: 'Core AI Workspace', rank: 1, pending_request: null });
+  vi.mocked(tenantApi.getTenantSubscription).mockResolvedValue({
+    subscription: { code: 'STARTER', display_name: 'Starter Plan', customer_subtitle: 'Core AI Workspace', rank: 1, billing_cycle: 'MONTHLY', currency: 'AED', monthly_price_aed: 1790, annual_price_aed: 18258, setup_fee_aed: 2500, status: 'ACTIVE' },
+    capabilities: {},
+    limits: {},
+    locked_capabilities: [],
+  });
   vi.mocked(tenantApi.listPlans).mockResolvedValue([
-    { code: 'STARTER', display_name: 'Starter Plan', customer_subtitle: 'Core AI Workspace', rank: 1 },
-    { code: 'GROWTH', display_name: 'Growth Plan', customer_subtitle: 'Multi-Channel AI Growth', rank: 2 },
+    { code: 'STARTER', display_name: 'Starter Plan', customer_subtitle: 'Core AI Workspace', rank: 1, monthly_price_aed: 1790, annual_price_aed: 18258, setup_fee_aed: 2500, currency: 'AED', included_capabilities: [], included_limits: {} },
+    { code: 'GROWTH', display_name: 'Growth Plan', customer_subtitle: 'Multi-Channel AI Growth', rank: 2, monthly_price_aed: 3990, annual_price_aed: 40698, setup_fee_aed: 5000, currency: 'AED', included_capabilities: [], included_limits: {} },
   ]);
   vi.mocked(tenantApi.changeTenantPlanAsOwner).mockResolvedValue({ plan_code: 'GROWTH', display_name: 'Growth Plan', customer_subtitle: 'Multi-Channel AI Growth', rank: 2 });
 });

@@ -69,3 +69,24 @@ export const requireTenantAdmin = (req, res, next) => {
     }
     return res.status(403).json({ error: 'Tenant ADMIN access required' });
 };
+
+export const requireTenantEntitlement = (capabilityKey) => async (req, res, next) => {
+    try {
+        const tenantId = req.verified_tenant_id || req.params.tenantId;
+        if (!tenantId) return res.status(400).json({ error: 'Tenant context required for entitlement check' });
+        const database = req.app?.locals?.database || (await import('../config/db.js')).default;
+        const { assertTenantEntitlement } = await import('../services/tenant-entitlement-service.js');
+        await assertTenantEntitlement({ database, tenantId, capabilityKey });
+        return next();
+    } catch (error) {
+        if (error?.code === 'ENTITLEMENT_REQUIRED') {
+            return res.status(403).json({
+                error: error.message,
+                code: error.code,
+                details: error.details,
+            });
+        }
+        console.error('Entitlement check error:', error);
+        return res.status(500).json({ error: 'Entitlement verification failed' });
+    }
+};

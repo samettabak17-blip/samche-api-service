@@ -14,7 +14,19 @@ import { CustomerOnboardingError, onboardCustomer } from '../services/customer-o
 import { validateInvitationMailConfiguration } from '../services/customer-invitation-mailer.js';
 import { resendInvitationLifecycle, revokeInvitationLifecycle } from '../services/customer-invitation-service.js';
 import { AssistantModelAccessError, assertAssistantModelWriteAllowed, serializeAssistantForActor } from '../services/assistant-model-access-policy.js';
-import { PLAN_CODES, TenantPlanError, changeTenantPlanAsOwner, requestTenantPlanUpgrade, resolveTenantPlanUpgrade } from '../services/tenant-plan-service.js';
+import {
+    listPlatformPlans,
+    getTenantSubscription,
+    resolveEffectiveTenantEntitlements,
+    grantTenantEntitlementOverride,
+    revokeTenantEntitlementOverride,
+    updateTenantUsageAllocation,
+    changeTenantSubscriptionAsOwner,
+    listTenantEntitlementAuditLog,
+    TenantEntitlementError,
+} from '../services/tenant-entitlement-service.js';
+import { PLAN_CODES, TenantPlanError, requestTenantPlanUpgrade, resolveTenantPlanUpgrade } from '../services/tenant-plan-service.js';
+
 import { listPlanUpgradeNotificationsForOwner, markPlanUpgradeNotificationRead, notifyPlatformOwnersOfPlanUpgrade } from '../services/tenant-plan-notification-service.js';
 import { createTenantWithPlatformCapabilities, TenantPlatformProvisioningError } from '../services/tenant-platform-provisioning-service.js';
 import { ensureGuideChannelForAssistant } from '../services/guide-domain-service.js';
@@ -126,8 +138,12 @@ router.get('/users', requireOwner, async (req, res) => {
 });
 
 router.get('/plans', async (_req, res) => {
-  try { const result = await query('SELECT code, rank, display_name, customer_subtitle FROM platform_plans WHERE active = TRUE ORDER BY rank'); return res.json({ plans: result.rows }); }
-  catch { return res.status(503).json({ error: 'Plan catalog is unavailable' }); }
+  try {
+    const plans = await listPlatformPlans({ database: pool });
+    return res.json({ plans });
+  } catch {
+    return res.status(503).json({ error: 'Plan catalog is unavailable' });
+  }
 });
 
 router.get('/plan-upgrade-requests', requireOwner, async (_req, res) => {
@@ -166,21 +182,141 @@ router.post('/plan-upgrade-requests/:requestId/:decision(approve|reject)', requi
 router.put('/:tenantId/plan', requireOwner, async (req, res) => {
   if (!isValidUUID(req.params.tenantId)) return res.status(400).json({ error: 'Tenant plan is unavailable' });
   try {
-    const change = await changeTenantPlanAsOwner({ database: pool, tenantId: req.params.tenantId, ownerUserId: req.user.user_id, planCode: req.body?.plan_code });
-    const result = await query(`SELECT tenant.plan_code, plan.display_name, plan.customer_subtitle, plan.rank
-      FROM tenants tenant JOIN platform_plans plan ON plan.code=tenant.plan_code WHERE tenant.id=$1`, [req.params.tenantId]);
+    const change = await changeTenantPlanAsOwner({
+      database: pool,
+      tenantId: req.params.tenantId,
+      ownerUserId: req.user.user_id,
+      planCode: req.body?.plan_code,
+      billingCycle: req.body?.billing_cycle || 'MONTHLY',
+    });
+    const result = await query(
+      `SELECT tenant.plan_code, plan.display_name, plan.customer_subtitle, plan.rank,
+              sub.billing_cycle, sub.monthly_price_aed, sub.annual_price_aed, sub.setup_fee_aed, sub.currency, sub.status AS subscription_status
+         FROM tenants tenant
+         JOIN platform_plans plan ON plan.code=tenant.plan_code
+         LEFT JOIN tenant_subscriptions sub ON sub.tenant_id=tenant.id
+        WHERE tenant.id=$1`,
+      [req.params.tenantId]
+    );
     return res.json({ plan: result.rows[0], audit: change });
   } catch (error) {
-    const status = error instanceof TenantPlanError && error.code === 'PLAN_TENANT_NOT_FOUND' ? 404 : error instanceof TenantPlanError ? 409 : 503;
-    return res.status(status).json({ error: error instanceof TenantPlanError ? error.message : 'Tenant plan could not be changed' });
+    const status = (error instanceof TenantPlanError || error instanceof TenantEntitlementError) && error.code === 'PLAN_TENANT_NOT_FOUND' ? 404 : (error instanceof TenantPlanError || error instanceof TenantEntitlementError) ? 409 : 503;
+    return res.status(status).json({ error: error.message || 'Tenant plan could not be changed' });
   }
 });
 
 router.get('/:tenantId/plan', requireTenantAccess, async (req, res) => {
   const tenantId = req.verified_tenant_id;
-  try { const result = await query(`SELECT tenant.plan_code, plan.display_name, plan.customer_subtitle, plan.rank, (SELECT row_to_json(request) FROM tenant_plan_upgrade_requests request WHERE request.tenant_id=tenant.id AND request.status='PENDING' ORDER BY request.created_at DESC LIMIT 1) AS pending_request FROM tenants tenant JOIN platform_plans plan ON plan.code=tenant.plan_code WHERE tenant.id=$1`, [tenantId]); if (!result.rowCount) return res.status(404).json({ error: 'Tenant not found' }); return res.json({ plan: result.rows[0] }); }
-  catch { return res.status(503).json({ error: 'Tenant plan is unavailable' }); }
+  try {
+    const result = await query(
+      `SELECT tenant.plan_code, plan.display_name, plan.customer_subtitle, plan.rank,
+              sub.billing_cycle, sub.monthly_price_aed, sub.annual_price_aed, sub.setup_fee_aed, sub.currency, sub.status AS subscription_status,
+              (SELECT row_to_json(request) FROM tenant_plan_upgrade_requests request WHERE request.tenant_id=tenant.id AND request.status='PENDING' ORDER BY request.created_at DESC LIMIT 1) AS pending_request
+         FROM tenants tenant
+         JOIN platform_plans plan ON plan.code=tenant.plan_code
+         LEFT JOIN tenant_subscriptions sub ON sub.tenant_id=tenant.id
+        WHERE tenant.id=$1`,
+      [tenantId]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: 'Tenant not found' });
+    return res.json({ plan: result.rows[0] });
+  } catch {
+    return res.status(503).json({ error: 'Tenant plan is unavailable' });
+  }
 });
+
+router.get('/:tenantId/subscription', requireTenantAccess, async (req, res) => {
+  const tenantId = req.verified_tenant_id;
+  try {
+    const effective = await resolveEffectiveTenantEntitlements({ database: pool, tenantId });
+    return res.json({
+      subscription: effective.plan,
+      capabilities: effective.capabilities,
+      limits: effective.limits,
+      locked_capabilities: effective.locked_capabilities,
+    });
+  } catch (error) {
+    return res.status(503).json({ error: 'Subscription is unavailable' });
+  }
+});
+
+router.get('/:tenantId/entitlements', requireTenantAccess, async (req, res) => {
+  const tenantId = req.verified_tenant_id;
+  try {
+    const effective = await resolveEffectiveTenantEntitlements({ database: pool, tenantId });
+    return res.json(effective);
+  } catch (error) {
+    return res.status(503).json({ error: 'Entitlements are unavailable' });
+  }
+});
+
+router.post('/:tenantId/overrides', requireOwner, async (req, res) => {
+  if (!isValidUUID(req.params.tenantId)) return res.status(400).json({ error: 'Invalid tenant ID' });
+  const { capability_key, effect = 'GRANT', reason = null } = req.body || {};
+  if (!capability_key) return res.status(400).json({ error: 'Capability key is required' });
+  try {
+    const override = await grantTenantEntitlementOverride({
+      database: pool,
+      tenantId: req.params.tenantId,
+      capabilityKey: capability_key,
+      effect,
+      reason,
+      ownerUserId: req.user.user_id,
+    });
+    return res.status(201).json({ override });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Override could not be created' });
+  }
+});
+
+router.delete('/:tenantId/overrides/:capabilityKey', requireOwner, async (req, res) => {
+  if (!isValidUUID(req.params.tenantId)) return res.status(400).json({ error: 'Invalid tenant ID' });
+  try {
+    const outcome = await revokeTenantEntitlementOverride({
+      database: pool,
+      tenantId: req.params.tenantId,
+      capabilityKey: req.params.capabilityKey,
+      ownerUserId: req.user.user_id,
+    });
+    return res.json(outcome);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Override could not be revoked' });
+  }
+});
+
+router.put('/:tenantId/limits', requireOwner, async (req, res) => {
+  if (!isValidUUID(req.params.tenantId)) return res.status(400).json({ error: 'Invalid tenant ID' });
+  const { metric_key, allocated_limit } = req.body || {};
+  if (!metric_key || typeof allocated_limit !== 'number') return res.status(400).json({ error: 'Metric key and allocated limit number are required' });
+  try {
+    const allocation = await updateTenantUsageAllocation({
+      database: pool,
+      tenantId: req.params.tenantId,
+      metricKey: metric_key,
+      allocatedLimit: allocated_limit,
+      ownerUserId: req.user.user_id,
+    });
+    return res.json({ allocation });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Limit allocation could not be updated' });
+  }
+});
+
+router.get('/:tenantId/entitlements/audit', requireOwner, async (req, res) => {
+  if (!isValidUUID(req.params.tenantId)) return res.status(400).json({ error: 'Invalid tenant ID' });
+  try {
+    const audit = await listTenantEntitlementAuditLog({
+      database: pool,
+      tenantId: req.params.tenantId,
+      limit: Number(req.query.limit) || 50,
+      offset: Number(req.query.offset) || 0,
+    });
+    return res.json({ audit });
+  } catch (error) {
+    return res.status(500).json({ error: 'Audit log is unavailable' });
+  }
+});
+
 
 router.post('/:tenantId/plan-upgrade-requests', requireTenantAccess, requireTenantAdmin, async (req, res) => {
   if (req.user.system_role !== 'CUSTOMER') return res.status(403).json({ error: 'Tenant plan mutation is reserved for Platform Super Admin' });
