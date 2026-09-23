@@ -9,12 +9,12 @@ export interface PlatformPlan {
   rank: number;
   display_name: string;
   customer_subtitle: string;
-  monthly_price_aed: number;
-  annual_price_aed: number;
-  setup_fee_aed: number;
-  currency: string;
-  included_capabilities: string[];
-  included_limits: Record<string, number>;
+  monthly_price_aed?: number;
+  annual_price_aed?: number;
+  setup_fee_aed?: number;
+  currency?: string;
+  included_capabilities?: string[];
+  included_limits?: Record<string, number>;
   metadata?: Record<string, unknown>;
   active?: boolean;
 }
