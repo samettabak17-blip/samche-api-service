@@ -367,3 +367,34 @@ test('a recent generated image cannot silently become a new catalog target', asy
   }), (error) => error.code === 'CUSTOMER_TARGET_REQUIRED');
   assert.equal(database.state.inserted, 0);
 });
+
+
+test('generic catalog request without specific SKU selects top approved candidate automatically', async () => {
+  const database = generationDatabase(catalogEntries);
+  const queued = await visual.orchestrateWhatsAppVisualAiJob({
+    database, tenantId, conversationId,
+    targetResourceId: customerTargetId,
+    promptInstruction: 'Redesign this room using a suitable product from your catalog. Choose the product yourself and create a realistic visualization.',
+    catalogRequested: true, assistantId,
+  });
+  assert.equal(queued.status, 'QUEUED');
+  assert.equal(database.state.job.grounding_context.catalog.entityId, selectedEntityId);
+  assert.deepEqual(database.state.job.grounding_context.catalog.mediaIds, [selectedMediaId]);
+});
+
+test('jpeg and jpg mime types are supported in visual catalog selection', async () => {
+  const jpegMediaId = '99999999-8888-4444-8888-999999999999';
+  const jpegEntries = [
+    { id: selectedEntityId, tenant_id: tenantId, name: 'JPEG Item', description: 'Warm finish', confidence: 0.99, approved_media: [{ id: jpegMediaId, mime_type: 'image/jpeg', storage_key: `knowledge/${tenantId}/source/item.jpeg` }] },
+  ];
+  const database = generationDatabase(jpegEntries);
+  const queued = await visual.orchestrateWhatsAppVisualAiJob({
+    database, tenantId, conversationId,
+    targetResourceId: customerTargetId,
+    promptInstruction: 'Use your catalog to redesign this',
+    catalogRequested: true, assistantId,
+  });
+  assert.equal(queued.status, 'QUEUED');
+  assert.equal(database.state.job.grounding_context.catalog.entityId, selectedEntityId);
+  assert.deepEqual(database.state.job.grounding_context.catalog.mediaIds, [jpegMediaId]);
+});

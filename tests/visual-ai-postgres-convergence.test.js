@@ -144,6 +144,41 @@ test('PostgreSQL catalog reference lookup enforces approved media, assistant sco
       assistantId: crypto.randomUUID(), entityId: entity.rows[0].id, mediaIds: [media.rows[0].id] }), null);
     assert.equal(await resolveApprovedVisualReference({ database: client, tenantId: crypto.randomUUID(),
       assistantId, entityId: entity.rows[0].id, mediaIds: [media.rows[0].id] }), null);
+
+    // Tenant-wide source (no specific assistant restriction) is accessible to any assistant in the tenant
+    const tenantWideSource = await client.query(
+      `INSERT INTO knowledge_base_documents (tenant_id, assistant_id, title, content, source_type, status, processing_status, enabled)
+       VALUES ($1, NULL, 'Tenant-wide catalog', 'Tenant-wide content', 'CATALOG', 'active', 'READY', TRUE) RETURNING id`,
+      [created.tenantId]
+    );
+    const tenantWideEntity = await client.query(
+      `INSERT INTO knowledge_entities (tenant_id, source_id, name, entity_type, approval_status, is_runtime_eligible)
+       VALUES ($1, $2, 'Tenant-wide Item', 'GENERIC', 'APPROVED', TRUE) RETURNING id`,
+      [created.tenantId, tenantWideSource.rows[0].id]
+    );
+    const tenantWideMedia = await client.query(
+      `INSERT INTO knowledge_entity_media (tenant_id, entity_id, source_id, mime_type, storage_key, approval_status, is_runtime_eligible)
+       VALUES ($1, $2, $3, 'image/jpeg', $4, 'APPROVED', TRUE) RETURNING id`,
+      [created.tenantId, tenantWideEntity.rows[0].id, tenantWideSource.rows[0].id, `knowledge/${created.tenantId}/${tenantWideSource.rows[0].id}/tw.jpg`]
+    );
+    const twResolved = await resolveApprovedVisualReference({ database: client, tenantId: created.tenantId,
+      assistantId, entityId: tenantWideEntity.rows[0].id, mediaIds: [tenantWideMedia.rows[0].id] });
+    assert.equal(twResolved.entity.id, tenantWideEntity.rows[0].id);
+
+    // Direct entity (source_id IS NULL) is accessible
+    const directEntity = await client.query(
+      `INSERT INTO knowledge_entities (tenant_id, source_id, name, entity_type, approval_status, is_runtime_eligible)
+       VALUES ($1, NULL, 'Direct Item', 'GENERIC', 'APPROVED', TRUE) RETURNING id`,
+      [created.tenantId]
+    );
+    const directMedia = await client.query(
+      `INSERT INTO knowledge_entity_media (tenant_id, entity_id, source_id, mime_type, storage_key, approval_status, is_runtime_eligible)
+       VALUES ($1, $2, NULL, 'image/png', $3, 'APPROVED', TRUE) RETURNING id`,
+      [created.tenantId, directEntity.rows[0].id, `knowledge/${created.tenantId}/direct/item.png`]
+    );
+    const directResolved = await resolveApprovedVisualReference({ database: client, tenantId: created.tenantId,
+      assistantId, entityId: directEntity.rows[0].id, mediaIds: [directMedia.rows[0].id] });
+    assert.equal(directResolved.entity.id, directEntity.rows[0].id);
   } finally {
     await client.query('ROLLBACK');
     client.release();

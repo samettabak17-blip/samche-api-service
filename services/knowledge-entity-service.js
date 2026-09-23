@@ -520,21 +520,35 @@ export async function retrieveApprovedEntities({
               ELSE 0.40
             END AS match_score
        FROM knowledge_entities e
-       JOIN knowledge_base_documents s
+       LEFT JOIN knowledge_base_documents s
          ON s.id = e.source_id AND s.tenant_id = e.tenant_id
       WHERE e.tenant_id = $1
         AND e.approval_status = 'APPROVED'
         AND e.is_runtime_eligible = TRUE
-        AND s.enabled = TRUE
-        AND s.status = 'active'
-        AND s.processing_status = 'READY'
         AND (
-          $3::uuid IS NULL
-          OR EXISTS (
-            SELECT 1 FROM knowledge_source_assistants ksa
-             WHERE ksa.tenant_id = e.tenant_id
-               AND ksa.source_id = e.source_id
-               AND ksa.assistant_id = $3
+          s.id IS NULL
+          OR (
+            s.enabled = TRUE
+            AND s.status = 'active'
+            AND s.processing_status <> 'FAILED'
+            AND s.processing_status <> 'ARCHIVED'
+            AND (
+              $3::uuid IS NULL
+              OR s.assistant_id = $3
+              OR (
+                NOT EXISTS (
+                  SELECT 1 FROM knowledge_source_assistants ksa_any
+                   WHERE ksa_any.tenant_id = e.tenant_id AND ksa_any.source_id = e.source_id
+                )
+                AND s.assistant_id IS NULL
+              )
+              OR EXISTS (
+                SELECT 1 FROM knowledge_source_assistants ksa
+                 WHERE ksa.tenant_id = e.tenant_id
+                   AND ksa.source_id = e.source_id
+                   AND ksa.assistant_id = $3
+              )
+            )
           )
         )
         AND (
@@ -571,20 +585,39 @@ export async function listApprovedVisualEntities({ database, tenantId, assistant
                 AND m.approval_status = 'APPROVED' AND m.is_runtime_eligible = TRUE
             ), '[]'::json) AS approved_media
        FROM knowledge_entities e
-       JOIN knowledge_base_documents s ON s.id = e.source_id AND s.tenant_id = e.tenant_id
+       LEFT JOIN knowledge_base_documents s ON s.id = e.source_id AND s.tenant_id = e.tenant_id
       WHERE e.tenant_id = $1
         AND ($4::uuid IS NULL OR e.id = $4)
         AND e.approval_status = 'APPROVED' AND e.is_runtime_eligible = TRUE
-        AND s.enabled = TRUE AND s.status = 'active' AND s.processing_status = 'READY'
+        AND (
+          s.id IS NULL
+          OR (
+            s.enabled = TRUE
+            AND s.status = 'active'
+            AND s.processing_status <> 'FAILED'
+            AND s.processing_status <> 'ARCHIVED'
+            AND (
+              $2::uuid IS NULL
+              OR s.assistant_id = $2
+              OR (
+                NOT EXISTS (
+                  SELECT 1 FROM knowledge_source_assistants ksa_any
+                   WHERE ksa_any.tenant_id = e.tenant_id AND ksa_any.source_id = e.source_id
+                )
+                AND s.assistant_id IS NULL
+              )
+              OR EXISTS (
+                SELECT 1 FROM knowledge_source_assistants ksa
+                 WHERE ksa.tenant_id = e.tenant_id AND ksa.source_id = e.source_id AND ksa.assistant_id = $2
+              )
+            )
+          )
+        )
         AND EXISTS (
           SELECT 1 FROM knowledge_entity_media m
            WHERE m.entity_id = e.id AND m.tenant_id = e.tenant_id
              AND m.approval_status = 'APPROVED' AND m.is_runtime_eligible = TRUE
         )
-        AND ($2::uuid IS NULL OR EXISTS (
-          SELECT 1 FROM knowledge_source_assistants ksa
-           WHERE ksa.tenant_id = e.tenant_id AND ksa.source_id = e.source_id AND ksa.assistant_id = $2
-        ))
       ORDER BY e.confidence DESC NULLS LAST, e.created_at DESC, e.id
       LIMIT $3`,
     [tenantId, assistantId, boundedLimit, entityId]
@@ -600,7 +633,7 @@ export async function resolveApprovedVisualReference({ database, tenantId, assis
   const approvedMedia = Array.isArray(entity.approved_media) ? entity.approved_media : [];
   const media = mediaIds.map((id) => approvedMedia.find((item) => item.id === id
     && String(item.storage_key || '').startsWith(`knowledge/${tenantId}/`)
-    && /^image\/(?:png|jpeg|webp)$/.test(String(item.mime_type))));
+    && /^image\/(?:png|jpe?g|webp)$/i.test(String(item.mime_type))));
   if (media.some((item) => !item)) return null;
   return { entity, media };
 }

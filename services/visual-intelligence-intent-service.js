@@ -467,7 +467,7 @@ export async function resolveVisualCatalogSelection({
     && Array.isArray(entry.approved_media)
     && entry.approved_media.some((media) => UUID_REGEX.test(String(media.id))
       && String(media.storage_key || '').startsWith(`knowledge/${tenantId}/`)
-      && /^image\/(?:png|jpeg|webp)$/.test(String(media.mime_type))));
+      && /^image\/(?:png|jpe?g|webp)$/i.test(String(media.mime_type))));
   if (!eligible.length) return { state: 'NO_APPROVED_CATALOG' };
 
   const candidates = requireDifferentEntity && previousEntityId
@@ -488,14 +488,18 @@ export async function resolveVisualCatalogSelection({
       const entryTerms = catalogTerms(description);
       const matches = [...terms].filter((word) => entryTerms.has(word)).length;
       return { entry, matches };
-    }).sort((a, b) => b.matches - a.matches || String(a.entry.id).localeCompare(String(b.entry.id)));
-    if (ranked[0]?.matches > 0 && ranked[0].matches > (ranked[1]?.matches || 0)) selected = ranked[0].entry;
+    }).sort((a, b) => b.matches - a.matches || Number(b.entry.confidence || 0) - Number(a.entry.confidence || 0) || String(a.entry.id).localeCompare(String(b.entry.id)));
+    if (ranked[0]?.matches > 0 && ranked[0].matches > (ranked[1]?.matches || 0)) {
+      selected = ranked[0].entry;
+    } else {
+      selected = ranked[0]?.entry || candidates[0];
+    }
   }
   if (!selected) return { state: 'CLARIFICATION_REQUIRED' };
 
   const media = selected.approved_media.filter((item) => UUID_REGEX.test(String(item.id))
     && String(item.storage_key || '').startsWith(`knowledge/${tenantId}/`)
-    && /^image\/(?:png|jpeg|webp)$/.test(String(item.mime_type))).slice(0, 3);
+    && /^image\/(?:png|jpe?g|webp)$/i.test(String(item.mime_type))).slice(0, 3);
   return {
     state: 'SELECTED',
     entity: {
