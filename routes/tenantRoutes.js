@@ -182,7 +182,7 @@ router.post('/plan-upgrade-requests/:requestId/:decision(approve|reject)', requi
 router.put('/:tenantId/plan', requireOwner, async (req, res) => {
   if (!isValidUUID(req.params.tenantId)) return res.status(400).json({ error: 'Tenant plan is unavailable' });
   try {
-    const change = await changeTenantPlanAsOwner({
+    const change = await changeTenantSubscriptionAsOwner({
       database: pool,
       tenantId: req.params.tenantId,
       ownerUserId: req.user.user_id,

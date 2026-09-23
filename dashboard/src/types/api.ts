@@ -61,6 +61,16 @@ export interface LockedCapability {
   description: string;
 }
 
+export interface EntitlementAuditLogEntry {
+  id: string;
+  tenant_id: string;
+  action_type: string;
+  details: Record<string, unknown>;
+  performed_by_email?: string;
+  performed_by_role?: string;
+  created_at: string;
+}
+
 export interface EffectiveTenantEntitlements {
   tenant_id: string;
   plan: TenantSubscriptionInfo;

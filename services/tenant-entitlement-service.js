@@ -160,7 +160,7 @@ export async function resolveEffectiveTenantEntitlements({ database, tenantId })
     `SELECT
        (SELECT COUNT(*)::integer FROM ai_assistants WHERE tenant_id = $1 AND status = 'active') AS active_assistants_count,
        (SELECT COUNT(*)::integer FROM tenant_users WHERE tenant_id = $1) AS team_users_count,
-       (SELECT COUNT(*)::integer FROM channel_integrations WHERE tenant_id = $1 AND enabled = TRUE) AS active_integrations_count,
+       (SELECT COUNT(*)::integer FROM channel_integrations WHERE tenant_id = $1 AND enabled = TRUE AND integration_type NOT IN ('WEB_CHAT', 'WHATSAPP', 'SAMCHEGUIDE')) AS active_integrations_count,
        (SELECT COUNT(*)::integer FROM channel_integrations WHERE tenant_id = $1 AND enabled = TRUE AND integration_type = 'WEB_CHAT') AS webchat_integrations_count,
        (SELECT COUNT(*)::integer FROM channel_integrations WHERE tenant_id = $1 AND enabled = TRUE AND integration_type = 'WHATSAPP') AS whatsapp_integrations_count,
        (SELECT COUNT(*)::integer FROM channel_integrations WHERE tenant_id = $1 AND enabled = TRUE AND integration_type = 'SAMCHEGUIDE') AS guide_integrations_count,
@@ -192,7 +192,7 @@ export async function resolveEffectiveTenantEntitlements({ database, tenantId })
         source = 'OVERRIDE_DENIED';
         reason = override.reason || 'Super Owner override denial';
       }
-    } else if (planIncluded.has(key)) {
+    } else if (planIncluded.has(key) || isPlanAtLeast(sub.plan_code, meta.min_plan)) {
       entitled = true;
       source = 'PLAN';
     } else if (key === 'visual_ai' && liveCounts.visual_ai_config_enabled === true) {
@@ -225,7 +225,7 @@ export async function resolveEffectiveTenantEntitlements({ database, tenantId })
       upgrade_required: entitled ? null : meta.min_plan,
     };
 
-    if (!entitled) {
+    if (!entitled && isHigherPlan(sub.plan_code, meta.min_plan)) {
       lockedCapabilities.push({
         key,
         name: meta.name,
