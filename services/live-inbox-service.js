@@ -930,14 +930,21 @@ export async function setConversationAiOverride({
   override = 'AUTOMATIC',
   actor = null,
   database = pool,
+  http = null,
+  generateAiResponse = null,
 }) {
-  const validOverrides = ['AUTOMATIC', 'ALWAYS_AI', 'NEVER_AI'];
-  const cleanOverride = String(override || 'AUTOMATIC').toUpperCase().trim();
-  if (!validOverrides.includes(cleanOverride)) {
+  const validOverrides = ['AUTOMATIC', 'AI_ONLY', 'ALWAYS_AI', 'NEVER_AI', 'FIRST_CONTACT_HOLD', 'UNDECIDED'];
+  const rawOverride = String(override || 'AUTOMATIC').toUpperCase().trim();
+  if (!validOverrides.includes(rawOverride)) {
     throw new ConversationOperationError(400, 'Invalid AI behavior override', 'AI_OVERRIDE_INVALID');
   }
 
+  const cleanOverride = (rawOverride === 'ALWAYS_AI') ? 'AI_ONLY' : (rawOverride === 'UNDECIDED') ? 'FIRST_CONTACT_HOLD' : rawOverride;
+
   const client = await database.connect();
+  let updatedConversation = null;
+  let shouldTriggerImmediateResponse = false;
+
   try {
     await client.query('BEGIN');
     const existing = await client.query(
@@ -961,6 +968,7 @@ export async function setConversationAiOverride({
         RETURNING *`,
       [cleanOverride, conversationId, tenantId]
     );
+    updatedConversation = updated.rows[0];
 
     // Persist durable contact-level override to CRM contact
     if (convRow.contact_id) {
@@ -984,6 +992,10 @@ export async function setConversationAiOverride({
       );
     }
 
+    if (cleanOverride === 'AI_ONLY' && convRow.status === 'open' && convRow.handling_mode !== 'HUMAN') {
+      shouldTriggerImmediateResponse = true;
+    }
+
     const actorUserId = actor?.id ?? actor?.userId ?? null;
     await writeAuditEvent(client, {
       tenantId,
@@ -995,13 +1007,33 @@ export async function setConversationAiOverride({
     await notify(client, tenantId, conversationId, 'AI_OVERRIDE_UPDATED');
 
     await client.query('COMMIT');
-    return updated.rows[0];
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
     throw error;
   } finally {
     client.release();
   }
+
+  let immediateResponse = null;
+  if (shouldTriggerImmediateResponse) {
+    try {
+      const { generateAndDeliverInstagramAssistantResponse } = await import('./instagram-ai-orchestrator.js');
+      immediateResponse = await generateAndDeliverInstagramAssistantResponse({
+        database,
+        tenantId,
+        conversationId,
+        http,
+        generateAiResponse,
+      });
+    } catch (respErr) {
+      console.warn('AI_ONLY_IMMEDIATE_RESPONSE_WARN', respErr?.message);
+    }
+  }
+
+  return {
+    ...updatedConversation,
+    immediateResponse,
+  };
 }
 
 

@@ -402,18 +402,24 @@ router.post('/:tenantId/conversations/:conversationId/ai-override', requireTenan
   if (!currentTenantId) return;
   if (!isValidUUID(req.params.conversationId)) return res.status(400).json({ error: 'Invalid conversation ID' });
   const { override } = req.body ?? {};
-  if (!['AUTOMATIC', 'ALWAYS_AI', 'NEVER_AI'].includes(override)) {
-    return res.status(400).json({ error: 'Override must be AUTOMATIC, ALWAYS_AI, or NEVER_AI' });
+
+  const valid = ['AUTOMATIC', 'AI_ONLY', 'ALWAYS_AI', 'NEVER_AI', 'FIRST_CONTACT_HOLD', 'UNDECIDED'];
+  if (!valid.includes(override)) {
+    return res.status(400).json({ error: 'Override must be AUTOMATIC, AI_ONLY, NEVER_AI, or FIRST_CONTACT_HOLD' });
   }
   try {
-    const conversation = await setConversationAiOverride({
+    const result = await setConversationAiOverride({
       tenantId: currentTenantId,
       conversationId: req.params.conversationId,
       override,
       actor: actor(req),
       database: req.app?.locals?.database || undefined,
     });
-    return res.json({ conversation });
+    return res.json({
+      conversation: result,
+      answered: Boolean(result?.immediateResponse?.delivered),
+      immediateResponse: result?.immediateResponse || null,
+    });
   } catch (error) {
     return operationError(res, error, 'Set AI override error:');
   }

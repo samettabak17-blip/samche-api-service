@@ -191,7 +191,7 @@ test('ALWAYS_AI override bypasses MANUAL_ONLY channel policy', async () => {
 
   assert.equal(evalResult.eligible, true);
   assert.equal(evalResult.decision, 'ACTIVATED');
-  assert.equal(evalResult.reasonCode, 'OVERRIDE_ALWAYS_AI');
+  assert.equal(evalResult.reasonCode, 'OVERRIDE_AI_ONLY');
 });
 
 test('Human Takeover (handling_mode = HUMAN) strictly suppresses AI even with ALWAYS_AI override', async () => {
@@ -374,5 +374,174 @@ test('Durable Contact Override: NEVER_AI persists on contact and carries over to
   assert.equal(evalNewThread.decision, 'SUPPRESSED');
   assert.equal(evalNewThread.reasonCode, 'OVERRIDE_NEVER_AI');
 });
+// ---------------------------------------------------------------------------
+// 7. FIRST-CONTACT HUMAN-GATED FLOW & IMMEDIATE AI_ONLY RESPONSE
+// ---------------------------------------------------------------------------
+test('FIRST CONTACT: Obvious business, personal, or ambiguous first DM is held silent until operator decision', async () => {
+  const newContactConv = {
+    id: 'conv-new-1',
+    tenant_id: tenantIdA,
+    handling_mode: 'AI',
+    status: 'open',
+    ai_behavior_override: 'FIRST_CONTACT_HOLD',
+  };
+
+  const businessFirst = await evaluateChannelAiActivationPolicy({
+    messageText: "Dubai'de şirket kurmak istiyorum, fiyat alabilir miyim?",
+    conversation: newContactConv,
+    channelConfig: { activation_policy: AI_ACTIVATION_MODES.ALL_MESSAGES },
+  });
+  assert.equal(businessFirst.eligible, false);
+  assert.equal(businessFirst.decision, 'SUPPRESSED');
+  assert.equal(businessFirst.reasonCode, 'FIRST_CONTACT_HOLD');
+
+  const personalFirst = await evaluateChannelAiActivationPolicy({
+    messageText: 'Naber?',
+    conversation: newContactConv,
+    channelConfig: { activation_policy: AI_ACTIVATION_MODES.ALL_MESSAGES },
+  });
+  assert.equal(personalFirst.eligible, false);
+  assert.equal(personalFirst.decision, 'SUPPRESSED');
+  assert.equal(personalFirst.reasonCode, 'FIRST_CONTACT_HOLD');
+
+  const ambiguousFirst = await evaluateChannelAiActivationPolicy({
+    messageText: 'Merhaba bilgi',
+    conversation: newContactConv,
+    channelConfig: { activation_policy: AI_ACTIVATION_MODES.ALL_MESSAGES },
+  });
+  assert.equal(ambiguousFirst.eligible, false);
+  assert.equal(ambiguousFirst.decision, 'SUPPRESSED');
+  assert.equal(ambiguousFirst.reasonCode, 'FIRST_CONTACT_HOLD');
+});
+test('AI_ONLY selection immediately answers pending customer message and prevents double replies', async () => {
+  const { setConversationAiOverride } = await import('../services/live-inbox-service.js');
+
+  const testConvId = 'conv-pending-1';
+  const testContactId = 'contact-pending-1';
+  let generatedResponses = 0;
+  let deliveredMessages = [];
+
+  const conversationStore = {
+    id: testConvId,
+    tenant_id: tenantIdA,
+    channel_id: 'ch-ig-1',
+    customer_external_id: 'instagram:17841400099',
+    contact_id: testContactId,
+    handling_mode: 'AI',
+    handling_version: 1,
+    status: 'open',
+    ai_behavior_override: 'FIRST_CONTACT_HOLD',
+  };
+
+  const messagesStore = [
+    {
+      id: 'msg-cust-1',
+      tenant_id: tenantIdA,
+      conversation_id: testConvId,
+      sender_type: 'CUSTOMER',
+      content: "Dubai'de şirket kurmak istiyorum, fiyat alabilir miyim?",
+      created_at: new Date().toISOString(),
+    },
+  ];
+
+  const mockClient = {
+    async query(sql, params) {
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return {};
+      if (sql.includes('SELECT id, handling_mode, status, ai_behavior_override')) {
+        return { rowCount: 1, rows: [conversationStore] };
+      }
+      if (sql.includes('UPDATE conversations') && sql.includes('SET ai_behavior_override = $1')) {
+        conversationStore.ai_behavior_override = params[0];
+        return { rows: [conversationStore] };
+      }
+      if (sql.includes('UPDATE crm_contacts')) return { rowCount: 1, rows: [] };
+      if (sql.includes('INSERT INTO audit_events')) return {};
+      if (sql.includes('SELECT pg_notify')) return {};
+      if (sql.includes('FROM conversations c') && sql.includes('JOIN tenant_channels tc')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            ...conversationStore,
+            channel_type: 'INSTAGRAM',
+            assistant_id: 'ast-1',
+            integration_config: { access_token: 'test-token', instagram_account_id: '17841400099' },
+          }],
+        };
+      }
+      if (sql.includes('SELECT * FROM conversations WHERE id')) {
+        return { rowCount: 1, rows: [conversationStore] };
+      }
+      if (sql.includes('FROM conversation_messages') && sql.includes('SELECT')) {
+        const sorted = [...messagesStore].reverse();
+        return { rowCount: sorted.length, rows: sorted.slice(0, 1) };
+      }
+      if (sql.includes('SELECT id, status, name, system_prompt FROM ai_assistants')) {
+        return { rowCount: 1, rows: [{ id: 'ast-1', status: 'active', name: 'Instagram AI', system_prompt: 'Help with company setup' }] };
+      }
+      if (sql.includes('INSERT INTO conversation_messages')) {
+        const newMsg = {
+          id: `msg-ai-${Date.now()}`,
+          tenant_id: tenantIdA,
+          conversation_id: testConvId,
+          sender_type: 'ASSISTANT',
+          content: params[3] || params[2],
+          created_at: new Date().toISOString(),
+        };
+        messagesStore.push(newMsg);
+        return { rowCount: 1, rows: [newMsg] };
+      }
+      return { rows: [] };
+    },
+    release() {},
+  };
+
+  const mockDb = {
+    async connect() { return mockClient; },
+  };
+
+  const fakeHttp = {
+    async post(url, body) {
+      deliveredMessages.push(body);
+      return { data: { message_id: `mid.ig.${Date.now()}` } };
+    },
+  };
+
+  const fakeGenerateAi = async () => {
+    generatedResponses++;
+    return 'Dubai şirket kurulum paketlerimiz ve fiyatlarımız hakkında size yardımcı olmaktan memnuniyet duyarım!';
+  };
+
+  // 1. Operator selects AI_ONLY
+  const result1 = await setConversationAiOverride({
+    tenantId: tenantIdA,
+    conversationId: testConvId,
+    override: 'AI_ONLY',
+    database: mockDb,
+    http: fakeHttp,
+    generateAiResponse: fakeGenerateAi,
+  });
+
+  assert.equal(generatedResponses, 1);
+  assert.equal(deliveredMessages.length, 1);
+  assert.equal(result1.immediateResponse?.delivered, true);
+  assert.equal(conversationStore.ai_behavior_override, 'AI_ONLY');
+
+  // 2. Concurrency / Double-click retry check: Calling AI_ONLY again
+  const result2 = await setConversationAiOverride({
+    tenantId: tenantIdA,
+    conversationId: testConvId,
+    override: 'AI_ONLY',
+    database: mockDb,
+    http: fakeHttp,
+    generateAiResponse: fakeGenerateAi,
+  });
+
+  // Verify exactly one response was generated and delivered (no duplicates)
+  assert.equal(generatedResponses, 1);
+  assert.equal(deliveredMessages.length, 1);
+  assert.equal(result2.immediateResponse?.reason, 'ALREADY_ANSWERED');
+});
+
+
 
 

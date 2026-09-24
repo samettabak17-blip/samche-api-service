@@ -277,7 +277,7 @@ export interface WebChatLogoUploadResponse {
 export type ConversationStatus = 'open' | 'closed' | 'archived';
 export type ConversationHandlingMode = 'AI' | 'HUMAN' | 'PAUSED';
 export type AiActivationPolicy = 'MANUAL_ONLY' | 'ALL_MESSAGES' | 'BUSINESS_INTENT_ONLY' | 'TRIGGER_ONLY';
-export type AiBehaviorOverride = 'AUTOMATIC' | 'ALWAYS_AI' | 'NEVER_AI';
+export type AiBehaviorOverride = 'AUTOMATIC' | 'AI_ONLY' | 'ALWAYS_AI' | 'NEVER_AI' | 'FIRST_CONTACT_HOLD' | 'UNDECIDED';
 
 export interface ConversationRecord {
   id: string;

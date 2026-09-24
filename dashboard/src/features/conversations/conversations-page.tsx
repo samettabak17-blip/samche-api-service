@@ -539,8 +539,89 @@ export function ConversationsPage() {
 
       <aside className="dashboard-card hidden min-h-0 overflow-y-auto rounded-lg bg-[#09111B] p-3 xl:block">{conversation ? <div className="space-y-3">
         <section className="rounded-lg border border-line bg-elevated/45 p-4"><p className="text-[10px] font-semibold tracking-[0.16em] text-stone-500">CONTACT INFORMATION</p><p className="mt-3 break-all text-sm font-semibold text-ink">{conversation.contact_display_name || (conversation.customer_external_id ? displayConversationCustomerIdentifier(conversation.customer_external_id, conversation.channel_type) : 'Customer identifier unavailable')}</p><dl className="mt-3 space-y-2 text-xs"><div className="flex justify-between gap-3"><dt className="text-stone-500">Phone</dt><dd className="text-right text-stone-200">{conversation.contact_phone || (conversation.customer_external_id ? displayConversationCustomerIdentifier(conversation.customer_external_id, conversation.channel_type) : '—')}</dd></div><div className="flex justify-between gap-3"><dt className="text-stone-500">Language</dt><dd className="text-right text-stone-200">{({ tr: 'Turkish', en: 'English', ar: 'Arabic', es: 'Spanish', fr: 'French', de: 'German' } as Record<string, string>)[conversation.communication_language || conversation.contact_language || ''] || '—'}</dd></div><div className="flex justify-between gap-3"><dt className="text-stone-500">Country</dt><dd className="text-right text-stone-200">{conversation.contact_country || '—'}</dd></div><div className="flex justify-between gap-3"><dt className="text-stone-500">Channel</dt><dd className="text-right text-stone-200">{conversation.channel_display_name || channelContext.label}</dd></div><div className="flex justify-between gap-3"><dt className="text-stone-500">Last activity</dt><dd className="text-right text-stone-200">{formatDateTime(conversation.last_activity_at)}</dd></div></dl></section>
-        <section className="rounded-lg border border-line bg-elevated/45 p-4"><p className="text-[10px] font-semibold tracking-[0.16em] text-stone-500">AI AUTOMATION</p><div className="mt-3 space-y-2 text-xs"><div className="flex justify-between gap-3"><span>AI Reply</span><span className={conversation.handling_mode === 'AI' ? 'text-emerald-300' : 'text-stone-400'}>{conversation.handling_mode === 'AI' ? 'Active' : 'Paused'}</span></div><div className="flex justify-between gap-3"><span>Human Handling</span><span className={conversation.handling_mode === 'HUMAN' ? 'text-gold' : 'text-stone-400'}>{conversation.handling_mode === 'HUMAN' ? 'Active' : 'Inactive'}</span></div><div className="flex justify-between gap-3"><span>Document Reading</span><span className={messageMetrics.attachments > 0 ? 'text-emerald-300' : 'text-stone-400'}>{messageMetrics.attachments > 0 ? 'Available' : 'Unavailable'}</span></div></div></section>
-<div className="pt-2 border-t border-white/[0.06]"><div className="flex justify-between items-center gap-2 mb-1"><span className="text-[10px] uppercase text-stone-500 font-semibold">AI Behavior</span></div><select aria-label="AI Behavior Override" value={conversation.ai_behavior_override || 'AUTOMATIC'} onChange={(e) => aiOverride.mutate(e.target.value as any)} disabled={aiOverride.isPending || (!isAdmin && !isAgent)} className="w-full rounded border border-line bg-[#09111B] px-2 py-1 text-xs text-stone-200 focus:border-signal focus:outline-none"><option value="AUTOMATIC">Automatic (Channel policy)</option><option value="ALWAYS_AI">Always AI</option><option value="NEVER_AI">Never AI</option></select></div>
+        <section className="rounded-lg border border-line bg-elevated/45 p-4">
+          <p className="text-[10px] font-semibold tracking-[0.16em] text-stone-500">AI AUTOMATION & POLICY</p>
+          <div className="mt-3 space-y-2.5 text-xs">
+            <div className="flex justify-between gap-3">
+              <span>AI Reply</span>
+              <span className={conversation.handling_mode === 'AI' ? 'text-emerald-300' : 'text-stone-400'}>
+                {conversation.handling_mode === 'AI' ? 'Active' : 'Paused'}
+              </span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span>Human Handling</span>
+              <span className={conversation.handling_mode === 'HUMAN' ? 'text-gold' : 'text-stone-400'}>
+                {conversation.handling_mode === 'HUMAN' ? 'Active' : 'Inactive'}
+              </span>
+            </div>
+
+            {/* First-Contact Assignment Banner */}
+            {(!conversation.ai_behavior_override || conversation.ai_behavior_override === 'FIRST_CONTACT_HOLD' || conversation.ai_behavior_override === 'UNDECIDED') && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 space-y-2 mt-2">
+                <div className="flex items-center gap-1.5 font-semibold text-amber-300 text-[11px]">
+                  <Bot size={13} />
+                  New Contact — AI on Hold
+                </div>
+                <p className="text-[11px] text-stone-300 leading-tight">
+                  First message is held. Select an AI assignment for this customer:
+                </p>
+                <div className="grid grid-cols-3 gap-1 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => aiOverride.mutate('AI_ONLY')}
+                    disabled={aiOverride.isPending || (!isAdmin && !isAgent)}
+                    className="rounded bg-emerald-500/20 border border-emerald-500/40 py-1 text-[10px] font-semibold text-emerald-300 hover:bg-emerald-500/30 text-center"
+                    title="Assign to AI and immediately answer pending message"
+                  >
+                    AI Only
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => aiOverride.mutate('AUTOMATIC')}
+                    disabled={aiOverride.isPending || (!isAdmin && !isAgent)}
+                    className="rounded bg-white/10 border border-white/20 py-1 text-[10px] font-medium text-stone-300 hover:bg-white/20 text-center"
+                    title="Follow channel policy for future messages"
+                  >
+                    Automatic
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => aiOverride.mutate('NEVER_AI')}
+                    disabled={aiOverride.isPending || (!isAdmin && !isAgent)}
+                    className="rounded bg-red-500/20 border border-red-500/40 py-1 text-[10px] font-medium text-red-300 hover:bg-red-500/30 text-center"
+                    title="Permanently silence AI for this contact"
+                  >
+                    Never AI
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="pt-2 border-t border-white/[0.06]">
+              <div className="flex justify-between items-center gap-2 mb-1">
+                <span className="text-[10px] uppercase text-stone-500 font-semibold">AI Behavior</span>
+                <span className="text-[10px] font-mono text-stone-400">
+                  {conversation.ai_behavior_override === 'AI_ONLY' || conversation.ai_behavior_override === 'ALWAYS_AI' ? 'AI Only'
+                    : conversation.ai_behavior_override === 'NEVER_AI' ? 'Never AI'
+                    : conversation.ai_behavior_override === 'AUTOMATIC' ? 'Automatic'
+                    : 'On Hold'}
+                </span>
+              </div>
+              <select
+                aria-label="AI Behavior Override"
+                value={conversation.ai_behavior_override || 'FIRST_CONTACT_HOLD'}
+                onChange={(e) => aiOverride.mutate(e.target.value as any)}
+                disabled={aiOverride.isPending || (!isAdmin && !isAgent)}
+                className="w-full rounded border border-line bg-[#09111B] px-2 py-1 text-xs text-stone-200 focus:border-signal focus:outline-none"
+              >
+                <option value="FIRST_CONTACT_HOLD">First Contact Hold (Waiting for assignment)</option>
+                <option value="AI_ONLY">AI Only (Answer pending message & manage with AI)</option>
+                <option value="AUTOMATIC">Automatic (Follow channel policy for future messages)</option>
+                <option value="NEVER_AI">Never AI (Force permanent AI silence)</option>
+              </select>
+            </div>
+          </div>
+        </section>
 
         <section className="rounded-lg border border-line bg-elevated/45 p-4"><p className="text-[10px] font-semibold tracking-[0.16em] text-stone-500">CONVERSATION ANALYTICS</p><div className="mt-3 grid grid-cols-2 gap-2 text-xs"><div className="rounded-lg border border-line/70 bg-[#09111B] p-2.5"><p className="text-stone-500">Messages</p><p className="mt-1 text-base font-semibold text-ink">{messageMetrics.total}</p></div><div className="rounded-lg border border-line/70 bg-[#09111B] p-2.5"><p className="text-stone-500">Attachments</p><p className="mt-1 text-base font-semibold text-ink">{messageMetrics.attachments}</p></div><div className="rounded-lg border border-line/70 bg-[#09111B] p-2.5"><p className="text-stone-500">Customer</p><p className="mt-1 text-base font-semibold text-ink">{messageMetrics.customer}</p></div><div className="rounded-lg border border-line/70 bg-[#09111B] p-2.5"><p className="text-stone-500">AI / Agent</p><p className="mt-1 text-base font-semibold text-ink">{messageMetrics.assistant + messageMetrics.agent}</p></div></div><div className="mt-3 border-t border-white/[0.06] pt-3 text-xs"><p className="font-medium text-ink">{conversation.human_attention_state === 'REQUESTED' ? 'LIVE SUPPORT WAITING' : handlingLabel(conversation.handling_mode)}</p><p className="mt-1 text-stone-500">{conversation.assigned_agent_user_id ? 'Handled by SamChe Support' : 'No operator assigned'}</p></div></section>
       </div> : <p className="mt-5 text-sm text-stone-500">Select a conversation.</p>}</aside>

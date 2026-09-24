@@ -23,8 +23,11 @@ export const AI_ACTIVATION_MODES = Object.freeze({
 
 export const AI_BEHAVIOR_OVERRIDES = Object.freeze({
   AUTOMATIC: 'AUTOMATIC',
-  ALWAYS_AI: 'ALWAYS_AI',
+  AI_ONLY: 'AI_ONLY',
+  ALWAYS_AI: 'AI_ONLY',
   NEVER_AI: 'NEVER_AI',
+  FIRST_CONTACT_HOLD: 'FIRST_CONTACT_HOLD',
+  UNDECIDED: 'FIRST_CONTACT_HOLD',
 });
 
 function normalizeText(text) {
@@ -177,7 +180,7 @@ export async function evaluateChannelAiActivationPolicy({
   // 2. Contact / Conversation Override Precedence
   const override = String(conversation?.ai_behavior_override ?? AI_BEHAVIOR_OVERRIDES.AUTOMATIC).toUpperCase();
 
-  if (override === AI_BEHAVIOR_OVERRIDES.NEVER_AI) {
+  if (override === 'NEVER_AI') {
     return {
       eligible: false,
       decision: 'SUPPRESSED',
@@ -189,11 +192,23 @@ export async function evaluateChannelAiActivationPolicy({
     };
   }
 
-  if (override === AI_BEHAVIOR_OVERRIDES.ALWAYS_AI) {
+  if (override === 'AI_ONLY' || override === 'ALWAYS_AI') {
     return {
       eligible: true,
       decision: 'ACTIVATED',
-      reasonCode: 'OVERRIDE_ALWAYS_AI',
+      reasonCode: 'OVERRIDE_AI_ONLY',
+      policy: channelConfig?.activation_policy || AI_ACTIVATION_MODES.MANUAL_ONLY,
+      matchedTriggers: [],
+      classifierLabel: null,
+      timestamp,
+    };
+  }
+
+  if (override === 'FIRST_CONTACT_HOLD' || override === 'UNDECIDED') {
+    return {
+      eligible: false,
+      decision: 'SUPPRESSED',
+      reasonCode: 'FIRST_CONTACT_HOLD',
       policy: channelConfig?.activation_policy || AI_ACTIVATION_MODES.MANUAL_ONLY,
       matchedTriggers: [],
       classifierLabel: null,
