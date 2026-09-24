@@ -2,6 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { authenticateToken, requireTenantAccess } from '../middleware/auth.js';
 import { isValidUUID } from '../middleware/validators.js';
+import { isValidChannelType } from '../services/channel-routing-service.js';
 import {
   appendAgentMessage,
   appendAgentMediaMessage,
@@ -173,7 +174,7 @@ router.get('/:tenantId/conversations', requireTenantAccess, async (req, res) => 
   const searchTokens = search ? search.split(/\s+/u).filter(Boolean).slice(0, 12) : null;
   if (status && !['open', 'closed', 'archived'].includes(status)) return res.status(400).json({ error: 'Invalid conversation status' });
   if (handlingMode && !['AI', 'HUMAN', 'PAUSED'].includes(handlingMode)) return res.status(400).json({ error: 'Invalid handling mode' });
-  if (channelType && !['WHATSAPP', 'WEB_CHAT', 'SAMCHEGUIDE'].includes(channelType)) return res.status(400).json({ error: 'Invalid conversation channel type' });
+  if (channelType && !isValidChannelType(channelType)) return res.status(400).json({ error: 'Invalid conversation channel type' });
 
   try {
     const { query } = await import('../config/db.js');

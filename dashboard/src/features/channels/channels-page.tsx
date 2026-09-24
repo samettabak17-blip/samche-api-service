@@ -11,6 +11,8 @@ import { useTenant } from '../tenants/tenant-context';
 import type { Assistant, TenantChannel } from '../../types/api';
 import { ApiError } from '../../lib/api-client';
 import { WhatsAppEmbeddedSignup } from './whatsapp-embedded-signup';
+import { InstagramConnectionCard } from './instagram-connection-card';
+
 
 type ChannelPayload = Omit<TenantChannel, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>;
 export interface WhatsAppOwnershipConflict {
@@ -62,7 +64,7 @@ export function ChannelForm({ canManage, assistants, initial, onSubmit, isPendin
     onSubmit({
       channel_type: channelType,
       display_name: displayName.trim(),
-      external_channel_id: channelType === 'WHATSAPP' ? (externalChannelId.trim() || null) : null,
+      external_channel_id: ['WHATSAPP', 'INSTAGRAM'].includes(channelType) ? (externalChannelId.trim() || null) : null,
       assistant_id: assistantId || null,
       status,
     });
@@ -72,10 +74,10 @@ export function ChannelForm({ canManage, assistants, initial, onSubmit, isPendin
     if (value === 'WHATSAPP' && !assistantId) setAssistantId(eligibleAssistants[0]?.id ?? '');
   }
   return <form onSubmit={submit} className="space-y-4">
-    <label className="block text-sm font-medium">Channel type<select aria-label="Channel type" value={channelType} onChange={(event) => changeChannelType(event.target.value as TenantChannel['channel_type'])} className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm"><option value="WEB_CHAT">Web Chat</option><option value="WHATSAPP">WhatsApp</option></select></label>
+    <label className="block text-sm font-medium">Channel type<select aria-label="Channel type" value={channelType} onChange={(event) => changeChannelType(event.target.value as TenantChannel['channel_type'])} className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm"><option value="WEB_CHAT">Web Chat</option><option value="WHATSAPP">WhatsApp</option><option value="INSTAGRAM">Instagram</option></select></label>
     <label className="block text-sm font-medium">Display name<input aria-label="Display name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm" /></label>
-    {channelType === 'WHATSAPP' && (
-      <label className="block text-sm font-medium">External channel ID<input aria-label="External channel ID" value={externalChannelId ?? ''} onChange={(event) => setExternalChannelId(event.target.value)} className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm" /></label>
+    {['WHATSAPP', 'INSTAGRAM'].includes(channelType) && (
+      <label className="block text-sm font-medium">External channel ID (Page ID or Account ID)<input aria-label="External channel ID" value={externalChannelId ?? ''} onChange={(event) => setExternalChannelId(event.target.value)} className="mt-1.5 w-full rounded-lg border border-line px-3 py-2 text-sm" /></label>
     )}
     {channelType === 'WEB_CHAT' && (
       <div className="rounded-lg border border-line/60 bg-canvas/30 p-3 text-xs text-stone-400">
@@ -149,7 +151,7 @@ export function ChannelsPage() {
         <div>
           <p className="eyebrow">Distribution</p>
           <h1 className="page-title mt-2">Channels</h1>
-          <p className="mt-2 text-sm text-stone-400">Connect tenant-scoped Web Chat and WhatsApp channels.</p>
+          <p className="mt-2 text-sm text-stone-400">Connect tenant-scoped Web Chat, WhatsApp, and Instagram channels.</p>
         </div>
         {canManage && (
           <div className="flex items-center gap-2">
@@ -190,6 +192,12 @@ export function ChannelsPage() {
         assistants={tenantAssistants}
       />
 
+      <InstagramConnectionCard
+        tenantId={tenantId!}
+        canManage={canManage}
+        assistants={tenantAssistants}
+      />
+
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(340px,0.9fr)]">
         <div className="panel overflow-hidden">
           <div className="border-b border-line px-5 py-3">
@@ -203,7 +211,7 @@ export function ChannelsPage() {
           ) : list.error ? (
             <QueryErrorState error={list.error} onRetry={() => list.refetch()} />
           ) : !list.data?.length ? (
-            <EmptyState title="No channels yet" description="Create a Web Chat or WhatsApp channel for this tenant." />
+            <EmptyState title="No channels yet" description="Create a Web Chat, WhatsApp, or Instagram channel for this tenant." />
           ) : (
             <ul className="divide-y divide-line">
               {list.data.map((channel) => (

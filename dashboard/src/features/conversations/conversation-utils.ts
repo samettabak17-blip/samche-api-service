@@ -7,7 +7,7 @@ export function senderTone(senderType: string): string {
 }
 
 export function supportsHumanReplyChannel(channelType?: string): boolean {
-  return channelType === 'SAMCHEGUIDE' || channelType === 'WHATSAPP' || channelType === 'WEB_CHAT';
+  return channelType === 'SAMCHEGUIDE' || channelType === 'WHATSAPP' || channelType === 'WEB_CHAT' || channelType === 'INSTAGRAM';
 }
 
 export function canUseHumanReplyComposer(channelType?: string, humanDeliveryConfigured?: boolean): boolean {
@@ -60,6 +60,9 @@ export function displayConversationCustomerIdentifier(value?: string | null, cha
   // implementation details and cannot distinguish Web Chat from AI Guide.
   if (channelType === 'WEB_CHAT') return 'Web Chat conversation';
   if (channelType === 'SAMCHEGUIDE') return 'Guide conversation';
+  if (channelType === 'INSTAGRAM') return 'Instagram conversation';
+  if (value.startsWith('instagram:')) return '@' + value.slice('instagram:'.length);
+
   if (value.startsWith('whatsapp:')) return '+' + value.slice('whatsapp:'.length);
   if (value.startsWith('samcheguide:')) return 'Guide conversation';
   return value;

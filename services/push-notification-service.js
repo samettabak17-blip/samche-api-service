@@ -1,3 +1,5 @@
+import { resolveChannelDashboardRoute } from './channel-routing-service.js';
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EVENT_TYPES = new Set(['KNOWLEDGE_JOB_COMPLETED', 'KNOWLEDGE_JOB_FAILED', 'REVIEW_REQUIRED', 'CONFIGURATION_READY', 'HUMAN_HANDOFF_REQUESTED']);
 const MAX_DELIVERY_ATTEMPTS = 3;
@@ -147,7 +149,7 @@ export async function enqueueHumanHandoffPushNotification({
 }) {
   const tenant = id(tenantId, 'PUSH_TENANT_INVALID');
   const conversation = id(conversationId, 'PUSH_CONVERSATION_INVALID');
-  const recipientUserIds = recipientIds(Array.isArray(recipients) ? recipients.map((recipient) => recipient?.id) : recipients);
+  const recipientUserIds = recipientIds(Array.isArray(recipients) ? recipients.map((recipient) => (typeof recipient === 'object' && recipient !== null ? recipient.id : recipient)) : recipients);
   const eventId = `human-handoff:${String(handoffOutboxId ?? '').trim()}`;
   if (!/^human-handoff:[A-Za-z0-9_.:-]{1,240}$/.test(eventId)) throw new PushNotificationError('PUSH_HANDOFF_EVENT_INVALID');
   const channelResult = await database.query(
@@ -157,8 +159,8 @@ export async function enqueueHumanHandoffPushNotification({
       WHERE c.id = $1 AND c.tenant_id = $2`,
     [conversation, tenant],
   );
-  const channelType = String(channelResult.rows[0]?.channel_type ?? '').toUpperCase();
-  const channelRoute = channelType === 'WEB_CHAT' ? 'web-chat' : channelType === 'SAMCHEGUIDE' ? 'guide' : 'whatsapp';
+  const channelRoute = resolveChannelDashboardRoute(channelResult.rows[0]?.channel_type);
+
   return createPushNotificationIntent({
     database,
     tenantId: tenant,

@@ -149,3 +149,14 @@ export function resolveWhatsAppCommunicationLanguage({ currentLanguage, content 
   if (!candidate) return current;
   return candidate;
 }
+
+// ============================================================================
+// Canonical Omnichannel Communication Language Aliases
+// ============================================================================
+export const inferConservativeCommunicationLanguage = inferConservativeWhatsAppLanguage;
+export const inferExplicitCommunicationLanguageRequest = inferExplicitWhatsAppLanguageRequest;
+export const isClearlySubstantiveCommunicationMessage = isClearlySubstantiveWhatsAppMessage;
+export const inferReliableCustomerLanguage = inferReliableWhatsAppCustomerLanguage;
+export const resolveCommunicationLanguage = resolveWhatsAppCommunicationLanguage;
+export const resolveMediaResponseLanguage = resolveWhatsAppMediaResponseLanguage;
+

@@ -1,6 +1,13 @@
 import crypto from 'crypto';
 import { randomUUID } from 'node:crypto';
 import pool, { query } from '../config/db.js';
+import {
+  channelDeliveryRegistry,
+  loadWhatsAppAgentDelivery,
+  loadHumanSupportLifecycleNotice,
+  deliverWhatsAppLifecycleNotice,
+  ChannelDeliveryError,
+} from './channel-delivery-registry.js';
 import { canOperateConversation } from './conversation-permissions.js';
 import { deliverWhatsAppText, deliverWhatsAppMedia, WhatsAppDeliveryError, sendWhatsAppTypingIndicator } from './whatsapp-delivery-service.js';
 import { applyWhatsAppAdaptivePacing } from './whatsapp-response-pacing-service.js';
@@ -752,29 +759,27 @@ export async function operateConversation({
       console.info('TAKEOVER_STAGE stage=ASSIGNED tenant=' + String(tenantId).slice(0, 8));
       // The customer-request transfer has already been delivered. Only a voluntary
       // manual takeover receives the separate deterministic manual-takeover notice.
-      if (String(takenOver.channel_type ?? '').toUpperCase() === 'WHATSAPP' && conversation.human_attention_state !== 'REQUESTED' && conversation.human_attention_state !== 'ACKNOWLEDGED') {
-        const content = await loadHumanSupportLifecycleNotice(client, takenOver, 'manual_takeover');
-        const integration = await loadWhatsAppAgentDelivery(client, takenOver);
-        if (!content || !integration) {
-          throw new ConversationOperationError(409, 'WhatsApp human delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
-        }
+      if (conversation.human_attention_state !== 'REQUESTED' && conversation.human_attention_state !== 'ACKNOWLEDGED') {
         try {
-          await deliverWhatsAppLifecycleNotice({
+          const lifecycleResult = await channelDeliveryRegistry.deliverLifecycleNotice({
             client,
             tenantId,
             conversationId,
             conversation: takenOver,
-            content,
-            integration,
+            eventType: 'manual_takeover',
             deliverWhatsApp,
             sendTyping,
             applyPacing,
           });
+          if (lifecycleResult?.handled && lifecycleResult?.persistAssistantMessage && lifecycleResult?.content) {
+            await insertMessage(client, { tenantId, conversationId, senderType: 'ASSISTANT', content: lifecycleResult.content });
+          }
         } catch (error) {
-          const code = error instanceof WhatsAppDeliveryError ? error.code : 'WHATSAPP_DELIVERY_FAILED';
-          throw new ConversationOperationError(code === 'WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH' ? 409 : 502, 'WhatsApp delivery could not be completed', code);
+          if (error instanceof ChannelDeliveryError) {
+            throw new ConversationOperationError(error.status, error.message, error.code);
+          }
+          throw error;
         }
-        await insertMessage(client, { tenantId, conversationId, senderType: 'ASSISTANT', content });
       }
       await writeAuditEvent(client, { tenantId, conversationId, actorUserId, eventType: 'TAKEOVER' });
       await notifyHumanTyping(client, tenantId, conversationId, false);
@@ -821,33 +826,28 @@ export async function operateConversation({
          WHERE tenant_id = $1 AND conversation_id = $2 AND status = 'PENDING'`, [tenantId, conversationId]
       );
       let publicLifecycleMessagePersisted = false;
-      if (String(returned.channel_type ?? '').toUpperCase() === 'WHATSAPP') {
-        const content = await loadHumanSupportLifecycleNotice(client, returned, 'return_to_ai');
-        const integration = await loadWhatsAppAgentDelivery(client, returned);
-        if (!content || !integration) {
-          throw new ConversationOperationError(409, 'WhatsApp human delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
+      try {
+        const lifecycleResult = await channelDeliveryRegistry.deliverLifecycleNotice({
+          client,
+          tenantId,
+          conversationId,
+          conversation: returned,
+          eventType: 'return_to_ai',
+          deliverWhatsApp,
+          sendTyping,
+          applyPacing,
+        });
+        if (lifecycleResult?.content && (lifecycleResult?.handled || lifecycleResult?.persistAssistantMessage)) {
+          await insertMessage(client, { tenantId, conversationId, senderType: 'ASSISTANT', content: lifecycleResult.content });
+          if (lifecycleResult?.persistPublicAssistantMessage) {
+            publicLifecycleMessagePersisted = true;
+          }
         }
-        try {
-          await deliverWhatsAppLifecycleNotice({
-            client,
-            tenantId,
-            conversationId,
-            conversation: returned,
-            content,
-            integration,
-            deliverWhatsApp,
-            sendTyping,
-            applyPacing,
-          });
-        } catch (error) {
-          const code = error instanceof WhatsAppDeliveryError ? error.code : 'WHATSAPP_DELIVERY_FAILED';
-          throw new ConversationOperationError(code === 'WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH' ? 409 : 502, 'WhatsApp delivery could not be completed', code);
+      } catch (error) {
+        if (error instanceof ChannelDeliveryError) {
+          throw new ConversationOperationError(error.status, error.message, error.code);
         }
-        await insertMessage(client, { tenantId, conversationId, senderType: 'ASSISTANT', content });
-      } else {
-        const content = await loadHumanSupportLifecycleNotice(client, returned, 'return_to_ai');
-        await insertMessage(client, { tenantId, conversationId, senderType: 'ASSISTANT', content });
-        publicLifecycleMessagePersisted = true;
+        throw error;
       }
       await writeAuditEvent(client, { tenantId, conversationId, actorUserId, eventType: 'RETURN_TO_AI', metadata: { source: transitionSource } });
       await notifyHumanTyping(client, tenantId, conversationId, false);
@@ -924,135 +924,7 @@ export async function operateConversation({
   }
 }
 
-async function deliverWhatsAppLifecycleNotice({
-  client,
-  tenantId,
-  conversationId,
-  conversation,
-  content,
-  integration,
-  deliverWhatsApp,
-  sendTyping,
-  applyPacing,
-}) {
-  let lastCustomerMessageId = null;
-  try {
-    const lastCustomerMsg = await client.query(
-      `SELECT external_message_id FROM conversation_messages
-        WHERE tenant_id = $1 AND conversation_id = $2 AND sender_type = 'CUSTOMER' AND external_message_id IS NOT NULL
-        ORDER BY created_at DESC, id DESC LIMIT 1`,
-      [tenantId, conversationId]
-    );
-    lastCustomerMessageId = lastCustomerMsg.rows?.[0]?.external_message_id ?? null;
-  } catch (err) {
-    console.warn('LIFECYCLE_TYPING_WAMID_LOOKUP_FAILED', err?.message);
-  }
 
-  let typingAttempted = false;
-  let typingSucceeded = false;
-  if (lastCustomerMessageId && typeof sendTyping === 'function') {
-    typingAttempted = true;
-    const typingStartedAt = Date.now();
-    try {
-      const outcome = await sendTyping({
-        phoneNumberId: integration.external_channel_id,
-        incomingMessageId: lastCustomerMessageId,
-      });
-      typingSucceeded = outcome?.ok !== false;
-    } catch (err) {
-      console.warn('LIFECYCLE_TYPING_NON_BLOCKING_ERROR', err?.message);
-    }
-    if (typingSucceeded && typeof applyPacing === 'function') {
-      try {
-        await applyPacing({
-          generationStartedAt: typingStartedAt,
-          content,
-        });
-      } catch {}
-    }
-  }
-
-  console.info(
-    'LIFECYCLE_TYPING_DIAGNOSTIC'
-    + ' tenant=' + String(tenantId).slice(0, 8)
-    + ' conversation=' + String(conversationId).slice(0, 8)
-    + ' typing_attempted=' + (typingAttempted ? '1' : '0')
-    + ' typing_succeeded=' + (typingSucceeded ? '1' : '0')
-    + ' wamid=' + (lastCustomerMessageId ? 'RESOLVED' : 'NONE')
-  );
-
-  return deliverWhatsApp({
-    phoneNumberId: integration.external_channel_id,
-    recipient: conversation.customer_external_id,
-    content,
-  });
-}
-
-async function loadHumanSupportLifecycleNotice(client, conversation, templateKey) {
-  try {
-    const key = templateKey === 'manual_takeover' ? 'human_takeover' : templateKey;
-    const templates = await loadPlatformLifecycleMessages({ database: client });
-    return renderPlatformLifecycleMessage({ templates, key, locale: conversation.communication_language });
-  } catch (error) {
-    if (error instanceof ConversationOperationError) throw error;
-    console.error('LIFECYCLE_TEMPLATE_LOAD_FAILED', error?.code ?? error?.message);
-    throw new ConversationOperationError(500, 'Lifecycle message template could not be loaded', error?.code ?? 'PLATFORM_LIFECYCLE_ERROR');
-  }
-}
-
-async function loadWhatsAppAgentDelivery(client, conversation) {
-  const channelId = conversation?.channel_id;
-  const tenantId = conversation?.tenant_id ?? conversation?.tenantId;
-  if (!channelId || !tenantId) return null;
-
-  const result = await client.query(
-    `SELECT tc.id AS channel_id, tc.tenant_id, tc.external_channel_id, tc.channel_type, tc.status AS channel_status,
-            ci.id AS integration_id, ci.integration_key, ci.enabled AS integration_enabled
-       FROM tenant_channels tc
-       LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND UPPER(ci.integration_type) = 'WHATSAPP'
-      WHERE tc.id = $1
-        AND tc.tenant_id = $2
-        AND UPPER(tc.channel_type) = 'WHATSAPP'
-        AND LOWER(tc.status) = 'active'`,
-    [channelId, tenantId]
-  );
-  if (result.rowCount < 1) return null;
-  const row = result.rows[0];
-  const rawPhone = String(row.external_channel_id ?? conversation.external_channel_id ?? '').trim();
-  let cleanPhone = '';
-  try {
-    cleanPhone = normalizeWhatsAppExternalId(rawPhone);
-  } catch {
-    cleanPhone = rawPhone.replace(/^whatsapp:\s*/i, '').replace(/[^0-9]/g, '');
-  }
-  if (!cleanPhone && !rawPhone) return null;
-
-  const canonicalKey = `whatsapp:${cleanPhone || rawPhone}`;
-  if (!row.integration_id || !row.integration_enabled) {
-    try {
-      await client.query(
-        `INSERT INTO channel_integrations
-           (integration_key, integration_type, tenant_id, channel_id, enabled)
-         VALUES ($1, 'WHATSAPP', $2, $3, TRUE)
-         ON CONFLICT (integration_key)
-         DO UPDATE SET channel_id = EXCLUDED.channel_id,
-                       tenant_id = EXCLUDED.tenant_id,
-                       enabled = TRUE,
-                       updated_at = CURRENT_TIMESTAMP`,
-        [canonicalKey, tenantId, channelId]
-      );
-    } catch {
-      // Non-fatal if another transaction converged it concurrently
-    }
-  }
-
-  return {
-    channel_id: channelId,
-    tenant_id: tenantId,
-    external_channel_id: cleanPhone || rawPhone,
-    integration_key: row.integration_key || canonicalKey,
-  };
-}
 
 export async function getHumanDeliveryCapability({ tenantId, conversationId, database = pool }) {
   const client = await database.connect();
@@ -1066,17 +938,7 @@ export async function getHumanDeliveryCapability({ tenantId, conversationId, dat
     );
     const conversation = result.rows[0];
     if (!conversation) return null;
-    const channelType = String(conversation.channel_type ?? '').toUpperCase();
-    if (channelType === 'SAMCHEGUIDE' || channelType === 'WEB_CHAT') {
-      return { channelType, configured: true };
-    }
-    if (channelType !== 'WHATSAPP') {
-      return { channelType, configured: false };
-    }
-    return {
-      channelType: 'WHATSAPP',
-      configured: Boolean(await loadWhatsAppAgentDelivery(client, conversation)),
-    };
+    return channelDeliveryRegistry.getDeliveryCapability(client, conversation);
   } finally {
     client.release();
   }
@@ -1090,6 +952,7 @@ export async function appendAgentMessage({
   idempotencyKey = null,
   database = pool,
   deliverWhatsApp = deliverWhatsAppText,
+  http = null,
 }) {
   const client = await database.connect();
   let operatorSendStage = 'BEGIN_TRANSACTION';
@@ -1156,29 +1019,21 @@ export async function appendAgentMessage({
     }
 
     let delivery = 'AVAILABLE_TO_SAMCHEGUIDE';
-    if (isWhatsApp) {
-      const integration = await loadWhatsAppAgentDelivery(client, conversation);
-      if (!integration) {
-        throw new ConversationOperationError(409, 'WhatsApp delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
+    try {
+      const deliveryResult = await channelDeliveryRegistry.deliverTextMessage({
+        client,
+        conversation,
+        content,
+        deliverWhatsApp,
+        http,
+        traceStage,
+      });
+      delivery = deliveryResult.delivery;
+    } catch (error) {
+      if (error instanceof ChannelDeliveryError) {
+        throw new ConversationOperationError(error.status, error.message, error.code);
       }
-      traceStage('DELIVERY_STARTED');
-      try {
-        await deliverWhatsApp({
-          phoneNumberId: integration.external_channel_id,
-          recipient: conversation.customer_external_id,
-          content,
-        });
-      } catch (error) {
-        if (error instanceof WhatsAppDeliveryError) {
-          const status = error.code === 'WHATSAPP_DELIVERY_NOT_CONFIGURED' || error.code === 'WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH' ? 409 : 502;
-          throw new ConversationOperationError(status, 'WhatsApp delivery could not be completed', error.code);
-        }
-        throw new ConversationOperationError(502, 'WhatsApp delivery could not be completed', 'WHATSAPP_DELIVERY_FAILED');
-      }
-      traceStage('DELIVERY_SUCCEEDED');
-      delivery = 'SENT_TO_WHATSAPP';
-    } else if (!['SAMCHEGUIDE', 'WEB_CHAT'].includes(conversation.channel_type)) {
-      throw new ConversationOperationError(409, 'Human delivery is not configured for this channel', 'CHANNEL_DELIVERY_UNSUPPORTED');
+      throw error;
     }
 
     traceStage('AGENT_PERSIST_STARTED');
@@ -1248,6 +1103,7 @@ export async function appendAgentMediaMessage({
   database = pool,
   storage = null,
   deliverWhatsAppMedia: deliverMedia = deliverWhatsAppMedia,
+  http = null,
 }) {
   let validated;
   try {
@@ -1338,30 +1194,25 @@ export async function appendAgentMediaMessage({
     }
 
     let deliveryResult = { delivery: 'AVAILABLE_TO_SAMCHEGUIDE', mediaId: null, providerMessageId: null };
-    if (String(conversation.channel_type ?? '').toUpperCase() === 'WHATSAPP') {
-      const integration = await loadWhatsAppAgentDelivery(client, conversation);
-      if (!integration) throw new ConversationOperationError(409, 'WhatsApp delivery is not configured for this conversation', 'WHATSAPP_DELIVERY_NOT_CONFIGURED');
-      try {
-        traceMediaStage('WHATSAPP_MEDIA_UPLOAD_AND_SEND');
-        deliveryResult = await deliverMedia({
-          phoneNumberId: integration.external_channel_id,
-          recipient: conversation.customer_external_id,
-          file,
-          mediaCategory: validated.mediaCategory,
-          caption,
-        });
-        if (!String(deliveryResult?.providerMessageId ?? '').trim()) {
-          throw new WhatsAppDeliveryError('WHATSAPP_MEDIA_SEND_UNCORRELATED');
-        }
+    try {
+      deliveryResult = await channelDeliveryRegistry.deliverMediaMessage({
+        client,
+        conversation,
+        file,
+        mediaCategory: validated.mediaCategory,
+        caption,
+        deliverMedia,
+        http,
+        traceMediaStage,
+      });
+      if (deliveryResult?.providerMessageId) {
         providerDelivered = true;
-        traceMediaStage('WHATSAPP_PROVIDER_ACCEPTED');
-      } catch (error) {
-        if (error instanceof WhatsAppDeliveryError) {
-          const status = error.code === 'WHATSAPP_DELIVERY_NOT_CONFIGURED' || error.code === 'WHATSAPP_CHANNEL_CONFIGURATION_MISMATCH' ? 409 : 502;
-          throw new ConversationOperationError(status, 'WhatsApp media delivery could not be completed', error.code);
-        }
-        throw new ConversationOperationError(502, 'WhatsApp media delivery could not be completed', 'WHATSAPP_MEDIA_SEND_FAILED');
       }
+    } catch (error) {
+      if (error instanceof ChannelDeliveryError) {
+        throw new ConversationOperationError(error.status, error.message, error.code);
+      }
+      throw error;
     }
 
     traceMediaStage('MESSAGE_PERSISTENCE');
@@ -1558,3 +1409,5 @@ export async function listConversationEvents({ tenantId, conversationId }) {
   );
   return result.rows;
 }
+
+export { loadWhatsAppAgentDelivery, loadHumanSupportLifecycleNotice, deliverWhatsAppLifecycleNotice };

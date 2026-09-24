@@ -4,6 +4,7 @@ const productNames: Record<ConversationChannelType, string> = {
   WHATSAPP: 'WhatsApp Chatbot',
   WEB_CHAT: 'Web Chatbot',
   SAMCHEGUIDE: 'AI Guide',
+  INSTAGRAM: 'Instagram DM',
 };
 
 const legacyDefaultNames = new Set(['samche ai', 'samcheguide runtime', 'samche bot', 'samche assistant']);

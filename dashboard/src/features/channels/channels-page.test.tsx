@@ -63,11 +63,11 @@ describe('ChannelForm', () => {
     expect(assistant.value).toBe('assistant-2');
   });
 
-  it('only exposes Web Chat and WhatsApp in ChannelForm for new channel creation', () => {
+  it('exposes Web Chat, WhatsApp, and Instagram in ChannelForm for new channel creation', () => {
     render(<ChannelForm canManage assistants={[]} onSubmit={vi.fn()} />);
     const select = screen.getByRole('combobox', { name: 'Channel type' });
     const options = Array.from(select.querySelectorAll('option')).map((o) => o.value);
-    expect(options).toEqual(['WEB_CHAT', 'WHATSAPP']);
+    expect(options).toEqual(['WEB_CHAT', 'WHATSAPP', 'INSTAGRAM']);
   });
 
   it('assigns the first eligible active tenant assistant when configuring WhatsApp', () => {

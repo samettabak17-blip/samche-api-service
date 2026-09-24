@@ -33,6 +33,13 @@ import {
 } from '../services/web-chat-asset-service.js';
 import { createConversationResourceStorage } from '../services/conversation-resource-storage.js';
 import {
+  getTenantInstagramStatus,
+  configureTenantInstagramChannel,
+  disconnectTenantInstagramChannel,
+  testTenantInstagramConnection,
+  TenantInstagramProvisioningError,
+} from '../services/tenant-instagram-provisioning-service.js';
+import {
   getWhatsAppEmbeddedSignupConfig,
   exchangeAndOnboardWhatsApp,
   getWhatsAppChannelStatus,
@@ -147,7 +154,7 @@ const whatsAppEmbeddedSignupErrorResponse = (req, res, error) => {
 
 const channelBody = async (req, res) => {
   const { channel_type, display_name, external_channel_id = null, assistant_id = null, status = 'active' } = req.body;
-  if (!['WEB_CHAT','WHATSAPP'].includes(channel_type) || typeof display_name !== 'string' || !display_name.trim() || !['active','inactive'].includes(status)) {
+  if (!['WEB_CHAT','WHATSAPP','INSTAGRAM'].includes(channel_type) || typeof display_name !== 'string' || !display_name.trim() || !['active','inactive'].includes(status)) {
     res.status(400).json({ error: 'Invalid channel body' }); return null;
   }
   if (channel_type === 'WHATSAPP' && status === 'active' && !assistant_id) {
@@ -213,6 +220,26 @@ router.post('/:tenantId/channels', requireTenantAccess, requireTenantAdmin, asyn
         displayName,
       });
       channel = result.channel;
+    } else if (channelType === 'INSTAGRAM') {
+      const result = await configureTenantInstagramChannel({
+        database: req.app?.locals?.database || pool,
+        tenantId: req.verified_tenant_id,
+        displayName,
+        externalChannelId,
+        assistantId,
+        status,
+      });
+      channel = {
+        id: result.channel_id,
+        tenant_id: req.verified_tenant_id,
+        assistant_id: result.assistant_id,
+        channel_type: 'INSTAGRAM',
+        display_name: result.display_name,
+        external_channel_id: result.external_channel_id,
+        status,
+        created_at: result.created_at,
+        updated_at: result.updated_at,
+      };
     } else {
       channel = (await (req.app?.locals?.query || query)(
         'INSERT INTO tenant_channels(channel_type,display_name,external_channel_id,assistant_id,status,tenant_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
@@ -785,6 +812,91 @@ router.post('/:tenantId/channels/whatsapp/disconnect', requireTenantAccess, requ
   } catch (error) {
     if (whatsAppEmbeddedSignupErrorResponse(req, res, error)) return;
     console.error('WhatsApp disconnect error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
+router.get('/:tenantId/channels/instagram/status', requireTenantAccess, async (req, res) => {
+  if (!tenant(req, res)) return;
+  try {
+    const database = req.app?.locals?.database || pool;
+    const status = await getTenantInstagramStatus({
+      database,
+      tenantId: req.verified_tenant_id,
+    });
+    return res.json(status);
+  } catch (error) {
+    console.error('Fetch Instagram status error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/:tenantId/channels/instagram/config', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  if (!tenant(req, res)) return;
+  const {
+    display_name = 'Instagram',
+    external_channel_id,
+    assistant_id = null,
+    page_id,
+    instagram_business_account_id,
+    account_username,
+    account_name,
+    access_token,
+    status = 'active',
+  } = req.body ?? {};
+
+  try {
+    const database = req.app?.locals?.database || pool;
+    const configured = await configureTenantInstagramChannel({
+      database,
+      tenantId: req.verified_tenant_id,
+      displayName: display_name,
+      externalChannelId: external_channel_id,
+      assistantId: assistant_id,
+      pageId: page_id,
+      instagramBusinessAccountId: instagram_business_account_id,
+      accountUsername: account_username,
+      accountName: account_name,
+      accessToken: access_token,
+      status,
+    });
+    return res.status(200).json(configured);
+  } catch (error) {
+    if (error?.name === 'TenantInstagramProvisioningError') {
+      return res.status(error.status).json({ error: error.code, message: error.message });
+    }
+    console.error('Configure Instagram error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/:tenantId/channels/instagram/disconnect', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  if (!tenant(req, res)) return;
+  try {
+    const database = req.app?.locals?.database || pool;
+    const result = await disconnectTenantInstagramChannel({
+      database,
+      tenantId: req.verified_tenant_id,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error('Disconnect Instagram error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+router.post('/:tenantId/channels/instagram/test-connection', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  if (!tenant(req, res)) return;
+  try {
+    const database = req.app?.locals?.database || pool;
+    const result = await testTenantInstagramConnection({
+      database,
+      tenantId: req.verified_tenant_id,
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error('Test Instagram connection error:', error);
     return res.status(500).json({ error: 'Server error' });
   }
 });

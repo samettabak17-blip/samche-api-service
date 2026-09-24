@@ -89,6 +89,7 @@ export const tenantKeys = {
   webChatChannel: (tenantId: string) => ['tenant', tenantId, 'channel', 'web-chat'] as const,
   whatsappConfig: (tenantId: string) => ['tenant', tenantId, 'whatsapp', 'config'] as const,
   whatsappStatus: (tenantId: string) => ['tenant', tenantId, 'whatsapp', 'status'] as const,
+  instagramStatus: (tenantId: string) => ['tenant', tenantId, 'instagram', 'status'] as const,
 
   knowledgeBase: (tenantId: string) => ['tenant', tenantId, 'knowledge-base'] as const,
   knowledgeDocument: (tenantId: string, documentId: string) => ['tenant', tenantId, 'knowledge-document', documentId] as const,
@@ -172,6 +173,10 @@ export const tenantApi = {
   getWhatsAppStatus: (tenantId: string) => apiClient.get<import('../../types/api').WhatsAppChannelStatusResponse>(`${tenantRoot(tenantId)}/channels/whatsapp/status`),
   connectWhatsAppEmbeddedSignup: (tenantId: string, payload: import('../../types/api').WhatsAppEmbeddedSignupPayload) => apiClient.post<import('../../types/api').WhatsAppEmbeddedSignupResponse>(`${tenantRoot(tenantId)}/channels/whatsapp/embedded-signup`, payload),
   disconnectWhatsApp: (tenantId: string, channelId?: string) => apiClient.post<{ ok: boolean; status: string }>(`${tenantRoot(tenantId)}/channels/whatsapp/disconnect`, { channel_id: channelId }),
+  getInstagramStatus: (tenantId: string) => apiClient.get<import('../../types/api').InstagramChannelStatusResponse>(`${tenantRoot(tenantId)}/channels/instagram/status`),
+  configureInstagram: (tenantId: string, payload: import('../../types/api').InstagramConfigPayload) => apiClient.post<import('../../types/api').InstagramChannelStatusResponse>(`${tenantRoot(tenantId)}/channels/instagram/config`, payload),
+  disconnectInstagram: (tenantId: string) => apiClient.post<{ ok: boolean; status: string }>(`${tenantRoot(tenantId)}/channels/instagram/disconnect`, {}),
+  testInstagramConnection: (tenantId: string) => apiClient.post<import('../../types/api').InstagramTestConnectionResponse>(`${tenantRoot(tenantId)}/channels/instagram/test-connection`, {}),
   getWebChatChannel: (tenantId: string) => apiClient.get<WebChatChannelResponse>(`${tenantRoot(tenantId)}/channels/web-chat`),
   updateWebChatChannel: (tenantId: string, body: {
     widget_key?: string | null;

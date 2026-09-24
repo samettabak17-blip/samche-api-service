@@ -67,7 +67,7 @@ export function ConversationsPage() {
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const tenantId = selectedTenant?.id ?? '';
-  const channelContext: { type: 'WEB_CHAT' | 'SAMCHEGUIDE' | 'WHATSAPP'; label: string } = channel === 'web-chat' ? { type: 'WEB_CHAT', label: 'Web Chatbot' } : channel === 'guide' ? { type: 'SAMCHEGUIDE', label: 'AI Guide' } : { type: 'WHATSAPP', label: 'WhatsApp' };
+  const channelContext: { type: 'WEB_CHAT' | 'SAMCHEGUIDE' | 'WHATSAPP' | 'INSTAGRAM'; label: string } = channel === 'web-chat' ? { type: 'WEB_CHAT', label: 'Web Chatbot' } : channel === 'guide' ? { type: 'SAMCHEGUIDE', label: 'AI Guide' } : channel === 'instagram' ? { type: 'INSTAGRAM', label: 'Instagram DM' } : { type: 'WHATSAPP', label: 'WhatsApp' };
   const [conversationLimit, setConversationLimit] = useState(pageSize);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');

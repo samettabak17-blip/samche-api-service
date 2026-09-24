@@ -96,7 +96,7 @@ export interface GuideExperienceData { brand_name: string; assistant_display_nam
 export interface GuideExperienceVersion { id: string; tenant_id: string; assistant_id: string; version: number; status: GuideExperienceStatus; experience: GuideExperienceData; created_at?: string; published_at?: string | null; }
 export type GuideDomainStatus = 'PENDING' | 'VERIFIED' | 'ACTIVE' | 'FAILED' | 'ARCHIVED';
 export interface GuideDomain { id: string; tenant_id: string; assistant_id: string; channel_id: string; hostname: string; slug?: string | null; status: GuideDomainStatus; domain_mode?: 'MANAGED' | 'CUSTOM'; verification_record_type: 'CNAME'; verification_target: string; verified_at?: string | null; activated_at?: string | null; archived_at?: string | null; created_at?: string; }
-export type ConversationChannelType = 'WEB_CHAT' | 'WHATSAPP' | 'SAMCHEGUIDE';
+export type ConversationChannelType = 'WEB_CHAT' | 'WHATSAPP' | 'SAMCHEGUIDE' | 'INSTAGRAM';
 export interface TenantChannel { id: string; tenant_id: string; assistant_id?: string | null; channel_type: ConversationChannelType; display_name: string; external_channel_id?: string | null; status: 'active' | 'inactive'; created_at?: string; updated_at?: string; }
 export interface WebChatThemeConfig {
   primary_color: string;
@@ -616,4 +616,47 @@ export interface WhatsAppEmbeddedSignupResponse {
     status: string;
   };
 }
+
+export type InstagramConnectionStatus = 'DISCONNECTED' | 'CONNECTED' | 'REAUTH_REQUIRED' | 'ERROR';
+
+export interface InstagramChannelStatusResponse {
+  status: InstagramConnectionStatus;
+  connected: boolean;
+  channel_id?: string;
+  display_name?: string;
+  external_channel_id?: string | null;
+  assistant_id?: string | null;
+  assistant_name?: string | null;
+  page_id?: string | null;
+  instagram_business_account_id?: string | null;
+  account_username?: string | null;
+  account_name?: string | null;
+  has_token?: boolean;
+  reauth_required?: boolean;
+  last_health_check_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface InstagramConfigPayload {
+  display_name?: string;
+  external_channel_id?: string;
+  assistant_id?: string | null;
+  page_id?: string;
+  instagram_business_account_id?: string;
+  account_username?: string;
+  account_name?: string;
+  access_token?: string;
+  status?: 'active' | 'inactive';
+}
+
+export interface InstagramTestConnectionResponse {
+  healthy: boolean;
+  status: InstagramConnectionStatus;
+  page_id?: string;
+  account_name?: string;
+  error?: string;
+  message?: string;
+}
+
 

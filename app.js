@@ -27,6 +27,9 @@ import knowledgeIntelligenceRoutes from "./routes/knowledgeIntelligenceRoutes.js
 import guideExperienceRoutes from "./routes/guideExperienceRoutes.js";
 import { fileURLToPath } from 'node:url';
 import { getSamcheguidePublicFeed, getWebChatPublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, persistWebChatInbound, resolveWebChatAiEligibility, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus, resetWebChatConversation, ensureWebChatConversation, ensureGuideConversation, linkConversationResourcesToMessage } from "./services/live-inbox-service.js";
+import { isInstagramWebhookEvent, extractInstagramInboundEvents } from "./services/instagram-inbound-adapter.js";
+import { persistInstagramInbound } from "./services/instagram-live-inbox-service.js";
+import { orchestrateInstagramInboundAiResponse } from "./services/instagram-ai-orchestrator.js";
 import { persistWhatsAppInbound, whatsappPhoneNumberFingerprint } from "./services/whatsapp-live-inbox-service.js";
 import { resolveMetaGraphApiVersion } from "./services/meta-graph-api-version.js";
 import { WHATSAPP_INGRESS_EVENTS, appSecretFingerprint, logWhatsAppIngressEvent } from "./services/whatsapp-webhook-ingress-observability.js";
@@ -791,6 +794,7 @@ const httpsAgent = whatsappHttpsAgent;
 // 🔥 TEKRARLANAN MESAJLARI ENGELLEME (RETRY KORUMASI) HAFIZALARI
 // ============================================================================
 const processedWpMessages = new Set();
+const processedIgMessages = new Set();
 
 // ============================================================================
 // 1. GENEL API YAPILANDIRMALARI
@@ -4424,7 +4428,13 @@ app.get("/webhook", (req, res) => {
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  if (mode === "subscribe" && token === process.env.WHATSAPP_VERIFY_TOKEN) {
+  const validTokens = [
+    process.env.WHATSAPP_VERIFY_TOKEN,
+    process.env.INSTAGRAM_VERIFY_TOKEN,
+    process.env.META_VERIFY_TOKEN,
+  ].filter(Boolean);
+
+  if (mode === "subscribe" && token && validTokens.includes(token)) {
     return res.status(200).send(challenge);
   }
   return res.sendStatus(403);
@@ -4441,6 +4451,55 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
     const logWhatsAppTiming = (phase) => console.info(`WHATSAPP_MEDIA_TIMING phase=${phase} elapsed_ms=${Date.now() - whatsappRequestStartedAt}`);
     logWhatsAppTiming('webhook_received');
     try {
+      if (isInstagramWebhookEvent(req.body)) {
+        const events = extractInstagramInboundEvents(req.body);
+        console.info('INSTAGRAM_WEBHOOK_PAYLOAD_SHAPE events_count=' + events.length);
+        for (const igEvent of events) {
+          if (igEvent.isEcho) {
+            console.info('INSTAGRAM_ECHO_DROPPED mid=' + (igEvent.messageId ? igEvent.messageId.slice(0, 8) : 'unknown'));
+            continue;
+          }
+          const igMid = igEvent.messageId;
+          if (igMid && processedIgMessages.has(igMid)) {
+            console.info('INSTAGRAM_DUPLICATE_RETRY_SKIPPED mid=' + igMid.slice(0, 8));
+            continue;
+          }
+          if (igMid) {
+            processedIgMessages.add(igMid);
+            setTimeout(() => processedIgMessages.delete(igMid), 2 * 60 * 1000);
+          }
+
+          try {
+            const inboundState = await persistInstagramInbound({
+              database: pool,
+              recipientId: igEvent.recipientId,
+              senderIgsid: igEvent.senderId,
+              messageId: igEvent.messageId,
+              content: igEvent.text,
+              attachments: igEvent.attachments,
+              ensureConversationCrmIdentity,
+              queueLeadQualification,
+            });
+
+            if (!inboundState || inboundState.unmapped) {
+              console.warn('INSTAGRAM_INBOUND_UNMAPPED_RECIPIENT recipient=' + (igEvent.recipientId ? igEvent.recipientId.slice(0, 8) : 'unknown'));
+              continue;
+            }
+            if (inboundState.duplicate) continue;
+
+            await orchestrateInstagramInboundAiResponse({
+              database: pool,
+              inboundState,
+              senderIgsid: igEvent.senderId,
+              text: igEvent.text,
+            });
+          } catch (igErr) {
+            console.error('INSTAGRAM_INBOUND_PROCESSING_ERROR', igErr?.code ?? igErr?.message);
+          }
+        }
+        return;
+      }
+
       const change = req.body.entry?.[0]?.changes?.[0]?.value ?? {};
       const phoneNumberId = change.metadata?.phone_number_id;
       // Signature-validated business handler reached. Records only structural
