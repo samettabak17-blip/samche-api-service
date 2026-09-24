@@ -27,6 +27,8 @@ export function InstagramConnectionCard({
   const [pageId, setPageId] = useState('');
   const [accountUsername, setAccountUsername] = useState('');
   const [accessToken, setAccessToken] = useState('');
+  const [activationPolicy, setActivationPolicy] = useState<import('../../types/api').AiActivationPolicy>('MANUAL_ONLY');
+  const [triggersInput, setTriggersInput] = useState('');
   const [selectedAssistantId, setSelectedAssistantId] = useState<string>(
     eligibleAssistants[0]?.id ?? ''
   );
@@ -49,9 +51,16 @@ export function InstagramConnectionCard({
   const configureMutation = useMutation({
     mutationFn: async () => {
       setLocalFeedback(null);
+      const parsedTriggers = triggersInput
+        .split(/[,\n]/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+
       return tenantApi.configureInstagram(tenantId, {
         display_name: displayName.trim() || 'Instagram',
         auth_mode: 'INSTAGRAM_LOGIN',
+        activation_policy: activationPolicy,
+        activation_triggers: parsedTriggers,
         instagram_account_id: pageId.trim() || undefined,
         page_id: pageId.trim() || undefined,
         instagram_business_account_id: pageId.trim() || undefined,
@@ -191,6 +200,8 @@ export function InstagramConnectionCard({
                 setPageId(statusData.instagram_account_id || statusData.page_id || statusData.external_channel_id || '');
                 setAccountUsername(statusData.account_username || '');
                 setSelectedAssistantId(statusData.assistant_id || eligibleAssistants[0]?.id || '');
+                setActivationPolicy(statusData.activation_policy || 'MANUAL_ONLY');
+                setTriggersInput(Array.isArray(statusData.activation_triggers) ? statusData.activation_triggers.join(', ') : '');
                 setIsConfiguring(true);
               }}
               className="gap-1.5 text-xs"
@@ -236,6 +247,8 @@ export function InstagramConnectionCard({
                 setPageId(statusData.instagram_account_id || statusData.page_id || statusData.external_channel_id || '');
                 setAccountUsername(statusData.account_username || '');
                 setSelectedAssistantId(statusData.assistant_id || eligibleAssistants[0]?.id || '');
+                setActivationPolicy(statusData.activation_policy || 'MANUAL_ONLY');
+                setTriggersInput(Array.isArray(statusData.activation_triggers) ? statusData.activation_triggers.join(', ') : '');
                 setIsConfiguring(true);
               }}
               className="shrink-0 text-xs"
@@ -248,7 +261,7 @@ export function InstagramConnectionCard({
 
       {/* Connected State Overview */}
       {isConnected && !isConfiguring && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 rounded-xl border border-line bg-elevated/30 p-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 rounded-xl border border-line bg-elevated/30 p-4">
           <div>
             <span className="text-xs font-medium text-stone-400">Instagram Account</span>
             <p className="mt-0.5 font-semibold text-sm text-white">
@@ -263,6 +276,15 @@ export function InstagramConnectionCard({
             <p className="mt-0.5 font-semibold text-sm text-white flex items-center gap-1.5">
               <Bot size={14} className="text-signal" />
               {currentAssistantName}
+            </p>
+          </div>
+          <div>
+            <span className="text-xs font-medium text-stone-400">AI Activation Policy</span>
+            <p className="mt-0.5 font-semibold text-sm text-stone-200">
+              {statusData.activation_policy === 'ALL_MESSAGES' ? 'All Messages'
+                : statusData.activation_policy === 'BUSINESS_INTENT_ONLY' ? 'Business Intent Only'
+                : statusData.activation_policy === 'TRIGGER_ONLY' ? `Triggers (${statusData.activation_triggers?.length || 0})`
+                : 'Manual Only (Silent)'}
             </p>
           </div>
           <div>
@@ -362,6 +384,42 @@ export function InstagramConnectionCard({
                 />
               </DashboardField>
             </div>
+
+            <DashboardField
+              label="AI Activation Policy"
+              helper="Controls when the AI assistant automatically replies to incoming Instagram Direct Messages. New channels default to Manual Only."
+            >
+              <DashboardSelect
+                value={activationPolicy}
+                onChange={(e) => setActivationPolicy(e.target.value as any)}
+                disabled={!canManage || configureMutation.isPending}
+              >
+                <option value="MANUAL_ONLY">Manual Only (AI stays silent - Recommended for initial setup)</option>
+                <option value="BUSINESS_INTENT_ONLY">Business Intent Only (AI responds only to commercial inquiries)</option>
+                <option value="TRIGGER_ONLY">Trigger Words / Rules Only (AI responds only when trigger keywords match)</option>
+                <option value="ALL_MESSAGES">All Messages (AI responds to all customer messages)</option>
+              </DashboardSelect>
+            </DashboardField>
+
+            {(activationPolicy === 'TRIGGER_ONLY' || activationPolicy === 'BUSINESS_INTENT_ONLY') && (
+              <DashboardField
+                label="Trigger Words / Phrases"
+                helper={
+                  activationPolicy === 'TRIGGER_ONLY'
+                    ? 'AI only activates when customer message contains one of these keywords (comma or newline separated).'
+                    : 'Optional strong business intent keywords (comma or newline separated).'
+                }
+              >
+                <textarea
+                  value={triggersInput}
+                  onChange={(e) => setTriggersInput(e.target.value)}
+                  placeholder="e.g. dubai, şirket, company, vize, visa, fiyat, randevu, bilgi"
+                  rows={3}
+                  disabled={!canManage || configureMutation.isPending}
+                  className="w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-xs text-ink placeholder-stone-500 transition focus:border-signal focus:outline-none focus:ring-1 focus:ring-signal"
+                />
+              </DashboardField>
+            )}
 
             <DashboardField
               label="Instagram Access Token"

@@ -11,6 +11,8 @@ import {
   listConversationEvents,
   operateConversation,
   publishHumanTyping,
+  setConversationAiOverride,
+
 } from '../services/live-inbox-service.js';
 import { listHumanAttentionSummary } from '../services/human-support-service.js';
 import { startLiveEventListener, subscribeTenantEvents } from '../services/live-event-bus.js';
@@ -394,6 +396,28 @@ for (const [path, action] of [
     }
   });
 }
+
+router.post('/:tenantId/conversations/:conversationId/ai-override', requireTenantAccess, async (req, res) => {
+  const currentTenantId = tenantId(req, res);
+  if (!currentTenantId) return;
+  if (!isValidUUID(req.params.conversationId)) return res.status(400).json({ error: 'Invalid conversation ID' });
+  const { override } = req.body ?? {};
+  if (!['AUTOMATIC', 'ALWAYS_AI', 'NEVER_AI'].includes(override)) {
+    return res.status(400).json({ error: 'Override must be AUTOMATIC, ALWAYS_AI, or NEVER_AI' });
+  }
+  try {
+    const conversation = await setConversationAiOverride({
+      tenantId: currentTenantId,
+      conversationId: req.params.conversationId,
+      override,
+      actor: actor(req),
+      database: req.app?.locals?.database || undefined,
+    });
+    return res.json({ conversation });
+  } catch (error) {
+    return operationError(res, error, 'Set AI override error:');
+  }
+});
 
 router.post('/:tenantId/conversations/:conversationId/human-typing', requireTenantAccess, async (req, res) => {
   const currentTenantId = tenantId(req, res);

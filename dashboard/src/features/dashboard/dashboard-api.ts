@@ -315,6 +315,8 @@ export const tenantApi = {
   pauseConversationAi: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/pause`, {}),
   resumeConversationAi: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/resume`, {}),
   closeConversation: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/close`, {}),
+  setConversationAiOverride: (tenantId: string, conversationId: string, override: import('../../types/api').AiBehaviorOverride) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/ai-override`, { override }),
+
   sendAgentMessage: (tenantId: string, conversationId: string, content: string, idempotencyKey: string) => apiClient.post<AgentMessageResponse>(
     `${tenantRoot(tenantId)}/conversations/${conversationId}/messages`,
     { content },

@@ -70,6 +70,8 @@ export async function getTenantInstagramStatus({ database = pool, tenantId }) {
       assistant_name: row.assistant_name || null,
       provider: config.provider || 'META_INSTAGRAM',
       auth_mode: config.auth_mode || 'INSTAGRAM_LOGIN',
+      activation_policy: config.activation_policy || 'MANUAL_ONLY',
+      activation_triggers: Array.isArray(config.activation_triggers) ? config.activation_triggers : [],
       instagram_account_id: accountId,
       page_id: config.page_id || accountId,
       instagram_business_account_id: config.instagram_business_account_id || accountId,
@@ -102,6 +104,8 @@ export async function configureTenantInstagramChannel({
   accountName = null,
   accessToken = null,
   authMode = 'INSTAGRAM_LOGIN',
+  activationPolicy = undefined,
+  activationTriggers = undefined,
   status = 'active',
 }) {
   if (!tenantId) throw new TenantInstagramProvisioningError('TENANT_ID_REQUIRED', 'Tenant ID is required', 400);
@@ -174,10 +178,21 @@ export async function configureTenantInstagramChannel({
 
     const resolvedAccountId = instagramAccountId || resolvedExternalId;
 
+    const validPolicies = ['MANUAL_ONLY', 'ALL_MESSAGES', 'BUSINESS_INTENT_ONLY', 'TRIGGER_ONLY'];
+    const resolvedPolicy = activationPolicy && validPolicies.includes(activationPolicy)
+      ? activationPolicy
+      : (existingConfig.activation_policy || 'MANUAL_ONLY');
+
+    const resolvedTriggers = Array.isArray(activationTriggers)
+      ? activationTriggers.map((t) => String(t).trim()).filter(Boolean)
+      : (Array.isArray(existingConfig.activation_triggers) ? existingConfig.activation_triggers : []);
+
     const updatedConfig = {
       ...existingConfig,
       provider: 'META_INSTAGRAM',
       auth_mode: authMode || existingConfig.auth_mode || 'INSTAGRAM_LOGIN',
+      activation_policy: resolvedPolicy,
+      activation_triggers: resolvedTriggers,
       instagram_account_id: resolvedAccountId,
       instagram_business_account_id: resolvedAccountId,
       page_id: pageId || existingConfig.page_id || resolvedAccountId,

@@ -845,6 +845,8 @@ router.post('/:tenantId/channels/instagram/config', requireTenantAccess, require
     account_name,
     access_token,
     auth_mode = 'INSTAGRAM_LOGIN',
+    activation_policy,
+    activation_triggers,
     status = 'active',
   } = req.body ?? {};
 
@@ -863,6 +865,8 @@ router.post('/:tenantId/channels/instagram/config', requireTenantAccess, require
       accountName: account_name,
       accessToken: access_token,
       authMode: auth_mode,
+      activationPolicy: activation_policy,
+      activationTriggers: activation_triggers,
       status,
     });
     return res.status(200).json(configured);

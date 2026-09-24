@@ -191,10 +191,63 @@ describe('InstagramConnectionCard UI Component', () => {
       expect(tenantApi.configureInstagram).toHaveBeenCalledWith('tenant-1', {
         display_name: 'Instagram',
         auth_mode: 'INSTAGRAM_LOGIN',
+        activation_policy: 'MANUAL_ONLY',
+        activation_triggers: [],
         instagram_account_id: '17841400012345678',
         instagram_business_account_id: '17841400012345678',
         page_id: '17841400012345678',
         account_username: 'samcheofficial',
+        access_token: 'IGAA_test_token_123',
+        assistant_id: 'ast-1',
+        status: 'active',
+      });
+    });
+  });
+
+  it('configures activation policy and trigger keywords', async () => {
+    vi.mocked(tenantApi.getInstagramStatus).mockResolvedValueOnce({
+      status: 'DISCONNECTED',
+      connected: false,
+    });
+    vi.mocked(tenantApi.configureInstagram).mockResolvedValueOnce({
+      status: 'CONNECTED',
+      connected: true,
+      activation_policy: 'BUSINESS_INTENT_ONLY',
+      activation_triggers: ['dubai', 'vize'],
+      has_token: true,
+    });
+
+    renderWithClient(
+      <InstagramConnectionCard
+        tenantId="tenant-1"
+        canManage={true}
+        assistants={mockAssistants}
+      />
+    );
+
+    const accountIdInput = screen.getByPlaceholderText('e.g. 17841400000000000');
+    const tokenInput = screen.getByPlaceholderText('EAAB... or IGA...');
+    const policySelect = screen.getByLabelText(/AI Activation Policy/i);
+    const submitBtn = screen.getByRole('button', { name: /Connect Instagram/i });
+
+    fireEvent.change(accountIdInput, { target: { value: '17841400012345678' } });
+    fireEvent.change(tokenInput, { target: { value: 'IGAA_test_token_123' } });
+    fireEvent.change(policySelect, { target: { value: 'BUSINESS_INTENT_ONLY' } });
+
+    const triggersInput = screen.getByPlaceholderText('e.g. dubai, şirket, company, vize, visa, fiyat, randevu, bilgi');
+    fireEvent.change(triggersInput, { target: { value: 'dubai, vize' } });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(tenantApi.configureInstagram).toHaveBeenCalledWith('tenant-1', {
+        display_name: 'Instagram',
+        auth_mode: 'INSTAGRAM_LOGIN',
+        activation_policy: 'BUSINESS_INTENT_ONLY',
+        activation_triggers: ['dubai', 'vize'],
+        instagram_account_id: '17841400012345678',
+        instagram_business_account_id: '17841400012345678',
+        page_id: '17841400012345678',
+        account_username: undefined,
         access_token: 'IGAA_test_token_123',
         assistant_id: 'ast-1',
         status: 'active',

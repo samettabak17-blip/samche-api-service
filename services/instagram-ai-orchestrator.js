@@ -8,6 +8,7 @@ import { resolveTenantRuntimePersona } from './tenant-runtime-persona-service.js
 import { resolveAssistantRuntimeKnowledgeContext } from './knowledge-runtime-context-service.js';
 import { buildTenantRuntimeSystemInstruction } from './tenant-runtime-persona-service.js';
 import { resolveCommunicationLanguage } from './conversation-communication-language.js';
+import { evaluateChannelAiActivationPolicy } from './channel-ai-activation-policy-service.js';
 
 export async function orchestrateInstagramInboundAiResponse({
   database = pool,
@@ -16,6 +17,7 @@ export async function orchestrateInstagramInboundAiResponse({
   text = '',
   http,
   generateAiResponse,
+  generateAiClassification,
 }) {
   if (!inboundState || inboundState.duplicate || !inboundState.integration || !inboundState.conversation) {
     return { skipped: true, reason: 'INVALID_INBOUND_STATE' };
@@ -87,10 +89,35 @@ export async function orchestrateInstagramInboundAiResponse({
     return { handoff: true, handoffOutcome: handoff };
   }
 
-
   // 2. Check AI eligibility (must be in AI handling mode and conversation open)
   if (!inboundState.shouldInvokeAi) {
     return { aiInvoked: false, reason: 'NOT_IN_AI_MODE' };
+  }
+
+  // 3. Evaluate generic Channel AI Activation Policy & Contact/Conversation Overrides
+  const activationEvaluation = await evaluateChannelAiActivationPolicy({
+    messageText: text,
+    conversation,
+    channelConfig: integration.config,
+    tenantContext: {
+      tenantId,
+      assistantId,
+    },
+    generateAiClassification,
+  });
+
+  if (!activationEvaluation.eligible) {
+    console.info(
+      `INSTAGRAM_AI_ACTIVATION_SUPPRESSED tenant=${tenantId ? tenantId.slice(0, 8) : 'unknown'}` +
+      ` conversation=${conversationId ? conversationId.slice(0, 8) : 'unknown'}` +
+      ` policy=${activationEvaluation.policy}` +
+      ` reason=${activationEvaluation.reasonCode}`
+    );
+    return {
+      aiInvoked: false,
+      suppressed: true,
+      activationEvaluation,
+    };
   }
 
   // 3. Resolve Persona and Knowledge context

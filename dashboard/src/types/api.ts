@@ -276,6 +276,9 @@ export interface WebChatLogoUploadResponse {
 
 export type ConversationStatus = 'open' | 'closed' | 'archived';
 export type ConversationHandlingMode = 'AI' | 'HUMAN' | 'PAUSED';
+export type AiActivationPolicy = 'MANUAL_ONLY' | 'ALL_MESSAGES' | 'BUSINESS_INTENT_ONLY' | 'TRIGGER_ONLY';
+export type AiBehaviorOverride = 'AUTOMATIC' | 'ALWAYS_AI' | 'NEVER_AI';
+
 export interface ConversationRecord {
   id: string;
   tenant_id: string;
@@ -291,6 +294,7 @@ export interface ConversationRecord {
   handoff_reason: string | null;
   handling_version: number;
   last_activity_at: string;
+  ai_behavior_override?: AiBehaviorOverride;
   visitor_context?: {
     current_entity?: {
       name: string;
@@ -629,6 +633,8 @@ export interface InstagramChannelStatusResponse {
   assistant_name?: string | null;
   provider?: string;
   auth_mode?: 'INSTAGRAM_LOGIN' | 'FACEBOOK_PAGE' | string;
+  activation_policy?: AiActivationPolicy;
+  activation_triggers?: string[];
   instagram_account_id?: string | null;
   page_id?: string | null;
   instagram_business_account_id?: string | null;
@@ -646,6 +652,8 @@ export interface InstagramConfigPayload {
   external_channel_id?: string;
   assistant_id?: string | null;
   auth_mode?: 'INSTAGRAM_LOGIN' | 'FACEBOOK_PAGE' | string;
+  activation_policy?: AiActivationPolicy;
+  activation_triggers?: string[];
   instagram_account_id?: string;
   page_id?: string;
   instagram_business_account_id?: string;

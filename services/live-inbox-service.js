@@ -924,6 +924,62 @@ export async function operateConversation({
   }
 }
 
+export async function setConversationAiOverride({
+  tenantId,
+  conversationId,
+  override = 'AUTOMATIC',
+  actor = null,
+  database = pool,
+}) {
+  const validOverrides = ['AUTOMATIC', 'ALWAYS_AI', 'NEVER_AI'];
+  const cleanOverride = String(override || 'AUTOMATIC').toUpperCase().trim();
+  if (!validOverrides.includes(cleanOverride)) {
+    throw new ConversationOperationError(400, 'Invalid AI behavior override', 'AI_OVERRIDE_INVALID');
+  }
+
+  const client = await database.connect();
+  try {
+    await client.query('BEGIN');
+    const existing = await client.query(
+      `SELECT id, handling_mode, status, ai_behavior_override
+         FROM conversations
+        WHERE id = $1 AND tenant_id = $2
+        FOR UPDATE`,
+      [conversationId, tenantId]
+    );
+    if (existing.rowCount < 1) {
+      throw new ConversationOperationError(404, 'Conversation not found', 'CONVERSATION_NOT_FOUND');
+    }
+
+    const updated = await client.query(
+      `UPDATE conversations
+          SET ai_behavior_override = $1,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2 AND tenant_id = $3
+        RETURNING *`,
+      [cleanOverride, conversationId, tenantId]
+    );
+
+    const actorUserId = actor?.id ?? actor?.userId ?? null;
+    await writeAuditEvent(client, {
+      tenantId,
+      conversationId,
+      actorUserId,
+      eventType: 'AI_OVERRIDE_UPDATED',
+      metadata: { override: cleanOverride },
+    });
+    await notify(client, tenantId, conversationId, 'AI_OVERRIDE_UPDATED');
+
+    await client.query('COMMIT');
+    return updated.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 
 
 export async function getHumanDeliveryCapability({ tenantId, conversationId, database = pool }) {

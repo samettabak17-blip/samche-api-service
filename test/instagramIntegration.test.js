@@ -515,7 +515,7 @@ test('orchestrateInstagramInboundAiResponse generates and delivers AI response i
       channel_id: channelId,
       assistant_id: assistantId,
       external_channel_id: testPageId,
-      config: { access_token: 'test-token', page_id: testPageId },
+      config: { access_token: 'test-token', page_id: testPageId, activation_policy: 'ALL_MESSAGES' },
     },
     conversation: {
       id: conversationId,
@@ -541,4 +541,46 @@ test('orchestrateInstagramInboundAiResponse generates and delivers AI response i
   assert.equal(outcome.responseText, 'We are open Monday through Friday, 9 AM to 6 PM.');
   assert.equal(outboundDMs.length, 1);
   assert.equal(outboundDMs[0].message.text, 'We are open Monday through Friday, 9 AM to 6 PM.');
+});
+
+test('orchestrateInstagramInboundAiResponse suppresses automatic reply in MANUAL_ONLY default mode', async () => {
+  const outboundDMs = [];
+  const fakeHttp = {
+    async post(url, body) {
+      outboundDMs.push(body);
+      return { data: { recipient_id: testIgsid, message_id: 'mid.ai.102' } };
+    },
+  };
+
+  const inboundState = {
+    integration: {
+      tenant_id: tenantId,
+      channel_id: channelId,
+      assistant_id: assistantId,
+      external_channel_id: testPageId,
+      config: { access_token: 'test-token', page_id: testPageId, activation_policy: 'MANUAL_ONLY' },
+    },
+    conversation: {
+      id: conversationId,
+      status: 'open',
+      handling_mode: 'AI',
+      handling_version: 1,
+      communication_language: 'en',
+    },
+    shouldInvokeAi: true,
+    handlingVersion: 1,
+  };
+
+  const outcome = await orchestrateInstagramInboundAiResponse({
+    inboundState,
+    senderIgsid: testIgsid,
+    text: 'What are your working hours?',
+    http: fakeHttp,
+    generateAiResponse: async () => 'Should not be called',
+  });
+
+  assert.equal(outcome.aiInvoked, false);
+  assert.equal(outcome.suppressed, true);
+  assert.equal(outcome.activationEvaluation.reasonCode, 'POLICY_MANUAL_ONLY');
+  assert.equal(outboundDMs.length, 0);
 });
