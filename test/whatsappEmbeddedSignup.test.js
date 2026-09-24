@@ -819,3 +819,202 @@ test('WhatsApp Embedded Signup: rejects inactive or unowned assistant', async ()
     }
   );
 });
+
+
+test('WhatsApp Embedded Signup: duplicate onboarding is idempotent and updates existing channel', async () => {
+  const tenantId = crypto.randomUUID();
+  const userId = crypto.randomUUID();
+  const assistantId = crypto.randomUUID();
+  const phoneId = '15554443322';
+  const env = {
+    WHATSAPP_APP_ID: 'meta-app-12345',
+    WHATSAPP_APP_SECRET: 'meta-app-secret-67890',
+    WHATSAPP_CONFIG_ID: 'meta-config-abcde',
+    JWT_SECRET: 'test-jwt-secret-xyz',
+  };
+
+  const db = createMockDatabase({
+    tenants: [{ id: tenantId, name: 'Idempotent Corp', plan_code: 'GROWTH' }],
+    assistants: [{ id: assistantId, tenant_id: tenantId, name: 'Assistant', status: 'active' }],
+  });
+
+  const httpClient = createMockMetaHttpClient({
+    accessToken: 'token-v1',
+    phoneNumbers: [{ id: phoneId, display_phone_number: '+1 555-444-3322', verified_name: 'Name V1' }],
+  });
+
+  const stateToken1 = generateWhatsAppOAuthState({ tenantId, userId, env });
+  const result1 = await exchangeAndOnboardWhatsApp({
+    database: db,
+    tenantId,
+    userId,
+    code: 'code-1',
+    wabaId: 'waba-idempotent',
+    phoneNumberId: phoneId,
+    assistantId,
+    oauthState: stateToken1,
+    httpClient,
+    env,
+  });
+  assert.equal(result1.ok, true);
+  assert.equal(db.state.channels.length, 1);
+  const initialChannelId = db.state.channels[0].id;
+
+  // Second onboarding with updated verified name
+  const httpClient2 = createMockMetaHttpClient({
+    accessToken: 'token-v2',
+    phoneNumbers: [{ id: phoneId, display_phone_number: '+1 555-444-3322', verified_name: 'Name V2' }],
+  });
+  const stateToken2 = generateWhatsAppOAuthState({ tenantId, userId, env });
+  const result2 = await exchangeAndOnboardWhatsApp({
+    database: db,
+    tenantId,
+    userId,
+    code: 'code-2',
+    wabaId: 'waba-idempotent',
+    phoneNumberId: phoneId,
+    assistantId,
+    oauthState: stateToken2,
+    httpClient: httpClient2,
+    env,
+  });
+  assert.equal(result2.ok, true);
+  // Channel count remains exactly 1 and retains same ID
+  assert.equal(db.state.channels.length, 1);
+  assert.equal(db.state.channels[0].id, initialChannelId);
+  assert.equal(db.state.channels[0].display_name, 'Name V2');
+});
+
+test('WhatsApp Embedded Signup: duplicate WABA subscription warning does not block onboarding', async () => {
+  const tenantId = crypto.randomUUID();
+  const userId = crypto.randomUUID();
+  const assistantId = crypto.randomUUID();
+  const phoneId = '15557778899';
+  const env = {
+    WHATSAPP_APP_ID: 'meta-app-12345',
+    WHATSAPP_APP_SECRET: 'meta-app-secret-67890',
+    WHATSAPP_CONFIG_ID: 'meta-config-abcde',
+    JWT_SECRET: 'test-jwt-secret-xyz',
+  };
+
+  const db = createMockDatabase({
+    tenants: [{ id: tenantId, name: 'Warning Corp', plan_code: 'GROWTH' }],
+    assistants: [{ id: assistantId, tenant_id: tenantId, name: 'Assistant', status: 'active' }],
+  });
+
+  const httpClient = createMockMetaHttpClient({
+    accessToken: 'token-with-sub-warn',
+    phoneNumbers: [{ id: phoneId, display_phone_number: '+1 555-777-8899', verified_name: 'Warning Corp' }],
+    failSubscription: true,
+  });
+
+  const stateToken = generateWhatsAppOAuthState({ tenantId, userId, env });
+  const result = await exchangeAndOnboardWhatsApp({
+    database: db,
+    tenantId,
+    userId,
+    code: 'code-sub-warn',
+    wabaId: 'waba-sub-warn',
+    phoneNumberId: phoneId,
+    assistantId,
+    oauthState: stateToken,
+    httpClient,
+    env,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.connection.status, 'CONNECTED');
+});
+
+
+test('WhatsApp Embedded Signup: security - zero secrets or raw tokens returned to frontend', async () => {
+  const tenantId = crypto.randomUUID();
+  const userId = crypto.randomUUID();
+  const assistantId = crypto.randomUUID();
+  const rawToken = 'super-secret-access-token-999';
+  const env = {
+    WHATSAPP_APP_ID: 'meta-app-12345',
+    WHATSAPP_APP_SECRET: 'meta-app-secret-67890',
+    WHATSAPP_CONFIG_ID: 'meta-config-abcde',
+    WHATSAPP_TOKEN_ENCRYPTION_KEY: crypto.randomBytes(32).toString('hex'),
+    JWT_SECRET: 'test-jwt-secret-xyz',
+  };
+
+  const envelope = encryptWhatsAppCredential(rawToken, { env });
+  const channelId = crypto.randomUUID();
+
+  const db = createMockDatabase({
+    tenants: [{ id: tenantId, name: 'Security Corp', plan_code: 'GROWTH' }],
+    assistants: [{ id: assistantId, tenant_id: tenantId, name: 'Assistant', status: 'active' }],
+    channels: [{
+      id: channelId,
+      tenant_id: tenantId,
+      channel_type: 'WHATSAPP',
+      display_name: 'Security WhatsApp',
+      external_channel_id: '15550001111',
+      assistant_id: assistantId,
+      status: 'active',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }],
+    integrations: [{
+      id: crypto.randomUUID(),
+      integration_key: 'whatsapp:15550001111',
+      integration_type: 'WHATSAPP',
+      tenant_id: tenantId,
+      channel_id: channelId,
+      assistant_id: assistantId,
+      enabled: true,
+      config: {
+        whatsapp: {
+          waba_id: 'waba-sec',
+          phone_number_id: '15550001111',
+          encrypted_access_token: envelope,
+        },
+      },
+    }],
+  });
+
+  const config = await getWhatsAppEmbeddedSignupConfig({ database: db, tenantId, userId, env });
+  const configKeys = Object.keys(config);
+  assert.equal(configKeys.includes('app_secret'), false);
+  assert.equal(configKeys.includes('access_token'), false);
+  assert.equal(configKeys.includes('token_encryption_key'), false);
+
+  const status = await getWhatsAppChannelStatus({ database: db, tenantId });
+  const statusJson = JSON.stringify(status);
+  assert.equal(statusJson.includes(rawToken), false, 'Raw token must NEVER appear in status response');
+  assert.equal(statusJson.includes('ciphertext'), false, 'Encrypted envelope must NEVER appear in status response');
+  assert.equal(status.connection.has_credentials, true, 'has_credentials boolean only');
+});
+
+test('WhatsApp Embedded Signup: fresh tenant onboarding requires zero manual DB setup or per-tenant ENV', async () => {
+  const freshTenantId = crypto.randomUUID();
+  const freshUserId = crypto.randomUUID();
+  const env = {
+    WHATSAPP_APP_ID: 'platform-meta-app-id',
+    WHATSAPP_APP_SECRET: 'platform-meta-app-secret',
+    JWT_SECRET: 'platform-jwt-secret',
+  };
+
+  const db = createMockDatabase({
+    tenants: [{ id: freshTenantId, name: 'Fresh Startup Inc', plan_code: 'GROWTH' }],
+  });
+
+  const config = await getWhatsAppEmbeddedSignupConfig({
+    database: db,
+    tenantId: freshTenantId,
+    userId: freshUserId,
+    env,
+  });
+
+  assert.equal(config.entitled, true);
+  assert.equal(config.configured, true);
+  assert.equal(config.config_id, '29049226651367865', 'Uses canonical configuration ID by default');
+  assert.ok(config.state_token, 'Issues signed OAuth state token for fresh tenant');
+
+  const status = await getWhatsAppChannelStatus({ database: db, tenantId: freshTenantId });
+  assert.equal(status.status, 'NOT_CONNECTED');
+  assert.equal(status.channel, null);
+  assert.equal(status.connection, null);
+});

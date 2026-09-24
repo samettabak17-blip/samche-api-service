@@ -59,6 +59,10 @@ export function loadFacebookSdk(appId: string, version: string): Promise<void> {
 
 export interface WhatsAppEmbeddedSignupProps {
   tenantId: string;
+  canManage: boolean;
+  assistants: Assistant[];
+}
+
 export function WhatsAppEmbeddedSignup({
   tenantId,
   canManage,
@@ -130,6 +134,7 @@ export function WhatsAppEmbeddedSignup({
     }
     window.addEventListener('message', handleMetaMessage);
     return () => window.removeEventListener('message', handleMetaMessage);
+  }, []);
   const connectMutation = useMutation({
     mutationFn: async (payload: {
       code: string;
@@ -233,6 +238,16 @@ export function WhatsAppEmbeddedSignup({
       {
         config_id: config.config_id,
         response_type: 'code',
+        override_default_response_type: true,
+        extras: {
+          setup: {},
+          featureType: 'whatsapp_business_app_onboarding',
+          sessionInfoVersion: '3',
+        },
+      }
+    );
+  }
+
   if (statusQuery.isLoading || configQuery.isLoading) {
     return (
       <div className="panel p-6 space-y-4">
@@ -349,6 +364,15 @@ export function WhatsAppEmbeddedSignup({
             </p>
           </div>
           <div>
+            <span className="text-xs font-medium text-stone-400">Assigned AI Assistant</span>
+            <p className="mt-0.5 font-semibold text-sm text-white flex items-center gap-1.5">
+              <Bot size={14} className="text-signal" />
+              {status.assistant?.name || 'Assigned'}
+            </p>
+          </div>
+        </div>
+      )}
+
       {!isConnected && (
         <div className="space-y-4 rounded-xl border border-line bg-elevated/30 p-5">
           <div className="space-y-1">
@@ -422,29 +446,4 @@ export function WhatsAppEmbeddedSignup({
       />
     </div>
   );
-}
-
-            <span className="text-xs font-medium text-stone-400">Assigned AI Assistant</span>
-            <p className="mt-0.5 font-semibold text-sm text-white flex items-center gap-1.5">
-              <Bot size={14} className="text-signal" />
-              {status.assistant?.name || 'Assigned'}
-            </p>
-          </div>
-        </div>
-      )}
-
-        override_default_response_type: true,
-        extras: {
-          setup: {},
-          featureType: 'whatsapp_business_app_onboarding',
-          sessionInfoVersion: '3',
-        },
-      }
-    );
-  }
-
-  }, []);
-
-  canManage: boolean;
-  assistants: Assistant[];
 }

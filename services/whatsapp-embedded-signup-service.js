@@ -6,6 +6,8 @@ import { resolveEffectiveTenantEntitlements } from './tenant-entitlement-service
 import { normalizeWhatsAppExternalId } from './whatsapp-channel-ownership-service.js';
 import { whatsappPhoneNumberFingerprint } from './whatsapp-live-inbox-service.js';
 
+export const CANONICAL_WHATSAPP_CONFIG_ID = '29049226651367865';
+
 export class WhatsAppEmbeddedSignupError extends Error {
   constructor(code, message, details = {}) {
     super(message);
@@ -48,7 +50,12 @@ export async function getWhatsAppEmbeddedSignupConfig({
   }
 
   const appId = String(env?.WHATSAPP_APP_ID || env?.META_APP_ID || env?.VITE_WHATSAPP_APP_ID || '').trim();
-  const configId = String(env?.WHATSAPP_CONFIG_ID || env?.META_EMBEDDED_SIGNUP_CONFIG_ID || env?.VITE_WHATSAPP_CONFIG_ID || '').trim();
+  const configId = String(
+    env?.WHATSAPP_CONFIG_ID ||
+    env?.META_EMBEDDED_SIGNUP_CONFIG_ID ||
+    env?.VITE_WHATSAPP_CONFIG_ID ||
+    CANONICAL_WHATSAPP_CONFIG_ID
+  ).trim();
   const graphApiVersion = resolveMetaGraphApiVersion(env);
 
   const stateToken = userId
