@@ -248,3 +248,131 @@ test('TWO-TENANT ISOLATION: Tenant A policies and triggers do not affect Tenant 
   assert.equal(evalB.reasonCode, 'POLICY_MANUAL_ONLY');
 });
 
+// ---------------------------------------------------------------------------
+// 6. DURABLE CONTACT-LEVEL OVERRIDE PERSISTENCE
+// ---------------------------------------------------------------------------
+test('Durable Contact Override: NEVER_AI persists on contact and carries over to new conversations', async () => {
+  const customerExtId = 'instagram:17841499999999999';
+  const convId1 = '33333333-3333-4333-8333-333333333333';
+  const convId2 = '44444444-4444-4444-8444-444444444444';
+  const contactId = '55555555-5555-4555-8555-555555555555';
+
+  const mockDbData = {
+    contacts: {
+      [contactId]: {
+        id: contactId,
+        tenant_id: tenantIdA,
+        identity_hash: 'hash-contact-1',
+        ai_behavior_override: 'AUTOMATIC',
+      },
+    },
+    conversations: {
+      [convId1]: {
+        id: convId1,
+        tenant_id: tenantIdA,
+        customer_external_id: customerExtId,
+        contact_id: contactId,
+        handling_mode: 'AI',
+        status: 'open',
+        ai_behavior_override: 'AUTOMATIC',
+      },
+      [convId2]: {
+        id: convId2,
+        tenant_id: tenantIdA,
+        customer_external_id: customerExtId,
+        contact_id: contactId,
+        handling_mode: 'AI',
+        status: 'open',
+        ai_behavior_override: 'AUTOMATIC',
+      },
+    },
+  };
+
+  const { setConversationAiOverride } = await import('../services/live-inbox-service.js');
+  const { ensureConversationCrmIdentity } = await import('../services/crm-lead-service.js');
+
+  const mockClient = {
+    async query(sql, params) {
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return {};
+      if (sql.includes('SELECT id, handling_mode, status, ai_behavior_override')) {
+        const row = mockDbData.conversations[params[0]];
+        return { rowCount: row ? 1 : 0, rows: row ? [row] : [] };
+      }
+      if (sql.includes('UPDATE conversations') && sql.includes('SET ai_behavior_override = $1')) {
+        const override = params[0];
+        const targetId = params[1];
+        if (mockDbData.conversations[targetId]) {
+          mockDbData.conversations[targetId].ai_behavior_override = override;
+        }
+        return { rows: [mockDbData.conversations[targetId]] };
+      }
+      if (sql.includes('UPDATE crm_contacts') && sql.includes('SET ai_behavior_override = $1')) {
+        const override = params[0];
+        const targetContactId = params[1];
+        if (mockDbData.contacts[targetContactId]) {
+          mockDbData.contacts[targetContactId].ai_behavior_override = override;
+        }
+        return { rows: [mockDbData.contacts[targetContactId]] };
+      }
+      if (sql.includes('INSERT INTO audit_events')) return {};
+      if (sql.includes('SELECT pg_notify')) return {};
+      if (sql.includes('SELECT id, tenant_id, customer_external_id, contact_id')) {
+        const row = mockDbData.conversations[params[0]];
+        return { rowCount: row ? 1 : 0, rows: row ? [row] : [] };
+      }
+      if (sql.includes('INSERT INTO crm_contacts')) {
+        return { rowCount: 1, rows: [mockDbData.contacts[contactId]] };
+      }
+      if (sql.includes('INSERT INTO crm_leads')) {
+        return { rowCount: 1, rows: [{ id: 'lead-1' }] };
+      }
+      if (sql.includes('SELECT id, tenant_id, contact_id, conversation_id FROM crm_leads')) {
+        return { rowCount: 1, rows: [{ id: 'lead-1' }] };
+      }
+      return { rows: [] };
+    },
+    release() {},
+  };
+
+  const mockDb = {
+    async connect() { return mockClient; },
+  };
+
+  // 1. Operator in Live Inbox marks Conversation 1 as NEVER_AI
+  await setConversationAiOverride({
+    tenantId: tenantIdA,
+    conversationId: convId1,
+    override: 'NEVER_AI',
+    database: mockDb,
+  });
+
+  // Verify Conversation 1 is NEVER_AI
+  assert.equal(mockDbData.conversations[convId1].ai_behavior_override, 'NEVER_AI');
+  // Verify durable Contact is also updated to NEVER_AI
+  assert.equal(mockDbData.contacts[contactId].ai_behavior_override, 'NEVER_AI');
+
+  // 2. New inbound message arrives, creating / initializing Conversation 2 with that same contact
+  await ensureConversationCrmIdentity(mockClient, {
+    tenantId: tenantIdA,
+    conversationId: convId2,
+    source: 'INSTAGRAM',
+    externalCustomerId: customerExtId,
+  });
+
+  // Verify Conversation 2 inherits durable contact-level NEVER_AI
+  assert.equal(mockDbData.conversations[convId2].ai_behavior_override, 'NEVER_AI');
+
+  // 3. Evaluate AI Activation Policy on Conversation 2 even with ALL_MESSAGES channel setting
+  const evalNewThread = await evaluateChannelAiActivationPolicy({
+    messageText: 'Dubai şirket fiyatı nedir?',
+    conversation: mockDbData.conversations[convId2],
+    channelConfig: { activation_policy: AI_ACTIVATION_MODES.ALL_MESSAGES },
+  });
+
+  // Strict proof: AI is suppressed due to durable contact-level NEVER_AI override
+  assert.equal(evalNewThread.eligible, false);
+  assert.equal(evalNewThread.decision, 'SUPPRESSED');
+  assert.equal(evalNewThread.reasonCode, 'OVERRIDE_NEVER_AI');
+});
+
+

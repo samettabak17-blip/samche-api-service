@@ -70,7 +70,7 @@ export async function ensureConversationCrmIdentity(client, {
   externalCustomerId = null,
 }) {
   const conversationResult = await client.query(
-    `SELECT id, tenant_id, customer_external_id, contact_id
+    `SELECT id, tenant_id, customer_external_id, contact_id, ai_behavior_override
        FROM conversations
       WHERE id = $1 AND tenant_id = $2
       FOR UPDATE`,
@@ -94,14 +94,20 @@ export async function ensureConversationCrmIdentity(client, {
     [tenantId, identity.kind, identity.identityHash, identity.displayName, identity.email, identity.phone, source]
   );
   const contact = contactResult.rows[0];
+  const contactOverride = contact.ai_behavior_override || 'AUTOMATIC';
+  const convOverride = conversation.ai_behavior_override || 'AUTOMATIC';
+  const effectiveOverride = contactOverride !== 'AUTOMATIC' ? contactOverride : convOverride;
 
-  if (conversation.contact_id !== contact.id) {
+  if (conversation.contact_id !== contact.id || convOverride !== effectiveOverride) {
     await client.query(
       `UPDATE conversations
-          SET contact_id = $1, updated_at = CURRENT_TIMESTAMP
-        WHERE id = $2 AND tenant_id = $3`,
-      [contact.id, conversationId, tenantId]
+          SET contact_id = $1,
+              ai_behavior_override = $2,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3 AND tenant_id = $4`,
+      [contact.id, effectiveOverride, conversationId, tenantId]
     );
+    conversation.ai_behavior_override = effectiveOverride;
   }
 
   const leadResult = await client.query(
@@ -118,23 +124,28 @@ export async function ensureConversationCrmIdentity(client, {
 
   const stageResult = await client.query(
     `SELECT id FROM crm_pipeline_stages
-      WHERE tenant_id = $1 AND stage_key = 'NEW_LEAD'
+      WHERE tenant_id = $1 AND is_default = TRUE
       LIMIT 1`,
     [tenantId]
   );
-  const stage = stageResult.rows[0];
-  if (!stage) throw new Error('CRM_DEFAULT_PIPELINE_MISSING');
+  const defaultStageId = stageResult.rows[0]?.id ?? null;
 
-  const createdLead = await client.query(
+  const insertedLead = await client.query(
     `INSERT INTO crm_leads
-      (tenant_id, contact_id, conversation_id, source_channel, pipeline_stage_id, last_activity_at)
-     VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+      (tenant_id, contact_id, conversation_id, pipeline_stage_id, title, status)
+     VALUES ($1, $2, $3, $4, $5, 'NEW')
      RETURNING *`,
-    [tenantId, contact.id, conversationId, source, stage.id]
+    [tenantId, contact.id, conversationId, defaultStageId, `${source} Lead`]
   );
-  const lead = createdLead.rows[0];
-  await recordCrmActivity(client, { tenantId, leadId: lead.id, conversationId, eventType: 'CONVERSATION_STARTED', metadata: { source } });
-  await recordCrmActivity(client, { tenantId, leadId: lead.id, conversationId, eventType: 'LEAD_CREATED', metadata: { source } });
+  const lead = insertedLead.rows[0];
+  await recordCrmActivity(client, {
+    tenantId,
+    leadId: lead.id,
+    conversationId,
+    eventType: 'LEAD_CREATED',
+    metadata: { source },
+  });
   return { contact, lead, created: true };
 }
+
 

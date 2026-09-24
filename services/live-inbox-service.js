@@ -941,7 +941,7 @@ export async function setConversationAiOverride({
   try {
     await client.query('BEGIN');
     const existing = await client.query(
-      `SELECT id, handling_mode, status, ai_behavior_override
+      `SELECT id, handling_mode, status, ai_behavior_override, contact_id, customer_external_id
          FROM conversations
         WHERE id = $1 AND tenant_id = $2
         FOR UPDATE`,
@@ -951,6 +951,8 @@ export async function setConversationAiOverride({
       throw new ConversationOperationError(404, 'Conversation not found', 'CONVERSATION_NOT_FOUND');
     }
 
+    const convRow = existing.rows[0];
+
     const updated = await client.query(
       `UPDATE conversations
           SET ai_behavior_override = $1,
@@ -959,6 +961,28 @@ export async function setConversationAiOverride({
         RETURNING *`,
       [cleanOverride, conversationId, tenantId]
     );
+
+    // Persist durable contact-level override to CRM contact
+    if (convRow.contact_id) {
+      await client.query(
+        `UPDATE crm_contacts
+            SET ai_behavior_override = $1,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2 AND tenant_id = $3`,
+        [cleanOverride, convRow.contact_id, tenantId]
+      );
+    }
+
+    // Propagate override to all active/open conversations with this customer identity
+    if (convRow.customer_external_id) {
+      await client.query(
+        `UPDATE conversations
+            SET ai_behavior_override = $1,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE tenant_id = $2 AND customer_external_id = $3 AND id != $4`,
+        [cleanOverride, tenantId, convRow.customer_external_id, conversationId]
+      );
+    }
 
     const actorUserId = actor?.id ?? actor?.userId ?? null;
     await writeAuditEvent(client, {
