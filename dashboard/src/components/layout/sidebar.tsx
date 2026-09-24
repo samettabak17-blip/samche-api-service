@@ -1,4 +1,4 @@
-import { BadgeDollarSign, BookOpenText, Bot, Cable, ChevronDown, KanbanSquare, LayoutDashboard, MessageCircle, MessagesSquare, Palette, Settings, UsersRound } from 'lucide-react';
+import { BadgeDollarSign, BookOpenText, Bot, Cable, ChevronDown, Instagram, KanbanSquare, LayoutDashboard, MessageCircle, MessagesSquare, Palette, Settings, UsersRound } from 'lucide-react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import samcheLogo from '../../assets/branding/samche-company-llc-logo.png';
 import { useEffect, useState } from 'react';
@@ -52,6 +52,7 @@ function ConversationNavigation({ tenantId, active, open, onToggle, onNavigate }
     {open && <div className="ml-5 space-y-1 border-l border-line pl-3">{
       [
         { label: 'WhatsApp', route: 'whatsapp', icon: MessageCircle },
+        { label: 'Instagram DM', route: 'instagram', icon: Instagram },
         { label: 'Web Chatbot', route: 'web-chat', icon: MessageCircle },
         { label: 'AI Guide', route: 'guide', icon: Bot },
       ].map(({ label, route, icon: Icon }) => <NavLink key={route} to={base + '/' + route} onClick={onNavigate} className={({ isActive }) => 'flex min-h-[38px] items-center gap-2 rounded-md px-3 py-2 text-[13px] font-medium transition ' + (isActive ? 'bg-signal/15 text-red-100' : 'text-stone-400 hover:bg-white/[0.04] hover:text-white')}><Icon aria-hidden="true" size={15} />{label}</NavLink>)

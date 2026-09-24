@@ -28,6 +28,7 @@ describe('Sidebar', () => {
     expect(navigationText.indexOf('CUSTOMER ENGAGEMENT')).toBeLessThan(navigationText.indexOf('OPERATIONS'));
     expect(navigationText.indexOf('CUSTOMER ENGAGEMENT')).toBeLessThan(navigationText.indexOf('SETTINGS'));
     expect(screen.getByRole('link', { name: 'WhatsApp' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Instagram DM' })).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Web Chatbot' })).toBeTruthy();
     expect(screen.getByRole('link', { name: 'AI Guide' })).toBeTruthy();
   });
