@@ -51,6 +51,8 @@ export function InstagramConnectionCard({
       setLocalFeedback(null);
       return tenantApi.configureInstagram(tenantId, {
         display_name: displayName.trim() || 'Instagram',
+        auth_mode: 'INSTAGRAM_LOGIN',
+        instagram_account_id: pageId.trim() || undefined,
         page_id: pageId.trim() || undefined,
         instagram_business_account_id: pageId.trim() || undefined,
         account_username: accountUsername.trim() || undefined,
@@ -96,7 +98,7 @@ export function InstagramConnectionCard({
       if (data.healthy) {
         setLocalFeedback({
           type: 'success',
-          message: `Connection healthy! Meta Graph verified account: ${data.account_name || data.page_id || 'Active'}`,
+          message: `Connection healthy! Meta Graph verified account: ${data.account_name || data.account_username || data.instagram_account_id || data.page_id || 'Active'}`,
         });
       } else {
         setLocalFeedback({
@@ -164,7 +166,7 @@ export function InstagramConnectionCard({
               )}
             </div>
             <p className="mt-0.5 text-xs text-stone-400">
-              Connect tenant-scoped Instagram Business accounts and Meta Direct Messaging to automate customer conversations with AI assistants.
+              Connect tenant-scoped Instagram Business accounts via Instagram Login to automate direct messaging with AI assistants.
             </p>
           </div>
         </div>
@@ -186,7 +188,7 @@ export function InstagramConnectionCard({
               variant="secondary"
               onClick={() => {
                 setDisplayName(statusData.display_name || 'Instagram');
-                setPageId(statusData.page_id || statusData.external_channel_id || '');
+                setPageId(statusData.instagram_account_id || statusData.page_id || statusData.external_channel_id || '');
                 setAccountUsername(statusData.account_username || '');
                 setSelectedAssistantId(statusData.assistant_id || eligibleAssistants[0]?.id || '');
                 setIsConfiguring(true);
@@ -222,7 +224,7 @@ export function InstagramConnectionCard({
           <div className="flex-1 space-y-1">
             <p className="font-semibold text-amber-300">Access Token Expired or Revoked</p>
             <p className="text-amber-200/80">
-              Meta reported an authentication error (OAuth token expired). Update your Instagram Page Access Token to resume automated AI responses.
+              Meta reported an authentication error (OAuth token expired or revoked). Update your Instagram Access Token to resume automated AI responses.
             </p>
           </div>
           {canManage && (
@@ -231,7 +233,7 @@ export function InstagramConnectionCard({
               variant="primary"
               onClick={() => {
                 setDisplayName(statusData.display_name || 'Instagram');
-                setPageId(statusData.page_id || statusData.external_channel_id || '');
+                setPageId(statusData.instagram_account_id || statusData.page_id || statusData.external_channel_id || '');
                 setAccountUsername(statusData.account_username || '');
                 setSelectedAssistantId(statusData.assistant_id || eligibleAssistants[0]?.id || '');
                 setIsConfiguring(true);
@@ -252,8 +254,8 @@ export function InstagramConnectionCard({
             <p className="mt-0.5 font-semibold text-sm text-white">
               {statusData.account_username ? `@${statusData.account_username.replace(/^@/, '')}` : statusData.account_name || statusData.display_name || 'Instagram'}
             </p>
-            {statusData.page_id && (
-              <p className="text-[11px] font-mono text-stone-400">ID: {statusData.page_id}</p>
+            {(statusData.instagram_account_id || statusData.page_id) && (
+              <p className="text-[11px] font-mono text-stone-400">ID: {statusData.instagram_account_id || statusData.page_id}</p>
             )}
           </div>
           <div>
@@ -272,9 +274,9 @@ export function InstagramConnectionCard({
           </div>
           <div>
             <span className="text-xs font-medium text-stone-400">Token Status</span>
-            <p className="mt-0.5 font-semibold text-sm text-stone-300 flex items-center gap-1.5">
+            <p className="mt-0.5 font-semibold text-sm text-stone-300 flex items-center gap-1.5" title="Access tokens are stored securely server-side and never returned in UI responses">
               <Key size={14} className="text-stone-400" />
-              Configured (Encrypted)
+              Configured (Protected)
             </p>
           </div>
         </div>
@@ -288,7 +290,7 @@ export function InstagramConnectionCard({
               {isConnected ? 'Update Instagram Channel Configuration' : 'Connect Instagram Channel'}
             </h3>
             <p className="text-xs text-stone-400">
-              Provide your Meta Instagram Business Account credentials. Access tokens are encrypted and never exposed.
+              Provide your Meta Instagram Professional Account credentials via Instagram Login. Access tokens are protected and never displayed after saving.
             </p>
           </div>
 
@@ -337,8 +339,8 @@ export function InstagramConnectionCard({
 
             <div className="grid gap-4 sm:grid-cols-2">
               <DashboardField
-                label="Instagram Account / Page ID"
-                helper="Meta Page ID or Instagram Business Account ID."
+                label="Instagram Account ID"
+                helper="Instagram Professional Account ID from Meta Developer Console (e.g. 17841400000000000)."
               >
                 <DashboardInput
                   value={pageId}
@@ -362,18 +364,18 @@ export function InstagramConnectionCard({
             </div>
 
             <DashboardField
-              label="Meta Page Access Token"
+              label="Instagram Access Token"
               helper={
                 isConnected
-                  ? 'Leave blank to preserve existing token, or paste a new token to update/re-authenticate.'
-                  : 'Meta Graph API Page Access Token with instagram_manage_messages and pages_messaging permissions.'
+                  ? 'Leave blank to preserve existing token, or paste a new token to update/re-authenticate. For security, stored tokens are never displayed.'
+                  : 'Instagram Access Token generated via Meta Developer Console (API setup with Instagram login) with instagram_business_basic and instagram_business_manage_messages permissions.'
               }
             >
               <DashboardInput
                 type="password"
                 value={accessToken}
                 onChange={(e) => setAccessToken(e.target.value)}
-                placeholder={isConnected ? '••••••••••••••••••••••••••••••••' : 'EAAB...'}
+                placeholder={isConnected ? '••••••••••••••••••••••••••••••••' : 'EAAB... or IGA...'}
                 disabled={!canManage || configureMutation.isPending}
                 autoComplete="new-password"
               />

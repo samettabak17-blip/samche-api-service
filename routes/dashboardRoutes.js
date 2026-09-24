@@ -838,11 +838,13 @@ router.post('/:tenantId/channels/instagram/config', requireTenantAccess, require
     display_name = 'Instagram',
     external_channel_id,
     assistant_id = null,
+    instagram_account_id,
     page_id,
     instagram_business_account_id,
     account_username,
     account_name,
     access_token,
+    auth_mode = 'INSTAGRAM_LOGIN',
     status = 'active',
   } = req.body ?? {};
 
@@ -854,11 +856,13 @@ router.post('/:tenantId/channels/instagram/config', requireTenantAccess, require
       displayName: display_name,
       externalChannelId: external_channel_id,
       assistantId: assistant_id,
+      instagramAccountId: instagram_account_id,
       pageId: page_id,
       instagramBusinessAccountId: instagram_business_account_id,
       accountUsername: account_username,
       accountName: account_name,
       accessToken: access_token,
+      authMode: auth_mode,
       status,
     });
     return res.status(200).json(configured);

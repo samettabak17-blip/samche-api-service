@@ -627,6 +627,9 @@ export interface InstagramChannelStatusResponse {
   external_channel_id?: string | null;
   assistant_id?: string | null;
   assistant_name?: string | null;
+  provider?: string;
+  auth_mode?: 'INSTAGRAM_LOGIN' | 'FACEBOOK_PAGE' | string;
+  instagram_account_id?: string | null;
   page_id?: string | null;
   instagram_business_account_id?: string | null;
   account_username?: string | null;
@@ -642,6 +645,8 @@ export interface InstagramConfigPayload {
   display_name?: string;
   external_channel_id?: string;
   assistant_id?: string | null;
+  auth_mode?: 'INSTAGRAM_LOGIN' | 'FACEBOOK_PAGE' | string;
+  instagram_account_id?: string;
   page_id?: string;
   instagram_business_account_id?: string;
   account_username?: string;
@@ -653,7 +658,9 @@ export interface InstagramConfigPayload {
 export interface InstagramTestConnectionResponse {
   healthy: boolean;
   status: InstagramConnectionStatus;
+  instagram_account_id?: string;
   page_id?: string;
+  account_username?: string;
   account_name?: string;
   error?: string;
   message?: string;

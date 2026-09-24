@@ -61,6 +61,8 @@ describe('InstagramConnectionCard UI Component', () => {
     expect(await screen.findByText('Instagram Messaging / Instagram DM')).toBeInTheDocument();
     expect(screen.getByText('Not connected')).toBeInTheDocument();
     expect(screen.getByText('Connect Instagram Channel')).toBeInTheDocument();
+    expect(screen.getByText('Instagram Account ID')).toBeInTheDocument();
+    expect(screen.getByText('Instagram Access Token')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Connect Instagram/i })).toBeInTheDocument();
   });
 
@@ -150,6 +152,53 @@ describe('InstagramConnectionCard UI Component', () => {
 
     await waitFor(() => {
       expect(tenantApi.testInstagramConnection).toHaveBeenCalledWith('tenant-1');
+    });
+  });
+
+  it('submits form with Instagram Login contract (auth_mode, account ID, access token)', async () => {
+    vi.mocked(tenantApi.getInstagramStatus).mockResolvedValueOnce({
+      status: 'DISCONNECTED',
+      connected: false,
+    });
+    vi.mocked(tenantApi.configureInstagram).mockResolvedValueOnce({
+      status: 'CONNECTED',
+      connected: true,
+      auth_mode: 'INSTAGRAM_LOGIN',
+      instagram_account_id: '17841400012345678',
+      account_username: 'samcheofficial',
+      has_token: true,
+    });
+
+    renderWithClient(
+      <InstagramConnectionCard
+        tenantId="tenant-1"
+        canManage={true}
+        assistants={mockAssistants}
+      />
+    );
+
+    const accountIdInput = screen.getByPlaceholderText('e.g. 17841400000000000');
+    const usernameInput = screen.getByPlaceholderText('e.g. samchecompany');
+    const tokenInput = screen.getByPlaceholderText('EAAB... or IGA...');
+    const submitBtn = screen.getByRole('button', { name: /Connect Instagram/i });
+
+    fireEvent.change(accountIdInput, { target: { value: '17841400012345678' } });
+    fireEvent.change(usernameInput, { target: { value: 'samcheofficial' } });
+    fireEvent.change(tokenInput, { target: { value: 'IGAA_test_token_123' } });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(tenantApi.configureInstagram).toHaveBeenCalledWith('tenant-1', {
+        display_name: 'Instagram',
+        auth_mode: 'INSTAGRAM_LOGIN',
+        instagram_account_id: '17841400012345678',
+        instagram_business_account_id: '17841400012345678',
+        page_id: '17841400012345678',
+        account_username: 'samcheofficial',
+        access_token: 'IGAA_test_token_123',
+        assistant_id: 'ast-1',
+        status: 'active',
+      });
     });
   });
 });

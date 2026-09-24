@@ -367,10 +367,12 @@ test('TWO-TENANT ISOLATION: Inbound events and outbound replies are strictly iso
   assert.equal(tenantAData.messages.length, 1);
   assert.equal(tenantAData.messages[0].content, 'Hello SamChe Instagram');
   assert.equal(tenantAData.messages[0].tenant_id, tenantIdA);
+  assert.equal(resultA.integration.assistant_id, assistantIdA);
 
   assert.equal(tenantBData.messages.length, 1);
   assert.equal(tenantBData.messages[0].content, 'Hello Tenant B Instagram');
   assert.equal(tenantBData.messages[0].tenant_id, tenantIdB);
+  assert.equal(resultB.integration.assistant_id, assistantIdB);
 
   assert.equal(tenantAData.notifications.length, 1);
   assert.equal(tenantAData.notifications[0].tenant_id, tenantIdA);
@@ -381,4 +383,48 @@ test('TWO-TENANT ISOLATION: Inbound events and outbound replies are strictly iso
   // Cross-tenant verification: Tenant A messages never contain Tenant B content
   assert.ok(!tenantAData.messages.some((m) => m.content.includes('Tenant B')));
   assert.ok(!tenantBData.messages.some((m) => m.content.includes('SamChe')));
+
+  // 4. Outbound delivery isolation proof: Outbound A uses only Token A & Account A, Outbound B uses only Token B & Account B
+  const outboundCalls = [];
+  const outboundHttp = {
+    async post(url, body, options) {
+      outboundCalls.push({ url, body, options });
+      return { data: { message_id: `mid.out.${Date.now()}` } };
+    },
+  };
+
+  await deliverInstagramText({
+    recipientId: igsidCustomer1,
+    content: 'Reply for Tenant A customer',
+    accessToken: tokenA,
+    instagramAccountId: pageIdA,
+    pageId: pageIdA,
+    http: outboundHttp,
+  });
+
+  await deliverInstagramText({
+    recipientId: igsidCustomer2,
+    content: 'Reply for Tenant B customer',
+    accessToken: tokenB,
+    instagramAccountId: pageIdB,
+    pageId: pageIdB,
+    http: outboundHttp,
+  });
+
+  assert.equal(outboundCalls.length, 2);
+  // Delivery A
+  assert.ok(outboundCalls[0].url.includes(pageIdA));
+  assert.equal(outboundCalls[0].options.headers.Authorization, `Bearer ${tokenA}`);
+  assert.equal(outboundCalls[0].body.recipient.id, igsidCustomer1);
+  assert.equal(outboundCalls[0].body.message.text, 'Reply for Tenant A customer');
+
+  // Delivery B
+  assert.ok(outboundCalls[1].url.includes(pageIdB));
+  assert.equal(outboundCalls[1].options.headers.Authorization, `Bearer ${tokenB}`);
+  assert.equal(outboundCalls[1].body.recipient.id, igsidCustomer2);
+  assert.equal(outboundCalls[1].body.message.text, 'Reply for Tenant B customer');
+
+  // Strict isolation verification: Token A is never in Call B, Token B is never in Call A
+  assert.notEqual(outboundCalls[0].options.headers.Authorization, outboundCalls[1].options.headers.Authorization);
+  assert.notEqual(outboundCalls[0].url, outboundCalls[1].url);
 });

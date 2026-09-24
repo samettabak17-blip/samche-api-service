@@ -26,8 +26,8 @@ export async function orchestrateInstagramInboundAiResponse({
   const conversationId = conversation.id;
   const assistantId = integration.assistant_id;
 
-  const accessToken = integration.config?.access_token || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
-  const pageId = integration.config?.page_id || integration.config?.instagram_business_account_id || integration.external_channel_id;
+  const accessToken = integration.config?.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+  const accountId = integration.config?.instagram_account_id || integration.config?.instagram_business_account_id || integration.config?.page_id || integration.external_channel_id;
 
   // 1. Human Support Intent check (Ownership transition precedes AI generation)
   const humanSupport = parseCustomerHumanSupportRequest(text);
@@ -67,7 +67,8 @@ export async function orchestrateInstagramInboundAiResponse({
           recipientId: senderIgsid,
           content: acknowledgement,
           accessToken,
-          pageId,
+          instagramAccountId: accountId,
+          pageId: accountId,
           http,
         });
       } catch (err) {
@@ -163,7 +164,8 @@ export async function orchestrateInstagramInboundAiResponse({
       recipientId: senderIgsid,
       content: aiResponseText,
       accessToken,
-      pageId,
+      instagramAccountId: accountId,
+      pageId: accountId,
       http,
     });
   }

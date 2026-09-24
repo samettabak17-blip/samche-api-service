@@ -1,6 +1,6 @@
 import axios from 'axios';
 import pool from '../config/db.js';
-import { metaGraphApiBase } from './meta-graph-api-version.js';
+import { instagramGraphApiBase } from './meta-graph-api-version.js';
 
 export class TenantInstagramProvisioningError extends Error {
   constructor(code, message, status = 400) {
@@ -44,7 +44,7 @@ export async function getTenantInstagramStatus({ database = pool, tenantId }) {
 
     const row = result.rows[0];
     const config = row.config || {};
-    const hasToken = Boolean(config.access_token || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN);
+    const hasToken = Boolean(config.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN);
     const isChannelActive = row.channel_status === 'active' && Boolean(row.integration_enabled !== false);
 
     let connectionStatus = 'DISCONNECTED';
@@ -58,6 +58,8 @@ export async function getTenantInstagramStatus({ database = pool, tenantId }) {
       connectionStatus = 'DISCONNECTED';
     }
 
+    const accountId = config.instagram_account_id || config.instagram_business_account_id || config.page_id || row.external_channel_id || null;
+
     return {
       status: connectionStatus,
       connected: connectionStatus === 'CONNECTED',
@@ -66,8 +68,11 @@ export async function getTenantInstagramStatus({ database = pool, tenantId }) {
       external_channel_id: row.external_channel_id,
       assistant_id: row.assistant_id,
       assistant_name: row.assistant_name || null,
-      page_id: config.page_id || row.external_channel_id || null,
-      instagram_business_account_id: config.instagram_business_account_id || row.external_channel_id || null,
+      provider: config.provider || 'META_INSTAGRAM',
+      auth_mode: config.auth_mode || 'INSTAGRAM_LOGIN',
+      instagram_account_id: accountId,
+      page_id: config.page_id || accountId,
+      instagram_business_account_id: config.instagram_business_account_id || accountId,
       account_username: config.account_username || null,
       account_name: config.account_name || row.display_name || null,
       has_token: hasToken,
@@ -90,11 +95,13 @@ export async function configureTenantInstagramChannel({
   displayName = 'Instagram',
   externalChannelId,
   assistantId = null,
+  instagramAccountId,
   pageId,
   instagramBusinessAccountId,
   accountUsername = null,
   accountName = null,
   accessToken = null,
+  authMode = 'INSTAGRAM_LOGIN',
   status = 'active',
 }) {
   if (!tenantId) throw new TenantInstagramProvisioningError('TENANT_ID_REQUIRED', 'Tenant ID is required', 400);
@@ -116,6 +123,7 @@ export async function configureTenantInstagramChannel({
 
     const resolvedExternalId = String(
       externalChannelId ||
+      instagramAccountId ||
       instagramBusinessAccountId ||
       pageId ||
       'instagram_account'
@@ -164,10 +172,15 @@ export async function configureTenantInstagramChannel({
     );
     const existingConfig = existingCi.rows[0]?.config || {};
 
+    const resolvedAccountId = instagramAccountId || resolvedExternalId;
+
     const updatedConfig = {
       ...existingConfig,
-      page_id: pageId || existingConfig.page_id || resolvedExternalId,
-      instagram_business_account_id: instagramBusinessAccountId || existingConfig.instagram_business_account_id || resolvedExternalId,
+      provider: 'META_INSTAGRAM',
+      auth_mode: authMode || existingConfig.auth_mode || 'INSTAGRAM_LOGIN',
+      instagram_account_id: resolvedAccountId,
+      instagram_business_account_id: resolvedAccountId,
+      page_id: pageId || existingConfig.page_id || resolvedAccountId,
       account_username: accountUsername || existingConfig.account_username || null,
       account_name: accountName || existingConfig.account_name || displayName,
       access_token: accessToken || existingConfig.access_token || null,
@@ -239,6 +252,7 @@ export async function disconnectTenantInstagramChannel({ database = pool, tenant
 
 /**
  * Tests the tenant's Instagram connection via Meta Graph API.
+ * Uses official Instagram Login endpoint: GET https://graph.instagram.com/{version}/{account_id}?fields=id,username,name
  */
 export async function testTenantInstagramConnection({
   database = pool,
@@ -265,32 +279,53 @@ export async function testTenantInstagramConnection({
       [tenantId]
     );
     const config = ciRes.rows[0]?.config || {};
-    const token = config.access_token || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
-    const pageId = config.page_id || config.instagram_business_account_id || 'me';
+    const token = config.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+    const accountId = config.instagram_account_id || config.instagram_business_account_id || config.page_id || 'me';
 
     if (!token) {
       return { healthy: false, status: 'DISCONNECTED', error: 'TOKEN_MISSING' };
     }
 
-    const baseUrl = metaGraphApiBase();
+    const baseUrl = instagramGraphApiBase();
     try {
-      const res = await http.get(`${baseUrl}/${pageId}`, {
-        params: { fields: 'id,name', access_token: token },
+      const res = await http.get(`${baseUrl}/${accountId}`, {
+        params: { fields: 'id,username,name', access_token: token },
+        headers: { Authorization: `Bearer ${token}` },
         timeout: 8000,
       });
+
+      const verifiedId = res.data?.id || accountId;
+      const verifiedUsername = res.data?.username || config.account_username;
+      const verifiedName = res.data?.name || res.data?.username || status.account_name;
+
+      const updatedConfig = {
+        ...config,
+        reauth_required: false,
+        last_health_check_at: new Date().toISOString(),
+        account_username: verifiedUsername || config.account_username,
+        account_name: verifiedName || config.account_name,
+      };
+      await client.query(
+        `UPDATE channel_integrations
+            SET config = $1::jsonb, updated_at = CURRENT_TIMESTAMP
+          WHERE tenant_id = $2 AND integration_type = 'INSTAGRAM'`,
+        [JSON.stringify(updatedConfig), tenantId]
+      );
 
       return {
         healthy: true,
         status: 'CONNECTED',
-        page_id: res.data?.id || pageId,
-        account_name: res.data?.name || status.account_name,
+        instagram_account_id: verifiedId,
+        page_id: verifiedId,
+        account_username: verifiedUsername,
+        account_name: verifiedName,
       };
     } catch (metaErr) {
       const errData = metaErr?.response?.data?.error;
       const isAuthError = errData?.code === 190 || errData?.type === 'OAuthException';
       if (isAuthError) {
         // Mark reauth required in config
-        const updatedConfig = { ...config, reauth_required: true, last_error: errData?.message || 'Token expired' };
+        const updatedConfig = { ...config, reauth_required: true, last_error: errData?.message || 'Token expired or revoked' };
         await client.query(
           `UPDATE channel_integrations
               SET config = $1::jsonb, updated_at = CURRENT_TIMESTAMP

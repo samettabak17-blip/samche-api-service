@@ -2,7 +2,7 @@
  * services/meta-graph-api-version.js
  *
  * Canonical, generic resolution of the Meta Graph API version used by every
- * WhatsApp Cloud API provider call.
+ * WhatsApp Cloud API and Instagram Graph API provider call.
  *
  * Meta expires Graph API versions on a published schedule (for example v20.0
  * expires 2026-09-24). A version hardcoded across provider call sites becomes a
@@ -28,15 +28,31 @@ const VERSION_PATTERN = /^v\d+\.\d+$/;
  * produce an invalid provider URL.
  */
 export function resolveMetaGraphApiVersion(env = process.env) {
-  const configured = String(env?.WHATSAPP_GRAPH_API_VERSION ?? '').trim().toLowerCase();
+  const configured = String(
+    env?.INSTAGRAM_GRAPH_API_VERSION ??
+    env?.WHATSAPP_GRAPH_API_VERSION ??
+    env?.META_GRAPH_API_VERSION ??
+    ''
+  ).trim().toLowerCase();
   if (!configured) return DEFAULT_META_GRAPH_API_VERSION;
   const candidate = configured.startsWith('v') ? configured : `v${configured}`;
   return VERSION_PATTERN.test(candidate) ? candidate : DEFAULT_META_GRAPH_API_VERSION;
 }
 
 /**
- * Canonical Graph API base URL for WhatsApp Cloud API provider calls.
+ * Canonical Graph API base URL for WhatsApp Cloud API and Meta Facebook provider calls.
  */
 export function metaGraphApiBase(env = process.env) {
   return `https://graph.facebook.com/${resolveMetaGraphApiVersion(env)}`;
 }
+
+/**
+ * Canonical Graph API base URL for Instagram API with Instagram Login provider calls.
+ * Official Meta Instagram Login endpoints live under https://graph.instagram.com/{version}.
+ */
+export function instagramGraphApiBase(env = process.env) {
+  const custom = String(env?.INSTAGRAM_GRAPH_API_BASE ?? '').trim();
+  if (custom) return custom.replace(/\/+$/, '');
+  return `https://graph.instagram.com/${resolveMetaGraphApiVersion(env)}`;
+}
+

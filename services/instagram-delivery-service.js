@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { metaGraphApiBase } from './meta-graph-api-version.js';
+import { instagramGraphApiBase } from './meta-graph-api-version.js';
 
 export class InstagramDeliveryError extends Error {
   constructor(code, message = code, status = 502) {
@@ -23,6 +23,7 @@ export async function deliverInstagramText({
   content,
   accessToken,
   pageId = 'me',
+  instagramAccountId = null,
   http = axios,
   graphVersion,
 }) {
@@ -36,8 +37,8 @@ export async function deliverInstagramText({
     throw new InstagramDeliveryError('INSTAGRAM_CREDENTIAL_REQUIRED', 'Instagram access token is not configured', 409);
   }
 
-  const baseUrl = metaGraphApiBase({ version: graphVersion });
-  const targetId = String(pageId || 'me').trim();
+  const baseUrl = instagramGraphApiBase();
+  const targetId = String(instagramAccountId || pageId || 'me').trim();
   const endpoint = `${baseUrl}/${targetId}/messages`;
 
   const payload = {
@@ -73,6 +74,7 @@ export async function deliverInstagramMedia({
   caption = '',
   accessToken,
   pageId = 'me',
+  instagramAccountId = null,
   http = axios,
   graphVersion,
 }) {
@@ -92,8 +94,8 @@ export async function deliverInstagramMedia({
     : category === 'VIDEO' ? 'video'
     : 'file';
 
-  const baseUrl = metaGraphApiBase({ version: graphVersion });
-  const targetId = String(pageId || 'me').trim();
+  const baseUrl = instagramGraphApiBase();
+  const targetId = String(instagramAccountId || pageId || 'me').trim();
   const endpoint = `${baseUrl}/${targetId}/messages`;
 
   const payload = {
@@ -124,7 +126,8 @@ export async function deliverInstagramMedia({
           recipientId,
           content: caption.trim(),
           accessToken,
-          pageId,
+          pageId: targetId,
+          instagramAccountId: targetId,
           http,
           graphVersion,
         });
@@ -144,17 +147,17 @@ export async function deliverInstagramMedia({
   }
 }
 
-
 export async function sendInstagramTypingIndicator({
   recipientId,
   accessToken,
   pageId = 'me',
+  instagramAccountId = null,
   http = axios,
   graphVersion,
 }) {
   if (!recipientId || !accessToken) return { ok: false, reason: 'CREDENTIALS_MISSING' };
-  const baseUrl = metaGraphApiBase({ version: graphVersion });
-  const targetId = String(pageId || 'me').trim();
+  const baseUrl = instagramGraphApiBase();
+  const targetId = String(instagramAccountId || pageId || 'me').trim();
   const endpoint = `${baseUrl}/${targetId}/messages`;
   try {
     await http.post(endpoint, {
@@ -173,4 +176,5 @@ export async function sendInstagramTypingIndicator({
     return { ok: false, reason: err?.message };
   }
 }
+
 

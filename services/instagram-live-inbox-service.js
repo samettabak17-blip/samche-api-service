@@ -53,6 +53,7 @@ export async function resolveInstagramIntegration(client, recipientId) {
           tc.external_channel_id = $1
           OR tc.external_channel_id = $2
           OR regexp_replace(lower(trim(tc.external_channel_id)), '^instagram:\\s*', '') = $1
+          OR ci.config->>'instagram_account_id' = $1
           OR ci.config->>'instagram_business_account_id' = $1
           OR ci.config->>'page_id' = $1
         )

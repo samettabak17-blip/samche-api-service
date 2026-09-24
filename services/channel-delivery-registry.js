@@ -91,8 +91,8 @@ export async function loadInstagramAgentDelivery(client, conversation) {
   if (result.rowCount < 1) return null;
   const row = result.rows[0];
   const config = row.config || {};
-  const accessToken = config.access_token || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || null;
-  const pageId = config.page_id || config.instagram_business_account_id || row.external_channel_id || 'me';
+  const accessToken = config.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || null;
+  const accountId = config.instagram_account_id || config.instagram_business_account_id || config.page_id || row.external_channel_id || 'me';
 
   if (!accessToken) return null;
 
@@ -100,7 +100,8 @@ export async function loadInstagramAgentDelivery(client, conversation) {
     channel_id: channelId,
     tenant_id: tenantId,
     external_channel_id: row.external_channel_id,
-    page_id: pageId,
+    instagram_account_id: accountId,
+    page_id: accountId,
     access_token: accessToken,
     config,
   };
@@ -337,6 +338,7 @@ export class OutboundChannelDeliveryRegistry {
             recipientId: recipientIgsid,
             content,
             accessToken: integration.access_token,
+            instagramAccountId: integration.instagram_account_id || integration.page_id,
             pageId: integration.page_id,
             http,
           });
@@ -368,6 +370,7 @@ export class OutboundChannelDeliveryRegistry {
             mediaCategory,
             caption,
             accessToken: integration.access_token,
+            instagramAccountId: integration.instagram_account_id || integration.page_id,
             pageId: integration.page_id,
             http,
           });
