@@ -5,6 +5,16 @@ DO $$
 DECLARE
   constraint_name text;
 BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'ck_tenant_channels_channel_type'
+       AND conrelid = 'tenant_channels'::regclass
+       AND pg_get_constraintdef(oid) LIKE '%SAMCHEGUIDE%'
+       AND pg_get_constraintdef(oid) LIKE '%INSTAGRAM%'
+  ) THEN
+    RETURN;
+  END IF;
+
   FOR constraint_name IN
     SELECT conname
     FROM pg_constraint
@@ -22,7 +32,7 @@ BEGIN
   ) THEN
     ALTER TABLE tenant_channels
       ADD CONSTRAINT ck_tenant_channels_channel_type
-      CHECK (channel_type IN ('WEB_CHAT', 'WHATSAPP', 'SAMCHEGUIDE'));
+      CHECK (channel_type IN ('WEB_CHAT', 'WHATSAPP', 'SAMCHEGUIDE', 'INSTAGRAM'));
   END IF;
 END $$;
 
