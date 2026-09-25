@@ -44,16 +44,17 @@ export async function resolveInstagramIntegration(client, recipientId) {
             ci.config AS config
        FROM tenant_channels tc
        JOIN tenants t ON t.id = tc.tenant_id AND t.status = 'active'
-       JOIN ai_assistants a ON a.id = tc.assistant_id AND a.tenant_id = tc.tenant_id
+       LEFT JOIN ai_assistants a ON a.id = tc.assistant_id AND a.tenant_id = tc.tenant_id
        LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.integration_type = 'INSTAGRAM'
       WHERE tc.channel_type = 'INSTAGRAM'
         AND tc.status = 'active'
-        AND a.status = 'active'
+        AND (tc.assistant_id IS NULL OR a.status = 'active')
         AND (
           tc.external_channel_id = $1
           OR tc.external_channel_id = $2
           OR regexp_replace(lower(trim(tc.external_channel_id)), '^instagram:\\s*', '') = $1
           OR ci.config->>'instagram_account_id' = $1
+          OR ci.config->>'instagram_user_id' = $1
           OR ci.config->>'instagram_business_account_id' = $1
           OR ci.config->>'page_id' = $1
         )

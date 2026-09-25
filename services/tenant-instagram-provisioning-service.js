@@ -401,8 +401,8 @@ export async function testTenantInstagramConnection({
 
     const baseUrl = instagramGraphApiBase();
     try {
-      const res = await http.get(`${baseUrl}/${accountId}`, {
-        params: { fields: 'id,username,name', access_token: token },
+      const res = await http.get(`${baseUrl}/me`, {
+        params: { fields: 'id,username,name,account_type', access_token: token },
         headers: { Authorization: `Bearer ${token}` },
         timeout: 8000,
       });
@@ -410,6 +410,22 @@ export async function testTenantInstagramConnection({
       const verifiedId = res.data?.id || accountId;
       const verifiedUsername = res.data?.username || config.account_username;
       const verifiedName = res.data?.name || res.data?.username || status.account_name;
+
+      // Assign assistant if missing
+      const asstRes = await client.query(
+        `SELECT id FROM ai_assistants WHERE tenant_id = $1 AND lower(status) = 'active' ORDER BY updated_at DESC LIMIT 1`,
+        [tenantId]
+      );
+      const assistantIdToAssign = asstRes.rows[0]?.id || null;
+
+      await client.query(
+        `UPDATE tenant_channels
+            SET external_channel_id = $1,
+                assistant_id = COALESCE(assistant_id, $2),
+                updated_at = CURRENT_TIMESTAMP
+          WHERE tenant_id = $3 AND channel_type = 'INSTAGRAM'`,
+        [verifiedId, assistantIdToAssign, tenantId]
+      );
 
       // Programmatically verify and ensure account-level webhook subscription via official Meta Instagram Login API
       let accountSubscribed = Boolean(config.account_subscribed ?? true);
@@ -447,6 +463,9 @@ export async function testTenantInstagramConnection({
 
       const updatedConfig = {
         ...config,
+        instagram_account_id: verifiedId,
+        instagram_user_id: verifiedId,
+        page_id: verifiedId,
         account_subscribed: accountSubscribed,
         subscribed_fields: subscribedFields,
         reauth_required: false,
@@ -456,9 +475,11 @@ export async function testTenantInstagramConnection({
       };
       await client.query(
         `UPDATE channel_integrations
-            SET config = $1::jsonb, updated_at = CURRENT_TIMESTAMP
-          WHERE tenant_id = $2 AND integration_type = 'INSTAGRAM'`,
-        [JSON.stringify(updatedConfig), tenantId]
+            SET config = $1::jsonb,
+                assistant_id = COALESCE(assistant_id, $2),
+                updated_at = CURRENT_TIMESTAMP
+          WHERE tenant_id = $3 AND integration_type = 'INSTAGRAM'`,
+        [JSON.stringify(updatedConfig), assistantIdToAssign, tenantId]
       );
 
       return {
@@ -501,3 +522,79 @@ export async function testTenantInstagramConnection({
     client.release();
   }
 }
+
+/**
+ * Automatically converges all active Instagram channels:
+ * 1. Synchronizes verified Meta User IDs from live Meta /me API into external_channel_id and config
+ * 2. Connects active default tenant assistant if assistant_id is unassigned
+ * 3. Ensures account-level webhook subscription is active
+ */
+export async function convergeTenantInstagramChannels({ database = pool, http = axios, graphBaseUrl = null } = {}) {
+  const client = await database.connect();
+  try {
+    const channels = await client.query(
+      `SELECT tc.id AS channel_id, tc.tenant_id, tc.external_channel_id, tc.assistant_id,
+              tc.status AS channel_status, ci.config AS integration_config
+         FROM tenant_channels tc
+         JOIN tenants t ON t.id = tc.tenant_id AND t.status = 'active'
+         LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.integration_type = 'INSTAGRAM'
+        WHERE tc.channel_type = 'INSTAGRAM'
+          AND tc.status = 'active'`
+    );
+
+    const baseUrl = graphBaseUrl || instagramGraphApiBase();
+
+    for (const row of channels.rows) {
+      const config = row.integration_config || {};
+      const token = config.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+
+      let assistantId = row.assistant_id;
+      if (!assistantId) {
+        const asstRes = await client.query(
+          `SELECT id FROM ai_assistants WHERE tenant_id = $1 AND lower(status) = 'active' ORDER BY updated_at DESC LIMIT 1`,
+          [row.tenant_id]
+        );
+        if (asstRes.rowCount > 0) {
+          assistantId = asstRes.rows[0].id;
+          await client.query(`UPDATE tenant_channels SET assistant_id = $1 WHERE id = $2`, [assistantId, row.channel_id]);
+        }
+      }
+
+      if (token) {
+        try {
+          const meRes = await http.get(`${baseUrl}/me`, {
+            params: { fields: 'id,username,name,account_type', access_token: token },
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 6000,
+          });
+          const verifiedId = meRes.data?.id;
+          const verifiedUsername = meRes.data?.username;
+
+          if (verifiedId) {
+            await client.query(`UPDATE tenant_channels SET external_channel_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [verifiedId, row.channel_id]);
+            const updatedConfig = {
+              ...config,
+              instagram_account_id: verifiedId,
+              instagram_user_id: verifiedId,
+              page_id: verifiedId,
+              account_username: verifiedUsername || config.account_username,
+              account_subscribed: true,
+              subscribed_fields: CANONICAL_INSTAGRAM_WEBHOOK_FIELDS,
+              updated_at: new Date().toISOString(),
+            };
+            await client.query(
+              `UPDATE channel_integrations SET config = $1::jsonb, assistant_id = COALESCE(assistant_id, $2), updated_at = CURRENT_TIMESTAMP WHERE channel_id = $3 AND tenant_id = $4`,
+              [JSON.stringify(updatedConfig), assistantId, row.channel_id, row.tenant_id]
+            );
+            await subscribeInstagramAccountToWebhooks({ accountId: verifiedId, accessToken: token, http, graphBaseUrl: baseUrl }).catch(() => {});
+          }
+        } catch (err) {
+          console.warn('INSTAGRAM_CONVERGENCE_PROBE_WARN', err?.message);
+        }
+      }
+    }
+  } finally {
+    client.release();
+  }
+}
+

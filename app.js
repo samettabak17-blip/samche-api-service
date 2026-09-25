@@ -33,7 +33,7 @@ import { orchestrateInstagramInboundAiResponse } from "./services/instagram-ai-o
 import { persistWhatsAppInbound, whatsappPhoneNumberFingerprint } from "./services/whatsapp-live-inbox-service.js";
 import { resolveMetaGraphApiVersion, instagramGraphApiBase } from "./services/meta-graph-api-version.js";
 import { WHATSAPP_INGRESS_EVENTS, appSecretFingerprint, logWhatsAppIngressEvent, getRecentIngressObservations, recordIngressObservation } from "./services/whatsapp-webhook-ingress-observability.js";
-import { getInstagramSubscribedApps } from "./services/tenant-instagram-provisioning-service.js";
+import { getInstagramSubscribedApps, convergeTenantInstagramChannels } from "./services/tenant-instagram-provisioning-service.js";
 import { claimDueCustomerSupportLifecycle, claimDueHumanSupportEscalations, requestCustomerHumanSupport, triggerImmediateHumanSupportNotificationPipeline } from "./services/human-support-service.js";
 import { processHumanSupportNotificationOutbox } from './services/human-support-notification-outbox-service.js';
 import { resolveHumanSupportRecipients } from './services/human-support-recipient-service.js';
@@ -431,6 +431,9 @@ app.get("/api/v1/health/whatsapp-diagnostics", async (_req, res) => {
 // Tenant identifiers are masked and external IDs are truncated to short prefixes.
 app.get("/api/v1/health/instagram-diagnostics", async (_req, res) => {
   try {
+    await convergeTenantInstagramChannels().catch((err) => console.warn('INSTAGRAM_CONVERGENCE_DIAG_WARN', err?.message));
+
+
     const channels = await pool.query(
       `SELECT tc.tenant_id, tc.id AS channel_id, tc.external_channel_id, tc.status AS channel_status,
               t.status AS tenant_status, a.id AS assistant_id, a.status AS assistant_status,
