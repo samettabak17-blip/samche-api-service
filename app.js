@@ -31,8 +31,9 @@ import { isInstagramWebhookEvent, extractInstagramInboundEvents } from "./servic
 import { persistInstagramInbound } from "./services/instagram-live-inbox-service.js";
 import { orchestrateInstagramInboundAiResponse } from "./services/instagram-ai-orchestrator.js";
 import { persistWhatsAppInbound, whatsappPhoneNumberFingerprint } from "./services/whatsapp-live-inbox-service.js";
-import { resolveMetaGraphApiVersion } from "./services/meta-graph-api-version.js";
-import { WHATSAPP_INGRESS_EVENTS, appSecretFingerprint, logWhatsAppIngressEvent } from "./services/whatsapp-webhook-ingress-observability.js";
+import { resolveMetaGraphApiVersion, instagramGraphApiBase } from "./services/meta-graph-api-version.js";
+import { WHATSAPP_INGRESS_EVENTS, appSecretFingerprint, logWhatsAppIngressEvent, getRecentIngressObservations, recordIngressObservation } from "./services/whatsapp-webhook-ingress-observability.js";
+import { getInstagramSubscribedApps } from "./services/tenant-instagram-provisioning-service.js";
 import { claimDueCustomerSupportLifecycle, claimDueHumanSupportEscalations, requestCustomerHumanSupport, triggerImmediateHumanSupportNotificationPipeline } from "./services/human-support-service.js";
 import { processHumanSupportNotificationOutbox } from './services/human-support-notification-outbox-service.js';
 import { resolveHumanSupportRecipients } from './services/human-support-recipient-service.js';
@@ -426,6 +427,165 @@ app.get("/api/v1/health/whatsapp-diagnostics", async (_req, res) => {
     res.status(500).json({ status: "error", message: error?.code ?? "WHATSAPP_DIAGNOSTICS_FAILED" });
   }
 });
+// SAFETY: emits no secrets, tokens, customer data, or message content.
+// Tenant identifiers are masked and external IDs are truncated to short prefixes.
+app.get("/api/v1/health/instagram-diagnostics", async (_req, res) => {
+  try {
+    const channels = await pool.query(
+      `SELECT tc.tenant_id, tc.id AS channel_id, tc.external_channel_id, tc.status AS channel_status,
+              t.status AS tenant_status, a.id AS assistant_id, a.status AS assistant_status,
+              ci.id AS integration_id, ci.enabled AS integration_enabled, ci.config AS integration_config
+         FROM tenant_channels tc
+         LEFT JOIN tenants t ON t.id = tc.tenant_id
+         LEFT JOIN ai_assistants a ON a.id = tc.assistant_id AND a.tenant_id = tc.tenant_id
+         LEFT JOIN channel_integrations ci
+                ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.integration_type = 'INSTAGRAM'
+        WHERE tc.channel_type = 'INSTAGRAM'
+        ORDER BY tc.updated_at DESC
+        LIMIT 50`
+    );
+
+    const convStats = await pool.query(
+      `SELECT count(distinct c.id)::int as total_conversations,
+              count(m.id)::int as total_messages
+         FROM conversations c
+         JOIN tenant_channels tc ON tc.id = c.channel_id
+         LEFT JOIN conversation_messages m ON m.conversation_id = c.id
+        WHERE tc.channel_type = 'INSTAGRAM'`
+    );
+
+    const recentMsgs = await pool.query(
+      `SELECT m.id, m.tenant_id, m.sender_type, m.external_message_id, m.created_at
+         FROM conversation_messages m
+         JOIN conversations c ON c.id = m.conversation_id
+         JOIN tenant_channels tc ON tc.id = c.channel_id
+        WHERE tc.channel_type = 'INSTAGRAM'
+        ORDER BY m.created_at DESC
+        LIMIT 10`
+    );
+
+    const baseUrl = instagramGraphApiBase();
+    const liveChecks = [];
+
+    for (const row of channels.rows) {
+      const config = row.integration_config || {};
+      const token = config.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+      const accountId = config.instagram_account_id || config.instagram_business_account_id || config.page_id || row.external_channel_id;
+
+      if (!token || !accountId) {
+        liveChecks.push({
+          tenant_id: String(row.tenant_id).slice(0, 8),
+          channel_id: String(row.channel_id).slice(0, 8),
+          configured: false,
+          has_token: Boolean(token),
+        });
+        continue;
+      }
+
+      let meData = null;
+      let permissionsData = null;
+      let subscribedAppsData = null;
+      let liveError = null;
+
+      try {
+        const meRes = await axios.get(`${baseUrl}/me`, {
+          params: { fields: 'id,username,name,account_type', access_token: token },
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 6000,
+        });
+        meData = meRes.data || null;
+      } catch (err) {
+        liveError = err?.response?.data?.error?.message || err?.message || 'Meta ME call failed';
+      }
+
+      try {
+        const permRes = await axios.get(`${baseUrl}/me/permissions`, {
+          params: { access_token: token },
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 6000,
+        });
+        permissionsData = Array.isArray(permRes.data?.data) ? permRes.data.data : null;
+      } catch (err) {}
+
+      try {
+        const subRes = await getInstagramSubscribedApps({
+          accountId,
+          accessToken: token,
+          graphBaseUrl: baseUrl,
+        });
+        subscribedAppsData = subRes;
+      } catch (err) {}
+
+      liveChecks.push({
+        tenant_id: String(row.tenant_id).slice(0, 8),
+        channel_id: String(row.channel_id).slice(0, 8),
+        configured: true,
+        meta_reachable: Boolean(meData),
+        meta_account_id_prefix: meData?.id ? String(meData.id).slice(0, 8) : null,
+        stored_account_id_prefix: accountId ? String(accountId).slice(0, 8) : null,
+        account_id_matches: Boolean(meData?.id && String(meData.id) === String(accountId)),
+        meta_username: meData?.username || null,
+        meta_account_type: meData?.account_type || null,
+        permissions: permissionsData ? permissionsData.map((p) => ({ permission: p.permission, status: p.status })) : null,
+        subscribed_apps: subscribedAppsData?.apps?.map((a) => ({ app_id_prefix: String(a.id || '').slice(0, 6), subscribed_fields: a.subscribed_fields })) || null,
+        account_subscribed: Boolean(subscribedAppsData?.subscribed),
+        subscribed_fields: subscribedAppsData?.subscribed_fields || [],
+        error: liveError,
+      });
+    }
+    res.json({
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      graph_api_version: resolveMetaGraphApiVersion(),
+      graph_base_url: baseUrl,
+      webhook: {
+        verify_token_configured: Boolean(process.env.INSTAGRAM_VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN || process.env.META_VERIFY_TOKEN),
+        instagram_app_secret_configured: Boolean(process.env.INSTAGRAM_APP_SECRET),
+        whatsapp_app_secret_configured: Boolean(process.env.WHATSAPP_APP_SECRET),
+        meta_app_secret_configured: Boolean(process.env.META_APP_SECRET),
+        instagram_app_secret_fingerprint: appSecretFingerprint(process.env.INSTAGRAM_APP_SECRET),
+        whatsapp_app_secret_fingerprint: appSecretFingerprint(process.env.WHATSAPP_APP_SECRET),
+        meta_app_secret_fingerprint: appSecretFingerprint(process.env.META_APP_SECRET),
+      },
+      instagram_channels: channels.rows.map((row) => ({
+        tenant_id: String(row.tenant_id).slice(0, 8),
+        channel_id: String(row.channel_id).slice(0, 8),
+        channel_status: row.channel_status,
+        tenant_status: row.tenant_status,
+        assistant_present: Boolean(row.assistant_id),
+        assistant_status: row.assistant_status,
+        integration_present: Boolean(row.integration_id),
+        integration_enabled: row.integration_enabled === true,
+        activation_policy: row.integration_config?.activation_policy || 'MANUAL_ONLY',
+        account_username: row.integration_config?.account_username || null,
+        has_token: Boolean(row.integration_config?.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN),
+        reauth_required: Boolean(row.integration_config?.reauth_required),
+        account_subscribed: Boolean(row.integration_config?.account_subscribed),
+        subscribed_fields: row.integration_config?.subscribed_fields || [],
+        inbound_resolvable: row.tenant_status === 'active'
+          && row.channel_status === 'active'
+          && String(row.assistant_status ?? '').toLowerCase() === 'active',
+      })),
+      live_meta_probe: liveChecks,
+      database_counts: {
+        total_conversations: convStats.rows[0]?.total_conversations || 0,
+        total_messages: convStats.rows[0]?.total_messages || 0,
+        recent_messages: recentMsgs.rows.map((m) => ({
+          id_prefix: String(m.id).slice(0, 8),
+          tenant_prefix: String(m.tenant_id).slice(0, 8),
+          sender_type: m.sender_type,
+          external_mid_prefix: m.external_message_id ? String(m.external_message_id).slice(0, 8) : null,
+          created_at: m.created_at,
+        })),
+      },
+      recent_ingress_observations: getRecentIngressObservations(),
+    });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: error?.code ?? "INSTAGRAM_DIAGNOSTICS_FAILED" });
+  }
+});
+
+
 
 
 // One public Guide shell is served for every tenant.  Its visual identity is
@@ -4454,6 +4614,14 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       if (isInstagramWebhookEvent(req.body)) {
         const events = extractInstagramInboundEvents(req.body);
         console.info('INSTAGRAM_WEBHOOK_PAYLOAD_SHAPE events_count=' + events.length);
+        recordIngressObservation({
+          event: 'INSTAGRAM_WEBHOOK_RECEIVED',
+          events_count: events.length,
+          first_mid_prefix: events[0]?.messageId ? events[0].messageId.slice(0, 8) : null,
+          sender_prefix: events[0]?.senderId ? events[0].senderId.slice(0, 8) : null,
+          recipient_prefix: events[0]?.recipientId ? events[0].recipientId.slice(0, 8) : null,
+          is_echo: Boolean(events[0]?.isEcho),
+        });
         for (const igEvent of events) {
           if (igEvent.isEcho) {
             console.info('INSTAGRAM_ECHO_DROPPED mid=' + (igEvent.messageId ? igEvent.messageId.slice(0, 8) : 'unknown'));
@@ -4479,6 +4647,13 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
               attachments: igEvent.attachments,
               ensureConversationCrmIdentity,
               queueLeadQualification,
+            });
+
+            recordIngressObservation({
+              event: 'INSTAGRAM_INBOUND_PERSISTED',
+              tenant_prefix: inboundState?.integration?.tenant_id ? String(inboundState.integration.tenant_id).slice(0, 8) : 'unmapped',
+              duplicate: Boolean(inboundState?.duplicate),
+              message_persisted: Boolean(inboundState?.customerMessage),
             });
 
             if (!inboundState || inboundState.unmapped) {

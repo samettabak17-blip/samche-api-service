@@ -55,6 +55,23 @@ export function appSecretFingerprint(appSecret) {
   return createHash('sha256').update(normalized).digest('hex').slice(0, 12);
 }
 
+const MAX_INGRESS_OBSERVATIONS = 50;
+const recentIngressObservations = [];
+
+export function recordIngressObservation(entry) {
+  recentIngressObservations.unshift({
+    timestamp: new Date().toISOString(),
+    ...entry,
+  });
+  if (recentIngressObservations.length > MAX_INGRESS_OBSERVATIONS) {
+    recentIngressObservations.pop();
+  }
+}
+
+export function getRecentIngressObservations() {
+  return [...recentIngressObservations];
+}
+
 /**
  * Emits one bounded, safe ingress observation line.
  */
@@ -72,4 +89,12 @@ export function logWhatsAppIngressEvent({
   if (appSecretConfigured !== null) parts.push('app_secret_configured=' + (appSecretConfigured ? '1' : '0'));
   if (appSecretFingerprintValue !== null) parts.push('app_secret_fingerprint=' + appSecretFingerprintValue);
   logger.info(parts.join(' '));
+
+  recordIngressObservation({
+    event: String(event ?? 'UNKNOWN'),
+    signaturePresent,
+    bodyBytes,
+    appSecretConfigured,
+    appSecretFingerprintValue,
+  });
 }
