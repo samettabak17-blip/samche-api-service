@@ -584,3 +584,57 @@ test('orchestrateInstagramInboundAiResponse suppresses automatic reply in MANUAL
   assert.equal(outcome.activationEvaluation.reasonCode, 'POLICY_MANUAL_ONLY');
   assert.equal(outboundDMs.length, 0);
 });
+
+test('subscribeInstagramAccountToWebhooks sends canonical subscribed_fields to Graph API', async () => {
+  const { subscribeInstagramAccountToWebhooks, CANONICAL_INSTAGRAM_WEBHOOK_FIELDS } = await import('../services/tenant-instagram-provisioning-service.js');
+  let calledUrl = '';
+  let calledParams = null;
+  const fakeHttp = {
+    async post(url, body, options) {
+      calledUrl = url;
+      calledParams = options.params;
+      return { status: 200, data: { success: true } };
+    },
+  };
+
+  const res = await subscribeInstagramAccountToWebhooks({
+    accountId: testPageId,
+    accessToken: 'test-token-123',
+    http: fakeHttp,
+  });
+
+  assert.equal(res.success, true);
+  assert.ok(calledUrl.includes(testPageId));
+  assert.ok(calledUrl.includes('/subscribed_apps'));
+  assert.equal(calledParams.subscribed_fields, CANONICAL_INSTAGRAM_WEBHOOK_FIELDS.join(','));
+});
+
+test('getInstagramSubscribedApps queries and returns active subscribed fields', async () => {
+  const { getInstagramSubscribedApps } = await import('../services/tenant-instagram-provisioning-service.js');
+  const fakeHttp = {
+    async get(url) {
+      return {
+        data: {
+          data: [
+            {
+              id: 'app-meta-1',
+              subscribed_fields: ['messages', 'messaging_postbacks', 'messaging_referral', 'messaging_seen'],
+            },
+          ],
+        },
+      };
+    },
+  };
+
+  const res = await getInstagramSubscribedApps({
+    accountId: testPageId,
+    accessToken: 'test-token-123',
+    http: fakeHttp,
+  });
+
+  assert.equal(res.subscribed, true);
+  assert.equal(res.subscribed_fields.length, 4);
+  assert.ok(res.subscribed_fields.includes('messages'));
+  assert.ok(res.subscribed_fields.includes('messaging_postbacks'));
+});
+

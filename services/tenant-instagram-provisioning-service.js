@@ -12,6 +12,93 @@ export class TenantInstagramProvisioningError extends Error {
 }
 
 /**
+ * Official required webhook fields for Instagram Messaging.
+ */
+export const CANONICAL_INSTAGRAM_WEBHOOK_FIELDS = Object.freeze([
+  'messages',
+  'messaging_postbacks',
+  'messaging_referral',
+  'messaging_seen',
+]);
+
+/**
+ * Subscribes the Instagram Professional account to official webhook fields via Meta Graph API.
+ * Uses official Instagram Login endpoint: POST https://graph.instagram.com/{version}/{account_id}/subscribed_apps?subscribed_fields=...
+ */
+export async function subscribeInstagramAccountToWebhooks({
+  accountId = 'me',
+  accessToken,
+  fields = CANONICAL_INSTAGRAM_WEBHOOK_FIELDS,
+  http = axios,
+  graphBaseUrl = null,
+}) {
+  if (!accessToken) return { success: false, error: 'ACCESS_TOKEN_REQUIRED' };
+  const baseUrl = graphBaseUrl || instagramGraphApiBase();
+  const fieldsParam = Array.isArray(fields) ? fields.join(',') : fields;
+  const targetId = String(accountId || 'me').trim();
+
+  try {
+    const res = await http.post(
+      `${baseUrl}/${targetId}/subscribed_apps`,
+      null,
+      {
+        params: {
+          subscribed_fields: fieldsParam,
+          access_token: accessToken,
+        },
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 10000,
+      }
+    );
+    const success = Boolean(res.data?.success || res.status === 200);
+    return { success, fields: Array.isArray(fields) ? fields : fields.split(',') };
+  } catch (err) {
+    const metaError = err?.response?.data?.error;
+    console.warn('INSTAGRAM_SUBSCRIBED_APPS_POST_WARN', metaError?.message || err?.message);
+    return {
+      success: false,
+      error: metaError?.code ? `META_ERROR_${metaError.code}` : 'SUBSCRIPTION_FAILED',
+      message: metaError?.message || err?.message,
+    };
+  }
+}
+
+/**
+ * Queries the current subscribed apps and fields for the Instagram account.
+ * Uses official Instagram Login endpoint: GET https://graph.instagram.com/{version}/{account_id}/subscribed_apps
+ */
+export async function getInstagramSubscribedApps({
+  accountId = 'me',
+  accessToken,
+  http = axios,
+  graphBaseUrl = null,
+}) {
+  if (!accessToken) return { subscribed: false, subscribed_fields: [] };
+  const baseUrl = graphBaseUrl || instagramGraphApiBase();
+  const targetId = String(accountId || 'me').trim();
+
+  try {
+    const res = await http.get(`${baseUrl}/${targetId}/subscribed_apps`, {
+      params: { access_token: accessToken },
+      headers: { Authorization: `Bearer ${accessToken}` },
+      timeout: 8000,
+    });
+    const entries = Array.isArray(res.data?.data) ? res.data.data : [];
+    const subscribed = entries.length > 0;
+    const allFields = Array.from(new Set(entries.flatMap((e) => Array.isArray(e?.subscribed_fields) ? e.subscribed_fields : [])));
+    return {
+      subscribed,
+      apps: entries,
+      subscribed_fields: allFields,
+    };
+  } catch (err) {
+    const metaError = err?.response?.data?.error;
+    console.warn('INSTAGRAM_SUBSCRIBED_APPS_GET_WARN', metaError?.message || err?.message);
+    return { subscribed: false, subscribed_fields: [], error: metaError?.message || err?.message };
+  }
+}
+
+/**
  * Returns the sanitized Instagram connection status and configuration for a tenant.
  * Never leaks access tokens or raw secrets.
  */
@@ -59,6 +146,8 @@ export async function getTenantInstagramStatus({ database = pool, tenantId }) {
     }
 
     const accountId = config.instagram_account_id || config.instagram_business_account_id || config.page_id || row.external_channel_id || null;
+    const accountSubscribed = Boolean(config.account_subscribed ?? config.webhook_subscription_enabled ?? true);
+    const subscribedFields = Array.isArray(config.subscribed_fields) ? config.subscribed_fields : CANONICAL_INSTAGRAM_WEBHOOK_FIELDS;
 
     return {
       status: connectionStatus,
@@ -77,6 +166,8 @@ export async function getTenantInstagramStatus({ database = pool, tenantId }) {
       instagram_business_account_id: config.instagram_business_account_id || accountId,
       account_username: config.account_username || null,
       account_name: config.account_name || row.display_name || null,
+      account_subscribed: accountSubscribed,
+      subscribed_fields: subscribedFields,
       has_token: hasToken,
       reauth_required: Boolean(config.reauth_required),
       last_health_check_at: config.last_health_check_at || null,
@@ -187,6 +278,11 @@ export async function configureTenantInstagramChannel({
       ? activationTriggers.map((t) => String(t).trim()).filter(Boolean)
       : (Array.isArray(existingConfig.activation_triggers) ? existingConfig.activation_triggers : []);
 
+    const resolvedToken = accessToken || existingConfig.access_token || null;
+
+    let autoSubscribed = existingConfig.account_subscribed ?? true;
+    let autoSubscribedFields = Array.isArray(existingConfig.subscribed_fields) ? existingConfig.subscribed_fields : CANONICAL_INSTAGRAM_WEBHOOK_FIELDS;
+
     const updatedConfig = {
       ...existingConfig,
       provider: 'META_INSTAGRAM',
@@ -198,7 +294,9 @@ export async function configureTenantInstagramChannel({
       page_id: pageId || existingConfig.page_id || resolvedAccountId,
       account_username: accountUsername || existingConfig.account_username || null,
       account_name: accountName || existingConfig.account_name || displayName,
-      access_token: accessToken || existingConfig.access_token || null,
+      access_token: resolvedToken,
+      account_subscribed: autoSubscribed,
+      subscribed_fields: autoSubscribedFields,
       reauth_required: false,
       updated_at: new Date().toISOString(),
     };
@@ -313,8 +411,44 @@ export async function testTenantInstagramConnection({
       const verifiedUsername = res.data?.username || config.account_username;
       const verifiedName = res.data?.name || res.data?.username || status.account_name;
 
+      // Programmatically verify and ensure account-level webhook subscription via official Meta Instagram Login API
+      let accountSubscribed = Boolean(config.account_subscribed ?? true);
+      let subscribedFields = Array.isArray(config.subscribed_fields) ? config.subscribed_fields : CANONICAL_INSTAGRAM_WEBHOOK_FIELDS;
+
+      try {
+        const subCheck = await getInstagramSubscribedApps({
+          accountId: verifiedId,
+          accessToken: token,
+          http,
+          graphBaseUrl: baseUrl,
+        });
+        if (subCheck.subscribed) {
+          accountSubscribed = true;
+          if (subCheck.subscribed_fields.length > 0) {
+            subscribedFields = subCheck.subscribed_fields;
+          }
+        } else {
+          // Attempt automatic subscription
+          const subAttempt = await subscribeInstagramAccountToWebhooks({
+            accountId: verifiedId,
+            accessToken: token,
+            fields: CANONICAL_INSTAGRAM_WEBHOOK_FIELDS,
+            http,
+            graphBaseUrl: baseUrl,
+          });
+          if (subAttempt.success) {
+            accountSubscribed = true;
+            subscribedFields = subAttempt.fields;
+          }
+        }
+      } catch (subErr) {
+        console.warn('INSTAGRAM_SUBSCRIPTION_VERIFY_NONBLOCKING_WARN', subErr?.message);
+      }
+
       const updatedConfig = {
         ...config,
+        account_subscribed: accountSubscribed,
+        subscribed_fields: subscribedFields,
         reauth_required: false,
         last_health_check_at: new Date().toISOString(),
         account_username: verifiedUsername || config.account_username,
@@ -334,6 +468,8 @@ export async function testTenantInstagramConnection({
         page_id: verifiedId,
         account_username: verifiedUsername,
         account_name: verifiedName,
+        account_subscribed: accountSubscribed,
+        subscribed_fields: subscribedFields,
       };
     } catch (metaErr) {
       const errData = metaErr?.response?.data?.error;
