@@ -56,13 +56,11 @@ export async function runMigrations() {
       const sqlContent = fs.readFileSync(filePath, 'utf8');
 
       try {
-        await client.query('SAVEPOINT migration_sp');
         await client.query(sqlContent);
         await client.query(
           'INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING',
           [file]
         );
-        await client.query('RELEASE SAVEPOINT migration_sp');
         appliedSet.add(file);
 
         if (file === '088_visual_ai_phase3_delivery_orchestration.sql') {
@@ -70,7 +68,7 @@ export async function runMigrations() {
         }
       } catch (fileErr) {
         console.error(`MIGRATION_EXECUTION_FAILED file=${file} code=${fileErr.code}`, fileErr.message);
-        await client.query('ROLLBACK TO SAVEPOINT migration_sp').catch(() => {});
+        await client.query('ROLLBACK').catch(() => {});
         throw fileErr;
       }
     }
