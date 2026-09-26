@@ -1,0 +1,31 @@
+name: Staging Task 9 Live Acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [staging]
+    paths:
+      - '.github/workflows/staging-task9-live-acceptance.yml'
+      - 'scripts/run_staging_task9_acceptance.js'
+
+jobs:
+  acceptance:
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      API: https://samche-api-staging.onrender.com
+      TEST_TENANT_ID: b85d7e7b-d52e-4541-92e7-284a6a67024b
+      STAGING_OWNER_TOKEN: ${{ secrets.STAGING_OWNER_TOKEN }}
+      STAGING_ADMIN_TOKEN: ${{ secrets.STAGING_ADMIN_TOKEN }}
+      STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      STAGING_DASHBOARD_ADMIN_PASSWORD: ${{ secrets.STAGING_DASHBOARD_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Run Task 9 live staging migration and acceptance
+        run: node scripts/run_staging_task9_acceptance.js
