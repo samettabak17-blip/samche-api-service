@@ -83,13 +83,16 @@ describe('customer identifier presentation', () => {
     expect(displayConversationCustomerIdentifier('samcheguide:opaque-session', 'SAMCHEGUIDE')).toBe('Guide conversation');
     expect(displayConversationCustomerIdentifier('samcheguide:opaque-session', 'WEB_CHAT')).toBe('Web Chat conversation');
     expect(displayConversationCustomerIdentifier('instagram:ahmetyilmaz', 'INSTAGRAM')).toBe('@ahmetyilmaz');
+    expect(displayConversationCustomerIdentifier('instagram:889142793634437', 'INSTAGRAM')).toBe('Instagram User');
+    expect(displayConversationCustomerIdentifier('instagram:9145042076703', 'INSTAGRAM')).toBe('Instagram User');
   });
 
-  it('formats Instagram customer identity with correct display priority', () => {
+  it('formats Instagram customer identity with correct display priority and never leaks provider IDs', () => {
     expect(formatInstagramCustomerDisplay('Ahmet Yılmaz', 'ahmetyilmaz')).toBe('Ahmet Yılmaz (@ahmetyilmaz)');
     expect(formatInstagramCustomerDisplay(null, 'ahmetyilmaz')).toBe('@ahmetyilmaz');
     expect(formatInstagramCustomerDisplay('Ahmet Yılmaz', null)).toBe('Ahmet Yılmaz');
-    expect(formatInstagramCustomerDisplay(null, null, 'instagram:123456')).toBe('@123456');
+    expect(formatInstagramCustomerDisplay(null, null, 'instagram:889142793634437')).toBe('Instagram User');
+    expect(formatInstagramCustomerDisplay('889142793634437', null, 'instagram:889142793634437')).toBe('Instagram User');
     expect(formatInstagramCustomerDisplay(null, null, null)).toBe('Instagram User');
     expect(formatInstagramCustomerDisplay('Instagram conversation', null, null)).toBe('Instagram User');
   });
@@ -100,6 +103,7 @@ describe('customer identifier presentation', () => {
     expect(displayConversationCustomerIdentifier(sharedLegacyReference, 'SAMCHEGUIDE')).toBe('Guide conversation');
   });
 });
+
 
 
 

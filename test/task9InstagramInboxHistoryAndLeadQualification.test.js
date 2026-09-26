@@ -678,42 +678,93 @@ test('TEST W — Identity metadata changes (Username/display name change preserv
   assert.equal(contactStore.display_name, 'Ahmet Yeni (@ahmet_new)');
 });
 
-test('TEST X — Contact Information Phone fallback is clean (Never "Instagram conversation")', () => {
-  // Test formatting logic directly
-  function formatInstagramCustomerDisplay(displayName, username, customerExternalId) {
-    const cleanName = typeof displayName === 'string' && displayName.trim() && !displayName.startsWith('instagram:') && displayName.trim() !== 'Instagram conversation' && displayName.trim() !== 'Instagram User'
-      ? displayName.trim()
-      : null;
-
-    const rawIg = String(username || customerExternalId || '').replace(/^instagram:\s*/i, '').trim();
-    const cleanUsername = rawIg && !rawIg.startsWith('ig_synth_') && !/^[a-f0-9]{32,64}$/i.test(rawIg)
-      ? (rawIg.startsWith('@') ? rawIg : '@' + rawIg)
-      : null;
-
-    if (cleanName && cleanUsername) {
-      if (cleanName.toLowerCase() === cleanUsername.toLowerCase() || cleanName.toLowerCase() === cleanUsername.slice(1).toLowerCase()) {
-        return cleanUsername;
-      }
-      if (cleanName.includes(cleanUsername)) {
-        return cleanName;
-      }
-      return `${cleanName} (${cleanUsername})`;
+test('TEST X — Contact Information Phone fallback is clean and Provider ID is never @IGSID', () => {
+  const { isInstagramProviderId, formatInstagramCustomerDisplay, displayConversationCustomerIdentifier } = (() => {
+    function isInstagramProviderId(value) {
+      if (!value || typeof value !== 'string') return false;
+      const clean = value.replace(/^instagram:\s*/i, '').replace(/^@/, '').trim();
+      if (!clean) return false;
+      if (/^\d+$/.test(clean)) return true;
+      if (clean.startsWith('ig_synth_')) return true;
+      if (/^[a-f0-9]{32,64}$/i.test(clean)) return true;
+      if (clean.toLowerCase() === 'instagram conversation' || clean.toLowerCase() === 'instagram user') return true;
+      return false;
     }
-    if (cleanName) return cleanName;
-    if (cleanUsername) return cleanUsername;
-    return 'Instagram User';
-  }
 
-  const formattedWithUsername = formatInstagramCustomerDisplay(null, 'ahmetyilmaz');
-  assert.equal(formattedWithUsername, '@ahmetyilmaz');
+    function formatInstagramCustomerDisplay(displayName, username, customerExternalId) {
+      let cleanName = null;
+      let cleanUsername = null;
 
-  const formattedWithNameAndUsername = formatInstagramCustomerDisplay('Ahmet Yılmaz', 'ahmetyilmaz');
-  assert.equal(formattedWithNameAndUsername, 'Ahmet Yılmaz (@ahmetyilmaz)');
+      if (typeof displayName === 'string' && displayName.trim()) {
+        const rawDisplay = displayName.trim();
+        if (!isInstagramProviderId(rawDisplay)) {
+          const parenMatch = rawDisplay.match(/^([^(]+?)\s*\((@[A-Za-z0-9._]+)\)$/);
+          if (parenMatch) {
+            cleanName = parenMatch[1].trim();
+            cleanUsername = parenMatch[2].trim();
+          } else if (rawDisplay.startsWith('@')) {
+            const u = rawDisplay.slice(1).trim();
+            if (!isInstagramProviderId(u)) {
+              cleanUsername = '@' + u;
+            }
+          } else {
+            cleanName = rawDisplay;
+          }
+        }
+      }
 
-  const fallback = formatInstagramCustomerDisplay(null, null);
-  assert.equal(fallback, 'Instagram User');
-  assert.notEqual(fallback, 'Instagram conversation');
+      if (!cleanUsername && typeof username === 'string' && username.trim()) {
+        const rawUser = username.replace(/^instagram:\s*/i, '').replace(/^@/, '').trim();
+        if (rawUser && !isInstagramProviderId(rawUser)) {
+          cleanUsername = '@' + rawUser;
+        }
+      }
+
+      if (cleanName && cleanUsername) {
+        if (cleanName.toLowerCase() === cleanUsername.slice(1).toLowerCase()) {
+          return cleanUsername;
+        }
+        return `${cleanName} (${cleanUsername})`;
+      }
+      if (cleanUsername) return cleanUsername;
+      if (cleanName) return cleanName;
+      return 'Instagram User';
+    }
+
+    function displayConversationCustomerIdentifier(value, channelType) {
+      if (!value) return 'Customer conversation';
+      if (channelType === 'INSTAGRAM' || value.startsWith('instagram:')) {
+        const raw = value.replace(/^instagram:\s*/i, '').replace(/^@/, '').trim();
+        if (raw && !isInstagramProviderId(raw)) {
+          return '@' + raw;
+        }
+        return 'Instagram User';
+      }
+      return value;
+    }
+
+    return { isInstagramProviderId, formatInstagramCustomerDisplay, displayConversationCustomerIdentifier };
+  })();
+
+  // 1. Numeric Provider IDs (IGSIDs) must NEVER be formatted as @IGSID
+  assert.equal(isInstagramProviderId('889142793634437'), true);
+  assert.equal(isInstagramProviderId('9145042076703'), true);
+  assert.equal(displayConversationCustomerIdentifier('instagram:889142793634437', 'INSTAGRAM'), 'Instagram User');
+  assert.equal(formatInstagramCustomerDisplay(null, null, 'instagram:889142793634437'), 'Instagram User');
+  assert.notEqual(formatInstagramCustomerDisplay(null, null, 'instagram:889142793634437'), '@889142793634437');
+
+  // 2. Real username format
+  assert.equal(formatInstagramCustomerDisplay(null, 'ahmetyilmaz'), '@ahmetyilmaz');
+  assert.equal(displayConversationCustomerIdentifier('instagram:ahmetyilmaz', 'INSTAGRAM'), '@ahmetyilmaz');
+
+  // 3. Real display name + username
+  assert.equal(formatInstagramCustomerDisplay('Ahmet Yılmaz', 'ahmetyilmaz'), 'Ahmet Yılmaz (@ahmetyilmaz)');
+
+  // 4. Missing/Fallback
+  assert.equal(formatInstagramCustomerDisplay(null, null), 'Instagram User');
+  assert.equal(formatInstagramCustomerDisplay('Instagram conversation', null), 'Instagram User');
 });
+
 
 
 

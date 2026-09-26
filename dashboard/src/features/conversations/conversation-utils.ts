@@ -54,31 +54,58 @@ export function canTakeOverConversation({
   return handlingMode === 'AI' || (handlingMode === 'HUMAN' && humanAttentionState === 'REQUESTED');
 }
 
+export function isInstagramProviderId(value?: string | null): boolean {
+  if (!value || typeof value !== 'string') return false;
+  const clean = value.replace(/^instagram:\s*/i, '').replace(/^@/, '').trim();
+  if (!clean) return false;
+  if (/^\d+$/.test(clean)) return true;
+  if (clean.startsWith('ig_synth_')) return true;
+  if (/^[a-f0-9]{32,64}$/i.test(clean)) return true;
+  if (clean.toLowerCase() === 'instagram conversation' || clean.toLowerCase() === 'instagram user') return true;
+  return false;
+}
+
 export function formatInstagramCustomerDisplay(
   displayName?: string | null,
   username?: string | null,
   customerExternalId?: string | null
 ): string {
-  const cleanName = typeof displayName === 'string' && displayName.trim() && !displayName.startsWith('instagram:') && displayName.trim() !== 'Instagram conversation' && displayName.trim() !== 'Instagram User'
-    ? displayName.trim()
-    : null;
+  let cleanName: string | null = null;
+  let cleanUsername: string | null = null;
 
-  const rawIg = String(username || customerExternalId || '').replace(/^instagram:\s*/i, '').trim();
-  const cleanUsername = rawIg && !rawIg.startsWith('ig_synth_') && !/^[a-f0-9]{32,64}$/i.test(rawIg)
-    ? (rawIg.startsWith('@') ? rawIg : '@' + rawIg)
-    : null;
+  if (typeof displayName === 'string' && displayName.trim()) {
+    const rawDisplay = displayName.trim();
+    if (!isInstagramProviderId(rawDisplay)) {
+      const parenMatch = rawDisplay.match(/^([^(]+?)\s*\((@[A-Za-z0-9._]+)\)$/);
+      if (parenMatch) {
+        cleanName = parenMatch[1].trim();
+        cleanUsername = parenMatch[2].trim();
+      } else if (rawDisplay.startsWith('@')) {
+        const u = rawDisplay.slice(1).trim();
+        if (!isInstagramProviderId(u)) {
+          cleanUsername = '@' + u;
+        }
+      } else {
+        cleanName = rawDisplay;
+      }
+    }
+  }
+
+  if (!cleanUsername && typeof username === 'string' && username.trim()) {
+    const rawUser = username.replace(/^instagram:\s*/i, '').replace(/^@/, '').trim();
+    if (rawUser && !isInstagramProviderId(rawUser)) {
+      cleanUsername = '@' + rawUser;
+    }
+  }
 
   if (cleanName && cleanUsername) {
-    if (cleanName.toLowerCase() === cleanUsername.toLowerCase() || cleanName.toLowerCase() === cleanUsername.slice(1).toLowerCase()) {
+    if (cleanName.toLowerCase() === cleanUsername.slice(1).toLowerCase()) {
       return cleanUsername;
-    }
-    if (cleanName.includes(cleanUsername)) {
-      return cleanName;
     }
     return `${cleanName} (${cleanUsername})`;
   }
-  if (cleanName) return cleanName;
   if (cleanUsername) return cleanUsername;
+  if (cleanName) return cleanName;
   return 'Instagram User';
 }
 
@@ -87,9 +114,9 @@ export function displayConversationCustomerIdentifier(value?: string | null, cha
   if (channelType === 'WEB_CHAT' || value.startsWith('web_chat:')) return 'Web Chat conversation';
   if (channelType === 'SAMCHEGUIDE' || value.startsWith('samcheguide:')) return 'Guide conversation';
   if (channelType === 'INSTAGRAM' || value.startsWith('instagram:')) {
-    const raw = value.replace(/^instagram:\s*/i, '').trim();
-    if (raw && !raw.startsWith('ig_synth_') && !/^[a-f0-9]{32,64}$/i.test(raw)) {
-      return raw.startsWith('@') ? raw : '@' + raw;
+    const raw = value.replace(/^instagram:\s*/i, '').replace(/^@/, '').trim();
+    if (raw && !isInstagramProviderId(raw)) {
+      return '@' + raw;
     }
     return 'Instagram User';
   }
@@ -97,6 +124,7 @@ export function displayConversationCustomerIdentifier(value?: string | null, cha
   if (value.startsWith('samcheguide:')) return 'Guide conversation';
   return value;
 }
+
 
 
 

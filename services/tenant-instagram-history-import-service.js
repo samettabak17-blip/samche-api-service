@@ -2,7 +2,8 @@ import crypto from 'node:crypto';
 import axios from 'axios';
 import pool from '../config/db.js';
 import { instagramGraphApiBase, metaGraphApiBase } from './meta-graph-api-version.js';
-import { instagramCustomerReference, instagramExternalConversationId } from './instagram-live-inbox-service.js';
+import { instagramCustomerReference, instagramExternalConversationId, resolveInstagramUserProfile } from './instagram-live-inbox-service.js';
+
 
 export class TenantInstagramHistoryImportError extends Error {
   constructor(code, message, status = 400) {
@@ -146,8 +147,21 @@ export async function importTenantInstagramHistory({
           (metaConv.messages?.data?.[0]?.from?.id !== myUserId ? metaConv.messages?.data?.[0]?.from?.id : null) ||
           metaConv.id;
 
-        const custName = customerParticipant?.name || null;
-        const custUsername = customerParticipant?.username || null;
+        let custName = customerParticipant?.name || null;
+        let custUsername = customerParticipant?.username || null;
+
+        if (!custName && !custUsername && customerIgsid) {
+          try {
+            const profile = await resolveInstagramUserProfile({
+              senderIgsid: customerIgsid,
+              accessToken,
+              http,
+            });
+            if (profile?.name) custName = profile.name;
+            if (profile?.username) custUsername = profile.username;
+          } catch {}
+        }
+
         let customerDisplayName = null;
         if (custName && custUsername) {
           customerDisplayName = `${custName} (@${custUsername.replace(/^@/, '')})`;
@@ -156,6 +170,7 @@ export async function importTenantInstagramHistory({
         } else if (custName) {
           customerDisplayName = custName;
         }
+
 
         const custRef = instagramCustomerReference(customerIgsid);
         const extConvId = instagramExternalConversationId(customerIgsid);

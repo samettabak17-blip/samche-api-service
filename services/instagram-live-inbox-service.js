@@ -22,28 +22,55 @@ export async function resolveInstagramUserProfile({
   graphBaseUrl = null,
 }) {
   if (!senderIgsid || !accessToken) return null;
-  const cached = profileCache.get(senderIgsid);
+  const cleanId = String(senderIgsid).replace(/^instagram:\s*/i, '').trim();
+  if (!cleanId) return null;
+
+  const cached = profileCache.get(cleanId);
   if (cached && Date.now() - cached.fetchedAt < 3600 * 1000) {
     return cached;
   }
-  const baseUrl = graphBaseUrl || instagramGraphApiBase();
+  const igBase = graphBaseUrl || instagramGraphApiBase();
   try {
-    const res = await http.get(`${baseUrl}/${senderIgsid}`, {
+    const res = await http.get(`${igBase}/${cleanId}`, {
       params: { fields: 'name,username', access_token: accessToken },
       headers: { Authorization: `Bearer ${accessToken}` },
       timeout: 5000,
     });
     const profile = {
-      name: res.data?.name || null,
-      username: res.data?.username || null,
+      name: res.data?.name?.trim() || null,
+      username: res.data?.username?.trim() || null,
       fetchedAt: Date.now(),
     };
-    profileCache.set(senderIgsid, profile);
-    return profile;
+    if (profile.name || profile.username) {
+      profileCache.set(cleanId, profile);
+      return profile;
+    }
   } catch {
-    return null;
+    // If graph.instagram.com failed, attempt fallback to graph.facebook.com
+    try {
+      const { metaGraphApiBase } = await import('./meta-graph-api-version.js');
+      const fbBase = metaGraphApiBase();
+      const fbRes = await http.get(`${fbBase}/${cleanId}`, {
+        params: { fields: 'name,username', access_token: accessToken },
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 5000,
+      });
+      const profile = {
+        name: fbRes.data?.name?.trim() || null,
+        username: fbRes.data?.username?.trim() || null,
+        fetchedAt: Date.now(),
+      };
+      if (profile.name || profile.username) {
+        profileCache.set(cleanId, profile);
+        return profile;
+      }
+    } catch {
+      profileCache.set(cleanId, { name: null, username: null, fetchedAt: Date.now() });
+    }
   }
+  return null;
 }
+
 
 
 export function instagramCustomerReference(senderIgsid) {
