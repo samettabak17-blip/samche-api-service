@@ -62,6 +62,7 @@ BEGIN
        );
 
     IF legacy_doc_ids IS NOT NULL AND ARRAY_LENGTH(legacy_doc_ids, 1) > 0 THEN
+      UPDATE knowledge_candidates SET approved_source_id = NULL WHERE tenant_id = t_id AND approved_source_id = ANY(legacy_doc_ids);
       DELETE FROM knowledge_candidate_image_evidence WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
       DELETE FROM knowledge_materialized_source_provenance WHERE tenant_id = t_id AND (materialized_source_id = ANY(legacy_doc_ids) OR original_source_id = ANY(legacy_doc_ids));
       DELETE FROM business_identity_source_evidence WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
@@ -142,31 +143,44 @@ BEGIN
     -- 4. Remove legacy knowledge gaps and signals
     DELETE FROM knowledge_gap_signals
      WHERE tenant_id = t_id
-       AND gap_id IN (
-         SELECT id FROM knowledge_gaps
-          WHERE tenant_id = t_id
-            AND (
-              query_text ILIKE '%Nova Crest%'
-              OR query_text ILIKE '%Meridian Arc%'
-              OR query_text ILIKE '%Foundation Launch%'
-              OR query_text ILIKE '%Growth Accelerator%'
-              OR query_text ILIKE '%Enterprise Architecture%'
-              OR topic ILIKE '%Technology Consultancy%'
-            )
+       AND (
+         redacted_question ILIKE '%Nova Crest%'
+         OR redacted_question ILIKE '%Meridian Arc%'
+         OR redacted_question ILIKE '%Foundation Launch%'
+         OR redacted_question ILIKE '%Growth Accelerator%'
+         OR redacted_question ILIKE '%Enterprise Architecture%'
+         OR redacted_question ILIKE '%Technology Consultancy%'
        );
 
     DELETE FROM knowledge_gaps
      WHERE tenant_id = t_id
        AND (
-         query_text ILIKE '%Nova Crest%'
-         OR query_text ILIKE '%Meridian Arc%'
-         OR query_text ILIKE '%Foundation Launch%'
-         OR query_text ILIKE '%Growth Accelerator%'
-         OR query_text ILIKE '%Enterprise Architecture%'
-         OR topic ILIKE '%Technology Consultancy%'
+         normalized_question ILIKE '%Nova Crest%'
+         OR normalized_question ILIKE '%Meridian Arc%'
+         OR normalized_question ILIKE '%Foundation Launch%'
+         OR normalized_question ILIKE '%Growth Accelerator%'
+         OR normalized_question ILIKE '%Enterprise Architecture%'
+         OR normalized_question ILIKE '%Technology Consultancy%'
        );
 
     -- 5. Clean up any superseded legacy business profile versions
+    UPDATE business_profiles
+       SET active_version_id = NULL
+     WHERE tenant_id = t_id
+       AND active_version_id IN (
+         SELECT id FROM business_profile_versions
+          WHERE tenant_id = t_id
+            AND (
+              profile_data->>'company_identity' ILIKE '%Nova Crest%'
+              OR profile_data->>'company_identity' ILIKE '%Meridian Arc%'
+              OR profile_data->>'company_identity' ILIKE '%Technology Consultancy%'
+              OR profile_data->>'industry' ILIKE '%Technology Consultancy%'
+              OR profile_data::text ILIKE '%Foundation Launch Package%'
+              OR profile_data::text ILIKE '%Growth Accelerator Package%'
+              OR profile_data::text ILIKE '%Silver Bridge Protocol%'
+            )
+       );
+
     DELETE FROM business_profile_versions
      WHERE tenant_id = t_id
        AND (
@@ -180,6 +194,22 @@ BEGIN
        );
 
     -- 6. Clean up any superseded legacy assistant configuration versions
+    UPDATE ai_assistants
+       SET active_configuration_version_id = NULL
+     WHERE tenant_id = t_id
+       AND active_configuration_version_id IN (
+         SELECT id FROM assistant_configuration_versions
+          WHERE tenant_id = t_id
+            AND (
+              configuration_data->>'assistant_identity' ILIKE '%Technology Consultancy%'
+              OR configuration_data->>'assistant_identity' ILIKE '%Nova Crest%'
+              OR configuration_data->>'assistant_identity' ILIKE '%Meridian Arc%'
+              OR configuration_data::text ILIKE '%Foundation Launch Package%'
+              OR configuration_data::text ILIKE '%Growth Accelerator Package%'
+              OR configuration_data::text ILIKE '%Silver Bridge Protocol%'
+            )
+       );
+
     DELETE FROM assistant_configuration_versions
      WHERE tenant_id = t_id
        AND (
