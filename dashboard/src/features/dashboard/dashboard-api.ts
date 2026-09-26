@@ -177,6 +177,8 @@ export const tenantApi = {
   configureInstagram: (tenantId: string, payload: import('../../types/api').InstagramConfigPayload) => apiClient.post<import('../../types/api').InstagramChannelStatusResponse>(`${tenantRoot(tenantId)}/channels/instagram/config`, payload),
   disconnectInstagram: (tenantId: string) => apiClient.post<{ ok: boolean; status: string }>(`${tenantRoot(tenantId)}/channels/instagram/disconnect`, {}),
   testInstagramConnection: (tenantId: string) => apiClient.post<import('../../types/api').InstagramTestConnectionResponse>(`${tenantRoot(tenantId)}/channels/instagram/test-connection`, {}),
+  importInstagramHistory: (tenantId: string, limit = 100) => apiClient.post<import('../../types/api').InstagramHistoryImportResponse>(`${tenantRoot(tenantId)}/channels/instagram/import-history`, { limit }),
+
   getWebChatChannel: (tenantId: string) => apiClient.get<WebChatChannelResponse>(`${tenantRoot(tenantId)}/channels/web-chat`),
   updateWebChatChannel: (tenantId: string, body: {
     widget_key?: string | null;
@@ -315,7 +317,10 @@ export const tenantApi = {
   pauseConversationAi: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/pause`, {}),
   resumeConversationAi: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/resume`, {}),
   closeConversation: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/close`, {}),
+  archiveConversation: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/archive`, {}),
+  unarchiveConversation: (tenantId: string, conversationId: string) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/unarchive`, {}),
   setConversationAiOverride: (tenantId: string, conversationId: string, override: import('../../types/api').AiBehaviorOverride) => apiClient.post<ConversationOperationResponse>(`${tenantRoot(tenantId)}/conversations/${conversationId}/ai-override`, { override }),
+
 
   sendAgentMessage: (tenantId: string, conversationId: string, content: string, idempotencyKey: string) => apiClient.post<AgentMessageResponse>(
     `${tenantRoot(tenantId)}/conversations/${conversationId}/messages`,

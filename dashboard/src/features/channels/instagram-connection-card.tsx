@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, AlertTriangle, AlertCircle, RefreshCw, Unlink, Bot, Instagram, ShieldCheck, Key } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, AlertCircle, RefreshCw, Unlink, Bot, Instagram, ShieldCheck, Key, Download, Bell } from 'lucide-react';
 import { DashboardButton, DashboardField, DashboardInput, DashboardSelect, DashboardFormMessage } from '../../components/ui/dashboard-control';
 import { ConfirmationDialog } from '../../components/ui/confirmation-dialog';
 import { SkeletonBlock } from '../../components/ui/async-state';
 import { tenantApi, tenantKeys } from '../dashboard/dashboard-api';
-import type { Assistant, InstagramChannelStatusResponse } from '../../types/api';
+import type { Assistant, InstagramChannelStatusResponse, InstagramHistoryImportResponse } from '../../types/api';
 
 export interface InstagramConnectionCardProps {
   tenantId: string;
@@ -29,11 +29,14 @@ export function InstagramConnectionCard({
   const [accessToken, setAccessToken] = useState('');
   const [activationPolicy, setActivationPolicy] = useState<import('../../types/api').AiActivationPolicy>('MANUAL_ONLY');
   const [triggersInput, setTriggersInput] = useState('');
+  const [leadNotificationEnabled, setLeadNotificationEnabled] = useState(true);
+  const [leadNotificationWhatsapp, setLeadNotificationWhatsapp] = useState('');
   const [selectedAssistantId, setSelectedAssistantId] = useState<string>(
     eligibleAssistants[0]?.id ?? ''
   );
   const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false);
   const [localFeedback, setLocalFeedback] = useState<{ type: 'error' | 'success'; message: string } | null>(null);
+  const [importSummary, setImportSummary] = useState<InstagramHistoryImportResponse | null>(null);
 
   const statusQuery = useQuery({
     queryKey: tenantKeys.instagramStatus(tenantId),
@@ -61,6 +64,9 @@ export function InstagramConnectionCard({
         auth_mode: 'INSTAGRAM_LOGIN',
         activation_policy: activationPolicy,
         activation_triggers: parsedTriggers,
+        lead_notification_enabled: leadNotificationEnabled,
+        lead_notification_whatsapp: leadNotificationWhatsapp.trim() || null,
+        visual_ai_enabled: false,
         instagram_account_id: pageId.trim() || undefined,
         page_id: pageId.trim() || undefined,
         instagram_business_account_id: pageId.trim() || undefined,
@@ -80,6 +86,23 @@ export function InstagramConnectionCard({
       setLocalFeedback({
         type: 'error',
         message: err?.body?.message || err?.message || 'Failed to configure Instagram channel.',
+      });
+    },
+  });
+
+  const importHistoryMutation = useMutation({
+    mutationFn: () => tenantApi.importInstagramHistory(tenantId, 100),
+    onSuccess: (data) => {
+      setImportSummary(data);
+      setLocalFeedback({
+        type: 'success',
+        message: `Import completed! ${data.conversations_imported} conversations and ${data.messages_imported} messages imported (${data.duplicates_skipped} duplicates skipped).`,
+      });
+    },
+    onError: (err: any) => {
+      setLocalFeedback({
+        type: 'error',
+        message: err?.body?.message || err?.message || 'Failed to import Instagram history.',
       });
     },
   });
@@ -123,6 +146,7 @@ export function InstagramConnectionCard({
       });
     },
   });
+
 
   if (statusQuery.isLoading) {
     return (
@@ -181,7 +205,17 @@ export function InstagramConnectionCard({
         </div>
 
         {canManage && isConnected && !isConfiguring && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <DashboardButton
+              type="button"
+              variant="secondary"
+              onClick={() => importHistoryMutation.mutate()}
+              disabled={importHistoryMutation.isPending}
+              className="gap-1.5 text-xs"
+            >
+              <Download size={14} className={importHistoryMutation.isPending ? 'animate-bounce' : ''} />
+              {importHistoryMutation.isPending ? 'Importing…' : 'Import Last 100 Conversations'}
+            </DashboardButton>
             <DashboardButton
               type="button"
               variant="secondary"
@@ -202,6 +236,8 @@ export function InstagramConnectionCard({
                 setSelectedAssistantId(statusData.assistant_id || eligibleAssistants[0]?.id || '');
                 setActivationPolicy(statusData.activation_policy || 'MANUAL_ONLY');
                 setTriggersInput(Array.isArray(statusData.activation_triggers) ? statusData.activation_triggers.join(', ') : '');
+                setLeadNotificationEnabled(statusData.lead_notification_enabled !== false);
+                setLeadNotificationWhatsapp(statusData.lead_notification_whatsapp || '');
                 setIsConfiguring(true);
               }}
               className="gap-1.5 text-xs"
@@ -218,6 +254,7 @@ export function InstagramConnectionCard({
             </DashboardButton>
           </div>
         )}
+
       </div>
 
       {localFeedback && (
@@ -227,6 +264,43 @@ export function InstagramConnectionCard({
           {localFeedback.message}
         </DashboardFormMessage>
       )}
+
+      {/* History Import Summary Banner */}
+      {importSummary && (
+        <div className="rounded-xl border border-gold/30 bg-gold/10 p-4 text-xs text-gold space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-sm text-gold flex items-center gap-1.5">
+              <Download size={15} /> Instagram History Import Summary ({importSummary.status})
+            </span>
+            <button
+              type="button"
+              onClick={() => setImportSummary(null)}
+              className="text-stone-400 hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-white pt-1">
+            <div className="rounded-lg bg-surface/80 p-2.5">
+              <p className="text-stone-400 text-[11px]">Discovered</p>
+              <p className="font-semibold text-base">{importSummary.conversations_discovered}</p>
+            </div>
+            <div className="rounded-lg bg-surface/80 p-2.5">
+              <p className="text-stone-400 text-[11px]">Conversations Imported</p>
+              <p className="font-semibold text-base text-emerald-400">{importSummary.conversations_imported}</p>
+            </div>
+            <div className="rounded-lg bg-surface/80 p-2.5">
+              <p className="text-stone-400 text-[11px]">Messages Imported</p>
+              <p className="font-semibold text-base text-sky-400">{importSummary.messages_imported}</p>
+            </div>
+            <div className="rounded-lg bg-surface/80 p-2.5">
+              <p className="text-stone-400 text-[11px]">Duplicates Skipped</p>
+              <p className="font-semibold text-base text-stone-300">{importSummary.duplicates_skipped}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* Re-auth alert */}
       {isReauthRequired && !isConfiguring && (
@@ -301,8 +375,18 @@ export function InstagramConnectionCard({
               Configured (Protected)
             </p>
           </div>
+          <div className="sm:col-span-2 lg:col-span-5 pt-2 border-t border-line/60 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="text-stone-400 flex items-center gap-1.5">
+              <Bell size={13} className="text-gold" />
+              Internal Lead WhatsApp: {statusData.lead_notification_whatsapp ? <span className="font-mono text-emerald-400">{statusData.lead_notification_whatsapp}</span> : <span className="text-stone-400">Not configured</span>}
+            </span>
+            <span className="text-stone-400">
+              Mode: <span className="text-stone-300">Text-only (Visual AI restricted)</span>
+            </span>
+          </div>
         </div>
       )}
+
 
       {/* Disconnected or Configuration Form */}
       {(isDisconnected || isConfiguring) && (
@@ -422,7 +506,21 @@ export function InstagramConnectionCard({
             )}
 
             <DashboardField
+              label="Internal High-Intent WhatsApp Notification Destination"
+              helper="When high-intent customers request an appointment or consultation, a silent internal WhatsApp alert is sent to this number. E.g. +971527288586"
+            >
+              <DashboardInput
+                type="text"
+                value={leadNotificationWhatsapp}
+                onChange={(e) => setLeadNotificationWhatsapp(e.target.value)}
+                placeholder="+971527288586"
+                disabled={!canManage || configureMutation.isPending}
+              />
+            </DashboardField>
+
+            <DashboardField
               label="Instagram Access Token"
+
               helper={
                 isConnected
                   ? 'Leave blank to preserve existing token, or paste a new token to update/re-authenticate. For security, stored tokens are never displayed.'

@@ -680,9 +680,10 @@ export async function operateConversation({
     );
     const conversation = result.rows[0];
     if (!conversation) throw new ConversationOperationError(404, 'Conversation not found', 'CONVERSATION_NOT_FOUND');
-    if (conversation.status !== 'open' && action !== 'close') {
+    if (conversation.status !== 'open' && action !== 'close' && action !== 'archive' && action !== 'unarchive') {
       throw new ConversationOperationError(409, 'Conversation is closed', 'CONVERSATION_CLOSED');
     }
+
 
     const actorUserId = actor?.userId ?? null;
     const isPrivilegedOperator = actor?.systemRole === 'OWNER' || actor?.tenantRole === 'ADMIN';
@@ -915,7 +916,42 @@ export async function operateConversation({
       return updated.rows[0];
     }
 
+    if (action === 'archive') {
+      await cancelConversationContextualFollowUps({ database: client, tenantId, conversationId }).catch(() => {});
+      const updated = await client.query(
+        `UPDATE conversations
+            SET status = 'archived',
+                last_activity_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1 AND tenant_id = $2
+          RETURNING *`,
+        [conversationId, tenantId]
+      );
+      await writeAuditEvent(client, { tenantId, conversationId, actorUserId, eventType: 'ARCHIVE' });
+      await notifyHumanTyping(client, tenantId, conversationId, false);
+      await notify(client, tenantId, conversationId, 'ARCHIVE');
+      await client.query('COMMIT');
+      return updated.rows[0];
+    }
+
+    if (action === 'unarchive') {
+      const updated = await client.query(
+        `UPDATE conversations
+            SET status = 'open',
+                last_activity_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1 AND tenant_id = $2
+          RETURNING *`,
+        [conversationId, tenantId]
+      );
+      await writeAuditEvent(client, { tenantId, conversationId, actorUserId, eventType: 'UNARCHIVE' });
+      await notify(client, tenantId, conversationId, 'UNARCHIVE');
+      await client.query('COMMIT');
+      return updated.rows[0];
+    }
+
     throw new ConversationOperationError(400, 'Unsupported conversation operation', 'CONVERSATION_OPERATION_INVALID');
+
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -1016,9 +1052,10 @@ export async function setConversationAiOverride({
       );
     }
 
-    if (cleanOverride === 'AI_ONLY' && convRow.status === 'open' && convRow.handling_mode !== 'HUMAN') {
+    if (cleanOverride === 'AI_ONLY' && convRow?.status === 'open' && convRow?.handling_mode !== 'HUMAN') {
       shouldTriggerImmediateResponse = true;
     }
+
 
     const actorUserId = actor?.id ?? actor?.userId ?? null;
     await writeAuditEvent(client, {

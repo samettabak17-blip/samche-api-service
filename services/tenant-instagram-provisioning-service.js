@@ -178,10 +178,15 @@ export async function getTenantInstagramStatus({ database = pool, tenantId }) {
       subscribed_fields: subscribedFields,
       has_token: hasToken,
       reauth_required: Boolean(config.reauth_required),
+      lead_notification_enabled: config.lead_notification_enabled !== false,
+      lead_notification_whatsapp: config.lead_notification_whatsapp || null,
+      visual_ai_enabled: Boolean(config.visual_ai_enabled),
+      history_import_available: connectionStatus === 'CONNECTED',
       last_health_check_at: config.last_health_check_at || null,
       created_at: row.created_at,
       updated_at: row.updated_at,
     };
+
   } finally {
     client.release();
   }
@@ -205,7 +210,11 @@ export async function configureTenantInstagramChannel({
   authMode = 'INSTAGRAM_LOGIN',
   activationPolicy = undefined,
   activationTriggers = undefined,
+  leadNotificationEnabled = undefined,
+  leadNotificationWhatsapp = undefined,
+  visualAiEnabled = undefined,
   status = 'active',
+
 }) {
   if (!tenantId) throw new TenantInstagramProvisioningError('TENANT_ID_REQUIRED', 'Tenant ID is required', 400);
 
@@ -309,7 +318,17 @@ export async function configureTenantInstagramChannel({
       account_username: accountUsername || existingConfig.account_username || null,
       account_name: accountName || existingConfig.account_name || displayName,
       access_token: resolvedToken,
+      lead_notification_enabled: typeof leadNotificationEnabled === 'boolean'
+        ? leadNotificationEnabled
+        : (existingConfig.lead_notification_enabled !== false),
+      lead_notification_whatsapp: typeof leadNotificationWhatsapp === 'string'
+        ? leadNotificationWhatsapp.trim()
+        : (leadNotificationWhatsapp === null ? null : (existingConfig.lead_notification_whatsapp || null)),
+      visual_ai_enabled: typeof visualAiEnabled === 'boolean'
+        ? visualAiEnabled
+        : Boolean(existingConfig.visual_ai_enabled),
       account_subscribed: autoSubscribed,
+
       subscribed_fields: autoSubscribedFields,
       reauth_required: false,
       updated_at: new Date().toISOString(),

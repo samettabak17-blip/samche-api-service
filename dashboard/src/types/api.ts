@@ -635,6 +635,10 @@ export interface InstagramChannelStatusResponse {
   auth_mode?: 'INSTAGRAM_LOGIN' | 'FACEBOOK_PAGE' | string;
   activation_policy?: AiActivationPolicy;
   activation_triggers?: string[];
+  lead_notification_enabled?: boolean;
+  lead_notification_whatsapp?: string | null;
+  visual_ai_enabled?: boolean;
+  history_import_available?: boolean;
   instagram_account_id?: string | null;
   page_id?: string | null;
   instagram_business_account_id?: string | null;
@@ -654,6 +658,9 @@ export interface InstagramConfigPayload {
   auth_mode?: 'INSTAGRAM_LOGIN' | 'FACEBOOK_PAGE' | string;
   activation_policy?: AiActivationPolicy;
   activation_triggers?: string[];
+  lead_notification_enabled?: boolean;
+  lead_notification_whatsapp?: string | null;
+  visual_ai_enabled?: boolean;
   instagram_account_id?: string;
   page_id?: string;
   instagram_business_account_id?: string;
@@ -662,6 +669,17 @@ export interface InstagramConfigPayload {
   access_token?: string;
   status?: 'active' | 'inactive';
 }
+
+export interface InstagramHistoryImportResponse {
+  success: boolean;
+  status: 'COMPLETED' | 'PARTIAL' | 'FAILED';
+  conversations_discovered: number;
+  conversations_imported: number;
+  messages_imported: number;
+  duplicates_skipped: number;
+  failed_conversations: number;
+}
+
 
 export interface InstagramTestConnectionResponse {
   healthy: boolean;

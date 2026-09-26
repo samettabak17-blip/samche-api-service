@@ -10,6 +10,8 @@ import { resolveCommunicationLanguage } from './conversation-communication-langu
 import { evaluateChannelAiActivationPolicy } from './channel-ai-activation-policy-service.js';
 import { applyWhatsAppAdaptivePacing } from './whatsapp-response-pacing-service.js';
 import { createGoogleGeminiProvider } from './google-gemini-provider.js';
+import { evaluateAndProcessHighIntentLead, hasHighIntentAppointmentSignals } from './high-intent-lead-service.js';
+
 
 export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
   'INSTAGRAM DM PRESENTATION & NATURAL HUMAN CONVERSATION RULES:',
@@ -44,7 +46,18 @@ export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
   '   - Ground all statements strictly in the active approved Business Profile and approved Knowledge.',
   '   - Treat approved Knowledge excerpts as a reference library, NOT a script to recite. Use ONLY the excerpts relevant to the customer\'s specific question and intent.',
   '   - Never invent prices, legal requirements, approvals, guarantees, or unsupported claims.',
+  '8. INSTAGRAM TEXT-ONLY & VISUAL AI RESTRICTION:',
+  '   - Instagram Direct Messaging is strictly text-only. Never generate images or invoke visual generation.',
+  '   - If the customer asks to generate or create an image (e.g. "bana bunun görselini oluştur", "tasarla"), respond naturally in text explaining that image generation is not supported on direct messages, and assist them directly with their business setup inquiry.',
+  '9. APPOINTMENT & HIGH-INTENT QUALIFICATION RULES:',
+  '   - When a customer expresses appointment, consultation, callback, or direct meeting intent (e.g. "Samed Bey sizinle görüşebilir miyiz?", "Randevu alabilir miyiz?", "Müsait olduğunuzda görüşelim", "Beni arayabilir misiniz?"):',
+  '     - DO NOT perform an immediate handoff and NEVER say phrases like "Sizi canlı temsilciye aktarıyorum", "Sizi Samed Bey\'e aktarıyorum", or "Sizi WhatsApp\'a yönlendiriyorum". Internal escalation is completely silent.',
+  '     - Naturally acknowledge the request conversationally (e.g. "Elbette. Randevu oluşturabilmemiz adına birkaç bilginizi almam gerekiyor. Bilgilerinizi benimle paylaşır mısınız?" or equivalent natural response).',
+  '     - Collect ONLY the necessary qualification info conversationally: customer name, preferred contact phone / WhatsApp number, and what they want to discuss / service needed (e.g. company activity, Free Zone/Mainland preference, visa count, timeline).',
+  '     - If the customer asks about pricing during qualification ("maliyeti ne kadar?", "danışmanlık ücreti nedir?"), answer directly with authoritative Main policy facts (8.000 AED Free Zone consultancy fee including corporate bank account opening and KYC support; license costs separate; do not invent exact license cost; do not volunteer Sponsored Residency unless living without company requested), and then continue collecting the missing appointment details.',
+  '     - DO NOT fabricate a confirmed calendar slot; record their preferred timing as a pending appointment request.',
 ].join('\n'));
+
 
 
 /**
@@ -101,25 +114,34 @@ export function formatInstagramDmResponse(rawText) {
  */
 async function loadRecentConversationHistory(database, tenantId, conversationId, limit = 10) {
   try {
-    const res = await database.query(
-      `SELECT id, sender_type, content, created_at
-         FROM conversation_messages
-        WHERE tenant_id = $1 AND conversation_id = $2
-        ORDER BY created_at DESC, id DESC
-        LIMIT $3`,
-      [tenantId, conversationId, limit]
-    );
-    return (res.rows || []).reverse().map((msg) => ({
-      role: msg.sender_type === 'CUSTOMER' ? 'user' : 'model',
-      parts: [{ text: msg.content || '' }],
-      sender_type: msg.sender_type,
-      content: msg.content,
-    }));
+    const isPool = typeof database?.connect === 'function' && typeof database?.query !== 'function';
+    const client = isPool ? await database.connect() : database;
+    try {
+      const res = await client.query(
+        `SELECT id, sender_type, content, created_at
+           FROM conversation_messages
+          WHERE tenant_id = $1 AND conversation_id = $2
+          ORDER BY created_at DESC, id DESC
+          LIMIT $3`,
+        [tenantId, conversationId, limit]
+      );
+      return (res.rows || []).reverse().map((msg) => ({
+        role: msg.sender_type === 'CUSTOMER' ? 'user' : 'model',
+        parts: [{ text: msg.content || '' }],
+        sender_type: msg.sender_type,
+        content: msg.content,
+      }));
+    } finally {
+      if (isPool && typeof client?.release === 'function') {
+        client.release();
+      }
+    }
   } catch (err) {
     console.warn('INSTAGRAM_LOAD_HISTORY_WARN', err?.message);
     return [];
   }
 }
+
 
 /**
  * Invokes the canonical Google Gemini provider with active system instruction & history.
@@ -204,9 +226,10 @@ export async function orchestrateInstagramInboundAiResponse({
   const accessToken = integration.config?.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
   const accountId = integration.config?.instagram_account_id || integration.config?.instagram_business_account_id || integration.config?.page_id || integration.external_channel_id;
 
-  // 1. Human Support Intent check (Ownership transition precedes AI generation)
+  // 1. Human Support Intent check (Appointments qualify conversationally without visible transfer)
   const humanSupport = parseCustomerHumanSupportRequest(text);
-  if (humanSupport.requested) {
+  const isAppointmentRequest = hasHighIntentAppointmentSignals(text);
+  if (humanSupport.requested && !isAppointmentRequest) {
     const lang = resolveCommunicationLanguage({
       currentLanguage: conversation.communication_language || 'en',
       content: text,
@@ -295,21 +318,30 @@ export async function orchestrateInstagramInboundAiResponse({
 
   // 4. Verify Latest Message is CUSTOMER and Unanswered (guards against duplicates/races)
   try {
-    const msgCheck = await database.query(
-      `SELECT id, sender_type, content, created_at
-         FROM conversation_messages
-        WHERE tenant_id = $1 AND conversation_id = $2
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1`,
-      [tenantId, conversationId]
-    );
-    const latest = msgCheck.rows?.[0];
-    if (latest && latest.sender_type !== 'CUSTOMER') {
-      return { skipped: true, reason: 'ALREADY_ANSWERED' };
+    const isPool = typeof database?.connect === 'function' && typeof database?.query !== 'function';
+    const client = isPool ? await database.connect() : database;
+    try {
+      const msgCheck = await client.query(
+        `SELECT id, sender_type, content, created_at
+           FROM conversation_messages
+          WHERE tenant_id = $1 AND conversation_id = $2
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1`,
+        [tenantId, conversationId]
+      );
+      const latest = msgCheck.rows?.[0];
+      if (latest && latest.sender_type !== 'CUSTOMER') {
+        return { skipped: true, reason: 'ALREADY_ANSWERED' };
+      }
+    } finally {
+      if (isPool && typeof client?.release === 'function') {
+        client.release();
+      }
     }
   } catch (chkErr) {
     console.warn('INSTAGRAM_MSG_CHECK_WARN', chkErr?.message);
   }
+
 
   // 5. Resolve Active Persona and Knowledge context
   let persona = null;
@@ -435,21 +467,41 @@ export async function orchestrateInstagramInboundAiResponse({
     }
 
     if (persisted.message?.id && deliveryResult?.providerMessageId) {
-      await database.query(
-        `UPDATE conversation_messages
-            SET external_message_id = $1
-          WHERE id = $2 AND tenant_id = $3`,
-        [deliveryResult.providerMessageId, persisted.message.id, tenantId]
-      ).catch((err) => console.warn('INSTAGRAM_MSG_PROVIDER_ID_UPDATE_WARN', err?.message));
+      const isPool = typeof database?.connect === 'function' && typeof database?.query !== 'function';
+      const dbClient = isPool ? await database.connect() : database;
+      try {
+        await dbClient.query(
+          `UPDATE conversation_messages
+              SET external_message_id = $1
+            WHERE id = $2 AND tenant_id = $3`,
+          [deliveryResult.providerMessageId, persisted.message.id, tenantId]
+        ).catch((err) => console.warn('INSTAGRAM_MSG_PROVIDER_ID_UPDATE_WARN', err?.message));
+      } finally {
+        if (isPool && typeof dbClient?.release === 'function') {
+          dbClient.release();
+        }
+      }
     }
+
   }
 
+  // Trigger high-intent qualification and silent internal notification asynchronously
+  evaluateAndProcessHighIntentLead({
+    tenantId,
+    conversationId,
+    database,
+    httpClient: http,
+  }).catch((err) => console.warn('HIGH_INTENT_LEAD_EVALUATION_NON_BLOCKING_WARN', err?.message));
+
   return {
+    aiInvoked: true,
     delivered: true,
     responseText: formattedResponse,
     deliveryResult,
     assistantMessageId: persisted.message?.id || null,
   };
+
+
 }
 
 /**
@@ -617,12 +669,21 @@ export async function generateAndDeliverInstagramAssistantResponse({
       }
     }
 
+    // Trigger high-intent qualification and silent internal notification asynchronously
+    evaluateAndProcessHighIntentLead({
+      tenantId,
+      conversationId,
+      database: client,
+      httpClient: http,
+    }).catch((err) => console.warn('HIGH_INTENT_LEAD_EVALUATION_NON_BLOCKING_WARN', err?.message));
+
     return {
       delivered: true,
       responseText: formattedResponse,
       deliveryResult,
       assistantMessageId: persisted.message?.id || null,
     };
+
   } finally {
     if (shouldRelease && typeof client?.release === 'function') {
       client.release();

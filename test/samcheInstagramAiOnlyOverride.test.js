@@ -209,11 +209,13 @@ test('4. AI_ONLY answers pending message exactly once (idempotent, no duplicates
 
   const mockDb = { async connect() { return mockClient; } };
   const fakeHttp = {
-    async post() {
+    async post(url, payload) {
+      if (payload?.sender_action) return { data: { success: true } };
       deliveredCount++;
       return { data: { message_id: `ig.mid.${deliveredCount}` } };
     },
   };
+
 
   const res1 = await setConversationAiOverride({
     tenantId,
@@ -273,9 +275,10 @@ test('5. Next inbound message receives AI processing under AI_ONLY override', as
           if (sql.includes('INSERT INTO conversation_messages')) {
             return { rowCount: 1, rows: [{ id: 'asst-msg-1', sender_type: 'ASSISTANT' }] };
           }
-          if (sql.includes('conversation_messages')) {
-            return { rowCount: 1, rows: [{ id: 'asst-msg-1', sender_type: 'ASSISTANT' }] };
+          if (sql.includes('SELECT id, sender_type') || sql.includes('conversation_messages')) {
+            return { rowCount: 1, rows: [{ id: 'cust-msg-1', sender_type: 'CUSTOMER', content: 'Sponsorlu oturum evrakları nelerdir?' }] };
           }
+
           return { rows: [] };
         },
         release() {},

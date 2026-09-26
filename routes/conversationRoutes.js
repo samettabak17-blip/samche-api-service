@@ -179,7 +179,8 @@ router.get('/:tenantId/conversations', requireTenantAccess, async (req, res) => 
   const channelType = req.query.channel_type;
   const search = typeof req.query.search === 'string' ? req.query.search.trim().slice(0, 160) : '';
   const searchTokens = search ? search.split(/\s+/u).filter(Boolean).slice(0, 12) : null;
-  if (status && !['open', 'closed', 'archived'].includes(status)) return res.status(400).json({ error: 'Invalid conversation status' });
+  if (status && !['open', 'closed', 'archived', 'all'].includes(status)) return res.status(400).json({ error: 'Invalid conversation status' });
+
   if (handlingMode && !['AI', 'HUMAN', 'PAUSED'].includes(handlingMode)) return res.status(400).json({ error: 'Invalid handling mode' });
   if (channelType && !isValidChannelType(channelType)) return res.status(400).json({ error: 'Invalid conversation channel type' });
 
@@ -212,7 +213,8 @@ router.get('/:tenantId/conversations', requireTenantAccess, async (req, res) => 
          LIMIT 1
        ) latest ON TRUE
        WHERE c.tenant_id = $1
-         AND ($2::text IS NULL OR c.status = $2)
+         AND ($2::text IS NULL AND c.status != 'archived' OR ($2::text = 'all' OR c.status = $2))
+
          AND ($3::text IS NULL OR c.handling_mode = $3)
          AND ($4::text IS NULL OR tc.channel_type = $4)
          AND ($5::text[] IS NULL
@@ -389,7 +391,10 @@ for (const [path, action] of [
   ['pause', 'pause'],
   ['resume', 'resume'],
   ['close', 'close'],
+  ['archive', 'archive'],
+  ['unarchive', 'unarchive'],
 ]) {
+
   router.post(`/:tenantId/conversations/:conversationId/${path}`, requireTenantAccess, async (req, res) => {
     const currentTenantId = tenantId(req, res);
     if (!currentTenantId) return;

@@ -39,6 +39,8 @@ import {
   testTenantInstagramConnection,
   TenantInstagramProvisioningError,
 } from '../services/tenant-instagram-provisioning-service.js';
+import { importTenantInstagramHistory } from '../services/tenant-instagram-history-import-service.js';
+
 import {
   getWhatsAppEmbeddedSignupConfig,
   exchangeAndOnboardWhatsApp,
@@ -847,6 +849,9 @@ router.post('/:tenantId/channels/instagram/config', requireTenantAccess, require
     auth_mode = 'INSTAGRAM_LOGIN',
     activation_policy,
     activation_triggers,
+    lead_notification_enabled,
+    lead_notification_whatsapp,
+    visual_ai_enabled,
     status = 'active',
   } = req.body ?? {};
 
@@ -867,6 +872,9 @@ router.post('/:tenantId/channels/instagram/config', requireTenantAccess, require
       authMode: auth_mode,
       activationPolicy: activation_policy,
       activationTriggers: activation_triggers,
+      leadNotificationEnabled: lead_notification_enabled,
+      leadNotificationWhatsapp: lead_notification_whatsapp,
+      visualAiEnabled: visual_ai_enabled,
       status,
     });
     return res.status(200).json(configured);
@@ -878,6 +886,28 @@ router.post('/:tenantId/channels/instagram/config', requireTenantAccess, require
     return res.status(500).json({ error: 'Server error' });
   }
 });
+
+router.post('/:tenantId/channels/instagram/import-history', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  if (!tenant(req, res)) return;
+  const { limit = 100 } = req.body ?? {};
+
+  try {
+    const database = req.app?.locals?.database || pool;
+    const result = await importTenantInstagramHistory({
+      database,
+      tenantId: req.verified_tenant_id,
+      limit: Math.min(Number(limit) || 100, 100),
+    });
+    return res.status(200).json(result);
+  } catch (error) {
+    if (error?.name === 'TenantInstagramHistoryImportError') {
+      return res.status(error.status).json({ error: error.code, message: error.message });
+    }
+    console.error('Import Instagram history error:', error);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
 
 router.post('/:tenantId/channels/instagram/disconnect', requireTenantAccess, requireTenantAdmin, async (req, res) => {
   if (!tenant(req, res)) return;
