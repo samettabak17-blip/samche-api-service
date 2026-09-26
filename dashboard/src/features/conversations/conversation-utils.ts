@@ -54,19 +54,50 @@ export function canTakeOverConversation({
   return handlingMode === 'AI' || (handlingMode === 'HUMAN' && humanAttentionState === 'REQUESTED');
 }
 
+export function formatInstagramCustomerDisplay(
+  displayName?: string | null,
+  username?: string | null,
+  customerExternalId?: string | null
+): string {
+  const cleanName = typeof displayName === 'string' && displayName.trim() && !displayName.startsWith('instagram:') && displayName.trim() !== 'Instagram conversation' && displayName.trim() !== 'Instagram User'
+    ? displayName.trim()
+    : null;
+
+  const rawIg = String(username || customerExternalId || '').replace(/^instagram:\s*/i, '').trim();
+  const cleanUsername = rawIg && !rawIg.startsWith('ig_synth_') && !/^[a-f0-9]{32,64}$/i.test(rawIg)
+    ? (rawIg.startsWith('@') ? rawIg : '@' + rawIg)
+    : null;
+
+  if (cleanName && cleanUsername) {
+    if (cleanName.toLowerCase() === cleanUsername.toLowerCase() || cleanName.toLowerCase() === cleanUsername.slice(1).toLowerCase()) {
+      return cleanUsername;
+    }
+    if (cleanName.includes(cleanUsername)) {
+      return cleanName;
+    }
+    return `${cleanName} (${cleanUsername})`;
+  }
+  if (cleanName) return cleanName;
+  if (cleanUsername) return cleanUsername;
+  return 'Instagram User';
+}
+
 export function displayConversationCustomerIdentifier(value?: string | null, channelType?: string | null): string {
   if (!value) return 'Customer conversation';
-  // Channel metadata is authoritative: legacy public session keys are shared
-  // implementation details and cannot distinguish Web Chat from AI Guide.
-  if (channelType === 'WEB_CHAT') return 'Web Chat conversation';
-  if (channelType === 'SAMCHEGUIDE') return 'Guide conversation';
-  if (channelType === 'INSTAGRAM') return 'Instagram conversation';
-  if (value.startsWith('instagram:')) return '@' + value.slice('instagram:'.length);
-
+  if (channelType === 'WEB_CHAT' || value.startsWith('web_chat:')) return 'Web Chat conversation';
+  if (channelType === 'SAMCHEGUIDE' || value.startsWith('samcheguide:')) return 'Guide conversation';
+  if (channelType === 'INSTAGRAM' || value.startsWith('instagram:')) {
+    const raw = value.replace(/^instagram:\s*/i, '').trim();
+    if (raw && !raw.startsWith('ig_synth_') && !/^[a-f0-9]{32,64}$/i.test(raw)) {
+      return raw.startsWith('@') ? raw : '@' + raw;
+    }
+    return 'Instagram User';
+  }
   if (value.startsWith('whatsapp:')) return '+' + value.slice('whatsapp:'.length);
   if (value.startsWith('samcheguide:')) return 'Guide conversation';
   return value;
 }
+
 
 
 export function isVoiceResource(resource: { media_category?: string | null; mime_type?: string | null }): boolean {

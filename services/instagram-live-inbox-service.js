@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
+import axios from 'axios';
 import pool from '../config/db.js';
 import { createConversationResource } from './conversation-resource-service.js';
 import { cancelConversationContextualFollowUps } from './durable-follow-up-service.js';
+import { instagramGraphApiBase } from './meta-graph-api-version.js';
 
 export class InstagramInboxError extends Error {
   constructor(code, message) {
@@ -10,6 +12,39 @@ export class InstagramInboxError extends Error {
     this.code = code;
   }
 }
+
+const profileCache = new Map();
+
+export async function resolveInstagramUserProfile({
+  senderIgsid,
+  accessToken,
+  http = axios,
+  graphBaseUrl = null,
+}) {
+  if (!senderIgsid || !accessToken) return null;
+  const cached = profileCache.get(senderIgsid);
+  if (cached && Date.now() - cached.fetchedAt < 3600 * 1000) {
+    return cached;
+  }
+  const baseUrl = graphBaseUrl || instagramGraphApiBase();
+  try {
+    const res = await http.get(`${baseUrl}/${senderIgsid}`, {
+      params: { fields: 'name,username', access_token: accessToken },
+      headers: { Authorization: `Bearer ${accessToken}` },
+      timeout: 5000,
+    });
+    const profile = {
+      name: res.data?.name || null,
+      username: res.data?.username || null,
+      fetchedAt: Date.now(),
+    };
+    profileCache.set(senderIgsid, profile);
+    return profile;
+  } catch {
+    return null;
+  }
+}
+
 
 export function instagramCustomerReference(senderIgsid) {
   return `instagram:${String(senderIgsid ?? '').trim()}`;
@@ -116,6 +151,7 @@ export async function persistInstagramInbound({
   content = '',
   attachments = [],
   referral = null,
+  http = axios,
   ensureConversationCrmIdentity = null,
   queueLeadQualification = null,
 }) {
@@ -141,6 +177,29 @@ export async function persistInstagramInbound({
 
     const conversationId = conversation.id;
 
+    let resolvedDisplayName = null;
+    const token = integration.config?.access_token ||
+      process.env.INSTAGRAM_ACCESS_TOKEN ||
+      process.env.INSTAGRAM_PAGE_ACCESS_TOKEN ||
+      process.env.META_ACCESS_TOKEN;
+
+    if (token && senderIgsid) {
+      try {
+        const profile = await resolveInstagramUserProfile({
+          senderIgsid,
+          accessToken: token,
+          http,
+        });
+        if (profile?.name && profile?.username) {
+          resolvedDisplayName = `${profile.name} (@${profile.username.replace(/^@/, '')})`;
+        } else if (profile?.username) {
+          resolvedDisplayName = `@${profile.username.replace(/^@/, '')}`;
+        } else if (profile?.name) {
+          resolvedDisplayName = profile.name;
+        }
+      } catch {}
+    }
+
     // Resolve / establish canonical CRM identity for this contact
     const crmEnsureFn = typeof ensureConversationCrmIdentity === 'function'
       ? ensureConversationCrmIdentity
@@ -153,6 +212,7 @@ export async function persistInstagramInbound({
           tenantId,
           conversationId,
           source: sourceKind,
+          displayName: resolvedDisplayName,
           externalCustomerId: instagramCustomerReference(senderIgsid),
         });
         await client.query('RELEASE SAVEPOINT crm_identity_sp');
@@ -168,6 +228,7 @@ export async function persistInstagramInbound({
         console.warn('INSTAGRAM_CRM_IDENTITY_WARN', crmErr?.message);
       }
     }
+
 
 
     // Idempotency check for incoming provider message ID

@@ -146,7 +146,17 @@ export async function importTenantInstagramHistory({
           (metaConv.messages?.data?.[0]?.from?.id !== myUserId ? metaConv.messages?.data?.[0]?.from?.id : null) ||
           metaConv.id;
 
-        const customerDisplayName = customerParticipant?.name || customerParticipant?.username || null;
+        const custName = customerParticipant?.name || null;
+        const custUsername = customerParticipant?.username || null;
+        let customerDisplayName = null;
+        if (custName && custUsername) {
+          customerDisplayName = `${custName} (@${custUsername.replace(/^@/, '')})`;
+        } else if (custUsername) {
+          customerDisplayName = `@${custUsername.replace(/^@/, '')}`;
+        } else if (custName) {
+          customerDisplayName = custName;
+        }
+
         const custRef = instagramCustomerReference(customerIgsid);
         const extConvId = instagramExternalConversationId(customerIgsid);
 
@@ -158,11 +168,12 @@ export async function importTenantInstagramHistory({
            VALUES ($1, 'EXTERNAL_CUSTOMER', $2, $3, 'INSTAGRAM', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
            ON CONFLICT (tenant_id, identity_hash)
            DO UPDATE SET
-             display_name = COALESCE(crm_contacts.display_name, EXCLUDED.display_name),
+             display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), crm_contacts.display_name),
              updated_at = CURRENT_TIMESTAMP
            RETURNING id, ai_behavior_override`,
           [tenantId, identityHash, customerDisplayName]
         );
+
 
         const contact = contactRes.rows[0];
         const contactOverride = contact.ai_behavior_override && contact.ai_behavior_override !== 'UNDECIDED'

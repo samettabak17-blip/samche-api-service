@@ -53,15 +53,37 @@ export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
   '   - When a customer expresses appointment, consultation, callback, or direct meeting intent (e.g. "Samed Bey sizinle görüşebilir miyiz?", "Randevu alabilir miyiz?", "Müsait olduğunuzda görüşelim", "Beni arayabilir misiniz?"):',
   '     - DO NOT perform an immediate handoff and NEVER say phrases like "Sizi canlı temsilciye aktarıyorum", "Sizi Samed Bey\'e aktarıyorum", or "Sizi WhatsApp\'a yönlendiriyorum". Internal escalation is completely silent.',
   '     - Naturally acknowledge the request conversationally (e.g. "Elbette. Randevu oluşturabilmemiz adına birkaç bilginizi almam gerekiyor. Bilgilerinizi benimle paylaşır mısınız?" or equivalent natural response).',
-  '     - Collect ONLY the necessary qualification info conversationally: customer name, preferred contact phone / WhatsApp number, and what they want to discuss / service needed (e.g. company activity, Free Zone/Mainland preference, visa count, timeline).',
+  '     - Collect ONLY the necessary qualification info conversationally: customer name (only if not already known), preferred contact phone / WhatsApp number, and what they want to discuss / service needed (e.g. company activity, Free Zone/Mainland preference, visa count, timeline).',
   '     - If the customer asks about pricing during qualification ("maliyeti ne kadar?", "danışmanlık ücreti nedir?"), answer directly with authoritative Main policy facts (8.000 AED Free Zone consultancy fee including corporate bank account opening and KYC support; license costs separate; do not invent exact license cost; do not volunteer Sponsored Residency unless living without company requested), and then continue collecting the missing appointment details.',
   '     - DO NOT fabricate a confirmed calendar slot; record their preferred timing as a pending appointment request.',
+  '10. CUSTOMER DISPLAY-NAME & NATURAL ADDRESSING:',
+  '    - If the customer\'s real display name is provided in Customer Identity Context (e.g. "Ahmet Yılmaz"), you may address them naturally and politely in Turkish (e.g. "Ahmet Bey" or natural conversational addressing).',
+  '    - NEVER address the customer by their Instagram username (e.g. do NOT say "@ahmet34" or "@ahmetyilmaz").',
+  '    - NEVER address the customer as "Instagram conversation", "Instagram User", or by an ID.',
+  '    - Do NOT repeatedly use their name in every response; use it naturally where appropriate (greetings, acknowledgements, qualification).',
+  '    - During appointment qualification, if the customer\'s real name is already known from context, do NOT redundantly ask "Adınız nedir?". Proceed directly to collecting missing contact details (phone/WhatsApp, service details).',
 ].join('\n'));
 
 
 
+
+export function extractReliableCustomerName(rawDisplayName) {
+  if (!rawDisplayName || typeof rawDisplayName !== 'string') return null;
+  const trimmed = rawDisplayName.trim();
+  if (trimmed.startsWith('instagram:') || trimmed === 'Instagram conversation' || trimmed === 'Instagram User') {
+    return null;
+  }
+  const match = trimmed.match(/^([^(]+)(?:\s*\(@[^)]+\))?$/);
+  const nameCandidate = (match?.[1] || trimmed).trim();
+  if (!nameCandidate || nameCandidate.startsWith('@') || nameCandidate.toLowerCase() === 'instagram user') {
+    return null;
+  }
+  return nameCandidate;
+}
+
 /**
  * Normalizes and formats AI response text for optimal readability in Instagram Direct Messages.
+
  * Guarantees vertical separation of list items, strips raw markdown fences, and formats clean paragraph breaks.
  */
 export function formatInstagramDmResponse(rawText) {
@@ -372,18 +394,30 @@ export async function orchestrateInstagramInboundAiResponse({
   // 6. Load Recent Conversation History
   const history = await loadRecentConversationHistory(database, tenantId, conversationId, 10);
 
-  // 7. Build System Instruction with Channel Presentation Rules
+  // 7. Build System Instruction with Channel Presentation Rules and Customer Identity Context
+  const rawCustomerName = conversation?.contact_display_name || conversation?.display_name || null;
+  const reliableCustomerName = extractReliableCustomerName(rawCustomerName);
+  const customerIdentityContext = reliableCustomerName
+    ? `CUSTOMER IDENTITY CONTEXT:\n- Customer Real Display Name: "${reliableCustomerName}"\n- You may address the customer naturally as "${reliableCustomerName}" / in Turkish.\n- Do NOT treat their username as a real name.\n- During appointment qualification, since their name is already known, do NOT ask "Adınız nedir?".`
+    : '';
+
+  const channelRules = [
+    INSTAGRAM_CHANNEL_PRESENTATION_RULES,
+    customerIdentityContext,
+  ].filter(Boolean).join('\n\n');
+
   const systemInstruction = persona?.available
     ? buildTenantRuntimeSystemInstruction({
         persona,
         knowledgeContext: knowledge?.knowledgeContext || '',
-        channelRules: INSTAGRAM_CHANNEL_PRESENTATION_RULES,
+        channelRules,
       })
     : [
         'PLATFORM RUNTIME SAFETY: Enforce tenant isolation and channel delivery rules.',
-        INSTAGRAM_CHANNEL_PRESENTATION_RULES,
+        channelRules,
         knowledge?.knowledgeContext ? `APPROVED KNOWLEDGE:\n${knowledge.knowledgeContext}` : '',
       ].filter(Boolean).join('\n\n');
+
 
   // 8. Start Instagram Typing Indicator (non-blocking)
   const generationStartedAt = Date.now();
@@ -574,17 +608,29 @@ export async function generateAndDeliverInstagramAssistantResponse({
 
     const history = await loadRecentConversationHistory(client, tenantId, conversationId, 10);
 
+    const rawCustomerName = conversation?.contact_display_name || conversation?.display_name || null;
+    const reliableCustomerName = extractReliableCustomerName(rawCustomerName);
+    const customerIdentityContext = reliableCustomerName
+      ? `CUSTOMER IDENTITY CONTEXT:\n- Customer Real Display Name: "${reliableCustomerName}"\n- You may address the customer naturally as "${reliableCustomerName}" / in Turkish.\n- Do NOT treat their username as a real name.\n- During appointment qualification, since their name is already known, do NOT ask "Adınız nedir?".`
+      : '';
+
+    const channelRules = [
+      INSTAGRAM_CHANNEL_PRESENTATION_RULES,
+      customerIdentityContext,
+    ].filter(Boolean).join('\n\n');
+
     const systemInstruction = persona?.available
       ? buildTenantRuntimeSystemInstruction({
           persona,
           knowledgeContext: knowledge?.knowledgeContext || '',
-          channelRules: INSTAGRAM_CHANNEL_PRESENTATION_RULES,
+          channelRules,
         })
       : [
           'PLATFORM RUNTIME SAFETY: Enforce tenant isolation and channel delivery rules.',
-          INSTAGRAM_CHANNEL_PRESENTATION_RULES,
+          channelRules,
           knowledge?.knowledgeContext ? `APPROVED KNOWLEDGE:\n${knowledge.knowledgeContext}` : '',
         ].filter(Boolean).join('\n\n');
+
 
     const generationStartedAt = Date.now();
     if (accessToken && recipientIgsid) {

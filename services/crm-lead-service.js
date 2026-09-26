@@ -68,6 +68,7 @@ export async function ensureConversationCrmIdentity(client, {
   conversationId,
   source = 'SAMCHEGUIDE',
   externalCustomerId = null,
+  displayName = null,
 }) {
   const conversationResult = await client.query(
     `SELECT id, tenant_id, customer_external_id, contact_id, ai_behavior_override
@@ -84,15 +85,19 @@ export async function ensureConversationCrmIdentity(client, {
     source,
     externalCustomerId: externalCustomerId ?? conversation.customer_external_id,
   });
+  const effectiveDisplayName = displayName || identity.displayName;
   const contactResult = await client.query(
     `INSERT INTO crm_contacts
       (tenant_id, identity_kind, identity_hash, display_name, email, phone, source)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (tenant_id, identity_hash)
-     DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+     DO UPDATE SET
+       display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), crm_contacts.display_name),
+       updated_at = CURRENT_TIMESTAMP
      RETURNING *`,
-    [tenantId, identity.kind, identity.identityHash, identity.displayName, identity.email, identity.phone, source]
+    [tenantId, identity.kind, identity.identityHash, effectiveDisplayName, identity.email, identity.phone, source]
   );
+
   const contact = contactResult.rows[0];
   const contactOverride = contact.ai_behavior_override;
   const convOverride = conversation.ai_behavior_override;

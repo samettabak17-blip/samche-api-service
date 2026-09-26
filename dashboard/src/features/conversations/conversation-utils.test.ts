@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { canTakeOverConversation, canUseHumanReplyComposer, clearSentAgentDraft, displayConversationCustomerIdentifier, isInlinePreviewableAttachment, isVoiceResource, voiceResourceDisplayLabel, resourceDisplayName, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel, deliveryTickPresentation } from './conversation-utils';
+import { canTakeOverConversation, canUseHumanReplyComposer, clearSentAgentDraft, displayConversationCustomerIdentifier, formatInstagramCustomerDisplay, isInlinePreviewableAttachment, isVoiceResource, voiceResourceDisplayLabel, resourceDisplayName, dashboardSoundMutePreferenceKey, liveSupportAlertTitle, liveSupportWaitingLabel, senderLabel, senderTone, supportsHumanReplyChannel, deliveryTickPresentation } from './conversation-utils';
+
 
 describe('conversation sender presentation', () => {
   it('maps every backend sender type to a distinct safe label', () => {
@@ -81,6 +82,16 @@ describe('customer identifier presentation', () => {
     expect(displayConversationCustomerIdentifier('whatsapp:971501234567')).toBe('+971501234567');
     expect(displayConversationCustomerIdentifier('samcheguide:opaque-session', 'SAMCHEGUIDE')).toBe('Guide conversation');
     expect(displayConversationCustomerIdentifier('samcheguide:opaque-session', 'WEB_CHAT')).toBe('Web Chat conversation');
+    expect(displayConversationCustomerIdentifier('instagram:ahmetyilmaz', 'INSTAGRAM')).toBe('@ahmetyilmaz');
+  });
+
+  it('formats Instagram customer identity with correct display priority', () => {
+    expect(formatInstagramCustomerDisplay('Ahmet Yılmaz', 'ahmetyilmaz')).toBe('Ahmet Yılmaz (@ahmetyilmaz)');
+    expect(formatInstagramCustomerDisplay(null, 'ahmetyilmaz')).toBe('@ahmetyilmaz');
+    expect(formatInstagramCustomerDisplay('Ahmet Yılmaz', null)).toBe('Ahmet Yılmaz');
+    expect(formatInstagramCustomerDisplay(null, null, 'instagram:123456')).toBe('@123456');
+    expect(formatInstagramCustomerDisplay(null, null, null)).toBe('Instagram User');
+    expect(formatInstagramCustomerDisplay('Instagram conversation', null, null)).toBe('Instagram User');
   });
 
   it('cannot relabel Web Chat and AI Guide conversations as one another', () => {
@@ -89,6 +100,7 @@ describe('customer identifier presentation', () => {
     expect(displayConversationCustomerIdentifier(sharedLegacyReference, 'SAMCHEGUIDE')).toBe('Guide conversation');
   });
 });
+
 
 
 describe('WhatsApp voice-resource presentation', () => {

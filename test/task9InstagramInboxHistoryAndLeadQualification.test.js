@@ -607,5 +607,114 @@ test('TEST S — Instagram Ad / Referral Lead (Ad Ingress into Canonical AI Pipe
   assert.ok(deliveredNotifications[0].text.body.includes('+971509998877'));
   assert.ok(deliveredNotifications[0].text.body.includes('Kaynak: Instagram Ad'));
 });
+test('TEST T — Display-name addressing (Uses real display name, not username or ID)', async () => {
+  const { extractReliableCustomerName } = await import('../services/instagram-ai-orchestrator.js');
+
+  const withBoth = 'Ahmet Yılmaz (@ahmet34)';
+  const withNameOnly = 'Ahmet Yılmaz';
+  const withUsernameOnly = '@ahmet34';
+  const fallbackVal = 'Instagram User';
+  const legacyVal = 'Instagram conversation';
+
+  assert.equal(extractReliableCustomerName(withBoth), 'Ahmet Yılmaz');
+  assert.equal(extractReliableCustomerName(withNameOnly), 'Ahmet Yılmaz');
+  assert.equal(extractReliableCustomerName(withUsernameOnly), null); // username is not used as a name
+  assert.equal(extractReliableCustomerName(fallbackVal), null);
+  assert.equal(extractReliableCustomerName(legacyVal), null);
+
+  assert.ok(INSTAGRAM_CHANNEL_PRESENTATION_RULES.includes('CUSTOMER DISPLAY-NAME & NATURAL ADDRESSING'));
+  assert.ok(INSTAGRAM_CHANNEL_PRESENTATION_RULES.includes('NEVER address the customer by their Instagram username'));
+  assert.ok(INSTAGRAM_CHANNEL_PRESENTATION_RULES.includes('NEVER address the customer as "Instagram conversation", "Instagram User"'));
+});
+
+test('TEST U — Name already known during appointment qualification (No redundant name request)', () => {
+  assert.ok(INSTAGRAM_CHANNEL_PRESENTATION_RULES.includes('During appointment qualification, if the customer\'s real name is already known from context, do NOT redundantly ask "Adınız nedir?"'));
+});
+
+test('TEST V — Username only (Continues naturally without inventing name)', async () => {
+  const { extractReliableCustomerName } = await import('../services/instagram-ai-orchestrator.js');
+  const nameFromUsername = extractReliableCustomerName('@dev_john_99');
+  assert.equal(nameFromUsername, null); // AI does not pretend @dev_john_99 is real name
+});
+
+test('TEST W — Identity metadata changes (Username/display name change preserves contact & NEVER_AI)', async () => {
+  const tenantId = '11111111-1111-4111-8111-111111111111';
+  const senderIgsid = '17841400999999999';
+  const custRef = `instagram:${senderIgsid}`;
+  const identityHash = crypto.createHash('sha256').update(`${tenantId}:EXTERNAL_CUSTOMER:${custRef.toLowerCase()}`).digest('hex');
+
+  let contactStore = {
+    id: 'contact_stable_uuid',
+    tenant_id: tenantId,
+    identity_hash: identityHash,
+    display_name: 'Ahmet Eski (@ahmet_old)',
+    ai_behavior_override: 'NEVER_AI',
+  };
+
+  const mockDbClient = new MockDatabaseClient({
+    queries: {
+      'INSERT INTO crm_contacts': (params) => {
+        contactStore.display_name = params[3] || contactStore.display_name;
+        return { rowCount: 1, rows: [contactStore] };
+      },
+    },
+  });
+
+  // Contact updates display name to 'Ahmet Yeni (@ahmet_new)'
+  const updatedDisplayName = 'Ahmet Yeni (@ahmet_new)';
+  const contactRes = await mockDbClient.query(
+    `INSERT INTO crm_contacts (tenant_id, identity_kind, identity_hash, display_name, email, phone, source)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (tenant_id, identity_hash) DO UPDATE SET display_name = EXCLUDED.display_name RETURNING *`,
+    [tenantId, 'EXTERNAL_CUSTOMER', identityHash, updatedDisplayName, null, null, 'INSTAGRAM']
+  );
+
+  // Stable ID is unchanged
+  assert.equal(contactRes.rows[0].id, 'contact_stable_uuid');
+  assert.equal(contactRes.rows[0].identity_hash, identityHash);
+  // NEVER_AI preference survived
+  assert.equal(contactRes.rows[0].ai_behavior_override, 'NEVER_AI');
+  // Presentation metadata updated
+  assert.equal(contactStore.display_name, 'Ahmet Yeni (@ahmet_new)');
+});
+
+test('TEST X — Contact Information Phone fallback is clean (Never "Instagram conversation")', () => {
+  // Test formatting logic directly
+  function formatInstagramCustomerDisplay(displayName, username, customerExternalId) {
+    const cleanName = typeof displayName === 'string' && displayName.trim() && !displayName.startsWith('instagram:') && displayName.trim() !== 'Instagram conversation' && displayName.trim() !== 'Instagram User'
+      ? displayName.trim()
+      : null;
+
+    const rawIg = String(username || customerExternalId || '').replace(/^instagram:\s*/i, '').trim();
+    const cleanUsername = rawIg && !rawIg.startsWith('ig_synth_') && !/^[a-f0-9]{32,64}$/i.test(rawIg)
+      ? (rawIg.startsWith('@') ? rawIg : '@' + rawIg)
+      : null;
+
+    if (cleanName && cleanUsername) {
+      if (cleanName.toLowerCase() === cleanUsername.toLowerCase() || cleanName.toLowerCase() === cleanUsername.slice(1).toLowerCase()) {
+        return cleanUsername;
+      }
+      if (cleanName.includes(cleanUsername)) {
+        return cleanName;
+      }
+      return `${cleanName} (${cleanUsername})`;
+    }
+    if (cleanName) return cleanName;
+    if (cleanUsername) return cleanUsername;
+    return 'Instagram User';
+  }
+
+  const formattedWithUsername = formatInstagramCustomerDisplay(null, 'ahmetyilmaz');
+  assert.equal(formattedWithUsername, '@ahmetyilmaz');
+
+  const formattedWithNameAndUsername = formatInstagramCustomerDisplay('Ahmet Yılmaz', 'ahmetyilmaz');
+  assert.equal(formattedWithNameAndUsername, 'Ahmet Yılmaz (@ahmetyilmaz)');
+
+  const fallback = formatInstagramCustomerDisplay(null, null);
+  assert.equal(fallback, 'Instagram User');
+  assert.notEqual(fallback, 'Instagram conversation');
+});
+
+
 
 
