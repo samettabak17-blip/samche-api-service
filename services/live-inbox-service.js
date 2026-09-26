@@ -971,13 +971,37 @@ export async function setConversationAiOverride({
     updatedConversation = updated.rows[0];
 
     // Persist durable contact-level override to CRM contact
-    if (convRow.contact_id) {
+    let effectiveContactId = convRow.contact_id;
+    if (!effectiveContactId && convRow.customer_external_id) {
+      const { crmContactIdentity } = await import('./crm-lead-service.js');
+      const identity = crmContactIdentity({
+        tenantId,
+        source: 'INSTAGRAM',
+        externalCustomerId: convRow.customer_external_id,
+      });
+      const contactRes = await client.query(
+        `INSERT INTO crm_contacts
+          (tenant_id, identity_kind, identity_hash, display_name, source, ai_behavior_override)
+         VALUES ($1, $2, $3, $4, 'INSTAGRAM', $5)
+         ON CONFLICT (tenant_id, identity_hash)
+         DO UPDATE SET ai_behavior_override = EXCLUDED.ai_behavior_override, updated_at = CURRENT_TIMESTAMP
+         RETURNING id`,
+        [tenantId, identity.kind, identity.identityHash, identity.displayName, cleanOverride]
+      );
+      if (contactRes.rows[0]?.id) {
+        effectiveContactId = contactRes.rows[0].id;
+        await client.query(
+          `UPDATE conversations SET contact_id = $1 WHERE id = $2 AND tenant_id = $3`,
+          [effectiveContactId, conversationId, tenantId]
+        );
+      }
+    } else if (effectiveContactId) {
       await client.query(
         `UPDATE crm_contacts
             SET ai_behavior_override = $1,
                 updated_at = CURRENT_TIMESTAMP
           WHERE id = $2 AND tenant_id = $3`,
-        [cleanOverride, convRow.contact_id, tenantId]
+        [cleanOverride, effectiveContactId, tenantId]
       );
     }
 

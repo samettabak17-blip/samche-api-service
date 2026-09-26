@@ -94,9 +94,22 @@ export async function ensureConversationCrmIdentity(client, {
     [tenantId, identity.kind, identity.identityHash, identity.displayName, identity.email, identity.phone, source]
   );
   const contact = contactResult.rows[0];
-  const contactOverride = contact.ai_behavior_override || 'AUTOMATIC';
-  const convOverride = conversation.ai_behavior_override || 'AUTOMATIC';
-  const effectiveOverride = contactOverride !== 'AUTOMATIC' ? contactOverride : convOverride;
+  const contactOverride = contact.ai_behavior_override;
+  const convOverride = conversation.ai_behavior_override;
+
+  let effectiveOverride = 'FIRST_CONTACT_HOLD';
+  if (contactOverride && contactOverride !== 'UNDECIDED') {
+    effectiveOverride = contactOverride;
+  } else if (convOverride && convOverride !== 'UNDECIDED') {
+    effectiveOverride = convOverride;
+    await client.query(
+      `UPDATE crm_contacts SET ai_behavior_override = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND tenant_id = $3`,
+      [effectiveOverride, contact.id, tenantId]
+    );
+    contact.ai_behavior_override = effectiveOverride;
+  } else {
+    effectiveOverride = 'FIRST_CONTACT_HOLD';
+  }
 
   if (conversation.contact_id !== contact.id || convOverride !== effectiveOverride) {
     await client.query(

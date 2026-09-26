@@ -140,10 +140,14 @@ export async function persistInstagramInbound({
     const conversationId = conversation.id;
 
     // Resolve / establish canonical CRM identity for this contact
-    if (typeof ensureConversationCrmIdentity === 'function') {
+    const crmEnsureFn = typeof ensureConversationCrmIdentity === 'function'
+      ? ensureConversationCrmIdentity
+      : (await import('./crm-lead-service.js')).ensureConversationCrmIdentity;
+
+    if (typeof crmEnsureFn === 'function') {
       try {
         await client.query('SAVEPOINT crm_identity_sp');
-        await ensureConversationCrmIdentity(client, {
+        await crmEnsureFn(client, {
           tenantId,
           conversationId,
           source: 'INSTAGRAM',

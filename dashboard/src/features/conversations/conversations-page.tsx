@@ -211,6 +211,14 @@ export function ConversationsPage() {
       if (!conversationId) throw new Error('Conversation not selected');
       return tenantApi.setConversationAiOverride(tenantId, conversationId, override);
     },
+    onMutate: async (newOverride) => {
+      if (conversationId) {
+        queryClient.setQueryData(
+          tenantKeys.conversation(tenantId, conversationId),
+          (old: any) => old ? { ...old, ai_behavior_override: newOverride } : old
+        );
+      }
+    },
     onSuccess: async () => {
       await refresh('ai-override');
     },

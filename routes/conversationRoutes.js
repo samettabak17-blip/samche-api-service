@@ -112,6 +112,7 @@ async function conversationContext(tenantId, conversationId) {
        contact.phone AS contact_phone,
        contact.language AS contact_language,
        contact.country AS contact_country,
+       contact.ai_behavior_override AS contact_ai_behavior_override,
        latest.content AS last_message_preview,
        latest.created_at AS last_message_at
      FROM conversations c
@@ -132,8 +133,12 @@ async function conversationContext(tenantId, conversationId) {
   const conversation = result.rows[0] ?? null;
   if (!conversation) return null;
   const humanDelivery = await getHumanDeliveryCapability({ tenantId, conversationId });
+  const effectiveOverride = (conversation.ai_behavior_override && conversation.ai_behavior_override !== 'AUTOMATIC')
+    ? conversation.ai_behavior_override
+    : (conversation.contact_ai_behavior_override || conversation.ai_behavior_override || 'FIRST_CONTACT_HOLD');
   return {
     ...conversation,
+    ai_behavior_override: effectiveOverride,
     human_delivery_configured: humanDelivery?.configured === true,
   };
 }
@@ -191,6 +196,7 @@ router.get('/:tenantId/conversations', requireTenantAccess, async (req, res) => 
          contact.phone AS contact_phone,
          contact.language AS contact_language,
          contact.country AS contact_country,
+         contact.ai_behavior_override AS contact_ai_behavior_override,
          latest.content AS last_message_preview,
          latest.created_at AS last_message_at
        FROM conversations c
@@ -232,7 +238,13 @@ router.get('/:tenantId/conversations', requireTenantAccess, async (req, res) => 
        LIMIT $6 OFFSET $7`,
       [currentTenantId, status ?? null, handlingMode ?? null, channelType ?? null, searchTokens, page.limit, page.offset]
     );
-    return res.json(result.rows);
+    const rows = result.rows.map((row) => ({
+      ...row,
+      ai_behavior_override: (row.ai_behavior_override && row.ai_behavior_override !== 'AUTOMATIC')
+        ? row.ai_behavior_override
+        : (row.contact_ai_behavior_override || row.ai_behavior_override || 'FIRST_CONTACT_HOLD'),
+    }));
+    return res.json(rows);
   } catch (error) {
     console.error('List tenant conversations error:', error?.code ?? error?.name ?? 'unknown');
     return res.status(500).json({ error: 'Server error' });

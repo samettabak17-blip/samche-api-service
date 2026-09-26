@@ -178,7 +178,8 @@ export async function evaluateChannelAiActivationPolicy({
   }
 
   // 2. Contact / Conversation Override Precedence
-  const override = String(conversation?.ai_behavior_override ?? AI_BEHAVIOR_OVERRIDES.AUTOMATIC).toUpperCase();
+  const rawOverride = conversation?.ai_behavior_override || conversation?.contact_ai_behavior_override || conversation?.contact?.ai_behavior_override || AI_BEHAVIOR_OVERRIDES.AUTOMATIC;
+  const override = String(rawOverride).toUpperCase().trim();
 
   if (override === 'NEVER_AI') {
     return {

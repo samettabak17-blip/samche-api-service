@@ -2,6 +2,31 @@
 -- Fully idempotent, tenant-scoped, and safe for live staging and historical tenants.
 
 BEGIN;
+-- 0. Update conversation_audit_events CHECK constraint to include 'AI_OVERRIDE_UPDATED'
+DO $$
+DECLARE
+  constraint_name text;
+BEGIN
+  FOR constraint_name IN
+    SELECT conname
+    FROM pg_constraint
+    WHERE conrelid = 'conversation_audit_events'::regclass
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%event_type%'
+  LOOP
+    EXECUTE format('ALTER TABLE conversation_audit_events DROP CONSTRAINT %I', constraint_name);
+  END LOOP;
+
+  ALTER TABLE conversation_audit_events
+    ADD CONSTRAINT ck_conversation_audit_events_event_type
+    CHECK (event_type IN (
+      'TAKEOVER', 'RETURN_TO_AI', 'PAUSE', 'RESUME', 'CLOSE',
+      'ASSIGNMENT', 'HANDOFF_REQUESTED', 'HUMAN_MESSAGE',
+      'HUMAN_SUPPORT_ACKNOWLEDGED', 'HUMAN_SUPPORT_REQUESTED',
+      'AI_OVERRIDE_UPDATED'
+    ));
+END $$;
+
 
 DO $$
 DECLARE
@@ -201,16 +226,33 @@ BEGIN
     RETURNING id INTO bpv_id;
 
     UPDATE business_profiles
-       SET active_version_id = bpv_id, activated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       SET active_version_id = bpv_id,
+           approved_version_id = bpv_id,
+           activated_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
      WHERE id = bp_id AND tenant_id = t_id;
 
-    IF legacy_acv_ids IS NOT NULL AND ARRAY_LENGTH(legacy_acv_ids, 1) > 0 THEN
-    -- 8. Upsert Staging Candidate Assistant & Configuration Version
-    INSERT INTO ai_assistants (id, tenant_id, name, model, status)
-    VALUES (gen_random_uuid(), t_id, 'SamChe AI Staging Candidate', 'gemini-2.5-pro', 'active')
-    ON CONFLICT (tenant_id, name)
-    DO UPDATE SET model = 'gemini-2.5-pro', status = 'active', updated_at = CURRENT_TIMESTAMP
-    RETURNING id INTO ast_id;
+    -- Clean up any other legacy business profiles for this tenant
+    DELETE FROM business_profiles
+     WHERE tenant_id = t_id AND id != bp_id;
+
+    -- 8. Upsert Assistant & Active Configuration Version
+    SELECT id INTO ast_id
+      FROM ai_assistants
+     WHERE tenant_id = t_id
+       AND (name ILIKE '%SamChe%' OR name ILIKE '%Main%')
+     ORDER BY created_at ASC
+     LIMIT 1;
+
+    IF ast_id IS NULL THEN
+      ast_id := gen_random_uuid();
+      INSERT INTO ai_assistants (id, tenant_id, name, model, status)
+      VALUES (ast_id, t_id, 'SamChe AI', 'gemini-2.5-pro', 'active');
+    ELSE
+      UPDATE ai_assistants
+         SET model = 'gemini-2.5-pro', status = 'active', updated_at = CURRENT_TIMESTAMP
+       WHERE id = ast_id AND tenant_id = t_id;
+    END IF;
 
     INSERT INTO assistant_configuration_versions (
       id, tenant_id, assistant_id, schema_version, configuration_data,
@@ -266,18 +308,28 @@ BEGIN
     SELECT t_id, unnest(src_ids), ast_id
     ON CONFLICT (tenant_id, source_id, assistant_id) DO NOTHING;
 
-      UPDATE ai_assistants
-         SET active_configuration_version_id = NULL
-       WHERE tenant_id = t_id AND active_configuration_version_id = ANY(legacy_acv_ids);
-      DELETE FROM assistant_configuration_versions WHERE tenant_id = t_id AND id = ANY(legacy_acv_ids);
-    END IF;
+    -- 9. Bind tenant channels and integrations to this active assistant
+    UPDATE tenant_channels
+       SET assistant_id = ast_id, updated_at = CURRENT_TIMESTAMP
+     WHERE tenant_id = t_id AND channel_type = 'INSTAGRAM';
 
-    -- 5. Ensure canonical Business Identity
-    INSERT INTO business_identities (id, tenant_id, display_name, normalized_identity, status)
-    VALUES (gen_random_uuid(), t_id, 'SamChe Company LLC', 'samche company llc', 'ACTIVE')
-    ON CONFLICT (tenant_id, normalized_identity)
-    DO UPDATE SET display_name = 'SamChe Company LLC', status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP
-    RETURNING id INTO b_ident_id;
+    UPDATE channel_integrations
+       SET assistant_id = ast_id, updated_at = CURRENT_TIMESTAMP
+     WHERE tenant_id = t_id AND integration_type = 'INSTAGRAM';
+
+    -- 10. Link any unlinked conversations for this tenant to their CRM contact
+    UPDATE conversations c
+       SET contact_id = contact.id,
+           updated_at = CURRENT_TIMESTAMP
+      FROM crm_contacts contact
+     WHERE c.tenant_id = t_id
+       AND c.contact_id IS NULL
+       AND contact.tenant_id = t_id
+       AND (
+         c.customer_external_id = contact.identity_hash
+         OR c.customer_external_id ILIKE '%' || contact.phone || '%'
+         OR c.customer_external_id ILIKE 'instagram:%'
+       );
   END LOOP;
 END $$;
 
