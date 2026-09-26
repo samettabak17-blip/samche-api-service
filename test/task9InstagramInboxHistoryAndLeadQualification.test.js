@@ -467,4 +467,145 @@ test('TEST O — Authoritative SamChe Main Policy SHA-256 integrity check', () =
   const sha256 = crypto.createHash('sha256').update(Buffer.from(normalizedLf, 'utf8')).digest('hex');
   assert.equal(sha256, 'c72bc5787e31ee788431fcb7b73a6f1f72fb3471c3910a00e87005d389edaf58');
 });
+test('TEST S — Instagram Ad / Referral Lead (Ad Ingress into Canonical AI Pipeline)', async () => {
+  const tenantId = '11111111-1111-4111-8111-111111111111';
+  const recipientId = '17841400000000001';
+  const senderIgsid = 'ad_customer_789';
+  const conversationId = '33333333-3333-4333-8333-333333333333';
+
+  // Sample Meta Click-to-Instagram Ad Referral webhook payload
+  const rawReferral = {
+    source: 'ADS',
+    type: 'OPEN_THREAD',
+    ad_id: '6789012345678',
+    ads_context_data: {
+      ad_title: 'Dubai Company Formation',
+      photo_url: 'https://lookaside.fbsbx.com/ad_image.jpg',
+    },
+  };
+
+  const storedActivity = [];
+  let ensureCrmCalled = false;
+  let leadQualificationQueued = false;
+  let deliveredNotifications = [];
+
+  const mockClient = new MockDatabaseClient({
+    queries: {
+      'SELECT tc.tenant_id, tc.id AS channel_id': () => ({
+        rowCount: 1,
+        rows: [{
+          tenant_id: tenantId,
+          channel_id: 'c_ig',
+          external_channel_id: recipientId,
+          channel_type: 'INSTAGRAM',
+          channel_status: 'active',
+          assistant_status: 'active',
+          config: {
+            lead_notification_enabled: true,
+            lead_notification_whatsapp: '+971527288586',
+          },
+        }],
+      }),
+      'INSERT INTO conversations': () => ({
+        rowCount: 1,
+        rows: [{
+          id: conversationId,
+          tenant_id: tenantId,
+          channel_id: 'c_ig',
+          status: 'open',
+          handling_mode: 'AI',
+          handling_version: 1,
+          ai_behavior_override: 'FIRST_CONTACT_HOLD',
+        }],
+      }),
+      'INSERT INTO conversation_messages': () => ({
+        rowCount: 1,
+        rows: [{ id: 'msg_ad_1', sender_type: 'CUSTOMER', content: 'Merhaba, reklamınızı gördüm, randevu almak istiyorum. Adım Kemal, tel: +971509998877' }],
+      }),
+      'SELECT ci.config AS ig_config': () => ({
+        rowCount: 1,
+        rows: [{
+          ig_config: {
+            lead_notification_enabled: true,
+            lead_notification_whatsapp: '+971527288586',
+          },
+        }],
+      }),
+      'SELECT tc.external_channel_id, ci.config AS wa_config': () => ({
+        rowCount: 1,
+        rows: [{
+          external_channel_id: '10987654321',
+          wa_config: {},
+        }],
+      }),
+      'INSERT INTO crm_lead_analyses': () => ({ rowCount: 1, rows: [] }),
+      'UPDATE conversations': () => ({ rowCount: 1, rows: [] }),
+
+    },
+  });
+
+  const poolMock = new MockDatabasePool(mockClient);
+
+  const mockEnsureCrm = async (client, params) => {
+    ensureCrmCalled = true;
+    assert.equal(params.tenantId, tenantId);
+    assert.equal(params.source, 'INSTAGRAM_AD');
+  };
+
+  const mockQueueLead = (params) => {
+    leadQualificationQueued = true;
+    assert.equal(params.sourceChannel, 'INSTAGRAM_AD');
+  };
+
+  // 1. Inbound persistence with referral metadata
+  const inboundState = await (await import('../services/instagram-live-inbox-service.js')).persistInstagramInbound({
+    database: poolMock,
+    recipientId,
+    senderIgsid,
+    messageId: 'mid_ad_101',
+    content: 'Merhaba, reklamınızı gördüm, randevu almak istiyorum. Adım Kemal, tel: +971509998877',
+    referral: rawReferral,
+    ensureConversationCrmIdentity: mockEnsureCrm,
+    queueLeadQualification: mockQueueLead,
+  });
+
+  assert.equal(inboundState.duplicate, false);
+  assert.equal(ensureCrmCalled, true);
+  assert.equal(leadQualificationQueued, true);
+
+  // 2. High-intent qualification & notification for ad lead
+  const mockHttp = {
+    post: async (url, payload) => {
+      deliveredNotifications.push(payload);
+      return { status: 200, data: { messages: [{ id: 'wamid_ad_lead' }] } };
+    },
+  };
+
+  const adLeadDetails = {
+    customerName: 'Kemal',
+    instagramUsername: 'kemal_ad',
+    phone: '+971509998877',
+    serviceRequested: 'Dubai Şirket Kuruluşu',
+    summary: 'Instagram reklamı üzerinden şirket kuruluşu randevu talebi.',
+    requestedTime: 'Zaman belirtilmedi',
+    source: 'Instagram Ad (ID: 6789012345678)',
+  };
+
+  const notifRes = await sendSilentInternalWhatsAppLeadNotification({
+    tenantId,
+    conversationId,
+    leadDetails: adLeadDetails,
+    database: poolMock,
+    env: { WHATSAPP_TOKEN: 'valid_token' },
+    httpClient: mockHttp,
+  });
+
+  assert.equal(notifRes.sent, true);
+  assert.equal(notifRes.recipient, '+971527288586');
+  assert.equal(deliveredNotifications.length, 1);
+  assert.ok(deliveredNotifications[0].text.body.includes('Kemal'));
+  assert.ok(deliveredNotifications[0].text.body.includes('+971509998877'));
+  assert.ok(deliveredNotifications[0].text.body.includes('Kaynak: Instagram Ad'));
+});
+
 

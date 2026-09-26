@@ -115,6 +115,7 @@ export async function persistInstagramInbound({
   messageId = null,
   content = '',
   attachments = [],
+  referral = null,
   ensureConversationCrmIdentity = null,
   queueLeadQualification = null,
 }) {
@@ -130,6 +131,7 @@ export async function persistInstagramInbound({
 
     const tenantId = integration.tenant_id;
     const channelId = integration.channel_id;
+    const sourceKind = (referral?.adId || referral?.source === 'ADS') ? 'INSTAGRAM_AD' : 'INSTAGRAM';
 
     const conversation = await upsertInstagramConversation(client, {
       tenantId,
@@ -150,7 +152,7 @@ export async function persistInstagramInbound({
         await crmEnsureFn(client, {
           tenantId,
           conversationId,
-          source: 'INSTAGRAM',
+          source: sourceKind,
           externalCustomerId: instagramCustomerReference(senderIgsid),
         });
         await client.query('RELEASE SAVEPOINT crm_identity_sp');
@@ -166,6 +168,7 @@ export async function persistInstagramInbound({
         console.warn('INSTAGRAM_CRM_IDENTITY_WARN', crmErr?.message);
       }
     }
+
 
     // Idempotency check for incoming provider message ID
     if (messageId) {
@@ -271,10 +274,11 @@ export async function persistInstagramInbound({
         queueLeadQualification({
           tenantId,
           conversationId,
-          sourceChannel: 'INSTAGRAM',
+          sourceChannel: sourceKind,
         });
       } catch {}
     }
+
 
     const shouldInvokeAi = conversation.status === 'open' && conversation.handling_mode === 'AI';
 

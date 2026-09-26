@@ -79,6 +79,7 @@ export function formatInternalWhatsAppLeadNotification({
   serviceRequested = null,
   summary = null,
   requestedTime = null,
+  source = 'Instagram DM',
   dashboardDeepLink = null,
   isUpdate = false,
 }) {
@@ -91,7 +92,7 @@ export function formatInternalWhatsAppLeadNotification({
     `Talep: ${serviceRequested || 'Danışmanlık / Şirket Kuruluşu'}`,
     `Detay: ${summary || 'Instagram üzerinden yüksek niyetli randevu/bilgi talebi'}`,
     `Randevu Talebi: ${requestedTime || 'Zaman belirtilmedi'}`,
-    'Kaynak: Instagram DM',
+    `Kaynak: ${source || 'Instagram DM'}`,
   ];
 
   if (dashboardDeepLink) {
@@ -100,6 +101,7 @@ export function formatInternalWhatsAppLeadNotification({
 
   return lines.join('\n');
 }
+
 
 /**
  * Computes durable hash of lead qualification fields to prevent notification spam.
@@ -207,9 +209,11 @@ export async function sendSilentInternalWhatsAppLeadNotification({
       serviceRequested: leadDetails.serviceRequested,
       summary: leadDetails.summary,
       requestedTime: leadDetails.requestedTime,
+      source: leadDetails.source || 'Instagram DM',
       dashboardDeepLink: deepLink,
       isUpdate,
     });
+
 
     // 4. Deliver silent internal WhatsApp message
     const deliveryRes = await deliverWhatsAppText({

@@ -4692,9 +4692,11 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
               messageId: igEvent.messageId,
               content: igEvent.text,
               attachments: igEvent.attachments,
+              referral: igEvent.referral,
               ensureConversationCrmIdentity,
               queueLeadQualification,
             });
+
 
             recordIngressObservation({
               event: 'INSTAGRAM_INBOUND_PERSISTED',
