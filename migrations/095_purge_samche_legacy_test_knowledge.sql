@@ -63,7 +63,7 @@ BEGIN
 
     IF legacy_doc_ids IS NOT NULL AND ARRAY_LENGTH(legacy_doc_ids, 1) > 0 THEN
       DELETE FROM knowledge_candidate_image_evidence WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
-      DELETE FROM knowledge_materialized_source_provenance WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
+      DELETE FROM knowledge_materialized_source_provenance WHERE tenant_id = t_id AND (materialized_source_id = ANY(legacy_doc_ids) OR original_source_id = ANY(legacy_doc_ids));
       DELETE FROM business_identity_source_evidence WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
       DELETE FROM knowledge_source_business_identity_assignment_events WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
       DELETE FROM knowledge_source_business_identities WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
