@@ -72,6 +72,16 @@ export function parseInstagramMessagingEvent(entry, messagingEvent) {
   const isStoryMention = rawAttachments.some((att) => att?.type === 'story_mention');
   const isShare = rawAttachments.some((att) => att?.type === 'share');
 
+  // Meta Ads / Messaging Referral context
+  const rawReferral = messagingEvent.referral || messagingEvent.postback?.referral || messagingEvent.message?.referral || null;
+  const referral = rawReferral ? {
+    source: rawReferral.source || null,
+    type: rawReferral.type || null,
+    ref: rawReferral.ref || null,
+    adId: rawReferral.ad_id || null,
+    adsContextData: rawReferral.ads_context_data || null,
+  } : null;
+
   return {
     senderId,
     recipientId,
@@ -85,6 +95,7 @@ export function parseInstagramMessagingEvent(entry, messagingEvent) {
     attachments,
     isStoryMention,
     isShare,
+    referral,
     rawEventType: messagingEvent.postback ? 'postback' : (messagingEvent.message ? 'message' : 'unknown'),
   };
 }
