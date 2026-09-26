@@ -217,6 +217,48 @@ test('Parity Scenario 16-18: Meta Ads Lead, Follow-up Categories and Visa Guaran
   const cand18 = buildCandidateContext({ customerText: 'Ödeme yaparsam vize kesin çıkar mı?', language: 'tr' });
   assert.match(cand18.systemInstruction, /kesin onay veya %100 garanti verilmez|Asla vize çıkma garantisi veya %100 onay vaat etme/i);
 });
+test('Parity Scenario 19-22: Instagram Natural Conversation & Transparency Policy', () => {
+  // Scenario 19: Instagram normal first customer message
+  const cand19 = buildCandidateContext({
+    customerText: 'Merhaba, şirket kuruluşu hakkında bilgi almak istiyorum.',
+    language: 'tr',
+  });
+  assert.ok(cand19.systemInstruction.includes('NATURAL CUSTOMER CONVERSATION & TRANSPARENCY POLICY'));
+  assert.match(cand19.systemInstruction, /Do NOT prepend responses with generic AI.*introduction boilerplate/i);
+  assert.match(cand19.systemInstruction, /Do NOT falsely claim to be a human employee/i);
+
+  // Scenario 20: Direct AI identity question ("Sen yapay zeka mısın?")
+  const cand20 = buildCandidateContext({
+    customerText: 'Sen yapay zeka mısın?',
+    language: 'tr',
+  });
+  assert.match(cand20.systemInstruction, /TRUTHFUL AI IDENTITY DISCLOSURE/i);
+  assert.match(cand20.systemInstruction, /Answer truthfully, clearly, and briefly that you are the company's digital\/AI assistant/i);
+  assert.ok(cand20.systemInstruction.includes("Evet, SamChe'nin dijital asistanıyım"));
+
+  // Scenario 21: Human identity challenge ("Gerçek bir insanla mı konuşuyorum?")
+  const cand21 = buildCandidateContext({
+    customerText: 'Gerçek bir insanla mı konuşuyorum?',
+    language: 'tr',
+  });
+  assert.match(cand21.systemInstruction, /ANTI-DECEPTION & TRANSPARENCY/i);
+  assert.match(cand21.systemInstruction, /Never invent a human name, job title, personal human life experiences, physical actions/i);
+  assert.match(cand21.systemInstruction, /offer or route to the human support handoff path/i);
+
+  // Scenario 22: Conversation continuity
+  const cand22 = buildCandidateContext({
+    history: [
+      { sender_type: 'CUSTOMER', content: 'Sen yapay zeka mısın?' },
+      { sender_type: 'ASSISTANT', content: "Evet, SamChe'nin dijital asistanıyım. Size şirket kuruluşu, oturum, vize ve diğer SamChe hizmetleri hakkında yardımcı olabilirim." },
+    ],
+    customerText: 'Peki Free Zone şirket için ne gerekiyor?',
+    language: 'tr',
+  });
+  assert.match(cand22.systemInstruction, /CONVERSATION CONTINUITY/i);
+  assert.match(cand22.systemInstruction, /smoothly and immediately return to the customer's business topic without repeatedly mentioning being an AI/i);
+  assert.ok(cand22.systemInstruction.includes('Free Zone'));
+});
+
 
 
 test('Baseline Integrity Check: Master policy canonical SHA-256 matches non-negotiable hash', () => {

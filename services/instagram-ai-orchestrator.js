@@ -267,10 +267,17 @@ export async function generateAndDeliverInstagramAssistantResponse({
       knowledge = await resolveAssistantRuntimeKnowledgeContext({ database, tenantId, assistantId, query: textToAnswer });
     } catch {}
 
+    const channelRules = [
+      'INSTAGRAM CHANNEL PRESENTATION RULES:',
+      '- Communicate naturally, concisely, and helpfully on behalf of the company in plain text without markdown headers or hashtags.',
+      '- Do NOT start replies with unsolicited AI self-identification phrases (e.g. "Ben SamChe AI\'yım", "Ben bir yapay zeka asistanıyım", "I am an AI assistant"). Address the customer\'s business question directly.',
+      '- If and only if the customer explicitly asks whether you are an AI/bot/human ("Sen yapay zeka mısın?", "Bot musun?", "Gerçek bir insan mısın?"), answer truthfully and briefly as the digital assistant without inventing a false human persona.',
+    ].join('\n');
+
     const systemInstruction = buildTenantRuntimeSystemInstruction({
       persona: persona || { available: false, name: 'Assistant' },
       knowledgeContext: knowledge?.knowledgeContext || '',
-      channelRules: 'You are an AI assistant responding to an Instagram DM. Keep messages conversational, helpful, concise, and formatted clearly without markdown headers.',
+      channelRules,
     });
 
     let aiResponseText = '';
