@@ -276,5 +276,127 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
     assert.equal(httpCalls.length, 0, 'No outbound calls must be made');
     assert.equal(result.aiInvoked, false);
   });
+  it('TEST C & D & E: Qualification collects phone, availability, and sends structured WhatsApp notification', async () => {
+    const executedQueries = [];
+    const httpCalls = [];
+
+    const mockDatabase = {
+      connect: async () => mockDatabase,
+      release: () => {},
+      query: async (sql, params) => {
+        executedQueries.push({ sql, params });
+        if (/FROM conversations/i.test(sql)) {
+          return {
+            rows: [{
+              id: 'conv-qual-1',
+              tenant_id: 'tenant-123',
+              channel_id: 'chan-ig-1',
+              customer_external_id: 'instagram:10203040',
+              contact_id: 'contact-1',
+              channel_type: 'INSTAGRAM',
+              contact_name: 'Ahmet Yılmaz',
+              contact_phone: null,
+            }],
+            rowCount: 1,
+          };
+        }
+        if (/FROM conversation_messages/i.test(sql)) {
+          return {
+            rows: [
+              { id: 'm1', sender_type: 'CUSTOMER', content: 'Samed Bey merhaba, Dubai\'de e-ticaret şirketi kurmak istiyoruz sizinle görüşebilir miyiz?' },
+              { id: 'm2', sender_type: 'ASSISTANT', content: 'Merhaba, tabii ki görüşebiliriz. Size ulaşabileceğimiz telefon veya WhatsApp numaranızı paylaşabilir misiniz?' },
+              { id: 'm3', sender_type: 'CUSTOMER', content: 'Telefon numaram +905321112233, yarın Dubai saatiyle 15:00 uygunum.' },
+            ],
+            rowCount: 3,
+          };
+        }
+        if (/SELECT id FROM crm_leads/i.test(sql)) {
+          return { rows: [{ id: 'lead-canonical-777' }], rowCount: 1 };
+        }
+        if (/integration_type.*INSTAGRAM/i.test(sql)) {
+          return {
+            rows: [{
+              ig_config: {
+                lead_whatsapp_destination: '+971527288586',
+                lead_notification_enabled: true,
+              },
+            }],
+            rowCount: 1,
+          };
+        }
+        if (/integration_type.*WHATSAPP/i.test(sql)) {
+          return {
+            rows: [{
+              external_channel_id: '10987654321',
+              wa_config: {
+                phone_number_id: '10987654321',
+                access_token: 'EAAB_test_wa_token',
+              },
+            }],
+            rowCount: 1,
+          };
+        }
+        return { rows: [], rowCount: 0 };
+      },
+    };
+
+    const mockHttp = {
+      post: async (url, payload, options) => {
+        httpCalls.push({ url, payload, options });
+        return { status: 200, data: { messages: [{ id: 'wamid.HBgL...' }] } };
+      },
+    };
+
+    const { evaluateAndProcessHighIntentLead } = await import('../services/high-intent-lead-service.js');
+    const outcome = await evaluateAndProcessHighIntentLead({
+      tenantId: 'tenant-123',
+      conversationId: 'conv-qual-1',
+      database: mockDatabase,
+      httpClient: mockHttp,
+      env: {
+        WHATSAPP_PHONE_NUMBER_ID: '10987654321',
+        WHATSAPP_TOKEN: 'EAAB_test_wa_token',
+      },
+    });
+
+    assert.equal(outcome.qualified, true, 'Lead must be qualified');
+    assert.equal(outcome.leadDetails.phone, '+905321112233', 'Customer phone must be extracted');
+    assert.ok(outcome.leadDetails.requestedTime.includes('15:00'), 'Appointment time must be extracted');
+    assert.ok(outcome.leadDetails.timezone.includes('dubai'), 'Timezone must be extracted');
+
+    // Verify contact phone update
+    const contactUpdate = executedQueries.find(q => /UPDATE crm_contacts/i.test(q.sql) && q.params?.[0] === '+905321112233');
+    assert.ok(contactUpdate, 'Must update crm_contacts.phone');
+
+    // Verify silent WhatsApp notification sent
+    const waCall = httpCalls.find(c => c.payload?.messaging_product === 'whatsapp' || c.payload?.text?.body);
+    assert.ok(waCall, 'Must send silent internal WhatsApp notification');
+    assert.equal(waCall.payload.to, '+971527288586', 'Must deliver to configured lead_whatsapp_destination');
+    assert.ok(waCall.payload.text.body.includes('Müşteri: Ahmet Yılmaz'));
+    assert.ok(waCall.payload.text.body.includes('Telefon / WhatsApp: +905321112233'));
+    assert.ok(waCall.payload.text.body.includes('YENİ INSTAGRAM GÖRÜŞME TALEBİ'));
+    assert.ok(waCall.payload.text.body.includes('Dubai saati'));
+  });
+
+  it('TEST I: Instagram Ad lead preserves source attribution as Instagram Ad', async () => {
+    const { formatInternalWhatsAppLeadNotification } = await import('../services/high-intent-lead-service.js');
+    const text = formatInternalWhatsAppLeadNotification({
+      customerName: 'Can Demir',
+      instagramUsername: 'candemir',
+      phone: '+905441112233',
+      source: 'Instagram Ad',
+      requestedTime: 'Pazartesi 14:00',
+    });
+    assert.ok(text.includes('Kaynak:\nInstagram Ad'), 'Must preserve Instagram Ad source attribution');
+  });
+
+  it('TEST F & G & H: Presentation rules enforce conversational Samed-voice without fake confirmation or handoff', () => {
+    const rules = INSTAGRAM_CHANNEL_PRESENTATION_RULES;
+    assert.ok(rules.includes('Internal escalation to Samed via WhatsApp is completely silent'));
+    assert.ok(rules.includes('NEVER say "Randevunuz kesinleşti."'));
+    assert.ok(rules.includes('DO NOT use stiff or corporate artificial phrases'));
+    assert.ok(rules.includes('Danışmanlık ücretimiz 8.000 AED\'dir'));
+  });
+
 
 });

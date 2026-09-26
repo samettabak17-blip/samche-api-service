@@ -70,34 +70,114 @@ export function extractMeetingTimePreference(text = '') {
 }
 
 /**
- * Formats the concise structured internal WhatsApp notification message.
+ * Extracts timezone from text if mentioned.
+ */
+export function extractTimezoneFromText(text = '') {
+  if (typeof text !== 'string') return null;
+  const match = text.match(/(?:dubai\s+saati(?:yle)?|türkiye\s+saati(?:yle)?|tr\s+saati(?:yle)?|gmt\+[0-9]+|utc\+[0-9]+)/i);
+  if (match) return match[0].trim();
+  return null;
+}
+
+/**
+ * Extracts business activity or sector from customer conversation text.
+ */
+export function extractBusinessActivity(text = '') {
+  if (typeof text !== 'string') return null;
+  const match = text.match(/(?:e-ticaret|online\s+satış|danışmanlık|yazılım|teknoloji|pazarlama|ithalat|ihracat|ticaret|gayrimenkul|turizm|restoran|ajans|lojistik|inşaat|finans|kripto|holding)/i);
+  if (match) return match[0].trim();
+  return null;
+}
+
+/**
+ * Extracts jurisdiction preference (Free Zone / Mainland) from text.
+ */
+export function extractJurisdictionPreference(text = '') {
+  if (typeof text !== 'string') return 'Free Zone';
+  if (/mainland/i.test(text)) return 'Mainland';
+  if (/free\s*zone/i.test(text)) return 'Free Zone';
+  return 'Free Zone';
+}
+
+/**
+ * Extracts visa count if explicitly mentioned by the customer.
+ */
+export function extractVisaCount(text = '') {
+  if (typeof text !== 'string') return null;
+  const match = text.match(/(\d+)\s*(?:adet\s*)?(?:vize|kişi|oturum)/i);
+  if (match?.[1]) return `${match[1]} kişi`;
+  return null;
+}
+
+/**
+ * Formats the structured internal WhatsApp notification message.
  */
 export function formatInternalWhatsAppLeadNotification({
   customerName = null,
   instagramUsername = null,
   phone = null,
+  requirement = null,
   serviceRequested = null,
+  activity = null,
+  jurisdictionPreference = null,
+  visaCount = null,
   summary = null,
   requestedTime = null,
+  timezone = null,
   source = 'Instagram DM',
+  leadId = null,
+  conversationId = null,
   dashboardDeepLink = null,
   isUpdate = false,
 }) {
-  const lines = [
-    `🔥 Yüksek Niyetli Instagram Lead${isUpdate ? ' [GÜNCELLEME]' : ''}`,
-    '',
-    `Ad: ${customerName || 'Belirtilmedi'}`,
-    `Instagram: ${instagramUsername ? '@' + instagramUsername.replace(/^@/, '') : 'Belirtilmedi'}`,
-    `Telefon/WhatsApp: ${phone || 'Belirtilmedi'}`,
-    `Talep: ${serviceRequested || 'Danışmanlık / Şirket Kuruluşu'}`,
-    `Detay: ${summary || 'Instagram üzerinden yüksek niyetli randevu/bilgi talebi'}`,
-    `Randevu Talebi: ${requestedTime || 'Zaman belirtilmedi'}`,
-    `Kaynak: ${source || 'Instagram DM'}`,
-  ];
+  const cleanIg = instagramUsername ? `@${String(instagramUsername).replace(/^@/, '')}` : 'Belirtilmedi';
+  const cleanName = customerName && !customerName.startsWith('instagram:') ? customerName : 'Belirtilmedi';
+  const cleanPhone = phone || 'Görüşmede alınacak';
+  const cleanTalep = requirement || serviceRequested || 'Dubai\'de şirket kurulumu / danışmanlık görüşmesi';
+  const cleanActivity = activity || 'Görüşmede netleştirilecek';
+  const cleanJurisdiction = jurisdictionPreference || 'Free Zone';
+  const cleanVisa = visaCount || 'Görüşmede netleştirilecek';
+  const cleanTime = requestedTime || 'Müşteriyle belirlenecek';
+  const cleanSource = source || 'Instagram DM';
+  const cleanSummary = summary || 'Müşteri şirket kuruluşu için danışmanlık ve randevu talebinde bulundu.';
+  const cleanLeadId = leadId ? String(leadId) : 'pending_lead';
+  const cleanConv = dashboardDeepLink || conversationId || 'N/A';
 
-  if (dashboardDeepLink) {
-    lines.push(`Dashboard: ${dashboardDeepLink}`);
-  }
+  const lines = [
+    `YENİ INSTAGRAM GÖRÜŞME TALEBİ${isUpdate ? ' [GÜNCELLEME]' : ''}`,
+    '',
+    `Müşteri: ${cleanName}`,
+    `Instagram: ${cleanIg}`,
+    `Telefon / WhatsApp: ${cleanPhone}`,
+    '',
+    'Talep:',
+    cleanTalep,
+    '',
+    'Faaliyet:',
+    cleanActivity,
+    '',
+    'Şirket tercihi:',
+    cleanJurisdiction,
+    '',
+    'Vize:',
+    cleanVisa,
+    '',
+    'Görüşme için uygun zaman:',
+    cleanTime,
+    ...(timezone ? [`Saat dilimi: ${timezone}`] : []),
+    '',
+    'Kaynak:',
+    cleanSource,
+    '',
+    'Konuşma özeti:',
+    cleanSummary,
+    '',
+    'Lead:',
+    cleanLeadId,
+    '',
+    'Conversation:',
+    cleanConv,
+  ];
 
   return lines.join('\n');
 }
@@ -140,7 +220,8 @@ export async function sendSilentInternalWhatsAppLeadNotification({
 
     const igConfig = igRes.rows[0]?.ig_config || {};
     const notificationEnabled = igConfig.lead_notification_enabled !== false;
-    const destinationPhone = igConfig.lead_notification_whatsapp ||
+    const destinationPhone = igConfig.lead_whatsapp_destination ||
+      igConfig.lead_notification_whatsapp ||
       igConfig.lead_notification_phone ||
       env.LEAD_NOTIFICATION_WHATSAPP ||
       null;
@@ -309,8 +390,14 @@ export async function evaluateAndProcessHighIntentLead({
     const extractedName = extractCustomerNameFromText(customerTextCombined);
     const customerName = extractedName || (conv.contact_name && !conv.contact_name.startsWith('instagram:') ? conv.contact_name : null);
     const requestedTime = extractMeetingTimePreference(customerTextCombined);
+    const timezone = extractTimezoneFromText(customerTextCombined);
+    const activity = extractBusinessActivity(customerTextCombined);
+    const jurisdiction = extractJurisdictionPreference(customerTextCombined);
+    const visaCount = extractVisaCount(customerTextCombined);
     const rawIg = String(conv.customer_external_id || '').replace(/^instagram:\s*/i, '');
     const igUsername = conv.contact_name && !conv.contact_name.startsWith('instagram:') ? conv.contact_name : rawIg;
+    const isAd = conv.channel_type === 'INSTAGRAM_AD' || /ad|campaign|sponsor/i.test(String(conv.customer_external_id || ''));
+    const source = isAd ? 'Instagram Ad' : 'Instagram DM';
 
     // Service topic determination
     let serviceRequested = 'Şirket Kuruluşu & Danışmanlık';
@@ -322,12 +409,6 @@ export async function evaluateAndProcessHighIntentLead({
       serviceRequested = 'Vize & Oturum Danışmanlığı';
     } else if (/banka|hesap|bank/i.test(customerTextCombined)) {
       serviceRequested = 'Banka Hesabı Açılışı';
-    }
-
-    // Lead is sufficiently qualified when we have phone OR (customerName + appointment intent)
-    const isSufficientlyQualified = Boolean(phone || (customerName && customerMessages.length >= 2));
-    if (!isSufficientlyQualified) {
-      return { qualified: false, reason: 'QUALIFICATION_INCOMPLETE_NEEDS_MORE_INFO' };
     }
 
     // Update crm_contacts with phone/name if found
@@ -360,19 +441,33 @@ export async function evaluateAndProcessHighIntentLead({
                 last_activity_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
           WHERE id = $3 AND tenant_id = $4`,
-        [serviceRequested, requestedTime, leadId, tenantId]
+        [serviceRequested, requestedTime || 'Pending Customer Availability', leadId, tenantId]
       );
     }
 
-    const summary = `Instagram üzerinden ${serviceRequested.toLowerCase()} randevu talebi. Müşteri bilgileri toplandı.`;
+    // Lead is sufficiently qualified when we have phone OR (customerName + requestedTime)
+    const isSufficientlyQualified = Boolean(phone || (customerName && requestedTime));
+    if (!isSufficientlyQualified) {
+      return { qualified: false, reason: 'QUALIFICATION_INCOMPLETE_NEEDS_MORE_INFO', partialLeadId: leadId };
+    }
+
+    const summary = `Instagram üzerinden ${serviceRequested.toLowerCase()} randevu talebi. ${activity ? `Faaliyet: ${activity}. ` : ''}${requestedTime ? `Uygun zaman: ${requestedTime}. ` : ''}`;
 
     const leadDetails = {
       customerName,
       instagramUsername: igUsername,
       phone,
+      requirement: `Dubai'de ${activity || 'şirket'} kurulumu ve danışmanlık görüşmesi`,
       serviceRequested,
+      activity,
+      jurisdictionPreference: jurisdiction,
+      visaCount,
       summary,
       requestedTime: requestedTime || 'Zaman belirtilmedi',
+      timezone,
+      source,
+      leadId,
+      conversationId,
     };
 
     // Trigger silent WhatsApp notification
