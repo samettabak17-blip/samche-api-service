@@ -142,13 +142,16 @@ export async function persistInstagramInbound({
     // Resolve / establish canonical CRM identity for this contact
     if (typeof ensureConversationCrmIdentity === 'function') {
       try {
+        await client.query('SAVEPOINT crm_identity_sp');
         await ensureConversationCrmIdentity(client, {
           tenantId,
           conversationId,
           source: 'INSTAGRAM',
           externalCustomerId: instagramCustomerReference(senderIgsid),
         });
+        await client.query('RELEASE SAVEPOINT crm_identity_sp');
       } catch (crmErr) {
+        await client.query('ROLLBACK TO SAVEPOINT crm_identity_sp').catch(() => {});
         console.warn('INSTAGRAM_CRM_IDENTITY_WARN', crmErr?.message);
       }
     }

@@ -575,4 +575,57 @@ test('20. TEST F: duplicate recipient across two tenants fails closed with null'
   assert.equal(resolved, null);
 });
 
+// 21. TEST: ensureConversationCrmIdentity succeeds and falls back gracefully even when no default stage exists
+test('21. ensureConversationCrmIdentity falls back to lowest position stage when is_default is missing', async () => {
+  const { ensureConversationCrmIdentity } = await import('../services/crm-lead-service.js');
+  let insertedLeadStageId = null;
+
+  const mockDb = {
+    async query(sql, params) {
+      if (sql.includes('SELECT id, tenant_id, customer_external_id, contact_id')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: 'conv-101',
+            tenant_id: tenantIdA,
+            customer_external_id: `instagram:${igsidCustomer1}`,
+            contact_id: null,
+            ai_behavior_override: 'AUTOMATIC',
+          }],
+        };
+      }
+      if (sql.includes('INSERT INTO crm_contacts')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: 'contact-101', tenant_id: tenantIdA, ai_behavior_override: 'AUTOMATIC' }],
+        };
+      }
+      if (sql.includes('UPDATE conversations SET contact_id')) return { rowCount: 1, rows: [] };
+      if (sql.includes('SELECT id, tenant_id, contact_id, conversation_id FROM crm_leads')) {
+        return { rowCount: 0, rows: [] };
+      }
+      if (sql.includes('FROM crm_pipeline_stages WHERE tenant_id = $1')) {
+        return { rowCount: 1, rows: [{ id: 'stage-fallback-10' }] };
+      }
+      if (sql.includes('INSERT INTO crm_leads')) {
+        insertedLeadStageId = params[3];
+        return { rowCount: 1, rows: [{ id: 'lead-101' }] };
+      }
+      if (sql.includes('INSERT INTO crm_activities') || sql.includes('SELECT pg_notify')) return { rowCount: 1, rows: [{ id: 'act-1' }] };
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  const res = await ensureConversationCrmIdentity(mockDb, {
+    tenantId: tenantIdA,
+    conversationId: 'conv-101',
+    source: 'INSTAGRAM',
+    externalCustomerId: `instagram:${igsidCustomer1}`,
+  });
+
+  assert.equal(insertedLeadStageId, 'stage-fallback-10');
+  assert.equal(res.contact.id, 'contact-101');
+});
+
+
 

@@ -124,11 +124,27 @@ export async function ensureConversationCrmIdentity(client, {
 
   const stageResult = await client.query(
     `SELECT id FROM crm_pipeline_stages
-      WHERE tenant_id = $1 AND is_default = TRUE
+      WHERE tenant_id = $1
+      ORDER BY (CASE WHEN is_default = TRUE THEN 0 ELSE 1 END), position ASC, created_at ASC
       LIMIT 1`,
     [tenantId]
   );
-  const defaultStageId = stageResult.rows[0]?.id ?? null;
+  let defaultStageId = stageResult.rows[0]?.id ?? null;
+
+  if (!defaultStageId) {
+    try {
+      await client.query('SELECT ensure_crm_default_pipeline($1)', [tenantId]);
+      const retryStage = await client.query(
+        `SELECT id FROM crm_pipeline_stages WHERE tenant_id = $1 ORDER BY position ASC, created_at ASC LIMIT 1`,
+        [tenantId]
+      );
+      defaultStageId = retryStage.rows[0]?.id ?? null;
+    } catch {}
+  }
+
+  if (!defaultStageId) {
+    return { contact, lead: null, created: false };
+  }
 
   const insertedLead = await client.query(
     `INSERT INTO crm_leads

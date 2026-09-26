@@ -4684,6 +4684,11 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
             });
           } catch (igErr) {
             console.error('INSTAGRAM_INBOUND_PROCESSING_ERROR', igErr?.code ?? igErr?.message);
+            recordIngressObservation({
+              event: 'INSTAGRAM_INBOUND_ERROR',
+              error_code: igErr?.code || igErr?.name || 'ERROR',
+              error_message: igErr?.message || String(igErr),
+            });
           }
         }
         return;
