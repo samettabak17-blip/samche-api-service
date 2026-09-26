@@ -63,8 +63,6 @@ BEGIN
 
     IF legacy_doc_ids IS NOT NULL AND ARRAY_LENGTH(legacy_doc_ids, 1) > 0 THEN
       DELETE FROM knowledge_candidate_image_evidence WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
-      DELETE FROM knowledge_candidate_evidence WHERE tenant_id = t_id AND chunk_id IN (SELECT id FROM knowledge_chunks WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids));
-      DELETE FROM knowledge_candidate_evidence WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
       DELETE FROM knowledge_materialized_source_provenance WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
       DELETE FROM business_identity_source_evidence WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
       DELETE FROM knowledge_source_business_identity_assignment_events WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
@@ -79,26 +77,6 @@ BEGIN
     END IF;
 
     -- 2. Remove orphaned chunks/embeddings that still contain legacy fixture text
-    DELETE FROM knowledge_candidate_evidence
-     WHERE tenant_id = t_id
-       AND chunk_id IN (
-         SELECT id FROM knowledge_chunks
-          WHERE tenant_id = t_id
-            AND (
-              content ILIKE '%Nova Crest%'
-              OR content ILIKE '%Meridian Arc%'
-              OR content ILIKE '%Foundation Launch Package%'
-              OR content ILIKE '%Growth Accelerator Package%'
-              OR content ILIKE '%Silver Bridge Protocol%'
-              OR content ILIKE '%Enterprise Architecture Review%'
-              OR content ILIKE '%Project Atlas%'
-              OR content ILIKE '%Project Harbor%'
-              OR content ILIKE '%Project Vela%'
-              OR content ILIKE '%cobalt lantern%'
-              OR content ILIKE '%task6_e2e%'
-            )
-       );
-
     DELETE FROM knowledge_chunks
      WHERE tenant_id = t_id
        AND (
