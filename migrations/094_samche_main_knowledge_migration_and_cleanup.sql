@@ -2,11 +2,12 @@
 -- Fully idempotent, tenant-scoped, and safe for live staging and historical tenants.
 
 BEGIN;
--- 0. Update conversation_audit_events CHECK constraint to include 'AI_OVERRIDE_UPDATED'
+-- 0. Update conversation_audit_events, conversations, and crm_contacts CHECK constraints
 DO $$
 DECLARE
   constraint_name text;
 BEGIN
+  -- Update conversation_audit_events
   FOR constraint_name IN
     SELECT conname
     FROM pg_constraint
@@ -25,6 +26,36 @@ BEGIN
       'HUMAN_SUPPORT_ACKNOWLEDGED', 'HUMAN_SUPPORT_REQUESTED',
       'AI_OVERRIDE_UPDATED'
     ));
+
+  -- Update conversations ai_behavior_override constraint
+  FOR constraint_name IN
+    SELECT conname
+    FROM pg_constraint
+    WHERE conrelid = 'conversations'::regclass
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%ai_behavior_override%'
+  LOOP
+    EXECUTE format('ALTER TABLE conversations DROP CONSTRAINT %I', constraint_name);
+  END LOOP;
+
+  ALTER TABLE conversations
+    ADD CONSTRAINT ck_conversations_ai_behavior_override
+    CHECK (ai_behavior_override IN ('AUTOMATIC', 'AI_ONLY', 'ALWAYS_AI', 'NEVER_AI', 'FIRST_CONTACT_HOLD', 'UNDECIDED'));
+
+  -- Update crm_contacts ai_behavior_override constraint
+  FOR constraint_name IN
+    SELECT conname
+    FROM pg_constraint
+    WHERE conrelid = 'crm_contacts'::regclass
+      AND contype = 'c'
+      AND pg_get_constraintdef(oid) LIKE '%ai_behavior_override%'
+  LOOP
+    EXECUTE format('ALTER TABLE crm_contacts DROP CONSTRAINT %I', constraint_name);
+  END LOOP;
+
+  ALTER TABLE crm_contacts
+    ADD CONSTRAINT ck_crm_contacts_ai_behavior_override
+    CHECK (ai_behavior_override IN ('AUTOMATIC', 'AI_ONLY', 'ALWAYS_AI', 'NEVER_AI', 'FIRST_CONTACT_HOLD', 'UNDECIDED'));
 END $$;
 
 
