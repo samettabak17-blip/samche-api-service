@@ -36,17 +36,10 @@ DECLARE
   bpv_id UUID;
   ast_id UUID;
   acv_id UUID;
-  src_1_id UUID := 'a1000001-0000-4000-8000-000000000001'::uuid;
-  src_2_id UUID := 'a1000001-0000-4000-8000-000000000002'::uuid;
-  src_3_id UUID := 'a1000001-0000-4000-8000-000000000003'::uuid;
-  src_4_id UUID := 'a1000001-0000-4000-8000-000000000004'::uuid;
-  src_5_id UUID := 'a1000001-0000-4000-8000-000000000005'::uuid;
-  src_6_id UUID := 'a1000001-0000-4000-8000-000000000006'::uuid;
-  src_7_id UUID := 'a1000001-0000-4000-8000-000000000007'::uuid;
+  cur_src_id UUID;
+  src_rec RECORD;
   src_ids UUID[];
   legacy_src_ids UUID[];
-  legacy_bpv_ids UUID[];
-  legacy_acv_ids UUID[];
 BEGIN
   FOR t_id IN
     SELECT id FROM tenants
@@ -106,26 +99,70 @@ BEGIN
     DO UPDATE SET display_name = 'SamChe Company LLC', status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP
     RETURNING id INTO b_ident_id;
 
-    -- 6. Upsert 7 Canonical Knowledge Base Documents
-    INSERT INTO knowledge_base_documents (id, tenant_id, title, content, status, source_type, mime_type, content_hash, processing_status, indexing_status, enabled)
-    VALUES
-      (src_1_id, t_id, 'SamChe Company Kurumsal Profil, İletişim ve Banka Bilgileri', 'SamChe Company LLC Kurumsal Bilgileri:\n\nKurumsal Rol: "DANIŞMANLIK, BAŞVURU KOORDİNASYONU VE SÜREÇ YÖNETİMİ"\nİletişim: info@samchecompany.com / +971 50 179 38 80 / Sheikh Zayed Road Latifa Tower Office No 402, Dubai\nBanka: SamChe Company LLC, USD, Wio Bank IBAN AE210860000009726414926, BIC WIOBAEADXXX\nSponsor firma detayları gizlilik politikası gereği kota rezervasyonu ve ön başvuru öncesi açıklanmaz.', 'active', 'MANUAL', 'text/plain', 'c814b7e8894ce0b615d0315fe40f533a1e27150117fb79ea0b8fa047d92c733f', 'READY', 'READY', TRUE),
-      (src_2_id, t_id, 'Dubai ve BAE Oturum Türleri ve Sponsorlu Oturum Çözümleri', 'Dubai ve BAE Oturum Seçenekleri:\nSponsorlu Oturum (2 Yıllık): Toplam 13.000 AED (1. 4.000 AED kota/dosya ~10 gün teklif mektubu, 2. 8.000 AED employment visa ~30 gün e-vize, 3. 1.000 AED ID/damgalama ~30 gün). NOC belgesi ile serbest çalışma/iş kurma imkanı.', 'active', 'MANUAL', 'text/plain', 'b83e4a9057b5fb9b23b4ea176a92849b2c6a6e709e995fb248380e2f5b5b0429', 'READY', 'READY', TRUE),
-      (src_3_id, t_id, 'BAE Aile Vizeleri (Family Visa) ve Sağlık Sigortası Sistemi', 'Dubai ve BAE Aile Vizeleri (Family Visa):\nÇocuklar: 4.500 AED, Eş: 6.000 AED (2 yıllık). Family Visa sadece oturumdur, çalışma izni içermez. Sağlık sigortası oturum paketlerine dahil değildir, basic paket yıllık ~800 AED.', 'active', 'MANUAL', 'text/plain', 'f3e792c019a84a6b12f458e0a12e9b8f2c3a5b6d7e8f901a2b3c4d5e6f7a8b9c', 'READY', 'READY', TRUE),
-      (src_4_id, t_id, 'Umm Al Quwain Freelance Permit ve Meslek Diploma Eşleştirme Tablosu', 'Umm Al Quwain Freelance Permit + Vize: Toplam 16.800 AED.\nMeslek Eşleştirme (39 Meslek):\nActor (Diploma: NO), Software System Developer (Diploma: YES), Web Developer (Diploma: YES), Journalist (Diploma: YES), Graphic Designer (Diploma: YES), Artist (Diploma: NO), Fashion Designer (Diploma: NO), Photographer (Diploma: YES), vb.', 'active', 'MANUAL', 'text/plain', 'd8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9', 'READY', 'READY', TRUE),
-      (src_5_id, t_id, 'BAE Şirket Kuruluşu: Mainland ve Free Zone Yetki Alanları ve Sektör Kuralları', 'BAE Şirket Kuruluşu Yetki Alanları:\nMainland (DET): %100 yabancı mülkiyeti, yerel ortak zorunluluğu YOKTUR. Sadece Mainland sektörleri: Perakende Mağazaları, İnşaat/Müteahhitlik, Gayrimenkul Acenteleri, Turizm/Seyahat, Araç Kiralama, Güvenlik/CCTV, Temizlik, Klinik/Tıp Merkezleri.\nFree Zone: Sanal ofis/flexi-desk, %100 mülkiyet. Meydan (Özel Altın Lisansı 40.000 AED), Dubai South, Sharjah/IFZA, RAKEZ/Ajman.', 'active', 'MANUAL', 'text/plain', 'a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8', 'READY', 'READY', TRUE),
-      (src_6_id, t_id, 'Şirket Kuruluşu Sonrası Hizmetler: Kurumlar Vergisi, KDV, Muhasebe ve Bankacılık', 'Şirket Kuruluşu Sonrası Hizmetler:\nKurumlar Vergisi: Tüm şirketler için zorunlu kayıt. 375.000 AED kâra kadar %0, üzeri %9. SamChe kayıt ücreti 1.300 AED, geç kalma cezası 10.000 AED.\nKDV: 375.000 AED ciro üzerinde zorunlu %5 KDV.\nMuhasebe: 5 yıl evrak saklama zorunlu.\nBanka: Wio Bank, ENBD, Mashreq, FAB hesap açılışı & KYC danışmanlığı 8.000 AED danışmanlık paketine dahildir.', 'active', 'MANUAL', 'text/plain', 'e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2', 'READY', 'READY', TRUE),
-      (src_7_id, t_id, 'SamChe Danışmanlık Ücreti ve Fiyatlandırma Politikası Referans Kılavuzu', 'SamChe Danışmanlık Ücreti Politikası:\nFree Zone Danışmanlık: 8.000 AED (Banka hesabı & KYC desteği dahil; sadece sorulduğunda veya ısrarda söylenir).\nMainland Danışmanlık: Sektöre göre resmi teklif ile belirlenir.\nMaliyet Analizleri Zorunlu İfade: "Belirtilen maliyetlere danışmanlık ücreti dahil değildir."', 'active', 'MANUAL', 'text/plain', 'f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a0f9e8', 'READY', 'READY', TRUE)
-    ON CONFLICT (id) DO UPDATE
-      SET title = EXCLUDED.title, content = EXCLUDED.content,
-          content_hash = EXCLUDED.content_hash, status = 'active',
-          processing_status = 'READY', indexing_status = 'READY', updated_at = CURRENT_TIMESTAMP;
+    -- 6. Upsert 7 Canonical Knowledge Base Documents dynamically
+    src_ids := ARRAY[]::uuid[];
 
-    src_ids := ARRAY[src_1_id, src_2_id, src_3_id, src_4_id, src_5_id, src_6_id, src_7_id];
+    FOR src_rec IN
+      SELECT * FROM (VALUES
+        ('SamChe Company Kurumsal Profil, İletişim ve Banka Bilgileri', 'SamChe Company LLC Kurumsal Bilgileri:
 
-    INSERT INTO knowledge_source_business_identities (tenant_id, source_id, business_identity_id)
-    SELECT t_id, unnest(src_ids), b_ident_id
-    ON CONFLICT (tenant_id, source_id, business_identity_id) DO NOTHING;
+Kurumsal Rol: "DANIŞMANLIK, BAŞVURU KOORDİNASYONU VE SÜREÇ YÖNETİMİ"
+İletişim: info@samchecompany.com / +971 50 179 38 80 / Sheikh Zayed Road Latifa Tower Office No 402, Dubai
+Banka: SamChe Company LLC, USD, Wio Bank IBAN AE210860000009726414926, BIC WIOBAEADXXX
+Sponsor firma detayları gizlilik politikası gereği kota rezervasyonu ve ön başvuru öncesi açıklanmaz.', 'c814b7e8894ce0b615d0315fe40f533a1e27150117fb79ea0b8fa047d92c733f'),
+        ('Dubai ve BAE Oturum Türleri ve Sponsorlu Oturum Çözümleri', 'Dubai ve BAE Oturum Seçenekleri:
+Sponsorlu Oturum (2 Yıllık): Toplam 13.000 AED (1. 4.000 AED kota/dosya ~10 gün teklif mektubu, 2. 8.000 AED employment visa ~30 gün e-vize, 3. 1.000 AED ID/damgalama ~30 gün). NOC belgesi ile serbest çalışma/iş kurma imkanı.', 'b83e4a9057b5fb9b23b4ea176a92849b2c6a6e709e995fb248380e2f5b5b0429'),
+        ('BAE Aile Vizeleri (Family Visa) ve Sağlık Sigortası Sistemi', 'Dubai ve BAE Aile Vizeleri (Family Visa):
+Çocuklar: 4.500 AED, Eş: 6.000 AED (2 yıllık). Family Visa sadece oturumdur, çalışma izni içermez. Sağlık sigortası oturum paketlerine dahil değildir, basic paket yıllık ~800 AED.', 'f3e792c019a84a6b12f458e0a12e9b8f2c3a5b6d7e8f901a2b3c4d5e6f7a8b9c'),
+        ('Umm Al Quwain Freelance Permit ve Meslek Diploma Eşleştirme Tablosu', 'Umm Al Quwain Freelance Permit + Vize: Toplam 16.800 AED.
+Meslek Eşleştirme (39 Meslek):
+Actor (Diploma: NO), Software System Developer (Diploma: YES), Web Developer (Diploma: YES), Journalist (Diploma: YES), Graphic Designer (Diploma: YES), Artist (Diploma: NO), Fashion Designer (Diploma: NO), Photographer (Diploma: YES), vb.', 'd8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9'),
+        ('BAE Şirket Kuruluşu: Mainland ve Free Zone Yetki Alanları ve Sektör Kuralları', 'BAE Şirket Kuruluşu Yetki Alanları:
+Mainland (DET): %100 yabancı mülkiyeti, yerel ortak zorunluluğu YOKTUR. Sadece Mainland sektörleri: Perakende Mağazaları, İnşaat/Müteahhitlik, Gayrimenkul Acenteleri, Turizm/Seyahat, Araç Kiralama, Güvenlik/CCTV, Temizlik, Klinik/Tıp Merkezleri.
+Free Zone: Sanal ofis/flexi-desk, %100 mülkiyet. Meydan (Özel Altın Lisansı 40.000 AED), Dubai South, Sharjah/IFZA, RAKEZ/Ajman.', 'a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8'),
+        ('Şirket Kuruluşu Sonrası Hizmetler: Kurumlar Vergisi, KDV, Muhasebe ve Bankacılık', 'Şirket Kuruluşu Sonrası Hizmetler:
+Kurumlar Vergisi: Tüm şirketler için zorunlu kayıt. 375.000 AED kâra kadar %0, üzeri %9. SamChe kayıt ücreti 1.300 AED, geç kalma cezası 10.000 AED.
+KDV: 375.000 AED ciro üzerinde zorunlu %5 KDV.
+Muhasebe: 5 yıl evrak saklama zorunlu.
+Banka: Wio Bank, ENBD, Mashreq, FAB hesap açılışı & KYC danışmanlığı 8.000 AED danışmanlık paketine dahildir.', 'e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2'),
+        ('SamChe Danışmanlık Ücreti ve Fiyatlandırma Politikası Referans Kılavuzu', 'SamChe Danışmanlık Ücreti Politikası:
+Free Zone Danışmanlık: 8.000 AED (Banka hesabı & KYC desteği dahil; sadece sorulduğunda veya ısrarda söylenir).
+Mainland Danışmanlık: Sektöre göre resmi teklif ile belirlenir.
+Maliyet Analizleri Zorunlu İfade: "Belirtilen maliyetlere danışmanlık ücreti dahil değildir."', 'f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a0f9e8')
+      ) AS t(title, content, hash)
+    LOOP
+      SELECT id INTO cur_src_id
+        FROM knowledge_base_documents
+       WHERE tenant_id = t_id AND title = src_rec.title
+       LIMIT 1;
+
+      IF cur_src_id IS NULL THEN
+        cur_src_id := gen_random_uuid();
+        INSERT INTO knowledge_base_documents (
+          id, tenant_id, title, content, status, source_type, mime_type,
+          content_hash, processing_status, indexing_status, enabled
+        ) VALUES (
+          cur_src_id, t_id, src_rec.title, src_rec.content, 'active', 'MANUAL', 'text/plain',
+          src_rec.hash, 'READY', 'READY', TRUE
+        );
+      ELSE
+        UPDATE knowledge_base_documents
+           SET content = src_rec.content,
+               content_hash = src_rec.hash,
+               status = 'active',
+               processing_status = 'READY',
+               indexing_status = 'READY',
+               enabled = TRUE,
+               updated_at = CURRENT_TIMESTAMP
+         WHERE id = cur_src_id AND tenant_id = t_id;
+      END IF;
+
+      src_ids := array_append(src_ids, cur_src_id);
+
+      INSERT INTO knowledge_source_business_identities (tenant_id, source_id, business_identity_id)
+      VALUES (t_id, cur_src_id, b_ident_id)
+      ON CONFLICT (tenant_id, source_id, business_identity_id) DO NOTHING;
+    END LOOP;
 
     -- 7. Upsert Business Profile and Approved Clean Version
     INSERT INTO business_profiles (id, tenant_id, business_identity_id)
