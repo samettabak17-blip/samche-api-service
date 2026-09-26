@@ -67,6 +67,16 @@ BEGIN
       DELETE FROM knowledge_candidate_evidence WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
       DELETE FROM knowledge_materialized_source_provenance WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
       DELETE FROM business_identity_source_evidence WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
+      DELETE FROM knowledge_source_business_identity_assignment_events WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
+      DELETE FROM knowledge_source_business_identities WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
+      DELETE FROM knowledge_source_assistants WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
+      DELETE FROM knowledge_source_extraction_segments WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
+      DELETE FROM knowledge_entity_media WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
+      DELETE FROM knowledge_entities WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
+      DELETE FROM knowledge_processing_jobs WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
+      DELETE FROM knowledge_chunks WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
+      DELETE FROM knowledge_base_documents WHERE tenant_id = t_id AND id = ANY(legacy_doc_ids);
+    END IF;
 
     -- 2. Remove orphaned chunks/embeddings that still contain legacy fixture text
     DELETE FROM knowledge_candidate_evidence
@@ -218,14 +228,3 @@ BEGIN
 END $$;
 
 COMMIT;
-
-      DELETE FROM knowledge_source_business_identity_assignment_events WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
-      DELETE FROM knowledge_source_business_identities WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
-      DELETE FROM knowledge_source_assistants WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
-      DELETE FROM knowledge_source_extraction_segments WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
-      DELETE FROM knowledge_entity_media WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
-      DELETE FROM knowledge_entities WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
-      DELETE FROM knowledge_processing_jobs WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
-      DELETE FROM knowledge_chunks WHERE tenant_id = t_id AND source_id = ANY(legacy_doc_ids);
-      DELETE FROM knowledge_base_documents WHERE tenant_id = t_id AND id = ANY(legacy_doc_ids);
-    END IF;
