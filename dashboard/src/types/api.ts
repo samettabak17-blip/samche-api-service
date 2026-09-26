@@ -361,7 +361,7 @@ export interface ConversationMessage {
   actor_email: string | null;
   resources: ConversationResource[];
 }
-export type ConversationAuditEventType = 'TAKEOVER' | 'RETURN_TO_AI' | 'PAUSE' | 'RESUME' | 'CLOSE' | 'ASSIGNMENT' | 'HANDOFF_REQUESTED' | 'HUMAN_MESSAGE';
+export type ConversationAuditEventType = 'TAKEOVER' | 'RETURN_TO_AI' | 'PAUSE' | 'RESUME' | 'CLOSE' | 'ARCHIVE' | 'UNARCHIVE' | 'ASSIGNMENT' | 'HANDOFF_REQUESTED' | 'HUMAN_MESSAGE' | 'HUMAN_SUPPORT_ACKNOWLEDGED' | 'HUMAN_SUPPORT_REQUESTED' | 'AI_OVERRIDE_UPDATED';
 export interface ConversationAuditEvent {
   id: string;
   event_type: ConversationAuditEventType;
