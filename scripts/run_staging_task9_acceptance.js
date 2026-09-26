@@ -87,6 +87,15 @@ async function main() {
   console.log('AI ASSISTANTS COUNT:', assistRes.rows.length);
   assistRes.rows.forEach((a) => console.log(`   - id=${a.id} name="${a.name}" model=${a.model} status=${a.status} active_config=${a.active_configuration_version_id}`));
 
+  const constraintsRes = await pool.query(`
+    SELECT conname, conrelid::regclass as relname, pg_get_constraintdef(oid) as def
+      FROM pg_constraint
+     WHERE conrelid IN ('conversations'::regclass, 'crm_contacts'::regclass, 'conversation_audit_events'::regclass)
+       AND contype = 'c'
+  `);
+  console.log('CHECK CONSTRAINTS ON STAGING DB:');
+  constraintsRes.rows.forEach(c => console.log(`   ${c.relname}.${c.conname}: ${c.def}`));
+
   const channelRes = await pool.query(
     `SELECT tc.id, tc.channel_type, tc.status, tc.assistant_id,
             ci.integration_type, ci.enabled, ci.config
