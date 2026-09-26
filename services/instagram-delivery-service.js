@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { instagramGraphApiBase } from './meta-graph-api-version.js';
+import { instagramGraphApiBase, metaGraphApiBase } from './meta-graph-api-version.js';
 
 export class InstagramDeliveryError extends Error {
   constructor(code, message = code, status = 502) {
@@ -119,44 +119,77 @@ export async function deliverInstagramText({
     throw new InstagramDeliveryError('INSTAGRAM_CREDENTIAL_REQUIRED', 'Instagram access token is not configured', 409);
   }
 
-  const baseUrl = instagramGraphApiBase();
+  const cleanRecipientId = String(recipientId).replace(/^instagram:\s*/i, '').trim();
+  const token = accessToken.trim();
+  const igBaseUrl = instagramGraphApiBase();
+  const fbBaseUrl = metaGraphApiBase();
   const targetId = String(instagramAccountId || pageId || 'me').trim();
-  const endpoint = `${baseUrl}/${targetId}/messages`;
+
+  const candidateEndpoints = Array.from(new Set([
+    `${igBaseUrl}/${targetId}/messages`,
+    ...(targetId !== 'me' ? [`${igBaseUrl}/me/messages`] : []),
+    `${fbBaseUrl}/${targetId}/messages`,
+    ...(targetId !== 'me' ? [`${fbBaseUrl}/me/messages`] : []),
+  ]));
 
   const chunks = splitIntoInstagramDmChunks(content, 950);
   let primaryProviderMessageId = null;
   const deliveredIds = [];
+  let workingEndpoint = candidateEndpoints[0];
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
     const payload = {
-      recipient: { id: recipientId },
+      recipient: { id: cleanRecipientId },
       message: { text: chunk },
     };
 
-    try {
-      const response = await http.post(endpoint, payload, {
-        headers: {
-          Authorization: `Bearer ${accessToken.trim()}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 15000,
-      });
+    let response = null;
+    let lastError = null;
 
-      const providerMessageId = response.data?.message_id || null;
-      if (providerMessageId) {
-        if (!primaryProviderMessageId) primaryProviderMessageId = providerMessageId;
-        deliveredIds.push(providerMessageId);
+    // Try working endpoint first, fallback to remaining candidate endpoints on route/node errors
+    const endpointsToTry = [workingEndpoint, ...candidateEndpoints.filter((ep) => ep !== workingEndpoint)];
+
+    for (const endpoint of endpointsToTry) {
+      try {
+        response = await http.post(endpoint, payload, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 15000,
+        });
+
+        if (response?.data?.message_id || response?.status === 200) {
+          workingEndpoint = endpoint;
+          lastError = null;
+          break;
+        }
+      } catch (err) {
+        lastError = err;
+        // If error is recipient not found or rate limit, no endpoint fallback will change that
+        const metaCode = err?.response?.data?.error?.code;
+        if (metaCode === 100 && String(err?.response?.data?.error?.message).includes('recipient')) {
+          break;
+        }
       }
-    } catch (error) {
-      if (error instanceof InstagramDeliveryError) throw error;
-      throw sanitizeMetaError(error);
+    }
+
+    if (!response && lastError) {
+      if (lastError instanceof InstagramDeliveryError) throw lastError;
+      throw sanitizeMetaError(lastError);
+    }
+
+    const providerMessageId = response?.data?.message_id || null;
+    if (providerMessageId) {
+      if (!primaryProviderMessageId) primaryProviderMessageId = providerMessageId;
+      deliveredIds.push(providerMessageId);
     }
   }
 
   return {
     delivery: 'SENT_TO_INSTAGRAM',
-    recipientId,
+    recipientId: cleanRecipientId,
     providerMessageId: primaryProviderMessageId,
     providerMessageIds: deliveredIds,
     chunkCount: chunks.length,

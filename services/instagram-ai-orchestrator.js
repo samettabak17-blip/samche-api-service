@@ -52,8 +52,14 @@ export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
   '9. APPOINTMENT & HIGH-INTENT QUALIFICATION RULES:',
   '   - When a customer expresses appointment, consultation, callback, or direct meeting intent (e.g. "Samed Bey sizinle görüşebilir miyiz?", "Randevu alabilir miyiz?", "Müsait olduğunuzda görüşelim", "Beni arayabilir misiniz?"):',
   '     - DO NOT perform an immediate handoff and NEVER say phrases like "Sizi canlı temsilciye aktarıyorum", "Sizi Samed Bey\'e aktarıyorum", or "Sizi WhatsApp\'a yönlendiriyorum". Internal escalation is completely silent.',
-  '     - Naturally acknowledge the request conversationally (e.g. "Elbette. Randevu oluşturabilmemiz adına birkaç bilginizi almam gerekiyor. Bilgilerinizi benimle paylaşır mısınız?" or equivalent natural response).',
-  '     - Collect ONLY the necessary qualification info conversationally: customer name (only if not already known), preferred contact phone / WhatsApp number, and what they want to discuss / service needed (e.g. company activity, Free Zone/Mainland preference, visa count, timeline).',
+  '     - Naturally acknowledge the request conversationally (e.g. "Merhaba, tabii ki. Size uygun seçenekleri belirleyip görüşmeyi planlayabilmemiz için birkaç detay rica edebilir miyim?" or equivalent natural response).',
+  '     - Collect ONLY the information genuinely necessary to qualify their specific stated topic:',
+  '       • Business activity or sector they plan to operate in',
+  '       • Relevant specifics of their stated inquiry (e.g. Free Zone / Mainland preference if known)',
+  '       • Preferred contact phone or WhatsApp number so the consultant can reach them',
+  '       • Preferred day or time for the meeting / call',
+  '     - DO NOT proactively ask or introduce residency/visa questions (e.g. do NOT ask "Kaç adet oturum vizesi gerekecek?") unless the customer explicitly asks about residency/visas or states a visa requirement.',
+  '     - Knowledge is a factual reference library, NOT a checklist of services to cross-sell.',
   '     - If the customer asks about pricing during qualification ("maliyeti ne kadar?", "danışmanlık ücreti nedir?"), answer directly with authoritative Main policy facts (8.000 AED Free Zone consultancy fee including corporate bank account opening and KYC support; license costs separate; do not invent exact license cost; do not volunteer Sponsored Residency unless living without company requested), and then continue collecting the missing appointment details.',
   '     - DO NOT fabricate a confirmed calendar slot; record their preferred timing as a pending appointment request.',
   '10. CUSTOMER DISPLAY-NAME & NATURAL ADDRESSING:',
@@ -480,19 +486,25 @@ export async function orchestrateInstagramInboundAiResponse({
 
   // 12. Deliver outbound message to Instagram
   let deliveryResult = null;
-  if (accessToken && senderIgsid) {
+  let deliveryError = null;
+  const cleanSenderId = String(senderIgsid || '').replace(/^instagram:\s*/i, '').trim();
+
+  if (accessToken && cleanSenderId) {
     try {
       deliveryResult = await deliverInstagramText({
-        recipientId: senderIgsid,
+        recipientId: cleanSenderId,
         content: formattedResponse,
         accessToken,
         instagramAccountId: accountId,
         pageId: accountId,
         http,
       });
+    } catch (deliveryErr) {
+      deliveryError = deliveryErr;
+      console.error('INSTAGRAM_OUTBOUND_DELIVERY_ERROR', deliveryErr?.code, deliveryErr?.message);
     } finally {
       sendInstagramTypingOff({
-        recipientId: senderIgsid,
+        recipientId: cleanSenderId,
         accessToken,
         instagramAccountId: accountId,
         pageId: accountId,
@@ -500,23 +512,35 @@ export async function orchestrateInstagramInboundAiResponse({
       }).catch(() => {});
     }
 
-    if (persisted.message?.id && deliveryResult?.providerMessageId) {
+    if (persisted.message?.id) {
       const isPool = typeof database?.connect === 'function' && typeof database?.query !== 'function';
       const dbClient = isPool ? await database.connect() : database;
       try {
-        await dbClient.query(
-          `UPDATE conversation_messages
-              SET external_message_id = $1
-            WHERE id = $2 AND tenant_id = $3`,
-          [deliveryResult.providerMessageId, persisted.message.id, tenantId]
-        ).catch((err) => console.warn('INSTAGRAM_MSG_PROVIDER_ID_UPDATE_WARN', err?.message));
+        if (deliveryError) {
+          await dbClient.query(
+            `UPDATE conversation_messages
+                SET delivery_status = 'FAILED',
+                    delivery_failure_code = $1,
+                    delivery_status_updated_at = CURRENT_TIMESTAMP
+              WHERE id = $2 AND tenant_id = $3`,
+            [deliveryError?.code || 'INSTAGRAM_DELIVERY_FAILED', persisted.message.id, tenantId]
+          ).catch((err) => console.warn('INSTAGRAM_MSG_DELIVERY_FAIL_UPDATE_WARN', err?.message));
+        } else if (deliveryResult?.providerMessageId) {
+          await dbClient.query(
+            `UPDATE conversation_messages
+                SET external_message_id = $1,
+                    delivery_status = 'SENT',
+                    delivery_status_updated_at = CURRENT_TIMESTAMP
+              WHERE id = $2 AND tenant_id = $3`,
+            [deliveryResult.providerMessageId, persisted.message.id, tenantId]
+          ).catch((err) => console.warn('INSTAGRAM_MSG_PROVIDER_ID_UPDATE_WARN', err?.message));
+        }
       } finally {
         if (isPool && typeof dbClient?.release === 'function') {
           dbClient.release();
         }
       }
     }
-
   }
 
   // Trigger high-intent qualification and silent internal notification asynchronously
@@ -529,7 +553,8 @@ export async function orchestrateInstagramInboundAiResponse({
 
   return {
     aiInvoked: true,
-    delivered: true,
+    delivered: !deliveryError && Boolean(deliveryResult),
+    deliveryError: deliveryError?.message || null,
     responseText: formattedResponse,
     deliveryResult,
     assistantMessageId: persisted.message?.id || null,
@@ -685,19 +710,25 @@ export async function generateAndDeliverInstagramAssistantResponse({
     }
 
     let deliveryResult = null;
-    if (accessToken && recipientIgsid) {
+    let deliveryError = null;
+    const cleanRecipient = String(recipientIgsid || '').replace(/^instagram:\s*/i, '').trim();
+
+    if (accessToken && cleanRecipient) {
       try {
         deliveryResult = await deliverInstagramText({
-          recipientId: recipientIgsid,
+          recipientId: cleanRecipient,
           content: formattedResponse,
           accessToken,
           instagramAccountId: accountId,
           pageId: accountId,
           http,
         });
+      } catch (deliveryErr) {
+        deliveryError = deliveryErr;
+        console.error('INSTAGRAM_OUTBOUND_DELIVERY_ERROR', deliveryErr?.code, deliveryErr?.message);
       } finally {
         sendInstagramTypingOff({
-          recipientId: recipientIgsid,
+          recipientId: cleanRecipient,
           accessToken,
           instagramAccountId: accountId,
           pageId: accountId,
@@ -705,13 +736,26 @@ export async function generateAndDeliverInstagramAssistantResponse({
         }).catch(() => {});
       }
 
-      if (persisted.message?.id && deliveryResult?.providerMessageId) {
-        await client.query(
-          `UPDATE conversation_messages
-              SET external_message_id = $1
-            WHERE id = $2 AND tenant_id = $3`,
-          [deliveryResult.providerMessageId, persisted.message.id, tenantId]
-        ).catch((err) => console.warn('INSTAGRAM_MSG_PROVIDER_ID_UPDATE_WARN', err?.message));
+      if (persisted.message?.id) {
+        if (deliveryError) {
+          await client.query(
+            `UPDATE conversation_messages
+                SET delivery_status = 'FAILED',
+                    delivery_failure_code = $1,
+                    delivery_status_updated_at = CURRENT_TIMESTAMP
+              WHERE id = $2 AND tenant_id = $3`,
+            [deliveryError?.code || 'INSTAGRAM_DELIVERY_FAILED', persisted.message.id, tenantId]
+          ).catch((err) => console.warn('INSTAGRAM_MSG_DELIVERY_FAIL_UPDATE_WARN', err?.message));
+        } else if (deliveryResult?.providerMessageId) {
+          await client.query(
+            `UPDATE conversation_messages
+                SET external_message_id = $1,
+                    delivery_status = 'SENT',
+                    delivery_status_updated_at = CURRENT_TIMESTAMP
+              WHERE id = $2 AND tenant_id = $3`,
+            [deliveryResult.providerMessageId, persisted.message.id, tenantId]
+          ).catch((err) => console.warn('INSTAGRAM_MSG_PROVIDER_ID_UPDATE_WARN', err?.message));
+        }
       }
     }
 
@@ -724,7 +768,8 @@ export async function generateAndDeliverInstagramAssistantResponse({
     }).catch((err) => console.warn('HIGH_INTENT_LEAD_EVALUATION_NON_BLOCKING_WARN', err?.message));
 
     return {
-      delivered: true,
+      delivered: !deliveryError && Boolean(deliveryResult),
+      deliveryError: deliveryError?.message || null,
       responseText: formattedResponse,
       deliveryResult,
       assistantMessageId: persisted.message?.id || null,

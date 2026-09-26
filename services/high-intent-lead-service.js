@@ -17,11 +17,11 @@ export class HighIntentLeadError extends Error {
  * Evaluates semantic and keyword triggers without hardcoding specific names.
  */
 const APPOINTMENT_INTENT_PATTERNS = [
-  /(?:^|[\s\p{P}])(?:randevu|görüşme|gorusme|toplantı|toplanti|konuşalım|konusalim|görüşelim|goruselim|görüşebilir|gorusabilir|arayabilir\s+misiniz|arayın|ararmısınız|iletişim\s+bilgilerinizi|görüşmek|konuşmak)(?:$|[\s\p{P}])/iu,
-  /(?:^|[\s\p{P}])(?:appointment|consultation|call\s+me|callback|meeting|schedule|discuss\s+services|contact\s+number)(?:$|[\s\p{P}])/iu,
-  /(?:ile\s+görüşmek|ile\s+konuşmak|ile\s+irtibat|ile\s+randevu|ile\s+görüşebilir|sizinle\s+görüş)/iu,
-  /(?:danışmanla|yetkiliyle|kurucuyla|sahibiyle)\s+(?:görüşmek|konuşmak)/iu,
-  /(?:şirket\s+kurmak\s+istiyorum|kurulum\s+yapmak\s+istiyorum|başlamak\s+istiyorum|teklif\s+almak\s+istiyorum)/iu,
+  /(?:^|[\s\p{P}])(?:randevu\w*|görüşme\w*|gorusme\w*|toplantı\w*|toplanti\w*|konuş\w*|konus\w*|görüş\w*|gorus\w*|arayabilir\s+misiniz|arayın|ararmısınız|iletişim\s+bilgilerinizi)(?:$|[\s\p{P}])/iu,
+  /(?:^|[\s\p{P}])(?:appointment\w*|consultation\w*|call\s+me|callback\w*|meeting\w*|schedule\w*|discuss\s+services|contact\s+number)(?:$|[\s\p{P}])/iu,
+  /(?:ile\s+görüş|ile\s+konuş|ile\s+irtibat|ile\s+randevu|sizinle\s+görüş|sizinle\s+konuş)/iu,
+  /(?:danışmanla|yetkiliyle|kurucuyla|sahibiyle)\s+(?:görüş|konuş)/iu,
+  /(?:şirket\s+kurmak\s+istiyoruz|şirket\s+kurmak\s+istiyorum|kurulum\s+yapmak|başlamak\s+istiyoruz|başlamak\s+istiyorum|teklif\s+almak)/iu,
 ];
 
 
