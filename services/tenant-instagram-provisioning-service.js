@@ -145,7 +145,14 @@ export async function getTenantInstagramStatus({ database = pool, tenantId }) {
       connectionStatus = 'DISCONNECTED';
     }
 
-    const accountId = config.instagram_account_id || config.instagram_business_account_id || config.page_id || row.external_channel_id || null;
+    const userId = config.instagram_user_id || null;
+    const businessAccountId = config.instagram_business_account_id ||
+      (config.page_id && config.page_id !== userId ? config.page_id : null) ||
+      (row.external_channel_id && row.external_channel_id !== userId ? row.external_channel_id : null) ||
+      config.instagram_account_id ||
+      null;
+
+    const primaryId = businessAccountId || userId || row.external_channel_id || null;
     const accountSubscribed = Boolean(config.account_subscribed ?? config.webhook_subscription_enabled ?? true);
     const subscribedFields = Array.isArray(config.subscribed_fields) ? config.subscribed_fields : CANONICAL_INSTAGRAM_WEBHOOK_FIELDS;
 
@@ -161,9 +168,10 @@ export async function getTenantInstagramStatus({ database = pool, tenantId }) {
       auth_mode: config.auth_mode || 'INSTAGRAM_LOGIN',
       activation_policy: config.activation_policy || 'MANUAL_ONLY',
       activation_triggers: Array.isArray(config.activation_triggers) ? config.activation_triggers : [],
-      instagram_account_id: accountId,
-      page_id: config.page_id || accountId,
-      instagram_business_account_id: config.instagram_business_account_id || accountId,
+      instagram_business_account_id: businessAccountId,
+      instagram_user_id: userId,
+      instagram_account_id: primaryId,
+      page_id: config.page_id || primaryId,
       account_username: config.account_username || null,
       account_name: config.account_name || row.display_name || null,
       account_subscribed: accountSubscribed,
@@ -267,7 +275,12 @@ export async function configureTenantInstagramChannel({
     );
     const existingConfig = existingCi.rows[0]?.config || {};
 
-    const resolvedAccountId = instagramAccountId || resolvedExternalId;
+    const businessAccountId = instagramBusinessAccountId || instagramAccountId || pageId ||
+      existingConfig.instagram_business_account_id ||
+      (existingConfig.page_id && String(existingConfig.page_id) !== String(existingConfig.instagram_user_id) ? existingConfig.page_id : null) ||
+      resolvedExternalId;
+
+    const primaryRoutingId = businessAccountId || resolvedExternalId;
 
     const validPolicies = ['MANUAL_ONLY', 'ALL_MESSAGES', 'BUSINESS_INTENT_ONLY', 'TRIGGER_ONLY'];
     const resolvedPolicy = activationPolicy && validPolicies.includes(activationPolicy)
@@ -289,9 +302,10 @@ export async function configureTenantInstagramChannel({
       auth_mode: authMode || existingConfig.auth_mode || 'INSTAGRAM_LOGIN',
       activation_policy: resolvedPolicy,
       activation_triggers: resolvedTriggers,
-      instagram_account_id: resolvedAccountId,
-      instagram_business_account_id: resolvedAccountId,
-      page_id: pageId || existingConfig.page_id || resolvedAccountId,
+      instagram_business_account_id: businessAccountId,
+      instagram_user_id: existingConfig.instagram_user_id || null,
+      instagram_account_id: primaryRoutingId,
+      page_id: primaryRoutingId,
       account_username: accountUsername || existingConfig.account_username || null,
       account_name: accountName || existingConfig.account_name || displayName,
       access_token: resolvedToken,
@@ -411,6 +425,37 @@ export async function testTenantInstagramConnection({
       const verifiedUsername = res.data?.username || config.account_username;
       const verifiedName = res.data?.name || res.data?.username || status.account_name;
 
+      // Preserve existing business account / webhook delivery ID if distinct from user ID
+      let businessAccountId = config.instagram_business_account_id ||
+        (config.page_id && String(config.page_id) !== String(verifiedId) ? config.page_id : null) ||
+        (config.instagram_account_id && String(config.instagram_account_id) !== String(verifiedId) ? config.instagram_account_id : null) ||
+        (row.external_channel_id && String(row.external_channel_id) !== String(verifiedId) ? row.external_channel_id : null) ||
+        null;
+
+      if (!businessAccountId) {
+        const candRes = await client.query(
+          `SELECT tc2.external_channel_id, ci2.config
+             FROM tenant_channels tc2
+             LEFT JOIN channel_integrations ci2 ON ci2.channel_id = tc2.id AND ci2.tenant_id = tc2.tenant_id AND ci2.integration_type = 'INSTAGRAM'
+            WHERE (tc2.tenant_id = $1 OR ci2.config->>'account_username' = $2)
+              AND tc2.channel_type = 'INSTAGRAM'
+            ORDER BY tc2.created_at ASC`,
+          [tenantId, verifiedUsername || config.account_username || '']
+        );
+        for (const cand of candRes.rows) {
+          const candId = cand.config?.instagram_business_account_id ||
+            (cand.config?.page_id && String(cand.config?.page_id) !== String(verifiedId) ? cand.config.page_id : null) ||
+            (cand.config?.instagram_account_id && String(cand.config?.instagram_account_id) !== String(verifiedId) ? cand.config.instagram_account_id : null) ||
+            (cand.external_channel_id && String(cand.external_channel_id) !== String(verifiedId) ? cand.external_channel_id : null);
+          if (candId) {
+            businessAccountId = candId;
+            break;
+          }
+        }
+      }
+
+      const primaryRoutingId = businessAccountId || verifiedId;
+
       // Assign assistant if missing
       const asstRes = await client.query(
         `SELECT id FROM ai_assistants WHERE tenant_id = $1 AND lower(status) = 'active' ORDER BY updated_at DESC LIMIT 1`,
@@ -424,7 +469,7 @@ export async function testTenantInstagramConnection({
                 assistant_id = COALESCE(assistant_id, $2),
                 updated_at = CURRENT_TIMESTAMP
           WHERE tenant_id = $3 AND channel_type = 'INSTAGRAM'`,
-        [verifiedId, assistantIdToAssign, tenantId]
+        [primaryRoutingId, assistantIdToAssign, tenantId]
       );
 
       // Programmatically verify and ensure account-level webhook subscription via official Meta Instagram Login API
@@ -463,9 +508,10 @@ export async function testTenantInstagramConnection({
 
       const updatedConfig = {
         ...config,
-        instagram_account_id: verifiedId,
+        instagram_business_account_id: businessAccountId || config.instagram_business_account_id || null,
         instagram_user_id: verifiedId,
-        page_id: verifiedId,
+        instagram_account_id: primaryRoutingId,
+        page_id: primaryRoutingId,
         account_subscribed: accountSubscribed,
         subscribed_fields: subscribedFields,
         reauth_required: false,
@@ -485,8 +531,10 @@ export async function testTenantInstagramConnection({
       return {
         healthy: true,
         status: 'CONNECTED',
-        instagram_account_id: verifiedId,
-        page_id: verifiedId,
+        instagram_business_account_id: businessAccountId,
+        instagram_user_id: verifiedId,
+        instagram_account_id: primaryRoutingId,
+        page_id: primaryRoutingId,
         account_username: verifiedUsername,
         account_name: verifiedName,
         account_subscribed: accountSubscribed,
@@ -569,15 +617,49 @@ export async function convergeTenantInstagramChannels({ database = pool, http = 
           });
           const verifiedId = meRes.data?.id;
           const verifiedUsername = meRes.data?.username;
+          const verifiedName = meRes.data?.name || meRes.data?.username || config.account_name || null;
+
 
           if (verifiedId) {
-            await client.query(`UPDATE tenant_channels SET external_channel_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [verifiedId, row.channel_id]);
+            let businessAccountId = config.instagram_business_account_id ||
+              (config.page_id && String(config.page_id) !== String(verifiedId) ? config.page_id : null) ||
+              (config.instagram_account_id && String(config.instagram_account_id) !== String(verifiedId) ? config.instagram_account_id : null) ||
+              (row.external_channel_id && String(row.external_channel_id) !== String(verifiedId) ? row.external_channel_id : null) ||
+              null;
+
+            if (!businessAccountId) {
+              const candRes = await client.query(
+                `SELECT tc2.external_channel_id, ci2.config
+                   FROM tenant_channels tc2
+                   LEFT JOIN channel_integrations ci2 ON ci2.channel_id = tc2.id AND ci2.tenant_id = tc2.tenant_id AND ci2.integration_type = 'INSTAGRAM'
+                  WHERE (tc2.tenant_id = $1 OR ci2.config->>'account_username' = $2)
+                    AND tc2.channel_type = 'INSTAGRAM'
+                  ORDER BY tc2.created_at ASC`,
+                [row.tenant_id, verifiedUsername || config.account_username || '']
+              );
+              for (const cand of candRes.rows) {
+                const candId = cand.config?.instagram_business_account_id ||
+                  (cand.config?.page_id && String(cand.config?.page_id) !== String(verifiedId) ? cand.config.page_id : null) ||
+                  (cand.config?.instagram_account_id && String(cand.config?.instagram_account_id) !== String(verifiedId) ? cand.config.instagram_account_id : null) ||
+                  (cand.external_channel_id && String(cand.external_channel_id) !== String(verifiedId) ? cand.external_channel_id : null);
+                if (candId) {
+                  businessAccountId = candId;
+                  break;
+                }
+              }
+            }
+
+            const primaryRoutingId = businessAccountId || verifiedId;
+
+            await client.query(`UPDATE tenant_channels SET external_channel_id = $1, assistant_id = COALESCE(assistant_id, $2), updated_at = CURRENT_TIMESTAMP WHERE id = $3`, [primaryRoutingId, assistantId, row.channel_id]);
             const updatedConfig = {
               ...config,
-              instagram_account_id: verifiedId,
+              instagram_business_account_id: businessAccountId || config.instagram_business_account_id || null,
               instagram_user_id: verifiedId,
-              page_id: verifiedId,
+              instagram_account_id: primaryRoutingId,
+              page_id: primaryRoutingId,
               account_username: verifiedUsername || config.account_username,
+              account_name: verifiedName || config.account_name,
               account_subscribed: true,
               subscribed_fields: CANONICAL_INSTAGRAM_WEBHOOK_FIELDS,
               updated_at: new Date().toISOString(),

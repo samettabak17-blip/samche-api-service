@@ -550,25 +550,36 @@ app.get("/api/v1/health/instagram-diagnostics", async (_req, res) => {
         whatsapp_app_secret_fingerprint: appSecretFingerprint(process.env.WHATSAPP_APP_SECRET),
         meta_app_secret_fingerprint: appSecretFingerprint(process.env.META_APP_SECRET),
       },
-      instagram_channels: channels.rows.map((row) => ({
-        tenant_id: String(row.tenant_id).slice(0, 8),
-        channel_id: String(row.channel_id).slice(0, 8),
-        channel_status: row.channel_status,
-        tenant_status: row.tenant_status,
-        assistant_present: Boolean(row.assistant_id),
-        assistant_status: row.assistant_status,
-        integration_present: Boolean(row.integration_id),
-        integration_enabled: row.integration_enabled === true,
-        activation_policy: row.integration_config?.activation_policy || 'MANUAL_ONLY',
-        account_username: row.integration_config?.account_username || null,
-        has_token: Boolean(row.integration_config?.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN),
-        reauth_required: Boolean(row.integration_config?.reauth_required),
-        account_subscribed: Boolean(row.integration_config?.account_subscribed),
-        subscribed_fields: row.integration_config?.subscribed_fields || [],
-        inbound_resolvable: row.tenant_status === 'active'
-          && row.channel_status === 'active'
-          && String(row.assistant_status ?? '').toLowerCase() === 'active',
-      })),
+      instagram_channels: channels.rows.map((row) => {
+        const cfg = row.integration_config || {};
+        const bId = cfg.instagram_business_account_id || (cfg.page_id && String(cfg.page_id) !== String(cfg.instagram_user_id) ? cfg.page_id : null) || (String(row.external_channel_id) !== String(cfg.instagram_user_id) ? row.external_channel_id : null);
+        const uId = cfg.instagram_user_id || null;
+        return {
+          tenant_id: String(row.tenant_id).slice(0, 8),
+          channel_id: String(row.channel_id).slice(0, 8),
+          channel_status: row.channel_status,
+          tenant_status: row.tenant_status,
+          assistant_present: Boolean(row.assistant_id),
+          assistant_status: row.assistant_status,
+          integration_present: Boolean(row.integration_id),
+          integration_enabled: row.integration_enabled === true,
+          activation_policy: cfg.activation_policy || 'MANUAL_ONLY',
+          account_username: cfg.account_username || null,
+          has_token: Boolean(cfg.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN),
+          reauth_required: Boolean(cfg.reauth_required),
+          account_subscribed: Boolean(cfg.account_subscribed),
+          subscribed_fields: cfg.subscribed_fields || [],
+          instagram_business_account_id_prefix: bId ? String(bId).slice(0, 8) : null,
+          instagram_user_id_prefix: uId ? String(uId).slice(0, 8) : null,
+          ids_distinct: Boolean(bId && uId && String(bId) !== String(uId)),
+          inbound_business_id_resolvable: Boolean(bId),
+          inbound_user_id_resolvable: Boolean(uId),
+          ambiguous: false,
+          inbound_resolvable: row.tenant_status === 'active'
+            && row.channel_status === 'active'
+            && (row.assistant_id === null || String(row.assistant_status ?? '').toLowerCase() === 'active'),
+        };
+      }),
       live_meta_probe: liveChecks,
       database_counts: {
         total_conversations: convStats.rows[0]?.total_conversations || 0,

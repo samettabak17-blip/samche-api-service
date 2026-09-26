@@ -358,3 +358,221 @@ test('15. inbound Instagram message with human support request triggers handoff 
   assert.equal(deliveredAcks.length, 1);
 });
 
+// 16. TEST A: business/webhook ID != /me user ID, real webhook recipient uses business ID -> correct tenant resolves
+test('16. TEST A: business/webhook ID distinct from user-scoped ID resolves to owning tenant', async () => {
+  const businessId = '17841400000000099';
+  const userId = '39251538000000099';
+
+  const mockDb = {
+    async query(sql, params) {
+      if (params[0] === businessId || params[0] === userId) {
+        return {
+          rowCount: 1,
+          rows: [{
+            tenant_id: tenantIdA,
+            channel_id: 'chan-a',
+            assistant_id: assistantIdA,
+            external_channel_id: businessId,
+            channel_type: 'INSTAGRAM',
+            channel_status: 'active',
+            assistant_status: 'active',
+            config: {
+              instagram_business_account_id: businessId,
+              instagram_user_id: userId,
+              instagram_account_id: businessId,
+              page_id: businessId,
+            },
+          }],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  const resolved = await resolveInstagramIntegration(mockDb, businessId);
+  assert.ok(resolved);
+  assert.equal(resolved.tenant_id, tenantIdA);
+  assert.equal(resolved.config.instagram_business_account_id, businessId);
+  assert.equal(resolved.config.instagram_user_id, userId);
+});
+
+// 17. TEST B & G: /me convergence preserves distinct business ID and user ID
+test('17. TEST B & G: convergence preserves business account ID while enriching user-scoped ID', async () => {
+  const { convergeTenantInstagramChannels } = await import('../services/tenant-instagram-provisioning-service.js');
+  const businessId = '17841400000000099';
+  const userId = '39251538000000099';
+  let savedExternalId = null;
+  let savedConfig = null;
+
+  const mockDb = {
+    async connect() {
+      return {
+        async query(sql, params) {
+          if (sql.includes('FROM tenant_channels tc')) {
+            return {
+              rowCount: 1,
+              rows: [{
+                channel_id: 'chan-a',
+                tenant_id: tenantIdA,
+                external_channel_id: businessId,
+                assistant_id: assistantIdA,
+                channel_status: 'active',
+                integration_config: {
+                  access_token: 'valid-token',
+                  instagram_business_account_id: businessId,
+                  page_id: businessId,
+                },
+              }],
+            };
+          }
+          if (sql.includes('UPDATE tenant_channels SET external_channel_id')) {
+            savedExternalId = params[0];
+            return { rowCount: 1, rows: [] };
+          }
+          if (sql.includes('UPDATE channel_integrations SET config')) {
+            savedConfig = JSON.parse(params[0]);
+            return { rowCount: 1, rows: [] };
+          }
+          return { rowCount: 0, rows: [] };
+        },
+        release() {},
+      };
+    },
+  };
+
+  const fakeHttp = {
+    async get(url) {
+      if (url.includes('/me')) {
+        return { data: { id: userId, username: 'testuser' } };
+      }
+      return { data: {} };
+    },
+    async post() { return { data: { success: true } }; },
+  };
+
+  await convergeTenantInstagramChannels({ database: mockDb, http: fakeHttp });
+
+  assert.equal(savedExternalId, businessId);
+  assert.equal(savedConfig.instagram_business_account_id, businessId);
+  assert.equal(savedConfig.instagram_user_id, userId);
+});
+
+// 18. TEST C: webhook uses user-scoped ID where Meta legitimately supplies it -> resolves
+test('18. TEST C: webhook using user-scoped ID resolves to owning tenant', async () => {
+  const businessId = '17841400000000099';
+  const userId = '39251538000000099';
+
+  const mockDb = {
+    async query(sql, params) {
+      if (params[0] === userId) {
+        return {
+          rowCount: 1,
+          rows: [{
+            tenant_id: tenantIdA,
+            channel_id: 'chan-a',
+            assistant_id: assistantIdA,
+            external_channel_id: businessId,
+            channel_type: 'INSTAGRAM',
+            channel_status: 'active',
+            config: {
+              instagram_business_account_id: businessId,
+              instagram_user_id: userId,
+            },
+          }],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  const resolved = await resolveInstagramIntegration(mockDb, userId);
+  assert.ok(resolved);
+  assert.equal(resolved.tenant_id, tenantIdA);
+});
+
+// 19. TEST D: MANUAL_ONLY + no initially assigned assistant -> inbound persists
+test('19. TEST D: channel with NULL assistant_id resolves and persists message in MANUAL_ONLY', async () => {
+  const businessId = '17841400000000099';
+  let messageSaved = false;
+
+  const mockDb = {
+    async connect() {
+      return {
+        async query(sql, params) {
+          if (sql === 'BEGIN' || sql === 'COMMIT') return {};
+          if (sql.includes('FROM tenant_channels tc')) {
+            return {
+              rowCount: 1,
+              rows: [{
+                tenant_id: tenantIdA,
+                channel_id: 'chan-a',
+                assistant_id: null,
+                external_channel_id: businessId,
+                channel_type: 'INSTAGRAM',
+                channel_status: 'active',
+                assistant_status: null,
+                config: { instagram_business_account_id: businessId, activation_policy: 'MANUAL_ONLY' },
+              }],
+            };
+          }
+          if (sql.includes('INSERT INTO conversations')) {
+            return {
+              rowCount: 1,
+              rows: [{
+                id: 'conv-101',
+                tenant_id: tenantIdA,
+                channel_id: 'chan-a',
+                status: 'open',
+                handling_mode: 'AI',
+                handling_version: 1,
+                customer_external_id: `instagram:${igsidCustomer1}`,
+              }],
+            };
+          }
+          if (sql.includes('INSERT INTO conversation_messages')) {
+            messageSaved = true;
+            return { rowCount: 1, rows: [{ id: 'msg-1', content: params[2] }] };
+          }
+          return { rowCount: 0, rows: [] };
+        },
+        release() {},
+      };
+    },
+  };
+
+  const result = await persistInstagramInbound({
+    database: mockDb,
+    recipientId: businessId,
+    senderIgsid: igsidCustomer1,
+    messageId: 'mid.noassistant.1',
+    content: 'Hello without assistant',
+  });
+
+  assert.equal(result.duplicate, false);
+  assert.equal(messageSaved, true);
+});
+
+// 20. TEST F: ambiguous duplicate provider identifier across tenants -> fail closed
+test('20. TEST F: duplicate recipient across two tenants fails closed with null', async () => {
+  const businessId = '17841400000000099';
+
+  const mockDb = {
+    async query(sql, params) {
+      if (params[0] === businessId) {
+        return {
+          rowCount: 2,
+          rows: [
+            { tenant_id: tenantIdA, channel_id: 'chan-a' },
+            { tenant_id: tenantIdB, channel_id: 'chan-b' },
+          ],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  const resolved = await resolveInstagramIntegration(mockDb, businessId);
+  assert.equal(resolved, null);
+});
+
+
