@@ -80,17 +80,17 @@ BEGIN
     DELETE FROM knowledge_chunks
      WHERE tenant_id = t_id
        AND (
-         content ILIKE '%Nova Crest%'
-         OR content ILIKE '%Meridian Arc%'
-         OR content ILIKE '%Foundation Launch Package%'
-         OR content ILIKE '%Growth Accelerator Package%'
-         OR content ILIKE '%Silver Bridge Protocol%'
-         OR content ILIKE '%Enterprise Architecture Review%'
-         OR content ILIKE '%Project Atlas%'
-         OR content ILIKE '%Project Harbor%'
-         OR content ILIKE '%Project Vela%'
-         OR content ILIKE '%cobalt lantern%'
-         OR content ILIKE '%task6_e2e%'
+         normalized_text ILIKE '%Nova Crest%'
+         OR normalized_text ILIKE '%Meridian Arc%'
+         OR normalized_text ILIKE '%Foundation Launch Package%'
+         OR normalized_text ILIKE '%Growth Accelerator Package%'
+         OR normalized_text ILIKE '%Silver Bridge Protocol%'
+         OR normalized_text ILIKE '%Enterprise Architecture Review%'
+         OR normalized_text ILIKE '%Project Atlas%'
+         OR normalized_text ILIKE '%Project Harbor%'
+         OR normalized_text ILIKE '%Project Vela%'
+         OR normalized_text ILIKE '%cobalt lantern%'
+         OR normalized_text ILIKE '%task6_e2e%'
        );
 
     -- 3. Remove legacy candidates and evidence

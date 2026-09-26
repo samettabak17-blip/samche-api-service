@@ -307,7 +307,7 @@ async function main() {
   const legacyChunksCheck = await pool.query(
     `SELECT count(*) FROM knowledge_chunks
       WHERE tenant_id = $1
-        AND (content ILIKE '%Nova Crest%' OR content ILIKE '%Meridian Arc%' OR content ILIKE '%Foundation Launch%' OR content ILIKE '%Silver Bridge%')`,
+        AND (normalized_text ILIKE '%Nova Crest%' OR normalized_text ILIKE '%Meridian Arc%' OR normalized_text ILIKE '%Foundation Launch%' OR normalized_text ILIKE '%Silver Bridge%')`,
     [tenantId]
   );
 
