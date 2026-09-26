@@ -37,7 +37,18 @@ import { getInstagramSubscribedApps, convergeTenantInstagramChannels } from "./s
 import { claimDueCustomerSupportLifecycle, claimDueHumanSupportEscalations, requestCustomerHumanSupport, triggerImmediateHumanSupportNotificationPipeline } from "./services/human-support-service.js";
 import { processHumanSupportNotificationOutbox } from './services/human-support-notification-outbox-service.js';
 import { resolveHumanSupportRecipients } from './services/human-support-recipient-service.js';
-import { enqueueHumanHandoffPushNotification, processPushNotificationOutbox } from './services/push-notification-service.js';
+import { enqueueHumanHandoffPushNotification, enqueueCustomerMessagePushNotification, processPushNotificationOutbox } from './services/push-notification-service.js';
+
+async function triggerPushDeliveryOutbox(tenantId, database = pool) {
+  try {
+    const pushAdapter = await createWebPushDeliveryAdapter().catch(() => null);
+    if (pushAdapter) {
+      await processPushNotificationOutbox({ database, deliver: pushAdapter.deliver, tenantId }).catch(() => {});
+    }
+  } catch (err) {
+    console.warn('PUSH_DELIVERY_TRIGGER_WARN', err?.message);
+  }
+}
 import { createWebPushDeliveryAdapter, getLatestWebPushDeliveryAttempt } from './services/web-push-delivery-adapter.js';
 import { cancelConversationContextualFollowUps, processDueContextualFollowUps, scheduleContextualFollowUp } from './services/durable-follow-up-service.js';
 import { parseCustomerHumanSupportRequest } from "./services/human-support-intent.js";
@@ -1872,6 +1883,17 @@ app.post("/chat", chatPostHandler = async (req, res) => {
         resourceIds: attachmentResourceIds,
       });
     }
+    if (inboxState?.customerMessage?.id && !inboxState.duplicate) {
+      enqueueCustomerMessagePushNotification({
+        database,
+        tenantId: guideRuntimeIntegration.tenant_id,
+        conversationId: inboxState.conversation.id,
+        messageId: inboxState.customerMessage.id,
+        channelType: 'SAMCHEGUIDE',
+      }).then(() => triggerPushDeliveryOutbox(guideRuntimeIntegration.tenant_id, database))
+        .catch((err) => console.warn('GUIDE_PUSH_NOTIF_WARN', err?.message));
+    }
+
 
     const moduleThread = guideConversation.module === 'ROADMAP'
       ? guideSessionState.roadmapState.messages
@@ -3913,6 +3935,17 @@ app.post("/api/chat", async (req, res) => {
             resourceIds: attachmentResourceIds,
           });
         }
+        if (webChatInboundState?.customerMessage?.id && !webChatInboundState.duplicate) {
+          enqueueCustomerMessagePushNotification({
+            database,
+            tenantId: webChatIntegration.tenant_id,
+            conversationId: webChatInboundState.conversation.id,
+            messageId: webChatInboundState.customerMessage.id,
+            channelType: 'WEB_CHAT',
+          }).then(() => triggerPushDeliveryOutbox(webChatIntegration.tenant_id, database))
+            .catch((err) => console.warn('WEB_CHAT_PUSH_NOTIF_WARN', err?.message));
+        }
+
       } catch (inboundErr) {
         webChatInboundPersistenceFailed = true;
         console.warn('WEB_CHAT_INBOUND_PERSIST_WARN:', inboundErr.message);
@@ -4675,6 +4708,17 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
               continue;
             }
             if (inboundState.duplicate) continue;
+            if (!inboundState.duplicate && inboundState.customerMessage?.id) {
+              enqueueCustomerMessagePushNotification({
+                database: pool,
+                tenantId: inboundState.integration.tenant_id,
+                conversationId: inboundState.conversation.id,
+                messageId: inboundState.customerMessage.id,
+                channelType: 'INSTAGRAM',
+              }).then(() => triggerPushDeliveryOutbox(inboundState.integration.tenant_id))
+                .catch((err) => console.warn('INSTAGRAM_CUSTOMER_MESSAGE_PUSH_WARN', err?.message));
+            }
+
 
             await orchestrateInstagramInboundAiResponse({
               database: pool,
@@ -4791,6 +4835,17 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           return;
         }
         if (whatsappInbox.duplicate) return;
+        if (!whatsappInbox.duplicate && whatsappInbox.customerMessage?.id) {
+          enqueueCustomerMessagePushNotification({
+            database: pool,
+            tenantId: whatsappInbox.integration.tenant_id,
+            conversationId: whatsappInbox.conversation.id,
+            messageId: whatsappInbox.customerMessage.id,
+            channelType: 'WHATSAPP',
+          }).then(() => triggerPushDeliveryOutbox(whatsappInbox.integration.tenant_id))
+            .catch((err) => console.warn('WHATSAPP_CUSTOMER_MESSAGE_PUSH_WARN', err?.message));
+        }
+
 
         // Any customer reply immediately cancels stale pending/retry follow-ups
         await cancelConversationContextualFollowUps({

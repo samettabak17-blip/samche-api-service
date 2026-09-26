@@ -1,7 +1,7 @@
 import { resolveChannelDashboardRoute } from './channel-routing-service.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const EVENT_TYPES = new Set(['KNOWLEDGE_JOB_COMPLETED', 'KNOWLEDGE_JOB_FAILED', 'REVIEW_REQUIRED', 'CONFIGURATION_READY', 'HUMAN_HANDOFF_REQUESTED']);
+const EVENT_TYPES = new Set(['KNOWLEDGE_JOB_COMPLETED', 'KNOWLEDGE_JOB_FAILED', 'REVIEW_REQUIRED', 'CONFIGURATION_READY', 'HUMAN_HANDOFF_REQUESTED', 'CUSTOMER_MESSAGE_RECEIVED']);
 const MAX_DELIVERY_ATTEMPTS = 3;
 
 export class PushNotificationError extends Error {
@@ -109,6 +109,12 @@ export async function createPushNotificationIntent({ database, tenantId, eventId
        JOIN push_notification_subscriptions subscription ON subscription.tenant_id=intent.tenant_id AND subscription.enabled=TRUE
        LEFT JOIN push_notification_preferences preference ON preference.tenant_id=subscription.tenant_id AND preference.user_id=subscription.user_id
       WHERE intent.id=$1 AND COALESCE(preference.push_enabled, TRUE)=TRUE
+        AND (
+          preference.categories IS NULL
+          OR preference.categories->>'customer_messages' IS NULL
+          OR preference.categories->>'customer_messages' = 'true'
+          OR intent.event_type != 'CUSTOMER_MESSAGE_RECEIVED'
+        )
         ${recipients ? 'AND subscription.user_id = ANY($2::uuid[])' : ''}
      ON CONFLICT (tenant_id, intent_id, subscription_id)
      DO UPDATE SET status = 'PENDING', attempts = 0, processing_started_at = NULL, failure_code = NULL, delivered_at = NULL
@@ -138,6 +144,53 @@ export async function createPushNotificationIntent({ database, tenantId, eventId
     }
   }
   return intent;
+}
+
+export async function enqueueCustomerMessagePushNotification({
+  database,
+  tenantId,
+  conversationId,
+  messageId,
+  channelType = 'INSTAGRAM',
+  recipients = null,
+}) {
+  const tenant = id(tenantId, 'PUSH_TENANT_INVALID');
+  const conversation = id(conversationId, 'PUSH_CONVERSATION_INVALID');
+  const msgId = String(messageId ?? '').trim();
+  if (!msgId) throw new PushNotificationError('PUSH_MESSAGE_ID_INVALID');
+
+  const eventId = `customer-message:${conversation}:${msgId}`;
+  if (!/^customer-message:[A-Za-z0-9_.:-]{1,240}$/.test(eventId)) throw new PushNotificationError('PUSH_EVENT_INVALID');
+
+  let resolvedChannelType = channelType;
+  if (!resolvedChannelType) {
+    const channelResult = await database.query(
+      `SELECT tc.channel_type
+         FROM conversations c
+         JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
+        WHERE c.id = $1 AND c.tenant_id = $2`,
+      [conversation, tenant],
+    );
+    resolvedChannelType = channelResult.rows[0]?.channel_type || 'INSTAGRAM';
+  }
+
+  const channelRoute = resolveChannelDashboardRoute(resolvedChannelType);
+  const deepLink = `/app/${tenant}/conversations/${channelRoute}/${conversation}`;
+
+  const recipientUserIds = recipientIds(
+    Array.isArray(recipients)
+      ? recipients.map((recipient) => (typeof recipient === 'object' && recipient !== null ? recipient.id : recipient))
+      : recipients
+  );
+
+  return createPushNotificationIntent({
+    database,
+    tenantId: tenant,
+    eventId,
+    eventType: 'CUSTOMER_MESSAGE_RECEIVED',
+    deepLink,
+    recipientUserIds,
+  });
 }
 
 export async function enqueueHumanHandoffPushNotification({

@@ -7,8 +7,12 @@ export function getLatestWebPushDeliveryAttempt() {
 export function createWebPushPayload({ type, title, body, deepLink, eventId, tenantId, conversationId }) {
   const link = deepLink || '/';
   const notifType = typeof type === 'string' ? type.slice(0, 64) : 'NOTIFICATION';
-  const notifTitle = title || 'SamChe Canlı Destek';
-  const notifBody = body || (notifType === 'HUMAN_HANDOFF_REQUESTED' ? 'Yeni canlı destek talebi aktarıldı.' : notifType.replaceAll('_', ' '));
+  const notifTitle = title || (notifType === 'CUSTOMER_MESSAGE_RECEIVED' ? 'Yeni Müşteri Mesajı' : 'SamChe Canlı Destek');
+  const notifBody = body || (notifType === 'HUMAN_HANDOFF_REQUESTED'
+    ? 'Yeni canlı destek talebi aktarıldı.'
+    : notifType === 'CUSTOMER_MESSAGE_RECEIVED'
+      ? 'Yeni bir müşteri mesajı alındı.'
+      : notifType.replaceAll('_', ' '));
   return {
     type: notifType,
     title: notifTitle,
