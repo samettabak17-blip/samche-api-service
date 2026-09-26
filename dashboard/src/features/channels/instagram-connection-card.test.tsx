@@ -177,7 +177,7 @@ describe('InstagramConnectionCard UI Component', () => {
       />
     );
 
-    const accountIdInput = screen.getByPlaceholderText('e.g. 17841400000000000');
+    const accountIdInput = await screen.findByPlaceholderText('e.g. 17841400000000000');
     const usernameInput = screen.getByPlaceholderText('e.g. samchecompany');
     const tokenInput = screen.getByPlaceholderText('EAAB... or IGA...');
     const submitBtn = screen.getByRole('button', { name: /Connect Instagram/i });
@@ -225,7 +225,7 @@ describe('InstagramConnectionCard UI Component', () => {
       />
     );
 
-    const accountIdInput = screen.getByPlaceholderText('e.g. 17841400000000000');
+    const accountIdInput = await screen.findByPlaceholderText('e.g. 17841400000000000');
     const tokenInput = screen.getByPlaceholderText('EAAB... or IGA...');
     const policySelect = screen.getByLabelText(/AI Activation Policy/i);
     const submitBtn = screen.getByRole('button', { name: /Connect Instagram/i });
