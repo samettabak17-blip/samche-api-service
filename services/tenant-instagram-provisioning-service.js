@@ -243,16 +243,6 @@ export async function configureTenantInstagramChannel({
       }
     }
 
-    const resolvedExternalId = String(
-      externalChannelId ||
-      instagramAccountId ||
-      instagramBusinessAccountId ||
-      pageId ||
-      'instagram_account'
-    ).trim();
-
-    const normalizedKey = `instagram:${tenantId}:${resolvedExternalId}`;
-
     // Check if tenant already has an existing INSTAGRAM channel
     const existing = await client.query(
       `SELECT id, assistant_id, external_channel_id FROM tenant_channels
@@ -260,6 +250,17 @@ export async function configureTenantInstagramChannel({
         LIMIT 1`,
       [tenantId]
     );
+
+    const resolvedExternalId = String(
+      externalChannelId ||
+      instagramAccountId ||
+      instagramBusinessAccountId ||
+      pageId ||
+      existing.rows[0]?.external_channel_id ||
+      'instagram_account'
+    ).trim();
+
+    const normalizedKey = `instagram:${tenantId}:${resolvedExternalId}`;
 
     let channelId;
     if (existing.rowCount > 0) {
@@ -287,12 +288,14 @@ export async function configureTenantInstagramChannel({
 
     // Prepare JSONB config
     const existingCi = await client.query(
-      `SELECT config FROM channel_integrations
-        WHERE channel_id = $1 AND tenant_id = $2 AND integration_type = 'INSTAGRAM'
+      `SELECT id, integration_key, config FROM channel_integrations
+        WHERE (channel_id = $1 OR tenant_id = $2) AND integration_type = 'INSTAGRAM'
+        ORDER BY updated_at DESC
         LIMIT 1`,
       [channelId, tenantId]
     );
     const existingConfig = existingCi.rows[0]?.config || {};
+    const ciKey = existingCi.rows[0]?.integration_key || normalizedKey;
 
     const businessAccountId = instagramBusinessAccountId || instagramAccountId || pageId ||
       existingConfig.instagram_business_account_id ||
@@ -361,7 +364,7 @@ export async function configureTenantInstagramChannel({
                      enabled = EXCLUDED.enabled,
                      config = EXCLUDED.config,
                      updated_at = CURRENT_TIMESTAMP`,
-      [normalizedKey, tenantId, channelId, assistantId, status === 'active', JSON.stringify(updatedConfig)]
+      [ciKey, tenantId, channelId, assistantId, status === 'active', JSON.stringify(updatedConfig)]
     );
 
     await client.query('COMMIT');
