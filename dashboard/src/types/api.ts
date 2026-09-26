@@ -646,6 +646,9 @@ export interface InstagramChannelStatusResponse {
   account_name?: string | null;
   has_token?: boolean;
   reauth_required?: boolean;
+  lead_whatsapp_destination?: string | null;
+  internal_lead_whatsapp?: string | null;
+  lead_whatsapp_configured?: boolean;
   last_health_check_at?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -667,20 +670,40 @@ export interface InstagramConfigPayload {
   account_username?: string;
   account_name?: string;
   access_token?: string;
+  lead_whatsapp_destination?: string;
+  internal_lead_whatsapp?: string;
   status?: 'active' | 'inactive';
 }
 
 export interface InstagramHistoryImportResponse {
   success: boolean;
-  status: 'COMPLETED' | 'PARTIAL' | 'FAILED';
-  conversations_discovered: number;
-  conversations_imported: number;
+  status?: 'COMPLETED' | 'PARTIAL' | 'FAILED' | string;
+  discovered: number;
+  imported: number;
+  reconciled: number;
+  failed: number;
   messages_imported: number;
-  duplicates_skipped: number;
-  failed_conversations: number;
+  messages_duplicates: number;
+  messages_failed: number;
+  conversations_discovered?: number;
+  conversations_imported?: number;
+  duplicates_skipped?: number;
+  failed_conversations?: number;
+  failure_categories: {
+    CONTACT_PERSISTENCE: number;
+    CONVERSATION_PERSISTENCE: number;
+    MESSAGE_PERSISTENCE: number;
+    IDENTITY_RESOLUTION: number;
+    META_MESSAGE_FETCH: number;
+    OTHER: number;
+  };
+  errors?: Array<{
+    conversation_id?: string;
+    stage: string;
+    category: string;
+    error: string;
+  }>;
 }
-
-
 export interface InstagramTestConnectionResponse {
   healthy: boolean;
   status: InstagramConnectionStatus;

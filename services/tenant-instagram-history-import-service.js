@@ -195,6 +195,8 @@ export async function importTenantInstagramHistory({
           ? contact.ai_behavior_override
           : 'FIRST_CONTACT_HOLD';
 
+        const targetChannelId = channel.channel_id || channel.id;
+
         const convRes = await client.query(
           `INSERT INTO conversations
             (tenant_id, channel_id, external_conversation_id, customer_external_id, contact_id, status, handling_mode, ai_behavior_override, created_at, last_activity_at)
@@ -205,7 +207,7 @@ export async function importTenantInstagramHistory({
              customer_external_id = EXCLUDED.customer_external_id,
              updated_at = CURRENT_TIMESTAMP
            RETURNING id, status, ai_behavior_override`,
-          [tenantId, channel.id, extConvId, custRef, contact.id, contactOverride]
+          [tenantId, targetChannelId, extConvId, custRef, contact.id, contactOverride]
         );
 
         const conversation = convRes.rows[0];
@@ -235,9 +237,14 @@ export async function importTenantInstagramHistory({
           const senderType = isFromMe ? 'AGENT' : 'CUSTOMER';
           let messageText = typeof msg.message === 'string' ? msg.message.trim() : '';
 
-          if (!messageText && msg.attachments?.data?.length > 0) {
-            const attType = msg.attachments.data[0]?.type || 'media';
-            messageText = `[Attachment: ${attType}]`;
+          if (!messageText) {
+            const rawAtts = Array.isArray(msg.attachments?.data) ? msg.attachments.data : (Array.isArray(msg.attachments) ? msg.attachments : []);
+            if (rawAtts.length > 0) {
+              const attType = rawAtts[0]?.type || rawAtts[0]?.mime_type || (rawAtts[0]?.image_data ? 'image' : 'media');
+              messageText = `[Attachment: ${attType}]`;
+            } else {
+              messageText = '[Message]';
+            }
           }
 
           const messageCreatedAt = msg.created_time ? new Date(msg.created_time) : new Date();
@@ -266,14 +273,29 @@ export async function importTenantInstagramHistory({
       }
     }
 
+    const isSuccess = !(allMetaConversations.length > 0 && conversationsImported === 0);
     return {
-      success: true,
+      success: isSuccess,
       status: failedConversations > 0 && conversationsImported > 0 ? 'PARTIAL' : (failedConversations > 0 && conversationsImported === 0 ? 'FAILED' : 'COMPLETED'),
+      discovered: allMetaConversations.length,
+      imported: conversationsImported,
+      reconciled: 0,
+      failed: failedConversations,
+      messages_imported: messagesImported,
+      messages_duplicates: duplicatesSkipped,
+      messages_failed: 0,
       conversations_discovered: allMetaConversations.length,
       conversations_imported: conversationsImported,
-      messages_imported: messagesImported,
       duplicates_skipped: duplicatesSkipped,
       failed_conversations: failedConversations,
+      failure_categories: {
+        CONTACT_PERSISTENCE: 0,
+        CONVERSATION_PERSISTENCE: failedConversations,
+        MESSAGE_PERSISTENCE: 0,
+        IDENTITY_RESOLUTION: 0,
+        META_MESSAGE_FETCH: 0,
+        OTHER: 0,
+      },
     };
   } finally {
     client.release();

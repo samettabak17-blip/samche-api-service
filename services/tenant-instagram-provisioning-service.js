@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import axios from 'axios';
 import pool from '../config/db.js';
 import { instagramGraphApiBase } from './meta-graph-api-version.js';
@@ -155,6 +156,8 @@ export async function getTenantInstagramStatus({ database = pool, tenantId }) {
     const primaryId = businessAccountId || userId || row.external_channel_id || null;
     const accountSubscribed = Boolean(config.account_subscribed ?? config.webhook_subscription_enabled ?? true);
     const subscribedFields = Array.isArray(config.subscribed_fields) ? config.subscribed_fields : CANONICAL_INSTAGRAM_WEBHOOK_FIELDS;
+    const leadWhatsappDestination = config.lead_whatsapp_destination || config.internal_lead_whatsapp || null;
+    const leadWhatsappConfigured = Boolean(leadWhatsappDestination);
 
     return {
       status: connectionStatus,
@@ -179,7 +182,10 @@ export async function getTenantInstagramStatus({ database = pool, tenantId }) {
       has_token: hasToken,
       reauth_required: Boolean(config.reauth_required),
       lead_notification_enabled: config.lead_notification_enabled !== false,
-      lead_notification_whatsapp: config.lead_notification_whatsapp || null,
+      lead_notification_whatsapp: config.lead_notification_whatsapp || config.lead_whatsapp_destination || config.internal_lead_whatsapp || null,
+      lead_whatsapp_destination: leadWhatsappDestination || config.lead_notification_whatsapp || null,
+      internal_lead_whatsapp: leadWhatsappDestination || config.lead_notification_whatsapp || null,
+      lead_whatsapp_configured: leadWhatsappConfigured || Boolean(config.lead_notification_whatsapp),
       visual_ai_enabled: Boolean(config.visual_ai_enabled),
       history_import_available: connectionStatus === 'CONNECTED',
       last_health_check_at: config.last_health_check_at || null,
@@ -213,6 +219,10 @@ export async function configureTenantInstagramChannel({
   leadNotificationEnabled = undefined,
   leadNotificationWhatsapp = undefined,
   visualAiEnabled = undefined,
+  leadWhatsappDestination = undefined,
+  internalLeadWhatsapp = undefined,
+  lead_whatsapp_destination = undefined,
+  internal_lead_whatsapp = undefined,
   status = 'active',
 
 }) {
@@ -305,6 +315,11 @@ export async function configureTenantInstagramChannel({
     let autoSubscribed = existingConfig.account_subscribed ?? true;
     let autoSubscribedFields = Array.isArray(existingConfig.subscribed_fields) ? existingConfig.subscribed_fields : CANONICAL_INSTAGRAM_WEBHOOK_FIELDS;
 
+    const rawLeadWhatsapp = leadWhatsappDestination ?? internalLeadWhatsapp ?? lead_whatsapp_destination ?? internal_lead_whatsapp;
+    const resolvedLeadWhatsapp = rawLeadWhatsapp !== undefined
+      ? (rawLeadWhatsapp ? String(rawLeadWhatsapp).trim() : null)
+      : (existingConfig.lead_whatsapp_destination || existingConfig.internal_lead_whatsapp || null);
+
     const updatedConfig = {
       ...existingConfig,
       provider: 'META_INSTAGRAM',
@@ -323,10 +338,12 @@ export async function configureTenantInstagramChannel({
         : (existingConfig.lead_notification_enabled !== false),
       lead_notification_whatsapp: typeof leadNotificationWhatsapp === 'string'
         ? leadNotificationWhatsapp.trim()
-        : (leadNotificationWhatsapp === null ? null : (existingConfig.lead_notification_whatsapp || null)),
+        : (leadNotificationWhatsapp === null ? null : (existingConfig.lead_notification_whatsapp || resolvedLeadWhatsapp)),
       visual_ai_enabled: typeof visualAiEnabled === 'boolean'
         ? visualAiEnabled
         : Boolean(existingConfig.visual_ai_enabled),
+      lead_whatsapp_destination: resolvedLeadWhatsapp,
+      internal_lead_whatsapp: resolvedLeadWhatsapp,
       account_subscribed: autoSubscribed,
 
       subscribed_fields: autoSubscribedFields,
@@ -698,4 +715,386 @@ export async function convergeTenantInstagramChannels({ database = pool, http = 
     client.release();
   }
 }
+
+/**
+ * Imports historical Instagram conversations and messages from Meta Graph API.
+ * Strict invariants:
+ * - PASSIVE ONLY: ZERO AI, ZERO outbound delivery, ZERO push notifications, ZERO typing, ZERO human handoffs.
+ * - ISOLATED TRANSACTIONS: One malformed conversation does not abort or roll back other conversations.
+ * - RESILIENT IDENTITIES: Profile lookup failure falls back safely to 'Instagram User' (never @<provider_id>).
+ * - MESSAGE RESILIENCE: Safely persists text, media placeholders, and handles unsupported/empty message types.
+ * - IDEMPOTENT RECONCILIATION: Reconciles with existing live conversations without resetting AI overrides or CRM state.
+ * - SANITIZED REPORTING: Returns operational failure metrics categorized safely.
+ */
+export async function importTenantInstagramHistory({
+  database = pool,
+  tenantId,
+  http = axios,
+  graphBaseUrl = null,
+  limit = 100,
+}) {
+  if (!tenantId) throw new TenantInstagramProvisioningError('TENANT_ID_REQUIRED', 'Tenant ID is required', 400);
+
+  const client = await database.connect();
+  let channelRow;
+  try {
+    const channelRes = await client.query(
+      `SELECT tc.id AS channel_id, tc.tenant_id, tc.external_channel_id, tc.assistant_id,
+              ci.id AS integration_id, ci.config
+         FROM tenant_channels tc
+         LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.integration_type = 'INSTAGRAM'
+        WHERE tc.tenant_id = $1 AND tc.channel_type = 'INSTAGRAM' AND tc.status = 'active'
+        ORDER BY tc.updated_at DESC
+        LIMIT 1`,
+      [tenantId]
+    );
+    if (channelRes.rowCount === 0) {
+      throw new TenantInstagramProvisioningError('INSTAGRAM_CHANNEL_NOT_FOUND', 'Active Instagram channel not found for tenant', 404);
+    }
+    channelRow = channelRes.rows[0];
+  } finally {
+    client.release();
+  }
+
+  const config = channelRow.config || {};
+  const token = config.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+  if (!token) {
+    throw new TenantInstagramProvisioningError('INSTAGRAM_TOKEN_MISSING', 'Instagram access token is missing', 400);
+  }
+
+  const baseUrl = graphBaseUrl || instagramGraphApiBase();
+  const targetId = config.instagram_user_id || config.page_id || config.instagram_account_id || channelRow.external_channel_id || 'me';
+
+  const businessIds = new Set([
+    String(channelRow.external_channel_id || '').trim(),
+    String(config.instagram_account_id || '').trim(),
+    String(config.instagram_user_id || '').trim(),
+    String(config.instagram_business_account_id || '').trim(),
+    String(config.page_id || '').trim(),
+    'me',
+  ].filter(Boolean));
+
+  // 1. Discover Meta Conversations
+  let metaConversations = [];
+  try {
+    const convRes = await http.get(`${baseUrl}/${targetId}/conversations`, {
+      params: {
+        fields: 'id,updated_time,participants{id,username,name}',
+        access_token: token,
+        limit: Math.min(Math.max(1, limit), 100),
+      },
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 15000,
+    });
+    metaConversations = Array.isArray(convRes.data?.data) ? convRes.data.data : [];
+  } catch (discoveryErr) {
+    if (targetId !== 'me') {
+      try {
+        const retryRes = await http.get(`${baseUrl}/me/conversations`, {
+          params: {
+            fields: 'id,updated_time,participants{id,username,name}',
+            access_token: token,
+            limit: Math.min(Math.max(1, limit), 100),
+          },
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 15000,
+        });
+        metaConversations = Array.isArray(retryRes.data?.data) ? retryRes.data.data : [];
+      } catch (retryErr) {
+        console.warn('INSTAGRAM_HISTORY_DISCOVERY_ERROR', retryErr?.message || discoveryErr?.message);
+        throw new TenantInstagramProvisioningError('META_DISCOVERY_FAILED', `Failed to discover Instagram conversations: ${retryErr?.message || discoveryErr?.message}`, 502);
+      }
+    } else {
+      console.warn('INSTAGRAM_HISTORY_DISCOVERY_ERROR', discoveryErr?.message);
+      throw new TenantInstagramProvisioningError('META_DISCOVERY_FAILED', `Failed to discover Instagram conversations: ${discoveryErr?.message}`, 502);
+    }
+  }
+
+  const result = {
+    success: true,
+    discovered: metaConversations.length,
+    imported: 0,
+    reconciled: 0,
+    failed: 0,
+    messages_imported: 0,
+    messages_duplicates: 0,
+    messages_failed: 0,
+    failure_categories: {
+      CONTACT_PERSISTENCE: 0,
+      CONVERSATION_PERSISTENCE: 0,
+      MESSAGE_PERSISTENCE: 0,
+      IDENTITY_RESOLUTION: 0,
+      META_MESSAGE_FETCH: 0,
+      OTHER: 0,
+    },
+    errors: [],
+  };
+
+
+
+  // 2. Process each discovered conversation within isolated transaction
+  for (const conv of metaConversations) {
+    const convClient = await database.connect();
+    try {
+      await convClient.query('BEGIN');
+
+      const rawParticipants = Array.isArray(conv.participants?.data)
+        ? conv.participants.data
+        : (Array.isArray(conv.participants) ? conv.participants : []);
+
+      let customerParticipant = rawParticipants.find(
+        (p) => p?.id && !businessIds.has(String(p.id).trim())
+      );
+      if (!customerParticipant && rawParticipants.length > 0) {
+        customerParticipant = rawParticipants[0];
+      }
+
+      if (!customerParticipant || !customerParticipant.id) {
+        result.failed++;
+        result.failure_categories.IDENTITY_RESOLUTION++;
+        result.errors.push({
+          conversation_id: conv.id,
+          stage: 'IDENTITY_RESOLUTION',
+          category: 'IDENTITY_RESOLUTION',
+          error: 'Unable to resolve customer participant from Meta conversation',
+        });
+        await convClient.query('ROLLBACK');
+        continue;
+      }
+
+      const customerIgsid = String(customerParticipant.id).trim();
+
+      let username = customerParticipant.username ? String(customerParticipant.username).trim() : null;
+      let name = customerParticipant.name ? String(customerParticipant.name).trim() : null;
+
+      if (!username && !name) {
+        try {
+          const profRes = await http.get(`${baseUrl}/${customerIgsid}`, {
+            params: { fields: 'id,username,name', access_token: token },
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 5000,
+          });
+          if (profRes.data?.username) username = String(profRes.data.username).trim();
+          if (profRes.data?.name) name = String(profRes.data.name).trim();
+        } catch {
+          // Profile lookup failure must never block persistence
+        }
+      }
+
+      let displayName = 'Instagram User';
+      if (name && name.trim()) {
+        displayName = name.trim();
+      } else if (username && username.trim() && !/^\d+$/.test(username.trim()) && username.trim() !== customerIgsid) {
+        displayName = `@${username.trim().replace(/^@/, '')}`;
+      } else {
+        displayName = 'Instagram User';
+      }
+
+      const customerRef = `instagram:${customerIgsid}`;
+      const identityHash = crypto
+        .createHash('sha256')
+        .update(`${tenantId}:EXTERNAL_CUSTOMER:${customerRef.toLowerCase()}`)
+        .digest('hex');
+
+      let contactRow;
+      try {
+        const contactRes = await convClient.query(
+          `INSERT INTO crm_contacts
+            (tenant_id, identity_kind, identity_hash, display_name, source, ai_behavior_override, created_at, updated_at)
+           VALUES ($1, 'EXTERNAL_CUSTOMER', $2, $3, 'INSTAGRAM', 'FIRST_CONTACT_HOLD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+           ON CONFLICT (tenant_id, identity_hash)
+           DO UPDATE SET
+             display_name = CASE
+               WHEN EXCLUDED.display_name IS NOT NULL AND EXCLUDED.display_name != 'Instagram User' THEN EXCLUDED.display_name
+               ELSE COALESCE(crm_contacts.display_name, EXCLUDED.display_name)
+             END,
+             updated_at = CURRENT_TIMESTAMP
+           RETURNING *`,
+          [tenantId, identityHash, displayName]
+        );
+        contactRow = contactRes.rows[0];
+      } catch (contactErr) {
+        result.failed++;
+        result.failure_categories.CONTACT_PERSISTENCE++;
+        result.errors.push({
+          conversation_id: conv.id,
+          stage: 'CONTACT_PERSISTENCE',
+          category: 'CONTACT_PERSISTENCE',
+          error: contactErr.message,
+          sqlstate: contactErr.code,
+        });
+        await convClient.query('ROLLBACK');
+        continue;
+      }
+
+      const extConvId = `instagram:${crypto.createHash('sha256').update(customerRef).digest('hex')}`;
+      const metaConvId = String(conv.id || '').trim();
+
+      let conversationRow;
+      let isReconciled = false;
+      try {
+        const existingConvRes = await convClient.query(
+          `SELECT * FROM conversations
+            WHERE tenant_id = $1 AND channel_id = $2
+              AND (
+                external_conversation_id = $3
+                OR customer_external_id = $4
+                OR external_conversation_id = $5
+              )
+            LIMIT 1`,
+          [tenantId, channelRow.channel_id, extConvId, customerRef, metaConvId]
+        );
+
+        if (existingConvRes.rowCount > 0) {
+          conversationRow = existingConvRes.rows[0];
+          isReconciled = true;
+          if (!conversationRow.contact_id && contactRow?.id) {
+            await convClient.query(
+              `UPDATE conversations SET contact_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+              [contactRow.id, conversationRow.id]
+            );
+            conversationRow.contact_id = contactRow.id;
+          }
+        } else {
+          const updatedTime = conv.updated_time ? new Date(conv.updated_time) : new Date();
+          const insertConvRes = await convClient.query(
+            `INSERT INTO conversations
+              (tenant_id, channel_id, contact_id, external_conversation_id, customer_external_id, status, handling_mode, handling_version, ai_behavior_override, created_at, updated_at, last_activity_at)
+             VALUES ($1, $2, $3, $4, $5, 'open', 'AI', 1, 'FIRST_CONTACT_HOLD', $6, $6, $6)
+             ON CONFLICT (channel_id, external_conversation_id)
+             DO UPDATE SET
+               contact_id = COALESCE(conversations.contact_id, EXCLUDED.contact_id),
+               updated_at = CURRENT_TIMESTAMP
+             RETURNING *`,
+            [tenantId, channelRow.channel_id, contactRow?.id || null, extConvId, customerRef, updatedTime]
+          );
+          conversationRow = insertConvRes.rows[0];
+        }
+      } catch (convErr) {
+        result.failed++;
+        result.failure_categories.CONVERSATION_PERSISTENCE++;
+        result.errors.push({
+          conversation_id: conv.id,
+          stage: 'CONVERSATION_PERSISTENCE',
+          category: 'CONVERSATION_PERSISTENCE',
+          error: convErr.message,
+          sqlstate: convErr.code,
+        });
+        await convClient.query('ROLLBACK');
+        continue;
+      }
+
+      let rawMessages = [];
+      if (metaConvId) {
+        try {
+          const msgRes = await http.get(`${baseUrl}/${metaConvId}/messages`, {
+            params: {
+              fields: 'id,created_time,from,to,message,attachments{id,mime_type,name,size,file_url,image_data,video_data}',
+              access_token: token,
+              limit: 100,
+            },
+            headers: { Authorization: `Bearer ${token}` },
+            timeout: 10000,
+          });
+          rawMessages = Array.isArray(msgRes.data?.data) ? msgRes.data.data : [];
+        } catch (msgFetchErr) {
+          result.failure_categories.META_MESSAGE_FETCH++;
+          result.errors.push({
+            conversation_id: conv.id,
+            stage: 'META_MESSAGE_FETCH',
+            category: 'META_MESSAGE_FETCH',
+            error: msgFetchErr.message,
+          });
+        }
+      }
+
+      const sortedMessages = [...rawMessages].sort(
+        (a, b) => new Date(a.created_time || 0).getTime() - new Date(b.created_time || 0).getTime()
+      );
+
+      for (const m of sortedMessages) {
+        const msgExtId = m.id ? String(m.id).trim() : null;
+        const msgCreated = m.created_time ? new Date(m.created_time) : new Date();
+        const fromId = String(m.from?.id ?? '').trim();
+        const senderType = fromId === customerIgsid ? 'CUSTOMER' : 'ASSISTANT';
+
+        let contentText = typeof m.message === 'string' ? m.message.trim() : '';
+        if (!contentText) {
+          const atts = Array.isArray(m.attachments?.data) ? m.attachments.data : (Array.isArray(m.attachments) ? m.attachments : []);
+          if (atts.length > 0) {
+            const firstAtt = atts[0];
+            const mediaKind = firstAtt.mime_type || (firstAtt.image_data ? 'image' : (firstAtt.video_data ? 'video' : 'attachment'));
+            contentText = `[Attachment: ${mediaKind}]`;
+          } else {
+            contentText = '[Message]';
+          }
+        }
+
+        try {
+          if (msgExtId) {
+            const existsCheck = await convClient.query(
+              `SELECT id FROM conversation_messages WHERE conversation_id = $1 AND external_message_id = $2 LIMIT 1`,
+              [conversationRow.id, msgExtId]
+            );
+            if (existsCheck.rowCount > 0) {
+              result.messages_duplicates++;
+              continue;
+            }
+          }
+
+          const insMsg = await convClient.query(
+            `INSERT INTO conversation_messages
+              (tenant_id, conversation_id, sender_type, content, external_message_id, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             ON CONFLICT (conversation_id, external_message_id) DO NOTHING
+             RETURNING id`,
+            [tenantId, conversationRow.id, senderType, contentText, msgExtId, msgCreated]
+          );
+
+          if (insMsg.rowCount > 0) {
+            result.messages_imported++;
+          } else {
+            result.messages_duplicates++;
+          }
+        } catch (msgErr) {
+          result.messages_failed++;
+          result.failure_categories.MESSAGE_PERSISTENCE++;
+          result.errors.push({
+            conversation_id: conv.id,
+            stage: 'MESSAGE_PERSISTENCE',
+            category: 'MESSAGE_PERSISTENCE',
+            error: msgErr.message,
+            sqlstate: msgErr.code,
+          });
+        }
+      }
+
+      await convClient.query('COMMIT');
+      if (isReconciled) {
+        result.reconciled++;
+      } else {
+        result.imported++;
+      }
+    } catch (err) {
+      await convClient.query('ROLLBACK').catch(() => {});
+      result.failed++;
+      result.failure_categories.OTHER++;
+      result.errors.push({
+        conversation_id: conv.id,
+        stage: 'UNEXPECTED',
+        category: 'OTHER',
+        error: err.message,
+      });
+    } finally {
+      convClient.release();
+    }
+  }
+
+  if (result.discovered > 0 && result.imported === 0 && result.reconciled === 0) {
+    result.success = false;
+  }
+
+  return result;
+}
+
 
