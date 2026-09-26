@@ -71,6 +71,30 @@ test('Knowledge Item Classification: Correctly categorizes real, migration, lega
     'LEGACY TEST / FIXTURE'
   );
 
+  assert.equal(
+    classifyKnowledgeItem({
+      title: 'nova_crest_company_policy_test.txt',
+      content: 'Nova Crest internal corporate guidelines and remote work policy test fixture.',
+    }),
+    'LEGACY TEST / FIXTURE'
+  );
+
+  assert.equal(
+    classifyKnowledgeItem({
+      title: 'PDF Manual Acceptance Test',
+      content: 'Manual acceptance test artifact uploaded during Task 6 testing.',
+    }),
+    'LEGACY TEST / FIXTURE'
+  );
+
+  assert.equal(
+    classifyKnowledgeItem({
+      title: 'Meridian Arc Technologies LLC Profile',
+      content: 'Meridian Arc Technologies LLC is a technology consulting firm...',
+    }),
+    'LEGACY TEST / FIXTURE'
+  );
+
   // Unknown / Needs Review
   assert.equal(
     classifyKnowledgeItem({
