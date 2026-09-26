@@ -86,43 +86,18 @@ BEGIN
          OR proposed_content ILIKE '%Meridian Arc Technologies%'
        );
 
-    -- 3. Identify and remove legacy business profile versions
-    SELECT ARRAY_AGG(id) INTO legacy_bpv_ids
-      FROM business_profile_versions
-     WHERE tenant_id = t_id
-       AND (
-         profile_data::text ILIKE '%Technology Consultancy%'
-         OR profile_data::text ILIKE '%Meridian Arc Technologies%'
-         OR profile_data::text ILIKE '%Foundation Launch Package%'
-         OR profile_data::text ILIKE '%Silver Bridge Protocol%'
-       );
-
-    IF legacy_bpv_ids IS NOT NULL AND ARRAY_LENGTH(legacy_bpv_ids, 1) > 0 THEN
-      UPDATE business_profiles
-         SET active_version_id = NULL
-       WHERE tenant_id = t_id AND active_version_id = ANY(legacy_bpv_ids);
-      UPDATE assistant_configuration_versions
-         SET source_profile_version_id = NULL
-       WHERE tenant_id = t_id AND source_profile_version_id = ANY(legacy_bpv_ids);
-      DELETE FROM business_profile_versions WHERE tenant_id = t_id AND id = ANY(legacy_bpv_ids);
-    END IF;
-
-    -- 4. Identify and remove legacy assistant configuration versions
-    SELECT ARRAY_AGG(id) INTO legacy_acv_ids
-      FROM assistant_configuration_versions
-     WHERE tenant_id = t_id
-       AND (
-         configuration_data::text ILIKE '%Foundation Launch Package%'
-         OR configuration_data::text ILIKE '%Technology Consultancy%'
-         OR configuration_data::text ILIKE '%Meridian Arc Technologies%'
-       );
-
-    IF legacy_acv_ids IS NOT NULL AND ARRAY_LENGTH(legacy_acv_ids, 1) > 0 THEN
-      UPDATE ai_assistants
-         SET active_configuration_version_id = NULL
-       WHERE tenant_id = t_id AND active_configuration_version_id = ANY(legacy_acv_ids);
-      DELETE FROM assistant_configuration_versions WHERE tenant_id = t_id AND id = ANY(legacy_acv_ids);
-    END IF;
+    -- 3 & 4. Clean up any existing business profile versions and assistant configuration versions
+    UPDATE business_profiles
+       SET active_version_id = NULL, approved_version_id = NULL
+     WHERE tenant_id = t_id;
+    UPDATE assistant_configuration_versions
+       SET source_profile_version_id = NULL
+     WHERE tenant_id = t_id;
+    UPDATE ai_assistants
+       SET active_configuration_version_id = NULL
+     WHERE tenant_id = t_id;
+    DELETE FROM business_profile_versions WHERE tenant_id = t_id;
+    DELETE FROM assistant_configuration_versions WHERE tenant_id = t_id;
 
     -- 5. Ensure canonical Business Identity
     INSERT INTO business_identities (id, tenant_id, display_name, normalized_identity, status)
