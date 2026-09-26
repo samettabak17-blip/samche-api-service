@@ -17,6 +17,88 @@ function sanitizeMetaError(error) {
   const code = metaError?.code ? `META_IG_ERROR_${metaError.code}` : (error?.code || 'INSTAGRAM_DELIVERY_FAILED');
   return new InstagramDeliveryError(code, message, status >= 500 ? 502 : 409);
 }
+/**
+ * Splits message text into chunks that safely comply with Meta Instagram DM 1000-character payload limits.
+ * Preserves paragraph breaks and sentence boundaries.
+ */
+export function splitIntoInstagramDmChunks(content, maxChunkLength = 950) {
+  if (!content || typeof content !== 'string') return [];
+  const text = content.trim();
+  if (text.length <= maxChunkLength) return [text];
+
+  const paragraphs = text.split(/\n\n+/);
+  const chunks = [];
+  let currentChunk = '';
+
+  for (const para of paragraphs) {
+    const trimmedPara = para.trim();
+    if (!trimmedPara) continue;
+
+    if (!currentChunk) {
+      if (trimmedPara.length <= maxChunkLength) {
+        currentChunk = trimmedPara;
+      } else {
+        const lines = trimmedPara.split(/\n+/);
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine) continue;
+          if (!currentChunk) {
+            if (trimmedLine.length <= maxChunkLength) {
+              currentChunk = trimmedLine;
+            } else {
+              const sentences = trimmedLine.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [trimmedLine];
+              for (const sentence of sentences) {
+                const s = sentence.trim();
+                if (!s) continue;
+                if (!currentChunk) {
+                  currentChunk = s.slice(0, maxChunkLength);
+                } else if ((currentChunk + ' ' + s).length <= maxChunkLength) {
+                  currentChunk += ' ' + s;
+                } else {
+                  chunks.push(currentChunk.trim());
+                  currentChunk = s.slice(0, maxChunkLength);
+                }
+              }
+            }
+          } else if ((currentChunk + '\n' + trimmedLine).length <= maxChunkLength) {
+            currentChunk += '\n' + trimmedLine;
+          } else {
+            chunks.push(currentChunk.trim());
+            currentChunk = trimmedLine.slice(0, maxChunkLength);
+          }
+        }
+      }
+    } else if ((currentChunk + '\n\n' + trimmedPara).length <= maxChunkLength) {
+      currentChunk += '\n\n' + trimmedPara;
+    } else {
+      chunks.push(currentChunk.trim());
+      if (trimmedPara.length <= maxChunkLength) {
+        currentChunk = trimmedPara;
+      } else {
+        const lines = trimmedPara.split(/\n+/);
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine) continue;
+          if (!currentChunk) {
+            currentChunk = trimmedLine.slice(0, maxChunkLength);
+          } else if ((currentChunk + '\n' + trimmedLine).length <= maxChunkLength) {
+            currentChunk += '\n' + trimmedLine;
+          } else {
+            chunks.push(currentChunk.trim());
+            currentChunk = trimmedLine.slice(0, maxChunkLength);
+          }
+        }
+      }
+    }
+  }
+
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
+  }
+
+  return chunks.length > 0 ? chunks : [text.slice(0, maxChunkLength)];
+}
+
 
 export async function deliverInstagramText({
   recipientId,
@@ -41,30 +123,44 @@ export async function deliverInstagramText({
   const targetId = String(instagramAccountId || pageId || 'me').trim();
   const endpoint = `${baseUrl}/${targetId}/messages`;
 
-  const payload = {
-    recipient: { id: recipientId },
-    message: { text: content.trim() },
-  };
+  const chunks = splitIntoInstagramDmChunks(content, 950);
+  let primaryProviderMessageId = null;
+  const deliveredIds = [];
 
-  try {
-    const response = await http.post(endpoint, payload, {
-      headers: {
-        Authorization: `Bearer ${accessToken.trim()}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 15000,
-    });
-
-    const providerMessageId = response.data?.message_id || null;
-    return {
-      delivery: 'SENT_TO_INSTAGRAM',
-      recipientId: response.data?.recipient_id || recipientId,
-      providerMessageId,
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    const payload = {
+      recipient: { id: recipientId },
+      message: { text: chunk },
     };
-  } catch (error) {
-    if (error instanceof InstagramDeliveryError) throw error;
-    throw sanitizeMetaError(error);
+
+    try {
+      const response = await http.post(endpoint, payload, {
+        headers: {
+          Authorization: `Bearer ${accessToken.trim()}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 15000,
+      });
+
+      const providerMessageId = response.data?.message_id || null;
+      if (providerMessageId) {
+        if (!primaryProviderMessageId) primaryProviderMessageId = providerMessageId;
+        deliveredIds.push(providerMessageId);
+      }
+    } catch (error) {
+      if (error instanceof InstagramDeliveryError) throw error;
+      throw sanitizeMetaError(error);
+    }
   }
+
+  return {
+    delivery: 'SENT_TO_INSTAGRAM',
+    recipientId,
+    providerMessageId: primaryProviderMessageId,
+    providerMessageIds: deliveredIds,
+    chunkCount: chunks.length,
+  };
 }
 
 export async function deliverInstagramMedia({

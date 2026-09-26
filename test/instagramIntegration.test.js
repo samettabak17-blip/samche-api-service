@@ -543,10 +543,11 @@ test('orchestrateInstagramInboundAiResponse generates and delivers AI response i
 
   assert.equal(outcome.delivered, true);
   assert.equal(outcome.responseText, 'We are open Monday through Friday, 9 AM to 6 PM.');
-  // First POST is typing_on sender action, second POST is the message delivery
-  assert.equal(outboundDMs.length, 2);
+  // First POST is typing_on sender action, second POST is the message delivery, third POST is typing_off cleanup
+  assert.equal(outboundDMs.length, 3);
   assert.equal(outboundDMs[0].sender_action, 'typing_on');
   assert.equal(outboundDMs[1].message.text, 'We are open Monday through Friday, 9 AM to 6 PM.');
+  assert.equal(outboundDMs[2].sender_action, 'typing_off');
 });
 
 test('orchestrateInstagramInboundAiResponse suppresses automatic reply in MANUAL_ONLY default mode', async () => {
@@ -785,12 +786,14 @@ test('TEST C: Response requiring 3+ items places each numbered/bullet item on se
   const formattedBullets = formatInstagramDmResponse(horizontalBullets);
   assert.ok(formattedBullets.includes('• Şirket lisansı\n• Oturum işlemleri\n• Emirates ID\n• Banka hesabı desteği'));
 });
-test('TEST D: Typing lifecycle triggers typing presence before message delivery', async () => {
+test('TEST D: Typing lifecycle triggers typing presence before message delivery and typing_off cleanup', async () => {
   const callSequence = [];
   const fakeHttp = {
     async post(url, body) {
       if (body?.sender_action === 'typing_on') {
         callSequence.push('TYPING_ON');
+      } else if (body?.sender_action === 'typing_off') {
+        callSequence.push('TYPING_OFF');
       } else if (body?.message?.text) {
         callSequence.push('MESSAGE_DELIVERED');
       }
@@ -840,7 +843,7 @@ test('TEST D: Typing lifecycle triggers typing presence before message delivery'
     generateAiResponse: async () => "Tabii, hangi konuda bilgi almak istersiniz?",
   });
 
-  assert.deepEqual(callSequence, ['TYPING_ON', 'MESSAGE_DELIVERED']);
+  assert.deepEqual(callSequence, ['TYPING_ON', 'MESSAGE_DELIVERED', 'TYPING_OFF']);
 });
 
 test('TEST E: Same provider MID delivered twice produces at most 1 message and 1 AI reply', async () => {
@@ -1068,5 +1071,176 @@ test('TEST J: AI generation failure does NOT fabricate generic greeting fallback
   assert.equal(outcome.delivered, undefined);
   // No outbound messages sent (no generic greeting fabricated)
   assert.equal(outboundDMs.length, 0);
+test('TEST K: Markdown with bold headings and inline bullets converts to clean vertical bullet list with •', () => {
+  const rawMarkdown = "**Free Zone Şirketi:** * %100 yabancı mülkiyet sunar * Uluslararası ticaret için uygundur. **Mainland Şirketi:** * Yerel pazara doğrudan satış * Fiziksel ofis gereksinimi";
+  const formatted = formatInstagramDmResponse(rawMarkdown);
+
+  assert.ok(!formatted.includes('**'), 'Raw bold markdown ** must be stripped');
+  assert.ok(formatted.includes('Free Zone Şirketi:'), 'Heading should be preserved without bold');
+  assert.ok(formatted.includes('• %100 yabancı mülkiyet sunar\n• Uluslararası ticaret için uygundur.'), 'Free Zone bullets must be on separate lines with •');
+  assert.ok(formatted.includes('Mainland Şirketi:'), 'Mainland heading should be preserved on separate paragraph');
+  assert.ok(formatted.includes('• Yerel pazara doğrudan satış\n• Fiziksel ofis gereksinimi'), 'Mainland bullets must be on separate lines with •');
+});
+
+test('TEST L: Long message (>1000 chars) is chunked and delivered sequentially within 1000-char Meta Graph API limit', async () => {
+  const { splitIntoInstagramDmChunks } = await import('../services/instagram-delivery-service.js');
+  const longText = 'Free Zone:\n\n• ' + 'A'.repeat(500) + '\n\nMainland:\n\n• ' + 'B'.repeat(600);
+  assert.ok(longText.length > 1000);
+
+  const chunks = splitIntoInstagramDmChunks(longText, 950);
+  assert.ok(chunks.length >= 2);
+  for (const chunk of chunks) {
+    assert.ok(chunk.length <= 950, `Chunk length ${chunk.length} must be <= 950`);
+  }
+
+  const outboundCalls = [];
+  const fakeHttp = {
+    async post(url, body) {
+      outboundCalls.push(body);
+      return { data: { recipient_id: testIgsid, message_id: `mid.chunk.${outboundCalls.length}` } };
+    },
+  };
+
+  const deliveryResult = await deliverInstagramText({
+    recipientId: testIgsid,
+    content: longText,
+    accessToken: 'test-token',
+    http: fakeHttp,
+  });
+
+  assert.equal(deliveryResult.delivery, 'SENT_TO_INSTAGRAM');
+  assert.equal(deliveryResult.chunkCount, chunks.length);
+  assert.equal(outboundCalls.length, chunks.length);
+  for (const call of outboundCalls) {
+    assert.ok(call.message.text.length <= 950);
+  }
+});
+
+});
+
+test('TEST M: Dashboard content and Instagram outbound content are identical formatted text', async () => {
+  let persistedContent = '';
+  const deliveredBodies = [];
+
+  const fakeHttp = {
+    async post(url, body) {
+      if (body?.message?.text) deliveredBodies.push(body.message.text);
+      return { data: { recipient_id: testIgsid, message_id: 'mid.parity.1' } };
+    },
+  };
+
+  const mockDb = {
+    async query(sql, params) {
+      if (sql.includes('FROM conversations')) {
+        return { rows: [{ id: conversationId, tenant_id: tenantId, channel_id: channelId, handling_mode: 'AI', handling_version: 1, status: 'open' }] };
+      }
+      if (sql.includes('INSERT INTO conversation_messages')) {
+        persistedContent = params[2]; // content param
+        return { rows: [{ id: 'msg-parity-1', sender_type: 'ASSISTANT', content: persistedContent }] };
+      }
+      if (sql.includes('UPDATE conversation_messages')) {
+        return { rowCount: 1 };
+      }
+      return { rows: [] };
+    },
+    async connect() { return this; },
+    release() {},
+  };
+
+  const inboundState = {
+    integration: {
+      tenant_id: tenantId,
+      channel_id: channelId,
+      assistant_id: assistantId,
+      external_channel_id: testPageId,
+      config: { access_token: 'test-token', page_id: testPageId, activation_policy: 'ALL_MESSAGES' },
+    },
+    conversation: {
+      id: conversationId,
+      status: 'open',
+      handling_mode: 'AI',
+      handling_version: 1,
+      communication_language: 'tr',
+    },
+    shouldInvokeAi: true,
+    handlingVersion: 1,
+  };
+
+  const rawAiText = '**Free Zone:** * Avantaj 1 * Avantaj 2\n\n**Mainland:** * Avantaj 3';
+  const outcome = await orchestrateInstagramInboundAiResponse({
+    database: mockDb,
+    inboundState,
+    senderIgsid: testIgsid,
+    text: "Bilgi alabilir miyim?",
+    http: fakeHttp,
+    generateAiResponse: async () => rawAiText,
+  });
+
+  assert.equal(outcome.delivered, true);
+  // Persisted content in database/Dashboard must match delivered content
+  assert.equal(persistedContent, outcome.responseText);
+  assert.equal(deliveredBodies[0], persistedContent);
+  assert.ok(!persistedContent.includes('**'));
+  assert.ok(persistedContent.includes('• Avantaj 1\n• Avantaj 2'));
+});
+
+test('TEST N: Successful delivery updates conversation_messages external_message_id with providerMessageId', async () => {
+  let updatedExternalMid = null;
+
+  const fakeHttp = {
+    async post(url, body) {
+      return { data: { recipient_id: testIgsid, message_id: 'mid.provider.confirmed.999' } };
+    },
+  };
+
+  const mockDb = {
+    async query(sql, params) {
+      if (sql.includes('FROM conversations')) {
+        return { rows: [{ id: conversationId, tenant_id: tenantId, channel_id: channelId, handling_mode: 'AI', handling_version: 1, status: 'open' }] };
+      }
+      if (sql.includes('INSERT INTO conversation_messages')) {
+        return { rows: [{ id: 'msg-mid-test-1', sender_type: 'ASSISTANT', content: 'Test' }] };
+      }
+      if (sql.includes('UPDATE conversation_messages')) {
+        updatedExternalMid = params[0];
+        return { rowCount: 1 };
+      }
+      return { rows: [] };
+    },
+    async connect() { return this; },
+    release() {},
+  };
+
+  const inboundState = {
+    integration: {
+      tenant_id: tenantId,
+      channel_id: channelId,
+      assistant_id: assistantId,
+      external_channel_id: testPageId,
+      config: { access_token: 'test-token', page_id: testPageId, activation_policy: 'ALL_MESSAGES' },
+    },
+    conversation: {
+      id: conversationId,
+      status: 'open',
+      handling_mode: 'AI',
+      handling_version: 1,
+      communication_language: 'tr',
+    },
+    shouldInvokeAi: true,
+    handlingVersion: 1,
+  };
+
+  const outcome = await orchestrateInstagramInboundAiResponse({
+    database: mockDb,
+    inboundState,
+    senderIgsid: testIgsid,
+    text: "Test inquiry",
+    http: fakeHttp,
+    generateAiResponse: async () => "Test response",
+  });
+
+  assert.equal(outcome.delivered, true);
+  assert.equal(outcome.deliveryResult.providerMessageId, 'mid.provider.confirmed.999');
+  assert.equal(updatedExternalMid, 'mid.provider.confirmed.999');
 });
 

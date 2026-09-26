@@ -3,7 +3,7 @@ import { parseCustomerHumanSupportRequest } from './human-support-intent.js';
 import { resolvePlatformHumanSupportPolicy } from './platform-lifecycle-message-service.js';
 import { requestCustomerHumanSupport, triggerImmediateHumanSupportNotificationPipeline } from './human-support-service.js';
 import { persistAssistantResponseIfCurrent } from './live-inbox-service.js';
-import { deliverInstagramText, sendInstagramTypingIndicator } from './instagram-delivery-service.js';
+import { deliverInstagramText, sendInstagramTypingIndicator, sendInstagramTypingOff } from './instagram-delivery-service.js';
 import { resolveTenantRuntimePersona, buildTenantRuntimeSystemInstruction } from './tenant-runtime-persona-service.js';
 import { resolveAssistantRuntimeKnowledgeContext } from './knowledge-runtime-context-service.js';
 import { resolveCommunicationLanguage } from './conversation-communication-language.js';
@@ -26,9 +26,11 @@ export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
   '   - Do not repeat "How can we help you?" or "Nasıl yardımcı olabilirim?" on every message.',
   '   - Use multi-turn conversation history: remember details provided earlier in the chat and never ask again for information the customer has already given.',
   '5. FORMATTING RULES (CRITICAL FOR READABILITY):',
+  '   - Concise mobile DM answers: keep responses focused and mobile-friendly (typically under 800 characters).',
   '   - When presenting lists of 2 or more items (numbered 1., 2., 3. or bullet points •), EACH item MUST be placed on its own separate line.',
   '   - NEVER concatenate list items horizontally onto the same line.',
   '   - Separate distinct points with clean paragraph breaks so the message is effortless to read on mobile DM screens.',
+  '   - Do not use markdown bolding (**) or markdown headers (###); write plain, beautifully spaced text with clean bullet points (• ).',
   '6. STRICT FACTUAL GROUNDING:',
   '   - Ground all statements strictly in the active approved Business Profile and approved Knowledge.',
   '   - Never invent prices, legal requirements, approvals, guarantees, or unsupported claims.',
@@ -37,22 +39,48 @@ export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
 
 /**
  * Normalizes and formats AI response text for optimal readability in Instagram Direct Messages.
- * Guarantees vertical separation of list items and clean paragraph breaks.
+ * Guarantees vertical separation of list items, strips raw markdown fences, and formats clean paragraph breaks.
  */
 export function formatInstagramDmResponse(rawText) {
   if (!rawText || typeof rawText !== 'string') return '';
   let text = rawText.trim();
 
-  // Strip markdown headers like ### or ## at line starts
-  text = text.replace(/^#{1,6}\s+/gm, '');
+  // 1. Strip markdown headers like ### or ## or # at line starts
+  text = text.replace(/^#{1,6}\s*(.+)$/gm, '$1');
 
-  // Fix horizontally concatenated numbered lists: e.g. "1. First 2. Second 3. Third" -> "1. First\n\n2. Second\n\n3. Third"
-  text = text.replace(/([^\n])\s+(\d+\.\s+)/g, '$1\n\n$2');
+  // 2. Separate inline bold titles before colons: e.g. "Item. **Mainland:** * ..." -> "Item.\n\n**Mainland:** * ..."
+  text = text.replace(/([^\n])\s+(\*\*[^\*\n]+:\*\*)/g, '$1\n\n$2');
 
-  // Fix horizontally concatenated bullet points: e.g. "• Item 1 • Item 2" or "- Item 1 - Item 2" -> "• Item 1\n• Item 2"
+  // 3. Strip bold wrappers like **text** or __text__
+  text = text.replace(/\*\*(.*?)\*\*/g, '$1');
+  text = text.replace(/__(.*?)__/g, '$1');
+
+  // 4. Strip code backticks: `code` -> code
+  text = text.replace(/`([^`]+)`/g, '$1');
+
+  // 5. Put paragraph break between heading with colon and first bullet or numbered item:
+  // e.g. "Free Zone:\n* Item 1" or "Free Zone: * Item 1" -> "Free Zone:\n\n• Item 1"
+  text = text.replace(/([^\n]+:)\s*([•\-\*]\s+)/g, '$1\n\n$2');
+  text = text.replace(/([^\n]+:)\s*(\d+\.\s+)/g, '$1\n\n$2');
+
+  // 6. Put each bullet point on its own line if concatenated inline:
+  // e.g. "• Item 1 • Item 2" or "* Item 1 * Item 2" -> "• Item 1\n• Item 2"
   text = text.replace(/([^\n])\s+([•\-\*]\s+)/g, '$1\n$2');
 
-  // Normalize excessive blank lines (more than 2 consecutive newlines to 2)
+  // 7. Put each numbered list item on its own paragraph if concatenated inline:
+  // e.g. "1. First 2. Second" -> "1. First\n\n2. Second"
+  text = text.replace(/([^\n])\s+(\d+\.\s+)/g, '$1\n\n$2');
+
+  // 8. Standardize bullet list markers (*, -, +) at line start to •
+  text = text.replace(/^[\t ]*[\*\-\+]\s+/gm, '• ');
+
+  // 9. Strip single-asterisk italic markdown when not a bullet marker
+  text = text.replace(/(^|[^\*])\*([^\*\n]+)\*([^\*]|$)/g, '$1$2$3');
+
+  // 10. Ensure clean separation between bullet lists and following headings
+  text = text.replace(/(•[^\n]+)\n([A-Za-z0-9ÇĞİÖŞÜçğıöşü\s]+:)/g, '$1\n\n$2');
+
+  // 11. Normalize excessive blank lines (more than 2 consecutive newlines -> 2)
   text = text.replace(/\n{3,}/g, '\n\n');
 
   return text.trim();
@@ -377,14 +405,33 @@ export async function orchestrateInstagramInboundAiResponse({
   // 12. Deliver outbound message to Instagram
   let deliveryResult = null;
   if (accessToken && senderIgsid) {
-    deliveryResult = await deliverInstagramText({
-      recipientId: senderIgsid,
-      content: formattedResponse,
-      accessToken,
-      instagramAccountId: accountId,
-      pageId: accountId,
-      http,
-    });
+    try {
+      deliveryResult = await deliverInstagramText({
+        recipientId: senderIgsid,
+        content: formattedResponse,
+        accessToken,
+        instagramAccountId: accountId,
+        pageId: accountId,
+        http,
+      });
+    } finally {
+      sendInstagramTypingOff({
+        recipientId: senderIgsid,
+        accessToken,
+        instagramAccountId: accountId,
+        pageId: accountId,
+        http,
+      }).catch(() => {});
+    }
+
+    if (persisted.message?.id && deliveryResult?.providerMessageId) {
+      await database.query(
+        `UPDATE conversation_messages
+            SET external_message_id = $1
+          WHERE id = $2 AND tenant_id = $3`,
+        [deliveryResult.providerMessageId, persisted.message.id, tenantId]
+      ).catch((err) => console.warn('INSTAGRAM_MSG_PROVIDER_ID_UPDATE_WARN', err?.message));
+    }
   }
 
   return {
@@ -531,14 +578,33 @@ export async function generateAndDeliverInstagramAssistantResponse({
 
     let deliveryResult = null;
     if (accessToken && recipientIgsid) {
-      deliveryResult = await deliverInstagramText({
-        recipientId: recipientIgsid,
-        content: formattedResponse,
-        accessToken,
-        instagramAccountId: accountId,
-        pageId: accountId,
-        http,
-      });
+      try {
+        deliveryResult = await deliverInstagramText({
+          recipientId: recipientIgsid,
+          content: formattedResponse,
+          accessToken,
+          instagramAccountId: accountId,
+          pageId: accountId,
+          http,
+        });
+      } finally {
+        sendInstagramTypingOff({
+          recipientId: recipientIgsid,
+          accessToken,
+          instagramAccountId: accountId,
+          pageId: accountId,
+          http,
+        }).catch(() => {});
+      }
+
+      if (persisted.message?.id && deliveryResult?.providerMessageId) {
+        await client.query(
+          `UPDATE conversation_messages
+              SET external_message_id = $1
+            WHERE id = $2 AND tenant_id = $3`,
+          [deliveryResult.providerMessageId, persisted.message.id, tenantId]
+        ).catch((err) => console.warn('INSTAGRAM_MSG_PROVIDER_ID_UPDATE_WARN', err?.message));
+      }
     }
 
     return {
