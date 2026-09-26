@@ -100,7 +100,8 @@ async function defaultGenerateInstagramAiResponse({
     return null;
   }
 
-  const runtimeModel = model || provider.runtimeMetadata().model;
+  const defaultModel = provider.runtimeMetadata().model;
+  const runtimeModel = model || defaultModel;
 
   // Prepare Gemini contents from history
   const contents = [];
@@ -125,7 +126,19 @@ async function defaultGenerateInstagramAiResponse({
     });
     return response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
   } catch (genErr) {
-    console.error(`INSTAGRAM_AI_GENERATION_ERROR model=${runtimeModel} code=${genErr?.code ?? 'UNKNOWN'} err=${genErr?.message}`);
+    console.warn(`INSTAGRAM_AI_GENERATION_WARN model=${runtimeModel} code=${genErr?.code ?? 'UNKNOWN'} err=${genErr?.message}`);
+    if (runtimeModel !== defaultModel) {
+      try {
+        const retryRes = await provider.generateContent({
+          model: defaultModel,
+          contents,
+          systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
+        });
+        return retryRes.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
+      } catch (retryErr) {
+        console.error(`INSTAGRAM_AI_GENERATION_FALLBACK_ERROR model=${defaultModel} code=${retryErr?.code ?? 'UNKNOWN'} err=${retryErr?.message}`);
+      }
+    }
     return null;
   }
 }

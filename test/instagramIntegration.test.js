@@ -1001,3 +1001,72 @@ test('TEST H: WhatsApp authoritative behavior remains unchanged and isolated', (
   assert.ok(INSTAGRAM_CHANNEL_PRESENTATION_RULES.includes('INSTAGRAM DM PRESENTATION'));
 });
 
+test('TEST I: Inbound event without mid generates deterministic synthetic ID and deduplicates retries', () => {
+  const event1 = {
+    sender: { id: testIgsid },
+    recipient: { id: testPageId },
+    timestamp: 1727368541298,
+    message: { text: "Dubai'de şirket kurmak istiyorum. Free Zone mu Mainland mi benim için daha uygun?" },
+  };
+  const parsed1 = parseInstagramMessagingEvent({ id: testPageId }, event1);
+  assert.ok(parsed1.messageId, 'Synthetic messageId should be generated');
+  assert.ok(parsed1.messageId.startsWith('ig_synth_'));
+
+  const parsed2 = parseInstagramMessagingEvent({ id: testPageId }, event1);
+  assert.equal(parsed1.messageId, parsed2.messageId, 'Synthetic messageId must be deterministic for identical event');
+});
+
+test('TEST J: AI generation failure does NOT fabricate generic greeting fallback', async () => {
+  const outboundDMs = [];
+  const fakeHttp = {
+    async post(url, body) {
+      outboundDMs.push(body);
+      return { data: { recipient_id: testIgsid, message_id: 'mid.ai.j' } };
+    },
+  };
+
+  const mockDb = {
+    async query(sql) {
+      if (sql.includes('FROM conversations')) {
+        return { rows: [{ id: conversationId, tenant_id: tenantId, channel_id: channelId, handling_mode: 'AI', handling_version: 1, status: 'open' }] };
+      }
+      return { rows: [] };
+    },
+    async connect() { return this; },
+    release() {},
+  };
+
+  const inboundState = {
+    integration: {
+      tenant_id: tenantId,
+      channel_id: channelId,
+      assistant_id: assistantId,
+      external_channel_id: testPageId,
+      config: { access_token: 'test-token', page_id: testPageId, activation_policy: 'ALL_MESSAGES' },
+    },
+    conversation: {
+      id: conversationId,
+      status: 'open',
+      handling_mode: 'AI',
+      handling_version: 1,
+      communication_language: 'tr',
+    },
+    shouldInvokeAi: true,
+    handlingVersion: 1,
+  };
+
+  const outcome = await orchestrateInstagramInboundAiResponse({
+    database: mockDb,
+    inboundState,
+    senderIgsid: testIgsid,
+    text: "Dubai'de şirket kurmak istiyorum",
+    http: fakeHttp,
+    generateAiResponse: async () => null, // Model generation fails
+  });
+
+  assert.equal(outcome.aiInvoked, false);
+  assert.equal(outcome.delivered, undefined);
+  // No outbound messages sent (no generic greeting fabricated)
+  assert.equal(outboundDMs.length, 0);
+});
+

@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 /**
  * Instagram Inbound Webhook Event Adapter
  *
@@ -39,7 +41,6 @@ export function parseInstagramMessagingEvent(entry, messagingEvent) {
     messagingEvent.message?.is_self
   );
 
-  const messageId = messagingEvent.message?.mid || messagingEvent.postback?.mid || null;
   let text = '';
   if (typeof messagingEvent.message?.text === 'string') {
     text = messagingEvent.message.text;
@@ -48,6 +49,19 @@ export function parseInstagramMessagingEvent(entry, messagingEvent) {
   } else if (typeof messagingEvent.postback?.payload === 'string') {
     text = messagingEvent.postback.payload;
   }
+
+  const rawMessageId = messagingEvent.message?.mid
+    || messagingEvent.message?.id
+    || messagingEvent.id
+    || messagingEvent.postback?.mid
+    || messagingEvent.postback?.id
+    || null;
+
+  const messageId = rawMessageId || (
+    senderId && recipientId && timestamp
+      ? `ig_synth_${crypto.createHash('sha256').update(`${senderId}:${recipientId}:${timestamp}:${text.slice(0, 100)}`).digest('hex').slice(0, 32)}`
+      : null
+  );
 
   const quickReplyPayload = messagingEvent.message?.quick_reply?.payload || null;
   const postbackPayload = messagingEvent.postback?.payload || null;

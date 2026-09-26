@@ -197,9 +197,21 @@ export async function persistInstagramInbound({
       `INSERT INTO conversation_messages
         (tenant_id, conversation_id, sender_type, content, external_message_id, created_at)
        VALUES ($1, $2, 'CUSTOMER', $3, $4, CURRENT_TIMESTAMP)
+       ON CONFLICT (conversation_id, external_message_id) DO NOTHING
        RETURNING *`,
       [tenantId, conversationId, messageText, messageId]
     );
+
+    if (msgResult.rowCount === 0) {
+      await client.query('COMMIT');
+      return {
+        duplicate: true,
+        integration,
+        conversation,
+        shouldInvokeAi: false,
+      };
+    }
+
     const customerMessage = msgResult.rows[0];
 
     // Ingest media attachments into conversation_resources
