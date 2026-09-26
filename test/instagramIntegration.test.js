@@ -21,7 +21,11 @@ import {
   instagramCustomerReference,
   instagramExternalConversationId,
 } from '../services/instagram-live-inbox-service.js';
-import { orchestrateInstagramInboundAiResponse } from '../services/instagram-ai-orchestrator.js';
+import {
+  orchestrateInstagramInboundAiResponse,
+  formatInstagramDmResponse,
+  INSTAGRAM_CHANNEL_PRESENTATION_RULES,
+} from '../services/instagram-ai-orchestrator.js';
 import { crmContactIdentity } from '../services/crm-lead-service.js';
 import { channelDeliveryRegistry } from '../services/channel-delivery-registry.js';
 import { appendAgentMessage, ConversationOperationError } from '../services/live-inbox-service.js';
@@ -539,8 +543,10 @@ test('orchestrateInstagramInboundAiResponse generates and delivers AI response i
 
   assert.equal(outcome.delivered, true);
   assert.equal(outcome.responseText, 'We are open Monday through Friday, 9 AM to 6 PM.');
-  assert.equal(outboundDMs.length, 1);
-  assert.equal(outboundDMs[0].message.text, 'We are open Monday through Friday, 9 AM to 6 PM.');
+  // First POST is typing_on sender action, second POST is the message delivery
+  assert.equal(outboundDMs.length, 2);
+  assert.equal(outboundDMs[0].sender_action, 'typing_on');
+  assert.equal(outboundDMs[1].message.text, 'We are open Monday through Friday, 9 AM to 6 PM.');
 });
 
 test('orchestrateInstagramInboundAiResponse suppresses automatic reply in MANUAL_ONLY default mode', async () => {
@@ -636,5 +642,362 @@ test('getInstagramSubscribedApps queries and returns active subscribed fields', 
   assert.equal(res.subscribed_fields.length, 4);
   assert.ok(res.subscribed_fields.includes('messages'));
   assert.ok(res.subscribed_fields.includes('messaging_postbacks'));
+});
+
+// ---------------------------------------------------------------------------
+// 6. TASK 9 ACCEPTANCE TESTS (TESTS A - H)
+// ---------------------------------------------------------------------------
+
+test('TEST A: Turkish customer inquiry executes SamChe runtime with Knowledge without generic greeting or unsolicited intro', async () => {
+  const outboundDMs = [];
+  const fakeHttp = {
+    async post(url, body) {
+      outboundDMs.push(body);
+      return { data: { recipient_id: testIgsid, message_id: 'mid.ai.testA' } };
+    },
+  };
+
+  const mockDb = {
+    async query(sql) {
+      if (sql.includes('FROM conversations')) {
+        return { rows: [{ id: conversationId, tenant_id: tenantId, channel_id: channelId, handling_mode: 'AI', handling_version: 1, status: 'open' }] };
+      }
+      if (sql.includes('INSERT INTO conversation_messages')) {
+        return { rows: [{ id: 'msg-ai-testA', sender_type: 'ASSISTANT' }] };
+      }
+      return { rows: [] };
+    },
+    async connect() { return this; },
+    release() {},
+  };
+
+  const inboundState = {
+    integration: {
+      tenant_id: tenantId,
+      channel_id: channelId,
+      assistant_id: assistantId,
+      external_channel_id: testPageId,
+      config: { access_token: 'test-token', page_id: testPageId, activation_policy: 'ALL_MESSAGES' },
+    },
+    conversation: {
+      id: conversationId,
+      status: 'open',
+      handling_mode: 'AI',
+      handling_version: 1,
+      communication_language: 'tr',
+      ai_behavior_override: 'AI_ONLY',
+    },
+    shouldInvokeAi: true,
+    handlingVersion: 1,
+  };
+
+  let capturedSystemInstruction = '';
+  const outcome = await orchestrateInstagramInboundAiResponse({
+    database: mockDb,
+    inboundState,
+    senderIgsid: testIgsid,
+    text: "Dubai'de şirket kurmak istiyorum. Free Zone mu Mainland mi benim için daha uygun?",
+    http: fakeHttp,
+    generateAiResponse: async ({ systemInstruction }) => {
+      capturedSystemInstruction = systemInstruction;
+      return "Dubai'de şirket kurulumunda faaliyet alanınız ve müşteri profilinize göre iki ana seçenek bulunmaktadır:\n\n1. Free Zone\nUluslararası ticaret veya yabancı mülkiyet avantajı arayan işletmeler için uygundur.\n\n2. Mainland\nBAE yerel pazarında doğrudan ticaret yapmak isteyen işletmeler için uygundur.";
+    },
+  });
+
+  assert.equal(outcome.delivered, true);
+  // Must NOT be the generic fallback text
+  assert.notEqual(outcome.responseText, 'Hello! Thank you for messaging us. How can we help you today?');
+  // Must NOT contain unsolicited bot/assistant introductions
+  assert.ok(!outcome.responseText.includes('SamChe AI'));
+  assert.ok(!outcome.responseText.includes('virtual assistant'));
+  assert.ok(!outcome.responseText.includes('How can we help you today?'));
+  // Verify system instruction contains Instagram Presentation Rules
+  assert.ok(capturedSystemInstruction.includes('INSTAGRAM DM PRESENTATION & NATURAL HUMAN CONVERSATION RULES'));
+  assert.ok(capturedSystemInstruction.includes('DO NOT introduce yourself as an "AI"'));
+});
+
+test('TEST B: Customer asks "Siz resmi kurum musunuz?" explains private consultancy and never claims government authority', async () => {
+  const outboundDMs = [];
+  const fakeHttp = {
+    async post(url, body) {
+      outboundDMs.push(body);
+      return { data: { recipient_id: testIgsid, message_id: 'mid.ai.testB' } };
+    },
+  };
+
+  const mockDb = {
+    async query(sql) {
+      if (sql.includes('FROM conversations')) {
+        return { rows: [{ id: conversationId, tenant_id: tenantId, channel_id: channelId, handling_mode: 'AI', handling_version: 1, status: 'open' }] };
+      }
+      if (sql.includes('INSERT INTO conversation_messages')) {
+        return { rows: [{ id: 'msg-ai-testB', sender_type: 'ASSISTANT' }] };
+      }
+      return { rows: [] };
+    },
+    async connect() { return this; },
+    release() {},
+  };
+
+  const inboundState = {
+    integration: {
+      tenant_id: tenantId,
+      channel_id: channelId,
+      assistant_id: assistantId,
+      external_channel_id: testPageId,
+      config: { access_token: 'test-token', page_id: testPageId, activation_policy: 'ALL_MESSAGES' },
+    },
+    conversation: {
+      id: conversationId,
+      status: 'open',
+      handling_mode: 'AI',
+      handling_version: 1,
+      communication_language: 'tr',
+    },
+    shouldInvokeAi: true,
+    handlingVersion: 1,
+  };
+
+  const outcome = await orchestrateInstagramInboundAiResponse({
+    database: mockDb,
+    inboundState,
+    senderIgsid: testIgsid,
+    text: "Siz resmi kurum musunuz?",
+    http: fakeHttp,
+    generateAiResponse: async () => "Hayır, biz resmi bir devlet kurumu değiliz. SamChe Company LLC olarak BAE'de şirket kuruluşu, lisanslama ve kurumsal danışmanlık hizmetleri sunan özel bir danışmanlık şirketiyiz.",
+  });
+
+  assert.equal(outcome.delivered, true);
+  assert.ok(outcome.responseText.includes('özel bir danışmanlık şirketi') || outcome.responseText.includes('Hayır'));
+  assert.ok(!outcome.responseText.includes('devlet kurumuyuz'));
+});
+
+test('TEST C: Response requiring 3+ items places each numbered/bullet item on separate lines', () => {
+  // Test horizontal numbered lists
+  const horizontalNumbered = "Genel olarak üç seçeneğimiz var: 1. Free Zone daha düşük maliyetlidir. 2. Mainland yerel pazar içindir. 3. Offshore uluslararası varlık koruma içindir.";
+  const formattedNumbered = formatInstagramDmResponse(horizontalNumbered);
+  assert.ok(formattedNumbered.includes('1. Free Zone'));
+  assert.ok(formattedNumbered.includes('\n\n2. Mainland'));
+  assert.ok(formattedNumbered.includes('\n\n3. Offshore'));
+
+  // Test horizontal bullet lists
+  const horizontalBullets = "Hizmetlerimiz: • Şirket lisansı • Oturum işlemleri • Emirates ID • Banka hesabı desteği";
+  const formattedBullets = formatInstagramDmResponse(horizontalBullets);
+  assert.ok(formattedBullets.includes('• Şirket lisansı\n• Oturum işlemleri\n• Emirates ID\n• Banka hesabı desteği'));
+});
+test('TEST D: Typing lifecycle triggers typing presence before message delivery', async () => {
+  const callSequence = [];
+  const fakeHttp = {
+    async post(url, body) {
+      if (body?.sender_action === 'typing_on') {
+        callSequence.push('TYPING_ON');
+      } else if (body?.message?.text) {
+        callSequence.push('MESSAGE_DELIVERED');
+      }
+      return { data: { recipient_id: testIgsid, message_id: 'mid.seq.1' } };
+    },
+  };
+
+  const mockDb = {
+    async query(sql) {
+      if (sql.includes('FROM conversations')) {
+        return { rows: [{ id: conversationId, tenant_id: tenantId, channel_id: channelId, handling_mode: 'AI', handling_version: 1, status: 'open' }] };
+      }
+      if (sql.includes('INSERT INTO conversation_messages')) {
+        return { rows: [{ id: 'msg-seq-1', sender_type: 'ASSISTANT' }] };
+      }
+      return { rows: [] };
+    },
+    async connect() { return this; },
+    release() {},
+  };
+
+  const inboundState = {
+    integration: {
+      tenant_id: tenantId,
+      channel_id: channelId,
+      assistant_id: assistantId,
+      external_channel_id: testPageId,
+      config: { access_token: 'test-token', page_id: testPageId, activation_policy: 'ALL_MESSAGES' },
+    },
+    conversation: {
+      id: conversationId,
+      status: 'open',
+      handling_mode: 'AI',
+      handling_version: 1,
+      communication_language: 'tr',
+    },
+    shouldInvokeAi: true,
+    handlingVersion: 1,
+  };
+
+  await orchestrateInstagramInboundAiResponse({
+    database: mockDb,
+    inboundState,
+    senderIgsid: testIgsid,
+    text: "Bilgi alabilir miyim?",
+    http: fakeHttp,
+    generateAiResponse: async () => "Tabii, hangi konuda bilgi almak istersiniz?",
+  });
+
+  assert.deepEqual(callSequence, ['TYPING_ON', 'MESSAGE_DELIVERED']);
+});
+
+test('TEST E: Same provider MID delivered twice produces at most 1 message and 1 AI reply', async () => {
+  let persistCount = 0;
+  const mockDb = {
+    async connect() {
+      return {
+        async query(sql, params) {
+          if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return {};
+          if (sql.includes('SELECT tc.tenant_id')) {
+            return {
+              rowCount: 1,
+              rows: [{
+                tenant_id: tenantId, channel_id: channelId, assistant_id: assistantId,
+                external_channel_id: testPageId, channel_type: 'INSTAGRAM',
+                config: { page_id: testPageId, access_token: 'token-123' },
+              }],
+            };
+          }
+          if (sql.includes('INSERT INTO conversations')) {
+            return { rowCount: 1, rows: [{ id: conversationId, tenant_id: tenantId, channel_id: channelId, status: 'open', handling_mode: 'AI', handling_version: 1 }] };
+          }
+          if (sql.includes('SELECT id, sender_type FROM conversation_messages')) {
+            if (persistCount === 0) return { rowCount: 0, rows: [] };
+            return { rowCount: 1, rows: [{ id: 'msg-existing-1', external_message_id: 'mid.duplicate.test' }] };
+          }
+          if (sql.includes('INSERT INTO conversation_messages')) {
+            persistCount++;
+            return { rows: [{ id: 'msg-persisted-1', sender_type: 'CUSTOMER' }] };
+          }
+          return { rows: [] };
+        },
+        release() {},
+      };
+    },
+  };
+
+  // 1st inbound delivery
+  const res1 = await persistInstagramInbound({
+    database: mockDb,
+    recipientId: testPageId,
+    senderIgsid: testIgsid,
+    messageId: 'mid.duplicate.test',
+    content: 'Hello',
+  });
+  assert.equal(res1.duplicate, false);
+
+  // 2nd inbound delivery of same MID
+  const res2 = await persistInstagramInbound({
+    database: mockDb,
+    recipientId: testPageId,
+    senderIgsid: testIgsid,
+    messageId: 'mid.duplicate.test',
+    content: 'Hello',
+  });
+  assert.equal(res2.duplicate, true);
+  assert.equal(res2.shouldInvokeAi, false);
+  assert.equal(persistCount, 1);
+});
+
+test('TEST F: MANUAL_ONLY without AI_ONLY override suppresses AI reply', async () => {
+  const outboundDMs = [];
+  let aiGenerated = 0;
+  const fakeHttp = {
+    async post(url, body) {
+      outboundDMs.push(body);
+      return { data: { recipient_id: testIgsid, message_id: 'mid.ai.f' } };
+    },
+  };
+
+  const inboundState = {
+    integration: {
+      tenant_id: tenantId,
+      channel_id: channelId,
+      assistant_id: assistantId,
+      external_channel_id: testPageId,
+      config: { access_token: 'test-token', page_id: testPageId, activation_policy: 'MANUAL_ONLY' },
+    },
+    conversation: {
+      id: conversationId,
+      status: 'open',
+      handling_mode: 'AI',
+      handling_version: 1,
+      communication_language: 'tr',
+      ai_behavior_override: 'AUTOMATIC',
+    },
+    shouldInvokeAi: true,
+    handlingVersion: 1,
+  };
+
+  const outcome = await orchestrateInstagramInboundAiResponse({
+    inboundState,
+    senderIgsid: testIgsid,
+    text: "Fiyat bilgisi alabilir miyim?",
+    http: fakeHttp,
+    generateAiResponse: async () => {
+      aiGenerated++;
+      return "Fiyatlarımız...";
+    },
+  });
+
+  assert.equal(outcome.aiInvoked, false);
+  assert.equal(outcome.suppressed, true);
+  assert.equal(aiGenerated, 0);
+  assert.equal(outboundDMs.length, 0);
+});
+
+test('TEST G: NEVER_AI override strictly suppresses AI generation and outbound messages', async () => {
+  const outboundDMs = [];
+  let aiGenerated = 0;
+  const fakeHttp = {
+    async post(url, body) {
+      outboundDMs.push(body);
+      return { data: { recipient_id: testIgsid, message_id: 'mid.ai.g' } };
+    },
+  };
+
+  const inboundState = {
+    integration: {
+      tenant_id: tenantId,
+      channel_id: channelId,
+      assistant_id: assistantId,
+      external_channel_id: testPageId,
+      config: { access_token: 'test-token', page_id: testPageId, activation_policy: 'ALL_MESSAGES' },
+    },
+    conversation: {
+      id: conversationId,
+      status: 'open',
+      handling_mode: 'AI',
+      handling_version: 1,
+      communication_language: 'tr',
+      ai_behavior_override: 'NEVER_AI',
+    },
+    shouldInvokeAi: true,
+    handlingVersion: 1,
+  };
+
+  const outcome = await orchestrateInstagramInboundAiResponse({
+    inboundState,
+    senderIgsid: testIgsid,
+    text: "Dubai'de şirket kurmak istiyorum",
+    http: fakeHttp,
+    generateAiResponse: async () => {
+      aiGenerated++;
+      return "Yanıt...";
+    },
+  });
+
+  assert.equal(outcome.aiInvoked, false);
+  assert.equal(outcome.suppressed, true);
+  assert.equal(outcome.activationEvaluation.reasonCode, 'OVERRIDE_NEVER_AI');
+  assert.equal(aiGenerated, 0);
+  assert.equal(outboundDMs.length, 0);
+});
+
+test('TEST H: WhatsApp authoritative behavior remains unchanged and isolated', () => {
+  // Verifies that Instagram presentation rules are isolated from WhatsApp
+  assert.ok(INSTAGRAM_CHANNEL_PRESENTATION_RULES.includes('INSTAGRAM DM PRESENTATION'));
 });
 

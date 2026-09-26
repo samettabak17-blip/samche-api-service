@@ -177,4 +177,33 @@ export async function sendInstagramTypingIndicator({
   }
 }
 
+export async function sendInstagramTypingOff({
+  recipientId,
+  accessToken,
+  pageId = 'me',
+  instagramAccountId = null,
+  http = axios,
+  graphVersion,
+}) {
+  if (!recipientId || !accessToken) return { ok: false, reason: 'CREDENTIALS_MISSING' };
+  const baseUrl = instagramGraphApiBase();
+  const targetId = String(instagramAccountId || pageId || 'me').trim();
+  const endpoint = `${baseUrl}/${targetId}/messages`;
+  try {
+    await http.post(endpoint, {
+      recipient: { id: recipientId },
+      sender_action: 'typing_off',
+    }, {
+      headers: {
+        Authorization: `Bearer ${accessToken.trim()}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 5000,
+    });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: err?.message };
+  }
+}
+
 

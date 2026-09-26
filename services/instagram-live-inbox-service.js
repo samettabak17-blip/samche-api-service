@@ -154,6 +154,13 @@ export async function persistInstagramInbound({
           externalCustomerId: instagramCustomerReference(senderIgsid),
         });
         await client.query('RELEASE SAVEPOINT crm_identity_sp');
+        const freshConvRes = await client.query(
+          `SELECT * FROM conversations WHERE id = $1 AND tenant_id = $2`,
+          [conversationId, tenantId]
+        );
+        if (freshConvRes.rowCount === 1) {
+          Object.assign(conversation, freshConvRes.rows[0]);
+        }
       } catch (crmErr) {
         await client.query('ROLLBACK TO SAVEPOINT crm_identity_sp').catch(() => {});
         console.warn('INSTAGRAM_CRM_IDENTITY_WARN', crmErr?.message);

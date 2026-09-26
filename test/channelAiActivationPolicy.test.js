@@ -522,7 +522,8 @@ test('AI_ONLY selection immediately answers pending customer message and prevent
   });
 
   assert.equal(generatedResponses, 1);
-  assert.equal(deliveredMessages.length, 1);
+  const textDMs1 = deliveredMessages.filter((m) => m?.message?.text);
+  assert.equal(textDMs1.length, 1);
   assert.equal(result1.immediateResponse?.delivered, true);
   assert.equal(conversationStore.ai_behavior_override, 'AI_ONLY');
 
@@ -538,7 +539,8 @@ test('AI_ONLY selection immediately answers pending customer message and prevent
 
   // Verify exactly one response was generated and delivered (no duplicates)
   assert.equal(generatedResponses, 1);
-  assert.equal(deliveredMessages.length, 1);
+  const textDMs2 = deliveredMessages.filter((m) => m?.message?.text);
+  assert.equal(textDMs2.length, 1);
   assert.equal(result2.immediateResponse?.reason, 'ALREADY_ANSWERED');
 });
 

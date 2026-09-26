@@ -4725,6 +4725,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
               inboundState,
               senderIgsid: igEvent.senderId,
               text: igEvent.text,
+              embed: knowledgeEmbedder,
             });
           } catch (igErr) {
             console.error('INSTAGRAM_INBOUND_PROCESSING_ERROR', igErr?.code ?? igErr?.message);

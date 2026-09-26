@@ -3,12 +3,132 @@ import { parseCustomerHumanSupportRequest } from './human-support-intent.js';
 import { resolvePlatformHumanSupportPolicy } from './platform-lifecycle-message-service.js';
 import { requestCustomerHumanSupport, triggerImmediateHumanSupportNotificationPipeline } from './human-support-service.js';
 import { persistAssistantResponseIfCurrent } from './live-inbox-service.js';
-import { deliverInstagramText } from './instagram-delivery-service.js';
-import { resolveTenantRuntimePersona } from './tenant-runtime-persona-service.js';
+import { deliverInstagramText, sendInstagramTypingIndicator } from './instagram-delivery-service.js';
+import { resolveTenantRuntimePersona, buildTenantRuntimeSystemInstruction } from './tenant-runtime-persona-service.js';
 import { resolveAssistantRuntimeKnowledgeContext } from './knowledge-runtime-context-service.js';
-import { buildTenantRuntimeSystemInstruction } from './tenant-runtime-persona-service.js';
 import { resolveCommunicationLanguage } from './conversation-communication-language.js';
 import { evaluateChannelAiActivationPolicy } from './channel-ai-activation-policy-service.js';
+import { applyWhatsAppAdaptivePacing } from './whatsapp-response-pacing-service.js';
+import { createGoogleGeminiProvider } from './google-gemini-provider.js';
+
+export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
+  'INSTAGRAM DM PRESENTATION & NATURAL HUMAN CONVERSATION RULES:',
+  '1. CHANNEL MEDIUM: You are conversing directly with a customer inside an Instagram Direct Message (DM). Keep responses concise, clear, and natural like a seasoned human business consultant.',
+  '2. DIRECT ANSWERS: Answer the customer’s actual question first. Do not add unnecessary filler greetings or generic pleasantries to every message.',
+  '3. IDENTITY PRESENTATION RULES:',
+  '   - DO NOT introduce yourself as an "AI", "AI Assistant", "bot", or "virtual assistant".',
+  '   - DO NOT unnecessarily start messages with unsolicited company introductions (e.g. "Hello, I am...", "SamChe Company LLC olarak...", "SamChe Company olarak size yardımcı olabiliriz...").',
+  '   - Normal business questions must be answered directly and naturally without stating company name unless the customer explicitly asks.',
+  '   - WHEN TO DISCLOSE COMPANY IDENTITY: Only mention company identity if the customer explicitly asks who you are ("Siz kimsiniz?", "Şirket misiniz?", "Resmi kurum musunuz?", "Hangi firmayla görüşüyorum?"), or for company contact/contract/invoice questions.',
+  '   - NON-GOVERNMENT ENTITY CLARIFICATION: When asked if you are an official/government authority, clarify truthfully and politely that you are a private corporate consultancy and business setup services provider. NEVER imply that SamChe Company LLC is a UAE government authority, immigration authority, Free Zone authority, bank, or government entity.',
+  '4. LANGUAGE & CONVERSATION FLOW:',
+  '   - Respond in the customer’s language. When the customer writes in Turkish, respond in natural, professional Turkish.',
+  '   - Do not repeat "How can we help you?" or "Nasıl yardımcı olabilirim?" on every message.',
+  '   - Use multi-turn conversation history: remember details provided earlier in the chat and never ask again for information the customer has already given.',
+  '5. FORMATTING RULES (CRITICAL FOR READABILITY):',
+  '   - When presenting lists of 2 or more items (numbered 1., 2., 3. or bullet points •), EACH item MUST be placed on its own separate line.',
+  '   - NEVER concatenate list items horizontally onto the same line.',
+  '   - Separate distinct points with clean paragraph breaks so the message is effortless to read on mobile DM screens.',
+  '6. STRICT FACTUAL GROUNDING:',
+  '   - Ground all statements strictly in the active approved Business Profile and approved Knowledge.',
+  '   - Never invent prices, legal requirements, approvals, guarantees, or unsupported claims.',
+].join('\n'));
+
+
+/**
+ * Normalizes and formats AI response text for optimal readability in Instagram Direct Messages.
+ * Guarantees vertical separation of list items and clean paragraph breaks.
+ */
+export function formatInstagramDmResponse(rawText) {
+  if (!rawText || typeof rawText !== 'string') return '';
+  let text = rawText.trim();
+
+  // Strip markdown headers like ### or ## at line starts
+  text = text.replace(/^#{1,6}\s+/gm, '');
+
+  // Fix horizontally concatenated numbered lists: e.g. "1. First 2. Second 3. Third" -> "1. First\n\n2. Second\n\n3. Third"
+  text = text.replace(/([^\n])\s+(\d+\.\s+)/g, '$1\n\n$2');
+
+  // Fix horizontally concatenated bullet points: e.g. "• Item 1 • Item 2" or "- Item 1 - Item 2" -> "• Item 1\n• Item 2"
+  text = text.replace(/([^\n])\s+([•\-\*]\s+)/g, '$1\n$2');
+
+  // Normalize excessive blank lines (more than 2 consecutive newlines to 2)
+  text = text.replace(/\n{3,}/g, '\n\n');
+
+  return text.trim();
+}
+
+/**
+ * Loads recent chronological conversation history for multi-turn AI context.
+ */
+async function loadRecentConversationHistory(database, tenantId, conversationId, limit = 10) {
+  try {
+    const res = await database.query(
+      `SELECT id, sender_type, content, created_at
+         FROM conversation_messages
+        WHERE tenant_id = $1 AND conversation_id = $2
+        ORDER BY created_at DESC, id DESC
+        LIMIT $3`,
+      [tenantId, conversationId, limit]
+    );
+    return (res.rows || []).reverse().map((msg) => ({
+      role: msg.sender_type === 'CUSTOMER' ? 'user' : 'model',
+      parts: [{ text: msg.content || '' }],
+      sender_type: msg.sender_type,
+      content: msg.content,
+    }));
+  } catch (err) {
+    console.warn('INSTAGRAM_LOAD_HISTORY_WARN', err?.message);
+    return [];
+  }
+}
+
+/**
+ * Invokes the canonical Google Gemini provider with active system instruction & history.
+ */
+async function defaultGenerateInstagramAiResponse({
+  systemInstruction,
+  text,
+  conversationHistory = [],
+  model = null,
+}) {
+  let provider;
+  try {
+    provider = createGoogleGeminiProvider();
+  } catch (providerErr) {
+    console.error('INSTAGRAM_GEMINI_PROVIDER_INIT_ERROR', providerErr?.message);
+    return null;
+  }
+
+  const runtimeModel = model || provider.runtimeMetadata().model;
+
+  // Prepare Gemini contents from history
+  const contents = [];
+  if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
+    for (const h of conversationHistory) {
+      if (h.role && Array.isArray(h.parts) && h.parts.length > 0 && h.parts[0]?.text) {
+        contents.push({ role: h.role, parts: h.parts });
+      }
+    }
+  }
+
+  // Ensure current user message is at the end if not already present
+  if (contents.length === 0 || contents[contents.length - 1].role !== 'user' || contents[contents.length - 1].parts?.[0]?.text !== text) {
+    contents.push({ role: 'user', parts: [{ text }] });
+  }
+
+  try {
+    const response = await provider.generateContent({
+      model: runtimeModel,
+      contents,
+      systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
+    });
+    return response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
+  } catch (genErr) {
+    console.error(`INSTAGRAM_AI_GENERATION_ERROR model=${runtimeModel} code=${genErr?.code ?? 'UNKNOWN'} err=${genErr?.message}`);
+    return null;
+  }
+}
 
 export async function orchestrateInstagramInboundAiResponse({
   database = pool,
@@ -16,6 +136,7 @@ export async function orchestrateInstagramInboundAiResponse({
   senderIgsid,
   text = '',
   http,
+  embed = null,
   generateAiResponse,
   generateAiClassification,
 }) {
@@ -27,6 +148,7 @@ export async function orchestrateInstagramInboundAiResponse({
   const tenantId = integration.tenant_id;
   const conversationId = conversation.id;
   const assistantId = integration.assistant_id;
+  const assistantModel = integration.assistant_model || null;
 
   const accessToken = integration.config?.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
   const accountId = integration.config?.instagram_account_id || integration.config?.instagram_business_account_id || integration.config?.page_id || integration.external_channel_id;
@@ -120,7 +242,25 @@ export async function orchestrateInstagramInboundAiResponse({
     };
   }
 
-  // 3. Resolve Persona and Knowledge context
+  // 4. Verify Latest Message is CUSTOMER and Unanswered (guards against duplicates/races)
+  try {
+    const msgCheck = await database.query(
+      `SELECT id, sender_type, content, created_at
+         FROM conversation_messages
+        WHERE tenant_id = $1 AND conversation_id = $2
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1`,
+      [tenantId, conversationId]
+    );
+    const latest = msgCheck.rows?.[0];
+    if (latest && latest.sender_type !== 'CUSTOMER') {
+      return { skipped: true, reason: 'ALREADY_ANSWERED' };
+    }
+  } catch (chkErr) {
+    console.warn('INSTAGRAM_MSG_CHECK_WARN', chkErr?.message);
+  }
+
+  // 5. Resolve Active Persona and Knowledge context
   let persona = null;
   let knowledge = null;
 
@@ -137,6 +277,7 @@ export async function orchestrateInstagramInboundAiResponse({
   try {
     knowledge = await resolveAssistantRuntimeKnowledgeContext({
       database,
+      embed,
       tenantId,
       assistantId,
       query: text,
@@ -145,60 +286,72 @@ export async function orchestrateInstagramInboundAiResponse({
     console.warn('INSTAGRAM_AI_KNOWLEDGE_WARN', knowledgeErr?.message);
   }
 
-  const channelRules = [
-    'INSTAGRAM CHANNEL PRESENTATION RULES:',
-    '- Communicate naturally, concisely, and helpfully on behalf of the company in plain text without markdown headers or hashtags.',
-    '- Do NOT start replies with unsolicited AI self-identification phrases (e.g. "Ben SamChe AI\'yım", "Ben bir yapay zeka asistanıyım", "I am an AI assistant"). Address the customer\'s business question directly.',
-    '- If and only if the customer explicitly asks whether you are an AI/bot/human ("Sen yapay zeka mısın?", "Bot musun?", "Gerçek bir insan mısın?"), answer truthfully and briefly as the digital assistant without inventing a false human persona.',
-  ].join('\n');
+  // 6. Load Recent Conversation History
+  const history = await loadRecentConversationHistory(database, tenantId, conversationId, 10);
 
-  const systemInstruction = buildTenantRuntimeSystemInstruction({
-    persona: persona || { available: false, name: 'Assistant' },
-    knowledgeContext: knowledge?.knowledgeContext || '',
-    channelRules,
-  });
+  // 7. Build System Instruction with Channel Presentation Rules
+  const systemInstruction = persona?.available
+    ? buildTenantRuntimeSystemInstruction({
+        persona,
+        knowledgeContext: knowledge?.knowledgeContext || '',
+        channelRules: INSTAGRAM_CHANNEL_PRESENTATION_RULES,
+      })
+    : [
+        'PLATFORM RUNTIME SAFETY: Enforce tenant isolation and channel delivery rules.',
+        INSTAGRAM_CHANNEL_PRESENTATION_RULES,
+        knowledge?.knowledgeContext ? `APPROVED KNOWLEDGE:\n${knowledge.knowledgeContext}` : '',
+      ].filter(Boolean).join('\n\n');
 
-  // 4. Generate AI response
-  let aiResponseText = '';
-  if (typeof generateAiResponse === 'function') {
-    aiResponseText = await generateAiResponse({
-      systemInstruction,
-      text,
-      conversationHistory: [],
-    });
-  } else {
+  // 8. Start Instagram Typing Indicator (non-blocking)
+  const generationStartedAt = Date.now();
+  if (accessToken && senderIgsid) {
     try {
-      const { createGoogleGeminiProvider } = await import('./google-gemini-provider.js');
-      const provider = createGoogleGeminiProvider();
-      const res = await provider.generateContent({
-        model: 'gemini-2.5-pro',
-        contents: [{ role: 'user', parts: [{ text }] }],
-        systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
+      await sendInstagramTypingIndicator({
+        recipientId: senderIgsid,
+        accessToken,
+        instagramAccountId: accountId,
+        pageId: accountId,
+        http,
       });
-      aiResponseText = res.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-    } catch (aiErr) {
-      console.warn('INSTAGRAM_GEMINI_RUNTIME_WARN', aiErr?.message);
-    }
-    if (!aiResponseText) {
-      aiResponseText = persona?.configuration?.systemPrompt
-        ? 'Thank you for reaching out! How can I assist you today?'
-        : 'Hello! Thank you for messaging us. How can we help you today?';
+    } catch (typingErr) {
+      console.warn('INSTAGRAM_TYPING_INDICATOR_NON_BLOCKING_WARN', typingErr?.message);
     }
   }
 
-  aiResponseText = String(aiResponseText ?? '')
-    .replace(/^(?:(?:ben\s+)?(?:bir\s+)?(?:samche\s+ai|yapay\s+zek[aâ]\s+asistan[ıi]y[ıi]m|ai\s+assistant|yapay\s+zeka|bot)[.,!?-]*\s*)+/i, '')
-    .replace(/^(?:i\s+am\s+(?:an\s+)?(?:ai\s+assistant|ai|bot|samche\s+ai)[.,!?-]*\s*)+/i, '')
-    .trim();
-  if (!aiResponseText) {
+  // 9. Generate AI response
+  let rawAiResponseText = '';
+  if (typeof generateAiResponse === 'function') {
+    rawAiResponseText = await generateAiResponse({
+      systemInstruction,
+      text,
+      conversationHistory: history,
+      model: assistantModel,
+    });
+  } else {
+    rawAiResponseText = await defaultGenerateInstagramAiResponse({
+      systemInstruction,
+      text,
+      conversationHistory: history,
+      model: assistantModel,
+    });
+  }
+
+  const formattedResponse = formatInstagramDmResponse(rawAiResponseText);
+  if (!formattedResponse) {
     return { aiInvoked: false, reason: 'EMPTY_AI_RESPONSE' };
   }
 
-  // 5. Persist Assistant response with handling version check (atomically guards against operator takeover race)
+  // 10. Bounded Human-Like Adaptive Pacing
+  await applyWhatsAppAdaptivePacing({
+    generationStartedAt,
+    content: formattedResponse,
+  });
+
+  // 11. Persist Assistant response atomically (guards against operator takeover race)
   const persisted = await persistAssistantResponseIfCurrent({
     tenantId,
     conversationId,
-    content: aiResponseText,
+    content: formattedResponse,
     handlingVersion,
     database,
   });
@@ -208,12 +361,12 @@ export async function orchestrateInstagramInboundAiResponse({
     return { delivered: false, dropped: true, reason: 'CONVERSATION_TAKEN_OVER' };
   }
 
-  // 6. Deliver outbound message to Instagram
+  // 12. Deliver outbound message to Instagram
   let deliveryResult = null;
-  if (accessToken) {
+  if (accessToken && senderIgsid) {
     deliveryResult = await deliverInstagramText({
       recipientId: senderIgsid,
-      content: aiResponseText,
+      content: formattedResponse,
       accessToken,
       instagramAccountId: accountId,
       pageId: accountId,
@@ -223,8 +376,9 @@ export async function orchestrateInstagramInboundAiResponse({
 
   return {
     delivered: true,
-    responseText: aiResponseText,
+    responseText: formattedResponse,
     deliveryResult,
+    assistantMessageId: persisted.message?.id || null,
   };
 }
 
@@ -238,17 +392,21 @@ export async function generateAndDeliverInstagramAssistantResponse({
   conversationId,
   messageText = '',
   http,
+  embed = null,
   generateAiResponse,
 }) {
-  const client = await database.connect();
+  const shouldRelease = typeof database?.connect === 'function';
+  const client = shouldRelease ? await database.connect() : database;
   try {
     const convRes = await client.query(
       `SELECT c.id, c.tenant_id, c.channel_id, c.customer_external_id, c.handling_mode,
               c.handling_version, c.status, c.communication_language,
               tc.channel_type, tc.assistant_id,
+              a.model AS assistant_model,
               ci.config AS integration_config
          FROM conversations c
          JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
+         LEFT JOIN ai_assistants a ON a.id = tc.assistant_id AND a.tenant_id = tc.tenant_id
          LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.integration_type = 'INSTAGRAM'
         WHERE c.id = $1 AND c.tenant_id = $2`,
       [conversationId, tenantId]
@@ -276,67 +434,80 @@ export async function generateAndDeliverInstagramAssistantResponse({
 
     const textToAnswer = String(messageText || latestMsg.content || '').trim();
     const assistantId = conversation.assistant_id;
+    const assistantModel = conversation.assistant_model || null;
     const config = conversation.integration_config || {};
     const accessToken = config.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
     const accountId = config.instagram_account_id || config.instagram_business_account_id || config.page_id || 'me';
     const recipientIgsid = String(conversation.customer_external_id || '').replace(/^instagram:\s*/i, '');
 
-    // Resolve persona & knowledge
+    // Resolve Persona & Knowledge
     let persona = null;
     let knowledge = null;
     try {
-      persona = await resolveTenantRuntimePersona({ database, tenantId, assistantId });
+      persona = await resolveTenantRuntimePersona({ database: client, tenantId, assistantId });
     } catch {}
     try {
-      knowledge = await resolveAssistantRuntimeKnowledgeContext({ database, tenantId, assistantId, query: textToAnswer });
+      knowledge = await resolveAssistantRuntimeKnowledgeContext({ database: client, embed, tenantId, assistantId, query: textToAnswer });
     } catch {}
 
-    const channelRules = [
-      'INSTAGRAM CHANNEL PRESENTATION RULES:',
-      '- Communicate naturally, concisely, and helpfully on behalf of the company in plain text without markdown headers or hashtags.',
-      '- Do NOT start replies with unsolicited AI self-identification phrases (e.g. "Ben SamChe AI\'yım", "Ben bir yapay zeka asistanıyım", "I am an AI assistant"). Address the customer\'s business question directly.',
-      '- If and only if the customer explicitly asks whether you are an AI/bot/human ("Sen yapay zeka mısın?", "Bot musun?", "Gerçek bir insan mısın?"), answer truthfully and briefly as the digital assistant without inventing a false human persona.',
-    ].join('\n');
+    const history = await loadRecentConversationHistory(client, tenantId, conversationId, 10);
 
-    const systemInstruction = buildTenantRuntimeSystemInstruction({
-      persona: persona || { available: false, name: 'Assistant' },
-      knowledgeContext: knowledge?.knowledgeContext || '',
-      channelRules,
-    });
+    const systemInstruction = persona?.available
+      ? buildTenantRuntimeSystemInstruction({
+          persona,
+          knowledgeContext: knowledge?.knowledgeContext || '',
+          channelRules: INSTAGRAM_CHANNEL_PRESENTATION_RULES,
+        })
+      : [
+          'PLATFORM RUNTIME SAFETY: Enforce tenant isolation and channel delivery rules.',
+          INSTAGRAM_CHANNEL_PRESENTATION_RULES,
+          knowledge?.knowledgeContext ? `APPROVED KNOWLEDGE:\n${knowledge.knowledgeContext}` : '',
+        ].filter(Boolean).join('\n\n');
 
-    let aiResponseText = '';
-    if (typeof generateAiResponse === 'function') {
-      aiResponseText = await generateAiResponse({ systemInstruction, text: textToAnswer, conversationHistory: [] });
-    } else {
+    const generationStartedAt = Date.now();
+    if (accessToken && recipientIgsid) {
       try {
-        const { createGoogleGeminiProvider } = await import('./google-gemini-provider.js');
-        const provider = createGoogleGeminiProvider();
-        const res = await provider.generateContent({
-          model: 'gemini-2.5-pro',
-          contents: [{ role: 'user', parts: [{ text: textToAnswer }] }],
-          systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
+        await sendInstagramTypingIndicator({
+          recipientId: recipientIgsid,
+          accessToken,
+          instagramAccountId: accountId,
+          pageId: accountId,
+          http,
         });
-        aiResponseText = res.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
-      } catch (aiErr) {
-        console.warn('INSTAGRAM_GEMINI_RUNTIME_WARN', aiErr?.message);
-      }
-      if (!aiResponseText) {
-        aiResponseText = persona?.configuration?.systemPrompt
-          ? 'Thank you for reaching out! How can I assist you today?'
-          : 'Hello! Thank you for messaging us. How can we help you today?';
+      } catch (typingErr) {
+        console.warn('INSTAGRAM_TYPING_INDICATOR_NON_BLOCKING_WARN', typingErr?.message);
       }
     }
 
-    aiResponseText = String(aiResponseText ?? '')
-      .replace(/^(?:(?:ben\s+)?(?:bir\s+)?(?:samche\s+ai|yapay\s+zek[aâ]\s+asistan[ıi]y[ıi]m|ai\s+assistant|yapay\s+zeka|bot)[.,!?-]*\s*)+/i, '')
-      .replace(/^(?:i\s+am\s+(?:an\s+)?(?:ai\s+assistant|ai|bot|samche\s+ai)[.,!?-]*\s*)+/i, '')
-      .trim();
-    if (!aiResponseText) return { skipped: true, reason: 'EMPTY_AI_RESPONSE' };
+    let rawAiResponseText = '';
+    if (typeof generateAiResponse === 'function') {
+      rawAiResponseText = await generateAiResponse({
+        systemInstruction,
+        text: textToAnswer,
+        conversationHistory: history,
+        model: assistantModel,
+      });
+    } else {
+      rawAiResponseText = await defaultGenerateInstagramAiResponse({
+        systemInstruction,
+        text: textToAnswer,
+        conversationHistory: history,
+        model: assistantModel,
+      });
+    }
+
+    const formattedResponse = formatInstagramDmResponse(rawAiResponseText);
+    if (!formattedResponse) return { skipped: true, reason: 'EMPTY_AI_RESPONSE' };
+
+    await applyWhatsAppAdaptivePacing({
+      generationStartedAt,
+      content: formattedResponse,
+    });
 
     const persisted = await persistAssistantResponseIfCurrent({
       tenantId,
       conversationId,
-      content: aiResponseText,
+      content: formattedResponse,
       handlingVersion: conversation.handling_version,
       database,
     });
@@ -349,7 +520,7 @@ export async function generateAndDeliverInstagramAssistantResponse({
     if (accessToken && recipientIgsid) {
       deliveryResult = await deliverInstagramText({
         recipientId: recipientIgsid,
-        content: aiResponseText,
+        content: formattedResponse,
         accessToken,
         instagramAccountId: accountId,
         pageId: accountId,
@@ -359,12 +530,15 @@ export async function generateAndDeliverInstagramAssistantResponse({
 
     return {
       delivered: true,
-      responseText: aiResponseText,
+      responseText: formattedResponse,
       deliveryResult,
       assistantMessageId: persisted.message?.id || null,
     };
   } finally {
-    client.release();
+    if (shouldRelease && typeof client?.release === 'function') {
+      client.release();
+    }
   }
 }
+
 
