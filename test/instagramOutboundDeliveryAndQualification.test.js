@@ -397,6 +397,141 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
     assert.ok(rules.includes('DO NOT use stiff or corporate artificial phrases'));
     assert.ok(rules.includes('Danışmanlık ücretimiz 8.000 AED\'dir'));
   });
+  it('TEST 1: Generic intent signal ("Samed Bey ile görüşmek istiyorum") does not trigger HOT lead or WhatsApp notification', async () => {
+    const httpCalls = [];
+    const mockDatabase = {
+      connect: async () => mockDatabase,
+      release: () => {},
+      query: async (sql, params) => {
+        if (/FROM conversations/i.test(sql)) {
+          return { rows: [{ id: 'conv-t1', tenant_id: 't-1', channel_id: 'ch-1', customer_external_id: 'instagram:user1' }], rowCount: 1 };
+        }
+        if (/FROM conversation_messages/i.test(sql)) {
+          return { rows: [{ id: 'm1', sender_type: 'CUSTOMER', content: 'Samed Bey ile görüşmek istiyorum.' }], rowCount: 1 };
+        }
+        if (/SELECT id FROM crm_leads/i.test(sql)) {
+          return { rows: [{ id: 'lead-t1' }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      },
+    };
+
+    const { evaluateAndProcessHighIntentLead } = await import('../services/high-intent-lead-service.js');
+    const outcome = await evaluateAndProcessHighIntentLead({
+      tenantId: 't-1',
+      conversationId: 'conv-t1',
+      database: mockDatabase,
+      httpClient: { post: async (...args) => httpCalls.push(args) },
+    });
+
+    assert.equal(outcome.qualified, false, 'Generic request must NOT be qualified');
+    assert.equal(outcome.reason, 'QUALIFICATION_INCOMPLETE_AWAITING_REQUIREMENT');
+    assert.equal(httpCalls.length, 0, 'WhatsApp notification count must be 0');
+  });
+
+  it('TEST 2 & 3: Requirement stated ("Dubai\'de şirket kuracağım") without phone/time remains incomplete with 0 notifications', async () => {
+    const httpCalls = [];
+    const mockDatabase = {
+      connect: async () => mockDatabase,
+      release: () => {},
+      query: async (sql) => {
+        if (/FROM conversations/i.test(sql)) {
+          return { rows: [{ id: 'conv-t2', tenant_id: 't-1', channel_id: 'ch-1', customer_external_id: 'instagram:user2' }], rowCount: 1 };
+        }
+        if (/FROM conversation_messages/i.test(sql)) {
+          return {
+            rows: [
+              { id: 'm1', sender_type: 'CUSTOMER', content: 'Samed Bey ile görüşmek istiyorum.' },
+              { id: 'm2', sender_type: 'ASSISTANT', content: 'Tabii, nasıl bir şirket kurmayı düşünüyorsunuz?' },
+              { id: 'm3', sender_type: 'CUSTOMER', content: 'Dubai\'de şirket kuracağım, e-ticaret faaliyeti.' },
+            ],
+            rowCount: 3,
+          };
+        }
+        if (/SELECT id FROM crm_leads/i.test(sql)) {
+          return { rows: [{ id: 'lead-t2' }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      },
+    };
+
+    const { evaluateAndProcessHighIntentLead } = await import('../services/high-intent-lead-service.js');
+    const outcome = await evaluateAndProcessHighIntentLead({
+      tenantId: 't-1',
+      conversationId: 'conv-t2',
+      database: mockDatabase,
+      httpClient: { post: async (...args) => httpCalls.push(args) },
+    });
+
+    assert.equal(outcome.qualified, false, 'Requirement without phone/time must remain incomplete');
+    assert.equal(outcome.reason, 'QUALIFICATION_INCOMPLETE_AWAITING_PHONE');
+  it('TEST 4 & 5: Fully answered qualification with phone and availability sends exactly 1 WhatsApp notification', async () => {
+    const httpCalls = [];
+    const executedQueries = [];
+    const mockDatabase = {
+      connect: async () => mockDatabase,
+      release: () => {},
+      query: async (sql, params) => {
+        executedQueries.push({ sql, params });
+        if (/FROM conversations/i.test(sql)) {
+          return {
+            rows: [{
+              id: 'conv-t5',
+              tenant_id: 't-1',
+              channel_id: 'ch-1',
+              customer_external_id: 'instagram:user5',
+              contact_id: 'ct-5',
+              contact_name: 'Merve Kaya',
+            }],
+            rowCount: 1,
+          };
+        }
+        if (/FROM conversation_messages/i.test(sql)) {
+          return {
+            rows: [
+              { id: 'm1', sender_type: 'CUSTOMER', content: 'Samed Bey merhaba, danışmanlık almak istiyorum.' },
+              { id: 'm2', sender_type: 'ASSISTANT', content: 'Merhaba, Dubai\'de hangi sektörde faaliyet göstermeyi planlıyorsunuz?' },
+              { id: 'm3', sender_type: 'CUSTOMER', content: 'Yazılım ve teknoloji danışmanlığı üzerine Free Zone şirket kurmak istiyoruz.' },
+              { id: 'm4', sender_type: 'ASSISTANT', content: 'Harika. Size ulaşabileceğimiz telefon veya WhatsApp numaranızı paylaşabilir misiniz?' },
+              { id: 'm5', sender_type: 'CUSTOMER', content: 'Numaram +905554443322, pazartesi 14:00 uygunum.' },
+            ],
+            rowCount: 5,
+          };
+        }
+        if (/SELECT id FROM crm_leads/i.test(sql)) {
+          return { rows: [{ id: 'lead-t5' }], rowCount: 1 };
+        }
+        if (/integration_type.*INSTAGRAM/i.test(sql)) {
+          return { rows: [{ ig_config: { lead_whatsapp_destination: '+971527288586', lead_notification_enabled: true } }], rowCount: 1 };
+        }
+        if (/integration_type.*WHATSAPP/i.test(sql)) {
+          return { rows: [{ external_channel_id: '10987654321', wa_config: { phone_number_id: '10987654321' } }], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      },
+    };
+
+    const { evaluateAndProcessHighIntentLead } = await import('../services/high-intent-lead-service.js');
+    const outcome = await evaluateAndProcessHighIntentLead({
+      tenantId: 't-1',
+      conversationId: 'conv-t5',
+      database: mockDatabase,
+      httpClient: { post: async (url, payload) => { httpCalls.push({ url, payload }); return { status: 200, data: {} }; } },
+      env: { WHATSAPP_PHONE_NUMBER_ID: '10987654321', WHATSAPP_TOKEN: 'EAAB_token' },
+    });
+
+    assert.equal(outcome.qualified, true, 'Fully qualified lead must be qualified');
+    assert.equal(outcome.leadDetails.phone, '+905554443322');
+    assert.ok(outcome.leadDetails.requestedTime.includes('14:00'));
+    assert.equal(httpCalls.length, 1, 'Exactly ONE WhatsApp notification must be sent');
+    assert.equal(httpCalls[0].payload.to, '+971527288586');
+
+    // Verify lead updated to HOT APPOINTMENT_REQUEST
+    const hotLeadUpdate = executedQueries.find(q => /UPDATE crm_leads/i.test(q.sql) && q.params?.[0] === 'Free Zone Şirket Kuruluşu' && q.sql.includes("'HOT'"));
+    assert.ok(hotLeadUpdate, 'Must update CRM lead to HOT APPOINTMENT_REQUEST');
+  });
+    assert.equal(httpCalls.length, 0, 'WhatsApp notification count must be 0');
+  });
 
 
 });

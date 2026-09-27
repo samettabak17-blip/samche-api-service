@@ -16,23 +16,33 @@ export class HighIntentLeadError extends Error {
  * Common Turkish/English intent patterns for high-intent appointment / consultation / callback requests.
  * Evaluates semantic and keyword triggers without hardcoding specific names.
  */
-const APPOINTMENT_INTENT_PATTERNS = [
-  /(?:^|[\s\p{P}])(?:randevu\w*|görüşme\w*|gorusme\w*|toplantı\w*|toplanti\w*|konuş\w*|konus\w*|görüş\w*|gorus\w*|arayabilir\s+misiniz|arayın|ararmısınız|iletişim\s+bilgilerinizi)(?:$|[\s\p{P}])/iu,
+const CONSULTATION_SIGNAL_PATTERNS = [
+  /(?:^|[\s\p{P}])(?:randevu\w*|görüşme\w*|gorusme\w*|toplantı\w*|toplanti\w*|konuş\w*|konus\w*|görüş\w*|gorus\w*|arayabilir\s+misiniz|arayın|ararmısınız|iletişim\s+bilgilerinizi|konuşmak\s+istiyorum|görüşmek\s+istiyorum)(?:$|[\s\p{P}])/iu,
   /(?:^|[\s\p{P}])(?:appointment\w*|consultation\w*|call\s+me|callback\w*|meeting\w*|schedule\w*|discuss\s+services|contact\s+number)(?:$|[\s\p{P}])/iu,
   /(?:ile\s+görüş|ile\s+konuş|ile\s+irtibat|ile\s+randevu|sizinle\s+görüş|sizinle\s+konuş)/iu,
   /(?:danışmanla|yetkiliyle|kurucuyla|sahibiyle)\s+(?:görüş|konuş)/iu,
-  /(?:şirket\s+kurmak\s+istiyoruz|şirket\s+kurmak\s+istiyorum|kurulum\s+yapmak|başlamak\s+istiyoruz|başlamak\s+istiyorum|teklif\s+almak)/iu,
 ];
 
-
-const PHONE_EXTRACTION_REGEX = /(?:\+?\d{1,4}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}/;
+const CONCRETE_BUSINESS_REQUIREMENT_PATTERNS = [
+  /(?:şirket\s+kur|şirket\s+aç|firma\s+kur|kurulum\s+yap|lisans\s+al|free\s*zone|mainland)/iu,
+  /(?:e-ticaret|online\s+satış|danışmanlık|yazılım|teknoloji|pazarlama|ithalat|ihracat|ticaret|gayrimenkul|turizm|restoran|ajans|lojistik|inşaat|finans|kripto|holding)/iu,
+  /(?:faaliyet\s+alan|sektör|hizmet|banka\s+hesab|vize\s+al|oturum\s+vize)/iu,
+];
 
 /**
  * Checks if a message or conversation contains high-intent appointment / consultation signals.
  */
 export function hasHighIntentAppointmentSignals(text = '') {
   if (typeof text !== 'string') return false;
-  return APPOINTMENT_INTENT_PATTERNS.some((pattern) => pattern.test(text));
+  return CONSULTATION_SIGNAL_PATTERNS.some((p) => p.test(text)) || CONCRETE_BUSINESS_REQUIREMENT_PATTERNS.some((p) => p.test(text));
+}
+
+/**
+ * Checks if customer has articulated a concrete business requirement beyond a generic meeting request.
+ */
+export function hasConcreteBusinessRequirement(text = '') {
+  if (typeof text !== 'string') return false;
+  return CONCRETE_BUSINESS_REQUIREMENT_PATTERNS.some((p) => p.test(text));
 }
 
 /**
@@ -381,19 +391,20 @@ export async function evaluateAndProcessHighIntentLead({
     const customerMessages = messages.filter((m) => m.sender_type === 'CUSTOMER');
     const customerTextCombined = customerMessages.map((m) => m.content).join('\n');
 
-    if (!hasHighIntentAppointmentSignals(customerTextCombined)) {
+    const hasInitialSignal = hasHighIntentAppointmentSignals(customerTextCombined);
+    if (!hasInitialSignal) {
       return { qualified: false, reason: 'NO_HIGH_INTENT_SIGNALS' };
     }
 
-    // Extract fields
+    const hasRequirement = hasConcreteBusinessRequirement(customerTextCombined);
     const phone = extractPhoneNumberFromText(customerTextCombined) || conv.contact_phone || null;
-    const extractedName = extractCustomerNameFromText(customerTextCombined);
-    const customerName = extractedName || (conv.contact_name && !conv.contact_name.startsWith('instagram:') ? conv.contact_name : null);
     const requestedTime = extractMeetingTimePreference(customerTextCombined);
     const timezone = extractTimezoneFromText(customerTextCombined);
     const activity = extractBusinessActivity(customerTextCombined);
     const jurisdiction = extractJurisdictionPreference(customerTextCombined);
     const visaCount = extractVisaCount(customerTextCombined);
+    const extractedName = extractCustomerNameFromText(customerTextCombined);
+    const customerName = extractedName || (conv.contact_name && !conv.contact_name.startsWith('instagram:') ? conv.contact_name : null);
     const rawIg = String(conv.customer_external_id || '').replace(/^instagram:\s*/i, '');
     const igUsername = conv.contact_name && !conv.contact_name.startsWith('instagram:') ? conv.contact_name : rawIg;
     const isAd = conv.channel_type === 'INSTAGRAM_AD' || /ad|campaign|sponsor/i.test(String(conv.customer_external_id || ''));
@@ -423,35 +434,61 @@ export async function evaluateAndProcessHighIntentLead({
       );
     }
 
-    // Upsert crm_leads with hot temperature & appointment intent
+    // Fetch existing lead
     const leadRes = await client.query(
       `SELECT id FROM crm_leads WHERE tenant_id = $1 AND conversation_id = $2 LIMIT 1`,
       [tenantId, conversationId]
     );
-
     let leadId = leadRes.rows[0]?.id;
+
+    // A customer becomes a QUALIFIED HIGH-INTENT LEAD only after:
+    // 1. Concrete business requirement is established (hasRequirement === true)
+    // 2. Customer provides their phone / WhatsApp number (phone !== null)
+    // 3. Customer provides their preferred availability / meeting time (requestedTime !== null)
+    const isFullyQualified = Boolean(hasRequirement && phone && requestedTime);
+
+    if (!isFullyQualified) {
+      if (leadId) {
+        await client.query(
+          `UPDATE crm_leads
+              SET intent = 'INQUIRY',
+                  temperature = 'WARM',
+                  lead_score = 50,
+                  service_interest = $1,
+                  last_activity_at = CURRENT_TIMESTAMP,
+                  updated_at = CURRENT_TIMESTAMP
+            WHERE id = $2 AND tenant_id = $3`,
+          [hasRequirement ? serviceRequested : 'Genel Danışmanlık', leadId, tenantId]
+        );
+      }
+      return {
+        qualified: false,
+        reason: !hasRequirement
+          ? 'QUALIFICATION_INCOMPLETE_AWAITING_REQUIREMENT'
+          : !phone
+          ? 'QUALIFICATION_INCOMPLETE_AWAITING_PHONE'
+          : 'QUALIFICATION_INCOMPLETE_AWAITING_TIME',
+        partialLeadId: leadId,
+      };
+    }
+
+    // Fully qualified HOT lead with appointment request
     if (leadId) {
       await client.query(
         `UPDATE crm_leads
             SET intent = 'APPOINTMENT_REQUEST',
                 temperature = 'HOT',
-                lead_score = GREATEST(lead_score, 85),
+                lead_score = 90,
                 service_interest = $1,
                 timeline = $2,
                 last_activity_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
           WHERE id = $3 AND tenant_id = $4`,
-        [serviceRequested, requestedTime || 'Pending Customer Availability', leadId, tenantId]
+        [serviceRequested, requestedTime, leadId, tenantId]
       );
     }
 
-    // Lead is sufficiently qualified when we have phone OR (customerName + requestedTime)
-    const isSufficientlyQualified = Boolean(phone || (customerName && requestedTime));
-    if (!isSufficientlyQualified) {
-      return { qualified: false, reason: 'QUALIFICATION_INCOMPLETE_NEEDS_MORE_INFO', partialLeadId: leadId };
-    }
-
-    const summary = `Instagram üzerinden ${serviceRequested.toLowerCase()} randevu talebi. ${activity ? `Faaliyet: ${activity}. ` : ''}${requestedTime ? `Uygun zaman: ${requestedTime}. ` : ''}`;
+    const summary = `Instagram üzerinden ${serviceRequested.toLowerCase()} randevu talebi. ${activity ? `Faaliyet: ${activity}. ` : ''}Uygun zaman: ${requestedTime}.`;
 
     const leadDetails = {
       customerName,
@@ -463,14 +500,14 @@ export async function evaluateAndProcessHighIntentLead({
       jurisdictionPreference: jurisdiction,
       visaCount,
       summary,
-      requestedTime: requestedTime || 'Zaman belirtilmedi',
+      requestedTime,
       timezone,
       source,
       leadId,
       conversationId,
     };
 
-    // Trigger silent WhatsApp notification
+    // Trigger silent WhatsApp notification ONLY when fully qualified
     const notificationResult = await sendSilentInternalWhatsAppLeadNotification({
       tenantId,
       conversationId,
