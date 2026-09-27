@@ -43,14 +43,8 @@ async function main() {
   console.log('TARGET TENANT:', tenantId);
   console.log('API BASE:', apiBase);
 
-  // 1. Verify migrations ledger safely through canonical runner
-  console.log('\n--- [STEP 1] VERIFYING CANONICAL MIGRATIONS LEDGER ---');
-  const { runMigrations } = await import('../migrations/runMigrations.js');
-  await runMigrations({ database: pool });
-  console.log('✓ Canonical migrations ledger verified.');
-
-  // 2. Forensic Tracing against samche_staging_db
-  console.log('\n--- [STEP 2] FORENSIC READ-ONLY DATABASE TRACING ---');
+  // 1. Forensic Read-Only Database Tracing
+  console.log('\n--- [STEP 1] FORENSIC READ-ONLY DATABASE TRACING ---');
   const failedMsgRes = await pool.query(`
     SELECT m.id AS msg_id, m.conversation_id, m.sender_type, m.content,
            m.external_message_id, m.delivery_status, m.delivery_failure_code, m.created_at,
