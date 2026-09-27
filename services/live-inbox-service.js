@@ -1548,8 +1548,72 @@ export async function recordWhatsAppDeliveryStatus({
       if (updated.rowCount > 0) break;
     }
     for (const row of updated.rows) await notify(client, row.tenant_id, row.conversation_id, 'WHATSAPP_DELIVERY_STATUS');
+
+    let internalUpdated = { rowCount: 0, rows: [] };
+    if (updated.rowCount === 0) {
+      try {
+        const failureDetailsJson = (providerFailure.code || providerFailure.title || providerFailure.detail)
+          ? JSON.stringify({
+              code: providerFailure.code,
+              title: providerFailure.title,
+              detail: providerFailure.detail,
+              raw_status: status,
+            })
+          : null;
+
+        internalUpdated = await client.query(
+          `UPDATE internal_notification_deliveries
+              SET delivery_status = $1,
+                  failure_code = CASE WHEN $1 = 'FAILED' THEN $2 ELSE failure_code END,
+                  failure_reason = CASE WHEN $1 = 'FAILED' THEN $3 ELSE failure_reason END,
+                  failure_details = CASE WHEN $1 = 'FAILED' AND $4::jsonb IS NOT NULL THEN $4::jsonb ELSE failure_details END,
+                  delivered_at = CASE WHEN $1 = 'DELIVERED' THEN CURRENT_TIMESTAMP ELSE delivered_at END,
+                  failed_at = CASE WHEN $1 = 'FAILED' THEN CURRENT_TIMESTAMP ELSE failed_at END,
+                  updated_at = CURRENT_TIMESTAMP
+            WHERE provider_message_id = $5
+            RETURNING id, tenant_id, lead_id, conversation_id, delivery_status, failure_code, failure_reason`,
+          [
+            deliveryStatus,
+            providerFailureCode || null,
+            providerFailure.title || providerFailure.detail || null,
+            failureDetailsJson,
+            providerMessageId,
+          ]
+        );
+
+        if (internalUpdated.rowCount > 0) {
+          const row = internalUpdated.rows[0];
+          console.info(
+            `INTERNAL_NOTIFICATION_DELIVERY_STATUS status=${deliveryStatus} wamid=${providerMessageId} tenant=${row.tenant_id}` +
+            (deliveryStatus === 'FAILED' ? ` failure_code=${providerFailureCode}` : '')
+          );
+
+          if (row.lead_id) {
+            await client.query(
+              `UPDATE crm_lead_analyses
+                  SET signals = jsonb_set(
+                        jsonb_set(
+                          COALESCE(signals, '{}'::jsonb),
+                          '{notification_delivery_status}',
+                          to_jsonb($1::text)
+                        ),
+                        '{notification_failure_code}',
+                        CASE WHEN $2::text IS NOT NULL THEN to_jsonb($2::text) ELSE 'null'::jsonb END
+                      ),
+                      analyzed_at = CURRENT_TIMESTAMP
+                WHERE tenant_id = $3 AND lead_id = $4`,
+              [deliveryStatus, providerFailureCode || null, row.tenant_id, row.lead_id]
+            );
+          }
+        }
+      } catch (internalErr) {
+        console.warn('INTERNAL_NOTIFICATION_STATUS_UPDATE_WARN', internalErr?.message);
+      }
+    }
+
     await client.query('COMMIT');
-    console.info('WHATSAPP_DELIVERY_STATUS stage=UPDATE_SUCCEEDED status=' + deliveryStatus + ' correlated=' + updated.rowCount + (providerFailureCode ? ' failure_code=' + providerFailureCode : ''));
+    const totalCorrelated = updated.rowCount + internalUpdated.rowCount;
+    console.info('WHATSAPP_DELIVERY_STATUS stage=UPDATE_SUCCEEDED status=' + deliveryStatus + ' correlated=' + totalCorrelated + (providerFailureCode ? ' failure_code=' + providerFailureCode : ''));
     if (deliveryStatus === 'FAILED') {
       const failureMarker = updated.rows.some((row) => row.is_audio === true || row.is_audio === 't')
         ? 'WHATSAPP_VOICE_DELIVERY_FAILED'
@@ -1562,7 +1626,12 @@ export async function recordWhatsAppDeliveryStatus({
         + ' wamid_present=' + (providerMessageId ? '1' : '0')
       );
     }
-    return { updated: updated.rowCount === 1, count: updated.rowCount, deliveryStatus };
+    return {
+      updated: totalCorrelated > 0,
+      count: totalCorrelated,
+      deliveryStatus,
+      internalNotification: internalUpdated.rowCount > 0,
+    };
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('WHATSAPP_DELIVERY_STATUS stage=UPDATE_FAILED pg_code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));

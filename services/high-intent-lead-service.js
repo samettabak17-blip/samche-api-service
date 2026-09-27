@@ -271,6 +271,7 @@ export async function sendSilentInternalWhatsAppLeadNotification({
   database = pool,
   env = process.env,
   httpClient,
+  forceRetry = false,
 }) {
   const isDedicatedClient = typeof database?.connect === 'function';
   const client = isDedicatedClient ? await database.connect() : database;
@@ -339,7 +340,47 @@ export async function sendSilentInternalWhatsAppLeadNotification({
       requestedTime: leadDetails.requestedTime,
     });
 
-    // 3. Check existing lead dedupe state in crm_lead_analyses
+    // 3. Check existing internal notification delivery state
+    let existingDelivery = null;
+    try {
+      const deliveryCheck = await client.query(
+        `SELECT id, delivery_status, provider_message_id, dispatched_at, dedupe_hash
+           FROM internal_notification_deliveries
+          WHERE tenant_id = $1
+            AND (conversation_id = $2 OR (lead_id IS NOT NULL AND lead_id = $3))
+            AND dedupe_hash = $4
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        [tenantId, conversationId, leadDetails?.leadId || null, currentHash]
+      );
+      existingDelivery = deliveryCheck.rows[0] || null;
+    } catch (deliveryCheckErr) {
+      // Table may not exist in unmigrated test harness; continue gracefully
+    }
+
+    if (!forceRetry && existingDelivery) {
+      if (['SENT', 'DELIVERED', 'READ'].includes(existingDelivery.delivery_status)) {
+        return {
+          skipped: true,
+          reason: 'DEDUPE_IDENTICAL_NOTIFICATION_ALREADY_SENT',
+          status: existingDelivery.delivery_status,
+          providerMessageId: existingDelivery.provider_message_id,
+        };
+      }
+      if (existingDelivery.delivery_status === 'DISPATCH_ACCEPTED') {
+        const ageMs = Date.now() - new Date(existingDelivery.dispatched_at).getTime();
+        if (ageMs < 5 * 60 * 1000) {
+          return {
+            skipped: true,
+            reason: 'DEDUPE_NOTIFICATION_IN_FLIGHT',
+            status: existingDelivery.delivery_status,
+            providerMessageId: existingDelivery.provider_message_id,
+          };
+        }
+      }
+    }
+
+    // Fallback dedupe check on crm_lead_analyses
     const leadCheck = await client.query(
       `SELECT l.id AS lead_id, a.analysis_hash, a.signals
        FROM crm_leads l
@@ -353,8 +394,9 @@ export async function sendSilentInternalWhatsAppLeadNotification({
 
     const existingLead = leadCheck.rows[0];
     const previousNotificationHash = existingLead?.signals?.last_notified_hash || null;
+    const previousDeliveryStatus = existingLead?.signals?.notification_delivery_status || null;
 
-    if (previousNotificationHash === currentHash) {
+    if (!forceRetry && !existingDelivery && previousNotificationHash === currentHash && previousDeliveryStatus !== 'FAILED') {
       return { skipped: true, reason: 'DEDUPE_IDENTICAL_NOTIFICATION_ALREADY_SENT' };
     }
 
@@ -386,25 +428,88 @@ export async function sendSilentInternalWhatsAppLeadNotification({
     });
 
 
-    // 4. Deliver silent internal WhatsApp message
-    const deliveryRes = await deliverWhatsAppTemplate({
-      phoneNumberId,
-      recipient: destinationPhone,
-      templateName: approvedTemplate.name,
-      languageCode: approvedTemplate.language_code,
-      bodyParameters: [notificationText],
-      env,
-      httpClient,
-      integrationConfig: waChannel?.wa_config || null,
-    });
+    // 5. Deliver silent internal WhatsApp message
+    let deliveryRes;
+    try {
+      deliveryRes = await deliverWhatsAppTemplate({
+        phoneNumberId,
+        recipient: destinationPhone,
+        templateName: approvedTemplate.name,
+        languageCode: approvedTemplate.language_code,
+        bodyParameters: [notificationText],
+        env,
+        httpClient,
+        integrationConfig: waChannel?.wa_config || null,
+      });
+    } catch (deliveryErr) {
+      console.error('INTERNAL_WHATSAPP_LEAD_NOTIFICATION_FAILED', deliveryErr?.code, deliveryErr?.message);
+      const targetLeadId = leadDetails?.leadId || existingLead?.lead_id || null;
+      try {
+        await client.query(
+          `INSERT INTO internal_notification_deliveries
+            (tenant_id, notification_type, lead_id, conversation_id, destination, sender_phone_number_id,
+             template_name, template_language, delivery_status, failure_code, failure_reason, dedupe_hash, dispatched_at, failed_at)
+           VALUES ($1, 'INSTAGRAM_QUALIFIED_LEAD', $2, $3, $4, $5, $6, $7, 'FAILED', $8, $9, $10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          [
+            tenantId,
+            targetLeadId,
+            conversationId,
+            destinationPhone,
+            phoneNumberId,
+            approvedTemplate.name,
+            approvedTemplate.language_code,
+            deliveryErr?.code || 'WHATSAPP_DELIVERY_FAILED',
+            deliveryErr?.message || null,
+            currentHash,
+          ]
+        );
+      } catch {}
+      return {
+        sent: false,
+        error: deliveryErr?.code || 'WHATSAPP_DELIVERY_FAILED',
+        message: deliveryErr?.message,
+        recipient: destinationPhone,
+      };
+    }
 
-    // 5. Update lead signals with durable dedupe hash
-    if (existingLead?.lead_id) {
+    const providerMessageId = deliveryRes?.providerMessageId || deliveryRes?.providerMessageIds?.[0] || null;
+    const targetLeadId = leadDetails?.leadId || existingLead?.lead_id || null;
+
+    // 6. Record DISPATCH_ACCEPTED in internal_notification_deliveries
+    try {
+      await client.query(
+        `INSERT INTO internal_notification_deliveries
+          (tenant_id, notification_type, lead_id, conversation_id, destination, sender_phone_number_id,
+           template_name, template_language, provider_message_id, dedupe_hash, delivery_status, dispatched_at)
+         VALUES ($1, 'INSTAGRAM_QUALIFIED_LEAD', $2, $3, $4, $5, $6, $7, $8, $9, 'DISPATCH_ACCEPTED', CURRENT_TIMESTAMP)
+         ON CONFLICT (provider_message_id) DO UPDATE
+           SET delivery_status = 'DISPATCH_ACCEPTED',
+               updated_at = CURRENT_TIMESTAMP`,
+        [
+          tenantId,
+          targetLeadId,
+          conversationId,
+          destinationPhone,
+          phoneNumberId,
+          approvedTemplate.name,
+          approvedTemplate.language_code,
+          providerMessageId,
+          currentHash,
+        ]
+      );
+    } catch (insertErr) {
+      console.warn('INTERNAL_NOTIFICATION_DELIVERY_INSERT_WARN', insertErr?.message);
+    }
+
+    // 7. Update lead signals with DISPATCH_ACCEPTED
+    if (targetLeadId) {
       const updatedSignals = {
-        ...(existingLead.signals || {}),
+        ...(existingLead?.signals || {}),
         last_notified_hash: currentHash,
         last_notified_at: new Date().toISOString(),
         notification_destination: destinationPhone,
+        notification_wamid: providerMessageId,
+        notification_delivery_status: 'DISPATCH_ACCEPTED',
       };
 
       await client.query(
@@ -413,13 +518,15 @@ export async function sendSilentInternalWhatsAppLeadNotification({
          VALUES ($1, $2, $3, $4, 1, $5::jsonb, $6, 'HIGH_INTENT_DETECTOR', 'rule-based-v1')
          ON CONFLICT (tenant_id, lead_id, analysis_hash)
          DO UPDATE SET signals = EXCLUDED.signals, summary = EXCLUDED.summary, analyzed_at = CURRENT_TIMESTAMP`,
-        [tenantId, existingLead.lead_id, conversationId, currentHash, JSON.stringify(updatedSignals), leadDetails.summary || 'High-intent Instagram appointment qualification']
+        [tenantId, targetLeadId, conversationId, currentHash, JSON.stringify(updatedSignals), leadDetails.summary || 'High-intent Instagram appointment qualification']
       );
     }
 
     return {
       sent: true,
       recipient: destinationPhone,
+      providerMessageId,
+      deliveryStatus: 'DISPATCH_ACCEPTED',
       isUpdate,
       dedupeHash: currentHash,
       deliveryResult: deliveryRes,

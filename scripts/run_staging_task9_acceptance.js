@@ -1,10 +1,12 @@
 import fs from 'node:fs';
 import pg from 'pg';
+import { runMigrations } from '../migrations/runMigrations.js';
 import {
   importTenantInstagramHistory,
   getTenantInstagramStatus,
   configureTenantInstagramChannel,
 } from '../services/tenant-instagram-provisioning-service.js';
+import { sendSilentInternalWhatsAppLeadNotification } from '../services/high-intent-lead-service.js';
 
 const { Pool } = pg;
 const apiBase = (process.env.API || 'https://samche-api-staging.onrender.com').replace(/\/+$/, '');
@@ -42,6 +44,15 @@ async function main() {
   console.log('==================================================');
   console.log('TARGET TENANT:', tenantId);
   console.log('API BASE:', apiBase);
+
+  // 0. Ensure Migrations are applied on Staging DB
+  console.log('\n--- [STEP 0] RUNNING STAGING MIGRATIONS ---');
+  try {
+    await runMigrations();
+    console.log('✓ Staging migrations applied / verified successfully');
+  } catch (migErr) {
+    console.error('Migration execution warn/error:', migErr.message);
+  }
 
   // 1. Forensic Read-Only Database Tracing
   console.log('\n--- [STEP 1] FORENSIC READ-ONLY DATABASE TRACING ---');
@@ -457,9 +468,8 @@ async function main() {
   }
 
 
-  // 10. Real Ahmet Soysal Lead Notification Single Retry
-  console.log('\n--- [STEP 10] AHMET SOYSAL REAL LEAD NOTIFICATION RETRY ---');
-  const { evaluateAndProcessHighIntentLead } = await import('../services/high-intent-lead-service.js');
+  // 10. Real Ahmet Soysal Lead Notification Single Controlled Retry & Observability Capture
+  console.log('\n--- [STEP 10] AHMET SOYSAL REAL LEAD NOTIFICATION CONTROLLED RETRY ---');
   const ahmetConvRes = await pool.query(`
     SELECT c.id AS conversation_id, c.tenant_id, c.channel_id, c.customer_external_id,
            c.contact_id, c.handling_mode, c.status AS conv_status,
@@ -474,6 +484,8 @@ async function main() {
 
   const ahmetConv = ahmetConvRes.rows[0];
   let ahmetRetryOutcome = null;
+  let finalMetaStatus = null;
+
   if (ahmetConv) {
     console.log('FOUND AHMET SOYSAL CONVERSATION:', {
       conversation_id: ahmetConv.conversation_id,
@@ -487,37 +499,91 @@ async function main() {
          FROM crm_leads WHERE tenant_id = $1 AND conversation_id = $2`,
       [tenantId, ahmetConv.conversation_id]
     );
-    console.log('LEAD RECORD BEFORE:', leadBefore.rows[0]);
+    console.log('EXISTING LEAD RECORD:', leadBefore.rows[0]);
 
     const actBefore = await pool.query(
       `SELECT id, event_type, metadata, created_at
          FROM crm_activities WHERE tenant_id = $1 AND conversation_id = $2 AND event_type = 'AI_QUALIFICATION'`,
       [tenantId, ahmetConv.conversation_id]
     );
-    console.log('CONSULTATION ACTIVITY BEFORE:', actBefore.rows);
+    console.log('EXISTING CONSULTATION ACTIVITIES COUNT:', actBefore.rows.length);
 
     const analysisBefore = await pool.query(
       `SELECT id, analysis_hash, signals, analyzed_at
          FROM crm_lead_analyses WHERE tenant_id = $1 AND conversation_id = $2 ORDER BY analyzed_at DESC LIMIT 1`,
       [tenantId, ahmetConv.conversation_id]
     );
-    console.log('LEAD ANALYSIS SIGNALS BEFORE:', analysisBefore.rows[0]?.signals);
+    console.log('LEAD ANALYSIS SIGNALS BEFORE RETRY:', analysisBefore.rows[0]?.signals);
 
-    // Execute single retry of notification dispatch
-    ahmetRetryOutcome = await evaluateAndProcessHighIntentLead({
+    const leadDetails = {
+      leadId: leadBefore.rows[0]?.id,
+      customerName: ahmetConv.display_name || 'Ahmet Soysal',
+      instagramUsername: ahmetConv.customer_external_id ? ahmetConv.customer_external_id.replace(/^instagram:/, '') : 'ahmetsoysal',
+      phone: ahmetConv.phone || '+9715312404965',
+      serviceRequested: leadBefore.rows[0]?.service_interest || 'Free Zone Şirket Kuruluşu',
+      requestedTime: 'Yarın 14:00',
+      summary: 'High-intent Instagram appointment qualification',
+      source: 'INSTAGRAM',
+    };
+
+    console.log('EXECUTING EXACTLY ONE CONTROLLED RETRY DISPATCH...');
+    const dispatchStart = Date.now();
+    ahmetRetryOutcome = await sendSilentInternalWhatsAppLeadNotification({
       tenantId,
       conversationId: ahmetConv.conversation_id,
+      leadDetails,
       database: pool,
       env: process.env,
+      forceRetry: true,
     });
-    console.log('AHMET RETRY OUTCOME:', JSON.stringify(ahmetRetryOutcome, null, 2));
+
+    console.log('AHMET RETRY DISPATCH OUTCOME:', JSON.stringify(ahmetRetryOutcome, null, 2));
+
+    if (ahmetRetryOutcome.providerMessageId) {
+      console.log(`POLLING FOR ASYNCHRONOUS META STATUS CALLBACK FOR WAMID: ${ahmetRetryOutcome.providerMessageId}...`);
+      const pollTimeoutMs = 30000;
+      const pollStart = Date.now();
+
+      while (Date.now() - pollStart < pollTimeoutMs) {
+        const pollRes = await pool.query(
+          `SELECT id, provider_message_id, delivery_status, failure_code, failure_reason, failure_details,
+                  dispatched_at, delivered_at, failed_at, updated_at
+             FROM internal_notification_deliveries
+            WHERE tenant_id = $1 AND provider_message_id = $2`,
+          [tenantId, ahmetRetryOutcome.providerMessageId]
+        );
+
+        if (pollRes.rows.length > 0) {
+          const record = pollRes.rows[0];
+          if (['SENT', 'DELIVERED', 'READ', 'FAILED'].includes(record.delivery_status)) {
+            finalMetaStatus = record;
+            console.log(`✓ CAPTURED REAL ASYNCHRONOUS STATUS: ${record.delivery_status} (after ${Date.now() - dispatchStart}ms)`);
+            break;
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+
+      if (!finalMetaStatus) {
+        const fallbackCheck = await pool.query(
+          `SELECT id, provider_message_id, delivery_status, failure_code, failure_reason, failure_details,
+                  dispatched_at, delivered_at, failed_at, updated_at
+             FROM internal_notification_deliveries
+            WHERE tenant_id = $1 AND provider_message_id = $2`,
+          [tenantId, ahmetRetryOutcome.providerMessageId]
+        );
+        finalMetaStatus = fallbackCheck.rows[0] || null;
+      }
+    }
+
+    console.log('FINAL NOTIFICATION DELIVERY RECORD:', JSON.stringify(finalMetaStatus, null, 2));
 
     const analysisAfter = await pool.query(
       `SELECT id, analysis_hash, signals, analyzed_at
          FROM crm_lead_analyses WHERE tenant_id = $1 AND conversation_id = $2 ORDER BY analyzed_at DESC LIMIT 1`,
       [tenantId, ahmetConv.conversation_id]
     );
-    console.log('LEAD ANALYSIS SIGNALS AFTER:', analysisAfter.rows[0]?.signals);
+    console.log('LEAD ANALYSIS SIGNALS AFTER RETRY:', analysisAfter.rows[0]?.signals);
   } else {
     console.warn('AHMET SOYSAL CONVERSATION NOT FOUND BY DISPLAY NAME / PHONE');
   }
