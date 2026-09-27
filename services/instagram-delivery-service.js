@@ -125,12 +125,23 @@ export async function deliverInstagramText({
   const fbBaseUrl = metaGraphApiBase();
   const targetId = String(instagramAccountId || pageId || 'me').trim();
 
-  const candidateEndpoints = Array.from(new Set([
-    `${igBaseUrl}/${targetId}/messages`,
-    ...(targetId !== 'me' ? [`${igBaseUrl}/me/messages`] : []),
-    `${fbBaseUrl}/${targetId}/messages`,
-    ...(targetId !== 'me' ? [`${fbBaseUrl}/me/messages`] : []),
-  ]));
+  // If token is an Instagram Login User token (starts with IGA):
+  // Meta Instagram Login requires POST https://graph.instagram.com/v23.0/me/messages
+  const isInstagramLoginToken = token.startsWith('IGA') || token.startsWith('IGQ');
+
+  const candidateEndpoints = isInstagramLoginToken
+    ? Array.from(new Set([
+        `${igBaseUrl}/me/messages`,
+        ...(targetId !== 'me' ? [`${igBaseUrl}/${targetId}/messages`] : []),
+        `${fbBaseUrl}/me/messages`,
+        ...(targetId !== 'me' ? [`${fbBaseUrl}/${targetId}/messages`] : []),
+      ]))
+    : Array.from(new Set([
+        `${fbBaseUrl}/${targetId}/messages`,
+        ...(targetId !== 'me' ? [`${fbBaseUrl}/me/messages`] : []),
+        `${igBaseUrl}/me/messages`,
+        ...(targetId !== 'me' ? [`${igBaseUrl}/${targetId}/messages`] : []),
+      ]));
 
   const chunks = splitIntoInstagramDmChunks(content, 950);
   let primaryProviderMessageId = null;
@@ -167,11 +178,6 @@ export async function deliverInstagramText({
         }
       } catch (err) {
         lastError = err;
-        // If error is recipient not found or rate limit, no endpoint fallback will change that
-        const metaCode = err?.response?.data?.error?.code;
-        if (metaCode === 100 && String(err?.response?.data?.error?.message).includes('recipient')) {
-          break;
-        }
       }
     }
 
