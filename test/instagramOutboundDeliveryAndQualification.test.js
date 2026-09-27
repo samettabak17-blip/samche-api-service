@@ -465,6 +465,9 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
 
     assert.equal(outcome.qualified, false, 'Requirement without phone/time must remain incomplete');
     assert.equal(outcome.reason, 'QUALIFICATION_INCOMPLETE_AWAITING_PHONE');
+    assert.equal(httpCalls.length, 0, 'WhatsApp notification count must be 0');
+  });
+
   it('TEST 4 & 5: Fully answered qualification with phone and availability sends exactly 1 WhatsApp notification', async () => {
     const httpCalls = [];
     const executedQueries = [];
@@ -530,8 +533,34 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
     const hotLeadUpdate = executedQueries.find(q => /UPDATE crm_leads/i.test(q.sql) && q.params?.[0] === 'Free Zone Şirket Kuruluşu' && q.sql.includes("'HOT'"));
     assert.ok(hotLeadUpdate, 'Must update CRM lead to HOT APPOINTMENT_REQUEST');
   });
-    assert.equal(httpCalls.length, 0, 'WhatsApp notification count must be 0');
-  });
 
+  it('Deterministic notification payload contains structured fields without LLM calls', async () => {
+    const { formatInternalWhatsAppLeadNotification } = await import('../services/high-intent-lead-service.js');
+    const text = formatInternalWhatsAppLeadNotification({
+      customerName: 'Ahmet Yılmaz',
+      instagramUsername: 'ahmetyilmaz',
+      phone: '+905321112233',
+      requestedService: 'Free Zone Şirket Kuruluşu',
+      activity: 'E-ticaret',
+      structuredRequirement: 'Dubai\'de e-ticaret şirketi kurmak istiyor.',
+      timeline: 'Ekim ayı',
+      requestedTime: '15:00',
+      timezone: 'Dubai / GMT+4',
+      source: 'INSTAGRAM',
+      conversationId: 'conv-123',
+    });
+
+    assert.ok(text.includes('YENİ INSTAGRAM LEAD'));
+    assert.ok(text.includes('Müşteri: Ahmet Yılmaz'));
+    assert.ok(text.includes('Instagram: @ahmetyilmaz'));
+    assert.ok(text.includes('Telefon / WhatsApp: +905321112233'));
+    assert.ok(text.includes('Konu: Free Zone Şirket Kuruluşu'));
+    assert.ok(text.includes('Faaliyet: E-ticaret'));
+    assert.ok(text.includes('İstediği: Dubai\'de e-ticaret şirketi kurmak istiyor.'));
+    assert.ok(text.includes('Başlama zamanı: Ekim ayı'));
+    assert.ok(text.includes('Görüşme:\n15:00\nDubai / GMT+4'));
+    assert.ok(text.includes('Kaynak: INSTAGRAM'));
+    assert.ok(text.includes('Konuşma:\n/conversations/conv-123'));
+  });
 
 });

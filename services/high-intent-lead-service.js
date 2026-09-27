@@ -120,76 +120,65 @@ export function extractVisaCount(text = '') {
 }
 
 /**
- * Formats the structured internal WhatsApp notification message.
+ * Formats the structured internal WhatsApp notification message deterministically
+ * from persisted structured metadata without any LLM or AI summarization calls.
  */
 export function formatInternalWhatsAppLeadNotification({
   customerName = null,
   instagramUsername = null,
   phone = null,
-  requirement = null,
+  requestedService = null,
   serviceRequested = null,
   activity = null,
-  jurisdictionPreference = null,
-  visaCount = null,
-  summary = null,
+  requirement = null,
+  structuredRequirement = null,
+  timeline = null,
+  requestedDate = null,
   requestedTime = null,
   timezone = null,
-  source = 'Instagram DM',
-  leadId = null,
+  source = 'INSTAGRAM',
   conversationId = null,
   dashboardDeepLink = null,
-  isUpdate = false,
+  dashboardUrl = null,
 }) {
-  const cleanIg = instagramUsername ? `@${String(instagramUsername).replace(/^@/, '')}` : 'Belirtilmedi';
-  const cleanName = customerName && !customerName.startsWith('instagram:') ? customerName : 'Belirtilmedi';
-  const cleanPhone = phone || 'Görüşmede alınacak';
-  const cleanTalep = requirement || serviceRequested || 'Dubai\'de şirket kurulumu / danışmanlık görüşmesi';
-  const cleanActivity = activity || 'Görüşmede netleştirilecek';
-  const cleanJurisdiction = jurisdictionPreference || 'Free Zone';
-  const cleanVisa = visaCount || 'Görüşmede netleştirilecek';
-  const cleanTime = requestedTime || 'Müşteriyle belirlenecek';
-  const cleanSource = source || 'Instagram DM';
-  const cleanSummary = summary || 'Müşteri şirket kuruluşu için danışmanlık ve randevu talebinde bulundu.';
-  const cleanLeadId = leadId ? String(leadId) : 'pending_lead';
-  const cleanConv = dashboardDeepLink || conversationId || 'N/A';
+  const cleanName = customerName && !customerName.startsWith('instagram:') ? String(customerName).trim() : null;
+  const cleanIg = instagramUsername ? `@${String(instagramUsername).replace(/^@/, '').trim()}` : null;
+  const cleanPhone = phone ? String(phone).trim() : null;
+  const cleanKonu = requestedService || serviceRequested || 'Şirket Kuruluşu & Danışmanlık';
+  const cleanFaaliyet = activity ? String(activity).trim() : null;
+  const cleanIstek = structuredRequirement || requirement || null;
+  const cleanTimeline = timeline ? String(timeline).trim() : null;
+  const cleanDate = requestedDate ? String(requestedDate).trim() : null;
+  const cleanTime = requestedTime ? String(requestedTime).trim() : null;
+  const cleanTz = timezone ? String(timezone).trim() : null;
+  const cleanSource = String(source || 'INSTAGRAM').toUpperCase().includes('AD') ? 'INSTAGRAM_AD' : 'INSTAGRAM';
+
+  const deepLink = dashboardDeepLink || dashboardUrl || (conversationId ? `/conversations/${conversationId}` : null);
 
   const lines = [
-    `YENİ INSTAGRAM GÖRÜŞME TALEBİ${isUpdate ? ' [GÜNCELLEME]' : ''}`,
+    'YENİ INSTAGRAM LEAD',
     '',
-    `Müşteri: ${cleanName}`,
-    `Instagram: ${cleanIg}`,
-    `Telefon / WhatsApp: ${cleanPhone}`,
+    ...(cleanName ? [`Müşteri: ${cleanName}`] : []),
+    ...(cleanIg ? [`Instagram: ${cleanIg}`] : []),
+    ...(cleanPhone ? [`Telefon / WhatsApp: ${cleanPhone}`] : []),
     '',
-    'Talep:',
-    cleanTalep,
+    ...(cleanKonu ? [`Konu: ${cleanKonu}`] : []),
+    ...(cleanFaaliyet ? [`Faaliyet: ${cleanFaaliyet}`] : []),
+    ...(cleanIstek ? [`İstediği: ${cleanIstek}`] : []),
+    ...(cleanTimeline ? [`Başlama zamanı: ${cleanTimeline}`] : []),
     '',
-    'Faaliyet:',
-    cleanActivity,
+    'Görüşme:',
+    ...(cleanDate ? [cleanDate] : []),
+    ...(cleanTime ? [cleanTime] : []),
+    ...(cleanTz ? [cleanTz] : []),
     '',
-    'Şirket tercihi:',
-    cleanJurisdiction,
+    `Kaynak: ${cleanSource}`,
     '',
-    'Vize:',
-    cleanVisa,
-    '',
-    'Görüşme için uygun zaman:',
-    cleanTime,
-    ...(timezone ? [`Saat dilimi: ${timezone}`] : []),
-    '',
-    'Kaynak:',
-    cleanSource,
-    '',
-    'Konuşma özeti:',
-    cleanSummary,
-    '',
-    'Lead:',
-    cleanLeadId,
-    '',
-    'Conversation:',
-    cleanConv,
+    'Konuşma:',
+    deepLink || 'N/A',
   ];
 
-  return lines.join('\n');
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 
@@ -293,16 +282,21 @@ export async function sendSilentInternalWhatsAppLeadNotification({
     const dashboardBase = env.DASHBOARD_URL || env.APP_BASE_URL || 'https://dashboard.samche.co';
     const deepLink = `${dashboardBase.replace(/\/+$/, '')}/${tenantId}/conversations/${conversationId}`;
 
+    // 3. Format structured deterministic notification without invoking any LLM / AI model
     const notificationText = formatInternalWhatsAppLeadNotification({
       customerName: leadDetails.customerName,
       instagramUsername: leadDetails.instagramUsername,
       phone: leadDetails.phone,
-      serviceRequested: leadDetails.serviceRequested,
-      summary: leadDetails.summary,
+      requestedService: leadDetails.requestedService || leadDetails.serviceRequested,
+      activity: leadDetails.activity,
+      structuredRequirement: leadDetails.structuredRequirement || leadDetails.requirement,
+      timeline: leadDetails.timeline,
+      requestedDate: leadDetails.requestedDate,
       requestedTime: leadDetails.requestedTime,
-      source: leadDetails.source || 'Instagram DM',
+      timezone: leadDetails.timezone,
+      source: leadDetails.source || 'INSTAGRAM',
+      conversationId,
       dashboardDeepLink: deepLink,
-      isUpdate,
     });
 
 
