@@ -16,6 +16,7 @@ vi.mock('../dashboard/dashboard-api', async (importOriginal) => {
       configureInstagram: vi.fn(),
       disconnectInstagram: vi.fn(),
       testInstagramConnection: vi.fn(),
+      importInstagramHistory: vi.fn(),
     },
   };
 });
@@ -200,7 +201,9 @@ describe('InstagramConnectionCard UI Component', () => {
         access_token: 'IGAA_test_token_123',
         assistant_id: 'ast-1',
         lead_notification_enabled: true,
-        lead_notification_whatsapp: null,
+        lead_notification_whatsapp: undefined,
+        lead_whatsapp_destination: undefined,
+        internal_lead_whatsapp: undefined,
         visual_ai_enabled: false,
         status: 'active',
       });
@@ -208,7 +211,7 @@ describe('InstagramConnectionCard UI Component', () => {
   });
 
   it('configures activation policy and trigger keywords', async () => {
-    vi.mocked(tenantApi.getInstagramStatus).mockResolvedValueOnce({
+    vi.mocked(tenantApi.getInstagramStatus).mockResolvedValue({
       status: 'DISCONNECTED',
       connected: false,
     });
@@ -254,10 +257,90 @@ describe('InstagramConnectionCard UI Component', () => {
         access_token: 'IGAA_test_token_123',
         assistant_id: 'ast-1',
         lead_notification_enabled: true,
-        lead_notification_whatsapp: null,
+        lead_notification_whatsapp: undefined,
+        lead_whatsapp_destination: undefined,
+        internal_lead_whatsapp: undefined,
         visual_ai_enabled: false,
         status: 'active',
       });
     });
+  });
+
+  it('renders "Internal Lead WhatsApp: Configured" when destination is present', async () => {
+    vi.mocked(tenantApi.getInstagramStatus).mockResolvedValueOnce({
+      status: 'CONNECTED',
+      connected: true,
+      channel_id: 'ch-ig-1',
+      display_name: 'SamChe Official Instagram',
+      account_username: 'samchecompany',
+      has_token: true,
+      lead_whatsapp_destination: '+971527288586',
+      lead_whatsapp_configured: true,
+    });
+
+    renderWithClient(
+      <InstagramConnectionCard
+        tenantId="tenant-1"
+        canManage={true}
+        assistants={mockAssistants}
+      />
+    );
+
+    expect(await screen.findByText('Internal Lead WhatsApp')).toBeInTheDocument();
+    expect(screen.getByText('Configured')).toBeInTheDocument();
+  });
+
+  it('triggers historical conversation import and displays summary banner', async () => {
+    vi.mocked(tenantApi.getInstagramStatus).mockResolvedValue({
+      status: 'CONNECTED',
+      connected: true,
+      channel_id: 'ch-ig-1',
+      display_name: 'SamChe Official Instagram',
+      account_username: 'samchecompany',
+      has_token: true,
+    });
+
+    vi.mocked(tenantApi.importInstagramHistory).mockResolvedValueOnce({
+      success: true,
+      status: 'COMPLETED',
+      conversations_discovered: 100,
+      conversations_imported: 98,
+      duplicates_skipped: 2,
+      messages_imported: 450,
+      discovered: 100,
+      imported: 98,
+      reconciled: 2,
+      failed: 0,
+      messages_duplicates: 12,
+      messages_failed: 0,
+      failure_categories: {
+        CONTACT_PERSISTENCE: 0,
+        CONVERSATION_PERSISTENCE: 0,
+        MESSAGE_PERSISTENCE: 0,
+        IDENTITY_RESOLUTION: 0,
+        META_MESSAGE_FETCH: 0,
+        OTHER: 0,
+      },
+    } as any);
+
+    renderWithClient(
+      <InstagramConnectionCard
+        tenantId="tenant-1"
+        canManage={true}
+        assistants={mockAssistants}
+      />
+    );
+
+    const importBtn = await screen.findByRole('button', { name: /Import History/i });
+    fireEvent.click(importBtn);
+
+    await waitFor(() => {
+      expect(tenantApi.importInstagramHistory).toHaveBeenCalledWith('tenant-1', 100);
+    });
+
+    expect(await screen.findByText(/Instagram History Import Summary/i)).toBeInTheDocument();
+    expect(screen.getByText(/COMPLETED/i)).toBeInTheDocument();
+    expect(screen.getByText('100')).toBeInTheDocument();
+    expect(screen.getByText('98')).toBeInTheDocument();
   });
 });

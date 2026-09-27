@@ -39,7 +39,10 @@ import {
   testTenantInstagramConnection,
   TenantInstagramProvisioningError,
 } from '../services/tenant-instagram-provisioning-service.js';
-import { importTenantInstagramHistory } from '../services/tenant-instagram-history-import-service.js';
+import {
+  importTenantInstagramHistory,
+  TenantInstagramHistoryImportError,
+} from '../services/tenant-instagram-history-import-service.js';
 
 import {
   getWhatsAppEmbeddedSignupConfig,
@@ -853,6 +856,8 @@ router.post('/:tenantId/channels/instagram/config', requireTenantAccess, require
     lead_notification_whatsapp,
     lead_notification_template,
     visual_ai_enabled,
+    lead_whatsapp_destination,
+    internal_lead_whatsapp,
     status = 'active',
   } = req.body ?? {};
 
@@ -877,6 +882,8 @@ router.post('/:tenantId/channels/instagram/config', requireTenantAccess, require
       leadNotificationWhatsapp: lead_notification_whatsapp,
       leadNotificationTemplate: lead_notification_template,
       visualAiEnabled: visual_ai_enabled,
+      leadWhatsappDestination: lead_whatsapp_destination ?? internal_lead_whatsapp ?? lead_notification_whatsapp,
+      internalLeadWhatsapp: internal_lead_whatsapp ?? lead_whatsapp_destination ?? lead_notification_whatsapp,
       status,
     });
     return res.status(200).json(configured);
@@ -892,7 +899,6 @@ router.post('/:tenantId/channels/instagram/config', requireTenantAccess, require
 router.post('/:tenantId/channels/instagram/import-history', requireTenantAccess, requireTenantAdmin, async (req, res) => {
   if (!tenant(req, res)) return;
   const { limit = 100 } = req.body ?? {};
-
   try {
     const database = req.app?.locals?.database || pool;
     const result = await importTenantInstagramHistory({
@@ -902,14 +908,13 @@ router.post('/:tenantId/channels/instagram/import-history', requireTenantAccess,
     });
     return res.status(200).json(result);
   } catch (error) {
-    if (error?.name === 'TenantInstagramHistoryImportError') {
+    if (error?.name === 'TenantInstagramHistoryImportError' || error?.name === 'TenantInstagramProvisioningError') {
       return res.status(error.status).json({ error: error.code, message: error.message });
     }
     console.error('Import Instagram history error:', error);
     return res.status(500).json({ error: 'Server error' });
   }
 });
-
 
 router.post('/:tenantId/channels/instagram/disconnect', requireTenantAccess, requireTenantAdmin, async (req, res) => {
   if (!tenant(req, res)) return;

@@ -178,7 +178,6 @@ export const tenantApi = {
   disconnectInstagram: (tenantId: string) => apiClient.post<{ ok: boolean; status: string }>(`${tenantRoot(tenantId)}/channels/instagram/disconnect`, {}),
   testInstagramConnection: (tenantId: string) => apiClient.post<import('../../types/api').InstagramTestConnectionResponse>(`${tenantRoot(tenantId)}/channels/instagram/test-connection`, {}),
   importInstagramHistory: (tenantId: string, limit = 100) => apiClient.post<import('../../types/api').InstagramHistoryImportResponse>(`${tenantRoot(tenantId)}/channels/instagram/import-history`, { limit }),
-
   getWebChatChannel: (tenantId: string) => apiClient.get<WebChatChannelResponse>(`${tenantRoot(tenantId)}/channels/web-chat`),
   updateWebChatChannel: (tenantId: string, body: {
     widget_key?: string | null;

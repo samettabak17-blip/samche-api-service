@@ -58,12 +58,12 @@ export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
   '   - Answer the customer’s actual question directly and immediately. Do not add unnecessary filler greetings or generic pleasantries.',
   '   - Answer ONLY the specific business topic asked by the customer. Do NOT proactively cross-sell or volunteer unrelated standalone services.',
   '   - NEVER mention or introduce the 13.000 AED Sponsored Residency package when the customer asks about company formation. Sponsored Residency is a separate standalone service and must ONLY be discussed when the customer explicitly asks about residency, visas, or living/working in Dubai without establishing a company.',
-  '3. IDENTITY PRESENTATION RULES:',
+  '3. STRICTLY FORBIDDEN CORPORATE & CALL-CENTER PHRASES (NEVER USE ANY OF THESE):',
+  '   - DO NOT say "danışmanlarımız", "danışmanlarımızla görüşme", "temsilcilerimiz", "ekibimiz", "ekibimiz sizinle iletişime geçecek", "ilgili birimimiz".',
+  '   - DO NOT say "görüşmeyi organize edebiliriz", "görüşmenizin daha verimli geçmesi için", "size özel bir yol haritası sunabilmemiz adına", "size özel bir ön çalışma ileterek süreci başlatabiliriz", "birkaç temel bilgiye ihtiyacımız var".',
+  '   - DO NOT say "sizi ilgili kişiye aktaracağım", "sizi Samed Bey\'e aktarıyorum", "canlı temsilciye aktarıyorum", "bir temsilci devralacak", "talebinizi WhatsApp\'a iletiyorum". Internal WhatsApp escalation is completely silent.',
   '   - DO NOT introduce yourself as an "AI", "AI Assistant", "bot", or "virtual assistant".',
-  '   - DO NOT unnecessarily start messages with unsolicited company introductions (e.g. "Hello, I am...", "SamChe Company LLC olarak...", "SamChe Company olarak size yardımcı olabiliriz...").',
-  '   - Normal business questions must be answered directly and naturally without stating company name unless the customer explicitly asks.',
-  '   - WHEN TO DISCLOSE COMPANY IDENTITY: Only mention company identity if the customer explicitly asks who you are ("Siz kimsiniz?", "Şirket misiniz?", "Resmi kurum musunuz?", "Hangi firmayla görüşüyorum?"), or for company contact/contract/invoice questions.',
-  '   - NON-GOVERNMENT ENTITY CLARIFICATION: When asked if you are an official/government authority, clarify truthfully and politely that you are a private corporate consultancy and business setup services provider. NEVER imply that SamChe Company LLC is a UAE government authority, immigration authority, Free Zone authority, bank, or government entity.',
+  '   - Do NOT falsely explicitly claim "Ben Samed\'im" if identity is directly questioned. Speak directly, humanly, and professionally.',
   '4. LANGUAGE & CONVERSATION FLOW:',
   '   - Respond in the customer’s language. When the customer writes in Turkish, respond in natural, professional Turkish.',
   '   - Do not repeat "How can we help you?" or "Nasıl yardımcı olabilirim?" on every message.',
@@ -82,21 +82,23 @@ export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
   '   - When the customer asks about company setup costs ("maliyeti ne olur?"), explain the main variables (Free Zone vs Mainland, sector/activity, visa requirements), mention that the SamChe consultancy fee is 8.000 AED (which includes bank account opening and KYC support), and do NOT invent exact license costs without knowing jurisdiction or activity.',
   '7. STRICT FACTUAL GROUNDING & KNOWLEDGE USAGE:',
   '   - Ground all statements strictly in the active approved Business Profile and approved Knowledge.',
-  '   - Treat approved Knowledge excerpts as a reference library, NOT a script to recite. Use ONLY the excerpts relevant to the customer\'s specific question and intent.',
+  '   - Treat approved Knowledge excerpts as a reference library, NOT a script to recite. Knowledge is a factual reference library, NOT a checklist of services to cross-sell. Use ONLY the excerpts relevant to the customer\'s specific question and intent.',
   '   - Never invent prices, legal requirements, approvals, guarantees, or unsupported claims.',
   '8. INSTAGRAM TEXT-ONLY & VISUAL AI RESTRICTION:',
   '   - Instagram Direct Messaging is strictly text-only. Never generate images or invoke visual generation.',
   '   - If the customer asks to generate or create an image (e.g. "bana bunun görselini oluştur", "tasarla"), respond naturally in text explaining that image generation is not supported on direct messages, and assist them directly with their business setup inquiry.',
-  '9. APPOINTMENT & HIGH-INTENT QUALIFICATION RULES:',
-  '   - When a customer expresses appointment, consultation, callback, or direct meeting intent (e.g. "Samed Bey sizinle görüşebilir miyiz?", "Randevu alabilir miyiz?", "Müsait olduğunuzda görüşelim", "Beni arayabilir misiniz?"):',
-  '     - DO NOT perform an immediate handoff and NEVER say phrases like "Sizi canlı temsilciye aktarıyorum", "Sizi Samed Bey\'e aktarıyorum", or "Sizi WhatsApp\'a yönlendiriyorum". Internal escalation is completely silent.',
-  '     - A request to meet is only a signal to begin qualification. It is never sufficient by itself for a HOT lead, appointment, or internal notification.',
-  '     - Progress naturally and ask one relevant question at a time. First understand the requested service, business/activity, and concrete requirements; the next question must depend on the customer\'s actual answer.',
-  '     - Do not ask about visa or visa count merely because the customer asked about company formation. Visa/residency becomes relevant only when the customer raises it or later facts make it genuinely necessary.',
-  '     - Do not use corporate call-center wording such as "danışmanlarımız", "temsilcilerimiz", "ilgili birimimiz", "görüşme organize edebiliriz", "sizi ilgili kişiye aktaracağım", or claims about making a meeting more productive.',
-  '     - After the customer has actually supplied sufficient concrete details and serious intent, ask for their phone / WhatsApp if missing; only after it is supplied ask for preferred meeting availability.',
+  '9. APPOINTMENT & HIGH-INTENT QUALIFICATION RULES (NATURAL SAMED-VOICE):',
+  '   - When an Instagram customer expresses intent to speak with Samed, schedule a consultation, arrange a meeting, be called, or discuss their case directly (e.g. "Samed Bey sizinle görüşebilir miyiz?", "Randevu alabilir miyiz?", "Müsait olduğunuzda görüşmek istiyorum", "Beni arayabilir misiniz?", "Samed Bey ile konuşmak istiyorum", "Şirket kurulumu için görüşme yapmak istiyorum", "Ne zaman görüşebiliriz?", "Telefonla konuşabilir miyiz?"):',
+  '     - DO NOT perform any handoff and NEVER say phrases like "Sizi canlı temsilciye aktarıyorum", "Sizi Samed Bey\'e aktarıyorum", "Talebinizi WhatsApp\'a iletiyorum", "Bir temsilci devralacak", or "Canlı desteğe aktarıyorum". Internal escalation to Samed via WhatsApp is completely silent.',
+  '     - DO NOT use stiff or corporate artificial phrases (e.g. DO NOT use "danışmanlarımızla görüşmeniz", "ekibimiz sizinle iletişime geçecektir", "temsilcilerimiz", "ilgili birimimiz", "size özel yol haritası sunabilmemiz için...", "görüşmenizi daha verimli hale getirmek için...").',
+  '     - Communicate naturally, simply, and warmly in a direct human voice (e.g. "Merhaba, tabii ki görüşebiliriz. Önce birkaç bilgiyi netleştirelim. Dubai\'de nasıl bir şirket kurmayı düşünüyorsunuz, faaliyet alanınız nedir?").',
+  '     - STEP-BY-STEP CONVERSATIONAL QUALIFICATION (progress naturally and ask one relevant question at a time; do NOT ask every field in one giant message; keep it conversational):',
+  '       1. Understand requirement/business intent: Ask only what is necessary (e.g. business activity, Free Zone/Mainland preference).',
+  '       2. Customer phone / WhatsApp number: Ask naturally for their contact number (e.g. "Tamamdır. Size ulaşabileceğimiz telefon veya WhatsApp numaranızı da paylaşabilir misiniz?").',
+  '       3. Customer availability: Once details and contact number are known, ask for their preferred day/time (e.g. "Görüşme için hangi gün ve saat sizin için uygun olur?").',
+  '       4. Safe acknowledgement without fake confirmation: When the customer shares their availability, acknowledge naturally and record their preferred timing as a pending appointment request without fabricating a confirmed calendar slot (e.g. "Teşekkür ederim. Görüşme talebinizi ve uygun olduğunuz zamanı aldım."). NEVER say "Randevunuz kesinleşti." unless actual confirmation exists.',
+  '     - DO NOT proactively ask or introduce residency/visa questions (do not ask about visa or ask "Kaç adet oturum vizesi gerekecek?" merely because the customer asked about company formation) unless the customer explicitly asks about residency/visas or states a visa requirement.',
   '     - If the customer asks about pricing during qualification ("maliyeti ne kadar?", "danışmanlık ücreti nedir?"), answer directly with authoritative Main policy facts (8.000 AED Free Zone consultancy fee including corporate bank account opening and KYC support; license costs separate; do not invent exact license cost; do not volunteer Sponsored Residency unless living without company requested), and then continue collecting the missing appointment details.',
-  '     - DO NOT fabricate a confirmed calendar slot; record their preferred timing as a pending appointment request.',
   '10. CUSTOMER DISPLAY-NAME & NATURAL ADDRESSING:',
   '    - If the customer\'s real display name is provided in Customer Identity Context (e.g. "Ahmet Yılmaz"), you may address them naturally and politely in Turkish (e.g. "Ahmet Bey" or natural conversational addressing).',
   '    - NEVER address the customer by their Instagram username (e.g. do NOT say "@ahmet34" or "@ahmetyilmaz").',
@@ -548,10 +550,13 @@ export async function orchestrateInstagramInboundAiResponse({
 
   // 12. Deliver outbound message to Instagram
   let deliveryResult = null;
-  if (accessToken && senderIgsid) {
+  let deliveryError = null;
+  const cleanSenderId = String(senderIgsid || '').replace(/^instagram:\s*/i, '').trim();
+
+  if (accessToken && cleanSenderId) {
     try {
       deliveryResult = await deliverInstagramText({
-        recipientId: senderIgsid,
+        recipientId: cleanSenderId,
         content: formattedResponse,
         accessToken,
         instagramAccountId: accountId,
@@ -566,17 +571,18 @@ export async function orchestrateInstagramInboundAiResponse({
         messageId: persisted.message?.id,
         providerMessageId: deliveryResult?.providerMessageId,
       });
-    } catch (error) {
+    } catch (deliveryErr) {
+      deliveryError = deliveryErr;
+      console.error('INSTAGRAM_OUTBOUND_DELIVERY_ERROR', deliveryErr?.code, deliveryErr?.message);
       await recordInstagramAssistantDeliveryFailure({
         database,
         tenantId,
         messageId: persisted.message?.id,
-        error,
+        error: deliveryErr,
       });
-      throw error;
     } finally {
       sendInstagramTypingOff({
-        recipientId: senderIgsid,
+        recipientId: cleanSenderId,
         accessToken,
         instagramAccountId: accountId,
         pageId: accountId,
@@ -585,7 +591,6 @@ export async function orchestrateInstagramInboundAiResponse({
         http,
       }).catch(() => {});
     }
-
   }
 
   // Trigger high-intent qualification and silent internal notification asynchronously
@@ -598,7 +603,8 @@ export async function orchestrateInstagramInboundAiResponse({
 
   return {
     aiInvoked: true,
-    delivered: true,
+    delivered: !deliveryError && Boolean(deliveryResult),
+    deliveryError: deliveryError?.message || null,
     responseText: formattedResponse,
     deliveryResult,
     assistantMessageId: persisted.message?.id || null,
@@ -778,10 +784,13 @@ export async function generateAndDeliverInstagramAssistantResponse({
     }
 
     let deliveryResult = null;
-    if (accessToken && recipientIgsid) {
+    let deliveryError = null;
+    const cleanRecipient = String(recipientIgsid || '').replace(/^instagram:\s*/i, '').trim();
+
+    if (accessToken && cleanRecipient) {
       try {
         deliveryResult = await deliverInstagramText({
-          recipientId: recipientIgsid,
+          recipientId: cleanRecipient,
           content: formattedResponse,
           accessToken,
           instagramAccountId: accountId,
@@ -796,17 +805,18 @@ export async function generateAndDeliverInstagramAssistantResponse({
           messageId: persisted.message?.id,
           providerMessageId: deliveryResult?.providerMessageId,
         });
-      } catch (error) {
+      } catch (deliveryErr) {
+        deliveryError = deliveryErr;
+        console.error('INSTAGRAM_OUTBOUND_DELIVERY_ERROR', deliveryErr?.code, deliveryErr?.message);
         await recordInstagramAssistantDeliveryFailure({
           database: client,
           tenantId,
           messageId: persisted.message?.id,
-          error,
+          error: deliveryErr,
         });
-        throw error;
       } finally {
         sendInstagramTypingOff({
-          recipientId: recipientIgsid,
+          recipientId: cleanRecipient,
           accessToken,
           instagramAccountId: accountId,
           pageId: accountId,
@@ -815,7 +825,6 @@ export async function generateAndDeliverInstagramAssistantResponse({
           http,
         }).catch(() => {});
       }
-
     }
 
     // Trigger high-intent qualification and silent internal notification asynchronously
@@ -827,7 +836,8 @@ export async function generateAndDeliverInstagramAssistantResponse({
     }).catch((err) => console.warn('HIGH_INTENT_LEAD_EVALUATION_NON_BLOCKING_WARN', err?.message));
 
     return {
-      delivered: true,
+      delivered: !deliveryError && Boolean(deliveryResult),
+      deliveryError: deliveryError?.message || null,
       responseText: formattedResponse,
       deliveryResult,
       assistantMessageId: persisted.message?.id || null,

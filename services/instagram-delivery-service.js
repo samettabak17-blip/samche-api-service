@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { instagramGraphApiBase } from './meta-graph-api-version.js';
+import { instagramGraphApiBase, metaGraphApiBase } from './meta-graph-api-version.js';
 
 export class InstagramDeliveryError extends Error {
   constructor(code, message = code, status = 502) {
@@ -127,49 +127,88 @@ export async function deliverInstagramText({
     throw new InstagramDeliveryError('INSTAGRAM_CREDENTIAL_REQUIRED', 'Instagram access token is not configured', 409);
   }
 
-  const baseUrl = instagramGraphApiBase();
+  const cleanRecipientId = String(recipientId).replace(/^instagram:\s*/i, '').trim();
+  const token = accessToken.trim();
+  const igBaseUrl = instagramGraphApiBase();
+  const fbBaseUrl = metaGraphApiBase();
   const targetId = resolveInstagramDeliveryTarget({ authMode, instagramAccountId, pageId, instagramUserId });
-  const endpoint = `${baseUrl}/${targetId}/messages`;
+
+  const isInstagramLoginToken = String(authMode || '').trim().toUpperCase() === 'INSTAGRAM_LOGIN'
+    || token.startsWith('IGA')
+    || token.startsWith('IGQ');
+
+  const candidateEndpoints = isInstagramLoginToken
+    ? Array.from(new Set([
+        `${igBaseUrl}/me/messages`,
+        ...(targetId !== 'me' ? [`${igBaseUrl}/${targetId}/messages`] : []),
+        `${fbBaseUrl}/me/messages`,
+        ...(targetId !== 'me' ? [`${fbBaseUrl}/${targetId}/messages`] : []),
+      ]))
+    : Array.from(new Set([
+        `${fbBaseUrl}/${targetId}/messages`,
+        ...(targetId !== 'me' ? [`${fbBaseUrl}/me/messages`] : []),
+        `${igBaseUrl}/me/messages`,
+        ...(targetId !== 'me' ? [`${igBaseUrl}/${targetId}/messages`] : []),
+      ]));
 
   const chunks = splitIntoInstagramDmChunks(content, 950);
   let primaryProviderMessageId = null;
   const deliveredIds = [];
+  let workingEndpoint = candidateEndpoints[0];
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
     const payload = {
-      recipient: { id: recipientId },
+      recipient: { id: cleanRecipientId },
       message: { text: chunk },
     };
 
-    try {
-      const response = await http.post(endpoint, payload, {
-        headers: {
-          Authorization: `Bearer ${accessToken.trim()}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 15000,
-      });
+    let response = null;
+    let lastError = null;
 
-      const providerMessageId = response.data?.message_id || null;
-      if (!providerMessageId) {
-        throw new InstagramDeliveryError(
-          'INSTAGRAM_PROVIDER_MESSAGE_ID_MISSING',
-          'Instagram provider accepted the request without a correlatable message ID',
-          502
-        );
+    // Try working endpoint first, fallback to remaining candidate endpoints on route/node errors
+    const endpointsToTry = [workingEndpoint, ...candidateEndpoints.filter((ep) => ep !== workingEndpoint)];
+
+    for (const endpoint of endpointsToTry) {
+      try {
+        response = await http.post(endpoint, payload, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 15000,
+        });
+
+        if (response?.data?.message_id || response?.status === 200) {
+          workingEndpoint = endpoint;
+          lastError = null;
+          break;
+        }
+      } catch (err) {
+        lastError = err;
       }
-      if (!primaryProviderMessageId) primaryProviderMessageId = providerMessageId;
-      deliveredIds.push(providerMessageId);
-    } catch (error) {
-      if (error instanceof InstagramDeliveryError) throw error;
-      throw sanitizeMetaError(error);
     }
+
+    if (!response && lastError) {
+      if (lastError instanceof InstagramDeliveryError) throw lastError;
+      throw sanitizeMetaError(lastError);
+    }
+
+    const providerMessageId = response?.data?.message_id || null;
+    if (!providerMessageId) {
+      throw new InstagramDeliveryError(
+        'INSTAGRAM_PROVIDER_MESSAGE_ID_MISSING',
+        'Instagram provider accepted the request without a correlatable message ID',
+        502
+      );
+    }
+    if (!primaryProviderMessageId) primaryProviderMessageId = providerMessageId;
+    deliveredIds.push(providerMessageId);
   }
 
   return {
     delivery: 'SENT_TO_INSTAGRAM',
-    recipientId,
+    recipientId: cleanRecipientId,
     providerMessageId: primaryProviderMessageId,
     providerMessageIds: deliveredIds,
     chunkCount: chunks.length,
