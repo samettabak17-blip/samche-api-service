@@ -17,6 +17,12 @@ function sanitizeMetaError(error) {
   const code = metaError?.code ? `META_IG_ERROR_${metaError.code}` : (error?.code || 'INSTAGRAM_DELIVERY_FAILED');
   return new InstagramDeliveryError(code, message, status >= 500 ? 502 : 409);
 }
+
+export function resolveInstagramDeliveryTarget({ authMode = null, instagramAccountId = null, pageId = 'me' } = {}) {
+  const normalizedAuthMode = String(authMode || '').trim().toUpperCase();
+  if (normalizedAuthMode === 'INSTAGRAM_LOGIN') return 'me';
+  return String(instagramAccountId || pageId || 'me').trim();
+}
 /**
  * Splits message text into chunks that safely comply with Meta Instagram DM 1000-character payload limits.
  * Preserves paragraph breaks and sentence boundaries.
@@ -106,6 +112,8 @@ export async function deliverInstagramText({
   accessToken,
   pageId = 'me',
   instagramAccountId = null,
+  instagramUserId = null,
+  authMode = null,
   http = axios,
   graphVersion,
 }) {
@@ -120,7 +128,7 @@ export async function deliverInstagramText({
   }
 
   const baseUrl = instagramGraphApiBase();
-  const targetId = String(instagramAccountId || pageId || 'me').trim();
+  const targetId = resolveInstagramDeliveryTarget({ authMode, instagramAccountId, pageId, instagramUserId });
   const endpoint = `${baseUrl}/${targetId}/messages`;
 
   const chunks = splitIntoInstagramDmChunks(content, 950);
@@ -144,10 +152,15 @@ export async function deliverInstagramText({
       });
 
       const providerMessageId = response.data?.message_id || null;
-      if (providerMessageId) {
-        if (!primaryProviderMessageId) primaryProviderMessageId = providerMessageId;
-        deliveredIds.push(providerMessageId);
+      if (!providerMessageId) {
+        throw new InstagramDeliveryError(
+          'INSTAGRAM_PROVIDER_MESSAGE_ID_MISSING',
+          'Instagram provider accepted the request without a correlatable message ID',
+          502
+        );
       }
+      if (!primaryProviderMessageId) primaryProviderMessageId = providerMessageId;
+      deliveredIds.push(providerMessageId);
     } catch (error) {
       if (error instanceof InstagramDeliveryError) throw error;
       throw sanitizeMetaError(error);
@@ -171,6 +184,8 @@ export async function deliverInstagramMedia({
   accessToken,
   pageId = 'me',
   instagramAccountId = null,
+  instagramUserId = null,
+  authMode = null,
   http = axios,
   graphVersion,
 }) {
@@ -191,7 +206,7 @@ export async function deliverInstagramMedia({
     : 'file';
 
   const baseUrl = instagramGraphApiBase();
-  const targetId = String(instagramAccountId || pageId || 'me').trim();
+  const targetId = resolveInstagramDeliveryTarget({ authMode, instagramAccountId, pageId, instagramUserId });
   const endpoint = `${baseUrl}/${targetId}/messages`;
 
   const payload = {
@@ -224,6 +239,8 @@ export async function deliverInstagramMedia({
           accessToken,
           pageId: targetId,
           instagramAccountId: targetId,
+          instagramUserId,
+          authMode,
           http,
           graphVersion,
         });
@@ -248,12 +265,14 @@ export async function sendInstagramTypingIndicator({
   accessToken,
   pageId = 'me',
   instagramAccountId = null,
+  instagramUserId = null,
+  authMode = null,
   http = axios,
   graphVersion,
 }) {
   if (!recipientId || !accessToken) return { ok: false, reason: 'CREDENTIALS_MISSING' };
   const baseUrl = instagramGraphApiBase();
-  const targetId = String(instagramAccountId || pageId || 'me').trim();
+  const targetId = resolveInstagramDeliveryTarget({ authMode, instagramAccountId, pageId, instagramUserId });
   const endpoint = `${baseUrl}/${targetId}/messages`;
   try {
     await http.post(endpoint, {
@@ -278,12 +297,14 @@ export async function sendInstagramTypingOff({
   accessToken,
   pageId = 'me',
   instagramAccountId = null,
+  instagramUserId = null,
+  authMode = null,
   http = axios,
   graphVersion,
 }) {
   if (!recipientId || !accessToken) return { ok: false, reason: 'CREDENTIALS_MISSING' };
   const baseUrl = instagramGraphApiBase();
-  const targetId = String(instagramAccountId || pageId || 'me').trim();
+  const targetId = resolveInstagramDeliveryTarget({ authMode, instagramAccountId, pageId, instagramUserId });
   const endpoint = `${baseUrl}/${targetId}/messages`;
   try {
     await http.post(endpoint, {

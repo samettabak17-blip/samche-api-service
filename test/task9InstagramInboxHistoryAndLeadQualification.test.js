@@ -360,6 +360,7 @@ test('TEST J & K & L — Silent internal WhatsApp notification with dedupe and u
           ig_config: {
             lead_notification_enabled: true,
             lead_notification_whatsapp: '+971527288586',
+            lead_notification_template: { status: 'APPROVED', name: 'instagram_qualified_lead', language_code: 'tr' },
           },
         }],
       }),
@@ -409,9 +410,10 @@ test('TEST J & K & L — Silent internal WhatsApp notification with dedupe and u
   assert.equal(res1.recipient, '+971527288586');
   assert.equal(res1.isUpdate, false);
   assert.equal(deliveredWhatsApp.length, 1);
-  assert.ok(deliveredWhatsApp[0].text.body.includes('🔥 Yüksek Niyetli Instagram Lead'));
-  assert.ok(deliveredWhatsApp[0].text.body.includes('Ali Yılmaz'));
-  assert.ok(deliveredWhatsApp[0].text.body.includes('+971501234567'));
+  const firstNotificationText = deliveredWhatsApp[0].template.components[0].parameters[0].text;
+  assert.ok(firstNotificationText.includes('YENİ INSTAGRAM LEAD'));
+  assert.ok(firstNotificationText.includes('Ali Yılmaz'));
+  assert.ok(firstNotificationText.includes('+971501234567'));
 
   // 2. Duplicate notification with identical data (TEST K: Dedupe) -> SKIPPED
   const res2 = await sendSilentInternalWhatsAppLeadNotification({
@@ -445,8 +447,9 @@ test('TEST J & K & L — Silent internal WhatsApp notification with dedupe and u
   assert.equal(res3.sent, true);
   assert.equal(res3.isUpdate, true);
   assert.equal(deliveredWhatsApp.length, 2);
-  assert.ok(deliveredWhatsApp[1].text.body.includes('[GÜNCELLEME]'));
-  assert.ok(deliveredWhatsApp[1].text.body.includes('Pazartesi 10:00'));
+  const updatedNotificationText = deliveredWhatsApp[1].template.components[0].parameters[0].text;
+  assert.ok(updatedNotificationText.includes('GÜNCELLEME'));
+  assert.ok(updatedNotificationText.includes('Pazartesi 10:00'));
 });
 
 test('TEST M — No fake appointment confirmation', () => {
@@ -528,6 +531,7 @@ test('TEST S — Instagram Ad / Referral Lead (Ad Ingress into Canonical AI Pipe
           ig_config: {
             lead_notification_enabled: true,
             lead_notification_whatsapp: '+971527288586',
+            lead_notification_template: { status: 'APPROVED', name: 'instagram_qualified_lead', language_code: 'tr' },
           },
         }],
       }),
@@ -603,9 +607,10 @@ test('TEST S — Instagram Ad / Referral Lead (Ad Ingress into Canonical AI Pipe
   assert.equal(notifRes.sent, true);
   assert.equal(notifRes.recipient, '+971527288586');
   assert.equal(deliveredNotifications.length, 1);
-  assert.ok(deliveredNotifications[0].text.body.includes('Kemal'));
-  assert.ok(deliveredNotifications[0].text.body.includes('+971509998877'));
-  assert.ok(deliveredNotifications[0].text.body.includes('Kaynak: Instagram Ad'));
+  const adNotificationText = deliveredNotifications[0].template.components[0].parameters[0].text;
+  assert.ok(adNotificationText.includes('Kemal'));
+  assert.ok(adNotificationText.includes('+971509998877'));
+  assert.ok(adNotificationText.includes('Kaynak: Instagram Ad'));
 });
 test('TEST T — Display-name addressing (Uses real display name, not username or ID)', async () => {
   const { extractReliableCustomerName } = await import('../services/instagram-ai-orchestrator.js');
@@ -763,6 +768,199 @@ test('TEST X — Contact Information Phone fallback is clean and Provider ID is 
   // 4. Missing/Fallback
   assert.equal(formatInstagramCustomerDisplay(null, null), 'Instagram User');
   assert.equal(formatInstagramCustomerDisplay('Instagram conversation', null), 'Instagram User');
+});
+
+test('TEST Y — progressive qualification requires customer details, phone, and availability across turns', async () => {
+  const { deriveInstagramLeadQualification } = await import('../services/high-intent-lead-service.js');
+  const firstTurn = deriveInstagramLeadQualification({
+    customerMessages: [
+      { content: 'Dubai’de yazılım şirketi kurmak istiyorum. Sizinle görüşebilir miyim?' },
+    ],
+  });
+  assert.equal(firstTurn.complete, false);
+  assert.equal(firstTurn.hasHighIntent, true);
+  assert.ok(firstTurn.missing.includes('CUSTOMER_PHONE'));
+  assert.ok(firstTurn.missing.includes('MEETING_AVAILABILITY'));
+
+  const detailedTurn = deriveInstagramLeadQualification({
+    customerMessages: [
+      { content: 'Dubai’de yazılım şirketi kurmak istiyorum. Sizinle görüşebilir miyim?' },
+      { content: 'B2B abonelik ürünü geliştireceğiz ve üç ortak olacağız.' },
+      { content: 'WhatsApp numaram +971 50 111 22 33.' },
+    ],
+  });
+  assert.equal(detailedTurn.complete, false);
+  assert.ok(detailedTurn.structuredRequirement);
+  assert.equal(detailedTurn.phone, '+971 50 111 22 33');
+  assert.ok(detailedTurn.missing.includes('MEETING_AVAILABILITY'));
+
+  const completeTurn = deriveInstagramLeadQualification({
+    customerMessages: [
+      { content: 'Dubai’de yazılım şirketi kurmak istiyorum. Sizinle görüşebilir miyim?' },
+      { content: 'B2B abonelik ürünü geliştireceğiz ve üç ortak olacağız.' },
+      { content: 'WhatsApp numaram +971 50 111 22 33.' },
+      { content: 'Salı saat 14:00 Dubai saati uygunum.' },
+    ],
+  });
+  assert.equal(completeTurn.complete, true);
+  assert.equal(completeTurn.requestedTime, 'Salı saat 14:00 Dubai saati');
+  assert.equal(completeTurn.timezone, 'Asia/Dubai');
+  assert.equal(completeTurn.notificationLlmCalls, 0);
+  assert.equal(completeTurn.notificationAiTokens, 0);
+});
+
+test('TEST Z — notification payload omits unknown fields and presentation rules enforce one-question progression', () => {
+  const payload = formatInternalWhatsAppLeadNotification({
+    customerName: 'Ayşe',
+    serviceRequested: 'Şirket Kuruluşu',
+    dashboardDeepLink: 'https://dashboard.example/conversations/1',
+  });
+
+  assert.match(payload, /YENİ INSTAGRAM LEAD/);
+  assert.match(payload, /Müşteri: Ayşe/);
+  assert.doesNotMatch(payload, /Belirtilmedi|Zaman belirtilmedi|Instagram üzerinden yüksek niyetli/);
+  assert.match(INSTAGRAM_CHANNEL_PRESENTATION_RULES, /one relevant question at a time/i);
+  assert.match(INSTAGRAM_CHANNEL_PRESENTATION_RULES, /do not ask about visa/i);
+  assert.doesNotMatch(INSTAGRAM_CHANNEL_PRESENTATION_RULES, /Randevu oluşturabilmemiz adına birkaç bilginizi almam gerekiyor/i);
+});
+
+test('TEST AA — incomplete qualification creates no consultation and sends no WhatsApp notification', async () => {
+  const { evaluateAndProcessHighIntentLead } = await import('../services/high-intent-lead-service.js');
+  let providerCalls = 0;
+  let consultationWrites = 0;
+  const mockDb = {
+    async query(sql) {
+      if (sql.includes('FROM conversations c')) {
+        return { rowCount: 1, rows: [{
+          id: 'conv-incomplete', tenant_id: 'tenant-a', channel_id: 'channel-a',
+          customer_external_id: 'instagram:customer-a', contact_id: 'contact-a',
+          channel_type: 'INSTAGRAM', contact_name: 'Ayşe', contact_phone: null,
+        }] };
+      }
+      if (sql.includes('FROM conversation_messages')) {
+        return { rowCount: 2, rows: [
+          { id: 'm1', sender_type: 'CUSTOMER', content: 'Dubai’de şirket kurmak istiyorum, görüşebilir miyiz?' },
+          { id: 'm2', sender_type: 'CUSTOMER', content: 'WhatsApp numaram +971 50 111 22 33.' },
+        ] };
+      }
+      if (sql.includes('CONSULTATION_REQUEST_PENDING')) consultationWrites += 1;
+      return { rowCount: 0, rows: [] };
+    },
+  };
+  const httpClient = { async post() { providerCalls += 1; return { data: { messages: [{ id: 'wamid.1' }] } }; } };
+
+  const result = await evaluateAndProcessHighIntentLead({
+    tenantId: 'tenant-a',
+    conversationId: 'conv-incomplete',
+    database: mockDb,
+    env: { WHATSAPP_TOKEN: 'test-token' },
+    httpClient,
+  });
+
+  assert.equal(result.qualified, false);
+  assert.equal(providerCalls, 0);
+  assert.equal(consultationWrites, 0);
+});
+
+test('TEST AB — complete qualification creates one pending consultation and one deterministic notification', async () => {
+  const { evaluateAndProcessHighIntentLead } = await import('../services/high-intent-lead-service.js');
+  let providerCalls = 0;
+  let consultationWrites = 0;
+  let qualifiedStageUpdates = 0;
+  const mockDb = {
+    async query(sql) {
+      if (sql.includes('FROM conversations c')) {
+        return { rowCount: 1, rows: [{
+          id: 'conv-complete', tenant_id: 'tenant-a', channel_id: 'channel-a',
+          customer_external_id: 'instagram:customer-a', contact_id: 'contact-a',
+          channel_type: 'INSTAGRAM', contact_name: 'Ayşe', contact_phone: null,
+        }] };
+      }
+      if (sql.includes('FROM conversation_messages')) {
+        return { rowCount: 4, rows: [
+          { id: 'm1', sender_type: 'CUSTOMER', content: 'Dubai’de şirket kurmak istiyorum, görüşebilir miyiz?' },
+          { id: 'm2', sender_type: 'CUSTOMER', content: 'B2B yazılım ürünü ve üç ortakla başlayacağız.' },
+          { id: 'm3', sender_type: 'CUSTOMER', content: 'WhatsApp numaram +971 50 111 22 33.' },
+          { id: 'm4', sender_type: 'CUSTOMER', content: 'Salı saat 14:00 Dubai saati uygunum.' },
+        ] };
+      }
+      if (sql.includes('UPDATE crm_contacts')) return { rowCount: 1, rows: [] };
+      if (sql.includes('SELECT id FROM crm_leads')) return { rowCount: 1, rows: [{ id: 'lead-a' }] };
+      if (sql.includes('SELECT id FROM crm_pipeline_stages') && sql.includes("stage_key = 'QUALIFIED'")) {
+        return { rowCount: 1, rows: [{ id: 'qualified-stage-a' }] };
+      }
+      if (sql.includes('UPDATE crm_leads')) { qualifiedStageUpdates += 1; return { rowCount: 1, rows: [] }; }
+      if (sql.includes('CONSULTATION_REQUEST_PENDING')) { consultationWrites += 1; return { rowCount: 1, rows: [{ id: 'activity-a' }] }; }
+      if (sql.includes('SELECT ci.config AS ig_config')) {
+        return { rowCount: 1, rows: [{ ig_config: {
+          lead_notification_enabled: true,
+          lead_notification_whatsapp: '+971527288586',
+          lead_notification_template: { status: 'APPROVED', name: 'instagram_qualified_lead', language_code: 'tr' },
+        } }] };
+      }
+      if (sql.includes('SELECT tc.external_channel_id')) {
+        return { rowCount: 1, rows: [{ external_channel_id: '1234567890', wa_config: { access_token: 'test-token' } }] };
+      }
+      if (sql.includes('SELECT l.id AS lead_id')) {
+        return { rowCount: 1, rows: [{ lead_id: 'lead-a', analysis_hash: null, signals: {} }] };
+      }
+      if (sql.includes('INSERT INTO crm_lead_analyses')) return { rowCount: 1, rows: [{ id: 'analysis-a' }] };
+      return { rowCount: 0, rows: [] };
+    },
+  };
+  const httpClient = { async post() { providerCalls += 1; return { data: { messages: [{ id: 'wamid.qualified.1' }] } }; } };
+
+  const result = await evaluateAndProcessHighIntentLead({
+    tenantId: 'tenant-a',
+    conversationId: 'conv-complete',
+    database: mockDb,
+    env: { WHATSAPP_TOKEN: 'test-token', DASHBOARD_URL: 'https://dashboard.example' },
+    httpClient,
+  });
+
+  assert.equal(result.qualified, true);
+  assert.equal(qualifiedStageUpdates, 1);
+  assert.equal(consultationWrites, 1);
+  assert.equal(providerCalls, 1);
+  assert.equal(result.notificationLlmCalls, 0);
+  assert.equal(result.notificationAiTokens, 0);
+});
+
+test('TEST AC — proactive internal WhatsApp fails closed without an approved template', async () => {
+  let providerCalls = 0;
+  const mockDb = {
+    async query(sql) {
+      if (sql.includes('SELECT ci.config AS ig_config')) {
+        return { rowCount: 1, rows: [{ ig_config: {
+          lead_notification_enabled: true,
+          lead_notification_whatsapp: '+971527288586',
+        } }] };
+      }
+      if (sql.includes('SELECT tc.external_channel_id')) {
+        return { rowCount: 1, rows: [{ external_channel_id: '1234567890', wa_config: { access_token: 'test-token' } }] };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  const result = await sendSilentInternalWhatsAppLeadNotification({
+    tenantId: 'tenant-a',
+    conversationId: 'conversation-a',
+    leadDetails: {
+      customerName: 'Ayşe',
+      phone: '+971501112233',
+      serviceRequested: 'Şirket Kuruluşu',
+      structuredRequirement: 'B2B yazılım faaliyeti',
+      requestedTime: 'Salı 14:00',
+    },
+    database: mockDb,
+    env: { WHATSAPP_TOKEN: 'test-token' },
+    httpClient: { async post() { providerCalls += 1; return { data: { messages: [{ id: 'wamid.1' }] } }; } },
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, 'WHATSAPP_APPROVED_TEMPLATE_REQUIRED');
+  assert.equal(providerCalls, 0);
 });
 
 

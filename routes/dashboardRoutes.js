@@ -851,6 +851,7 @@ router.post('/:tenantId/channels/instagram/config', requireTenantAccess, require
     activation_triggers,
     lead_notification_enabled,
     lead_notification_whatsapp,
+    lead_notification_template,
     visual_ai_enabled,
     status = 'active',
   } = req.body ?? {};
@@ -874,6 +875,7 @@ router.post('/:tenantId/channels/instagram/config', requireTenantAccess, require
       activationTriggers: activation_triggers,
       leadNotificationEnabled: lead_notification_enabled,
       leadNotificationWhatsapp: lead_notification_whatsapp,
+      leadNotificationTemplate: lead_notification_template,
       visualAiEnabled: visual_ai_enabled,
       status,
     });

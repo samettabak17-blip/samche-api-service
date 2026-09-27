@@ -244,7 +244,7 @@ test('14. AI_ONLY activation response delivers exactly one AI reply for existing
   const deliveredDMs = [];
   const fakeHttp = {
     async post(url, body) {
-      deliveredDMs.push(body);
+      if (body?.message?.text) deliveredDMs.push(body);
       return { data: { recipient_id: igsidCustomer1, message_id: 'mid.ai.201' } };
     },
   };
@@ -403,11 +403,16 @@ test('17. TEST B & G: convergence preserves business account ID while enriching 
   const userId = '39251538000000099';
   let savedExternalId = null;
   let savedConfig = null;
+  let staleIntegrationConvergenceRan = false;
 
   const mockDb = {
     async connect() {
       return {
         async query(sql, params) {
+          if (sql.includes('ROW_NUMBER() OVER') && sql.includes('enabled = FALSE')) {
+            staleIntegrationConvergenceRan = true;
+            return { rowCount: 1, rows: [] };
+          }
           if (sql.includes('FROM tenant_channels tc')) {
             return {
               rowCount: 1,
@@ -455,6 +460,7 @@ test('17. TEST B & G: convergence preserves business account ID while enriching 
   assert.equal(savedExternalId, businessId);
   assert.equal(savedConfig.instagram_business_account_id, businessId);
   assert.equal(savedConfig.instagram_user_id, userId);
+  assert.equal(staleIntegrationConvergenceRan, true);
 });
 
 // 18. TEST C: webhook uses user-scoped ID where Meta legitimately supplies it -> resolves
@@ -573,6 +579,51 @@ test('20. TEST F: duplicate recipient across two tenants fails closed with null'
 
   const resolved = await resolveInstagramIntegration(mockDb, businessId);
   assert.equal(resolved, null);
+});
+
+test('20b. duplicate integration rows for one canonical tenant channel resolve once', async () => {
+  const businessId = '17841400000000099';
+  const canonicalConfig = {
+    auth_mode: 'INSTAGRAM_LOGIN',
+    instagram_business_account_id: businessId,
+    instagram_user_id: '39251538000000001',
+  };
+
+  const mockDb = {
+    async query(_sql, params) {
+      if (params[0] === businessId) {
+        return {
+          rowCount: 2,
+          rows: [
+            {
+              tenant_id: tenantIdA,
+              channel_id: 'chan-a',
+              integration_id: 'integration-new',
+              integration_enabled: true,
+              integration_updated_at: '2026-09-27T00:40:00.000Z',
+              config: canonicalConfig,
+            },
+            {
+              tenant_id: tenantIdA,
+              channel_id: 'chan-a',
+              integration_id: 'integration-legacy',
+              integration_enabled: true,
+              integration_updated_at: '2026-09-26T18:00:00.000Z',
+              config: { ...canonicalConfig, legacy: true },
+            },
+          ],
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  const resolved = await resolveInstagramIntegration(mockDb, businessId);
+
+  assert.equal(resolved.tenant_id, tenantIdA);
+  assert.equal(resolved.channel_id, 'chan-a');
+  assert.equal(resolved.integration_id, 'integration-new');
+  assert.equal(resolved.config.legacy, undefined);
 });
 
 // 21. TEST: ensureConversationCrmIdentity succeeds and falls back gracefully even when no default stage exists

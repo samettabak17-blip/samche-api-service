@@ -144,6 +144,54 @@ export async function deliverWhatsAppText({
   };
 }
 
+export async function deliverWhatsAppTemplate({
+  phoneNumberId,
+  recipient,
+  templateName,
+  languageCode,
+  bodyParameters = [],
+  env = process.env,
+  httpClient = axios,
+  httpsAgent = whatsappHttpsAgent,
+  integrationConfig = null,
+}) {
+  const accessToken = outboundAccessToken(env, integrationConfig);
+  const destination = trustedRecipient(recipient);
+  const targetPhoneNumberId = configuredValue(phoneNumberId);
+  const resolvedTemplateName = configuredValue(templateName);
+  const resolvedLanguageCode = configuredValue(languageCode);
+  if (!targetPhoneNumberId || !accessToken) throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_NOT_CONFIGURED');
+  if (!destination || !resolvedTemplateName || !resolvedLanguageCode) {
+    throw new WhatsAppDeliveryError('WHATSAPP_TEMPLATE_DELIVERY_INVALID_INPUT');
+  }
+
+  const components = bodyParameters.length > 0 ? [{
+    type: 'body',
+    parameters: bodyParameters.map((value) => ({ type: 'text', text: String(value ?? '') })),
+  }] : [];
+  const response = await httpClient.post(
+    `${metaGraphApiBase(env)}/${targetPhoneNumberId}/messages`,
+    {
+      messaging_product: 'whatsapp',
+      to: destination,
+      type: 'template',
+      template: {
+        name: resolvedTemplateName,
+        language: { code: resolvedLanguageCode },
+        ...(components.length > 0 ? { components } : {}),
+      },
+    },
+    {
+      httpsAgent,
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      timeout: 20000,
+    }
+  );
+  const providerMessageId = configuredValue(response?.data?.messages?.[0]?.id);
+  if (!providerMessageId) throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_UNCORRELATED');
+  return { deliveredChunks: 1, failedChunks: 0, failures: [], providerMessageIds: [providerMessageId], providerMessageId };
+}
+
 
 function resolveMediaCategory(file, explicitCategory = null) {
   if (explicitCategory === 'IMAGE' || explicitCategory === 'AUDIO' || explicitCategory === 'DOCUMENT') return explicitCategory;

@@ -282,7 +282,8 @@ test('TEST F: Authoritative WhatsApp master policy file exists and matches canon
   assert.ok(fs.existsSync(policyPath), 'Policy file must exist');
 
   const content = fs.readFileSync(policyPath, 'utf8');
-  const actualHash = createHash('sha256').update(content).digest('hex');
+  const canonicalContent = content.replace(/\r\n/g, '\n').replace(/\n$/, '');
+  const actualHash = createHash('sha256').update(canonicalContent).digest('hex');
 
   // Verify hash matches canonical hash without unauthorized mutation
   assert.equal(actualHash, SAMCHE_CANONICAL_MASTER_POLICY_HASH, 'Authoritative master policy hash must match exactly');

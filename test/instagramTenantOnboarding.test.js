@@ -111,6 +111,11 @@ test('configureTenantInstagramChannel configures channel and never exposes acces
     accountUsername: 'samche_ai',
     accessToken: tokenA,
     assistantId: assistantIdA,
+    leadNotificationTemplate: {
+      status: 'APPROVED',
+      name: 'instagram_qualified_lead_internal',
+      language_code: 'tr',
+    },
   });
 
   assert.equal(status.status, 'CONNECTED');
@@ -119,9 +124,55 @@ test('configureTenantInstagramChannel configures channel and never exposes acces
   assert.equal(status.account_username, 'samche_ai');
   assert.equal(status.has_token, true);
   assert.equal(status.assistant_id, assistantIdA);
+  assert.deepEqual(status.lead_notification_template, {
+    status: 'APPROVED',
+    name: 'instagram_qualified_lead_internal',
+    language_code: 'tr',
+  });
   // CRITICAL: Access token must never be present in the public response object
   assert.equal(status.access_token, undefined);
   assert.equal(storedConfig.access_token, tokenA);
+});
+
+test('reconfiguration disables stale Instagram integration rows for the same tenant channel', async () => {
+  let staleRowsDisabled = false;
+  const mockDb = {
+    async connect() {
+      return {
+        async query(sql) {
+          if (sql === 'BEGIN' || sql === 'COMMIT') return { rowCount: 0, rows: [] };
+          if (sql.includes('SELECT id FROM ai_assistants')) return { rowCount: 1, rows: [{ id: assistantIdA }] };
+          if (sql.includes('FROM tenant_channels') && sql.includes("channel_type = 'INSTAGRAM'")) {
+            return { rowCount: 1, rows: [{ id: 'channel-ig-a', assistant_id: assistantIdA, external_channel_id: pageIdA }] };
+          }
+          if (sql.includes('SELECT config FROM channel_integrations')) {
+            return { rowCount: 1, rows: [{ config: { access_token: tokenA, instagram_business_account_id: pageIdA } }] };
+          }
+          if (sql.includes('INSERT INTO channel_integrations')) {
+            return { rowCount: 1, rows: [{ id: 'integration-canonical' }] };
+          }
+          if (sql.includes('UPDATE channel_integrations') && sql.includes('enabled = FALSE')) {
+            staleRowsDisabled = true;
+            return { rowCount: 1, rows: [] };
+          }
+          if (sql.includes('SELECT tc.id AS channel_id')) return { rowCount: 0, rows: [] };
+          return { rowCount: 0, rows: [] };
+        },
+        release() {},
+      };
+    },
+  };
+
+  await configureTenantInstagramChannel({
+    database: mockDb,
+    tenantId: tenantIdA,
+    externalChannelId: pageIdA,
+    instagramBusinessAccountId: pageIdA,
+    accessToken: tokenA,
+    assistantId: assistantIdA,
+  });
+
+  assert.equal(staleRowsDisabled, true);
 });
 
 test('assistant assignment must belong to the exact tenant', async () => {

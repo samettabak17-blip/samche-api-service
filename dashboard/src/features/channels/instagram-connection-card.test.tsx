@@ -199,6 +199,9 @@ describe('InstagramConnectionCard UI Component', () => {
         account_username: 'samcheofficial',
         access_token: 'IGAA_test_token_123',
         assistant_id: 'ast-1',
+        lead_notification_enabled: true,
+        lead_notification_whatsapp: null,
+        visual_ai_enabled: false,
         status: 'active',
       });
     });
@@ -250,6 +253,9 @@ describe('InstagramConnectionCard UI Component', () => {
         account_username: undefined,
         access_token: 'IGAA_test_token_123',
         assistant_id: 'ast-1',
+        lead_notification_enabled: true,
+        lead_notification_whatsapp: null,
+        visual_ai_enabled: false,
         status: 'active',
       });
     });

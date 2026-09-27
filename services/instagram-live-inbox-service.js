@@ -103,11 +103,15 @@ export async function resolveInstagramIntegration(client, recipientId) {
             tc.external_channel_id, tc.channel_type, tc.status AS channel_status, a.status AS assistant_status,
             t.name AS tenant_name, a.name AS assistant_name, a.model AS assistant_model,
             a.system_prompt AS assistant_system_prompt,
-            ci.config AS config
+            ci.id AS integration_id, ci.enabled AS integration_enabled,
+            ci.updated_at AS integration_updated_at, ci.config AS config
        FROM tenant_channels tc
        JOIN tenants t ON t.id = tc.tenant_id AND t.status = 'active'
        LEFT JOIN ai_assistants a ON a.id = tc.assistant_id AND a.tenant_id = tc.tenant_id
-       LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.integration_type = 'INSTAGRAM'
+       JOIN channel_integrations ci ON ci.channel_id = tc.id
+        AND ci.tenant_id = tc.tenant_id
+        AND ci.integration_type = 'INSTAGRAM'
+        AND ci.enabled = TRUE
       WHERE tc.channel_type = 'INSTAGRAM'
         AND tc.status = 'active'
         AND (tc.assistant_id IS NULL OR a.status = 'active')
@@ -120,20 +124,26 @@ export async function resolveInstagramIntegration(client, recipientId) {
           OR ci.config->>'instagram_business_account_id' = $1
           OR ci.config->>'page_id' = $1
         )
-      ORDER BY tc.updated_at DESC
-      LIMIT 2`,
+      ORDER BY tc.updated_at DESC, ci.updated_at DESC`,
     [cleanId, normalizedId]
   );
 
-  if (result.rowCount === 1) {
+  const canonicalOwners = new Map();
+  for (const row of result.rows) {
+    const ownerKey = `${row.tenant_id}:${row.channel_id}`;
+    if (!canonicalOwners.has(ownerKey)) canonicalOwners.set(ownerKey, row);
+  }
+
+  if (canonicalOwners.size === 1) {
+    const row = canonicalOwners.values().next().value;
     return {
-      ...result.rows[0],
+      ...row,
       external_channel_id: cleanId,
-      config: result.rows[0].config || {},
+      config: row.config || {},
     };
   }
 
-  if (result.rowCount > 1) {
+  if (canonicalOwners.size > 1) {
     console.info('INSTAGRAM_CANONICAL_OWNERSHIP_AMBIGUOUS recipient=' + cleanId.slice(0, 8));
   }
   return null;

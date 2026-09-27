@@ -552,7 +552,7 @@ export async function persistWebChatInbound({ externalSessionId, content, idempo
   }
 }
 
-export async function persistAssistantResponseIfCurrent({ tenantId, conversationId, content, handlingVersion, knowledgeAuthority = null, idempotencyKey = null, database = pool }) {
+export async function persistAssistantResponseIfCurrent({ tenantId, conversationId, content, handlingVersion, knowledgeAuthority = null, idempotencyKey = null, deliveryStatus = null, database = pool }) {
   const client = await database.connect();
   let operatorSendStage = 'BEGIN_TRANSACTION';
   const traceStage = (stage) => {
@@ -586,6 +586,7 @@ export async function persistAssistantResponseIfCurrent({ tenantId, conversation
       senderType: 'ASSISTANT',
       content,
       idempotencyKey,
+      deliveryStatus,
     });
     if (!message && idempotencyKey) {
       const existing = await client.query(

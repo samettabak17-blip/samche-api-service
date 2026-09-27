@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import pool from '../config/db.js';
-import { deliverWhatsAppText, WhatsAppDeliveryError } from './whatsapp-delivery-service.js';
+import { deliverWhatsAppTemplate } from './whatsapp-delivery-service.js';
 import { normalizeWhatsAppExternalId } from './whatsapp-channel-ownership-service.js';
 
 export class HighIntentLeadError extends Error {
@@ -25,7 +25,7 @@ const APPOINTMENT_INTENT_PATTERNS = [
 ];
 
 
-const PHONE_EXTRACTION_REGEX = /(?:\+?\d{1,4}[-.\s]?)?\(?\d{2,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}/;
+const PHONE_EXTRACTION_REGEX = /\+?\d(?:[\d().\s-]{5,20}\d)/;
 
 /**
  * Checks if a message or conversation contains high-intent appointment / consultation signals.
@@ -64,9 +64,70 @@ export function extractCustomerNameFromText(text = '') {
  */
 export function extractMeetingTimePreference(text = '') {
   if (typeof text !== 'string') return null;
-  const match = text.match(/(?:yarın|pazartesi|salı|çarşamba|perşembe|cuma|cumartesi|pazar|bugün|haftaya|saat\s+\d{1,2}(?::\d{2})?|\d{1,2}\s+(?:ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık)|\d{1,2}[:.]\d{2})/i);
+  const match = text.match(/(?:(?:yarın|pazartesi|salı|çarşamba|perşembe|cuma|cumartesi|pazar|bugün|haftaya)(?:\s+saat\s+\d{1,2}(?::\d{2})?)?(?:\s+(?:dubai|türkiye|turkiye|utc|gmt)(?:\s+saati)?)?|saat\s+\d{1,2}(?::\d{2})?|\d{1,2}\s+(?:ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık)|\d{1,2}[:.]\d{2})/i);
   if (match) return match[0].trim();
   return null;
+}
+
+function inferRequestedService(text = '') {
+  if (/(?:şirket|sirket|company|free\s*zone|mainland|kurulum|incorporat)/iu.test(text)) return 'Şirket Kuruluşu';
+  if (/(?:vize|visa|residency|oturum|ikamet)/iu.test(text)) return 'Vize / Oturum';
+  if (/(?:banka|bank|hesap|account)/iu.test(text)) return 'Kurumsal Banka Hesabı';
+  if (/(?:muhasebe|accounting|vergi|tax|vat|kdv)/iu.test(text)) return 'Muhasebe / Vergi';
+  return null;
+}
+
+function isQualificationDetail(content = '') {
+  const normalized = String(content).trim();
+  if (normalized.length < 12) return false;
+  const withoutPhone = normalized.replace(PHONE_EXTRACTION_REGEX, ' ');
+  if (/^(?:whatsapp|telefon|phone|numara|numaram|iletişim|iletisim)[\p{L}\s:.-]*$/iu.test(withoutPhone.trim())) return false;
+  const withoutAvailability = withoutPhone.replace(/(?:yarın|pazartesi|salı|çarşamba|perşembe|cuma|cumartesi|pazar|bugün|haftaya|saat\s+\d{1,2}(?::\d{2})?|\d{1,2}[:.]\d{2}|dubai\s+saati)/giu, ' ');
+  const withoutMeetingIntent = withoutAvailability.replace(/(?:randevu|görüşme|gorusme|toplantı|toplanti|görüşmek|gorusmek|görüşebilir|gorusabilir|appointment|consultation|meeting|call\s+me)/giu, ' ');
+  const meaningful = withoutMeetingIntent.replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  return meaningful.length >= 10;
+}
+
+export function deriveInstagramLeadQualification({ customerMessages = [], contactName = null, contactPhone = null } = {}) {
+  const contents = customerMessages
+    .map((message) => typeof message === 'string' ? message : message?.content)
+    .map((content) => String(content || '').trim())
+    .filter(Boolean);
+  const combined = contents.join('\n');
+  const detailCandidates = contents.slice(1).filter(isQualificationDetail);
+  const structuredRequirement = detailCandidates.at(-1)?.slice(0, 240) || null;
+  const phone = extractPhoneNumberFromText(combined) || contactPhone || null;
+  const customerName = extractCustomerNameFromText(combined) || contactName || null;
+  const requestedTime = extractMeetingTimePreference(combined);
+  const timezone = /(?:dubai|bae|uae)(?:\s+saati)?/iu.test(combined)
+    ? 'Asia/Dubai'
+    : /(?:türkiye|turkiye)(?:\s+saati)?/iu.test(combined)
+      ? 'Europe/Istanbul'
+      : /(?:utc|gmt)/iu.test(combined) ? 'UTC' : null;
+  const serviceRequested = inferRequestedService(combined);
+  const hasHighIntent = hasHighIntentAppointmentSignals(combined);
+  const missing = [];
+
+  if (!serviceRequested) missing.push('REQUESTED_SERVICE');
+  if (!structuredRequirement) missing.push('CONCRETE_REQUIREMENT');
+  if (!phone) missing.push('CUSTOMER_PHONE');
+  if (!requestedTime) missing.push('MEETING_AVAILABILITY');
+
+  return {
+    hasHighIntent,
+    complete: hasHighIntent && contents.length >= 2 && missing.length === 0,
+    customerName,
+    phone,
+    requestedTime,
+    timezone,
+    serviceRequested,
+    businessActivity: structuredRequirement,
+    structuredRequirement,
+    customerMessageCount: contents.length,
+    missing,
+    notificationLlmCalls: 0,
+    notificationAiTokens: 0,
+  };
 }
 
 /**
@@ -79,21 +140,27 @@ export function formatInternalWhatsAppLeadNotification({
   serviceRequested = null,
   summary = null,
   requestedTime = null,
+  businessActivity = null,
+  structuredRequirement = null,
+  timeline = null,
+  timezone = null,
   source = 'Instagram DM',
   dashboardDeepLink = null,
   isUpdate = false,
 }) {
-  const lines = [
-    `🔥 Yüksek Niyetli Instagram Lead${isUpdate ? ' [GÜNCELLEME]' : ''}`,
-    '',
-    `Ad: ${customerName || 'Belirtilmedi'}`,
-    `Instagram: ${instagramUsername ? '@' + instagramUsername.replace(/^@/, '') : 'Belirtilmedi'}`,
-    `Telefon/WhatsApp: ${phone || 'Belirtilmedi'}`,
-    `Talep: ${serviceRequested || 'Danışmanlık / Şirket Kuruluşu'}`,
-    `Detay: ${summary || 'Instagram üzerinden yüksek niyetli randevu/bilgi talebi'}`,
-    `Randevu Talebi: ${requestedTime || 'Zaman belirtilmedi'}`,
-    `Kaynak: ${source || 'Instagram DM'}`,
-  ];
+  const lines = [`YENİ INSTAGRAM LEAD${isUpdate ? ' — GÜNCELLEME' : ''}`, ''];
+  if (customerName) lines.push(`Müşteri: ${customerName}`);
+  if (instagramUsername) lines.push(`Instagram: @${instagramUsername.replace(/^@/, '')}`);
+  if (phone) lines.push(`Telefon / WhatsApp: ${phone}`);
+  if (serviceRequested) lines.push(`Konu: ${serviceRequested}`);
+  if (businessActivity) lines.push(`Faaliyet: ${businessActivity}`);
+  if (structuredRequirement || summary) lines.push(`İstediği: ${structuredRequirement || summary}`);
+  if (timeline) lines.push(`Başlama zamanı: ${timeline}`);
+  if (requestedTime) {
+    lines.push('', 'Görüşme:', requestedTime);
+    if (timezone) lines.push(timezone);
+  }
+  if (source) lines.push('', `Kaynak: ${source}`);
 
   if (dashboardDeepLink) {
     lines.push(`Dashboard: ${dashboardDeepLink}`);
@@ -172,6 +239,16 @@ export async function sendSilentInternalWhatsAppLeadNotification({
       return { skipped: true, reason: 'WHATSAPP_SENDER_NOT_CONFIGURED' };
     }
 
+    const approvedTemplate = igConfig.lead_notification_template || waChannel?.wa_config?.lead_notification_template || null;
+    if (
+      !approvedTemplate
+      || String(approvedTemplate.status || '').toUpperCase() !== 'APPROVED'
+      || !approvedTemplate.name
+      || !approvedTemplate.language_code
+    ) {
+      return { skipped: true, reason: 'WHATSAPP_APPROVED_TEMPLATE_REQUIRED' };
+    }
+
     const currentHash = computeLeadNotificationDedupeHash({
       name: leadDetails.customerName,
       phone: leadDetails.phone,
@@ -182,9 +259,10 @@ export async function sendSilentInternalWhatsAppLeadNotification({
     // 3. Check existing lead dedupe state in crm_lead_analyses
     const leadCheck = await client.query(
       `SELECT l.id AS lead_id, a.analysis_hash, a.signals
-         FROM crm_leads l
+       FROM crm_leads l
          LEFT JOIN crm_lead_analyses a ON a.lead_id = l.id AND a.tenant_id = l.tenant_id
         WHERE l.tenant_id = $1 AND l.conversation_id = $2
+          AND a.signals ? 'last_notified_hash'
         ORDER BY a.analyzed_at DESC
         LIMIT 1`,
       [tenantId, conversationId]
@@ -208,7 +286,11 @@ export async function sendSilentInternalWhatsAppLeadNotification({
       phone: leadDetails.phone,
       serviceRequested: leadDetails.serviceRequested,
       summary: leadDetails.summary,
+      businessActivity: leadDetails.businessActivity,
+      structuredRequirement: leadDetails.structuredRequirement,
+      timeline: leadDetails.timeline,
       requestedTime: leadDetails.requestedTime,
+      timezone: leadDetails.timezone,
       source: leadDetails.source || 'Instagram DM',
       dashboardDeepLink: deepLink,
       isUpdate,
@@ -216,10 +298,12 @@ export async function sendSilentInternalWhatsAppLeadNotification({
 
 
     // 4. Deliver silent internal WhatsApp message
-    const deliveryRes = await deliverWhatsAppText({
+    const deliveryRes = await deliverWhatsAppTemplate({
       phoneNumberId,
       recipient: destinationPhone,
-      content: notificationText,
+      templateName: approvedTemplate.name,
+      languageCode: approvedTemplate.language_code,
+      bodyParameters: [notificationText],
       env,
       httpClient,
       integrationConfig: waChannel?.wa_config || null,
@@ -299,35 +383,68 @@ export async function evaluateAndProcessHighIntentLead({
     const messages = messagesRes.rows;
     const customerMessages = messages.filter((m) => m.sender_type === 'CUSTOMER');
     const customerTextCombined = customerMessages.map((m) => m.content).join('\n');
+    const qualification = deriveInstagramLeadQualification({
+      customerMessages,
+      contactName: conv.contact_name && !conv.contact_name.startsWith('instagram:') ? conv.contact_name : null,
+      contactPhone: conv.contact_phone,
+    });
 
-    if (!hasHighIntentAppointmentSignals(customerTextCombined)) {
+    if (!qualification.hasHighIntent) {
       return { qualified: false, reason: 'NO_HIGH_INTENT_SIGNALS' };
     }
 
-    // Extract fields
-    const phone = extractPhoneNumberFromText(customerTextCombined) || conv.contact_phone || null;
-    const extractedName = extractCustomerNameFromText(customerTextCombined);
-    const customerName = extractedName || (conv.contact_name && !conv.contact_name.startsWith('instagram:') ? conv.contact_name : null);
-    const requestedTime = extractMeetingTimePreference(customerTextCombined);
-    const rawIg = String(conv.customer_external_id || '').replace(/^instagram:\s*/i, '');
-    const igUsername = conv.contact_name && !conv.contact_name.startsWith('instagram:') ? conv.contact_name : rawIg;
+    const phone = qualification.phone;
+    const customerName = qualification.customerName;
+    const requestedTime = qualification.requestedTime;
+    const serviceRequested = qualification.serviceRequested;
+    const usernameMatch = String(conv.contact_name || '').match(/\(@([A-Za-z0-9._]+)\)$/);
+    const igUsername = usernameMatch?.[1] || null;
 
-    // Service topic determination
-    let serviceRequested = 'Şirket Kuruluşu & Danışmanlık';
-    if (/free\s*zone/i.test(customerTextCombined)) {
-      serviceRequested = 'Free Zone Şirket Kuruluşu';
-    } else if (/mainland/i.test(customerTextCombined)) {
-      serviceRequested = 'Mainland Şirket Kuruluşu';
-    } else if (/vize|residency|ikamet/i.test(customerTextCombined)) {
-      serviceRequested = 'Vize & Oturum Danışmanlığı';
-    } else if (/banka|hesap|bank/i.test(customerTextCombined)) {
-      serviceRequested = 'Banka Hesabı Açılışı';
+    const leadRes = await client.query(
+      `SELECT id FROM crm_leads WHERE tenant_id = $1 AND conversation_id = $2 LIMIT 1`,
+      [tenantId, conversationId]
+    );
+    const leadId = leadRes.rows[0]?.id || null;
+
+    if (leadId) {
+      const checkpointSignals = {
+        high_intent: true,
+        qualification_complete: qualification.complete,
+        missing: qualification.missing,
+        customer_name: customerName,
+        phone,
+        requested_service: serviceRequested,
+        structured_requirement: qualification.structuredRequirement,
+        requested_time: requestedTime,
+        timezone: qualification.timezone,
+      };
+      const checkpointHash = crypto.createHash('sha256').update(JSON.stringify(checkpointSignals)).digest('hex');
+      await client.query(
+        `INSERT INTO crm_lead_analyses
+          (tenant_id, lead_id, conversation_id, analysis_hash, analyzed_customer_message_count, signals, summary, provider, model)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, 'HIGH_INTENT_DETECTOR', 'rule-based-v2')
+         ON CONFLICT (tenant_id, lead_id, analysis_hash)
+         DO UPDATE SET signals = EXCLUDED.signals, analyzed_at = CURRENT_TIMESTAMP`,
+        [
+          tenantId,
+          leadId,
+          conversationId,
+          checkpointHash,
+          customerMessages.length,
+          JSON.stringify(checkpointSignals),
+          qualification.complete ? 'Progressive Instagram qualification complete' : 'Progressive Instagram qualification in progress',
+        ]
+      );
     }
 
-    // Lead is sufficiently qualified when we have phone OR (customerName + appointment intent)
-    const isSufficientlyQualified = Boolean(phone || (customerName && customerMessages.length >= 2));
-    if (!isSufficientlyQualified) {
-      return { qualified: false, reason: 'QUALIFICATION_INCOMPLETE_NEEDS_MORE_INFO' };
+    if (!qualification.complete) {
+      return {
+        qualified: false,
+        reason: 'QUALIFICATION_INCOMPLETE_NEEDS_MORE_INFO',
+        qualification,
+        notificationLlmCalls: 0,
+        notificationAiTokens: 0,
+      };
     }
 
     // Update crm_contacts with phone/name if found
@@ -342,14 +459,13 @@ export async function evaluateAndProcessHighIntentLead({
       );
     }
 
-    // Upsert crm_leads with hot temperature & appointment intent
-    const leadRes = await client.query(
-      `SELECT id FROM crm_leads WHERE tenant_id = $1 AND conversation_id = $2 LIMIT 1`,
-      [tenantId, conversationId]
-    );
-
-    let leadId = leadRes.rows[0]?.id;
     if (leadId) {
+      const qualifiedStage = await client.query(
+        `SELECT id FROM crm_pipeline_stages
+          WHERE tenant_id = $1 AND stage_key = 'QUALIFIED'
+          LIMIT 1`,
+        [tenantId]
+      );
       await client.query(
         `UPDATE crm_leads
             SET intent = 'APPOINTMENT_REQUEST',
@@ -357,14 +473,37 @@ export async function evaluateAndProcessHighIntentLead({
                 lead_score = GREATEST(lead_score, 85),
                 service_interest = $1,
                 timeline = $2,
+                pipeline_stage_id = COALESCE($3, pipeline_stage_id),
                 last_activity_at = CURRENT_TIMESTAMP,
                 updated_at = CURRENT_TIMESTAMP
-          WHERE id = $3 AND tenant_id = $4`,
-        [serviceRequested, requestedTime, leadId, tenantId]
+          WHERE id = $4 AND tenant_id = $5`,
+        [serviceRequested, requestedTime, qualifiedStage.rows[0]?.id || null, leadId, tenantId]
+      );
+
+      await client.query(
+        `INSERT INTO crm_activities
+          (tenant_id, lead_id, conversation_id, event_type, metadata)
+         SELECT $1, $2, $3, 'AI_QUALIFICATION', $4::jsonb
+          WHERE NOT EXISTS (
+            SELECT 1 FROM crm_activities
+             WHERE tenant_id = $1
+               AND lead_id = $2
+               AND conversation_id = $3
+               AND event_type = 'AI_QUALIFICATION'
+               AND metadata->>'event' = 'CONSULTATION_REQUEST_PENDING'
+          )
+         RETURNING *`,
+        [tenantId, leadId, conversationId, JSON.stringify({
+          event: 'CONSULTATION_REQUEST_PENDING',
+          status: 'PENDING',
+          requested_time: requestedTime,
+          timezone: qualification.timezone,
+          service_requested: serviceRequested,
+        })]
       );
     }
 
-    const summary = `Instagram üzerinden ${serviceRequested.toLowerCase()} randevu talebi. Müşteri bilgileri toplandı.`;
+    const summary = `${serviceRequested}: ${qualification.structuredRequirement}`;
 
     const leadDetails = {
       customerName,
@@ -372,7 +511,11 @@ export async function evaluateAndProcessHighIntentLead({
       phone,
       serviceRequested,
       summary,
-      requestedTime: requestedTime || 'Zaman belirtilmedi',
+      businessActivity: qualification.businessActivity,
+      structuredRequirement: qualification.structuredRequirement,
+      requestedTime,
+      timezone: qualification.timezone,
+      source: 'INSTAGRAM',
     };
 
     // Trigger silent WhatsApp notification
@@ -389,6 +532,9 @@ export async function evaluateAndProcessHighIntentLead({
       qualified: true,
       leadDetails,
       notificationResult,
+      consultationStatus: 'PENDING',
+      notificationLlmCalls: 0,
+      notificationAiTokens: 0,
     };
   } finally {
     if (isDedicatedClient && typeof client?.release === 'function') {

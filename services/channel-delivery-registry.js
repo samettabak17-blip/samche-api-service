@@ -81,11 +81,14 @@ export async function loadInstagramAgentDelivery(client, conversation) {
     `SELECT tc.id AS channel_id, tc.tenant_id, tc.external_channel_id, tc.channel_type, tc.status AS channel_status,
             ci.id AS integration_id, ci.integration_key, ci.enabled AS integration_enabled, ci.config
        FROM tenant_channels tc
-       LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND UPPER(ci.integration_type) = 'INSTAGRAM'
+       JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id
+        AND UPPER(ci.integration_type) = 'INSTAGRAM' AND ci.enabled = TRUE
       WHERE tc.id = $1
         AND tc.tenant_id = $2
         AND UPPER(tc.channel_type) = 'INSTAGRAM'
-        AND LOWER(tc.status) = 'active'`,
+        AND LOWER(tc.status) = 'active'
+      ORDER BY ci.updated_at DESC
+      LIMIT 1`,
     [channelId, tenantId]
   );
   if (result.rowCount < 1) return null;
@@ -101,6 +104,8 @@ export async function loadInstagramAgentDelivery(client, conversation) {
     tenant_id: tenantId,
     external_channel_id: row.external_channel_id,
     instagram_account_id: accountId,
+    instagram_user_id: config.instagram_user_id || null,
+    auth_mode: config.auth_mode || null,
     page_id: accountId,
     access_token: accessToken,
     config,
@@ -339,6 +344,8 @@ export class OutboundChannelDeliveryRegistry {
             content,
             accessToken: integration.access_token,
             instagramAccountId: integration.instagram_account_id || integration.page_id,
+            instagramUserId: integration.instagram_user_id,
+            authMode: integration.auth_mode,
             pageId: integration.page_id,
             http,
           });
@@ -371,6 +378,8 @@ export class OutboundChannelDeliveryRegistry {
             caption,
             accessToken: integration.access_token,
             instagramAccountId: integration.instagram_account_id || integration.page_id,
+            instagramUserId: integration.instagram_user_id,
+            authMode: integration.auth_mode,
             pageId: integration.page_id,
             http,
           });

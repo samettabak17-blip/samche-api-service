@@ -453,7 +453,8 @@ app.get("/api/v1/health/instagram-diagnostics", async (_req, res) => {
          LEFT JOIN tenants t ON t.id = tc.tenant_id
          LEFT JOIN ai_assistants a ON a.id = tc.assistant_id AND a.tenant_id = tc.tenant_id
          LEFT JOIN channel_integrations ci
-                ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.integration_type = 'INSTAGRAM'
+                ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id
+               AND ci.integration_type = 'INSTAGRAM' AND ci.enabled = TRUE
         WHERE tc.channel_type = 'INSTAGRAM'
         ORDER BY tc.updated_at DESC
         LIMIT 50`
@@ -469,10 +470,13 @@ app.get("/api/v1/health/instagram-diagnostics", async (_req, res) => {
     );
 
     const recentMsgs = await pool.query(
-      `SELECT m.id, m.tenant_id, m.sender_type, m.external_message_id, m.created_at
+      `SELECT m.id, m.tenant_id, m.sender_type, m.external_message_id, m.created_at,
+              c.id AS conversation_id, c.handling_mode, c.ai_behavior_override,
+              contact.ai_behavior_override AS contact_ai_behavior_override
          FROM conversation_messages m
          JOIN conversations c ON c.id = m.conversation_id
          JOIN tenant_channels tc ON tc.id = c.channel_id
+         LEFT JOIN crm_contacts contact ON contact.id = c.contact_id AND contact.tenant_id = c.tenant_id
         WHERE tc.channel_type = 'INSTAGRAM'
         ORDER BY m.created_at DESC
         LIMIT 10`
@@ -575,6 +579,9 @@ app.get("/api/v1/health/instagram-diagnostics", async (_req, res) => {
           integration_present: Boolean(row.integration_id),
           integration_enabled: row.integration_enabled === true,
           activation_policy: cfg.activation_policy || 'MANUAL_ONLY',
+          lead_notification_enabled: cfg.lead_notification_enabled !== false,
+          lead_notification_template_configured: Boolean(cfg.lead_notification_template?.name),
+          lead_notification_template_approved: String(cfg.lead_notification_template?.status || '').toUpperCase() === 'APPROVED',
           account_username: cfg.account_username || null,
           has_token: Boolean(cfg.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN),
           reauth_required: Boolean(cfg.reauth_required),
@@ -600,6 +607,10 @@ app.get("/api/v1/health/instagram-diagnostics", async (_req, res) => {
           tenant_prefix: String(m.tenant_id).slice(0, 8),
           sender_type: m.sender_type,
           external_mid_prefix: m.external_message_id ? String(m.external_message_id).slice(0, 8) : null,
+          conversation_prefix: String(m.conversation_id).slice(0, 8),
+          handling_mode: m.handling_mode,
+          conversation_ai_override: m.ai_behavior_override,
+          contact_ai_override: m.contact_ai_behavior_override,
           created_at: m.created_at,
         })),
       },
@@ -4722,12 +4733,22 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
             }
 
 
-            await orchestrateInstagramInboundAiResponse({
+            const aiOutcome = await orchestrateInstagramInboundAiResponse({
               database: pool,
               inboundState,
               senderIgsid: igEvent.senderId,
               text: igEvent.text,
               embed: knowledgeEmbedder,
+            });
+            recordIngressObservation({
+              event: 'INSTAGRAM_AI_OUTCOME',
+              tenant_prefix: String(inboundState.integration.tenant_id).slice(0, 8),
+              conversation_prefix: String(inboundState.conversation.id).slice(0, 8),
+              ai_invoked: Boolean(aiOutcome?.aiInvoked),
+              delivered: Boolean(aiOutcome?.delivered),
+              reason: aiOutcome?.reason || aiOutcome?.activationEvaluation?.reasonCode || null,
+              activation_policy: aiOutcome?.activationEvaluation?.policy || inboundState.integration.config?.activation_policy || null,
+              provider_mid_present: Boolean(aiOutcome?.deliveryResult?.providerMessageId),
             });
           } catch (igErr) {
             console.error('INSTAGRAM_INBOUND_PROCESSING_ERROR', igErr?.code ?? igErr?.message);

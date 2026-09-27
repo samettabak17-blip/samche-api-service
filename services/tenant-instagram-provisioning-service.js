@@ -114,9 +114,10 @@ export async function getTenantInstagramStatus({ database = pool, tenantId }) {
               ci.id AS integration_id, ci.enabled AS integration_enabled, ci.config
          FROM tenant_channels tc
          LEFT JOIN ai_assistants a ON a.id = tc.assistant_id AND a.tenant_id = tc.tenant_id
-         LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.integration_type = 'INSTAGRAM'
+         LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id
+          AND ci.integration_type = 'INSTAGRAM' AND ci.enabled = TRUE
         WHERE tc.tenant_id = $1 AND tc.channel_type = 'INSTAGRAM'
-        ORDER BY tc.updated_at DESC
+        ORDER BY tc.updated_at DESC, ci.updated_at DESC
         LIMIT 1`,
       [tenantId]
     );
@@ -180,6 +181,13 @@ export async function getTenantInstagramStatus({ database = pool, tenantId }) {
       reauth_required: Boolean(config.reauth_required),
       lead_notification_enabled: config.lead_notification_enabled !== false,
       lead_notification_whatsapp: config.lead_notification_whatsapp || null,
+      lead_notification_template: config.lead_notification_template
+        ? {
+            status: config.lead_notification_template.status || null,
+            name: config.lead_notification_template.name || null,
+            language_code: config.lead_notification_template.language_code || null,
+          }
+        : null,
       visual_ai_enabled: Boolean(config.visual_ai_enabled),
       history_import_available: connectionStatus === 'CONNECTED',
       last_health_check_at: config.last_health_check_at || null,
@@ -212,11 +220,35 @@ export async function configureTenantInstagramChannel({
   activationTriggers = undefined,
   leadNotificationEnabled = undefined,
   leadNotificationWhatsapp = undefined,
+  leadNotificationTemplate = undefined,
   visualAiEnabled = undefined,
   status = 'active',
 
 }) {
   if (!tenantId) throw new TenantInstagramProvisioningError('TENANT_ID_REQUIRED', 'Tenant ID is required', 400);
+
+  let normalizedLeadNotificationTemplate = leadNotificationTemplate;
+  if (leadNotificationTemplate !== undefined && leadNotificationTemplate !== null) {
+    const templateName = String(leadNotificationTemplate.name || '').trim();
+    const languageCode = String(leadNotificationTemplate.language_code || '').trim();
+    const templateStatus = String(leadNotificationTemplate.status || '').trim().toUpperCase();
+    if (
+      !/^[a-z0-9_]{1,512}$/.test(templateName) ||
+      !/^[a-z]{2,3}(?:_[A-Z]{2})?$/.test(languageCode) ||
+      templateStatus !== 'APPROVED'
+    ) {
+      throw new TenantInstagramProvisioningError(
+        'INSTAGRAM_LEAD_NOTIFICATION_TEMPLATE_INVALID',
+        'Lead notification template must be an approved WhatsApp template with a valid name and language code',
+        400
+      );
+    }
+    normalizedLeadNotificationTemplate = {
+      status: templateStatus,
+      name: templateName,
+      language_code: languageCode,
+    };
+  }
 
   const client = await database.connect();
   try {
@@ -324,6 +356,9 @@ export async function configureTenantInstagramChannel({
       lead_notification_whatsapp: typeof leadNotificationWhatsapp === 'string'
         ? leadNotificationWhatsapp.trim()
         : (leadNotificationWhatsapp === null ? null : (existingConfig.lead_notification_whatsapp || null)),
+      lead_notification_template: normalizedLeadNotificationTemplate === undefined
+        ? (existingConfig.lead_notification_template || null)
+        : normalizedLeadNotificationTemplate,
       visual_ai_enabled: typeof visualAiEnabled === 'boolean'
         ? visualAiEnabled
         : Boolean(existingConfig.visual_ai_enabled),
@@ -334,7 +369,7 @@ export async function configureTenantInstagramChannel({
       updated_at: new Date().toISOString(),
     };
 
-    await client.query(
+    const canonicalIntegration = await client.query(
       `INSERT INTO channel_integrations
         (integration_key, integration_type, tenant_id, channel_id, assistant_id, enabled, config)
        VALUES ($1, 'INSTAGRAM', $2, $3, $4, $5, $6::jsonb)
@@ -343,9 +378,25 @@ export async function configureTenantInstagramChannel({
                      assistant_id = EXCLUDED.assistant_id,
                      enabled = EXCLUDED.enabled,
                      config = EXCLUDED.config,
-                     updated_at = CURRENT_TIMESTAMP`,
+                     updated_at = CURRENT_TIMESTAMP
+       RETURNING id`,
       [normalizedKey, tenantId, channelId, assistantId, status === 'active', JSON.stringify(updatedConfig)]
     );
+
+    const canonicalIntegrationId = canonicalIntegration.rows?.[0]?.id || null;
+    if (canonicalIntegrationId) {
+      await client.query(
+        `UPDATE channel_integrations
+            SET enabled = FALSE,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE tenant_id = $1
+            AND channel_id = $2
+            AND integration_type = 'INSTAGRAM'
+            AND id <> $3
+            AND enabled = TRUE`,
+        [tenantId, channelId, canonicalIntegrationId]
+      );
+    }
 
     await client.query('COMMIT');
 
@@ -599,14 +650,35 @@ export async function testTenantInstagramConnection({
 export async function convergeTenantInstagramChannels({ database = pool, http = axios, graphBaseUrl = null } = {}) {
   const client = await database.connect();
   try {
+    await client.query(
+      `WITH ranked AS (
+         SELECT id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY tenant_id, channel_id, integration_type
+                  ORDER BY updated_at DESC, id DESC
+                ) AS row_rank
+           FROM channel_integrations
+          WHERE integration_type = 'INSTAGRAM' AND enabled = TRUE
+       )
+       UPDATE channel_integrations ci
+          SET enabled = FALSE,
+              updated_at = CURRENT_TIMESTAMP
+         FROM ranked
+        WHERE ci.id = ranked.id
+          AND ranked.row_rank > 1`
+    );
+
     const channels = await client.query(
-      `SELECT tc.id AS channel_id, tc.tenant_id, tc.external_channel_id, tc.assistant_id,
+      `SELECT DISTINCT ON (tc.id)
+              tc.id AS channel_id, tc.tenant_id, tc.external_channel_id, tc.assistant_id,
               tc.status AS channel_status, ci.config AS integration_config
          FROM tenant_channels tc
          JOIN tenants t ON t.id = tc.tenant_id AND t.status = 'active'
-         LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.integration_type = 'INSTAGRAM'
+         LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id
+          AND ci.integration_type = 'INSTAGRAM' AND ci.enabled = TRUE
         WHERE tc.channel_type = 'INSTAGRAM'
-          AND tc.status = 'active'`
+          AND tc.status = 'active'
+        ORDER BY tc.id, ci.updated_at DESC`
     );
 
     const baseUrl = graphBaseUrl || instagramGraphApiBase();

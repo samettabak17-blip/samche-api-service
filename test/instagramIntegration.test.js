@@ -308,6 +308,48 @@ test('deliverInstagramText delivers via Meta Graph API and returns provider mess
   assert.equal(httpCalls[0].options.headers.Authorization, 'Bearer test-ig-access-token');
 });
 
+test('Instagram Login delivery uses the token-bound me endpoint and customer IGSID recipient', async () => {
+  const httpCalls = [];
+  const fakeHttp = {
+    async post(url, body) {
+      httpCalls.push({ url, body });
+      return { data: { recipient_id: testIgsid, message_id: 'mid.ig.login.1' } };
+    },
+  };
+
+  await deliverInstagramText({
+    recipientId: testIgsid,
+    content: 'Hello from the account',
+    accessToken: 'instagram-login-token',
+    authMode: 'INSTAGRAM_LOGIN',
+    instagramAccountId: testPageId,
+    instagramUserId: '39251538000000001',
+    http: fakeHttp,
+  });
+
+  assert.match(httpCalls[0].url, /graph\.instagram\.com\/v\d+\.\d+\/me\/messages$/);
+  assert.equal(httpCalls[0].body.recipient.id, testIgsid);
+});
+
+test('provider acceptance without a message ID is not reported as SENT', async () => {
+  const fakeHttp = {
+    async post() {
+      return { status: 200, data: { recipient_id: testIgsid } };
+    },
+  };
+
+  await assert.rejects(
+    deliverInstagramText({
+      recipientId: testIgsid,
+      content: 'Hello',
+      accessToken: 'instagram-login-token',
+      authMode: 'INSTAGRAM_LOGIN',
+      http: fakeHttp,
+    }),
+    (error) => error instanceof InstagramDeliveryError && error.code === 'INSTAGRAM_PROVIDER_MESSAGE_ID_MISSING'
+  );
+});
+
 test('deliverInstagramMedia delivers supported image attachment via Graph API', async () => {
   const httpCalls = [];
   const fakeHttp = {
@@ -342,7 +384,7 @@ test('operator reply in Live Inbox dispatches to Instagram when configured', asy
   const delivered = [];
   const fakeHttp = {
     async post(url, body) {
-      delivered.push(body);
+      delivered.push({ url, body });
       return { data: { recipient_id: testIgsid, message_id: 'mid.ig.reply.1' } };
     },
   };
@@ -376,7 +418,13 @@ test('operator reply in Live Inbox dispatches to Instagram when configured', asy
                 external_channel_id: testPageId,
                 channel_type: 'INSTAGRAM',
                 channel_status: 'active',
-                config: { access_token: 'live-ig-token', page_id: testPageId },
+                config: {
+                  access_token: 'live-ig-token',
+                  auth_mode: 'INSTAGRAM_LOGIN',
+                  instagram_business_account_id: testPageId,
+                  instagram_user_id: '39251538000000001',
+                  page_id: testPageId,
+                },
               }],
             };
           }
@@ -404,7 +452,8 @@ test('operator reply in Live Inbox dispatches to Instagram when configured', asy
 
   assert.equal(result.delivery, 'SENT_TO_INSTAGRAM');
   assert.equal(delivered.length, 1);
-  assert.equal(delivered[0].message.text, 'Live agent reply to customer');
+  assert.match(delivered[0].url, /\/me\/messages$/);
+  assert.equal(delivered[0].body.message.text, 'Live agent reply to customer');
 });
 
 // ---------------------------------------------------------------------------
@@ -548,6 +597,56 @@ test('orchestrateInstagramInboundAiResponse generates and delivers AI response i
   assert.equal(outboundDMs[0].sender_action, 'typing_on');
   assert.equal(outboundDMs[1].message.text, 'We are open Monday through Friday, 9 AM to 6 PM.');
   assert.equal(outboundDMs[2].sender_action, 'typing_off');
+});
+
+test('orchestrateInstagramInboundAiResponse does not report delivery without transport configuration', async () => {
+  const statements = [];
+  const mockDb = {
+    async query(sql) {
+      statements.push(sql);
+      if (sql.includes('FROM ai_assistants')) {
+        return { rows: [{ id: assistantId, name: 'Instagram Assistant', system_prompt: 'Help customers.' }] };
+      }
+      if (sql.includes('FROM conversations')) {
+        return { rows: [{ id: conversationId, tenant_id: tenantId, channel_id: channelId, handling_mode: 'AI', handling_version: 1, status: 'open' }] };
+      }
+      if (sql.includes('INSERT INTO conversation_messages')) {
+        return { rows: [{ id: 'msg-no-transport', sender_type: 'ASSISTANT', content: 'Response.' }] };
+      }
+      return { rows: [] };
+    },
+    async connect() { return this; },
+    release() {},
+  };
+
+  const outcome = await orchestrateInstagramInboundAiResponse({
+    database: mockDb,
+    inboundState: {
+      integration: {
+        tenant_id: tenantId,
+        channel_id: channelId,
+        assistant_id: assistantId,
+        external_channel_id: testPageId,
+        config: { activation_policy: 'ALL_MESSAGES' },
+      },
+      conversation: {
+        id: conversationId,
+        status: 'open',
+        handling_mode: 'AI',
+        handling_version: 1,
+        communication_language: 'en',
+      },
+      shouldInvokeAi: true,
+      handlingVersion: 1,
+    },
+    senderIgsid: testIgsid,
+    text: 'What are your working hours?',
+    generateAiResponse: async () => 'Response.',
+  });
+
+  assert.equal(outcome.delivered, false);
+  assert.equal(outcome.reason, 'INSTAGRAM_DELIVERY_NOT_CONFIGURED');
+  assert.equal(statements.some((sql) => sql.includes("delivery_status = 'FAILED'")), true);
 });
 
 test('orchestrateInstagramInboundAiResponse suppresses automatic reply in MANUAL_ONLY default mode', async () => {
@@ -1023,7 +1122,7 @@ test('TEST J: AI generation failure does NOT fabricate generic greeting fallback
   const outboundDMs = [];
   const fakeHttp = {
     async post(url, body) {
-      outboundDMs.push(body);
+      if (body?.message?.text) outboundDMs.push(body);
       return { data: { recipient_id: testIgsid, message_id: 'mid.ai.j' } };
     },
   };
@@ -1135,7 +1234,7 @@ test('TEST M: Dashboard content and Instagram outbound content are identical for
         return { rows: [{ id: conversationId, tenant_id: tenantId, channel_id: channelId, handling_mode: 'AI', handling_version: 1, status: 'open' }] };
       }
       if (sql.includes('INSERT INTO conversation_messages')) {
-        persistedContent = params[2]; // content param
+        persistedContent = params[3]; // content param
         return { rows: [{ id: 'msg-parity-1', sender_type: 'ASSISTANT', content: persistedContent }] };
       }
       if (sql.includes('UPDATE conversation_messages')) {
@@ -1242,5 +1341,77 @@ test('TEST N: Successful delivery updates conversation_messages external_message
   assert.equal(outcome.delivered, true);
   assert.equal(outcome.deliveryResult.providerMessageId, 'mid.provider.confirmed.999');
   assert.equal(updatedExternalMid, 'mid.provider.confirmed.999');
+});
+
+test('TEST O: Meta delivery failure marks the persisted assistant message FAILED', async () => {
+  let failedStatusRecorded = false;
+  const fakeHttp = {
+    async post() {
+      const error = new Error('recipient mismatch');
+      error.response = { status: 400, data: { error: { code: 100, message: 'recipient mismatch' } } };
+      throw error;
+    },
+  };
+
+  const mockDb = {
+    async query(sql, params) {
+      if (sql.includes('FROM conversation_messages') && sql.includes('ORDER BY created_at DESC')) {
+        return { rows: [{ id: 'customer-msg-1', sender_type: 'CUSTOMER', content: 'Hello' }] };
+      }
+      if (sql.includes('FROM conversations')) {
+        return { rows: [{ id: conversationId, tenant_id: tenantId, channel_id: channelId, handling_mode: 'AI', handling_version: 1, status: 'open' }] };
+      }
+      if (sql.includes('INSERT INTO conversation_messages')) {
+        return { rows: [{ id: 'assistant-msg-failed-1', sender_type: 'ASSISTANT', content: 'Test' }] };
+      }
+      if (sql.includes("delivery_status = 'FAILED'")) {
+        failedStatusRecorded = params.includes('assistant-msg-failed-1') && params.includes(tenantId);
+        return { rowCount: 1, rows: [] };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+    async connect() { return this; },
+    release() {},
+  };
+
+  const inboundState = {
+    integration: {
+      tenant_id: tenantId,
+      channel_id: channelId,
+      assistant_id: assistantId,
+      external_channel_id: testPageId,
+      config: {
+        access_token: 'test-token',
+        auth_mode: 'INSTAGRAM_LOGIN',
+        instagram_business_account_id: testPageId,
+        instagram_user_id: '39251538000000001',
+        activation_policy: 'ALL_MESSAGES',
+      },
+    },
+    conversation: {
+      id: conversationId,
+      status: 'open',
+      handling_mode: 'AI',
+      handling_version: 1,
+      communication_language: 'tr',
+    },
+    customerMessage: { id: 'customer-msg-1' },
+    shouldInvokeAi: true,
+    handlingVersion: 1,
+  };
+
+  await assert.rejects(
+    orchestrateInstagramInboundAiResponse({
+      database: mockDb,
+      inboundState,
+      senderIgsid: testIgsid,
+      text: 'Test inquiry',
+      http: fakeHttp,
+      generateAiResponse: async () => 'Test response',
+    }),
+    /recipient mismatch/
+  );
+
+  assert.equal(failedStatusRecorded, true);
 });
 
