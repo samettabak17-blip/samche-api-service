@@ -16,6 +16,8 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
+process.env.DATABASE_URL = databaseUrl;
+
 const pool = new Pool({
   connectionString: databaseUrl,
   ssl: { rejectUnauthorized: false },
