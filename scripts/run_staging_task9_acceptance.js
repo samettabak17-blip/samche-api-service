@@ -57,6 +57,28 @@ async function main() {
 
   // 2. Forensic Tracing against samche_staging_db
   console.log('\n--- [STEP 2] FORENSIC READ-ONLY DATABASE TRACING ---');
+  const failedMsgRes = await pool.query(`
+    SELECT m.id AS msg_id, m.conversation_id, m.sender_type, m.content,
+           m.external_message_id, m.delivery_status, m.delivery_failure_code, m.created_at,
+           c.channel_id, c.customer_external_id, c.handling_mode,
+           tc.external_channel_id, ci.id AS integration_id, ci.config AS integration_config
+      FROM conversation_messages m
+      JOIN conversations c ON c.id = m.conversation_id
+      LEFT JOIN tenant_channels tc ON tc.id = c.channel_id
+      LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.integration_type = 'INSTAGRAM'
+     WHERE m.content ILIKE '%Samed bey%' OR m.content ILIKE '%Dubaide%' OR m.content ILIKE '%danışmanlarımızla%'
+     ORDER BY m.created_at DESC
+     LIMIT 5
+  `);
+  console.log('=== EXACT REAL FAILED MESSAGES TRACE ===');
+  for (const row of failedMsgRes.rows) {
+    console.log(`MSG_ID: ${row.msg_id} CONV_ID: ${row.conversation_id} SENDER: ${row.sender_type} STATUS: ${row.delivery_status} CODE: ${row.delivery_failure_code} EXT_ID: ${row.external_message_id} CREATED: ${row.created_at} IGSID: ${row.customer_external_id} CHAN: ${row.channel_id} INT_ID: ${row.integration_id}`);
+    console.log(`CONTENT: ${row.content}`);
+    console.log(`CONFIG: ${JSON.stringify(row.integration_config)}`);
+    console.log('---');
+  }
+  console.log('=== END EXACT REAL FAILED MESSAGES TRACE ===');
+
   console.log('\n--- [FORENSIC TRACE: REAL CUSTOMER MESSAGE AT 03:22] ---');
   const realConvRes = await pool.query(`
     SELECT c.id AS conversation_id, c.tenant_id, c.channel_id, c.customer_external_id,
