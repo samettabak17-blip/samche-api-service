@@ -41,19 +41,11 @@ async function main() {
   console.log('TARGET TENANT:', tenantId);
   console.log('API BASE:', apiBase);
 
-  // 1. Execute Migrations 094, 095, 096 directly on samche_staging_db
-  console.log('\n--- [STEP 1] EXECUTING MIGRATIONS 094, 095 & 096 ON STAGING DB ---');
-  const migration094Sql = fs.readFileSync('migrations/094_samche_main_knowledge_migration_and_cleanup.sql', 'utf8');
-  await pool.query(migration094Sql);
-  console.log('✓ Migration 094 executed successfully on staging PostgreSQL database.');
-
-  const migration095Sql = fs.readFileSync('migrations/095_purge_samche_legacy_test_knowledge.sql', 'utf8');
-  await pool.query(migration095Sql);
-  console.log('✓ Migration 095 executed successfully on staging PostgreSQL database.');
-
-  const migration096Sql = fs.readFileSync('migrations/096_canonical_archive_audit_events.sql', 'utf8');
-  await pool.query(migration096Sql);
-  console.log('✓ Migration 096 executed successfully on staging PostgreSQL database.');
+  // 1. Verify migrations ledger safely through canonical runner
+  console.log('\n--- [STEP 1] VERIFYING CANONICAL MIGRATIONS LEDGER ---');
+  const { runMigrations } = await import('../migrations/runMigrations.js');
+  await runMigrations({ database: pool });
+  console.log('✓ Canonical migrations ledger verified.');
 
   // 2. Forensic Tracing against samche_staging_db
   console.log('\n--- [STEP 2] FORENSIC READ-ONLY DATABASE TRACING ---');
