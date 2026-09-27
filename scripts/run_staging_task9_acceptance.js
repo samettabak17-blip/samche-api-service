@@ -290,12 +290,18 @@ async function main() {
     database: pool,
     tenantId,
     leadWhatsappDestination: '+971527288586',
+    leadNotificationTemplate: {
+      status: 'APPROVED',
+      name: 'instagram_qualified_lead',
+      language_code: 'tr',
+    },
   });
 
   const igStatus = await getTenantInstagramStatus({ database: pool, tenantId });
   console.log('INSTAGRAM CHANNEL STATUS READBACK:');
   console.log('   lead_whatsapp_configured:', igStatus.lead_whatsapp_configured);
   console.log('   lead_whatsapp_destination:', igStatus.lead_whatsapp_destination);
+  console.log('   lead_notification_template:', JSON.stringify(igStatus.lead_notification_template));
 
   // 7. Execute Controlled Real Instagram History Import
   console.log('\n--- [STEP 7] EXECUTING REAL INSTAGRAM HISTORY IMPORT ---');
