@@ -51,6 +51,8 @@ import {
   disconnectWhatsAppChannel,
   WhatsAppEmbeddedSignupError,
 } from '../services/whatsapp-embedded-signup-service.js';
+import { sendSilentInternalWhatsAppLeadNotification } from '../services/high-intent-lead-service.js';
+
 
 const webChatLogoUpload = multer({
   storage: multer.memoryStorage(),
@@ -1022,5 +1024,55 @@ router.get('/:tenantId/conversations/:conversationId/messages', requireTenantAcc
 const kbBody=async(req,res)=>{const{title,content,assistant_id=null,status='active'}=req.body;if(typeof title!=='string'||!title.trim()||typeof content!=='string'||!content.trim()||!['active','inactive'].includes(status)){res.status(400).json({error:'Invalid knowledge document body'});return null;}if(assistant_id&&(!isValidUUID(assistant_id)||(await query('SELECT id FROM ai_assistants WHERE id=$1 AND tenant_id=$2',[assistant_id,req.verified_tenant_id])).rowCount===0)){res.status(400).json({error:'Assistant must belong to this tenant'});return null;}return[title.trim(),content.trim(),assistant_id,status];};
 router.get('/:tenantId/knowledge-base',requireTenantAccess,async(req,res)=>{if(!tenant(req,res))return;const r=await query('SELECT * FROM knowledge_base_documents WHERE tenant_id=$1 ORDER BY created_at DESC',[req.verified_tenant_id]);res.json(r.rows);});
 router.post('/:tenantId/knowledge-base',requireTenantAccess,requireTenantAdmin,async(req,res)=>{if(!tenant(req,res))return;const b=await kbBody(req,res);if(!b)return;const r=await query('INSERT INTO knowledge_base_documents(title,content,assistant_id,status,tenant_id) VALUES($1,$2,$3,$4,$5) RETURNING *',[...b,req.verified_tenant_id]);res.status(201).json(r.rows[0]);});
+router.post('/:tenantId/conversations/:conversationId/lead-notification/retry', requireTenantAccess, async (req, res) => {
+  const { tenantId, conversationId } = req.params;
+  if (!isValidUUID(tenantId) || !isValidUUID(conversationId)) {
+    return res.status(400).json({ error: 'INVALID_PARAMETERS' });
+  }
+  try {
+    const leadRes = await pool.query(
+      `SELECT l.id AS lead_id, l.intent, l.temperature, l.lead_score, l.timeline, l.service_interest,
+              c.display_name, c.phone, conv.customer_external_id
+         FROM crm_leads l
+         JOIN conversations conv ON conv.id = l.conversation_id
+         LEFT JOIN crm_contacts c ON c.id = conv.contact_id
+        WHERE l.tenant_id = $1 AND l.conversation_id = $2
+        ORDER BY l.created_at DESC
+        LIMIT 1`,
+      [tenantId, conversationId]
+    );
+
+    const targetLead = leadRes.rows[0];
+    if (!targetLead) {
+      return res.status(404).json({ error: 'LEAD_NOT_FOUND', message: 'No qualified lead found for this conversation' });
+    }
+
+    const leadDetails = {
+      leadId: targetLead.lead_id,
+      customerName: targetLead.display_name || 'Customer',
+      instagramUsername: targetLead.customer_external_id ? targetLead.customer_external_id.replace(/^instagram:/, '') : null,
+      phone: targetLead.phone,
+      serviceRequested: targetLead.service_interest || 'Free Zone Şirket Kuruluşu',
+      requestedTime: targetLead.timeline || 'Yarın 14:00',
+      summary: 'High-intent appointment qualification',
+      source: 'INSTAGRAM',
+    };
+
+    const result = await sendSilentInternalWhatsAppLeadNotification({
+      tenantId,
+      conversationId,
+      leadDetails,
+      database: pool,
+      env: process.env,
+      forceRetry: true,
+    });
+
+    return res.json({ success: true, result });
+  } catch (err) {
+    console.error('LEAD_NOTIFICATION_RETRY_ROUTE_ERROR', err);
+    return res.status(500).json({ error: err.code || 'INTERNAL_ERROR', message: err.message });
+  }
+});
+
 for (const method of ['get','put','delete']) router[method]('/:tenantId/knowledge-base/:documentId',requireTenantAccess,...(method==='get'?[]:[requireTenantAdmin]),async(req,res)=>{if(!tenant(req,res)||!isValidUUID(req.params.documentId))return res.status(400).json({error:'Invalid document ID'});if(method==='get'){const r=await query('SELECT * FROM knowledge_base_documents WHERE id=$1 AND tenant_id=$2',[req.params.documentId,req.verified_tenant_id]);return r.rowCount?res.json(r.rows[0]):res.status(404).json({error:'Knowledge document not found'});}if(method==='delete'){const r=await query('DELETE FROM knowledge_base_documents WHERE id=$1 AND tenant_id=$2 RETURNING id',[req.params.documentId,req.verified_tenant_id]);return r.rowCount?res.json({message:'Knowledge document deleted successfully'}):res.status(404).json({error:'Knowledge document not found'});}const b=await kbBody(req,res);if(!b)return;const r=await query('UPDATE knowledge_base_documents SET title=$1,content=$2,assistant_id=$3,status=$4,updated_at=CURRENT_TIMESTAMP WHERE id=$5 AND tenant_id=$6 RETURNING *',[...b,req.params.documentId,req.verified_tenant_id]);return r.rowCount?res.json(r.rows[0]):res.status(404).json({error:'Knowledge document not found'});});
 export default router;

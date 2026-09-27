@@ -526,16 +526,41 @@ async function main() {
       source: 'INSTAGRAM',
     };
 
-    console.log('EXECUTING EXACTLY ONE CONTROLLED RETRY DISPATCH...');
+    console.log('EXECUTING EXACTLY ONE CONTROLLED RETRY DISPATCH VIA DEPLOYED API OR SERVICE...');
     const dispatchStart = Date.now();
-    ahmetRetryOutcome = await sendSilentInternalWhatsAppLeadNotification({
-      tenantId,
-      conversationId: ahmetConv.conversation_id,
-      leadDetails,
-      database: pool,
-      env: process.env,
-      forceRetry: true,
-    });
+    let apiCallSuccessful = false;
+
+    if (token) {
+      try {
+        console.log(`Calling POST ${apiBase}/api/v1/dashboard/${tenantId}/conversations/${ahmetConv.conversation_id}/lead-notification/retry`);
+        const apiRetryRes = await fetch(`${apiBase}/api/v1/dashboard/${tenantId}/conversations/${ahmetConv.conversation_id}/lead-notification/retry`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        const apiRetryJson = await apiRetryRes.json();
+        console.log('API RETRY RESPONSE:', apiRetryRes.status, JSON.stringify(apiRetryJson));
+        if (apiRetryRes.ok && apiRetryJson?.result) {
+          ahmetRetryOutcome = apiRetryJson.result;
+          apiCallSuccessful = true;
+        }
+      } catch (apiErr) {
+        console.warn('API Retry call failed, falling back to direct service dispatch:', apiErr.message);
+      }
+    }
+
+    if (!apiCallSuccessful) {
+      ahmetRetryOutcome = await sendSilentInternalWhatsAppLeadNotification({
+        tenantId,
+        conversationId: ahmetConv.conversation_id,
+        leadDetails,
+        database: pool,
+        env: process.env,
+        forceRetry: true,
+      });
+    }
 
     console.log('AHMET RETRY DISPATCH OUTCOME:', JSON.stringify(ahmetRetryOutcome, null, 2));
 
