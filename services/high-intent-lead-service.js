@@ -110,7 +110,7 @@ export function deriveInstagramLeadQualification({ customerMessages = [], contac
     .map((content) => String(content || '').trim())
     .filter(Boolean);
   const combined = contents.join('\n');
-  const detailCandidates = contents.slice(1).filter(isQualificationDetail);
+  const detailCandidates = contents.filter(isQualificationDetail);
   const structuredRequirement = detailCandidates.at(-1)?.slice(0, 240) || null;
   const phone = extractPhoneNumberFromText(combined) || contactPhone || null;
   const customerName = extractCustomerNameFromText(combined) || contactName || null;
