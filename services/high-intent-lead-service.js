@@ -77,7 +77,7 @@ export function extractCustomerNameFromText(text = '') {
 export function extractMeetingTimePreference(text = '') {
   if (typeof text !== 'string') return null;
   const match = text.match(
-    /(?:(?:yarın|pazartesi|salı|çarşamba|perşembe|cuma|cumartesi|pazar|bugün|haftaya)(?:[,\s]+(?:(?:dubai|türkiye|turkiye|utc|gmt)(?:\s+saati(?:yle)?)?|saat|\d{1,2}[:.]\d{2}))*(?:\s+\d{1,2}[:.]\d{2})?(?:\s+(?:dubai|türkiye|turkiye|utc|gmt)(?:\s+saati(?:yle)?)?)?|saat\s+\d{1,2}(?::\d{2})?|\d{1,2}\s+(?:ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık)(?:\s+\d{1,2}[:.]\d{2})?|\d{1,2}[:.]\d{2})/iu
+    /(?:(?:yarın|pazartesi|salı|çarşamba|perşembe|cuma|cumartesi|pazar|bugün|bugun|haftaya)(?:[,\s]+(?:(?:dubai|türkiye|turkiye|utc|gmt)(?:\s+saati(?:yle)?)?|saat|\d{1,2}[:.]\d{2}))*(?:\s+\d{1,2}[:.]\d{2})?(?:\s+(?:dubai|türkiye|turkiye|utc|gmt)(?:\s+saati(?:yle)?)?)?|saat\s+\d{1,2}(?::\d{2})?|\d{1,2}\s+(?:ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık)(?:\s+\d{1,2}[:.]\d{2})?|\d{1,2}[:.]\d{2})/iu
   );
   if (match) return match[0].trim();
   return null;

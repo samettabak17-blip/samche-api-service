@@ -457,6 +457,71 @@ async function main() {
   }
 
 
+  // 10. Real Ahmet Soysal Lead Notification Single Retry
+  console.log('\n--- [STEP 10] AHMET SOYSAL REAL LEAD NOTIFICATION RETRY ---');
+  const { evaluateAndProcessHighIntentLead } = await import('../services/high-intent-lead-service.js');
+  const ahmetConvRes = await pool.query(`
+    SELECT c.id AS conversation_id, c.tenant_id, c.channel_id, c.customer_external_id,
+           c.contact_id, c.handling_mode, c.status AS conv_status,
+           contact.display_name, contact.phone
+      FROM conversations c
+      JOIN crm_contacts contact ON contact.id = c.contact_id AND contact.tenant_id = c.tenant_id
+     WHERE c.tenant_id = $1
+       AND (contact.display_name ILIKE '%Ahmet%' OR contact.phone ILIKE '%5312404965%' OR c.customer_external_id ILIKE '%Ahmet%')
+     ORDER BY c.updated_at DESC
+     LIMIT 1
+  `, [tenantId]);
+
+  const ahmetConv = ahmetConvRes.rows[0];
+  let ahmetRetryOutcome = null;
+  if (ahmetConv) {
+    console.log('FOUND AHMET SOYSAL CONVERSATION:', {
+      conversation_id: ahmetConv.conversation_id,
+      customer_external_id: ahmetConv.customer_external_id,
+      display_name: ahmetConv.display_name,
+      phone: ahmetConv.phone,
+    });
+
+    const leadBefore = await pool.query(
+      `SELECT id, intent, temperature, lead_score, timeline, service_interest
+         FROM crm_leads WHERE tenant_id = $1 AND conversation_id = $2`,
+      [tenantId, ahmetConv.conversation_id]
+    );
+    console.log('LEAD RECORD BEFORE:', leadBefore.rows[0]);
+
+    const actBefore = await pool.query(
+      `SELECT id, event_type, metadata, created_at
+         FROM crm_activities WHERE tenant_id = $1 AND conversation_id = $2 AND event_type = 'AI_QUALIFICATION'`,
+      [tenantId, ahmetConv.conversation_id]
+    );
+    console.log('CONSULTATION ACTIVITY BEFORE:', actBefore.rows);
+
+    const analysisBefore = await pool.query(
+      `SELECT id, analysis_hash, signals, analyzed_at
+         FROM crm_lead_analyses WHERE tenant_id = $1 AND conversation_id = $2 ORDER BY analyzed_at DESC LIMIT 1`,
+      [tenantId, ahmetConv.conversation_id]
+    );
+    console.log('LEAD ANALYSIS SIGNALS BEFORE:', analysisBefore.rows[0]?.signals);
+
+    // Execute single retry of notification dispatch
+    ahmetRetryOutcome = await evaluateAndProcessHighIntentLead({
+      tenantId,
+      conversationId: ahmetConv.conversation_id,
+      database: pool,
+      env: process.env,
+    });
+    console.log('AHMET RETRY OUTCOME:', JSON.stringify(ahmetRetryOutcome, null, 2));
+
+    const analysisAfter = await pool.query(
+      `SELECT id, analysis_hash, signals, analyzed_at
+         FROM crm_lead_analyses WHERE tenant_id = $1 AND conversation_id = $2 ORDER BY analyzed_at DESC LIMIT 1`,
+      [tenantId, ahmetConv.conversation_id]
+    );
+    console.log('LEAD ANALYSIS SIGNALS AFTER:', analysisAfter.rows[0]?.signals);
+  } else {
+    console.warn('AHMET SOYSAL CONVERSATION NOT FOUND BY DISPLAY NAME / PHONE');
+  }
+
   // 9. Print Structured Acceptance Report
   console.log('\n==================================================');
   console.log('TASK 9 FINAL EXECUTION REPORT');
