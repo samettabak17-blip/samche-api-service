@@ -57,6 +57,35 @@ async function main() {
 
   // 2. Forensic Tracing against samche_staging_db
   console.log('\n--- [STEP 2] FORENSIC READ-ONLY DATABASE TRACING ---');
+  console.log('\n--- [FORENSIC TRACE: REAL CUSTOMER MESSAGE AT 03:22] ---');
+  const realConvRes = await pool.query(`
+    SELECT c.id AS conversation_id, c.tenant_id, c.channel_id, c.customer_external_id,
+           c.contact_id, c.handling_mode, c.status AS conv_status, c.ai_behavior_override,
+           tc.external_channel_id, ci.id AS integration_id, ci.config AS integration_config
+      FROM conversations c
+      LEFT JOIN tenant_channels tc ON tc.id = c.channel_id
+      LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.integration_type = 'INSTAGRAM'
+     WHERE c.customer_external_id LIKE '%1784%' OR c.customer_external_id LIKE '%suleyman%' OR c.id IN (
+       SELECT conversation_id FROM conversation_messages WHERE content LIKE '%Dubaide şirket kurmak%' OR content LIKE '%Samed bey merhabalar%'
+     )
+     ORDER BY c.updated_at DESC
+     LIMIT 5
+  `);
+  console.log('REAL CONVERSATION MATCHES:', JSON.stringify(realConvRes.rows, null, 2));
+
+  if (realConvRes.rows.length > 0) {
+    const targetConvId = realConvRes.rows[0].conversation_id;
+    const realMsgsRes = await pool.query(`
+      SELECT id, sender_type, content, external_message_id, delivery_status,
+             delivery_failure_code, delivery_status_updated_at, created_at
+        FROM conversation_messages
+       WHERE conversation_id = $1
+       ORDER BY created_at DESC
+       LIMIT 10
+    `, [targetConvId]);
+    console.log('REAL MESSAGES FOR TARGET CONVERSATION:', JSON.stringify(realMsgsRes.rows, null, 2));
+  }
+
   const tenantRes = await pool.query('SELECT id, name, status, plan_code FROM tenants WHERE id = $1', [tenantId]);
   console.log('TENANT ROW:', tenantRes.rows[0]);
 
