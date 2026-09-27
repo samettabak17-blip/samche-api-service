@@ -26,9 +26,9 @@ const CONSULTATION_SIGNAL_PATTERNS = [
 const PHONE_EXTRACTION_REGEX = /\+?\d(?:[\d().\s-]{5,20}\d)/;
 
 const CONCRETE_BUSINESS_REQUIREMENT_PATTERNS = [
-  /(?:şirket\s+kur|şirket\s+aç|firma\s+kur|kurulum\s+yap|lisans\s+al|free\s*zone|mainland)/iu,
-  /(?:e-ticaret|online\s+satış|danışmanlık|yazılım|teknoloji|pazarlama|ithalat|ihracat|ticaret|gayrimenkul|turizm|restoran|ajans|lojistik|inşaat|finans|kripto|holding)/iu,
-  /(?:faaliyet\s+alan|sektör|hizmet|banka\s+hesab|vize\s+al|oturum\s+vize)/iu,
+  /(?:şirket\w*\s+kur|şirket\w*\s+aç|firma\w*\s+kur|kurulum\w*\s+yap|lisans\w*\s+al|free\s*zone|mainland)/iu,
+  /(?:e-ticaret|online\s+satış|danışmanlık|yazılım|saas|teknoloji|pazarlama|ithalat|ihracat|ticaret|gayrimenkul|turizm|restoran|ajans|lojistik|inşaat|finans|kripto|holding)/iu,
+  /(?:faaliyet\s+alan|sektör|hizmet|banka\s+hesab|vize\w*\s+al|oturum\w*\s+vize)/iu,
 ];
 
 /**

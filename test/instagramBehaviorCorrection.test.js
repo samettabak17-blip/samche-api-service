@@ -9,6 +9,7 @@ import {
 import {
   deriveInstagramLeadQualification,
   evaluateAndProcessHighIntentLead,
+  formatInternalWhatsAppLeadNotification,
 } from '../services/high-intent-lead-service.js';
 
 describe('Final Instagram Behavior Correction: Strictly Request-Driven Pricing & Natural Progressive Qualification', () => {
@@ -246,6 +247,220 @@ describe('Final Instagram Behavior Correction: Strictly Request-Driven Pricing &
     assert.equal(computedHash, expectedPolicySha256, 'Authoritative Main policy hash must remain exactly unchanged');
   });
 
+
+  it('TEST G: Internal notification renderer uses 0 LLM calls and 0 AI tokens', () => {
+    const text = formatInternalWhatsAppLeadNotification({
+      customerName: 'Ahmet Yılmaz',
+      instagramUsername: 'ahmetyilmaz',
+      phone: '+905321112233',
+      serviceRequested: 'Free Zone Şirket Kuruluşu',
+      activity: 'SaaS Yazılım',
+      structuredRequirement: 'Dubai üzerinden global SaaS şirketi',
+      requestedTime: '15:00',
+      timezone: 'Asia/Dubai',
+      source: 'Instagram DM',
+    });
+
+    assert.ok(text.includes('YENİ INSTAGRAM LEAD'));
+    assert.ok(text.includes('Müşteri: Ahmet Yılmaz'));
+    assert.ok(text.includes('Telefon / WhatsApp: +905321112233'));
+    assert.ok(text.includes('Faaliyet: SaaS Yazılım'));
+    assert.ok(!text.includes('WhatsApp numaranız üzerinden'));
+  });
+
+  it('TEST H: Same provider inbound MID delivered twice results in exactly 1 assistant reply and 1 outbound delivery', async () => {
+    let assistantMessageCount = 0;
+    const outboundDMs = [];
+    const fakeHttp = {
+      async post(url, body) {
+        outboundDMs.push(body);
+        return { data: { recipient_id: '8891427900000001', message_id: 'mid.h.1' } };
+      },
+    };
+
+    const insertedMessages = [];
+    const mockDb = {
+      async query(sql, params) {
+        if (sql.includes('FROM conversations')) {
+          return { rows: [{ id: 'conv-test-h', tenant_id: 'tenant-1', channel_id: 'chan-1', status: 'open', handling_mode: 'AI', handling_version: 1 }] };
+        }
+        if (sql.includes('FROM conversation_messages') && sql.includes('ORDER BY created_at DESC')) {
+          return { rows: insertedMessages.slice().reverse() };
+        }
+        if (sql.includes('INSERT INTO conversation_messages')) {
+          const idempotencyKey = params?.[5];
+          if (idempotencyKey && insertedMessages.some(m => m.idempotency_key === idempotencyKey)) {
+            return { rows: [] }; // ON CONFLICT DO NOTHING
+          }
+          const msg = { id: `msg-${insertedMessages.length + 1}`, sender_type: 'ASSISTANT', content: params?.[3], idempotency_key: idempotencyKey };
+          insertedMessages.push(msg);
+          assistantMessageCount++;
+          return { rows: [msg] };
+        }
+        if (sql.includes('UPDATE conversation_messages')) {
+          return { rows: [{ id: 'msg-1' }] };
+        }
+        return { rows: [] };
+      },
+      async connect() { return this; },
+      release() {},
+    };
+
+    const customerMsg = { id: 'cust-msg-unique-1', sender_type: 'CUSTOMER', content: 'SaaS şirketi kurmak istiyorum' };
+    insertedMessages.push(customerMsg);
+
+    const inboundState = {
+      integration: {
+        tenant_id: 'tenant-1',
+        channel_id: 'chan-1',
+        assistant_id: 'ast-1',
+        external_channel_id: '17841400000000001',
+        config: { access_token: 'token-1', page_id: '17841400000000001', activation_policy: 'ALL_MESSAGES' },
+      },
+      conversation: { id: 'conv-test-h', status: 'open', handling_mode: 'AI', handling_version: 1 },
+      customerMessage: customerMsg,
+      shouldInvokeAi: true,
+      handlingVersion: 1,
+    };
+
+    // First delivery -> generates and delivers
+    const res1 = await orchestrateInstagramInboundAiResponse({
+      database: mockDb,
+      inboundState,
+      senderIgsid: '8891427900000001',
+      text: 'SaaS şirketi kurmak istiyorum',
+      http: fakeHttp,
+      generateAiResponse: async () => 'Harika, şirket detaylarını netleştirelim.',
+    });
+
+    assert.equal(res1.delivered, true);
+    assert.equal(assistantMessageCount, 1);
+
+    // Second delivery of same message -> skipped via idempotency
+    const res2 = await orchestrateInstagramInboundAiResponse({
+      database: mockDb,
+      inboundState,
+      senderIgsid: '8891427900000001',
+      text: 'SaaS şirketi kurmak istiyorum',
+      http: fakeHttp,
+      generateAiResponse: async () => 'Harika, şirket detaylarını netleştirelim.',
+    });
+
+    assert.equal(Boolean(res2.delivered), false);
+    assert.equal(assistantMessageCount, 1, 'Exactly ONE assistant message must be persisted');
+    const actualDMs = outboundDMs.filter(d => d?.message?.text);
+    assert.equal(actualDMs.length, 1, 'Exactly ONE outbound DM must be delivered');
+  });
+
+  it('TEST I: High-intent qualification workflow does NOT generate a second customer-facing response', async () => {
+    const executedQueries = [];
+    const mockDb = {
+      async query(sql, params) {
+        executedQueries.push({ sql, params });
+        if (sql.includes('FROM conversations')) {
+          return { rows: [{ id: 'conv-test-i', tenant_id: 't-1', channel_id: 'ch-1', customer_external_id: 'instagram:u1', contact_id: 'ct-1', channel_type: 'INSTAGRAM', contact_name: 'Ahmet' }] };
+        }
+        if (sql.includes('FROM conversation_messages')) {
+          return { rows: [
+            { id: 'm1', sender_type: 'CUSTOMER', content: "SaaS şirketi kurmak istiyorum, görüşelim." },
+            { id: 'm2', sender_type: 'CUSTOMER', content: "Numaram +971501112233, yarın 15:00 uygunum." },
+          ] };
+        }
+        if (sql.includes('SELECT id FROM crm_leads')) return { rows: [{ id: 'lead-1' }] };
+        if (sql.includes('SELECT id FROM crm_pipeline_stages')) return { rows: [{ id: 'stage-1' }] };
+        if (sql.includes('SELECT ci.config AS ig_config')) {
+          return { rows: [{ ig_config: { lead_notification_enabled: true, lead_whatsapp_destination: '+971527288586', lead_notification_template: { status: 'APPROVED', name: 'instagram_qualified_lead', language_code: 'tr' } } }] };
+        }
+        if (sql.includes('SELECT tc.external_channel_id')) return { rows: [{ external_channel_id: '1234567890', wa_config: {} }] };
+        return { rows: [] };
+      },
+      async connect() { return this; },
+      release() {},
+    };
+
+    const httpCalls = [];
+    const result = await evaluateAndProcessHighIntentLead({
+      tenantId: 't-1',
+      conversationId: 'conv-test-i',
+      database: mockDb,
+      httpClient: { post: async (url, payload) => { httpCalls.push({ url, payload }); return { status: 200, data: { messages: [{ id: 'wamid.1' }] } }; } },
+      env: { WHATSAPP_PHONE_NUMBER_ID: '1234567890', WHATSAPP_TOKEN: 'token' },
+    });
+
+    assert.equal(result.qualified, true);
+    // Ensure high intent lead workflow only updates CRM & internal notification, NEVER inserts customer-facing message
+    const assistantMessageInsert = executedQueries.find(q => q.sql.includes('INSERT INTO conversation_messages') && q.params?.includes('ASSISTANT'));
+    assert.equal(assistantMessageInsert, undefined, 'High intent workflow must NEVER create customer-facing message');
+  });
+
+  it('TEST J: Concurrent duplicate webhook requests for same conversation produce at most 1 AI reply', async () => {
+    let aiGenerationInvocations = 0;
+    const fakeHttp = {
+      async post() {
+        return { data: { recipient_id: '8891427900000001', message_id: 'mid.j.1' } };
+      },
+    };
+
+    const mockDb = {
+      async query(sql) {
+        if (sql.includes('FROM conversations')) {
+          return { rows: [{ id: 'conv-test-j', tenant_id: 'tenant-1', channel_id: 'chan-1', status: 'open', handling_mode: 'AI', handling_version: 1 }] };
+        }
+        if (sql.includes('INSERT INTO conversation_messages') || sql.includes('UPDATE conversation_messages')) {
+          return { rows: [{ id: 'msg-j-1', sender_type: 'ASSISTANT' }] };
+        }
+        return { rows: [] };
+      },
+      async connect() { return this; },
+      release() {},
+    };
+
+    const inboundState = {
+      integration: {
+        tenant_id: 'tenant-1',
+        channel_id: 'chan-1',
+        assistant_id: 'ast-1',
+        external_channel_id: '17841400000000001',
+        config: { access_token: 'token-1', page_id: '17841400000000001', activation_policy: 'ALL_MESSAGES' },
+      },
+      conversation: { id: 'conv-test-j', status: 'open', handling_mode: 'AI', handling_version: 1 },
+      customerMessage: { id: 'cust-msg-j-1' },
+      shouldInvokeAi: true,
+      handlingVersion: 1,
+    };
+
+    // Run 2 parallel concurrent orchestrations for the exact same conversation
+    const [res1, res2] = await Promise.all([
+      orchestrateInstagramInboundAiResponse({
+        database: mockDb,
+        inboundState,
+        senderIgsid: '8891427900000001',
+        text: 'Parallel test',
+        http: fakeHttp,
+        generateAiResponse: async () => {
+          aiGenerationInvocations++;
+          await new Promise((r) => setTimeout(r, 50));
+          return 'Response';
+        },
+      }),
+      orchestrateInstagramInboundAiResponse({
+        database: mockDb,
+        inboundState,
+        senderIgsid: '8891427900000001',
+        text: 'Parallel test',
+        http: fakeHttp,
+        generateAiResponse: async () => {
+          aiGenerationInvocations++;
+          await new Promise((r) => setTimeout(r, 50));
+          return 'Response';
+        },
+      }),
+    ]);
+
+    assert.equal(aiGenerationInvocations, 1, 'Only 1 parallel generation must proceed');
+    const successfulDeliveries = [res1, res2].filter(r => r.delivered === true);
+    assert.equal(successfulDeliveries.length, 1, 'Exactly 1 concurrent orchestration must deliver');
+  });
 
 
 });

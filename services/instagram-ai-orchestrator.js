@@ -84,7 +84,7 @@ export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
   '     6. Preferred meeting day/time and availability (e.g. "Görüşme için hangi gün ve saat sizin için uygun olur?")',
   '   - USE INFORMATION ALREADY PROVIDED (NEVER ASK REDUNDANTLY): If the customer already provided details in earlier turns (e.g. SaaS/software, clients in Turkey, 1 month timeline), treat them as collected facts. NEVER ask for sector/activity or timeline again if already stated. Move directly to the NEXT missing detail (e.g. partner count, visa count, or contact details).',
   '   - DO NOT proactively ask or introduce residency/visa questions (do not ask about visa or ask "Kaç adet oturum vizesi gerekecek?" merely because the customer asked about company formation) unless the customer explicitly asks about residency/visas or states a visa requirement. Visa count IS allowed as part of genuine company formation qualification once contextually relevant.',
-  '   - SAFE ACKNOWLEDGEMENT WITHOUT FAKE CONFIRMATION: When the customer shares their availability, acknowledge naturally and record their preferred timing as a pending appointment request without fabricating a confirmed calendar slot (e.g. "Teşekkür ederim. Görüşme talebinizi ve uygun olduğunuz zamanı aldım."). NEVER say "Randevunuz kesinleşti." unless actual confirmation exists.',
+  '   - SAFE ACKNOWLEDGEMENT WITHOUT FAKE CONFIRMATION: If customer provides their phone/WhatsApp number and preferred availability (day/time) is NOT yet collected, DO NOT say the meeting request is complete and DO NOT say you will contact them on WhatsApp. Instead, ask naturally for their availability (e.g. "Teşekkürler Ahmet Bey. Görüşme için size uygun gün ve saat nedir?"). When BOTH phone and preferred availability are collected, acknowledge naturally and record their preferred timing as a pending appointment request (e.g. "Teşekkür ederim Ahmet Bey. Görüşme talebinizi ve uygun olduğunuz zamanı aldım."). NEVER say "Randevunuz kesinleşti." unless actual confirmation exists.',
   '6. CUSTOMER CONTROLS THE TOPIC:',
   '   - If during appointment qualification the customer asks a question (e.g. pricing, banking, visas, process):',
   '     * Answer THAT specific question directly and factually according to authoritative policy.',
@@ -92,6 +92,7 @@ export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
   '     * Then smoothly and naturally continue collecting the missing appointment qualification details.',
   '7. STRICTLY FORBIDDEN CORPORATE & CALL-CENTER PHRASES (NEVER USE ANY OF THESE):',
   '   - DO NOT use stiff or corporate artificial phrases (danışmanlarımız, danışmanlarımızla görüşme, temsilcilerimiz, ekibimiz, ekibimiz sizinle iletişime geçecektir, ilgili birimimiz, görüşmeyi organize edebiliriz, görüşmenizin daha verimli geçmesi için, size özel bir yol haritası sunabilmemiz adına, size özel bir ön çalışma ileterek süreci başlatabiliriz, birkaç temel bilgiye ihtiyacımız var).',
+  '   - DO NOT say "WhatsApp numaranız üzerinden sizinle iletişime geçilecektir", "WhatsApp üzerinden size ulaşacağız", "WhatsApp\'tan iletişime geçilecektir". The customer\'s WhatsApp is collected as contact details only; the customer must NEVER be told about the internal notification mechanism.',
   '   - DO NOT say "sizi ilgili kişiye aktaracağım", "sizi Samed Bey\'e aktarıyorum", "canlı temsilciye aktarıyorum", "bir temsilci devralacak", "talebinizi WhatsApp\'a iletiyorum". Internal escalation to Samed via WhatsApp is completely silent.',
   '   - DO NOT introduce yourself as an "AI", "AI Assistant", "bot", or "virtual assistant".',
   '   - Do NOT falsely explicitly claim "Ben Samed\'im" if identity is directly questioned. Speak directly, humanly, and professionally.',
@@ -277,6 +278,8 @@ async function defaultGenerateInstagramAiResponse({
   }
 }
 
+const activeInstagramOrchestrations = new Set();
+
 export async function orchestrateInstagramInboundAiResponse({
   database = pool,
   inboundState,
@@ -297,10 +300,18 @@ export async function orchestrateInstagramInboundAiResponse({
   const assistantId = integration.assistant_id;
   const assistantModel = integration.assistant_model || null;
 
-  const accessToken = integration.config?.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
-  const accountId = integration.config?.instagram_account_id || integration.config?.instagram_business_account_id || integration.config?.page_id || integration.external_channel_id;
-  const instagramUserId = integration.config?.instagram_user_id || null;
-  const authMode = integration.config?.auth_mode || null;
+  const orchestrationKey = `${tenantId}:${conversationId}`;
+  if (activeInstagramOrchestrations.has(orchestrationKey)) {
+    console.info('INSTAGRAM_AI_ORCHESTRATION_ALREADY_IN_FLIGHT conversationId=' + conversationId);
+    return { aiInvoked: false, skipped: true, duplicate: true, reason: 'ORCHESTRATION_IN_FLIGHT' };
+  }
+  activeInstagramOrchestrations.add(orchestrationKey);
+
+  try {
+    const accessToken = integration.config?.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+    const accountId = integration.config?.instagram_account_id || integration.config?.instagram_business_account_id || integration.config?.page_id || integration.external_channel_id;
+    const instagramUserId = integration.config?.instagram_user_id || null;
+    const authMode = integration.config?.auth_mode || null;
 
   // 1. Human Support Intent check (Appointments qualify conversationally without visible transfer)
   const humanSupport = parseCustomerHumanSupportRequest(text);
@@ -410,6 +421,19 @@ export async function orchestrateInstagramInboundAiResponse({
       const latest = msgCheck.rows?.[0];
       if (latest && latest.sender_type !== 'CUSTOMER') {
         return { skipped: true, reason: 'ALREADY_ANSWERED' };
+      }
+
+      const customerMsgId = inboundState.customerMessage?.id;
+      if (customerMsgId) {
+        const existingAssistantMsg = await client.query(
+          `SELECT id FROM conversation_messages
+            WHERE tenant_id = $1 AND conversation_id = $2 AND sender_type = 'ASSISTANT' AND idempotency_key = $3
+            LIMIT 1`,
+          [tenantId, conversationId, `instagram-ai:${customerMsgId}`]
+        );
+        if (existingAssistantMsg.rowCount > 0) {
+          return { skipped: true, duplicate: true, reason: 'ASSISTANT_REPLY_ALREADY_EXISTS' };
+        }
       }
     } finally {
       if (isPool && typeof client?.release === 'function') {
@@ -538,6 +562,17 @@ export async function orchestrateInstagramInboundAiResponse({
     return { delivered: false, dropped: true, reason: 'CONVERSATION_TAKEN_OVER' };
   }
 
+  if (persisted.duplicate) {
+    console.info('INSTAGRAM_AI_RESPONSE_DROPPED reason=DUPLICATE_IDEMPOTENCY_KEY');
+    return {
+      aiInvoked: false,
+      delivered: false,
+      duplicate: true,
+      reason: 'DUPLICATE_PERSIST_SKIPPED',
+      assistantMessageId: persisted.message?.id || null,
+    };
+  }
+
   if (!accessToken || !senderIgsid) {
     const transportError = Object.assign(new Error('Instagram delivery transport is not configured'), {
       code: 'INSTAGRAM_DELIVERY_NOT_CONFIGURED',
@@ -618,8 +653,9 @@ export async function orchestrateInstagramInboundAiResponse({
     deliveryResult,
     assistantMessageId: persisted.message?.id || null,
   };
-
-
+  } finally {
+    activeInstagramOrchestrations.delete(orchestrationKey);
+  }
 }
 
 /**
