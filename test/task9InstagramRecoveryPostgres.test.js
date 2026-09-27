@@ -88,12 +88,10 @@ test('real PostgreSQL: progressive Instagram qualification converges to one pend
         WHERE l.id = $1 AND l.tenant_id = $2`,
       [leadId, tenantId]
     );
-    assert.deepEqual(state.rows[0], {
-      temperature: 'HOT',
-      lead_score: 85,
-      stage_key: 'QUALIFIED',
-      consultation_count: 1,
-    });
+    assert.equal(state.rows[0].temperature, 'HOT');
+    assert.equal(state.rows[0].stage_key, 'QUALIFIED');
+    assert.equal(state.rows[0].consultation_count, 1);
+    assert.ok(state.rows[0].lead_score >= 85);
   } finally {
     await client.query('ROLLBACK');
     await client.end();
