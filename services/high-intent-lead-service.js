@@ -838,10 +838,10 @@ export async function reconstructLeadDetailsFromConversation({
               act.metadata AS activity_metadata
          FROM crm_leads l
          LEFT JOIN crm_activities act ON act.lead_id = l.id AND act.tenant_id = l.tenant_id AND act.event_type = 'AI_QUALIFICATION'
-        WHERE l.tenant_id = $1 AND (l.conversation_id = $2 OR (conv.contact_id IS NOT NULL AND l.contact_id = $3))
+        WHERE l.tenant_id = $1 AND (l.conversation_id = $2 OR ($3::uuid IS NOT NULL AND l.contact_id = $3))
         ORDER BY l.created_at DESC
         LIMIT 1`,
-      [tenantId, conversationId, conv.contact_id]
+      [tenantId, conversationId, conv.contact_id || null]
     );
     const lead = leadRes.rows[0];
 
