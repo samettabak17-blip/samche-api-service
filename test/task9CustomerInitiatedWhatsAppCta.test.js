@@ -424,17 +424,393 @@ describe('Task 9: Customer-Initiated WhatsApp Contact CTA Full Acceptance & Regr
       text: 'Numaram +90 531 240 49 65, bugün 18:00 uygunum.',
       http: mockHttp,
       applyPacing: false,
+      generateAiResponse: async () => "Bilgilerinizi aldım. Görüşme detaylarınızı iletiyorum.",
     });
 
     assert.equal(result.delivered, true);
-    assert.equal(result.qualified, true);
-    assert.ok(result.responseText.includes('Bilgilerinizi aldım. Aşağıdaki bağlantı üzerinden WhatsApp\'tan doğrudan iletişime geçebilirsiniz:'));
-    assert.ok(result.responseText.includes('https://wa.me/971527288586?text='));
+    assert.equal(result.aiInvoked, true);
+
+    const outcome = await evaluateAndProcessHighIntentLead({
+      tenantId: 't-samche',
+      conversationId: 'conv-e2e',
+      database: new MockDatabasePool(client),
+    });
+
+    assert.equal(outcome.qualified, true);
+    assert.ok(outcome.ctaUrl.startsWith('https://wa.me/971527288586?text='));
     const messageDeliveries = httpCalls.filter((c) => c.payload?.message?.text);
     assert.equal(messageDeliveries.length, 1);
-    assert.ok(messageDeliveries[0].payload.message.text.includes('https://wa.me/971527288586'));
   });
 
+  // REGRESSION TEST 1: AI_ONLY + MANUAL_ONLY
+  it('REGRESSION TEST 1: First inbound with meeting request under AI_ONLY + MANUAL_ONLY generates normal AI response without premature CTA', async () => {
+    let aiGenerated = false;
+    const outboundDMs = [];
+    const client = new MockDatabaseClient({
+      queries: {
+        'FROM conversations': () => ({
+          rowCount: 1,
+          rows: [{ id: 'conv-r1', tenant_id: 't-1', status: 'open', handling_mode: 'AI', handling_version: 1, contact_id: 'ct-r1', ai_behavior_override: 'AI_ONLY' }],
+        }),
+        'SELECT c.ai_behavior_override': () => ({
+          rowCount: 1,
+          rows: [{ contact_override: 'AI_ONLY', conv_override: 'AI_ONLY' }],
+        }),
+        'FROM conversation_messages': () => ({
+          rowCount: 1,
+          rows: [{ id: 'm-r1', sender_type: 'CUSTOMER', content: "Samed Bey merhaba. youtube videolarizi izledim.dubaide sirket kurulumu icin Sizinle görüşebilir miyim?" }],
+        }),
+        'INSERT INTO conversation_messages': () => ({
+          rowCount: 1,
+          rows: [{ id: 'asst-r1', sender_type: 'ASSISTANT' }],
+        }),
+      },
+    });
+
+    const inboundState = {
+      duplicate: false,
+      handlingVersion: 1,
+      integration: {
+        tenant_id: 't-1',
+        assistant_id: 'ast-1',
+        external_channel_id: '17841400000000001',
+        config: { access_token: 'valid_tok', instagram_account_id: '17841400000000001', activation_policy: 'MANUAL_ONLY' },
+      },
+      conversation: {
+        id: 'conv-r1',
+        tenant_id: 't-1',
+        contact_id: 'ct-r1',
+        customer_external_id: 'instagram:10203040',
+        status: 'open',
+        handling_mode: 'AI',
+        handling_version: 1,
+        ai_behavior_override: 'AI_ONLY',
+      },
+      shouldInvokeAi: true,
+    };
+
+    const result = await orchestrateInstagramInboundAiResponse({
+      database: new MockDatabasePool(client),
+      inboundState,
+      senderIgsid: '10203040',
+      text: "Samed Bey merhaba. youtube videolarizi izledim.dubaide sirket kurulumu icin Sizinle görüşebilir miyim?",
+      http: { post: async (url, p) => { outboundDMs.push(p); return { data: { message_id: 'mid.r1' } }; } },
+      applyPacing: false,
+      generateAiResponse: async () => {
+        aiGenerated = true;
+        return "Merhaba, Dubai'de şirket kurulumu hakkında görüşmekten memnuniyet duyarım. Hangi sektörde faaliyet göstermeyi planlıyorsunuz? Size ulaşabileceğimiz iletişim numaranızı paylaşabilir misiniz?";
+      },
+    });
+
+    assert.equal(aiGenerated, true, 'AI must generate a conversational reply');
+    assert.equal(result.delivered, true, 'Normal Instagram outbound must occur');
+    assert.ok(result.responseText.includes('şirket kurulumu'), 'Must begin progressive qualification naturally');
+    assert.equal(result.responseText.includes('https://wa.me/'), false, 'Must NOT emit CTA on incomplete qualification');
+    assert.equal(inboundState.conversation.handling_mode, 'AI', 'Must not force human mode');
+  });
+
+  // REGRESSION TEST 2: NEVER_AI
+  it('REGRESSION TEST 2: Contact with NEVER_AI override strictly suppresses AI and CTA generation', async () => {
+    let aiCalled = false;
+    const client = new MockDatabaseClient({
+      queries: {
+        'SELECT c.ai_behavior_override': () => ({
+          rowCount: 1,
+          rows: [{ contact_override: 'NEVER_AI', conv_override: 'NEVER_AI' }],
+        }),
+      },
+    });
+    const inboundState = {
+      duplicate: false,
+      handlingVersion: 1,
+      integration: {
+        tenant_id: 't-1',
+        assistant_id: 'ast-1',
+        external_channel_id: '17841400000000001',
+        config: { access_token: 'valid_tok', instagram_account_id: '17841400000000001', activation_policy: 'ALL_MESSAGES' },
+      },
+      conversation: {
+        id: 'conv-r2',
+        tenant_id: 't-1',
+        contact_id: 'ct-r2',
+        status: 'open',
+        handling_mode: 'AI',
+        handling_version: 1,
+        ai_behavior_override: 'NEVER_AI',
+      },
+      shouldInvokeAi: true,
+    };
+    const result = await orchestrateInstagramInboundAiResponse({
+      database: new MockDatabasePool(client),
+      inboundState,
+      senderIgsid: '10203040',
+      text: 'Randevu almak istiyorum numaram +905321112233',
+      generateAiResponse: async () => { aiCalled = true; return 'AI reply'; },
+      applyPacing: false,
+    });
+    assert.equal(result.aiInvoked, false);
+    assert.equal(result.suppressed, true);
+    assert.equal(aiCalled, false);
+  });
+  // REGRESSION TEST 3: MANUAL_ONLY WITHOUT OVERRIDE
+  it('REGRESSION TEST 3: MANUAL_ONLY channel without contact override suppresses AI normally', async () => {
+    const evalRes = await evaluateChannelAiActivationPolicy({
+      messageText: 'Dubai şirket kurulumu hakkında bilgi alabilir miyim?',
+      conversation: { status: 'open', handling_mode: 'AI', ai_behavior_override: 'AUTOMATIC' },
+      channelConfig: { activation_policy: 'MANUAL_ONLY' },
+    });
+    assert.equal(evalRes.eligible, false);
+    assert.equal(evalRes.decision, 'SUPPRESSED');
+    assert.equal(evalRes.reasonCode, 'POLICY_MANUAL_ONLY');
+  });
+
+  // REGRESSION TEST 4: QUALIFICATION IN PROGRESS
+  it('REGRESSION TEST 4: Qualification in progress asks missing info without CTA', async () => {
+    let aiGenerated = false;
+    const client = new MockDatabaseClient({
+      queries: {
+        'FROM conversations': () => ({
+          rowCount: 1,
+          rows: [{ id: 'conv-r4', tenant_id: 't-1', status: 'open', handling_mode: 'AI', handling_version: 1 }],
+        }),
+        'SELECT c.ai_behavior_override': () => ({
+          rowCount: 1,
+          rows: [{ contact_override: 'AI_ONLY', conv_override: 'AI_ONLY' }],
+        }),
+        'FROM conversation_messages': () => ({
+          rowCount: 1,
+          rows: [{ id: 'm-r4', sender_type: 'CUSTOMER', content: "Free Zone teknoloji şirketi kuracağız." }],
+        }),
+        'INSERT INTO conversation_messages': () => ({
+          rowCount: 1,
+          rows: [{ id: 'asst-r4', sender_type: 'ASSISTANT' }],
+        }),
+      },
+    });
+
+    const inboundState = {
+      duplicate: false,
+      handlingVersion: 1,
+      integration: {
+        tenant_id: 't-1',
+        assistant_id: 'ast-1',
+        external_channel_id: '17841400000000001',
+        config: { access_token: 'valid_tok', instagram_account_id: '17841400000000001', activation_policy: 'ALL_MESSAGES' },
+      },
+      conversation: {
+        id: 'conv-r4',
+        tenant_id: 't-1',
+        customer_external_id: 'instagram:10203040',
+        status: 'open',
+        handling_mode: 'AI',
+        handling_version: 1,
+      },
+      shouldInvokeAi: true,
+    };
+
+    const result = await orchestrateInstagramInboundAiResponse({
+      database: new MockDatabasePool(client),
+      inboundState,
+      senderIgsid: '10203040',
+      text: "Free Zone teknoloji şirketi kuracağız.",
+      http: { post: async () => ({ data: { message_id: 'mid.r4' } }) },
+      applyPacing: false,
+      generateAiResponse: async () => {
+        aiGenerated = true;
+        return "Harika. Size ulaşabileceğimiz telefon veya WhatsApp numaranızı ve uygun olduğunuz bir gün/saati paylaşabilir misiniz?";
+      },
+    });
+
+    assert.equal(aiGenerated, true);
+    assert.equal(result.delivered, true);
+    assert.equal(result.responseText.includes('https://wa.me/'), false);
+  });
+  // REGRESSION TEST 5: QUALIFICATION COMPLETE
+  it('REGRESSION TEST 5: Qualification complete creates exactly one PENDING consultation and WhatsApp CTA', async () => {
+    let consultationCount = 0;
+    const client = new MockDatabaseClient({
+      queries: {
+        'FROM conversations': () => ({
+          rowCount: 1,
+          rows: [{ id: 'conv-r5', tenant_id: 't-1', status: 'open', handling_mode: 'AI', handling_version: 1, contact_id: 'ct-r5', contact_name: 'Ahmet Soysal (@samchetravel)' }],
+        }),
+        'FROM conversation_messages': () => ({
+          rowCount: 2,
+          rows: [
+            { id: 'm1', sender_type: 'CUSTOMER', content: "Dubai'de yazılım şirketi kurulumu yapmak istiyorum." },
+            { id: 'm2', sender_type: 'CUSTOMER', content: 'Numaram +90 531 240 49 65, bugün 18:00 uygunum.' },
+          ],
+        }),
+        'SELECT id FROM crm_leads': () => ({ rowCount: 1, rows: [{ id: 'lead-r5' }] }),
+        'INSERT INTO crm_consultations': () => {
+          consultationCount++;
+          return { rowCount: 1, rows: [{ id: 'cons-r5', status: 'PENDING' }] };
+        },
+      },
+    });
+
+    const outcome = await evaluateAndProcessHighIntentLead({
+      tenantId: 't-1',
+      conversationId: 'conv-r5',
+      database: new MockDatabasePool(client),
+    });
+
+    assert.equal(outcome.qualified, true);
+    assert.equal(consultationCount, 1);
+    assert.equal(outcome.consultation.status, 'PENDING');
+    assert.ok(outcome.ctaUrl.startsWith('https://wa.me/971527288586?text='));
+    assert.ok(outcome.ctaUrl.includes('Ahmet%20Soysal'));
+  });
+
+  // REGRESSION TEST 6: NEXT CUSTOMER MESSAGE AFTER CTA
+  it('REGRESSION TEST 6: Subsequent customer message after CTA evaluates normal AI without duplicate CTA', async () => {
+    let aiGenerated = false;
+    const client = new MockDatabaseClient({
+      queries: {
+        'FROM conversations': () => ({
+          rowCount: 1,
+          rows: [{ id: 'conv-r6', tenant_id: 't-1', status: 'open', handling_mode: 'AI', handling_version: 1 }],
+        }),
+        'SELECT c.ai_behavior_override': () => ({
+          rowCount: 1,
+          rows: [{ contact_override: 'AI_ONLY', conv_override: 'AI_ONLY' }],
+        }),
+        'FROM conversation_messages': () => ({
+          rowCount: 1,
+          rows: [{ id: 'm-r6', sender_type: 'CUSTOMER', content: "Teşekkürler, WhatsApp'tan yazdım." }],
+        }),
+        'INSERT INTO conversation_messages': () => ({
+          rowCount: 1,
+          rows: [{ id: 'asst-r6', sender_type: 'ASSISTANT' }],
+        }),
+      },
+    });
+
+    const inboundState = {
+      duplicate: false,
+      handlingVersion: 1,
+      integration: {
+        tenant_id: 't-1',
+        assistant_id: 'ast-1',
+        external_channel_id: '17841400000000001',
+        config: { access_token: 'valid_tok', instagram_account_id: '17841400000000001', activation_policy: 'ALL_MESSAGES' },
+      },
+      conversation: {
+        id: 'conv-r6',
+        tenant_id: 't-1',
+        customer_external_id: 'instagram:10203040',
+        status: 'open',
+        handling_mode: 'AI',
+        handling_version: 1,
+      },
+      shouldInvokeAi: true,
+    };
+
+    const result = await orchestrateInstagramInboundAiResponse({
+      database: new MockDatabasePool(client),
+      inboundState,
+      senderIgsid: '10203040',
+      text: "Teşekkürler, WhatsApp'tan yazdım.",
+      http: { post: async () => ({ data: { message_id: 'mid.r6' } }) },
+      applyPacing: false,
+      generateAiResponse: async () => {
+        aiGenerated = true;
+        return "Rica ederim, Samed Bey en kısa sürede size dönüş yapacaktır.";
+      },
+    });
+
+    assert.equal(aiGenerated, true, 'AI must respond naturally to follow-up comments');
+    assert.equal(result.delivered, true);
+  });
+  // REGRESSION TEST 7: HUMAN MODE
+  it('REGRESSION TEST 7: Canonical human takeover suppresses AI without CTA interference', async () => {
+    let aiTriggered = false;
+    const client = new MockDatabaseClient({
+      queries: {
+        'SELECT c.ai_behavior_override': () => ({
+          rowCount: 1,
+          rows: [{ contact_override: 'AI_ONLY', conv_override: 'AI_ONLY' }],
+        }),
+      },
+    });
+
+    const inboundState = {
+      duplicate: false,
+      handlingVersion: 1,
+      integration: {
+        tenant_id: 't-1',
+        assistant_id: 'ast-1',
+        external_channel_id: '17841400000000001',
+        config: { access_token: 'valid_tok', instagram_account_id: '17841400000000001', activation_policy: 'ALL_MESSAGES' },
+      },
+      conversation: {
+        id: 'conv-r7',
+        tenant_id: 't-1',
+        status: 'open',
+        handling_mode: 'HUMAN',
+        handling_version: 1,
+        ai_behavior_override: 'AI_ONLY',
+      },
+      shouldInvokeAi: false,
+    };
+
+    const result = await orchestrateInstagramInboundAiResponse({
+      database: new MockDatabasePool(client),
+      inboundState,
+      senderIgsid: '10203040',
+      text: 'Randevu almak istiyorum.',
+      generateAiResponse: async () => { aiTriggered = true; return 'AI reply'; },
+      applyPacing: false,
+    });
+
+    assert.equal(result.aiInvoked, false);
+    assert.equal(aiTriggered, false);
+  });
+
+  // REGRESSION TEST 8: MULTI-TENANT ISOLATION
+  it('REGRESSION TEST 8: Multiple tenants with distinct CTA/channel configs remain strictly isolated', () => {
+    const tenantAConfig = resolveQualifiedLeadCtaConfig({
+      integrationConfig: {
+        qualified_lead_contact_cta: {
+          enabled: true,
+          destination: '+971527288586',
+          contact_name: 'Samed Bey',
+        },
+      },
+    });
+
+    const tenantBConfig = resolveQualifiedLeadCtaConfig({
+      integrationConfig: {
+        qualified_lead_contact_cta: {
+          enabled: true,
+          destination: '+905329998877',
+          contact_name: 'Ayşe Hanım',
+        },
+      },
+    });
+
+    const urlA = generateCustomerInitiatedWhatsAppCtaUrl({
+      destination: tenantAConfig.destination,
+      prefilledText: buildQualifiedLeadWhatsAppPrefilledMessage({
+        customerName: 'Client A',
+        contactName: tenantAConfig.contactName,
+      }),
+    });
+
+    const urlB = generateCustomerInitiatedWhatsAppCtaUrl({
+      destination: tenantBConfig.destination,
+      prefilledText: buildQualifiedLeadWhatsAppPrefilledMessage({
+        customerName: 'Client B',
+        contactName: tenantBConfig.contactName,
+      }),
+    });
+
+    assert.ok(urlA.startsWith('https://wa.me/971527288586?text='));
+    assert.ok(urlA.includes('Samed%20Bey'));
+    assert.ok(urlB.startsWith('https://wa.me/905329998877?text='));
+    assert.ok(urlB.includes('Ay%C5%9Fe%20Han%C4%B1m'));
+    assert.notEqual(urlA, urlB);
+  });
   // 17. Main policy unchanged
   it('17. Master policy hash is exactly c72bc5787e31ee788431fcb7b73a6f1f72fb3471c3910a00e87005d389edaf58', () => {
     const policyContent = fs.readFileSync('policies/samche-whatsapp-master-business-policy.tr.txt', 'utf8');

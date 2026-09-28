@@ -102,7 +102,7 @@ export async function ensureConversationCrmIdentity(client, {
   const contactOverride = contact.ai_behavior_override;
   const convOverride = conversation.ai_behavior_override;
 
-  let effectiveOverride = 'FIRST_CONTACT_HOLD';
+  let effectiveOverride = 'AUTOMATIC';
   if (contactOverride && contactOverride !== 'UNDECIDED') {
     effectiveOverride = contactOverride;
   } else if (convOverride && convOverride !== 'UNDECIDED') {
@@ -113,7 +113,7 @@ export async function ensureConversationCrmIdentity(client, {
     );
     contact.ai_behavior_override = effectiveOverride;
   } else {
-    effectiveOverride = 'FIRST_CONTACT_HOLD';
+    effectiveOverride = 'AUTOMATIC';
   }
 
   if (conversation.contact_id !== contact.id || convOverride !== effectiveOverride) {

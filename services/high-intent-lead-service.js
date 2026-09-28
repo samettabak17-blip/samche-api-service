@@ -83,20 +83,20 @@ export function extractCustomerNameFromText(text = '') {
 export function extractMeetingTimePreference(text = '') {
   if (typeof text !== 'string') return null;
 
-  // Match full day + time combinations: e.g. "yarın 15:00", "pazartesi 14:00", "bugün 18:00", "yarın Dubai saatiyle 15:00"
-  const fullMatch = text.match(/(?:yarın|bugün|pazartesi|salı|çarşamba|perşembe|cuma|cumartesi|pazar|haftaya)(?:\s+(?:günü|öğleden\s+sonra|sabah|akşam|Dubai saatiyle|Türkiye saatiyle|saat))*\s+(?:\d{1,2}[:.]\d{2})/i);
+  // Match full day + time combinations: e.g. "yarın 15:00", "pazartesi 14:00", "bugün 18:00", "yarın Dubai saatiyle 15:00", "Salı saat 14:00 Dubai saati"
+  const fullMatch = text.match(/(?:yarın|bugün|pazartesi|salı|sali|çarşamba|carsamba|perşembe|persembe|cuma|cumartesi|pazar|haftaya)(?:\s+(?:günü|öğleden\s+sonra|sabah|akşam|Dubai saatiyle|Dubai saati|Türkiye saatiyle|saat))*\s+(?:\d{1,2}[:.]\d{2})(?:\s+(?:Dubai saatiyle|Dubai saati|Türkiye saatiyle|TSI))?/i);
   if (fullMatch) return fullMatch[0].trim();
 
   // Match time with saat prefix: e.g. "saat 18:00", "saat 14"
-  const saatMatch = text.match(/saat\s+\d{1,2}(?::\d{2})?/i);
+  const saatMatch = text.match(/saat\s+\d{1,2}(?::\d{2})?(?:\s+(?:Dubai saatiyle|Dubai saati|Türkiye saatiyle|TSI))?/i);
   if (saatMatch) return saatMatch[0].trim();
 
   // Match standalone HH:MM time: e.g. "18:00", "14.00"
-  const timeMatch = text.match(/\b\d{1,2}[:.]\d{2}\b/);
+  const timeMatch = text.match(/\b\d{1,2}[:.]\d{2}\b(?:\s+(?:Dubai saatiyle|Dubai saati|Türkiye saatiyle|TSI))?/i);
   if (timeMatch) return timeMatch[0].trim();
 
   // Match days or dates without specific time: e.g. "yarın", "bugün", "pazartesi"
-  const dayMatch = text.match(/(?:yarın|pazartesi|salı|çarşamba|perşembe|cuma|cumartesi|pazar|bugün|haftaya|\d{1,2}\s+(?:ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık))/i);
+  const dayMatch = text.match(/(?:yarın|pazartesi|salı|sali|çarşamba|carsamba|perşembe|persembe|cuma|cumartesi|pazar|bugün|haftaya|\d{1,2}\s+(?:ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık))/i);
   if (dayMatch) return dayMatch[0].trim();
 
   return null;
@@ -243,7 +243,7 @@ export function formatInternalWhatsAppLeadNotification({
   const cleanSource = source ? String(source).trim() : 'INSTAGRAM';
 
   const parts = [
-    `YENİ LEAD${isUpdate ? ' (GÜNCELLEME)' : ''}:`,
+    `YENİ INSTAGRAM LEAD${isUpdate ? ' (GÜNCELLEME):' : ':'}`,
     cleanName ? `Müşteri: ${cleanName}` : null,
     cleanIg ? `IG: ${cleanIg}` : null,
     cleanPhone ? `Tel: ${cleanPhone}` : null,

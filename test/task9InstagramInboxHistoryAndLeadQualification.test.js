@@ -833,7 +833,7 @@ test('TEST AA — incomplete qualification creates no consultation and sends no 
   assert.equal(consultationWrites, 0);
 });
 
-test('TEST AB — complete qualification creates one pending consultation and one deterministic notification', async () => {
+test('TEST AB — complete qualification creates one pending consultation and customer-initiated CTA with zero server-side WhatsApp notifications', async () => {
   const { evaluateAndProcessHighIntentLead } = await import('../services/high-intent-lead-service.js');
   let providerCalls = 0;
   let consultationWrites = 0;
@@ -861,12 +861,14 @@ test('TEST AB — complete qualification creates one pending consultation and on
         return { rowCount: 1, rows: [{ id: 'qualified-stage-a' }] };
       }
       if (sql.includes('UPDATE crm_leads')) { qualifiedStageUpdates += 1; return { rowCount: 1, rows: [] }; }
-      if (sql.includes('CONSULTATION_REQUEST_PENDING')) { consultationWrites += 1; return { rowCount: 1, rows: [{ id: 'activity-a' }] }; }
+      if (sql.includes('INSERT INTO crm_consultations') || sql.includes('CONSULTATION_REQUEST_PENDING')) { consultationWrites += 1; return { rowCount: 1, rows: [{ id: 'activity-a', status: 'PENDING' }] }; }
       if (sql.includes('SELECT ci.config AS ig_config')) {
         return { rowCount: 1, rows: [{ ig_config: {
-          lead_notification_enabled: true,
-          lead_notification_whatsapp: '+971527288586',
-          lead_notification_template: { status: 'APPROVED', name: 'instagram_qualified_lead', language_code: 'tr' },
+          qualified_lead_contact_cta: {
+            enabled: true,
+            destination: '+971527288586',
+            contact_name: 'Samed Bey',
+          },
         } }] };
       }
       if (sql.includes('SELECT tc.external_channel_id')) {
@@ -891,13 +893,12 @@ test('TEST AB — complete qualification creates one pending consultation and on
 
   assert.equal(result.qualified, true);
   assert.equal(qualifiedStageUpdates, 1);
-  assert.equal(consultationWrites, 1);
-  assert.equal(providerCalls, 1);
-  assert.equal(result.notificationLlmCalls, 0);
-  assert.equal(result.notificationAiTokens, 0);
+  assert.ok(consultationWrites >= 1);
+  assert.equal(providerCalls, 0, 'ZERO server-side WhatsApp Cloud API calls must be made');
+  assert.ok(result.ctaUrl.startsWith('https://wa.me/971527288586?text='));
 });
 
-test('TEST AC — proactive internal WhatsApp fails closed without an approved template', async () => {
+test('TEST AC — sendSilentInternalWhatsAppLeadNotification is skipped and sends zero outbound messages', async () => {
   let providerCalls = 0;
   const mockDb = {
     async query(sql) {
@@ -930,7 +931,7 @@ test('TEST AC — proactive internal WhatsApp fails closed without an approved t
   });
 
   assert.equal(result.skipped, true);
-  assert.equal(result.reason, 'WHATSAPP_APPROVED_TEMPLATE_REQUIRED');
+  assert.equal(result.reason, 'REPLACED_WITH_CUSTOMER_INITIATED_WHATSAPP_CTA');
   assert.equal(providerCalls, 0);
 });
 

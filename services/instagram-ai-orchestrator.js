@@ -381,6 +381,42 @@ export async function orchestrateInstagramInboundAiResponse({
     return { aiInvoked: false, reason: 'NOT_IN_AI_MODE' };
   }
 
+  // 2b. Resolve durable contact-level AI behavior override from CRM contact
+  if (conversation?.contact_id || conversation?.id) {
+    try {
+      const isPool = typeof database?.connect === 'function' && typeof database?.query !== 'function';
+      const dbClient = isPool ? await database.connect() : database;
+      try {
+        const contactCheck = await dbClient.query(
+          `SELECT c.ai_behavior_override AS contact_override, conv.ai_behavior_override AS conv_override
+             FROM conversations conv
+             LEFT JOIN crm_contacts c ON c.id = conv.contact_id AND c.tenant_id = conv.tenant_id
+            WHERE conv.id = $1 AND conv.tenant_id = $2
+            LIMIT 1`,
+          [conversationId, tenantId]
+        );
+        const row = contactCheck.rows?.[0];
+        if (row) {
+          const effective = (row.contact_override && row.contact_override !== 'UNDECIDED')
+            ? row.contact_override
+            : (row.conv_override && row.conv_override !== 'UNDECIDED')
+            ? row.conv_override
+            : null;
+          if (effective) {
+            conversation.ai_behavior_override = effective;
+            conversation.contact_ai_behavior_override = effective;
+          }
+        }
+      } finally {
+        if (isPool && typeof dbClient?.release === 'function') {
+          dbClient.release();
+        }
+      }
+    } catch {
+      // Non-fatal if unmigrated test mock client
+    }
+  }
+
   // 3. Evaluate generic Channel AI Activation Policy & Contact/Conversation Overrides
   const activationEvaluation = await evaluateChannelAiActivationPolicy({
     messageText: text,
@@ -501,111 +537,7 @@ export async function orchestrateInstagramInboundAiResponse({
       ].filter(Boolean).join('\n\n');
 
 
-  // 7b. Check high-intent lead qualification & customer-initiated WhatsApp CTA
-  const qualificationOutcome = await evaluateAndProcessHighIntentLead({
-    tenantId,
-    conversationId,
-    database,
-    httpClient: http,
-  }).catch((err) => {
-    console.warn('HIGH_INTENT_LEAD_EVALUATION_WARN', err?.message);
-    return null;
-  });
 
-  if (qualificationOutcome?.qualified && !qualificationOutcome.alreadyDelivered) {
-    const dmText = `${qualificationOutcome.dmResponseText || "Bilgilerinizi aldım. Aşağıdaki bağlantı üzerinden WhatsApp'tan doğrudan iletişime geçebilirsiniz:"}\n\n${qualificationOutcome.ctaUrl}`;
-
-    const persisted = await persistAssistantResponseIfCurrent({
-      tenantId,
-      conversationId,
-      content: dmText,
-      handlingVersion,
-      database,
-    });
-
-    if (!persisted.delivered) {
-      return { delivered: false, dropped: true, reason: 'CONVERSATION_TAKEN_OVER' };
-    }
-
-    let deliveryResult = null;
-    let deliveryError = null;
-    const cleanSenderId = String(senderIgsid || '').replace(/^instagram:\s*/i, '').trim();
-
-    if (accessToken && cleanSenderId) {
-      try {
-        deliveryResult = await deliverInstagramText({
-          recipientId: cleanSenderId,
-          content: dmText,
-          accessToken,
-          instagramAccountId: accountId,
-          pageId: accountId,
-          http,
-        });
-      } catch (deliveryErr) {
-        deliveryError = deliveryErr;
-        console.error('INSTAGRAM_CTA_DELIVERY_ERROR', deliveryErr?.code, deliveryErr?.message);
-      } finally {
-        sendInstagramTypingOff({
-          recipientId: cleanSenderId,
-          accessToken,
-          instagramAccountId: accountId,
-          pageId: accountId,
-          http,
-        }).catch(() => {});
-      }
-
-      if (persisted.message?.id) {
-        const isPool = typeof database?.connect === 'function' && typeof database?.query !== 'function';
-        const dbClient = isPool ? await database.connect() : database;
-        try {
-          if (deliveryError) {
-            await dbClient.query(
-              `UPDATE conversation_messages
-                  SET delivery_status = 'FAILED',
-                      delivery_failure_code = $1,
-                      delivery_status_updated_at = CURRENT_TIMESTAMP
-                WHERE id = $2 AND tenant_id = $3`,
-              [deliveryError?.code || 'INSTAGRAM_DELIVERY_FAILED', persisted.message.id, tenantId]
-            ).catch(() => {});
-          } else if (deliveryResult?.providerMessageId) {
-            await dbClient.query(
-              `UPDATE conversation_messages
-                  SET external_message_id = $1,
-                      delivery_status = 'SENT',
-                      delivery_status_updated_at = CURRENT_TIMESTAMP
-                WHERE id = $2 AND tenant_id = $3`,
-              [deliveryResult.providerMessageId, persisted.message.id, tenantId]
-            ).catch(() => {});
-
-            await dbClient.query(
-              `UPDATE crm_consultations
-                  SET cta_delivered_at = CURRENT_TIMESTAMP,
-                      updated_at = CURRENT_TIMESTAMP
-                WHERE tenant_id = $1 AND conversation_id = $2`,
-              [tenantId, conversationId]
-            ).catch(() => {});
-          }
-        } finally {
-          if (isPool && typeof dbClient?.release === 'function') {
-            dbClient.release();
-          }
-        }
-      }
-    }
-
-    return {
-      aiInvoked: true,
-      qualified: true,
-      ctaDelivered: !deliveryError && Boolean(deliveryResult),
-      delivered: !deliveryError && Boolean(deliveryResult),
-      deliveryError: deliveryError?.message || null,
-      responseText: dmText,
-      deliveryResult,
-      assistantMessageId: persisted.message?.id || null,
-      consultation: qualificationOutcome.consultation,
-      ctaUrl: qualificationOutcome.ctaUrl,
-    };
-  }
 
   // 8. Start Instagram Typing Indicator (non-blocking)
   const generationStartedAt = Date.now();
@@ -828,104 +760,6 @@ export async function generateAndDeliverInstagramAssistantResponse({
     const instagramUserId = config.instagram_user_id || null;
     const authMode = config.auth_mode || null;
     const recipientIgsid = String(conversation.customer_external_id || '').replace(/^instagram:\s*/i, '');
-
-    // Check high-intent lead qualification & customer-initiated WhatsApp CTA
-    const qualificationOutcome = await evaluateAndProcessHighIntentLead({
-      tenantId,
-      conversationId,
-      database: client,
-      httpClient: http,
-    }).catch((err) => {
-      console.warn('HIGH_INTENT_LEAD_EVALUATION_WARN', err?.message);
-      return null;
-    });
-
-    if (qualificationOutcome?.qualified && !qualificationOutcome.alreadyDelivered) {
-      const dmText = `${qualificationOutcome.dmResponseText || "Bilgilerinizi aldım. Aşağıdaki bağlantı üzerinden WhatsApp'tan doğrudan iletişime geçebilirsiniz:"}\n\n${qualificationOutcome.ctaUrl}`;
-
-      const persisted = await persistAssistantResponseIfCurrent({
-        tenantId,
-        conversationId,
-        content: dmText,
-        handlingVersion: conversation.handling_version,
-        database: client,
-      });
-
-      if (!persisted.delivered) {
-        return { delivered: false, dropped: true, reason: 'CONVERSATION_TAKEN_OVER' };
-      }
-
-      let deliveryResult = null;
-      let deliveryError = null;
-      const cleanRecipient = String(recipientIgsid || '').replace(/^instagram:\s*/i, '').trim();
-
-      if (accessToken && cleanRecipient) {
-        try {
-          deliveryResult = await deliverInstagramText({
-            recipientId: cleanRecipient,
-            content: dmText,
-            accessToken,
-            instagramAccountId: accountId,
-            pageId: accountId,
-            http,
-          });
-        } catch (deliveryErr) {
-          deliveryError = deliveryErr;
-          console.error('INSTAGRAM_CTA_DELIVERY_ERROR', deliveryErr?.code, deliveryErr?.message);
-        } finally {
-          sendInstagramTypingOff({
-            recipientId: cleanRecipient,
-            accessToken,
-            instagramAccountId: accountId,
-            pageId: accountId,
-            http,
-          }).catch(() => {});
-        }
-
-        if (persisted.message?.id) {
-          if (deliveryError) {
-            await client.query(
-              `UPDATE conversation_messages
-                  SET delivery_status = 'FAILED',
-                      delivery_failure_code = $1,
-                      delivery_status_updated_at = CURRENT_TIMESTAMP
-                WHERE id = $2 AND tenant_id = $3`,
-              [deliveryError?.code || 'INSTAGRAM_DELIVERY_FAILED', persisted.message.id, tenantId]
-            ).catch(() => {});
-          } else if (deliveryResult?.providerMessageId) {
-            await client.query(
-              `UPDATE conversation_messages
-                  SET external_message_id = $1,
-                      delivery_status = 'SENT',
-                      delivery_status_updated_at = CURRENT_TIMESTAMP
-                WHERE id = $2 AND tenant_id = $3`,
-              [deliveryResult.providerMessageId, persisted.message.id, tenantId]
-            ).catch(() => {});
-
-            await client.query(
-              `UPDATE crm_consultations
-                  SET cta_delivered_at = CURRENT_TIMESTAMP,
-                      updated_at = CURRENT_TIMESTAMP
-                WHERE tenant_id = $1 AND conversation_id = $2`,
-              [tenantId, conversationId]
-            ).catch(() => {});
-          }
-        }
-      }
-
-      return {
-        aiInvoked: true,
-        qualified: true,
-        ctaDelivered: !deliveryError && Boolean(deliveryResult),
-        delivered: !deliveryError && Boolean(deliveryResult),
-        deliveryError: deliveryError?.message || null,
-        responseText: dmText,
-        deliveryResult,
-        assistantMessageId: persisted.message?.id || null,
-        consultation: qualificationOutcome.consultation,
-        ctaUrl: qualificationOutcome.ctaUrl,
-      };
-    }
 
     // Resolve Persona & Knowledge
     let persona = null;

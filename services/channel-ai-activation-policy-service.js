@@ -156,6 +156,7 @@ export async function classifySemanticBusinessIntent({
 export async function evaluateChannelAiActivationPolicy({
   messageText = '',
   conversation = {},
+  contact = null,
   channelConfig = {},
   tenantContext = {},
   generateAiClassification = null,
@@ -178,7 +179,11 @@ export async function evaluateChannelAiActivationPolicy({
   }
 
   // 2. Contact / Conversation Override Precedence
-  const rawOverride = conversation?.ai_behavior_override || conversation?.contact_ai_behavior_override || conversation?.contact?.ai_behavior_override || AI_BEHAVIOR_OVERRIDES.AUTOMATIC;
+  const rawOverride = contact?.ai_behavior_override ||
+    conversation?.contact_ai_behavior_override ||
+    conversation?.contact?.ai_behavior_override ||
+    conversation?.ai_behavior_override ||
+    AI_BEHAVIOR_OVERRIDES.AUTOMATIC;
   const override = String(rawOverride).toUpperCase().trim();
 
   if (override === 'NEVER_AI') {
@@ -205,19 +210,7 @@ export async function evaluateChannelAiActivationPolicy({
     };
   }
 
-  if (override === 'FIRST_CONTACT_HOLD' || override === 'UNDECIDED') {
-    return {
-      eligible: false,
-      decision: 'SUPPRESSED',
-      reasonCode: 'FIRST_CONTACT_HOLD',
-      policy: channelConfig?.activation_policy || AI_ACTIVATION_MODES.MANUAL_ONLY,
-      matchedTriggers: [],
-      classifierLabel: null,
-      timestamp,
-    };
-  }
-
-  // 3. Channel Activation Policy Evaluation
+  // 3. Channel Activation Policy Evaluation (for AUTOMATIC, FIRST_CONTACT_HOLD, or unconfigured)
   const policy = String(channelConfig?.activation_policy || AI_ACTIVATION_MODES.MANUAL_ONLY).toUpperCase();
   const configuredTriggers = Array.isArray(channelConfig?.activation_triggers) ? channelConfig.activation_triggers : [];
 
@@ -226,7 +219,7 @@ export async function evaluateChannelAiActivationPolicy({
       return {
         eligible: false,
         decision: 'SUPPRESSED',
-        reasonCode: 'POLICY_MANUAL_ONLY',
+        reasonCode: (override === 'FIRST_CONTACT_HOLD') ? 'FIRST_CONTACT_HOLD' : 'POLICY_MANUAL_ONLY',
         policy: AI_ACTIVATION_MODES.MANUAL_ONLY,
         matchedTriggers: [],
         classifierLabel: null,
