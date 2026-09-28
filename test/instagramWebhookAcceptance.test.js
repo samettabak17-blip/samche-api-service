@@ -274,7 +274,8 @@ test('14. AI_ONLY activation response delivers exactly one AI reply for existing
   });
   assert.equal(outcome.delivered, true);
   assert.equal(outcome.responseText, 'Our rates start at $50/hour.');
-  assert.equal(deliveredDMs.length, 1);
+  const textMessages = deliveredDMs.filter((d) => d.message?.text);
+  assert.equal(textMessages.length, 1);
 });
 
 // 15. PUSH PIPELINE ELIGIBILITY

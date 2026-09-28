@@ -97,6 +97,7 @@ test('TEST A: Company formation inquiry discusses setup and 8.000 AED consultanc
     senderIgsid: testIgsid,
     text: "Dubai'de e-ticaret şirketi kuracağım, maliyeti ne olur?",
     http: fakeHttp,
+    applyPacing: false,
     generateAiResponse: async ({ systemInstruction }) => {
       capturedSystemInstruction = systemInstruction;
       return [
@@ -137,6 +138,7 @@ test('TEST B: Direct consultancy fee inquiry returns 8.000 AED with Bank/KYC inc
     senderIgsid: testIgsid,
     text: "Danışmanlık ücretiniz ne kadar?",
     http: fakeHttp,
+    applyPacing: false,
     generateAiResponse: async () => {
       return "Danışmanlık ücretimiz 8.000 AED'dir. Şirket banka hesabı açılışı ve KYC desteği bu ücrete dahildir.";
     },
@@ -166,6 +168,7 @@ test('TEST C: Explicit sponsored residency inquiry correctly discloses 13.000 AE
     senderIgsid: testIgsid,
     text: "Şirket kurmadan Dubai'de yaşamak istiyorum. Sponsorlu oturum vizesi ücretiniz ne kadar?",
     http: fakeHttp,
+    applyPacing: false,
     generateAiResponse: async () => {
       return [
         "Şirket kurmadan Dubai'de yaşamak ve çalışmak için 2 yıllık sponsorlu oturum çözümü sunuyoruz.",
@@ -200,6 +203,7 @@ test('TEST D: Free Zone vs Mainland comparison answers structure differences wit
     senderIgsid: testIgsid,
     text: "Free Zone mu Mainland mi benim için daha uygun?",
     http: fakeHttp,
+    applyPacing: false,
     generateAiResponse: async () => {
       return [
         "İki yapı arasındaki temel farklar faaliyet alanınıza ve pazar hedefinize bağlıdır:",
@@ -241,6 +245,7 @@ test('TEST E: Multi-turn: Turn 1 is company formation only; Turn 2 explicitly re
     senderIgsid: testIgsid,
     text: "Dubai'de şirket açmak istiyorum.",
     http: fakeHttp,
+    applyPacing: false,
     generateAiResponse: async () => {
       return "Dubai'de şirket kurulumunda Free Zone ve Mainland seçenekleri mevcuttur. Hangi sektörde faaliyet göstereceksiniz?";
     },
@@ -264,6 +269,7 @@ test('TEST E: Multi-turn: Turn 1 is company formation only; Turn 2 explicitly re
     senderIgsid: testIgsid,
     text: "Peki oturum da istiyorum, şirket kurmadan oturum alabilir miyim?",
     http: fakeHttp,
+    applyPacing: false,
     generateAiResponse: async () => {
       return "Evet, şirket kurmadan 2 yıllık sponsorlu oturum vizesi alabilirsiniz. Toplam ücret 13.000 AED'dir.";
     },

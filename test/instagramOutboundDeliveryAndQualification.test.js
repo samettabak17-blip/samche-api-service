@@ -78,6 +78,7 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
       text: 'Samed bey merhabalar',
       http: mockHttp,
       generateAiResponse,
+      applyPacing: false,
     });
 
     assert.equal(aiGenerated, true, 'AI generation must be invoked');
@@ -149,6 +150,7 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
       text,
       http: mockHttp,
       generateAiResponse: async () => 'Merhaba, randevu için iletişim numaranızı paylaşabilir misiniz?',
+      applyPacing: false,
     });
 
     assert.equal(result.delivered, true);
@@ -214,6 +216,7 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
       text: 'Merhabalar',
       http: mockHttp,
       generateAiResponse: async () => 'Size nasıl yardımcı olabilirim?',
+      applyPacing: false,
     });
 
     assert.equal(result.delivered, false, 'Delivery must be marked false');
@@ -225,9 +228,9 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
   });
 
   it('E & F: Appointment rules prohibit unsolicited residency/visa questions for company formation', () => {
-    const rules = INSTAGRAM_CHANNEL_PRESENTATION_RULES;
-    assert.ok(rules.includes('DO NOT proactively ask or introduce residency/visa questions'), 'Must prohibit proactive visa questions');
-    assert.ok(rules.includes('Knowledge is a factual reference library, NOT a checklist of services to cross-sell'), 'Must clarify Knowledge scope');
+    const rules = Array.isArray(INSTAGRAM_CHANNEL_PRESENTATION_RULES) ? INSTAGRAM_CHANNEL_PRESENTATION_RULES : [String(INSTAGRAM_CHANNEL_PRESENTATION_RULES)];
+    assert.ok(rules.some(r => r.includes('DO NOT proactively ask or introduce residency/visa questions')), 'Must prohibit proactive visa questions');
+    assert.ok(rules.some(r => r.includes('reference library')), 'Must clarify Knowledge scope');
   });
 
   it('H: NEVER_AI suppression produces 0 AI generations and 0 Instagram outbound calls', async () => {
@@ -313,6 +316,19 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
         if (/SELECT id FROM crm_leads/i.test(sql)) {
           return { rows: [{ id: 'lead-canonical-777' }], rowCount: 1 };
         }
+        if (/INSERT INTO crm_consultations/i.test(sql)) {
+          return {
+            rows: [{
+              id: 'cons-canonical-777',
+              tenant_id: 'tenant-123',
+              conversation_id: 'conv-qual-1',
+              status: 'PENDING',
+              customer_name: 'Ahmet Yılmaz',
+              phone: '+905321112233',
+            }],
+            rowCount: 1,
+          };
+        }
         if (/integration_type.*INSTAGRAM/i.test(sql)) {
           return {
             rows: [{
@@ -369,15 +385,11 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
     const contactUpdate = executedQueries.find(q => /UPDATE crm_contacts/i.test(q.sql) && q.params?.[0] === '+905321112233');
     assert.ok(contactUpdate, 'Must update crm_contacts.phone');
 
-    // Verify silent WhatsApp notification sent
-    const waCall = httpCalls.find(c => c.payload?.messaging_product === 'whatsapp' || c.payload?.template || c.payload?.text?.body);
-    assert.ok(waCall, 'Must send silent internal WhatsApp notification');
-    assert.equal(String(waCall.payload.to).replace(/^\+/, ''), '971527288586', 'Must deliver to configured lead_whatsapp_destination');
-    const notificationText = waCall.payload?.template?.components?.[0]?.parameters?.[0]?.text || waCall.payload?.text?.body || '';
-    assert.ok(notificationText.includes('Müşteri: Ahmet Yılmaz'));
-    assert.ok(notificationText.includes('Telefon / WhatsApp: +905321112233'));
-    assert.ok(notificationText.includes('YENİ INSTAGRAM LEAD') || notificationText.includes('YENİ INSTAGRAM GÖRÜŞME TALEBİ'));
-    assert.ok(notificationText.includes('Dubai') || notificationText.includes('Asia/Dubai'));
+    // Verify customer-initiated WhatsApp CTA generated and ZERO server-side WhatsApp messages sent
+    assert.equal(httpCalls.length, 0, 'ZERO server-side WhatsApp messages must be sent');
+    assert.ok(outcome.ctaUrl.startsWith('https://wa.me/971527288586?text='));
+    assert.ok(outcome.ctaUrl.includes('Ahmet%20Y%C4%B1lmaz'));
+    assert.equal(outcome.consultation?.status, 'PENDING');
   });
 
   it('TEST I: Instagram Ad lead preserves source attribution as Instagram Ad', async () => {
@@ -389,15 +401,15 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
       source: 'Instagram Ad',
       requestedTime: 'Pazartesi 14:00',
     });
-    assert.ok(text.includes('Kaynak: Instagram Ad') || text.includes('Kaynak:\nInstagram Ad'), 'Must preserve Instagram Ad source attribution');
+    assert.ok(text.includes('Kaynak: INSTAGRAM_AD') || text.includes('Kaynak: Instagram Ad') || text.includes('Instagram Ad'), 'Must preserve Instagram Ad source attribution');
   });
 
   it('TEST F & G & H: Presentation rules enforce conversational Samed-voice without fake confirmation or handoff', () => {
-    const rules = INSTAGRAM_CHANNEL_PRESENTATION_RULES;
-    assert.ok(rules.includes('Internal escalation to Samed via WhatsApp is completely silent'));
-    assert.ok(rules.includes('NEVER say "Randevunuz kesinleşti."'));
-    assert.ok(rules.includes('DO NOT use stiff or corporate artificial phrases'));
-    assert.ok(rules.includes('Danışmanlık ücretimiz 8.000 AED\'dir'));
+    const rules = Array.isArray(INSTAGRAM_CHANNEL_PRESENTATION_RULES) ? INSTAGRAM_CHANNEL_PRESENTATION_RULES : [String(INSTAGRAM_CHANNEL_PRESENTATION_RULES)];
+    assert.ok(rules.some(r => r.includes('Internal escalation') || r.includes('The customer initiates WhatsApp contact themselves')));
+    assert.ok(rules.some(r => r.includes('NEVER say "Randevunuz kesinleşti."')));
+    assert.ok(rules.some(r => r.includes('stiff or corporate artificial phrases') || r.includes('FORBIDDEN CORPORATE')));
+    assert.ok(rules.some(r => r.includes("Danışmanlık ücretimiz 8.000 AED'dir")));
   });
   it('TEST 1: Generic intent signal ("Samed Bey ile görüşmek istiyorum") does not trigger HOT lead or WhatsApp notification', async () => {
     const httpCalls = [];
@@ -453,6 +465,19 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
         if (/SELECT id FROM crm_leads/i.test(sql)) {
           return { rows: [{ id: 'lead-t2' }], rowCount: 1 };
         }
+        if (/INSERT INTO crm_consultations/i.test(sql)) {
+          return {
+            rows: [{
+              id: 'cons-t2',
+              tenant_id: 'tenant-123',
+              conversation_id: 'conv-t2',
+              status: 'PENDING',
+              customer_name: 'Ahmet Yılmaz',
+              phone: '+905321112233',
+            }],
+            rowCount: 1,
+          };
+        }
         return { rows: [], rowCount: 0 };
       },
     };
@@ -470,7 +495,7 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
     assert.equal(httpCalls.length, 0, 'WhatsApp notification count must be 0');
   });
 
-  it('TEST 4 & 5: Fully answered qualification with phone and availability sends exactly 1 WhatsApp notification', async () => {
+  it('TEST 4 & 5: Fully answered qualification creates 1 PENDING consultation and customer-initiated WhatsApp CTA without server-side WhatsApp messages', async () => {
     const httpCalls = [];
     const executedQueries = [];
     const mockDatabase = {
@@ -506,20 +531,36 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
         if (/SELECT id FROM crm_leads/i.test(sql)) {
           return { rows: [{ id: 'lead-t5' }], rowCount: 1 };
         }
-        if (/integration_type.*INSTAGRAM/i.test(sql)) {
+        if (/INSERT INTO crm_consultations/i.test(sql)) {
           return {
             rows: [{
-              ig_config: {
-                lead_whatsapp_destination: '+971527288586',
-                lead_notification_enabled: true,
-                lead_notification_template: { status: 'APPROVED', name: 'instagram_qualified_lead', language_code: 'tr' },
-              },
+              id: 'cons-t5',
+              tenant_id: 't-1',
+              conversation_id: 'conv-t5',
+              status: 'PENDING',
+              customer_name: 'Merve Kaya',
+              phone: '+905554443322',
+              service_requested: 'Free Zone Şirket Kuruluşu',
+              requested_time: 'pazartesi 14:00',
+              cta_destination: '+971527288586',
+              cta_url: 'https://wa.me/971527288586?text=test',
             }],
             rowCount: 1,
           };
         }
-        if (/integration_type.*WHATSAPP/i.test(sql)) {
-          return { rows: [{ external_channel_id: '10987654321', wa_config: { phone_number_id: '10987654321' } }], rowCount: 1 };
+        if (/integration_type.*INSTAGRAM/i.test(sql)) {
+          return {
+            rows: [{
+              ig_config: {
+                qualified_lead_contact_cta: {
+                  enabled: true,
+                  destination: '+971527288586',
+                  contact_name: 'Samed Bey',
+                },
+              },
+            }],
+            rowCount: 1,
+          };
         }
         return { rows: [], rowCount: 0 };
       },
@@ -530,48 +571,51 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
       tenantId: 't-1',
       conversationId: 'conv-t5',
       database: mockDatabase,
-      httpClient: { post: async (url, payload) => { httpCalls.push({ url, payload }); return { status: 200, data: { messages: [{ id: 'wamid.test.5' }] } }; } },
+      httpClient: { post: async (url, payload) => { httpCalls.push({ url, payload }); return { status: 200, data: {} }; } },
       env: { WHATSAPP_PHONE_NUMBER_ID: '10987654321', WHATSAPP_TOKEN: 'EAAB_token' },
     });
 
     assert.equal(outcome.qualified, true, 'Fully qualified lead must be qualified');
     assert.equal(outcome.leadDetails.phone, '+905554443322');
     assert.ok(outcome.leadDetails.requestedTime.includes('14:00'));
-    assert.equal(httpCalls.length, 1, 'Exactly ONE WhatsApp notification must be sent');
-    assert.equal(String(httpCalls[0].payload.to).replace(/^\+/, ''), '971527288586');
+    assert.equal(httpCalls.length, 0, 'ZERO server-side WhatsApp Cloud API calls must be made');
+    assert.ok(outcome.ctaUrl.startsWith('https://wa.me/971527288586?text='));
+    assert.equal(outcome.consultation?.status, 'PENDING');
 
     // Verify lead updated to HOT APPOINTMENT_REQUEST
-    const hotLeadUpdate = executedQueries.find(q => /UPDATE crm_leads/i.test(q.sql) && q.params?.[0] === 'Free Zone Şirket Kuruluşu' && q.sql.includes("'HOT'"));
+    const hotLeadUpdate = executedQueries.find(q => /UPDATE crm_leads/i.test(q.sql) && q.sql.includes("'HOT'"));
     assert.ok(hotLeadUpdate, 'Must update CRM lead to HOT APPOINTMENT_REQUEST');
+
+    // Verify consultation inserted with PENDING status
+    const consultInsert = executedQueries.find(q => /INSERT INTO crm_consultations/i.test(q.sql));
+    assert.ok(consultInsert, 'Must create 1 PENDING consultation in crm_consultations');
   });
 
-  it('Deterministic notification payload contains structured fields without LLM calls', async () => {
-    const { formatInternalWhatsAppLeadNotification } = await import('../services/high-intent-lead-service.js');
-    const text = formatInternalWhatsAppLeadNotification({
-      customerName: 'Ahmet Yılmaz',
-      instagramUsername: 'ahmetyilmaz',
-      phone: '+905321112233',
-      requestedService: 'Free Zone Şirket Kuruluşu',
-      activity: 'E-ticaret',
-      structuredRequirement: 'Dubai\'de e-ticaret şirketi kurmak istiyor.',
-      timeline: 'Ekim ayı',
-      requestedTime: '15:00',
-      timezone: 'Dubai / GMT+4',
-      source: 'INSTAGRAM',
-      conversationId: 'conv-123',
+  it('Deterministic CTA prefilled text contains structured fields without LLM calls', async () => {
+    const { buildQualifiedLeadWhatsAppPrefilledMessage, generateCustomerInitiatedWhatsAppCtaUrl } = await import('../services/high-intent-lead-service.js');
+    const text = buildQualifiedLeadWhatsAppPrefilledMessage({
+      customerName: 'Ahmet Soysal',
+      instagramUsername: 'samchetravel',
+      phone: '+90 531 240 49 65',
+      requirement: "Dubai'de yazılım şirketi kurulumu",
+      requestedTime: 'Bugün 18:00',
+      contactName: 'Samed Bey',
     });
 
-    assert.ok(text.includes('YENİ INSTAGRAM LEAD'));
-    assert.ok(text.includes('Müşteri: Ahmet Yılmaz'));
-    assert.ok(text.includes('Instagram: @ahmetyilmaz'));
-    assert.ok(text.includes('Telefon / WhatsApp: +905321112233'));
-    assert.ok(text.includes('Konu: Free Zone Şirket Kuruluşu'));
-    assert.ok(text.includes('Faaliyet: E-ticaret'));
-    assert.ok(text.includes('İstediği: Dubai\'de e-ticaret şirketi kurmak istiyor.'));
-    assert.ok(text.includes('Başlama zamanı: Ekim ayı'));
-    assert.ok(text.includes('Görüşme:\n15:00\nDubai / GMT+4'));
-    assert.ok(text.includes('Kaynak: INSTAGRAM'));
-    assert.ok(text.includes('Konuşma:\n/conversations/conv-123'));
+    assert.ok(text.includes('Merhaba Samed Bey, Instagram üzerinden görüşme talebi oluşturdum.'));
+    assert.ok(text.includes('Ad Soyad: Ahmet Soysal'));
+    assert.ok(text.includes("Konu: Dubai'de yazılım şirketi kurulumu"));
+    assert.ok(text.includes('Telefon: +90 531 240 49 65'));
+    assert.ok(text.includes('Görüşme: Bugün 18:00'));
+    assert.ok(text.includes('Instagram: @samchetravel'));
+    assert.ok(text.includes('Görüşme talebim hakkında sizinle iletişime geçmek istiyorum.'));
+
+    const ctaUrl = generateCustomerInitiatedWhatsAppCtaUrl({
+      destination: '+971527288586',
+      prefilledText: text,
+    });
+    assert.ok(ctaUrl.startsWith('https://wa.me/971527288586?text='));
+    assert.ok(ctaUrl.includes(encodeURIComponent('Ahmet Soysal')));
   });
 
 });

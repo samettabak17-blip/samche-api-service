@@ -18,6 +18,19 @@ export async function getCrmLeadDetail(queryFn, { tenantId, leadId }) {
                ORDER BY a.analyzed_at DESC, a.id DESC
                LIMIT 1
             ) AS latest_analysis,
+            (
+              SELECT jsonb_build_object(
+                'id', con.id, 'status', con.status, 'customer_name', con.customer_name,
+                'phone', con.phone, 'service_requested', con.service_requested,
+                'activity', con.activity, 'requested_time', con.requested_time,
+                'timezone', con.timezone, 'cta_destination', con.cta_destination,
+                'cta_url', con.cta_url, 'created_at', con.created_at
+              )
+                FROM crm_consultations con
+               WHERE con.tenant_id = l.tenant_id AND con.lead_id = l.id
+               ORDER BY con.created_at DESC
+               LIMIT 1
+            ) AS consultation,
             COALESCE((
               SELECT jsonb_agg(jsonb_build_object(
                 'id', d.id, 'title', d.title, 'value', d.value, 'currency', d.currency,

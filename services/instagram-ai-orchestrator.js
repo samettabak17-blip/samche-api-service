@@ -91,9 +91,10 @@ export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
   '     * If they asked pricing: answer 8.000 AED Free Zone consultancy fee with bank/KYC included.',
   '     * Then smoothly and naturally continue collecting the missing appointment qualification details.',
   '7. STRICTLY FORBIDDEN CORPORATE & CALL-CENTER PHRASES (NEVER USE ANY OF THESE):',
-  '   - DO NOT use stiff or corporate artificial phrases (danışmanlarımız, danışmanlarımızla görüşme, temsilcilerimiz, ekibimiz, ekibimiz sizinle iletişime geçecektir, ilgili birimimiz, görüşmeyi organize edebiliriz, görüşmenizin daha verimli geçmesi için, size özel bir yol haritası sunabilmemiz adına, size özel bir ön çalışma ileterek süreci başlatabiliriz, birkaç temel bilgiye ihtiyacımız var).',
-  '   - DO NOT say "WhatsApp numaranız üzerinden sizinle iletişime geçilecektir", "WhatsApp üzerinden size ulaşacağız", "WhatsApp\'tan iletişime geçilecektir". The customer\'s WhatsApp is collected as contact details only; the customer must NEVER be told about the internal notification mechanism.',
-  '   - DO NOT say "sizi ilgili kişiye aktaracağım", "sizi Samed Bey\'e aktarıyorum", "canlı temsilciye aktarıyorum", "bir temsilci devralacak", "talebinizi WhatsApp\'a iletiyorum". Internal escalation to Samed via WhatsApp is completely silent.',
+  '   - DO NOT say "danışmanlarımız", "danışmanlarımızla görüşme", "temsilcilerimiz", "ekibimiz", "ekibimiz sizinle iletişime geçecek", "ilgili birimimiz", "danışmanlarımız sizi arayacak", "WhatsApp\'tan sizinle iletişime geçeceğiz", "ekibimize yönlendiriyorum".',
+  '   - DO NOT say "görüşmeyi organize edebiliriz", "görüşmenizin daha verimli geçmesi için", "size özel bir yol haritası sunabilmemiz adına", "size özel bir ön çalışma ileterek süreci başlatabiliriz", "birkaç temel bilgiye ihtiyacımız var".',
+  '   - DO NOT say "sizi ilgili kişiye aktaracağım", "sizi Samed Bey\'e aktarıyorum", "sizi canlı temsilciye aktarıyorum", "canlı temsilciye aktarıyorum", "bir temsilci devralacak", "talebinizi WhatsApp\'a iletiyorum". The customer initiates WhatsApp contact themselves via the CTA.',
+  '   - DO NOT claim the appointment is confirmed unless a real calendar booking exists. The PENDING consultation is an internal request, not a confirmed appointment.',
   '   - DO NOT introduce yourself as an "AI", "AI Assistant", "bot", or "virtual assistant".',
   '   - Do NOT falsely explicitly claim "Ben Samed\'im" if identity is directly questioned. Speak directly, humanly, and professionally.',
   '8. LANGUAGE & CONVERSATION FLOW:',
@@ -289,6 +290,7 @@ export async function orchestrateInstagramInboundAiResponse({
   embed = null,
   generateAiResponse,
   generateAiClassification,
+  applyPacing = true,
 }) {
   if (!inboundState || inboundState.duplicate || !inboundState.integration || !inboundState.conversation) {
     return { skipped: true, reason: 'INVALID_INBOUND_STATE' };
@@ -499,6 +501,112 @@ export async function orchestrateInstagramInboundAiResponse({
       ].filter(Boolean).join('\n\n');
 
 
+  // 7b. Check high-intent lead qualification & customer-initiated WhatsApp CTA
+  const qualificationOutcome = await evaluateAndProcessHighIntentLead({
+    tenantId,
+    conversationId,
+    database,
+    httpClient: http,
+  }).catch((err) => {
+    console.warn('HIGH_INTENT_LEAD_EVALUATION_WARN', err?.message);
+    return null;
+  });
+
+  if (qualificationOutcome?.qualified && !qualificationOutcome.alreadyDelivered) {
+    const dmText = `${qualificationOutcome.dmResponseText || "Bilgilerinizi aldım. Aşağıdaki bağlantı üzerinden WhatsApp'tan doğrudan iletişime geçebilirsiniz:"}\n\n${qualificationOutcome.ctaUrl}`;
+
+    const persisted = await persistAssistantResponseIfCurrent({
+      tenantId,
+      conversationId,
+      content: dmText,
+      handlingVersion,
+      database,
+    });
+
+    if (!persisted.delivered) {
+      return { delivered: false, dropped: true, reason: 'CONVERSATION_TAKEN_OVER' };
+    }
+
+    let deliveryResult = null;
+    let deliveryError = null;
+    const cleanSenderId = String(senderIgsid || '').replace(/^instagram:\s*/i, '').trim();
+
+    if (accessToken && cleanSenderId) {
+      try {
+        deliveryResult = await deliverInstagramText({
+          recipientId: cleanSenderId,
+          content: dmText,
+          accessToken,
+          instagramAccountId: accountId,
+          pageId: accountId,
+          http,
+        });
+      } catch (deliveryErr) {
+        deliveryError = deliveryErr;
+        console.error('INSTAGRAM_CTA_DELIVERY_ERROR', deliveryErr?.code, deliveryErr?.message);
+      } finally {
+        sendInstagramTypingOff({
+          recipientId: cleanSenderId,
+          accessToken,
+          instagramAccountId: accountId,
+          pageId: accountId,
+          http,
+        }).catch(() => {});
+      }
+
+      if (persisted.message?.id) {
+        const isPool = typeof database?.connect === 'function' && typeof database?.query !== 'function';
+        const dbClient = isPool ? await database.connect() : database;
+        try {
+          if (deliveryError) {
+            await dbClient.query(
+              `UPDATE conversation_messages
+                  SET delivery_status = 'FAILED',
+                      delivery_failure_code = $1,
+                      delivery_status_updated_at = CURRENT_TIMESTAMP
+                WHERE id = $2 AND tenant_id = $3`,
+              [deliveryError?.code || 'INSTAGRAM_DELIVERY_FAILED', persisted.message.id, tenantId]
+            ).catch(() => {});
+          } else if (deliveryResult?.providerMessageId) {
+            await dbClient.query(
+              `UPDATE conversation_messages
+                  SET external_message_id = $1,
+                      delivery_status = 'SENT',
+                      delivery_status_updated_at = CURRENT_TIMESTAMP
+                WHERE id = $2 AND tenant_id = $3`,
+              [deliveryResult.providerMessageId, persisted.message.id, tenantId]
+            ).catch(() => {});
+
+            await dbClient.query(
+              `UPDATE crm_consultations
+                  SET cta_delivered_at = CURRENT_TIMESTAMP,
+                      updated_at = CURRENT_TIMESTAMP
+                WHERE tenant_id = $1 AND conversation_id = $2`,
+              [tenantId, conversationId]
+            ).catch(() => {});
+          }
+        } finally {
+          if (isPool && typeof dbClient?.release === 'function') {
+            dbClient.release();
+          }
+        }
+      }
+    }
+
+    return {
+      aiInvoked: true,
+      qualified: true,
+      ctaDelivered: !deliveryError && Boolean(deliveryResult),
+      delivered: !deliveryError && Boolean(deliveryResult),
+      deliveryError: deliveryError?.message || null,
+      responseText: dmText,
+      deliveryResult,
+      assistantMessageId: persisted.message?.id || null,
+      consultation: qualificationOutcome.consultation,
+      ctaUrl: qualificationOutcome.ctaUrl,
+    };
+  }
+
   // 8. Start Instagram Typing Indicator (non-blocking)
   const generationStartedAt = Date.now();
   if (accessToken && senderIgsid) {
@@ -541,10 +649,12 @@ export async function orchestrateInstagramInboundAiResponse({
   }
 
   // 10. Bounded Human-Like Adaptive Pacing
-  await applyWhatsAppAdaptivePacing({
-    generationStartedAt,
-    content: formattedResponse,
-  });
+  if (applyPacing !== false) {
+    await applyWhatsAppAdaptivePacing({
+      generationStartedAt,
+      content: formattedResponse,
+    });
+  }
 
   // 11. Persist Assistant response atomically (guards against operator takeover race)
   const persisted = await persistAssistantResponseIfCurrent({
@@ -670,6 +780,7 @@ export async function generateAndDeliverInstagramAssistantResponse({
   http,
   embed = null,
   generateAiResponse,
+  applyPacing = true,
 }) {
   const shouldRelease = typeof database?.connect === 'function';
   const client = shouldRelease ? await database.connect() : database;
@@ -717,6 +828,104 @@ export async function generateAndDeliverInstagramAssistantResponse({
     const instagramUserId = config.instagram_user_id || null;
     const authMode = config.auth_mode || null;
     const recipientIgsid = String(conversation.customer_external_id || '').replace(/^instagram:\s*/i, '');
+
+    // Check high-intent lead qualification & customer-initiated WhatsApp CTA
+    const qualificationOutcome = await evaluateAndProcessHighIntentLead({
+      tenantId,
+      conversationId,
+      database: client,
+      httpClient: http,
+    }).catch((err) => {
+      console.warn('HIGH_INTENT_LEAD_EVALUATION_WARN', err?.message);
+      return null;
+    });
+
+    if (qualificationOutcome?.qualified && !qualificationOutcome.alreadyDelivered) {
+      const dmText = `${qualificationOutcome.dmResponseText || "Bilgilerinizi aldım. Aşağıdaki bağlantı üzerinden WhatsApp'tan doğrudan iletişime geçebilirsiniz:"}\n\n${qualificationOutcome.ctaUrl}`;
+
+      const persisted = await persistAssistantResponseIfCurrent({
+        tenantId,
+        conversationId,
+        content: dmText,
+        handlingVersion: conversation.handling_version,
+        database: client,
+      });
+
+      if (!persisted.delivered) {
+        return { delivered: false, dropped: true, reason: 'CONVERSATION_TAKEN_OVER' };
+      }
+
+      let deliveryResult = null;
+      let deliveryError = null;
+      const cleanRecipient = String(recipientIgsid || '').replace(/^instagram:\s*/i, '').trim();
+
+      if (accessToken && cleanRecipient) {
+        try {
+          deliveryResult = await deliverInstagramText({
+            recipientId: cleanRecipient,
+            content: dmText,
+            accessToken,
+            instagramAccountId: accountId,
+            pageId: accountId,
+            http,
+          });
+        } catch (deliveryErr) {
+          deliveryError = deliveryErr;
+          console.error('INSTAGRAM_CTA_DELIVERY_ERROR', deliveryErr?.code, deliveryErr?.message);
+        } finally {
+          sendInstagramTypingOff({
+            recipientId: cleanRecipient,
+            accessToken,
+            instagramAccountId: accountId,
+            pageId: accountId,
+            http,
+          }).catch(() => {});
+        }
+
+        if (persisted.message?.id) {
+          if (deliveryError) {
+            await client.query(
+              `UPDATE conversation_messages
+                  SET delivery_status = 'FAILED',
+                      delivery_failure_code = $1,
+                      delivery_status_updated_at = CURRENT_TIMESTAMP
+                WHERE id = $2 AND tenant_id = $3`,
+              [deliveryError?.code || 'INSTAGRAM_DELIVERY_FAILED', persisted.message.id, tenantId]
+            ).catch(() => {});
+          } else if (deliveryResult?.providerMessageId) {
+            await client.query(
+              `UPDATE conversation_messages
+                  SET external_message_id = $1,
+                      delivery_status = 'SENT',
+                      delivery_status_updated_at = CURRENT_TIMESTAMP
+                WHERE id = $2 AND tenant_id = $3`,
+              [deliveryResult.providerMessageId, persisted.message.id, tenantId]
+            ).catch(() => {});
+
+            await client.query(
+              `UPDATE crm_consultations
+                  SET cta_delivered_at = CURRENT_TIMESTAMP,
+                      updated_at = CURRENT_TIMESTAMP
+                WHERE tenant_id = $1 AND conversation_id = $2`,
+              [tenantId, conversationId]
+            ).catch(() => {});
+          }
+        }
+      }
+
+      return {
+        aiInvoked: true,
+        qualified: true,
+        ctaDelivered: !deliveryError && Boolean(deliveryResult),
+        delivered: !deliveryError && Boolean(deliveryResult),
+        deliveryError: deliveryError?.message || null,
+        responseText: dmText,
+        deliveryResult,
+        assistantMessageId: persisted.message?.id || null,
+        consultation: qualificationOutcome.consultation,
+        ctaUrl: qualificationOutcome.ctaUrl,
+      };
+    }
 
     // Resolve Persona & Knowledge
     let persona = null;
@@ -791,10 +1000,12 @@ export async function generateAndDeliverInstagramAssistantResponse({
     const formattedResponse = formatInstagramDmResponse(rawAiResponseText);
     if (!formattedResponse) return { skipped: true, reason: 'EMPTY_AI_RESPONSE' };
 
-    await applyWhatsAppAdaptivePacing({
-      generationStartedAt,
-      content: formattedResponse,
-    });
+    if (applyPacing !== false) {
+      await applyWhatsAppAdaptivePacing({
+        generationStartedAt,
+        content: formattedResponse,
+      });
+    }
 
     const persisted = await persistAssistantResponseIfCurrent({
       tenantId,
