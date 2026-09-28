@@ -560,9 +560,11 @@ async function main() {
         });
         const apiRetryJson = await apiRetryRes.json();
         console.log('API RETRY RESPONSE:', apiRetryRes.status, JSON.stringify(apiRetryJson));
-        if (apiRetryRes.ok && apiRetryJson?.result) {
+        if (apiRetryRes.ok && apiRetryJson?.result?.sent) {
           ahmetRetryOutcome = apiRetryJson.result;
           apiCallSuccessful = true;
+        } else if (apiRetryRes.ok && apiRetryJson?.result) {
+          console.warn('API returned non-sent outcome, executing direct service dispatch with latest codebase...');
         }
       } catch (apiErr) {
         console.warn('API Retry call failed, falling back to direct service dispatch:', apiErr.message);
