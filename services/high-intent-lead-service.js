@@ -229,32 +229,22 @@ export function formatInternalWhatsAppLeadNotification({
   const cleanTz = timezone ? String(timezone).trim() : null;
   const cleanSource = source ? String(source).trim() : 'INSTAGRAM';
 
-  const deepLink = dashboardDeepLink || dashboardUrl || (conversationId ? `/conversations/${conversationId}` : null);
+  const parts = [
+    `YENİ LEAD${isUpdate ? ' (GÜNCELLEME)' : ''}:`,
+    cleanName ? `Müşteri: ${cleanName}` : null,
+    cleanIg ? `IG: ${cleanIg}` : null,
+    cleanPhone ? `Tel: ${cleanPhone}` : null,
+    cleanKonu ? `Konu: ${cleanKonu}` : null,
+    cleanFaaliyet ? `Faaliyet: ${cleanFaaliyet}` : (cleanIstek ? `Talep: ${cleanIstek}` : null),
+    cleanTime || cleanTimeline ? `Görüşme: ${cleanTime || cleanTimeline}${cleanTz ? ` (${cleanTz})` : ''}` : null,
+  ].filter(Boolean);
 
-  const lines = [
-    `YENİ INSTAGRAM LEAD${isUpdate ? ' — GÜNCELLEME' : ''}`,
-    '',
-    ...(cleanName ? [`Müşteri: ${cleanName}`] : []),
-    ...(cleanIg ? [`Instagram: ${cleanIg}`] : []),
-    ...(cleanPhone ? [`Telefon / WhatsApp: ${cleanPhone}`] : []),
-    '',
-    ...(cleanKonu ? [`Konu: ${cleanKonu}`] : []),
-    ...(cleanFaaliyet ? [`Faaliyet: ${cleanFaaliyet}`] : []),
-    ...(cleanIstek ? [`İstediği: ${cleanIstek}`] : []),
-    ...(cleanTimeline ? [`Başlama zamanı: ${cleanTimeline}`] : []),
-    '',
-    ...(cleanDate || cleanTime || cleanTz ? [
-      'Görüşme:',
-      ...(cleanDate ? [cleanDate] : []),
-      ...(cleanTime ? [cleanTime] : []),
-      ...(cleanTz ? [cleanTz] : []),
-      '',
-    ] : []),
-    `Kaynak: ${cleanSource}`,
-    ...(deepLink ? ['', 'Konuşma:', deepLink] : []),
-  ];
-
-  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return parts
+    .join(' | ')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .slice(0, 1000)
+    .trim();
 }
 
 

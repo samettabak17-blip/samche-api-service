@@ -191,9 +191,10 @@ export async function deliverWhatsAppTemplate({
     throw new WhatsAppDeliveryError('WHATSAPP_TEMPLATE_DELIVERY_INVALID_INPUT');
   }
 
+  const sanitizeTemplateParam = (val) => String(val ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
   const components = bodyParameters.length > 0 ? [{
     type: 'body',
-    parameters: bodyParameters.map((value) => ({ type: 'text', text: String(value ?? '') })),
+    parameters: bodyParameters.map((value) => ({ type: 'text', text: sanitizeTemplateParam(value) })),
   }] : [];
 
   let response;
