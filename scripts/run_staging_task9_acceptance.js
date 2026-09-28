@@ -496,8 +496,10 @@ async function main() {
 
     const leadBefore = await pool.query(
       `SELECT id, intent, temperature, lead_score, timeline, service_interest
-         FROM crm_leads WHERE tenant_id = $1 AND conversation_id = $2`,
-      [tenantId, ahmetConv.conversation_id]
+         FROM crm_leads
+        WHERE tenant_id = $1 AND (conversation_id = $2 OR (contact_id IS NOT NULL AND contact_id = $3))
+        ORDER BY created_at DESC LIMIT 1`,
+      [tenantId, ahmetConv.conversation_id, ahmetConv.contact_id]
     );
     console.log('EXISTING LEAD RECORD:', leadBefore.rows[0]);
 
@@ -532,8 +534,8 @@ async function main() {
 
     if (token) {
       try {
-        console.log(`Calling POST ${apiBase}/api/v1/dashboard/${tenantId}/conversations/${ahmetConv.conversation_id}/lead-notification/retry`);
-        const apiRetryRes = await fetch(`${apiBase}/api/v1/dashboard/${tenantId}/conversations/${ahmetConv.conversation_id}/lead-notification/retry`, {
+        console.log(`Calling POST ${apiBase}/api/v1/tenants/${tenantId}/conversations/${ahmetConv.conversation_id}/lead-notification/retry`);
+        const apiRetryRes = await fetch(`${apiBase}/api/v1/tenants/${tenantId}/conversations/${ahmetConv.conversation_id}/lead-notification/retry`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${token}`,

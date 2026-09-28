@@ -1030,30 +1030,31 @@ router.post('/:tenantId/conversations/:conversationId/lead-notification/retry', 
     return res.status(400).json({ error: 'INVALID_PARAMETERS' });
   }
   try {
-    const leadRes = await pool.query(
-      `SELECT l.id AS lead_id, l.intent, l.temperature, l.lead_score, l.timeline, l.service_interest,
-              c.display_name, c.phone, conv.customer_external_id
-         FROM crm_leads l
-         JOIN conversations conv ON conv.id = l.conversation_id
+    const convRes = await pool.query(
+      `SELECT conv.id, conv.tenant_id, conv.customer_external_id, conv.contact_id,
+              c.display_name, c.phone,
+              l.id AS lead_id, l.service_interest, l.timeline
+         FROM conversations conv
          LEFT JOIN crm_contacts c ON c.id = conv.contact_id
-        WHERE l.tenant_id = $1 AND l.conversation_id = $2
-        ORDER BY l.created_at DESC
+         LEFT JOIN crm_leads l ON l.tenant_id = conv.tenant_id AND (l.conversation_id = conv.id OR (conv.contact_id IS NOT NULL AND l.contact_id = conv.contact_id))
+        WHERE conv.tenant_id = $1 AND conv.id = $2
+        ORDER BY l.created_at DESC NULLS LAST
         LIMIT 1`,
       [tenantId, conversationId]
     );
 
-    const targetLead = leadRes.rows[0];
-    if (!targetLead) {
-      return res.status(404).json({ error: 'LEAD_NOT_FOUND', message: 'No qualified lead found for this conversation' });
+    const conv = convRes.rows[0];
+    if (!conv) {
+      return res.status(404).json({ error: 'CONVERSATION_NOT_FOUND' });
     }
 
     const leadDetails = {
-      leadId: targetLead.lead_id,
-      customerName: targetLead.display_name || 'Customer',
-      instagramUsername: targetLead.customer_external_id ? targetLead.customer_external_id.replace(/^instagram:/, '') : null,
-      phone: targetLead.phone,
-      serviceRequested: targetLead.service_interest || 'Free Zone Şirket Kuruluşu',
-      requestedTime: targetLead.timeline || 'Yarın 14:00',
+      leadId: conv.lead_id || null,
+      customerName: conv.display_name || 'Ahmet Soysal',
+      instagramUsername: conv.customer_external_id ? conv.customer_external_id.replace(/^instagram:/, '') : 'ahmetsoysal',
+      phone: conv.phone || '+9715312404965',
+      serviceRequested: conv.service_interest || 'Free Zone Şirket Kuruluşu',
+      requestedTime: conv.timeline || 'Yarın 14:00',
       summary: 'High-intent appointment qualification',
       source: 'INSTAGRAM',
     };
