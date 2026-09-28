@@ -51,7 +51,10 @@ import {
   disconnectWhatsAppChannel,
   WhatsAppEmbeddedSignupError,
 } from '../services/whatsapp-embedded-signup-service.js';
-import { sendSilentInternalWhatsAppLeadNotification } from '../services/high-intent-lead-service.js';
+import {
+  sendSilentInternalWhatsAppLeadNotification,
+  reconstructLeadDetailsFromConversation,
+} from '../services/high-intent-lead-service.js';
 
 
 const webChatLogoUpload = multer({
@@ -1030,34 +1033,15 @@ router.post('/:tenantId/conversations/:conversationId/lead-notification/retry', 
     return res.status(400).json({ error: 'INVALID_PARAMETERS' });
   }
   try {
-    const convRes = await pool.query(
-      `SELECT conv.id, conv.tenant_id, conv.customer_external_id, conv.contact_id,
-              c.display_name, c.phone,
-              l.id AS lead_id, l.service_interest, l.timeline
-         FROM conversations conv
-         LEFT JOIN crm_contacts c ON c.id = conv.contact_id
-         LEFT JOIN crm_leads l ON l.tenant_id = conv.tenant_id AND (l.conversation_id = conv.id OR (conv.contact_id IS NOT NULL AND l.contact_id = conv.contact_id))
-        WHERE conv.tenant_id = $1 AND conv.id = $2
-        ORDER BY l.created_at DESC NULLS LAST
-        LIMIT 1`,
-      [tenantId, conversationId]
-    );
+    const leadDetails = await reconstructLeadDetailsFromConversation({
+      tenantId,
+      conversationId,
+      database: pool,
+    });
 
-    const conv = convRes.rows[0];
-    if (!conv) {
+    if (!leadDetails) {
       return res.status(404).json({ error: 'CONVERSATION_NOT_FOUND' });
     }
-
-    const leadDetails = {
-      leadId: conv.lead_id || null,
-      customerName: conv.display_name || 'Ahmet Soysal',
-      instagramUsername: conv.customer_external_id ? conv.customer_external_id.replace(/^instagram:/, '') : 'ahmetsoysal',
-      phone: conv.phone || '+9715312404965',
-      serviceRequested: conv.service_interest || 'Free Zone Şirket Kuruluşu',
-      requestedTime: conv.timeline || 'Yarın 14:00',
-      summary: 'High-intent appointment qualification',
-      source: 'INSTAGRAM',
-    };
 
     const result = await sendSilentInternalWhatsAppLeadNotification({
       tenantId,

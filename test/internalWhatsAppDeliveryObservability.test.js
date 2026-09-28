@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import {
   sendSilentInternalWhatsAppLeadNotification,
   computeLeadNotificationDedupeHash,
+  reconstructLeadDetailsFromConversation,
 } from '../services/high-intent-lead-service.js';
 import { recordWhatsAppDeliveryStatus } from '../services/live-inbox-service.js';
+import { safeProviderDiagnostic, WhatsAppDeliveryError } from '../services/whatsapp-delivery-service.js';
 
 class MockDatabaseClient {
   constructor({ queries = {} } = {}) {
@@ -129,6 +131,7 @@ test('PHASE 4.2 & 4.3 & 4.4 — Webhook lifecycle: SENT -> DELIVERED -> READ', a
     phoneNumberId: '1376040765584173',
     status: { id: wamid, status: 'sent', timestamp: '1727470000' },
     database: poolMock,
+    reconciliationDelaysMs: [0],
   });
   assert.equal(resSent.deliveryStatus, 'SENT');
   assert.equal(resSent.internalNotification, true);
@@ -138,6 +141,7 @@ test('PHASE 4.2 & 4.3 & 4.4 — Webhook lifecycle: SENT -> DELIVERED -> READ', a
     phoneNumberId: '1376040765584173',
     status: { id: wamid, status: 'delivered', timestamp: '1727470005' },
     database: poolMock,
+    reconciliationDelaysMs: [0],
   });
   assert.equal(resDelivered.deliveryStatus, 'DELIVERED');
   assert.equal(recordedStatus, 'DELIVERED');
@@ -146,6 +150,7 @@ test('PHASE 4.2 & 4.3 & 4.4 — Webhook lifecycle: SENT -> DELIVERED -> READ', a
     phoneNumberId: '1376040765584173',
     status: { id: wamid, status: 'read', timestamp: '1727470010' },
     database: poolMock,
+    reconciliationDelaysMs: [0],
   });
   assert.equal(resRead.deliveryStatus, 'READ');
   assert.equal(recordedStatus, 'READ');
@@ -189,6 +194,7 @@ test('PHASE 4.5 — Webhook FAILED persists exact sanitized provider error', asy
       }],
     },
     database: new MockDatabasePool(client),
+    reconciliationDelaysMs: [0],
   });
 
   assert.equal(resFailed.updated, true);
@@ -214,6 +220,7 @@ test('PHASE 4.6 & 4.7 — Customer messages unaffected and isolation preserved',
     phoneNumberId: '1376040765584173',
     status: { id: 'wamid.customer.1', status: 'delivered' },
     database: new MockDatabasePool(client),
+    reconciliationDelaysMs: [0],
   });
 
   assert.equal(res.updated, true);
@@ -335,4 +342,178 @@ test('PHASE 4.11 & 4.12 — Zero LLM calls and zero customer Instagram messages'
   assert.equal(res.sent, true);
   assert.equal(llmCalls, 0);
   assert.equal(customerMessages, 0);
+});
+
+test('PHASE 4.13 — Provider error extraction sanitizes Meta error response and excludes secrets', async () => {
+  const metaErrorPayload = {
+    response: {
+      status: 400,
+      data: {
+        error: {
+          message: '(#132000) The number of parameters does not match the expected number of params',
+          type: 'OAuthException',
+          code: 132000,
+          error_subcode: 2494010,
+          error_data: {
+            messaging_product: 'whatsapp',
+            details: 'template parameter length mismatch: expected 2, got 1',
+          },
+          fbtrace_id: 'A1B2C3D4E5F',
+        },
+      },
+    },
+    config: {
+      headers: {
+        Authorization: 'Bearer SECRET_ACCESS_TOKEN_12345',
+      },
+    },
+  };
+
+  const diag = safeProviderDiagnostic(metaErrorPayload, 'TEMPLATE_SEND');
+  assert.equal(diag.providerStatus, 400);
+  assert.equal(diag.providerCode, '132000');
+  assert.equal(diag.providerSubcode, '2494010');
+  assert.equal(diag.providerType, 'OAuthException');
+  assert.equal(diag.providerMessage, '(#132000) The number of parameters does not match the expected number of params');
+  assert.equal(diag.providerDetails, 'template parameter length mismatch: expected 2, got 1');
+
+  // Verify secrets are strictly excluded
+  const serialized = JSON.stringify(diag);
+  assert.equal(serialized.includes('SECRET_ACCESS_TOKEN_12345'), false);
+  assert.equal(serialized.includes('Authorization'), false);
+});
+
+test('PHASE 4.14 — HTTP 400 from Meta persists sanitized failure details to internal_notification_deliveries', async () => {
+  const tenantId = '11111111-1111-4111-8111-111111111111';
+  const conversationId = '22222222-2222-4222-8222-222222222222';
+  let recordedFailureCode = null;
+  let recordedFailureReason = null;
+
+  const mockHttpError = {
+    post: async () => {
+      const err = new Error('Request failed with status code 400');
+      err.response = {
+        status: 400,
+        data: {
+          error: {
+            message: '(#132000) The number of parameters does not match the expected number of params',
+            type: 'OAuthException',
+            code: 132000,
+            error_subcode: 2494010,
+            error_data: {
+              messaging_product: 'whatsapp',
+              details: 'template parameter length mismatch',
+            },
+          },
+        },
+      };
+      throw err;
+    },
+  };
+
+  const client = new MockDatabaseClient({
+    queries: {
+      'integration_type = \'INSTAGRAM\'': () => ({
+        rowCount: 1,
+        rows: [{
+          ig_config: {
+            lead_notification_enabled: true,
+            lead_whatsapp_destination: '+971527288586',
+            lead_notification_template: { name: 'instagram_qualified_lead', language_code: 'tr', status: 'APPROVED' },
+          },
+        }],
+      }),
+      'integration_type = \'WHATSAPP\'': () => ({
+        rowCount: 1,
+        rows: [{ external_channel_id: '1376040765584173', wa_config: { access_token: 'meta_secret_token' } }],
+      }),
+      'FROM internal_notification_deliveries': () => ({ rowCount: 0, rows: [] }),
+      'FROM crm_leads': () => ({ rowCount: 1, rows: [{ lead_id: 'lead-1', signals: {} }] }),
+      'INSERT INTO internal_notification_deliveries': (params) => {
+        recordedFailureCode = params[7];
+        recordedFailureReason = JSON.parse(params[8]);
+        return { rowCount: 1, rows: [] };
+      },
+    },
+  });
+
+  const res = await sendSilentInternalWhatsAppLeadNotification({
+    tenantId,
+    conversationId,
+    leadDetails: {
+      leadId: 'lead-1',
+      customerName: 'Ahmet Soysal',
+      phone: '+905312404965',
+      serviceRequested: 'Free Zone Şirket Kuruluşu',
+      requestedTime: 'Bugün 18:00',
+    },
+    database: new MockDatabasePool(client),
+    env: { WHATSAPP_TOKEN: 'valid_token' },
+    httpClient: mockHttpError,
+  });
+
+  assert.equal(res.sent, false);
+  assert.equal(res.error, 'META_132000');
+  assert.equal(recordedFailureCode, 'META_132000');
+  assert.equal(recordedFailureReason.http_status, 400);
+  assert.equal(recordedFailureReason.code, 132000);
+  assert.equal(recordedFailureReason.error_subcode, 2494010);
+  assert.equal(recordedFailureReason.details, 'template parameter length mismatch');
+});
+
+test('PHASE 4.15 — reconstructLeadDetailsFromConversation uses authoritative persisted data without caller overrides', async () => {
+  const tenantId = '11111111-1111-4111-8111-111111111111';
+  const conversationId = '22222222-2222-4222-8222-222222222222';
+
+  const client = new MockDatabaseClient({
+    queries: {
+      'FROM conversations conv': () => ({
+        rowCount: 1,
+        rows: [{
+          id: conversationId,
+          tenant_id: tenantId,
+          customer_external_id: 'instagram:797284549839918',
+          contact_id: 'contact-uuid-1',
+          display_name: 'Ahmet Soysal',
+          phone: '+905312404965',
+        }],
+      }),
+      'FROM crm_leads l': () => ({
+        rowCount: 1,
+        rows: [{
+          lead_id: 'lead-uuid-1',
+          customer_name: 'Ahmet Soysal',
+          phone: '+905312404965',
+          service_interest: 'Free Zone Şirket Kuruluşu',
+          timeline: 'Bugün 18:00',
+          activity_metadata: {
+            event: 'CONSULTATION_REQUEST_PENDING',
+            status: 'PENDING',
+            requested_time: 'Bugün 18:00',
+          },
+        }],
+      }),
+      'FROM conversation_messages': () => ({
+        rowCount: 4,
+        rows: [
+          { sender_type: 'CUSTOMER', content: 'Merhaba, Free Zone şirket kurmak istiyorum.' },
+          { sender_type: 'CUSTOMER', content: 'E-ticaret üzerine olacak.' },
+          { sender_type: 'CUSTOMER', content: 'Numaram: +905312404965' },
+          { sender_type: 'CUSTOMER', content: 'Bugun saat 18.00 olabilir' },
+        ],
+      }),
+    },
+  });
+
+  const reconstructed = await reconstructLeadDetailsFromConversation({
+    tenantId,
+    conversationId,
+    database: new MockDatabasePool(client),
+  });
+
+  assert.equal(reconstructed.customerName, 'Ahmet Soysal');
+  assert.equal(reconstructed.phone, '+905312404965');
+  assert.equal(reconstructed.serviceRequested, 'Free Zone Şirket Kuruluşu');
+  assert.equal(reconstructed.requestedTime, 'Bugün 18:00');
+  assert.notEqual(reconstructed.requestedTime, 'Yarın 14:00');
 });

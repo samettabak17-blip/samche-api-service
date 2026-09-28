@@ -1,6 +1,11 @@
 import crypto from 'node:crypto';
 import pool from '../config/db.js';
-import { deliverWhatsAppTemplate, deliverWhatsAppText } from './whatsapp-delivery-service.js';
+import {
+  deliverWhatsAppTemplate,
+  deliverWhatsAppText,
+  safeProviderDiagnostic,
+  WhatsAppDeliveryError,
+} from './whatsapp-delivery-service.js';
 import { normalizeWhatsAppExternalId } from './whatsapp-channel-ownership-service.js';
 
 export class HighIntentLeadError extends Error {
@@ -442,7 +447,31 @@ export async function sendSilentInternalWhatsAppLeadNotification({
         integrationConfig: waChannel?.wa_config || null,
       });
     } catch (deliveryErr) {
-      console.error('INTERNAL_WHATSAPP_LEAD_NOTIFICATION_FAILED', deliveryErr?.code, deliveryErr?.message);
+      const diag = deliveryErr instanceof WhatsAppDeliveryError ? deliveryErr : safeProviderDiagnostic(deliveryErr, 'TEMPLATE_SEND');
+      const providerError = diag?.providerError || (deliveryErr?.response?.data?.error ? safeProviderDiagnostic(deliveryErr, 'TEMPLATE_SEND').providerError : null);
+      const httpStatus = diag?.providerStatus ?? (deliveryErr?.response?.status ? Number(deliveryErr.response.status) : null);
+      const metaCode = providerError?.code ?? diag?.providerCode ?? null;
+      const metaSubcode = providerError?.error_subcode ?? diag?.providerSubcode ?? null;
+      const metaType = providerError?.type ?? diag?.providerType ?? null;
+      const metaMessage = providerError?.message ?? diag?.providerMessage ?? deliveryErr?.message ?? 'WhatsApp delivery failed';
+      const metaDetails = providerError?.details ?? diag?.providerDetails ?? null;
+
+      const failureCode = metaCode ? `META_${metaCode}` : (deliveryErr?.code || 'WHATSAPP_DELIVERY_FAILED');
+      const normalizedProviderError = {
+        http_status: httpStatus,
+        type: metaType,
+        code: metaCode,
+        error_subcode: metaSubcode,
+        message: metaMessage,
+        details: metaDetails,
+      };
+
+      console.error('INTERNAL_WHATSAPP_LEAD_NOTIFICATION_FAILED', JSON.stringify({
+        code: failureCode,
+        http_status: httpStatus,
+        provider_error: normalizedProviderError,
+      }));
+
       const targetLeadId = leadDetails?.leadId || existingLead?.lead_id || null;
       try {
         await client.query(
@@ -458,16 +487,18 @@ export async function sendSilentInternalWhatsAppLeadNotification({
             phoneNumberId,
             approvedTemplate.name,
             approvedTemplate.language_code,
-            deliveryErr?.code || 'WHATSAPP_DELIVERY_FAILED',
-            deliveryErr?.message || null,
+            failureCode,
+            JSON.stringify(normalizedProviderError),
             currentHash,
           ]
         );
       } catch {}
       return {
         sent: false,
-        error: deliveryErr?.code || 'WHATSAPP_DELIVERY_FAILED',
-        message: deliveryErr?.message,
+        error: failureCode,
+        message: metaMessage,
+        httpStatus,
+        providerError: normalizedProviderError,
         recipient: destinationPhone,
       };
     }
@@ -776,5 +807,104 @@ export async function evaluateAndProcessHighIntentLead({
     }
   }
 }
+
+/**
+ * Authoritatively reconstructs lead qualification details for a conversation from persisted records.
+ * Prioritizes persisted qualification / consultation records over arbitrary caller inputs.
+ * Zero hardcoded fallback meeting times. Zero LLM calls.
+ */
+export async function reconstructLeadDetailsFromConversation({
+  tenantId,
+  conversationId,
+  database = pool,
+}) {
+  const isDedicatedClient = typeof database?.connect === 'function';
+  const client = isDedicatedClient ? await database.connect() : database;
+  try {
+    const convRes = await client.query(
+      `SELECT conv.id, conv.tenant_id, conv.customer_external_id, conv.contact_id,
+              c.display_name, c.phone
+         FROM conversations conv
+         LEFT JOIN crm_contacts c ON c.id = conv.contact_id
+        WHERE conv.tenant_id = $1 AND conv.id = $2
+        LIMIT 1`,
+      [tenantId, conversationId]
+    );
+    const conv = convRes.rows[0];
+    if (!conv) return null;
+
+    const leadRes = await client.query(
+      `SELECT l.id AS lead_id, l.customer_name, l.phone, l.service_interest, l.timeline,
+              act.metadata AS activity_metadata
+         FROM crm_leads l
+         LEFT JOIN crm_activities act ON act.lead_id = l.id AND act.tenant_id = l.tenant_id AND act.event_type = 'AI_QUALIFICATION'
+        WHERE l.tenant_id = $1 AND (l.conversation_id = $2 OR (conv.contact_id IS NOT NULL AND l.contact_id = $3))
+        ORDER BY l.created_at DESC
+        LIMIT 1`,
+      [tenantId, conversationId, conv.contact_id]
+    );
+    const lead = leadRes.rows[0];
+
+    const msgRes = await client.query(
+      `SELECT sender_type, content
+         FROM conversation_messages
+        WHERE tenant_id = $1 AND conversation_id = $2
+        ORDER BY created_at ASC`,
+      [tenantId, conversationId]
+    );
+    const customerMessages = msgRes.rows
+      .filter((m) => m.sender_type === 'CUSTOMER' || m.sender_type === 'USER')
+      .map((m) => m.content);
+
+    const qualification = deriveInstagramLeadQualification({
+      customerMessages,
+      contactName: conv.display_name,
+      contactPhone: conv.phone,
+    });
+
+    const requestedTime = lead?.timeline
+      || lead?.activity_metadata?.requested_time
+      || qualification.requestedTime
+      || null;
+
+    const customerName = (conv.display_name && !conv.display_name.startsWith('instagram:') ? conv.display_name : null)
+      || lead?.customer_name
+      || qualification.customerName
+      || 'Instagram User';
+
+    const phone = conv.phone
+      || lead?.phone
+      || qualification.phone
+      || null;
+
+    const serviceRequested = lead?.service_interest
+      || qualification.serviceRequested
+      || 'Free Zone Şirket Kuruluşu';
+
+    const cleanIg = conv.customer_external_id ? conv.customer_external_id.replace(/^instagram:/, '') : null;
+
+    return {
+      leadId: lead?.lead_id || null,
+      customerName,
+      instagramUsername: cleanIg,
+      phone,
+      serviceRequested,
+      requestedService: serviceRequested,
+      requestedTime,
+      timeline: requestedTime,
+      timezone: qualification.timezone || lead?.activity_metadata?.timezone || null,
+      businessActivity: qualification.businessActivity || null,
+      structuredRequirement: qualification.structuredRequirement || null,
+      summary: `${serviceRequested}: ${qualification.structuredRequirement || 'Görüşme talebi'}`,
+      source: 'INSTAGRAM',
+      conversationId,
+    };
+  } finally {
+    if (isDedicatedClient && typeof client?.release === 'function') {
+      client.release();
+    }
+  }
+}
+
 
 

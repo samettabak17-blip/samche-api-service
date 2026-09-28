@@ -6,7 +6,10 @@ import {
   getTenantInstagramStatus,
   configureTenantInstagramChannel,
 } from '../services/tenant-instagram-provisioning-service.js';
-import { sendSilentInternalWhatsAppLeadNotification } from '../services/high-intent-lead-service.js';
+import {
+  sendSilentInternalWhatsAppLeadNotification,
+  reconstructLeadDetailsFromConversation,
+} from '../services/high-intent-lead-service.js';
 
 const { Pool } = pg;
 const apiBase = (process.env.API || 'https://samche-api-staging.onrender.com').replace(/\/+$/, '');
@@ -517,16 +520,29 @@ async function main() {
     );
     console.log('LEAD ANALYSIS SIGNALS BEFORE RETRY:', analysisBefore.rows[0]?.signals);
 
-    const leadDetails = {
-      leadId: leadBefore.rows[0]?.id,
-      customerName: ahmetConv.display_name || 'Ahmet Soysal',
-      instagramUsername: ahmetConv.customer_external_id ? ahmetConv.customer_external_id.replace(/^instagram:/, '') : 'ahmetsoysal',
-      phone: ahmetConv.phone || '+9715312404965',
-      serviceRequested: leadBefore.rows[0]?.service_interest || 'Free Zone Şirket Kuruluşu',
-      requestedTime: 'Yarın 14:00',
-      summary: 'High-intent Instagram appointment qualification',
-      source: 'INSTAGRAM',
-    };
+    // Authoritatively reconstruct lead details from database without any mock / fallback values
+    const leadDetails = await reconstructLeadDetailsFromConversation({
+      tenantId,
+      conversationId: ahmetConv.conversation_id,
+      database: pool,
+    });
+    console.log('AUTHORITATIVE PERSISTED LEAD DETAILS:', leadDetails);
+
+    // Preflight verification (Requirement 7 & 8)
+    const phoneMatches = String(leadDetails.phone || '').includes('5312404965');
+    const nameMatches = String(leadDetails.customerName || '').toLowerCase().includes('ahmet') || String(ahmetConv.display_name || '').toLowerCase().includes('ahmet');
+    const meetingTimeMatches = String(leadDetails.requestedTime || '').includes('18:00') || String(leadDetails.requestedTime || '').includes('18.00');
+
+    console.log('PREFLIGHT VALIDATION:');
+    console.log(`  Customer: ${leadDetails.customerName} (Matches: ${nameMatches})`);
+    console.log(`  Phone: ${leadDetails.phone} (Matches: ${phoneMatches})`);
+    console.log(`  Meeting availability: ${leadDetails.requestedTime} (Matches: ${meetingTimeMatches})`);
+    console.log(`  Consultations count: ${actBefore.rows.length} (Expected: <= 1)`);
+
+    if (!phoneMatches || !meetingTimeMatches) {
+      console.error('PREFLIGHT CHECK FAILED: Persisted state does not match expected Ahmet Soysal qualification facts. STOPPING WITHOUT RETRY.');
+      process.exit(1);
+    }
 
     console.log('EXECUTING EXACTLY ONE CONTROLLED RETRY DISPATCH VIA DEPLOYED API OR SERVICE...');
     const dispatchStart = Date.now();

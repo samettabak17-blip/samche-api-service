@@ -8,20 +8,46 @@ import { resolveWhatsAppOutboundCredential } from './whatsapp-credential-resolut
 export class WhatsAppDeliveryError extends Error {
   constructor(code, message = 'WhatsApp delivery failed', diagnostic = {}) {
     super(message);
+    this.name = 'WhatsAppDeliveryError';
     this.code = code;
     this.providerStage = diagnostic.providerStage ?? null;
     this.providerStatus = diagnostic.providerStatus ?? null;
     this.providerCode = diagnostic.providerCode ?? null;
+    this.providerSubcode = diagnostic.providerSubcode ?? null;
+    this.providerType = diagnostic.providerType ?? null;
+    this.providerMessage = diagnostic.providerMessage ?? null;
+    this.providerDetails = diagnostic.providerDetails ?? null;
+    this.providerError = diagnostic.providerError ?? null;
   }
 }
 
-function safeProviderDiagnostic(error, providerStage) {
+export function safeProviderDiagnostic(error, providerStage = 'OUTBOUND_SEND') {
   const status = Number(error?.response?.status);
-  const providerCode = error?.response?.data?.error?.code;
+  const rawProviderError = error?.response?.data?.error;
+  const providerCode = rawProviderError?.code;
+  const providerSubcode = rawProviderError?.error_subcode;
+  const providerType = rawProviderError?.type;
+  const providerMessage = rawProviderError?.message;
+  const providerDetails = rawProviderError?.error_data?.details;
+
+  const sanitizedProviderError = rawProviderError ? {
+    http_status: Number.isInteger(status) ? status : null,
+    type: providerType ? String(providerType).slice(0, 64) : null,
+    code: providerCode !== undefined && providerCode !== null ? Number(providerCode) || String(providerCode).slice(0, 32) : null,
+    error_subcode: providerSubcode !== undefined && providerSubcode !== null ? Number(providerSubcode) || String(providerSubcode).slice(0, 32) : null,
+    message: providerMessage ? String(providerMessage).slice(0, 500) : null,
+    details: providerDetails ? String(providerDetails).slice(0, 1000) : null,
+  } : null;
+
   return {
     providerStage,
     providerStatus: Number.isInteger(status) ? status : null,
-    providerCode: providerCode === undefined || providerCode === null ? null : String(providerCode).slice(0, 32),
+    providerCode: providerCode !== undefined && providerCode !== null ? String(providerCode).slice(0, 32) : null,
+    providerSubcode: providerSubcode !== undefined && providerSubcode !== null ? String(providerSubcode).slice(0, 32) : null,
+    providerType: providerType ? String(providerType).slice(0, 64) : null,
+    providerMessage: providerMessage ? String(providerMessage).slice(0, 500) : null,
+    providerDetails: providerDetails ? String(providerDetails).slice(0, 1000) : null,
+    providerError: sanitizedProviderError,
   };
 }
 
@@ -169,24 +195,39 @@ export async function deliverWhatsAppTemplate({
     type: 'body',
     parameters: bodyParameters.map((value) => ({ type: 'text', text: String(value ?? '') })),
   }] : [];
-  const response = await httpClient.post(
-    `${metaGraphApiBase(env)}/${targetPhoneNumberId}/messages`,
-    {
-      messaging_product: 'whatsapp',
-      to: destination,
-      type: 'template',
-      template: {
-        name: resolvedTemplateName,
-        language: { code: resolvedLanguageCode },
-        ...(components.length > 0 ? { components } : {}),
+
+  let response;
+  try {
+    response = await httpClient.post(
+      `${metaGraphApiBase(env)}/${targetPhoneNumberId}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        to: destination,
+        type: 'template',
+        template: {
+          name: resolvedTemplateName,
+          language: { code: resolvedLanguageCode },
+          ...(components.length > 0 ? { components } : {}),
+        },
       },
-    },
-    {
-      httpsAgent,
-      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      timeout: 20000,
-    }
-  );
+      {
+        httpsAgent,
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        timeout: 20000,
+      }
+    );
+  } catch (error) {
+    const diagnostic = safeProviderDiagnostic(error, 'TEMPLATE_SEND');
+    const providerErr = diagnostic.providerError;
+    const failureCode = providerErr?.code ? `META_${providerErr.code}` : (
+      diagnostic.providerStatus === 401 || diagnostic.providerStatus === 403
+        ? 'WHATSAPP_DELIVERY_AUTH_FAILED'
+        : 'WHATSAPP_DELIVERY_FAILED'
+    );
+    const failureMsg = providerErr?.message || error?.message || 'WhatsApp template delivery failed';
+    throw new WhatsAppDeliveryError(failureCode, failureMsg, diagnostic);
+  }
+
   const providerMessageId = configuredValue(response?.data?.messages?.[0]?.id);
   if (!providerMessageId) throw new WhatsAppDeliveryError('WHATSAPP_DELIVERY_UNCORRELATED');
   return { deliveredChunks: 1, failedChunks: 0, failures: [], providerMessageIds: [providerMessageId], providerMessageId };
