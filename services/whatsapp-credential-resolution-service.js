@@ -44,6 +44,7 @@
 
 import { createHash } from 'node:crypto';
 import { decryptWhatsAppCredential } from './whatsapp-credential-crypto.js';
+import { normalizeWhatsAppExternalId } from './whatsapp-channel-ownership-service.js';
 
 export const WHATSAPP_CREDENTIAL_SOURCES = Object.freeze({
   INTEGRATION_SCOPED: 'INTEGRATION_SCOPED',
@@ -180,4 +181,74 @@ export function describeWhatsAppCredentialResolution(resolution) {
     + ' env_reference=' + (resolution?.envName ?? 'none')
     + ' credential_fingerprint=' + (resolution?.fingerprint ?? 'unconfigured');
 }
+
+/**
+ * Generic, multi-tenant resolution of the WhatsApp sender Phone Number ID.
+ * Strictly distinguishes Phone Number ID from WABA ID / Business Account ID.
+ * Never uses a WABA ID as the sender Phone Number ID for /messages.
+ * Fails closed (returns null) if no valid distinct Phone Number ID can be resolved.
+ */
+export function resolveWhatsAppSenderPhoneNumberId({
+  tenantChannel = null,
+  integrationConfig = null,
+  env = process.env,
+} = {}) {
+  const wabaId = String(
+    integrationConfig?.whatsapp?.waba_id ||
+    integrationConfig?.waba_id ||
+    env?.WHATSAPP_WABA_ID ||
+    env?.META_WABA_ID ||
+    ''
+  ).trim();
+
+  // 1. Explicit phone_number_id from integration configuration (canonical multi-tenant contract)
+  const explicitPhoneId = String(
+    integrationConfig?.whatsapp?.phone_number_id ||
+    integrationConfig?.phone_number_id ||
+    integrationConfig?.whatsapp?.phoneNumberId ||
+    integrationConfig?.phoneNumberId ||
+    ''
+  ).trim();
+
+  if (explicitPhoneId && explicitPhoneId !== wabaId) {
+    try {
+      return normalizeWhatsAppExternalId(explicitPhoneId);
+    } catch {
+      const digits = explicitPhoneId.replace(/[^0-9]/g, '');
+      if (digits.length >= 6 && digits.length <= 32) return digits;
+    }
+  }
+
+  // 2. Channel external_channel_id IF not equal to WABA ID
+  const rawChannelId = String(tenantChannel?.external_channel_id || '').trim();
+  if (rawChannelId && rawChannelId !== wabaId) {
+    try {
+      return normalizeWhatsAppExternalId(rawChannelId);
+    } catch {
+      const digits = rawChannelId.replace(/[^0-9]/g, '');
+      if (digits.length >= 6 && digits.length <= 32) return digits;
+    }
+  }
+
+  // 3. Fallback to platform environment configuration
+  const envPhoneId = String(
+    env?.WHATSAPP_PHONE_NUMBER_ID ||
+    env?.META_PHONE_NUMBER_ID ||
+    env?.STAGING_WHATSAPP_PHONE_ID ||
+    ''
+  ).trim();
+
+  if (envPhoneId && envPhoneId !== wabaId) {
+    try {
+      return normalizeWhatsAppExternalId(envPhoneId);
+    } catch {
+      const digits = envPhoneId.replace(/[^0-9]/g, '');
+      if (digits.length >= 6 && digits.length <= 32) return digits;
+    }
+  }
+
+  // Fail closed: Never return WABA ID or guess
+  return null;
+}
+
 

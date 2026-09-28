@@ -7,6 +7,7 @@ import {
   WhatsAppDeliveryError,
 } from './whatsapp-delivery-service.js';
 import { normalizeWhatsAppExternalId } from './whatsapp-channel-ownership-service.js';
+import { resolveWhatsAppSenderPhoneNumberId } from './whatsapp-credential-resolution-service.js';
 
 export class HighIntentLeadError extends Error {
   constructor(code, message, status = 400) {
@@ -305,9 +306,9 @@ export async function sendSilentInternalWhatsAppLeadNotification({
       return { skipped: true, reason: 'LEAD_NOTIFICATION_NOT_CONFIGURED' };
     }
 
-    // 2. Resolve WhatsApp sender channel / phone number ID for this tenant
+    // 2. Resolve WhatsApp sender channel / phone number ID for this tenant generically
     const waRes = await client.query(
-      `SELECT tc.external_channel_id, ci.config AS wa_config
+      `SELECT tc.id AS channel_id, tc.external_channel_id, ci.config AS wa_config
          FROM tenant_channels tc
          JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.integration_type = 'WHATSAPP'
         WHERE tc.tenant_id = $1 AND tc.channel_type = 'WHATSAPP' AND tc.status = 'active'
@@ -316,13 +317,11 @@ export async function sendSilentInternalWhatsAppLeadNotification({
     );
 
     const waChannel = waRes.rows[0];
-    const rawPhoneNumberId = waChannel?.external_channel_id || env.WHATSAPP_PHONE_NUMBER_ID || env.META_PHONE_NUMBER_ID;
-    let phoneNumberId = null;
-    try {
-      phoneNumberId = normalizeWhatsAppExternalId(rawPhoneNumberId);
-    } catch {
-      phoneNumberId = String(rawPhoneNumberId || '').replace(/[^0-9]/g, '');
-    }
+    const phoneNumberId = resolveWhatsAppSenderPhoneNumberId({
+      tenantChannel: waChannel,
+      integrationConfig: waChannel?.wa_config || null,
+      env,
+    });
 
     if (!phoneNumberId) {
       return { skipped: true, reason: 'WHATSAPP_SENDER_NOT_CONFIGURED' };

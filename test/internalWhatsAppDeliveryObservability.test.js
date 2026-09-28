@@ -7,6 +7,7 @@ import {
 } from '../services/high-intent-lead-service.js';
 import { recordWhatsAppDeliveryStatus } from '../services/live-inbox-service.js';
 import { safeProviderDiagnostic, WhatsAppDeliveryError } from '../services/whatsapp-delivery-service.js';
+import { resolveWhatsAppSenderPhoneNumberId } from '../services/whatsapp-credential-resolution-service.js';
 
 class MockDatabaseClient {
   constructor({ queries = {} } = {}) {
@@ -514,4 +515,112 @@ test('PHASE 4.15 — reconstructLeadDetailsFromConversation uses authoritative p
   assert.equal(reconstructed.serviceRequested, 'Free Zone Şirket Kuruluşu');
   assert.equal(reconstructed.requestedTime, 'Bugün 18:00');
   assert.notEqual(reconstructed.requestedTime, 'Yarın 14:00');
+});
+
+test('PHASE 4.16 — resolveWhatsAppSenderPhoneNumberId semantically distinguishes WABA ID from Phone Number ID', () => {
+  const wabaId = '947279035146304';
+  const phoneId = '1376040765584173';
+
+  // Test 1: Config has explicit phone_number_id while external_channel_id has WABA ID
+  const resolvedFromConfig = resolveWhatsAppSenderPhoneNumberId({
+    tenantChannel: { external_channel_id: wabaId },
+    integrationConfig: {
+      whatsapp: {
+        waba_id: wabaId,
+        phone_number_id: phoneId,
+      },
+    },
+    env: {},
+  });
+  assert.equal(resolvedFromConfig, phoneId);
+
+  // Test 2: Channel has valid phone number and no WABA ID collision
+  const resolvedFromChannel = resolveWhatsAppSenderPhoneNumberId({
+    tenantChannel: { external_channel_id: phoneId },
+    integrationConfig: {},
+    env: {},
+  });
+  assert.equal(resolvedFromChannel, phoneId);
+
+  // Test 3: Channel has WABA ID, config has WABA ID, env has WHATSAPP_PHONE_NUMBER_ID
+  const resolvedFromEnv = resolveWhatsAppSenderPhoneNumberId({
+    tenantChannel: { external_channel_id: wabaId },
+    integrationConfig: { whatsapp: { waba_id: wabaId } },
+    env: { WHATSAPP_PHONE_NUMBER_ID: phoneId },
+  });
+  assert.equal(resolvedFromEnv, phoneId);
+
+  // Test 4: Channel has WABA ID, no phone number configured anywhere -> FAILS CLOSED (returns null)
+  const failedClosed = resolveWhatsAppSenderPhoneNumberId({
+    tenantChannel: { external_channel_id: wabaId },
+    integrationConfig: { whatsapp: { waba_id: wabaId } },
+    env: { WHATSAPP_WABA_ID: wabaId },
+  });
+  assert.equal(failedClosed, null);
+});
+
+test('PHASE 4.17 — sendSilentInternalWhatsAppLeadNotification dispatches to resolved Phone Number ID instead of WABA ID', async () => {
+  const tenantId = '11111111-1111-4111-8111-111111111111';
+  const conversationId = '22222222-2222-4222-8222-222222222222';
+  const wabaId = '947279035146304';
+  const phoneId = '1376040765584173';
+  let capturedUrl = null;
+
+  const mockHttp = {
+    post: async (url) => {
+      capturedUrl = url;
+      return { status: 200, data: { messages: [{ id: 'wamid.resolved.phone' }] } };
+    },
+  };
+
+  const client = new MockDatabaseClient({
+    queries: {
+      'integration_type = \'INSTAGRAM\'': () => ({
+        rowCount: 1,
+        rows: [{
+          ig_config: {
+            lead_notification_enabled: true,
+            lead_whatsapp_destination: '+971527288586',
+            lead_notification_template: { name: 'instagram_qualified_lead', language_code: 'tr', status: 'APPROVED' },
+          },
+        }],
+      }),
+      'integration_type = \'WHATSAPP\'': () => ({
+        rowCount: 1,
+        rows: [{
+          id: 'channel-1',
+          external_channel_id: wabaId, // WABA ID in channel
+          wa_config: {
+            whatsapp: {
+              waba_id: wabaId,
+              phone_number_id: phoneId, // Canonical phone number in config
+            },
+          },
+        }],
+      }),
+      'FROM internal_notification_deliveries': () => ({ rowCount: 0, rows: [] }),
+      'FROM crm_leads': () => ({ rowCount: 1, rows: [{ lead_id: 'lead-1', signals: {} }] }),
+      'INSERT INTO internal_notification_deliveries': () => ({ rowCount: 1, rows: [] }),
+      'INSERT INTO crm_lead_analyses': () => ({ rowCount: 1, rows: [] }),
+    },
+  });
+
+  const res = await sendSilentInternalWhatsAppLeadNotification({
+    tenantId,
+    conversationId,
+    leadDetails: {
+      leadId: 'lead-1',
+      customerName: 'Ahmet Soysal',
+      phone: '+905312404965',
+      serviceRequested: 'Free Zone Şirket Kuruluşu',
+      requestedTime: 'Bugün 18:00',
+    },
+    database: new MockDatabasePool(client),
+    env: { WHATSAPP_TOKEN: 'valid_token' },
+    httpClient: mockHttp,
+  });
+
+  assert.equal(res.sent, true);
+  assert.equal(capturedUrl.includes(phoneId), true);
+  assert.equal(capturedUrl.includes(wabaId), false);
 });
