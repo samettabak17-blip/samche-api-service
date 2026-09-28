@@ -307,19 +307,38 @@ export async function sendSilentInternalWhatsAppLeadNotification({
     }
 
     // 2. Resolve WhatsApp sender channel / phone number ID for this tenant generically
+    let waChannel = null;
+    let waConfig = null;
+
     const waRes = await client.query(
-      `SELECT tc.id AS channel_id, tc.external_channel_id, ci.config AS wa_config
+      `SELECT tc.id AS channel_id, tc.external_channel_id,
+              COALESCE(ci.config, tc_ci.config) AS wa_config
          FROM tenant_channels tc
-         JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.integration_type = 'WHATSAPP'
-        WHERE tc.tenant_id = $1 AND tc.channel_type = 'WHATSAPP' AND tc.status = 'active'
+         LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.integration_type = 'WHATSAPP'
+         LEFT JOIN channel_integrations tc_ci ON tc_ci.tenant_id = tc.tenant_id AND tc_ci.integration_type = 'WHATSAPP' AND tc_ci.enabled = TRUE
+        WHERE tc.tenant_id = $1 AND (tc.channel_type = 'WHATSAPP' OR UPPER(tc.channel_type) = 'WHATSAPP') AND tc.status = 'active'
+        ORDER BY ci.id NULLS LAST, tc.created_at ASC
         LIMIT 1`,
       [tenantId]
     );
 
-    const waChannel = waRes.rows[0];
+    if (waRes.rowCount > 0) {
+      waChannel = waRes.rows[0];
+      waConfig = waChannel?.wa_config || null;
+    } else {
+      const standaloneRes = await client.query(
+        `SELECT ci.id, ci.config AS wa_config
+           FROM channel_integrations ci
+          WHERE ci.tenant_id = $1 AND ci.integration_type = 'WHATSAPP' AND ci.enabled = TRUE
+          LIMIT 1`,
+        [tenantId]
+      );
+      waConfig = standaloneRes.rows[0]?.wa_config || null;
+    }
+
     const phoneNumberId = resolveWhatsAppSenderPhoneNumberId({
       tenantChannel: waChannel,
-      integrationConfig: waChannel?.wa_config || null,
+      integrationConfig: waConfig,
       env,
     });
 
@@ -327,7 +346,7 @@ export async function sendSilentInternalWhatsAppLeadNotification({
       return { skipped: true, reason: 'WHATSAPP_SENDER_NOT_CONFIGURED' };
     }
 
-    const approvedTemplate = igConfig.lead_notification_template || waChannel?.wa_config?.lead_notification_template || null;
+    const approvedTemplate = igConfig.lead_notification_template || waConfig?.lead_notification_template || null;
     if (
       !approvedTemplate
       || String(approvedTemplate.status || '').toUpperCase() !== 'APPROVED'
@@ -443,7 +462,7 @@ export async function sendSilentInternalWhatsAppLeadNotification({
         bodyParameters: [notificationText],
         env,
         httpClient,
-        integrationConfig: waChannel?.wa_config || null,
+        integrationConfig: waConfig || waChannel?.wa_config || null,
       });
     } catch (deliveryErr) {
       const diag = deliveryErr instanceof WhatsAppDeliveryError ? deliveryErr : safeProviderDiagnostic(deliveryErr, 'TEMPLATE_SEND');
