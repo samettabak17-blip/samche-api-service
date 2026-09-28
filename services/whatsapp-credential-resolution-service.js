@@ -155,12 +155,18 @@ export function resolveWhatsAppOutboundCredential({ integrationConfig = null, en
   }
 
   // 3. Fall back to shared platform credential
-  const platformToken = trimmed(env?.[PLATFORM_WHATSAPP_TOKEN_ENV]);
+  const platformToken = trimmed(
+    env?.[PLATFORM_WHATSAPP_TOKEN_ENV] ||
+    env?.WHATSAPP_ACCESS_TOKEN ||
+    env?.META_ACCESS_TOKEN ||
+    env?.STAGING_WHATSAPP_TOKEN ||
+    env?.META_TOKEN
+  );
   if (platformToken) {
     return {
       accessToken: platformToken,
       source: WHATSAPP_CREDENTIAL_SOURCES.PLATFORM_FALLBACK,
-      envName: PLATFORM_WHATSAPP_TOKEN_ENV,
+      envName: env?.[PLATFORM_WHATSAPP_TOKEN_ENV] ? PLATFORM_WHATSAPP_TOKEN_ENV : 'PLATFORM_SECRET_STORE',
       fingerprint: credentialFingerprint(platformToken),
     };
   }
