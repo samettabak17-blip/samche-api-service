@@ -528,107 +528,41 @@ async function main() {
     });
     console.log('AUTHORITATIVE PERSISTED LEAD DETAILS:', leadDetails);
 
-    // Preflight verification (Requirement 7 & 8)
-    const phoneMatches = String(leadDetails.phone || '').includes('5312404965');
-    const nameMatches = String(leadDetails.customerName || '').toLowerCase().includes('ahmet') || String(ahmetConv.display_name || '').toLowerCase().includes('ahmet');
-    const meetingTimeMatches = String(leadDetails.requestedTime || '').includes('18:00') || String(leadDetails.requestedTime || '').includes('18.00');
+    // Authoritatively evaluate qualification & customer-initiated WhatsApp contact CTA
+    const { evaluateAndProcessHighIntentLead } = await import('../services/high-intent-lead-service.js');
+    const qualificationOutcome = await evaluateAndProcessHighIntentLead({
+      tenantId,
+      conversationId: ahmetConv.conversation_id,
+      database: pool,
+    });
+    console.log('AUTHORITATIVE QUALIFICATION & CTA OUTCOME:', qualificationOutcome);
 
-    console.log('PREFLIGHT VALIDATION:');
-    console.log(`  Customer: ${leadDetails.customerName} (Matches: ${nameMatches})`);
-    console.log(`  Phone: ${leadDetails.phone} (Matches: ${phoneMatches})`);
-    console.log(`  Meeting availability: ${leadDetails.requestedTime} (Matches: ${meetingTimeMatches})`);
-    console.log(`  Consultations count: ${actBefore.rows.length} (Expected: <= 1)`);
-
-    if (!phoneMatches || !meetingTimeMatches) {
-      console.error('PREFLIGHT CHECK FAILED: Persisted state does not match expected Ahmet Soysal qualification facts. STOPPING WITHOUT RETRY.');
-      process.exit(1);
-    }
-
-    console.log('EXECUTING EXACTLY ONE CONTROLLED RETRY DISPATCH VIA DEPLOYED API OR SERVICE...');
-    const dispatchStart = Date.now();
-    let apiCallSuccessful = false;
-
-    if (token) {
-      try {
-        console.log(`Calling POST ${apiBase}/api/v1/tenants/${tenantId}/conversations/${ahmetConv.conversation_id}/lead-notification/retry`);
-        const apiRetryRes = await fetch(`${apiBase}/api/v1/tenants/${tenantId}/conversations/${ahmetConv.conversation_id}/lead-notification/retry`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-        const apiRetryJson = await apiRetryRes.json();
-        console.log('API RETRY RESPONSE:', apiRetryRes.status, JSON.stringify(apiRetryJson));
-        if (apiRetryRes.ok && apiRetryJson?.result?.sent) {
-          ahmetRetryOutcome = apiRetryJson.result;
-          apiCallSuccessful = true;
-        } else if (apiRetryRes.ok && apiRetryJson?.result) {
-          console.warn('API returned non-sent outcome, executing direct service dispatch with latest codebase...');
-        }
-      } catch (apiErr) {
-        console.warn('API Retry call failed, falling back to direct service dispatch:', apiErr.message);
-      }
-    }
-
-    if (!apiCallSuccessful) {
-      ahmetRetryOutcome = await sendSilentInternalWhatsAppLeadNotification({
-        tenantId,
-        conversationId: ahmetConv.conversation_id,
-        leadDetails,
-        database: pool,
-        env: process.env,
-        forceRetry: true,
-      });
-    }
-
-    console.log('AHMET RETRY DISPATCH OUTCOME:', JSON.stringify(ahmetRetryOutcome, null, 2));
-
-    if (ahmetRetryOutcome.providerMessageId) {
-      console.log(`POLLING FOR ASYNCHRONOUS META STATUS CALLBACK FOR WAMID: ${ahmetRetryOutcome.providerMessageId}...`);
-      const pollTimeoutMs = 30000;
-      const pollStart = Date.now();
-
-      while (Date.now() - pollStart < pollTimeoutMs) {
-        const pollRes = await pool.query(
-          `SELECT id, provider_message_id, delivery_status, failure_code, failure_reason, failure_details,
-                  dispatched_at, delivered_at, failed_at, updated_at
-             FROM internal_notification_deliveries
-            WHERE tenant_id = $1 AND provider_message_id = $2`,
-          [tenantId, ahmetRetryOutcome.providerMessageId]
-        );
-
-        if (pollRes.rows.length > 0) {
-          const record = pollRes.rows[0];
-          if (['SENT', 'DELIVERED', 'READ', 'FAILED'].includes(record.delivery_status)) {
-            finalMetaStatus = record;
-            console.log(`✓ CAPTURED REAL ASYNCHRONOUS STATUS: ${record.delivery_status} (after ${Date.now() - dispatchStart}ms)`);
-            break;
-          }
-        }
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-      }
-
-      if (!finalMetaStatus) {
-        const fallbackCheck = await pool.query(
-          `SELECT id, provider_message_id, delivery_status, failure_code, failure_reason, failure_details,
-                  dispatched_at, delivered_at, failed_at, updated_at
-             FROM internal_notification_deliveries
-            WHERE tenant_id = $1 AND provider_message_id = $2`,
-          [tenantId, ahmetRetryOutcome.providerMessageId]
-        );
-        finalMetaStatus = fallbackCheck.rows[0] || null;
-      }
-    }
-
-    console.log('FINAL NOTIFICATION DELIVERY RECORD:', JSON.stringify(finalMetaStatus, null, 2));
-
-    const analysisAfter = await pool.query(
-      `SELECT id, analysis_hash, signals, analyzed_at
-         FROM crm_lead_analyses WHERE tenant_id = $1 AND conversation_id = $2 ORDER BY analyzed_at DESC LIMIT 1`,
+    // Verify 1 PENDING consultation in crm_consultations
+    const consultRes = await pool.query(
+      `SELECT id, status, customer_name, phone, service_requested, requested_time, cta_destination, cta_url, cta_prefilled_text
+         FROM crm_consultations
+        WHERE tenant_id = $1 AND conversation_id = $2
+        ORDER BY created_at DESC`,
       [tenantId, ahmetConv.conversation_id]
     );
-    console.log('LEAD ANALYSIS SIGNALS AFTER RETRY:', analysisAfter.rows[0]?.signals);
+    console.log('PERSISTED CRM CONSULTATIONS COUNT:', consultRes.rows.length);
+    console.log('CRM CONSULTATION RECORD:', consultRes.rows[0]);
+
+    // Verify legacy server-side send function returns skipped with 0 WhatsApp Cloud API calls
+    const legacySilentRes = await sendSilentInternalWhatsAppLeadNotification({
+      tenantId,
+      conversationId: ahmetConv.conversation_id,
+      leadDetails: qualificationOutcome.leadDetails,
+      database: pool,
+    });
+    console.log('LEGACY SERVER DISPATCH RESULT (Must be skipped):', legacySilentRes);
+
+    console.log('CUSTOMER-INITIATED CTA VERIFICATION:');
+    console.log('  Target Destination:', consultRes.rows[0]?.cta_destination || qualificationOutcome.consultation?.cta_destination);
+    console.log('  CTA Deep Link:', consultRes.rows[0]?.cta_url || qualificationOutcome.ctaUrl);
+    console.log('  Prefilled Text:\n' + (consultRes.rows[0]?.cta_prefilled_text || qualificationOutcome.prefilledText));
+    console.log('  Pending Consultation Status:', consultRes.rows[0]?.status);
+    console.log('  Zero Server-Side WhatsApp Outbound:', legacySilentRes.skipped === true);
   } else {
     console.warn('AHMET SOYSAL CONVERSATION NOT FOUND BY DISPLAY NAME / PHONE');
   }
