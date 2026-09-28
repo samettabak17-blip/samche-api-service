@@ -834,7 +834,7 @@ export async function reconstructLeadDetailsFromConversation({
     if (!conv) return null;
 
     const leadRes = await client.query(
-      `SELECT l.id AS lead_id, l.customer_name, l.phone, l.service_interest, l.timeline,
+      `SELECT l.id AS lead_id, l.service_interest, l.timeline,
               act.metadata AS activity_metadata
          FROM crm_leads l
          LEFT JOIN crm_activities act ON act.lead_id = l.id AND act.tenant_id = l.tenant_id AND act.event_type = 'AI_QUALIFICATION'
@@ -868,12 +868,10 @@ export async function reconstructLeadDetailsFromConversation({
       || null;
 
     const customerName = (conv.display_name && !conv.display_name.startsWith('instagram:') ? conv.display_name : null)
-      || lead?.customer_name
       || qualification.customerName
       || 'Instagram User';
 
     const phone = conv.phone
-      || lead?.phone
       || qualification.phone
       || null;
 

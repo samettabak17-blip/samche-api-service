@@ -482,8 +482,6 @@ test('PHASE 4.15 — reconstructLeadDetailsFromConversation uses authoritative p
         rowCount: 1,
         rows: [{
           lead_id: 'lead-uuid-1',
-          customer_name: 'Ahmet Soysal',
-          phone: '+905312404965',
           service_interest: 'Free Zone Şirket Kuruluşu',
           timeline: 'Bugün 18:00',
           activity_metadata: {
