@@ -131,6 +131,20 @@ export function resolveWhatsAppOutboundCredential({ integrationConfig = null, en
     };
   }
 
+  // 1b. Check for integration-stored plain access token
+  const integrationDirectToken = trimmed(
+    integrationConfig?.whatsapp?.access_token ||
+    integrationConfig?.access_token
+  );
+  if (integrationDirectToken) {
+    return {
+      accessToken: integrationDirectToken,
+      source: WHATSAPP_CREDENTIAL_SOURCES.INTEGRATION_SCOPED,
+      envName: null,
+      fingerprint: credentialFingerprint(integrationDirectToken),
+    };
+  }
+
   // 2. Check for integration-scoped environment variable reference
   const scopedEnvName = integrationCredentialEnvName(integrationConfig);
   if (scopedEnvName) {
