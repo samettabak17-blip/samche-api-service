@@ -1368,6 +1368,7 @@
       browsingPrefix: 'Gözatılan: ',
       botGreeting: 'Merhaba! Size nasıl yardımcı olabilirim?',
       userSample: 'Kargo ve teslimat süreleri hakkında bilgi alabilir miyim?',
+      temporaryResponseFailure: 'Şu anda yanıt oluştururken geçici bir sorun yaşıyorum. Lütfen kısa bir süre sonra tekrar deneyin.',
     },
     en: {
       defaultTitle: 'Live Support',
@@ -1388,6 +1389,7 @@
       browsingPrefix: 'Viewing: ',
       botGreeting: 'Hello! How can I help you today?',
       userSample: 'Can I get information about shipping and delivery times?',
+      temporaryResponseFailure: "I'm having a temporary problem generating a response. Please try again shortly.",
     },
     ar: {
       defaultTitle: 'الدعم المباشر',
@@ -1408,8 +1410,43 @@
       browsingPrefix: 'المعروض: ',
       botGreeting: 'مرحباً! كيف يمكنني مساعدتك اليوم؟',
       userSample: 'هل يمكنني الحصول على معلومات حول أوقات الشحن والتسليم؟',
+      temporaryResponseFailure: 'أواجه مشكلة مؤقتة أثناء إنشاء الرد. يُرجى المحاولة مرة أخرى بعد قليل.',
     },
   };
+
+  function resolvePublicFailureLanguage(latestMessage, fallbackLanguage) {
+    var text = String(latestMessage || '').trim();
+    if (/[\u0600-\u06FF]/u.test(text)) return 'ar';
+    if (/[çğıöşüİÇĞÖŞÜ]/u.test(text) || /\b(?:baglanilamadi|uyari|sorun|hata|lutfen|mesajlarimi)\b/i.test(text)) return 'tr';
+    if (/\b(?:i|the|am|is|are|can|could|connection|failed|warning|please|message|messages|dashboard)\b/i.test(text)) return 'en';
+    var fallback = String(fallbackLanguage || '').trim().toLowerCase().split('-')[0];
+    return fallback === 'tr' || fallback === 'ar' || fallback === 'en' ? fallback : 'en';
+  }
+
+  function resolvePublicFailureReply(latestMessage, fallbackLanguage) {
+    var language = resolvePublicFailureLanguage(latestMessage, fallbackLanguage);
+    return I18N[language].temporaryResponseFailure;
+  }
+
+  function parsePublicChatResponse(options) {
+    options = options || {};
+    var parsed = null;
+    try {
+      parsed = JSON.parse(String(options.rawText || ''));
+    } catch (e) {}
+
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      var usableReply = [parsed.reply, parsed.response, parsed.text].some(function(value) {
+        return typeof value === 'string' && value.trim();
+      });
+      if (usableReply || parsed.suppress_reply === true) return parsed;
+    }
+
+    return {
+      error: 'TEMPORARY_RESPONSE_FAILURE',
+      reply: resolvePublicFailureReply(options.latestMessage, options.fallbackLanguage),
+    };
+  }
 
   function isDiscreteContext(ctx) {
     if (!ctx) return false;
@@ -2583,16 +2620,16 @@
             }),
           });
           var rawText = await res.text();
-          var data;
-          try {
-            data = JSON.parse(rawText);
-          } catch (e) {
-            data = { reply: rawText };
-          }
+          var data = parsePublicChatResponse({
+            ok: res.ok,
+            rawText: rawText,
+            latestMessage: text || userDisplay,
+            fallbackLanguage: currentLang,
+          });
           clearTypingIndicator(messages);
 
-          if (!res.ok && !data.reply && !data.response && !data.text) {
-            appendMessage('bot', data.error || 'Üzgünüm, şu anda yanıt verilemiyor. Lütfen tekrar deneyin.', { message_type: 'ASSISTANT' });
+          if (!res.ok) {
+            appendMessage('bot', data.reply || resolvePublicFailureReply(text || userDisplay, currentLang), { message_type: 'ASSISTANT' });
             return;
           }
 
@@ -2603,12 +2640,12 @@
           }
 
           if (data && data.suppress_reply) return;
-          var reply = data.reply || data.response || data.text || 'Anlaşıldı, size nasıl yardımcı olabilirim?';
+          var reply = data.reply || data.response || data.text || resolvePublicFailureReply(text || userDisplay, currentLang);
           var botBubble = appendMessage('bot', '', { message_type: 'ASSISTANT' });
           await progressiveReveal(botBubble, reply, { container: messages });
         } catch (err) {
           clearTypingIndicator(messages);
-          appendMessage('bot', 'Üzgünüm, şu anda yanıt verilemiyor. Lütfen tekrar deneyin.', { message_type: 'ASSISTANT' });
+          appendMessage('bot', resolvePublicFailureReply(text || userDisplay, currentLang), { message_type: 'ASSISTANT' });
         } finally {
           isSending = false;
           sendBtn.disabled = !textarea.value.trim();
@@ -3205,6 +3242,8 @@
     progressiveReveal: progressiveReveal,
     injectStyles: injectStyles,
     I18N: I18N,
+    parsePublicChatResponse: parsePublicChatResponse,
+    resolvePublicFailureReply: resolvePublicFailureReply,
     escapeHtml: escapeHtml,
     formatAssistantHtml: formatAssistantHtml,
     renderAssistantMessage: renderAssistantMessage,

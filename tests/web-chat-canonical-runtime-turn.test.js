@@ -14,6 +14,8 @@ import {
 const appSource = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 const webChatSource = fs.readFileSync(new URL('../public/web-chat.js', import.meta.url), 'utf8');
 const demoHtmlSource = fs.readFileSync(new URL('../public/task8-demo/index.html', import.meta.url), 'utf8');
+await import('../public/web-chat.js');
+const { parsePublicChatResponse, resolvePublicFailureReply } = globalThis.SamcheChatUX;
 
 test('REGRESSION CONTRACT: app.js /api/chat returns JSON on all runtime paths and never unformatted plain text', () => {
   const chatRoute = appSource.slice(appSource.indexOf('app.post("/api/chat"'), appSource.indexOf('app.get("/webhook"'));
@@ -37,16 +39,58 @@ test('REGRESSION CONTRACT: app.js accepts both req.body.page_context and top-lev
   assert.match(chatRoute, /rawPageContext: rawContextPayload/);
 });
 
-test('REGRESSION CONTRACT: public/web-chat.js safely handles JSON, text fallback, and sends page_context', () => {
+test('REGRESSION CONTRACT: public/web-chat.js safely parses JSON without raw-text fallback and sends page_context', () => {
   // handleSend sends page_context
   assert.match(webChatSource, /page_context:\s*ctx/);
 
-  // handleSend reads text then JSON.parses safely without uncaught SyntaxError
+  // handleSend delegates the raw body to the safe response parser.
   assert.match(webChatSource, /var rawText = await res\.text\(\);/);
-  assert.match(webChatSource, /JSON\.parse\(rawText\)/);
+  assert.match(webChatSource, /var data = parsePublicChatResponse\(\{/);
+  assert.doesNotMatch(webChatSource, /data\s*=\s*\{\s*reply:\s*rawText\s*\}/);
 
   // SPA listener tracks full URL (hash + query + pathname) for SPAs
   assert.match(webChatSource, /window\.location\.hash/);
+});
+
+test('PUBLIC FAILURE UX: browser uses latest-message TR/EN/AR copy and never renders a raw failed response body', () => {
+  const cases = [
+    ['Bağlanılamadı uyarısı alıyorum', 'en', 'Şu anda yanıt oluştururken geçici bir sorun yaşıyorum. Lütfen kısa bir süre sonra tekrar deneyin.'],
+    ['I am getting a connection failed warning', 'tr', "I'm having a temporary problem generating a response. Please try again shortly."],
+    ['أتلقى تحذيرًا بأن الاتصال تعذر', 'en', 'أواجه مشكلة مؤقتة أثناء إنشاء الرد. يُرجى المحاولة مرة أخرى بعد قليل.'],
+  ];
+
+  for (const [message, fallbackLanguage, expected] of cases) {
+    assert.equal(resolvePublicFailureReply(message, fallbackLanguage), expected);
+  }
+
+  const rawBodies = [
+    '<html>RAW_PROVIDER_502 stack trace</html>',
+    JSON.stringify({ error: { code: 'RESOURCE_EXHAUSTED', quota: 'RAW_QUOTA_OBJECT' } }),
+    'provider=gemini request_id=RAW_INTERNAL_ID',
+  ];
+  for (const rawText of rawBodies) {
+    const parsed = parsePublicChatResponse({
+      ok: false,
+      rawText,
+      latestMessage: 'I am getting a connection failed warning',
+      fallbackLanguage: 'tr',
+    });
+    assert.deepEqual(parsed, {
+      error: 'TEMPORARY_RESPONSE_FAILURE',
+      reply: "I'm having a temporary problem generating a response. Please try again shortly.",
+    });
+    assert.equal(JSON.stringify(parsed).includes(rawText), false);
+  }
+
+  assert.deepEqual(
+    parsePublicChatResponse({
+      ok: false,
+      rawText: JSON.stringify({ error: 'TEMPORARY_RESPONSE_FAILURE', reply: 'Server-safe reply' }),
+      latestMessage: 'Hello',
+      fallbackLanguage: 'en',
+    }),
+    { error: 'TEMPORARY_RESPONSE_FAILURE', reply: 'Server-safe reply' },
+  );
 });
 
 test('REGRESSION CONTRACT: public/task8-demo/index.html catalog view exposes visible products in page context & JSON-LD', () => {
