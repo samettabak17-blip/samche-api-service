@@ -1435,7 +1435,18 @@
       parsed = JSON.parse(String(options.rawText || ''));
     } catch (e) {}
 
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    if (options.ok === false) {
+      if (
+        parsed &&
+        typeof parsed === 'object' &&
+        !Array.isArray(parsed) &&
+        parsed.error === 'TEMPORARY_RESPONSE_FAILURE' &&
+        typeof parsed.reply === 'string' &&
+        parsed.reply.trim()
+      ) {
+        return { error: 'TEMPORARY_RESPONSE_FAILURE', reply: parsed.reply };
+      }
+    } else if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       var usableReply = [parsed.reply, parsed.response, parsed.text].some(function(value) {
         return typeof value === 'string' && value.trim();
       });

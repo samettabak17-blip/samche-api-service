@@ -85,6 +85,19 @@ test('PUBLIC FAILURE UX: browser uses latest-message TR/EN/AR copy and never ren
   assert.deepEqual(
     parsePublicChatResponse({
       ok: false,
+      rawText: JSON.stringify({ reply: 'RESOURCE_EXHAUSTED provider=gemini request_id=RAW_INTERNAL_ID' }),
+      latestMessage: 'I am getting a connection failed warning',
+      fallbackLanguage: 'tr',
+    }),
+    {
+      error: 'TEMPORARY_RESPONSE_FAILURE',
+      reply: "I'm having a temporary problem generating a response. Please try again shortly.",
+    },
+  );
+
+  assert.deepEqual(
+    parsePublicChatResponse({
+      ok: false,
       rawText: JSON.stringify({ error: 'TEMPORARY_RESPONSE_FAILURE', reply: 'Server-safe reply' }),
       latestMessage: 'Hello',
       fallbackLanguage: 'en',
