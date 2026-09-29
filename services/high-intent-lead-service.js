@@ -50,7 +50,8 @@ export function hasHighIntentAppointmentSignals(text = '') {
  */
 export function hasConcreteBusinessRequirement(text = '') {
   if (typeof text !== 'string') return false;
-  return CONCRETE_BUSINESS_REQUIREMENT_PATTERNS.some((p) => p.test(text));
+  return CONCRETE_BUSINESS_REQUIREMENT_PATTERNS.some((p) => p.test(text))
+    || /(?:ikisi\s+de\s+olabilir|ikiside\s+olabilir|her\s+ikisi|hem\s+şirket\s+hem\s+oturum|henüz\s+karar\s+vermedim|karar\s+vermedim|netleşmedi)/iu.test(text);
 }
 
 /**
@@ -102,14 +103,17 @@ export function extractMeetingTimePreference(text = '') {
   return null;
 }
 
-function inferRequestedService(text = '') {
+export function inferRequestedService(text = '') {
+  if (/(?:ikisi\s+de\s+olabilir|ikiside\s+olabilir|her\s+ikisi|hem\s+şirket\s+hem\s+oturum|ikisi\s+de|ikiside)/iu.test(text)) {
+    return 'Şirket Kuruluşu & Sponsorlu Oturum';
+  }
   if (/free\s*zone/iu.test(text)) return 'Free Zone Şirket Kuruluşu';
   if (/mainland/iu.test(text)) return 'Mainland Şirket Kuruluşu';
   if (/(?:şirket|sirket|company|kurulum|incorporat)/iu.test(text)) return 'Şirket Kuruluşu';
   if (/(?:vize|visa|residency|oturum|ikamet)/iu.test(text)) return 'Vize / Oturum';
   if (/(?:banka|bank|hesap|account)/iu.test(text)) return 'Kurumsal Banka Hesabı';
   if (/(?:muhasebe|accounting|vergi|tax|vat|kdv)/iu.test(text)) return 'Muhasebe / Vergi';
-  return null;
+  return 'Şirket Kuruluşu & Danışmanlık';
 }
 
 function isQualificationDetail(content = '') {
@@ -143,14 +147,12 @@ export function deriveInstagramLeadQualification({ customerMessages = [], contac
   const hasHighIntent = hasHighIntentAppointmentSignals(combined);
   const missing = [];
 
-  if (!serviceRequested) missing.push('REQUESTED_SERVICE');
-  if (!structuredRequirement) missing.push('CONCRETE_REQUIREMENT');
   if (!phone) missing.push('CUSTOMER_PHONE');
   if (!requestedTime) missing.push('MEETING_AVAILABILITY');
 
   return {
     hasHighIntent,
-    complete: hasHighIntent && contents.length >= 2 && missing.length === 0,
+    complete: hasHighIntent && Boolean(phone && requestedTime),
     customerName,
     phone,
     requestedTime,
@@ -354,18 +356,18 @@ export function buildQualifiedLeadWhatsAppPrefilledMessage({
     lines.push(`Ad Soyad: ${cleanName}`);
   }
 
-  // 2. Konu (only if known)
+  // 2. Konu
   let topic = null;
-  if (requirement && typeof requirement === 'string' && requirement.trim()) {
+  if (requirement && typeof requirement === 'string' && requirement.trim() && !requirement.includes('undefined')) {
     topic = requirement.trim();
-  } else if (activity && typeof activity === 'string' && activity.trim()) {
+  } else if (activity && typeof activity === 'string' && activity.trim() && !activity.includes('Henüz karar') && !activity.includes('Netleşmedi')) {
     topic = `Dubai'de ${activity.trim()} şirketi kurulumu`;
   } else if (serviceRequested && typeof serviceRequested === 'string' && serviceRequested.trim()) {
     topic = serviceRequested.trim();
+  } else {
+    topic = 'Dubai Şirket Kuruluşu & Danışmanlık';
   }
-  if (topic) {
-    lines.push(`Konu: ${topic}`);
-  }
+  lines.push(`Konu: ${topic}`);
 
   // 3. Telefon (only if known)
   const cleanPhone = typeof phone === 'string' && phone.trim() ? phone.trim() : null;
@@ -557,7 +559,7 @@ export async function evaluateAndProcessHighIntentLead({
     );
     const leadId = leadRes.rows[0]?.id || null;
 
-    const isFullyQualified = Boolean(hasRequirement && phone && requestedTime);
+    const isFullyQualified = Boolean(hasInitialSignal && hasRequirement && phone && requestedTime);
 
     if (!isFullyQualified) {
       if (leadId) {

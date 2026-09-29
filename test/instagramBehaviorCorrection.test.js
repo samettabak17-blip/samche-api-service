@@ -75,6 +75,7 @@ describe('Final Instagram Behavior Correction: Strictly Request-Driven Pricing &
       senderIgsid: '8891427900000001',
       text: customerText,
       http: fakeHttp,
+      applyPacing: false,
       generateAiResponse: async ({ systemInstruction }) => {
         capturedSystemInstruction = systemInstruction;
         return "Elbette görüşebiliriz. Görüşme talebinizi oluşturabilmem için sizden birkaç kısa bilgi almam gerekiyor. Şirketi tek ortaklı mı düşünüyorsunuz, yoksa başka ortaklar da olacak mı?";
@@ -131,6 +132,7 @@ describe('Final Instagram Behavior Correction: Strictly Request-Driven Pricing &
       senderIgsid: '8891427900000001',
       text: "Danışmanlık ücretiniz ne kadar?",
       http: fakeHttp,
+      applyPacing: false,
       generateAiResponse: async () => {
         return "Danışmanlık ücretimiz 8.000 AED'dir. Şirket banka hesabı açılışı ve KYC desteği bu ücrete dahildir.";
       },
@@ -183,6 +185,7 @@ describe('Final Instagram Behavior Correction: Strictly Request-Driven Pricing &
       senderIgsid: '8891427900000001',
       text: "Dubai'de şirket toplam ne kadara kurulur, maliyeti nedir?",
       http: fakeHttp,
+      applyPacing: false,
       generateAiResponse: async () => {
         return [
           "Şirket kurulum maliyeti seçilecek serbest bölgeye (Free Zone) veya Mainland yapısına, lisans faaliyetine ve gereken vize sayısına göre belirlenir.",
@@ -330,6 +333,7 @@ describe('Final Instagram Behavior Correction: Strictly Request-Driven Pricing &
       senderIgsid: '8891427900000001',
       text: 'SaaS şirketi kurmak istiyorum',
       http: fakeHttp,
+      applyPacing: false,
       generateAiResponse: async () => 'Harika, şirket detaylarını netleştirelim.',
     });
 
@@ -343,6 +347,7 @@ describe('Final Instagram Behavior Correction: Strictly Request-Driven Pricing &
       senderIgsid: '8891427900000001',
       text: 'SaaS şirketi kurmak istiyorum',
       http: fakeHttp,
+      applyPacing: false,
       generateAiResponse: async () => 'Harika, şirket detaylarını netleştirelim.',
     });
 

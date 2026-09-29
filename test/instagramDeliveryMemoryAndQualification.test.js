@@ -11,6 +11,7 @@ import {
   resolveDurableConversationMemory,
   buildStructuredMemoryInstruction,
   orchestrateInstagramInboundAiResponse,
+  generateContextualConversationalFallback,
 } from '../services/instagram-ai-orchestrator.js';
 import {
   evaluateAndProcessHighIntentLead,
@@ -279,8 +280,8 @@ describe('Mandatory Regression Suite: Safe Chunking, Multi-Turn Memory & CTA', (
 
     assert.equal(memory.businessActivity, 'yazılım');
     const instruction = buildStructuredMemoryInstruction(memory);
-    assert.ok(instruction.includes('Business Activity / Requirement: "yazılım"'));
-    assert.ok(instruction.includes('Business Activity is ALREADY KNOWN. DO NOT ask "Ne tür bir iş yapmak istiyorsunuz?"'));
+    assert.ok(instruction.includes('Business Activity / Sector: "yazılım"'));
+    assert.ok(instruction.includes('Business Activity is ALREADY ANSWERED') || instruction.includes('DO NOT ask for their business activity'));
   });
 
   it('12. Customer gives phone -> durable memory persists and AI never asks phone again', async () => {
@@ -341,6 +342,72 @@ describe('Mandatory Regression Suite: Safe Chunking, Multi-Turn Memory & CTA', (
     assert.equal(memory.shareholderCount, '1 ortak (Tek ortak)');
     const instruction = buildStructuredMemoryInstruction(memory);
     assert.ok(instruction.includes('Shareholder / Partner Count: 1 ortak (Tek ortak)'));
+  });
+
+  it('15b. Customer says "İkiside olabilir" -> both company formation and residency retained in topic', async () => {
+    const memory = await resolveDurableConversationMemory({
+      tenantId: 't-1',
+      conversationId: 'conv-1',
+      rawMessages: [
+        { sender_type: 'CUSTOMER', content: "Samed bey sizinle telefonda görüşmek isterim" },
+        { sender_type: 'ASSISTANT', content: "Telefon numaranızı ve görüşmek istediğiniz konuyu paylaşabilir misiniz?" },
+        { sender_type: 'CUSTOMER', content: "+905312404965" },
+        { sender_type: 'ASSISTANT', content: "Şirket kuruluşu mu yoksa sponsorlu oturum mu görüşmek istersiniz?" },
+        { sender_type: 'CUSTOMER', content: "İkiside olabilir" },
+      ],
+    });
+
+    assert.equal(memory.phone, '+905312404965');
+    assert.equal(memory.serviceRequested, 'Şirket Kuruluşu ve Sponsorlu Oturum');
+    const instruction = buildStructuredMemoryInstruction(memory);
+    assert.ok(instruction.includes('Şirket Kuruluşu ve Sponsorlu Oturum'));
+    assert.ok(instruction.includes('Service / Consultation Topic is ALREADY KNOWN'));
+  });
+
+  it('15c. Customer says "Henüz karar vermedim" -> memory stores NOT_DECIDED and AI does not re-ask', async () => {
+    const memory = await resolveDurableConversationMemory({
+      tenantId: 't-1',
+      conversationId: 'conv-1',
+      rawMessages: [
+        { sender_type: 'CUSTOMER', content: "+905312404965" },
+        { sender_type: 'CUSTOMER', content: "İkiside olabilir" },
+        { sender_type: 'CUSTOMER', content: "Henüz karar vermedim" },
+      ],
+    });
+
+    assert.equal(memory.activityState, 'NOT_DECIDED');
+    assert.ok(memory.businessActivity.includes('karar verilmedi'));
+    const instruction = buildStructuredMemoryInstruction(memory);
+    assert.ok(instruction.includes('Business Activity State: NOT_DECIDED'));
+    assert.ok(instruction.includes('Business Activity is ALREADY ANSWERED (known or undecided)'));
+  });
+
+  it('15d. Customer later provides previously undecided activity -> latest explicit statement updates memory', async () => {
+    const memory = await resolveDurableConversationMemory({
+      tenantId: 't-1',
+      conversationId: 'conv-1',
+      rawMessages: [
+        { sender_type: 'CUSTOMER', content: "Henüz karar vermedim" },
+        { sender_type: 'ASSISTANT', content: "Sorun değil, görüşmede netleştirebiliriz. Size uygun gün ve saat nedir?" },
+        { sender_type: 'CUSTOMER', content: "Aslında yazılım şirketi kurmaya karar verdim, yarın 15:00 uygun." },
+      ],
+    });
+
+    assert.equal(memory.activityState, 'KNOWN');
+    assert.equal(memory.businessActivity, 'yazılım');
+    assert.ok(memory.requestedTime.includes('15:00'));
+  });
+
+  it('15e. Fallback safety: "Bilmiyorum" or "Emin değilim" returns friendly response without silent turn', () => {
+    const memory = { phone: '+905312404965' };
+    const fallback1 = generateContextualConversationalFallback({ text: 'Henüz karar vermedim', memory });
+    assert.ok(fallback1.includes('gün ve saat') || fallback1.includes('görüşme'));
+
+    const fallback2 = generateContextualConversationalFallback({ text: 'Bilmiyorum', memory });
+    assert.ok(fallback2.includes('gün ve saat') || fallback2.includes('görüşme'));
+
+    const fallback3 = generateContextualConversationalFallback({ text: 'Emin değilim', memory });
+    assert.ok(fallback3.includes('gün ve saat') || fallback3.includes('görüşme'));
   });
 
   it('16. Follow-up "peki banka hesabı?" preserves active company-formation context', () => {

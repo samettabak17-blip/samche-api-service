@@ -80,22 +80,18 @@ export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
   '     * "Şirket kurulum maliyeti ne olur? / Toplam ne kadara kurulur?": Explain the main variables (Free Zone vs Mainland, sector/activity, visa requirements), state that the SamChe consultancy fee is 8.000 AED (which includes bank account opening and KYC support), and do NOT invent exact license costs without knowing jurisdiction or activity.',
   '4. MEETING / APPOINTMENT INTENT OVERRIDES SALES EXPLANATION (PROGRESSIVE QUALIFICATION):',
   '   - When an Instagram customer expresses intent to speak with Samed, schedule a consultation, arrange a meeting, be called, or discuss their case directly (e.g. "Samed Bey sizinle görüşebilir miyiz?", "Randevu alabilir miyiz?", "Müsait olduğunuzda görüşmek istiyorum", "Beni arayabilir misiniz?", "Samed Bey ile konuşmak istiyorum", "Şirket kurulumu için görüşme yapmak istiyorum", "Ne zaman görüşebiliriz?", "Telefonla konuşabilir miyiz?"):',
-  '     - Switch IMMEDIATELY into progressive appointment qualification. Do NOT give long company-formation explanations, unsolicited Free Zone recommendations, setup step overviews, or pricing.',
+  '     - Switch IMMEDIATELY into natural appointment scheduling. Do NOT give long unsolicited lectures, pricing overviews, or Free Zone explanations.',
   '     - DO NOT perform any handoff and NEVER say phrases like "Sizi canlı temsilciye aktarıyorum", "Sizi Samed Bey\'e aktarıyorum", "Talebinizi WhatsApp\'a iletiyorum", "Bir temsilci devralacak", or "Canlı desteğe aktarıyorum". Internal escalation to Samed via WhatsApp is completely silent.',
-  '     - Communicate naturally, warmly, and simply in a direct human voice (e.g. "Elbette görüşebiliriz. Görüşme talebinizi oluşturabilmem için sizden birkaç kısa bilgi almam gerekiyor.").',
-  '     - Then ask the FIRST relevant missing qualification question.',
-  '5. STEP-BY-STEP CONVERSATIONAL QUALIFICATION:',
-  '   - Progress naturally and ask ONE relevant question at a time (or a very small related pair). Do NOT send a giant checklist questionnaire.',
-  '   - For company formation, relevant qualification details to collect progressively:',
-  '     1. Intended business/activity or sector (e.g. "Kurmayı düşündüğünüz şirketin faaliyet alanı nedir?")',
-  '     2. Shareholder / partner count (e.g. "Şirketi tek ortaklı mı düşünüyorsunuz, yoksa başka ortaklar da olacak mı?")',
-  '     3. Visa / residency count if relevant (e.g. "Şirket üzerinden kaç kişi için oturum/vize gerekecek?")',
-  '     4. Target setup timeline (e.g. "Şirket kurulumuna ne zaman başlamayı planlıyorsunuz?")',
-  '     5. Customer phone / WhatsApp number for reachability',
-  '     6. Preferred meeting day/time and availability (e.g. "Görüşme için hangi gün ve saat sizin için uygun olur?")',
-  '   - USE INFORMATION ALREADY PROVIDED (NEVER ASK REDUNDANTLY): If the customer already provided details in earlier turns (e.g. SaaS/software, clients in Turkey, 1 month timeline), treat them as collected facts. NEVER ask for sector/activity or timeline again if already stated. Move directly to the NEXT missing detail (e.g. partner count, visa count, or contact details).',
-  '   - DO NOT proactively ask or introduce residency/visa questions (do not ask about visa or ask "Kaç adet oturum vizesi gerekecek?" merely because the customer asked about company formation) unless the customer explicitly asks about residency/visas or states a visa requirement. Visa count IS allowed as part of genuine company formation qualification once contextually relevant.',
-  '   - SAFE ACKNOWLEDGEMENT WITHOUT FAKE CONFIRMATION: If customer provides their phone/WhatsApp number and preferred availability (day/time) is NOT yet collected, DO NOT say the meeting request is complete and DO NOT say you will contact them on WhatsApp. Instead, ask naturally for their availability (e.g. "Teşekkürler Ahmet Bey. Görüşme için size uygun gün ve saat nedir?"). When BOTH phone and preferred availability are collected, acknowledge naturally and record their preferred timing as a pending appointment request (e.g. "Teşekkür ederim Ahmet Bey. Görüşme talebinizi ve uygun olduğunuz zamanı aldım."). NEVER say "Randevunuz kesinleşti." unless actual confirmation exists.',
+  '     - Determine all currently missing required meeting information (phone/WhatsApp number, meeting topic/service if unknown, and preferred day/time availability).',
+  '     - Ask for the missing required information together in ONE natural, friendly, concise message (e.g. "Elbette görüşebiliriz. Görüşme talebinizi oluşturabilmem için telefon numaranızı, görüşmek istediğiniz konuyu ve size uygun gün/saat bilgisini paylaşabilir misiniz? Şirket kurulumu düşünüyorsanız faaliyet alanınız netleştiyse onu da ekleyebilirsiniz; henüz net değilse sorun değil.").',
+  '     - DO NOT force a slow one-question-per-turn interrogation form.',
+  '     - USE INFORMATION ALREADY PROVIDED (NEVER ASK REDUNDANTLY): If the customer already provided details in earlier turns, treat them as collected facts. NEVER ask for already stated information again.',
+  '     - If phone is already provided -> DO NOT ask for phone.',
+  '     - If topic is already provided (or if customer says "İkisi de olabilir") -> accept both / do NOT ask topic again.',
+  '     - If customer states business activity is undecided ("Henüz karar vermedim", "bilmiyorum", "emin değilim", "fark etmez", etc.) -> accept it as undecided; do NOT repeat the question and proceed with meeting availability (preferred day/time).',
+  '     - DO NOT proactively ask or introduce residency/visa questions (do not ask about visa or ask "Kaç adet oturum vizesi gerekecek?" merely because the customer asked about company formation) unless the customer explicitly asks about residency/visas or states a visa requirement.',
+  '5. SAFE ACKNOWLEDGEMENT WITHOUT FAKE CONFIRMATION:',
+  '   - When both phone and preferred availability (day/time) are collected, acknowledge naturally and record their preferred timing as a pending appointment request (e.g. "Teşekkür ederim, görüşme talebinizi ve uygun olduğunuz zamanı aldım."). NEVER say "Randevunuz kesinleşti." unless actual booking confirmation exists.',
   '6. CUSTOMER CONTROLS THE TOPIC:',
   '   - If during appointment qualification the customer asks a question (e.g. pricing, banking, visas, process):',
   '     * Answer THAT specific question directly and factually according to authoritative policy.',
@@ -222,6 +218,67 @@ export function mergeConsecutiveConversationTurns(rawMessages = []) {
   return merged;
 }
 
+function normalizeTrText(text) {
+  if (typeof text !== 'string') return '';
+  return text
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'i')
+    .replace(/ı/g, 'i')
+    .normalize('NFKC')
+    .toLowerCase()
+    .trim();
+}
+
+export function extractUndecidedSignals(text = '') {
+  if (typeof text !== 'string') return false;
+  const norm = normalizeTrText(text);
+  return /(?:henuz\s+karar\s+vermedim|karar\s+vermedim|bilmiyorum|emin\s+degilim|daha\s+netlesmedi|netlesmedi|fark\s+etmez|sonra\s+karar|belli\s+degil|henuz\s+belli|kararsizim|not\s+sure|undecided|haven't\s+decided)/i.test(norm)
+    || /(?:henüz\s+karar\s+vermedim|karar\s+vermedim|bilmiyorum|emin\s+değilim|daha\s+netleşmedi|netleşmedi|fark\s+etmez|sonra\s+karar|belli\s+değil|henüz\s+belli|kararsızım)/iu.test(text);
+}
+
+export function extractBothTopicsSignals(text = '') {
+  if (typeof text !== 'string') return false;
+  const norm = normalizeTrText(text);
+  return /(?:ikisi\s+de\s+olabilir|ikiside\s+olabilir|her\s+ikisi|hem\s+sirket\s+hem\s+oturum|ikisi\s+de|ikiside|fark\s+etmez|both)/i.test(norm)
+    || /(?:ikisi\s+de\s+olabilir|ikiside\s+olabilir|her\s+ikisi|hem\s+şirket\s+hem\s+oturum|ikisi\s+de|ikiside)/iu.test(text);
+}
+
+/**
+ * Generates an intelligent, context-aware fallback response from conversation memory
+ * ensuring no eligible customer turn is ever silently dropped.
+ */
+export function generateContextualConversationalFallback({ text = '', conversationHistory = [], memory = {} } = {}) {
+  const cleanText = String(text || '').trim();
+  const phone = memory.phone || extractPhoneNumberFromText(cleanText);
+  const requestedTime = memory.requestedTime || extractMeetingTimePreference(cleanText);
+  const isUndecided = extractUndecidedSignals(cleanText);
+
+  if (isUndecided) {
+    if (!requestedTime) {
+      return 'Anladım, faaliyet alanı netleşmediyse sorun değil; görüşme sırasında detayları birlikte değerlendirebiliriz. Görüşme için size uygun gün ve saat aralığını paylaşabilir misiniz?';
+    }
+    return 'Anladım, detayları görüşmemizde birlikte netleştirebiliriz. Görüşme talebinizi aldım.';
+  }
+
+  if (hasHighIntentAppointmentSignals(cleanText)) {
+    if (!phone && !requestedTime) {
+      return 'Elbette görüşebiliriz. Görüşme talebinizi oluşturabilmem için telefon numaranızı, görüşmek istediğiniz konuyu ve size uygun gün/saat bilgisini iletebilir misiniz?';
+    }
+    if (phone && !requestedTime) {
+      return 'Telefon numaranızı aldım. Görüşme için size uygun gün ve saat aralığını paylaşabilir misiniz?';
+    }
+    if (!phone && requestedTime) {
+      return 'Uygun olduğunuz zamanı aldım. Sizinle iletişime geçebilmemiz için telefon numaranızı paylaşabilir misiniz?';
+    }
+  }
+
+  if (phone && !requestedTime) {
+    return 'Numaranızı kaydettim. Görüşme için size uygun gün ve saat aralığını paylaşabilir misiniz?';
+  }
+
+  return 'Mesajınızı aldım. Şirket kuruluşu veya oturum danışmanlığı ile ilgili sorularınızı yanıtlayabilir veya görüşme talebinizi planlayabilirim.';
+}
+
 /**
  * Resolves durable conversation memory and qualification state across CRM tables and message history.
  * Supports chronological customer corrections (e.g. latest shareholder count, phone, or time wins).
@@ -235,7 +292,9 @@ export async function resolveDurableConversationMemory({
 }) {
   let customerName = extractReliableCustomerName(conversation?.contact_display_name || conversation?.display_name);
   let phone = conversation?.contact_phone || null;
+  let serviceRequested = null;
   let activity = null;
+  let activityState = null;
   let jurisdiction = null;
   let shareholderCount = null;
   let visaCount = null;
@@ -276,6 +335,7 @@ export async function resolveDurableConversationMemory({
         if (consult.customer_name && !customerName) customerName = consult.customer_name;
         if (consult.phone && !phone) phone = consult.phone;
         if (consult.activity && !activity) activity = consult.activity;
+        if (consult.service_requested && !serviceRequested) serviceRequested = consult.service_requested;
         if (consult.requested_time && !requestedTime) requestedTime = consult.requested_time;
         if (consult.timezone && !timezone) timezone = consult.timezone;
       }
@@ -298,8 +358,22 @@ export async function resolveDurableConversationMemory({
     const parsedPhone = extractPhoneNumberFromText(text);
     if (parsedPhone) phone = parsedPhone;
 
+    if (extractBothTopicsSignals(text)) {
+      serviceRequested = 'Şirket Kuruluşu ve Sponsorlu Oturum';
+    } else if (/sponsorlu\s+oturum|oturum\s+izni|residency|ikamet/i.test(text)) {
+      serviceRequested = 'Sponsorlu Oturum';
+    } else if (/şirket\s+kur|şirket\s+aç|firma\s+kur|free\s*zone|mainland|şirket/i.test(text)) {
+      serviceRequested = 'Şirket Kuruluşu';
+    }
+
     const parsedActivity = extractBusinessActivity(text);
-    if (parsedActivity) activity = parsedActivity;
+    if (parsedActivity) {
+      activity = parsedActivity;
+      activityState = 'KNOWN';
+    } else if (extractUndecidedSignals(text)) {
+      activity = 'Henüz karar verilmedi / Netleşmedi';
+      activityState = 'NOT_DECIDED';
+    }
 
     const parsedJurisdiction = extractJurisdictionPreference(text);
     if (parsedJurisdiction) jurisdiction = parsedJurisdiction;
@@ -320,7 +394,9 @@ export async function resolveDurableConversationMemory({
   return {
     customerName,
     phone,
+    serviceRequested,
     businessActivity: activity,
+    activityState,
     jurisdictionPreference: jurisdiction,
     shareholderCount,
     visaCount,
@@ -335,23 +411,27 @@ export async function resolveDurableConversationMemory({
 export function buildStructuredMemoryInstruction(memory = {}) {
   const lines = [
     'DURABLE CONVERSATION MEMORY & PERSISTED CRM FACTS:',
-    `- Active Topic / Context: Company Formation & Consultancy (UAE / Dubai)`,
+    `- Active Topic / Context: ${memory.serviceRequested || 'Company Formation & Consultancy (UAE / Dubai)'}`,
     memory.customerName ? `- Customer Real Name: "${memory.customerName}"` : `- Customer Real Name: Unknown`,
-    memory.businessActivity ? `- Business Activity / Requirement: "${memory.businessActivity}"` : `- Business Activity / Requirement: Missing`,
+    memory.serviceRequested ? `- Service / Consultation Topic: "${memory.serviceRequested}"` : `- Service / Consultation Topic: General Consultancy`,
+    memory.businessActivity ? `- Business Activity / Sector: "${memory.businessActivity}"` : `- Business Activity / Sector: Not specified`,
+    memory.activityState === 'NOT_DECIDED' ? `- Business Activity State: NOT_DECIDED (Customer stated they have not decided on the sector yet. Accept this; do NOT ask again)` : null,
     memory.shareholderCount ? `- Shareholder / Partner Count: ${memory.shareholderCount}` : `- Shareholder / Partner Count: Not specified`,
     memory.visaCount ? `- Visa Requirement: ${memory.visaCount}` : `- Visa Requirement: Not specified`,
     memory.jurisdictionPreference ? `- Jurisdiction Preference: ${memory.jurisdictionPreference}` : `- Jurisdiction Preference: Free Zone (Default)`,
     memory.phone ? `- Contact Phone / WhatsApp: ${memory.phone}` : `- Contact Phone / WhatsApp: Missing`,
     memory.requestedTime ? `- Preferred Meeting Time: ${memory.requestedTime}${memory.timezone ? ` (${memory.timezone})` : ''}` : `- Preferred Meeting Time: Missing`,
     '',
-    'STRICT DUPLICATE-QUESTION PREVENTION (MANDATORY RULES):',
-    '1. NEVER re-ask any fact listed above as already known!',
-    memory.businessActivity ? '2. Business Activity is ALREADY KNOWN. DO NOT ask "Ne tür bir iş yapmak istiyorsunuz?" or what business they want to do.' : null,
-    memory.phone ? '3. Customer Phone is ALREADY KNOWN. DO NOT ask for their phone number again.' : null,
-    memory.requestedTime ? '4. Preferred Meeting Time is ALREADY KNOWN. DO NOT ask for their preferred time or availability again.' : null,
-    memory.customerName ? '5. Customer Real Name is ALREADY KNOWN. DO NOT ask "Adınız nedir?".' : null,
-    '6. TOPIC CONTINUITY: Follow-up questions inherit the active subject (e.g. "Peki banka hesabı?" refers to banking for their specific company formation).',
-    '7. PROGRESSIVE QUALIFICATION: Answer the customer\'s question directly first. Then, if essential qualification info is still missing, ask ONLY the next single missing item naturally without interrogation.',
+    'STRICT ANTI-REDUNDANT-QUESTION & CONVERSATION RULES:',
+    '1. NEVER re-ask any fact listed above as already known or answered!',
+    memory.phone ? '2. Customer Phone is ALREADY KNOWN. DO NOT ask for their phone number again.' : null,
+    memory.serviceRequested ? '3. Service / Consultation Topic is ALREADY KNOWN. DO NOT ask them what service or to choose between options again.' : null,
+    memory.businessActivity || memory.activityState === 'NOT_DECIDED' ? '4. Business Activity is ALREADY ANSWERED (known or undecided). DO NOT ask for their business activity or sector again.' : null,
+    memory.requestedTime ? '5. Preferred Meeting Time is ALREADY KNOWN. DO NOT ask for their preferred time or availability again.' : null,
+    memory.customerName ? '6. Customer Real Name is ALREADY KNOWN. DO NOT ask "Adınız nedir?".' : null,
+    '7. NATURAL MULTI-FIELD COLLECTION: When a customer requests a meeting, ask currently missing required details (phone, topic, preferred day/time) naturally in ONE response instead of interrogating one question per turn.',
+    '8. UNDECIDED ANSWERS ARE VALID: If customer says "Henüz karar vermedim", "bilmiyorum", "fark etmez", etc., accept it smoothly, do not repeat the question, and proceed with scheduling the meeting.',
+    '9. TOPIC CONTINUITY: Follow-up questions inherit the active subject.',
   ].filter((p) => p !== null);
 
   return lines.join('\n');
@@ -398,13 +478,14 @@ async function defaultGenerateInstagramAiResponse({
   text,
   conversationHistory = [],
   model = null,
+  memory = {},
 }) {
   let provider;
   try {
     provider = createGoogleGeminiProvider();
   } catch (providerErr) {
     console.error('INSTAGRAM_GEMINI_PROVIDER_INIT_ERROR', providerErr?.message);
-    return null;
+    return generateContextualConversationalFallback({ text, conversationHistory, memory });
   }
 
   const defaultModel = provider.runtimeMetadata().model;
@@ -476,14 +557,21 @@ async function defaultGenerateInstagramAiResponse({
     return null;
   };
 
+  const genConfig = {
+    thinkingConfig: {
+      thinkingBudget: 0,
+    },
+  };
+
   const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), 25000);
+  const timeoutId = setTimeout(() => abortController.abort(), 35000);
 
   try {
     const response = await provider.generateContent({
       model: runtimeModel,
       contents,
       systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
+      generationConfig: genConfig,
       signal: abortController.signal,
     });
     const parsedText = extractResponseText(response);
@@ -497,12 +585,13 @@ async function defaultGenerateInstagramAiResponse({
   // Fallback retry with default model if distinct from runtimeModel
   if (runtimeModel !== defaultModel) {
     const retryController = new AbortController();
-    const retryTimeoutId = setTimeout(() => retryController.abort(), 25000);
+    const retryTimeoutId = setTimeout(() => retryController.abort(), 35000);
     try {
       const retryRes = await provider.generateContent({
         model: defaultModel,
         contents,
         systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
+        generationConfig: genConfig,
         signal: retryController.signal,
       });
       const fallbackText = extractResponseText(retryRes);
@@ -514,7 +603,8 @@ async function defaultGenerateInstagramAiResponse({
     }
   }
 
-  return null;
+  // No-Silent-Turn Conversational Fallback
+  return generateContextualConversationalFallback({ text, conversationHistory, memory });
 }
 
 const activeInstagramOrchestrations = new Set();
@@ -826,6 +916,7 @@ export async function orchestrateInstagramInboundAiResponse({
         text,
         conversationHistory: history,
         model: assistantModel,
+        memory: durableMemory,
       });
     }
 
@@ -1102,6 +1193,7 @@ export async function generateAndDeliverInstagramAssistantResponse({
           text: textToAnswer,
           conversationHistory: history,
           model: assistantModel,
+          memory: durableMemory,
         });
       }
 
