@@ -264,7 +264,7 @@ export function formatInternalWhatsAppLeadNotification({
     `YENİ INSTAGRAM LEAD${isUpdate ? ' (GÜNCELLEME):' : ':'}`,
     cleanName ? `Müşteri: ${cleanName}` : null,
     cleanIg ? `IG: ${cleanIg}` : null,
-    cleanPhone ? `Tel: ${cleanPhone}` : null,
+    cleanPhone ? `Telefon / WhatsApp: ${cleanPhone}` : null,
     cleanKonu ? `Konu: ${cleanKonu}` : null,
     cleanFaaliyet ? `Faaliyet: ${cleanFaaliyet}` : (cleanIstek ? `Talep: ${cleanIstek}` : null),
     cleanTime || cleanTimeline ? `Görüşme: ${cleanTime || cleanTimeline}${cleanTz ? ` (${cleanTz})` : ''}` : null,

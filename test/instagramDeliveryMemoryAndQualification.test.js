@@ -1178,4 +1178,102 @@ describe('Mandatory Regression Suite: Safe Chunking, Multi-Turn Memory & CTA', (
     assert.equal(res1.providerMessageId, res2.providerMessageId);
   });
 
+  it('39. Exact physical failure reproduction: sanitizes false promise and deterministically appends Customer-Initiated WhatsApp CTA', async () => {
+    let deliveredText = '';
+    const fakeHttp = {
+      post: async (url, payload) => {
+        if (payload?.message?.text) {
+          deliveredText = payload.message.text;
+        }
+        return { data: { message_id: 'mid.exact.qual.1' } };
+      },
+    };
+
+    let ctaDeliveredAtSet = false;
+    const mockDb = {
+      connect: async () => mockDb,
+      release: () => {},
+      query: async (sql, params) => {
+        if (/FROM conversations/i.test(sql)) {
+          return { rowCount: 1, rows: [{ id: 'conv-real-test', tenant_id: 't-1', channel_id: 'ch-1', contact_id: 'cnt-1', status: 'open', handling_mode: 'AI', handling_version: 1 }] };
+        }
+        if (/FROM crm_contacts/i.test(sql)) {
+          return { rowCount: 1, rows: [{ display_name: 'Suleyman (@suleyman_isseven)', phone: '+905312404965' }] };
+        }
+        if (/FROM crm_consultations/i.test(sql)) {
+          return { rowCount: 0, rows: [] };
+        }
+        if (/FROM crm_leads/i.test(sql)) {
+          return { rowCount: 0, rows: [] };
+        }
+        if (/INSERT INTO crm_consultations/i.test(sql)) {
+          return {
+            rowCount: 1,
+            rows: [{
+              id: 'c-new',
+              status: 'PENDING',
+              phone: '+905312404965',
+              requested_time: 'Yarın 14:00',
+              cta_url: 'https://wa.me/971527288586?text=' + encodeURIComponent('Merhaba Samed Bey, görüşme talebi oluşturdum.\nTelefon: +905312404965\nGörüşme: Yarın 14:00'),
+              cta_delivered_at: null,
+            }],
+          };
+        }
+        if (/UPDATE crm_consultations/i.test(sql)) {
+          ctaDeliveredAtSet = true;
+          return { rowCount: 1, rows: [] };
+        }
+        if (/INSERT INTO conversation_messages/i.test(sql)) {
+          return { rowCount: 1, rows: [{ id: 'msg-ai-real', content: params?.[3] }] };
+        }
+        if (/idempotency_key/i.test(sql)) {
+          return { rowCount: 0, rows: [] };
+        }
+        if (/FROM conversation_messages/i.test(sql)) {
+          return {
+            rowCount: 3,
+            rows: [
+              { sender_type: 'CUSTOMER', content: '+905312404965' },
+              { sender_type: 'CUSTOMER', content: 'İkiside olabilir' },
+              { sender_type: 'CUSTOMER', content: 'Henüz karar vermedim' },
+              { sender_type: 'CUSTOMER', content: 'Yarın 14:00 uygunum.GORUSME ICIN' },
+            ],
+          };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+    };
+
+    const inboundState = {
+      duplicate: false,
+      handlingVersion: 1,
+      customerMessage: { id: 'msg-cust-final', content: 'Yarın 14:00 uygunum.GORUSME ICIN' },
+      integration: {
+        tenant_id: 't-1',
+        assistant_id: 'ast-1',
+        config: { access_token: 'EAAB_token', instagram_account_id: '17841474291887372', activation_policy: 'ALL_MESSAGES' },
+      },
+      conversation: { id: 'conv-real-test', tenant_id: 't-1', contact_id: 'cnt-1', customer_external_id: '10203040', status: 'open', handling_mode: 'AI', handling_version: 1 },
+      shouldInvokeAi: true,
+    };
+
+    const outcome = await orchestrateInstagramInboundAiResponse({
+      database: mockDb,
+      inboundState,
+      senderIgsid: '10203040',
+      text: 'Yarın 14:00 uygunum.GORUSME ICIN',
+      http: fakeHttp,
+      generateAiResponse: async () => 'Yarın saat 14:00 için notumu aldım. Paylaştığınız telefon numarası üzerinden sizinle iletişime geçeceğiz. Görüşmek üzere.',
+      applyPacing: false,
+    });
+
+    assert.equal(outcome.delivered, true);
+    assert.ok(!deliveredText.includes('sizinle iletişime geçeceğiz'), 'False automated promise must be stripped');
+    assert.ok(!deliveredText.includes('numara üzerinden'), 'False automated promise must be stripped');
+    assert.ok(deliveredText.includes('https://wa.me/971527288586?text='), 'Customer-Initiated WhatsApp CTA link must be appended');
+    assert.ok(decodeURIComponent(deliveredText).includes('+905312404965'), 'CTA text must contain persisted phone');
+    assert.ok(decodeURIComponent(deliveredText).includes('14:00'), 'CTA text must contain meeting time');
+    assert.equal(ctaDeliveredAtSet, true, 'cta_delivered_at must be updated after provider delivery');
+  });
+
 });

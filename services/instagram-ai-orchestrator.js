@@ -143,6 +143,35 @@ export function extractReliableCustomerName(rawDisplayName) {
 }
 
 /**
+ * Strips unsupported automated contact promises from AI generated responses,
+ * enforcing truthfulness in channel communications without mutating the Main business policy.
+ */
+export function sanitizeInstagramOutboundResponse(rawText) {
+  if (!rawText || typeof rawText !== 'string') return '';
+  let text = rawText;
+
+  // Patterns for false contact promises (e.g. "telefon numarası üzerinden sizinle iletişime geçeceğiz", "ekibimiz sizi arayacak")
+  const sentencePatterns = [
+    /[^.!?\n]*\b(?:iletişime\s+geç\w*|arayacağ\w*|ulaşacağ\w*|ulaşılacak\w*|aranacak\w*)[^.!?\n]*[.!?]?/giu,
+    /[^.!?\n]*\b(?:numara\w*\s+üzerinden)[^.!?\n]*[.!?]?/giu,
+    /[^.!?\n]*\b(?:görüşmek\s+üzere)[^.!?\n]*[.!?]?/giu,
+  ];
+
+  for (const pattern of sentencePatterns) {
+    text = text.replace(pattern, '');
+  }
+
+  // Clean up leftover phrases cleanly
+  text = text
+    .replace(/(?:için\s+)?notumu\s+aldım\s*\.?/giu, 'için görüşme talebinizi kaydettim.')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  return text;
+}
+
+
+/**
  * Normalizes and formats AI response text for optimal readability in Instagram Direct Messages.
 
  * Guarantees vertical separation of list items, strips raw markdown fences, and formats clean paragraph breaks.
@@ -991,7 +1020,19 @@ export async function orchestrateInstagramInboundAiResponse({
       });
     }
 
-    const formattedResponse = formatInstagramDmResponse(rawAiResponseText);
+    const sanitizedResponse = sanitizeInstagramOutboundResponse(rawAiResponseText);
+    let formattedResponse = formatInstagramDmResponse(sanitizedResponse);
+
+    // Deterministic CTA Attachment:
+    // If qualification is complete and consultation exists with CTA url, and CTA was not yet delivered:
+    if (isQualified && qualResult?.ctaUrl && !durableMemory.ctaDelivered) {
+      if (!formattedResponse.includes('wa.me')) {
+        const ctaLeadText = qualResult.ctaPayload?.dm_response_text ||
+          "Görüşme talebinizi WhatsApp üzerinden doğrudan iletmek için aşağıdaki bağlantıyı kullanabilirsiniz:";
+        formattedResponse = `${formattedResponse}\n\n${ctaLeadText}\n${qualResult.ctaUrl}`.trim();
+      }
+    }
+
     if (!formattedResponse) {
       return { aiInvoked: true, delivered: false, reason: 'EMPTY_AI_RESPONSE' };
     }
@@ -1304,7 +1345,18 @@ export async function generateAndDeliverInstagramAssistantResponse({
         });
       }
 
-      const formattedResponse = formatInstagramDmResponse(rawAiResponseText);
+      const sanitizedResponse = sanitizeInstagramOutboundResponse(rawAiResponseText);
+      let formattedResponse = formatInstagramDmResponse(sanitizedResponse);
+
+      // Deterministic CTA Attachment:
+      if (isQualified && qualResult?.ctaUrl && !durableMemory.ctaDelivered) {
+        if (!formattedResponse.includes('wa.me')) {
+          const ctaLeadText = qualResult.ctaPayload?.dm_response_text ||
+            "Görüşme talebinizi WhatsApp üzerinden doğrudan iletmek için aşağıdaki bağlantıyı kullanabilirsiniz:";
+          formattedResponse = `${formattedResponse}\n\n${ctaLeadText}\n${qualResult.ctaUrl}`.trim();
+        }
+      }
+
       if (!formattedResponse) return { skipped: true, reason: 'EMPTY_AI_RESPONSE' };
 
       if (applyPacing !== false) {
