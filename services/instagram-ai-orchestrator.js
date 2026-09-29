@@ -10,7 +10,18 @@ import { resolveCommunicationLanguage } from './conversation-communication-langu
 import { evaluateChannelAiActivationPolicy } from './channel-ai-activation-policy-service.js';
 import { applyWhatsAppAdaptivePacing } from './whatsapp-response-pacing-service.js';
 import { createGoogleGeminiProvider } from './google-gemini-provider.js';
-import { evaluateAndProcessHighIntentLead, hasHighIntentAppointmentSignals } from './high-intent-lead-service.js';
+import {
+  evaluateAndProcessHighIntentLead,
+  hasHighIntentAppointmentSignals,
+  extractBusinessActivity,
+  extractPhoneNumberFromText,
+  extractMeetingTimePreference,
+  extractTimezoneFromText,
+  extractJurisdictionPreference,
+  extractVisaCount,
+  extractShareholderCount,
+  extractCustomerNameFromText,
+} from './high-intent-lead-service.js';
 
 async function recordInstagramAssistantDeliverySuccess({ database, tenantId, messageId, providerMessageId }) {
   if (!messageId || !providerMessageId) return;
@@ -186,9 +197,170 @@ export function formatInstagramDmResponse(rawText) {
 }
 
 /**
+ * Merges consecutive same-role messages so that chunked transport messages (or burst messages)
+ * are represented as exactly one logical conversational turn.
+ */
+export function mergeConsecutiveConversationTurns(rawMessages = []) {
+  if (!Array.isArray(rawMessages) || rawMessages.length === 0) return [];
+  const merged = [];
+  for (const msg of rawMessages) {
+    const role = msg.sender_type === 'CUSTOMER' ? 'user' : 'model';
+    const text = String(msg.content || '').trim();
+    if (!text) continue;
+    if (merged.length > 0 && merged[merged.length - 1].role === role) {
+      merged[merged.length - 1].parts[0].text += '\n\n' + text;
+      merged[merged.length - 1].content += '\n\n' + text;
+    } else {
+      merged.push({
+        role,
+        parts: [{ text }],
+        sender_type: msg.sender_type,
+        content: text,
+      });
+    }
+  }
+  return merged;
+}
+
+/**
+ * Resolves durable conversation memory and qualification state across CRM tables and message history.
+ * Supports chronological customer corrections (e.g. latest shareholder count, phone, or time wins).
+ */
+export async function resolveDurableConversationMemory({
+  database,
+  tenantId,
+  conversationId,
+  conversation = {},
+  rawMessages = [],
+}) {
+  let customerName = extractReliableCustomerName(conversation?.contact_display_name || conversation?.display_name);
+  let phone = conversation?.contact_phone || null;
+  let activity = null;
+  let jurisdiction = null;
+  let shareholderCount = null;
+  let visaCount = null;
+  let requestedTime = null;
+  let timezone = null;
+
+  // 1. Check CRM Leads & Consultations if existing in DB
+  try {
+    const isPool = typeof database?.connect === 'function' && typeof database?.query !== 'function';
+    const client = isPool ? await database.connect() : database;
+    try {
+      const leadRes = await client.query(
+        `SELECT contact_name, phone, service_interest, timeline, custom_fields
+           FROM crm_leads
+          WHERE tenant_id = $1 AND conversation_id = $2
+          ORDER BY updated_at DESC
+          LIMIT 1`,
+        [tenantId, conversationId]
+      );
+      if (leadRes.rowCount > 0) {
+        const lead = leadRes.rows[0];
+        if (lead.contact_name && !customerName) customerName = lead.contact_name;
+        if (lead.phone && !phone) phone = lead.phone;
+        if (lead.service_interest) activity = lead.service_interest;
+        if (lead.timeline && !requestedTime) requestedTime = lead.timeline;
+      }
+
+      const consultRes = await client.query(
+        `SELECT customer_name, phone, activity, service_requested, requested_time, timezone
+           FROM crm_consultations
+          WHERE tenant_id = $1 AND conversation_id = $2
+          ORDER BY updated_at DESC
+          LIMIT 1`,
+        [tenantId, conversationId]
+      );
+      if (consultRes.rowCount > 0) {
+        const consult = consultRes.rows[0];
+        if (consult.customer_name && !customerName) customerName = consult.customer_name;
+        if (consult.phone && !phone) phone = consult.phone;
+        if (consult.activity && !activity) activity = consult.activity;
+        if (consult.requested_time && !requestedTime) requestedTime = consult.requested_time;
+        if (consult.timezone && !timezone) timezone = consult.timezone;
+      }
+    } finally {
+      if (isPool && typeof client?.release === 'function') client.release();
+    }
+  } catch (err) {
+    // Non-blocking in mock environments
+  }
+
+  // 2. Scan customer messages chronologically for durable facts & corrections
+  const customerMsgs = (rawMessages || []).filter((m) => m.sender_type === 'CUSTOMER');
+  for (const msg of customerMsgs) {
+    const text = String(msg.content || '').trim();
+    if (!text) continue;
+
+    const parsedName = extractCustomerNameFromText(text);
+    if (parsedName) customerName = parsedName;
+
+    const parsedPhone = extractPhoneNumberFromText(text);
+    if (parsedPhone) phone = parsedPhone;
+
+    const parsedActivity = extractBusinessActivity(text);
+    if (parsedActivity) activity = parsedActivity;
+
+    const parsedJurisdiction = extractJurisdictionPreference(text);
+    if (parsedJurisdiction) jurisdiction = parsedJurisdiction;
+
+    const parsedShareholders = extractShareholderCount(text);
+    if (parsedShareholders) shareholderCount = parsedShareholders;
+
+    const parsedVisas = extractVisaCount(text);
+    if (parsedVisas) visaCount = parsedVisas;
+
+    const parsedTime = extractMeetingTimePreference(text);
+    if (parsedTime) requestedTime = parsedTime;
+
+    const parsedTz = extractTimezoneFromText(text);
+    if (parsedTz) timezone = parsedTz;
+  }
+
+  return {
+    customerName,
+    phone,
+    businessActivity: activity,
+    jurisdictionPreference: jurisdiction,
+    shareholderCount,
+    visaCount,
+    requestedTime,
+    timezone,
+  };
+}
+/**
+ * Builds the structured memory instruction for the system prompt.
+ * Contains durable facts, topic continuity rules, and strict anti-re-asking constraints.
+ */
+export function buildStructuredMemoryInstruction(memory = {}) {
+  const lines = [
+    'DURABLE CONVERSATION MEMORY & PERSISTED CRM FACTS:',
+    `- Active Topic / Context: Company Formation & Consultancy (UAE / Dubai)`,
+    memory.customerName ? `- Customer Real Name: "${memory.customerName}"` : `- Customer Real Name: Unknown`,
+    memory.businessActivity ? `- Business Activity / Requirement: "${memory.businessActivity}"` : `- Business Activity / Requirement: Missing`,
+    memory.shareholderCount ? `- Shareholder / Partner Count: ${memory.shareholderCount}` : `- Shareholder / Partner Count: Not specified`,
+    memory.visaCount ? `- Visa Requirement: ${memory.visaCount}` : `- Visa Requirement: Not specified`,
+    memory.jurisdictionPreference ? `- Jurisdiction Preference: ${memory.jurisdictionPreference}` : `- Jurisdiction Preference: Free Zone (Default)`,
+    memory.phone ? `- Contact Phone / WhatsApp: ${memory.phone}` : `- Contact Phone / WhatsApp: Missing`,
+    memory.requestedTime ? `- Preferred Meeting Time: ${memory.requestedTime}${memory.timezone ? ` (${memory.timezone})` : ''}` : `- Preferred Meeting Time: Missing`,
+    '',
+    'STRICT DUPLICATE-QUESTION PREVENTION (MANDATORY RULES):',
+    '1. NEVER re-ask any fact listed above as already known!',
+    memory.businessActivity ? '2. Business Activity is ALREADY KNOWN. DO NOT ask "Ne tür bir iş yapmak istiyorsunuz?" or what business they want to do.' : null,
+    memory.phone ? '3. Customer Phone is ALREADY KNOWN. DO NOT ask for their phone number again.' : null,
+    memory.requestedTime ? '4. Preferred Meeting Time is ALREADY KNOWN. DO NOT ask for their preferred time or availability again.' : null,
+    memory.customerName ? '5. Customer Real Name is ALREADY KNOWN. DO NOT ask "Adınız nedir?".' : null,
+    '6. TOPIC CONTINUITY: Follow-up questions inherit the active subject (e.g. "Peki banka hesabı?" refers to banking for their specific company formation).',
+    '7. PROGRESSIVE QUALIFICATION: Answer the customer\'s question directly first. Then, if essential qualification info is still missing, ask ONLY the next single missing item naturally without interrogation.',
+  ].filter((p) => p !== null);
+
+  return lines.join('\n');
+}
+
+/**
  * Loads recent chronological conversation history for multi-turn AI context.
  */
-async function loadRecentConversationHistory(database, tenantId, conversationId, limit = 10) {
+async function loadRecentConversationHistory(database, tenantId, conversationId, limit = 20) {
   try {
     const isPool = typeof database?.connect === 'function' && typeof database?.query !== 'function';
     const client = isPool ? await database.connect() : database;
@@ -201,12 +373,11 @@ async function loadRecentConversationHistory(database, tenantId, conversationId,
           LIMIT $3`,
         [tenantId, conversationId, limit]
       );
-      return (res.rows || []).reverse().map((msg) => ({
-        role: msg.sender_type === 'CUSTOMER' ? 'user' : 'model',
-        parts: [{ text: msg.content || '' }],
-        sender_type: msg.sender_type,
-        content: msg.content,
-      }));
+      const chronological = (res.rows || []).reverse();
+      return {
+        rawMessages: chronological,
+        mergedTurns: mergeConsecutiveConversationTurns(chronological),
+      };
     } finally {
       if (isPool && typeof client?.release === 'function') {
         client.release();
@@ -214,7 +385,7 @@ async function loadRecentConversationHistory(database, tenantId, conversationId,
     }
   } catch (err) {
     console.warn('INSTAGRAM_LOAD_HISTORY_WARN', err?.message);
-    return [];
+    return { rawMessages: [], mergedTurns: [] };
   }
 }
 
@@ -509,11 +680,21 @@ export async function orchestrateInstagramInboundAiResponse({
     console.warn('INSTAGRAM_AI_KNOWLEDGE_WARN', knowledgeErr?.message);
   }
 
-  // 6. Load Recent Conversation History
-  const history = await loadRecentConversationHistory(database, tenantId, conversationId, 10);
+  // 6. Load Recent Conversation History & Resolve Durable Memory
+  const historyData = await loadRecentConversationHistory(database, tenantId, conversationId, 20);
+  const history = historyData.mergedTurns || [];
+  const durableMemory = await resolveDurableConversationMemory({
+    database,
+    tenantId,
+    conversationId,
+    conversation,
+    rawMessages: historyData.rawMessages || [],
+  });
 
-  // 7. Build System Instruction with Channel Presentation Rules and Customer Identity Context
-  const rawCustomerName = conversation?.contact_display_name || conversation?.display_name || null;
+  const structuredMemoryContext = buildStructuredMemoryInstruction(durableMemory);
+
+  // 7. Build System Instruction with Channel Presentation Rules and Structured Memory Context
+  const rawCustomerName = durableMemory.customerName || conversation?.contact_display_name || conversation?.display_name || null;
   const reliableCustomerName = extractReliableCustomerName(rawCustomerName);
   const customerIdentityContext = reliableCustomerName
     ? `CUSTOMER IDENTITY CONTEXT:\n- Customer Real Display Name: "${reliableCustomerName}"\n- You may address the customer naturally as "${reliableCustomerName}" / in Turkish.\n- Do NOT treat their username as a real name.\n- During appointment qualification, since their name is already known, do NOT ask "Adınız nedir?".`
@@ -522,6 +703,7 @@ export async function orchestrateInstagramInboundAiResponse({
   const channelRules = [
     INSTAGRAM_CHANNEL_PRESENTATION_RULES,
     customerIdentityContext,
+    structuredMemoryContext,
   ].filter(Boolean).join('\n\n');
 
   const systemInstruction = persona?.available
@@ -771,9 +953,19 @@ export async function generateAndDeliverInstagramAssistantResponse({
       knowledge = await resolveAssistantRuntimeKnowledgeContext({ database: client, embed, tenantId, assistantId, query: textToAnswer });
     } catch {}
 
-    const history = await loadRecentConversationHistory(client, tenantId, conversationId, 10);
+    const historyData = await loadRecentConversationHistory(client, tenantId, conversationId, 20);
+    const history = historyData.mergedTurns || [];
+    const durableMemory = await resolveDurableConversationMemory({
+      database: client,
+      tenantId,
+      conversationId,
+      conversation,
+      rawMessages: historyData.rawMessages || [],
+    });
 
-    const rawCustomerName = conversation?.contact_display_name || conversation?.display_name || null;
+    const structuredMemoryContext = buildStructuredMemoryInstruction(durableMemory);
+
+    const rawCustomerName = durableMemory.customerName || conversation?.contact_display_name || conversation?.display_name || null;
     const reliableCustomerName = extractReliableCustomerName(rawCustomerName);
     const customerIdentityContext = reliableCustomerName
       ? `CUSTOMER IDENTITY CONTEXT:\n- Customer Real Display Name: "${reliableCustomerName}"\n- You may address the customer naturally as "${reliableCustomerName}" / in Turkish.\n- Do NOT treat their username as a real name.\n- During appointment qualification, since their name is already known, do NOT ask "Adınız nedir?".`
@@ -782,6 +974,7 @@ export async function generateAndDeliverInstagramAssistantResponse({
     const channelRules = [
       INSTAGRAM_CHANNEL_PRESENTATION_RULES,
       customerIdentityContext,
+      structuredMemoryContext,
     ].filter(Boolean).join('\n\n');
 
     const systemInstruction = persona?.available

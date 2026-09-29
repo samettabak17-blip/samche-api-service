@@ -180,7 +180,7 @@ export function extractTimezoneFromText(text = '') {
  */
 export function extractBusinessActivity(text = '') {
   if (typeof text !== 'string') return null;
-  const match = text.match(/(?:e-ticaret|online\s+satış|danışmanlık|yazılım|teknoloji|pazarlama|ithalat|ihracat|ticaret|gayrimenkul|turizm|restoran|ajans|lojistik|inşaat|finans|kripto|holding)/i);
+  const match = text.match(/(?:e-ticaret|online\s+satış|danışmanlık|yazılım|saas|teknoloji|pazarlama|ithalat|ihracat|ticaret|gayrimenkul|turizm|restoran|ajans|lojistik|inşaat|finans|kripto|holding)/i);
   if (match) return match[0].trim();
   return null;
 }
@@ -189,10 +189,26 @@ export function extractBusinessActivity(text = '') {
  * Extracts jurisdiction preference (Free Zone / Mainland) from text.
  */
 export function extractJurisdictionPreference(text = '') {
-  if (typeof text !== 'string') return 'Free Zone';
+  if (typeof text !== 'string') return null;
   if (/mainland/i.test(text)) return 'Mainland';
   if (/free\s*zone/i.test(text)) return 'Free Zone';
-  return 'Free Zone';
+  return null;
+}
+
+/**
+ * Extracts shareholder or partner count from text.
+ * Handles updates and corrections (e.g. "aslında tek ortak", "2 ortak").
+ */
+export function extractShareholderCount(text = '') {
+  if (typeof text !== 'string') return null;
+  if (/(?:tek\s+ortak|tek\s+başım|tek\s+kişi|yalnız\s+ol|aslında\s+1\s+ortak|aslında\s+tek)/i.test(text)) {
+    return '1 ortak (Tek ortak)';
+  }
+  const match = text.match(/(?:^|[\s\p{P}])(\d+)\s*(?:ortak|kurucu|hissedar)(?:$|[\s\p{P}])/iu);
+  if (match?.[1]) {
+    return `${match[1]} ortak`;
+  }
+  return null;
 }
 
 /**

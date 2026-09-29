@@ -23,78 +23,113 @@ export function resolveInstagramDeliveryTarget({ authMode = null, instagramAccou
   if (normalizedAuthMode === 'INSTAGRAM_LOGIN') return 'me';
   return String(instagramAccountId || pageId || 'me').trim();
 }
+export const MAX_FINAL_INSTAGRAM_CHUNK_LENGTH = 900;
+
 /**
- * Splits message text into chunks that safely comply with Meta Instagram DM 1000-character payload limits.
- * Preserves paragraph breaks and sentence boundaries.
+ * Splits message text into safe Instagram DM chunks strictly respecting MAX_FINAL_INSTAGRAM_CHUNK_LENGTH (900 chars).
+ * Preserves paragraph breaks, list items, sentences, Turkish/Arabic Unicode characters, and URLs.
  */
-export function splitIntoInstagramDmChunks(content, maxChunkLength = 950) {
+export function splitIntoInstagramDmChunks(content, maxChunkLength = MAX_FINAL_INSTAGRAM_CHUNK_LENGTH) {
   if (!content || typeof content !== 'string') return [];
+  const limit = Math.max(50, Math.min(Number(maxChunkLength) || MAX_FINAL_INSTAGRAM_CHUNK_LENGTH, MAX_FINAL_INSTAGRAM_CHUNK_LENGTH));
   const text = content.trim();
-  if (text.length <= maxChunkLength) return [text];
+  if (!text) return [];
+  if (text.length <= limit) return [text];
 
-  const paragraphs = text.split(/\n\n+/);
-  const chunks = [];
-  let currentChunk = '';
+  // Level 1: Split into paragraphs
+  const rawParagraphs = text.split(/\n\n+/);
+  const leafSegments = [];
 
-  for (const para of paragraphs) {
+  for (const para of rawParagraphs) {
     const trimmedPara = para.trim();
     if (!trimmedPara) continue;
 
-    if (!currentChunk) {
-      if (trimmedPara.length <= maxChunkLength) {
-        currentChunk = trimmedPara;
-      } else {
-        const lines = trimmedPara.split(/\n+/);
-        for (const line of lines) {
-          const trimmedLine = line.trim();
-          if (!trimmedLine) continue;
-          if (!currentChunk) {
-            if (trimmedLine.length <= maxChunkLength) {
-              currentChunk = trimmedLine;
-            } else {
-              const sentences = trimmedLine.match(/[^.!?]+[.!?]+(?:\s+|$)|[^.!?]+$/g) || [trimmedLine];
-              for (const sentence of sentences) {
-                const s = sentence.trim();
-                if (!s) continue;
-                if (!currentChunk) {
-                  currentChunk = s.slice(0, maxChunkLength);
-                } else if ((currentChunk + ' ' + s).length <= maxChunkLength) {
-                  currentChunk += ' ' + s;
-                } else {
-                  chunks.push(currentChunk.trim());
-                  currentChunk = s.slice(0, maxChunkLength);
-                }
-              }
+    if (trimmedPara.length <= limit) {
+      leafSegments.push({ type: 'para', text: trimmedPara });
+      continue;
+    }
+
+    // Level 2: Split paragraph into lines / list items
+    const rawLines = trimmedPara.split(/\n+/);
+    for (const line of rawLines) {
+      const trimmedLine = line.trim();
+      if (!trimmedLine) continue;
+
+      if (trimmedLine.length <= limit) {
+        leafSegments.push({ type: 'line', text: trimmedLine });
+        continue;
+      }
+
+      // Level 3: Split line into sentences
+      const sentences = trimmedLine.match(/[^.!?…]+[.!?…]+(?:\s+|$)|[^.!?]+$/gu) || [trimmedLine];
+      for (const sentence of sentences) {
+        const trimmedSentence = sentence.trim();
+        if (!trimmedSentence) continue;
+
+        if (trimmedSentence.length <= limit) {
+          leafSegments.push({ type: 'sentence', text: trimmedSentence });
+          continue;
+        }
+
+        // Level 4: Split sentence by whitespace / words
+        const words = trimmedSentence.split(/\s+/u);
+        let wordBuffer = '';
+
+        for (const word of words) {
+          const w = word.trim();
+          if (!w) continue;
+
+          if (w.length > limit) {
+            if (wordBuffer) {
+              leafSegments.push({ type: 'word', text: wordBuffer });
+              wordBuffer = '';
             }
-          } else if ((currentChunk + '\n' + trimmedLine).length <= maxChunkLength) {
-            currentChunk += '\n' + trimmedLine;
+            // Level 5: Hard Unicode slice for oversized continuous tokens
+            const chars = Array.from(w);
+            for (let c = 0; c < chars.length; c += limit) {
+              leafSegments.push({ type: 'word', text: chars.slice(c, c + limit).join('') });
+            }
+            continue;
+          }
+
+          if (!wordBuffer) {
+            wordBuffer = w;
+          } else if ((wordBuffer + ' ' + w).length <= limit) {
+            wordBuffer += ' ' + w;
           } else {
-            chunks.push(currentChunk.trim());
-            currentChunk = trimmedLine.slice(0, maxChunkLength);
+            leafSegments.push({ type: 'word', text: wordBuffer });
+            wordBuffer = w;
           }
         }
+
+        if (wordBuffer) {
+          leafSegments.push({ type: 'word', text: wordBuffer });
+        }
       }
-    } else if ((currentChunk + '\n\n' + trimmedPara).length <= maxChunkLength) {
-      currentChunk += '\n\n' + trimmedPara;
+    }
+  }
+
+  // Greedily combine leaf segments into chunks <= limit
+  const chunks = [];
+  let currentChunk = '';
+
+  for (let i = 0; i < leafSegments.length; i++) {
+    const seg = leafSegments[i];
+    const segText = seg.text;
+
+    if (!currentChunk) {
+      currentChunk = segText;
+      continue;
+    }
+
+    const sep = (seg.type === 'para') ? '\n\n' : (seg.type === 'line') ? '\n' : ' ';
+    const candidate = currentChunk + sep + segText;
+
+    if (candidate.length <= limit) {
+      currentChunk = candidate;
     } else {
       chunks.push(currentChunk.trim());
-      if (trimmedPara.length <= maxChunkLength) {
-        currentChunk = trimmedPara;
-      } else {
-        const lines = trimmedPara.split(/\n+/);
-        for (const line of lines) {
-          const trimmedLine = line.trim();
-          if (!trimmedLine) continue;
-          if (!currentChunk) {
-            currentChunk = trimmedLine.slice(0, maxChunkLength);
-          } else if ((currentChunk + '\n' + trimmedLine).length <= maxChunkLength) {
-            currentChunk += '\n' + trimmedLine;
-          } else {
-            chunks.push(currentChunk.trim());
-            currentChunk = trimmedLine.slice(0, maxChunkLength);
-          }
-        }
-      }
+      currentChunk = segText;
     }
   }
 
@@ -102,7 +137,20 @@ export function splitIntoInstagramDmChunks(content, maxChunkLength = 950) {
     chunks.push(currentChunk.trim());
   }
 
-  return chunks.length > 0 ? chunks : [text.slice(0, maxChunkLength)];
+  // Final Invariant Guarantee: Assert EVERY chunk is strictly <= limit
+  const validatedChunks = [];
+  for (const c of chunks) {
+    if (c.length <= limit) {
+      validatedChunks.push(c);
+    } else {
+      const chars = Array.from(c);
+      for (let idx = 0; idx < chars.length; idx += limit) {
+        validatedChunks.push(chars.slice(idx, idx + limit).join('').trim());
+      }
+    }
+  }
+
+  return validatedChunks.filter(Boolean);
 }
 
 
@@ -151,16 +199,25 @@ export async function deliverInstagramText({
         ...(targetId !== 'me' ? [`${igBaseUrl}/${targetId}/messages`] : []),
       ]));
 
-  const chunks = splitIntoInstagramDmChunks(content, 950);
+  const chunks = splitIntoInstagramDmChunks(content, MAX_FINAL_INSTAGRAM_CHUNK_LENGTH);
   let primaryProviderMessageId = null;
   const deliveredIds = [];
   let workingEndpoint = candidateEndpoints[0];
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
+
+    // Pre-send Hard Limit Assertion: Must never exceed MAX_FINAL_INSTAGRAM_CHUNK_LENGTH (900)
+    if (chunk.length > MAX_FINAL_INSTAGRAM_CHUNK_LENGTH) {
+      const emergencySubChunks = splitIntoInstagramDmChunks(chunk, MAX_FINAL_INSTAGRAM_CHUNK_LENGTH);
+      for (const subChunk of emergencySubChunks) {
+        chunks.splice(i, 1, subChunk);
+      }
+    }
+
     const payload = {
       recipient: { id: cleanRecipientId },
-      message: { text: chunk },
+      message: { text: chunks[i] },
     };
 
     let response = null;
@@ -190,20 +247,32 @@ export async function deliverInstagramText({
     }
 
     if (!response && lastError) {
-      if (lastError instanceof InstagramDeliveryError) throw lastError;
-      throw sanitizeMetaError(lastError);
+      const sanitized = (lastError instanceof InstagramDeliveryError) ? lastError : sanitizeMetaError(lastError);
+      sanitized.chunkIndex = i;
+      sanitized.totalChunks = chunks.length;
+      sanitized.deliveredProviderIds = [...deliveredIds];
+      throw sanitized;
     }
 
     const providerMessageId = response?.data?.message_id || null;
     if (!providerMessageId) {
-      throw new InstagramDeliveryError(
+      const error = new InstagramDeliveryError(
         'INSTAGRAM_PROVIDER_MESSAGE_ID_MISSING',
         'Instagram provider accepted the request without a correlatable message ID',
         502
       );
+      error.chunkIndex = i;
+      error.totalChunks = chunks.length;
+      error.deliveredProviderIds = [...deliveredIds];
+      throw error;
     }
     if (!primaryProviderMessageId) primaryProviderMessageId = providerMessageId;
     deliveredIds.push(providerMessageId);
+
+    // Apply human pacing between sequential chunks if there are multiple chunks
+    if (i < chunks.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
   }
 
   return {

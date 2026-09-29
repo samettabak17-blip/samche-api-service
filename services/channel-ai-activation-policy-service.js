@@ -198,6 +198,18 @@ export async function evaluateChannelAiActivationPolicy({
     };
   }
 
+  if (override === 'FIRST_CONTACT_HOLD') {
+    return {
+      eligible: false,
+      decision: 'SUPPRESSED',
+      reasonCode: 'FIRST_CONTACT_HOLD',
+      policy: channelConfig?.activation_policy || AI_ACTIVATION_MODES.MANUAL_ONLY,
+      matchedTriggers: [],
+      classifierLabel: null,
+      timestamp,
+    };
+  }
+
   if (override === 'AI_ONLY' || override === 'ALWAYS_AI') {
     return {
       eligible: true,
