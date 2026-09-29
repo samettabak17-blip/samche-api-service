@@ -668,6 +668,57 @@ describe('Task 9: Final Instagram Main-Parity Full Suite & CTA Decommissioning',
     }
   });
 
+  it('W4. Exact physical failure reproduction: substantive residency inquiry receives Main answer, never generic fallback', async () => {
+    // Turn 1: "Merhaba Samed bey"
+    // Turn 2: "Dubaide yaşamak istiyorum YouTube videolarınızı izledim bilgi rica ediyorum"
+    const client = new MockDatabaseClient({
+      messages: [
+        { id: 'm1_cust', sender_type: 'CUSTOMER', content: 'Merhaba Samed bey', created_at: new Date(1000) },
+        { id: 'm1_asst', sender_type: 'ASSISTANT', content: 'Merhaba, hoş geldiniz. Size nasıl yardımcı olabilirim?', created_at: new Date(2000) },
+        { id: 'm2_cust', sender_type: 'CUSTOMER', content: 'Dubaide yaşamak istiyorum YouTube videolarınızı izledim bilgi rica ediyorum', created_at: new Date(3000) },
+      ],
+    });
+
+    const inboundState = createMockInboundState({
+      customerMessageId: 'm2_cust',
+    });
+
+    const result = await orchestrateInstagramInboundAiResponse({
+      database: new MockDatabasePool(client),
+      inboundState,
+      senderIgsid: defaultIgsid,
+      text: 'Dubaide yaşamak istiyorum YouTube videolarınızı izledim bilgi rica ediyorum',
+      http: { post: async () => ({ data: { recipient_id: defaultIgsid, message_id: 'mid.residency.1' } }) },
+      applyPacing: false,
+      generateAiResponse: async () => [
+        "Dubai'de yaşamak için şirket kurarak yatırımcı vizesi veya şirket kurmadan 2 yıllık sponsorlu oturum vizesi alabilirsiniz.",
+        "",
+        "Sponsorlu oturum seçeneğimizle şirket kurma zorunluluğu olmadan 2 yıllık oturum izni ve serbest çalışma hakkı (NOC) sağlanır.",
+        "",
+        "Hangi oturum seçeneği hakkında detaylı bilgi almak istersiniz?",
+      ].join('\n'),
+    });
+
+    assert.equal(result.delivered, true);
+    assert.ok(result.responseText.includes('oturum') || result.responseText.includes('vize'));
+    assert.ok(!result.responseText.includes('Mesajınızı aldım. Şirket kuruluşu, oturum'));
+    assert.ok(!result.responseText.includes('Size nasıl yardımcı olabilirim?'));
+    assert.ok(!result.responseText.includes('https://wa.me/'));
+    assert.ok(!result.responseText.includes('wa.me'));
+  });
+
+  it('W5. Failure injection: provider error falls back safely without parallel sales brain or fake questionnaire', async () => {
+    const fallback = generateContextualConversationalFallback({
+      text: 'Dubai vergi oranları nedir?',
+      memory: {},
+    });
+
+    assert.equal(fallback, 'Mesajınızı aldım, en kısa sürede size dönüş sağlayacağız.');
+    assert.ok(!fallback.includes('Size nasıl yardımcı olabilirim?'));
+    assert.ok(!fallback.includes('Şirket kuruluşu, oturum ve danışmanlık hizmetlerimizle'));
+    assert.ok(!fallback.includes('wa.me'));
+  });
+
 
   it('X. Master policy file SHA-256 hash is byte-for-byte identical to c72bc5787e31ee788431fcb7b73a6f1f72fb3471c3910a00e87005d389edaf58', () => {
     const policyPath = 'policies/samche-whatsapp-master-business-policy.tr.txt';

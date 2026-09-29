@@ -307,7 +307,7 @@ export function generateContextualConversationalFallback({ text = '', conversati
   }
 
   // 4. Default safe fallback
-  return 'Mesajınızı aldım. Şirket kuruluşu, oturum ve danışmanlık hizmetlerimizle ilgili sorularınızı yanıtlayabilir veya görüşme talebinizi planlayabilirim. Size nasıl yardımcı olabilirim?';
+  return 'Mesajınızı aldım, en kısa sürede size dönüş sağlayacağız.';
 }
 
 /**
@@ -552,11 +552,31 @@ async function defaultGenerateInstagramAiResponse({
     provider = createGoogleGeminiProvider();
   } catch (providerErr) {
     console.error('INSTAGRAM_GEMINI_PROVIDER_INIT_ERROR', providerErr?.message);
-    return generateContextualConversationalFallback({ text, conversationHistory, memory });
+    const fallbackText = generateContextualConversationalFallback({ text, conversationHistory, memory });
+    return {
+      text: fallbackText,
+      model: 'none',
+      fallbackUsed: true,
+      fallbackReason: `PROVIDER_INIT_FAILED: ${providerErr?.message}`,
+    };
   }
 
   const defaultModel = provider.runtimeMetadata().model;
   const runtimeModel = model || defaultModel;
+
+  // Build clean conversational history summary for single prompt fallback
+  const historyText = Array.isArray(conversationHistory) && conversationHistory.length > 0
+    ? conversationHistory.slice(-8).map((m) => {
+        const role = m.role === 'model' || m.role === 'assistant' ? 'ASSISTANT' : 'CUSTOMER';
+        const t = (Array.isArray(m.parts) ? m.parts.map((p) => p?.text || '').filter(Boolean).join('\n') : (m.content || '')).trim();
+        return `${role}: ${t}`;
+      }).filter(Boolean).join('\n')
+    : '';
+
+  const singlePromptText = [
+    historyText ? `Recent conversation history:\n${historyText}\n` : '',
+    `Current customer message:\n${text}`,
+  ].filter(Boolean).join('\n\n');
 
   // Prepare Gemini contents from history:
   // Gemini requires that the first turn has role 'user' and turns alternate strictly.
@@ -591,7 +611,6 @@ async function defaultGenerateInstagramAiResponse({
     if (rawContents.length === 0) {
       rawContents.push({ role: 'user', parts: [{ text: currentPrompt }] });
     } else if (rawContents[rawContents.length - 1].role === 'user') {
-      // If the last turn in history is already the current user message, leave it; otherwise ensure currentPrompt
       if (rawContents[rawContents.length - 1].parts[0]?.text !== currentPrompt) {
         rawContents[rawContents.length - 1].parts[0].text = currentPrompt;
       }
@@ -624,54 +643,69 @@ async function defaultGenerateInstagramAiResponse({
     return null;
   };
 
-  const genConfig = {
-    thinkingConfig: {
-      thinkingBudget: 0,
-    },
-  };
-
-  const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), 35000);
+  const primaryAbortController = new AbortController();
+  const primaryTimeoutId = setTimeout(() => primaryAbortController.abort(), 20000);
+  let parsedText = null;
+  let activeModel = runtimeModel;
+  let fallbackReason = null;
 
   try {
     const response = await provider.generateContent({
       model: runtimeModel,
       contents,
       systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
-      generationConfig: genConfig,
-      signal: abortController.signal,
+      signal: primaryAbortController.signal,
     });
-    const parsedText = extractResponseText(response);
-    if (parsedText) return parsedText;
+    parsedText = extractResponseText(response);
   } catch (genErr) {
-    console.warn(`INSTAGRAM_AI_GENERATION_WARN model=${runtimeModel} code=${genErr?.code ?? 'UNKNOWN'} err=${genErr?.message}`);
+    console.warn(`INSTAGRAM_AI_GENERATION_PRIMARY_WARN model=${runtimeModel} code=${genErr?.code ?? 'UNKNOWN'} err=${genErr?.message}`);
+    fallbackReason = `${runtimeModel}_FAILED_${genErr?.code ?? genErr?.message}`;
   } finally {
-    clearTimeout(timeoutId);
+    clearTimeout(primaryTimeoutId);
   }
 
-  // Fallback retry with default model if distinct from runtimeModel
-  if (runtimeModel !== defaultModel) {
+  // Fallback retry with single-prompt format and defaultModel if primary failed
+  if (!parsedText) {
     const retryController = new AbortController();
-    const retryTimeoutId = setTimeout(() => retryController.abort(), 35000);
+    const retryTimeoutId = setTimeout(() => retryController.abort(), 20000);
     try {
+      activeModel = defaultModel;
+      const retryContents = [{ role: 'user', parts: [{ text: singlePromptText }] }];
       const retryRes = await provider.generateContent({
         model: defaultModel,
-        contents,
+        contents: retryContents,
         systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
-        generationConfig: genConfig,
         signal: retryController.signal,
       });
-      const fallbackText = extractResponseText(retryRes);
-      if (fallbackText) return fallbackText;
+      parsedText = extractResponseText(retryRes);
+      if (parsedText) {
+        fallbackReason = null;
+      }
     } catch (retryErr) {
-      console.error(`INSTAGRAM_AI_GENERATION_FALLBACK_ERROR model=${defaultModel} code=${retryErr?.code ?? 'UNKNOWN'} err=${retryErr?.message}`);
+      console.error(`INSTAGRAM_AI_GENERATION_RETRY_ERROR model=${defaultModel} code=${retryErr?.code ?? 'UNKNOWN'} err=${retryErr?.message}`);
+      fallbackReason = `${defaultModel}_FAILED_${retryErr?.code ?? retryErr?.message}`;
     } finally {
       clearTimeout(retryTimeoutId);
     }
   }
 
-  // No-Silent-Turn Conversational Fallback
-  return generateContextualConversationalFallback({ text, conversationHistory, memory });
+  if (parsedText) {
+    return {
+      text: parsedText,
+      model: activeModel,
+      fallbackUsed: false,
+      fallbackReason: null,
+    };
+  }
+
+  // Safe fallback if model generation could not produce text
+  const fallbackText = generateContextualConversationalFallback({ text, conversationHistory, memory });
+  return {
+    text: fallbackText,
+    model: activeModel,
+    fallbackUsed: true,
+    fallbackReason: fallbackReason || 'EMPTY_MODEL_RESPONSE',
+  };
 }
 
 const activeInstagramOrchestrations = new Set();
@@ -997,16 +1031,21 @@ export async function orchestrateInstagramInboundAiResponse({
 
   try {
     // 9. Generate AI response
-    let rawAiResponseText = '';
+    let genResult = { text: '', model: assistantModel || 'default', fallbackUsed: false, fallbackReason: null };
     if (typeof generateAiResponse === 'function') {
-      rawAiResponseText = await generateAiResponse({
+      const generated = await generateAiResponse({
         systemInstruction,
         text,
         conversationHistory: history,
         model: assistantModel,
       });
+      if (typeof generated === 'string') {
+        genResult.text = generated;
+      } else if (generated && typeof generated.text === 'string') {
+        genResult = { ...genResult, ...generated };
+      }
     } else {
-      rawAiResponseText = await defaultGenerateInstagramAiResponse({
+      genResult = await defaultGenerateInstagramAiResponse({
         systemInstruction,
         text,
         conversationHistory: history,
@@ -1015,8 +1054,22 @@ export async function orchestrateInstagramInboundAiResponse({
       });
     }
 
+    const rawAiResponseText = typeof genResult === 'string' ? genResult : genResult.text;
     const sanitizedResponse = sanitizeInstagramOutboundResponse(rawAiResponseText);
     const formattedResponse = formatInstagramDmResponse(sanitizedResponse);
+
+    const durationMs = Date.now() - generationStartedAt;
+    console.info(
+      `INSTAGRAM_AI_GENERATION` +
+      ` tenant=${tenantId ? tenantId.slice(0, 8) : 'unknown'}` +
+      ` conversation=${conversationId ? conversationId.slice(0, 8) : 'unknown'}` +
+      ` inboundMid=${inboundState.customerMessage?.id ? String(inboundState.customerMessage.id).slice(0, 8) : 'none'}` +
+      ` model=${genResult.model || assistantModel || 'default'}` +
+      ` durationMs=${durationMs}` +
+      ` fallbackUsed=${genResult.fallbackUsed ? '1' : '0'}` +
+      ` fallbackReason=${genResult.fallbackReason || 'none'}` +
+      ` chars=${(formattedResponse || '').length}`
+    );
 
     if (!formattedResponse) {
       return { aiInvoked: true, delivered: false, reason: 'EMPTY_AI_RESPONSE' };
@@ -1322,16 +1375,21 @@ export async function generateAndDeliverInstagramAssistantResponse({
     }
 
     try {
-      let rawAiResponseText = '';
+      let genResult = { text: '', model: assistantModel || 'default', fallbackUsed: false, fallbackReason: null };
       if (typeof generateAiResponse === 'function') {
-        rawAiResponseText = await generateAiResponse({
+        const generated = await generateAiResponse({
           systemInstruction,
           text: textToAnswer,
           conversationHistory: history,
           model: assistantModel,
         });
+        if (typeof generated === 'string') {
+          genResult.text = generated;
+        } else if (generated && typeof generated.text === 'string') {
+          genResult = { ...genResult, ...generated };
+        }
       } else {
-        rawAiResponseText = await defaultGenerateInstagramAiResponse({
+        genResult = await defaultGenerateInstagramAiResponse({
           systemInstruction,
           text: textToAnswer,
           conversationHistory: history,
@@ -1340,8 +1398,22 @@ export async function generateAndDeliverInstagramAssistantResponse({
         });
       }
 
+      const rawAiResponseText = typeof genResult === 'string' ? genResult : genResult.text;
       const sanitizedResponse = sanitizeInstagramOutboundResponse(rawAiResponseText);
       const formattedResponse = formatInstagramDmResponse(sanitizedResponse);
+
+      const durationMs = Date.now() - generationStartedAt;
+      console.info(
+        `INSTAGRAM_AI_GENERATION` +
+        ` tenant=${tenantId ? tenantId.slice(0, 8) : 'unknown'}` +
+        ` conversation=${conversationId ? conversationId.slice(0, 8) : 'unknown'}` +
+        ` mode=OPERATOR_AI_ONLY` +
+        ` model=${genResult.model || assistantModel || 'default'}` +
+        ` durationMs=${durationMs}` +
+        ` fallbackUsed=${genResult.fallbackUsed ? '1' : '0'}` +
+        ` fallbackReason=${genResult.fallbackReason || 'none'}` +
+        ` chars=${(formattedResponse || '').length}`
+      );
 
       if (!formattedResponse) return { skipped: true, reason: 'EMPTY_AI_RESPONSE' };
 
