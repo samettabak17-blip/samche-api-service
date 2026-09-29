@@ -200,10 +200,6 @@ describe('InstagramConnectionCard UI Component', () => {
         account_username: 'samcheofficial',
         access_token: 'IGAA_test_token_123',
         assistant_id: 'ast-1',
-        lead_notification_enabled: true,
-        lead_notification_whatsapp: undefined,
-        lead_whatsapp_destination: undefined,
-        internal_lead_whatsapp: undefined,
         visual_ai_enabled: false,
         status: 'active',
       });
@@ -256,17 +252,13 @@ describe('InstagramConnectionCard UI Component', () => {
         account_username: undefined,
         access_token: 'IGAA_test_token_123',
         assistant_id: 'ast-1',
-        lead_notification_enabled: true,
-        lead_notification_whatsapp: undefined,
-        lead_whatsapp_destination: undefined,
-        internal_lead_whatsapp: undefined,
         visual_ai_enabled: false,
         status: 'active',
       });
     });
   });
 
-  it('renders "Internal Lead WhatsApp: Configured" when destination is present', async () => {
+  it('does NOT render "Internal Lead WhatsApp" anywhere in the component', async () => {
     vi.mocked(tenantApi.getInstagramStatus).mockResolvedValueOnce({
       status: 'CONNECTED',
       connected: true,
@@ -274,8 +266,6 @@ describe('InstagramConnectionCard UI Component', () => {
       display_name: 'SamChe Official Instagram',
       account_username: 'samchecompany',
       has_token: true,
-      lead_whatsapp_destination: '+971527288586',
-      lead_whatsapp_configured: true,
     });
 
     renderWithClient(
@@ -286,8 +276,9 @@ describe('InstagramConnectionCard UI Component', () => {
       />
     );
 
-    expect(await screen.findByText('Internal Lead WhatsApp')).toBeInTheDocument();
-    expect(screen.getByText('Configured')).toBeInTheDocument();
+    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    expect(screen.queryByText('Internal Lead WhatsApp')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Internal High-Intent WhatsApp/i)).not.toBeInTheDocument();
   });
 
   it('triggers historical conversation import and displays summary banner', async () => {

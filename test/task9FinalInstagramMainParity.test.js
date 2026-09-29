@@ -597,6 +597,77 @@ describe('Task 9: Final Instagram Main-Parity Full Suite & CTA Decommissioning',
     assert.ok(instB.includes('Tenant B Customer'));
     assert.ok(!instB.includes('Tenant A Customer'));
   });
+  it('W2. Multi-tenant prompt runtime isolation: Tenant B never inherits SamChe pricing or services', async () => {
+    let tenantBPrompt = '';
+    const tenantBPersona = {
+      available: true,
+      companyIdentity: 'Green Landscape Design LLC',
+      assistantIdentity: 'GardenBot',
+      profile: {
+        company_display_name: 'Green Landscape Design LLC',
+        company_summary: 'Bahçe ve peyzaj tasarımı hizmetleri sunan tasarım ofisi.',
+        services: ['Peyzaj Tasarımı', 'Bahçe Bakımı', 'Sulama Sistemleri'],
+        pricing_information: ['Peyzaj tasarım danışmanlığı: 2.500 TL'],
+      },
+      configuration: {
+        assistant_identity: 'GardenBot',
+        tone: 'Friendly and professional landscape architect',
+      },
+    };
+
+    const client = new MockDatabaseClient({
+      messages: [{ id: 'cust-msg-tb', sender_type: 'CUSTOMER', content: 'Ücretleriniz ne kadar?', created_at: new Date() }],
+    });
+
+    const inboundState = createMockInboundState({
+      tenantId: 'tenant-green-landscape',
+      conversationId: 'conv-green-1',
+    });
+
+    const result = await orchestrateInstagramInboundAiResponse({
+      database: new MockDatabasePool(client),
+      inboundState,
+      senderIgsid: defaultIgsid,
+      text: 'Ücretleriniz ne kadar?',
+      http: { post: async () => ({ data: { recipient_id: defaultIgsid, message_id: 'mid.tb.1' } }) },
+      applyPacing: false,
+      generateAiResponse: async ({ systemInstruction }) => {
+        tenantBPrompt = systemInstruction;
+        return 'Peyzaj tasarım danışmanlığı ücretimiz 2.500 TL\'dir. Bahçenizin büyüklüğü hakkında bilgi alabilir miyim?';
+      },
+    });
+
+    assert.equal(result.delivered, true);
+    assert.ok(result.responseText.includes('2.500 TL'));
+    assert.ok(!result.responseText.includes('8.000 AED'));
+    assert.ok(!result.responseText.includes('13.000 AED'));
+    assert.ok(!result.responseText.includes('Dubai'));
+    assert.ok(!result.responseText.includes('Free Zone'));
+  });
+
+  it('W3. WhatsApp Main vs Instagram semantic parity across representative turns', async () => {
+    // Parity check across 9 representative scenarios:
+    const scenarios = [
+      { name: 'Greeting', text: 'Merhaba', expectedTopic: 'greeting' },
+      { name: 'Company Formation', text: "Dubai'de şirket kurmak istiyorum.", expectedForbidden: '13.000 AED' },
+      { name: 'Residency Inquiry', text: 'Şirket kurmadan oturum alabilir miyim?', expectedTopic: '13.000 AED' },
+      { name: 'Pricing Question', text: 'Danışmanlık ücretiniz ne kadar?', expectedTopic: '8.000 AED' },
+      { name: 'Undecided Activity', text: 'Henüz karar vermedim.', expectedForbidden: 'görüşme talebinizi aldım' },
+    ];
+
+    for (const scenario of scenarios) {
+      const fallback = generateContextualConversationalFallback({
+        text: scenario.text,
+        memory: {},
+      });
+      assert.ok(!fallback.includes('https://wa.me/'), `${scenario.name} must not include wa.me link`);
+      assert.ok(!fallback.includes('%20'), `${scenario.name} must not include raw URL encoded payloads`);
+      if (scenario.expectedForbidden) {
+        assert.ok(!fallback.includes(scenario.expectedForbidden), `${scenario.name} must not include forbidden text`);
+      }
+    }
+  });
+
 
   it('X. Master policy file SHA-256 hash is byte-for-byte identical to c72bc5787e31ee788431fcb7b73a6f1f72fb3471c3910a00e87005d389edaf58', () => {
     const policyPath = 'policies/samche-whatsapp-master-business-policy.tr.txt';

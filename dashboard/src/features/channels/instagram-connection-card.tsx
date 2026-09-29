@@ -29,9 +29,6 @@ export function InstagramConnectionCard({
   const [accessToken, setAccessToken] = useState('');
   const [activationPolicy, setActivationPolicy] = useState<import('../../types/api').AiActivationPolicy>('MANUAL_ONLY');
   const [triggersInput, setTriggersInput] = useState('');
-  const [leadNotificationEnabled, setLeadNotificationEnabled] = useState(true);
-  const [leadNotificationWhatsapp, setLeadNotificationWhatsapp] = useState('');
-  const [leadWhatsAppDestination, setLeadWhatsAppDestination] = useState('');
   const [importSummary, setImportSummary] = useState<InstagramHistoryImportResponse | null>(null);
   const [selectedAssistantId, setSelectedAssistantId] = useState<string>(
     eligibleAssistants[0]?.id ?? ''
@@ -60,17 +57,11 @@ export function InstagramConnectionCard({
         .map((t) => t.trim())
         .filter(Boolean);
 
-      const resolvedLeadWhatsapp = leadWhatsAppDestination.trim() || leadNotificationWhatsapp.trim() || undefined;
-
       return tenantApi.configureInstagram(tenantId, {
         display_name: displayName.trim() || 'Instagram',
         auth_mode: 'INSTAGRAM_LOGIN',
         activation_policy: activationPolicy,
         activation_triggers: parsedTriggers,
-        lead_notification_enabled: leadNotificationEnabled,
-        lead_notification_whatsapp: resolvedLeadWhatsapp,
-        lead_whatsapp_destination: resolvedLeadWhatsapp,
-        internal_lead_whatsapp: resolvedLeadWhatsapp,
         visual_ai_enabled: false,
         instagram_account_id: pageId.trim() || undefined,
         page_id: pageId.trim() || undefined,
@@ -263,10 +254,6 @@ export function InstagramConnectionCard({
                 setSelectedAssistantId(statusData.assistant_id || eligibleAssistants[0]?.id || '');
                 setActivationPolicy(statusData.activation_policy || 'MANUAL_ONLY');
                 setTriggersInput(Array.isArray(statusData.activation_triggers) ? statusData.activation_triggers.join(', ') : '');
-                setLeadNotificationEnabled(statusData.lead_notification_enabled !== false);
-                const leadNumber = statusData.lead_whatsapp_destination || statusData.internal_lead_whatsapp || statusData.lead_notification_whatsapp || '';
-                setLeadNotificationWhatsapp(leadNumber);
-                setLeadWhatsAppDestination(leadNumber);
                 setIsConfiguring(true);
               }}
               className="gap-1.5 text-xs"
@@ -352,7 +339,6 @@ export function InstagramConnectionCard({
                 setSelectedAssistantId(statusData.assistant_id || eligibleAssistants[0]?.id || '');
                 setActivationPolicy(statusData.activation_policy || 'MANUAL_ONLY');
                 setTriggersInput(Array.isArray(statusData.activation_triggers) ? statusData.activation_triggers.join(', ') : '');
-                setLeadWhatsAppDestination(statusData.lead_whatsapp_destination || statusData.internal_lead_whatsapp || '');
                 setIsConfiguring(true);
               }}
               className="shrink-0 text-xs"
@@ -365,7 +351,7 @@ export function InstagramConnectionCard({
 
       {/* Connected State Overview */}
       {isConnected && !isConfiguring && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6 rounded-xl border border-line bg-elevated/30 p-4">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 rounded-xl border border-line bg-elevated/30 p-4">
           <div>
             <span className="text-xs font-medium text-stone-400">Instagram Account</span>
             <p className="mt-0.5 font-semibold text-sm text-white">
@@ -392,12 +378,6 @@ export function InstagramConnectionCard({
             </p>
           </div>
           <div>
-            <span className="text-xs font-medium text-stone-400">Internal Lead WhatsApp</span>
-            <p className="mt-0.5 font-semibold text-sm text-stone-200">
-              {statusData.lead_whatsapp_configured || statusData.lead_whatsapp_destination || statusData.internal_lead_whatsapp ? 'Configured' : 'Not configured'}
-            </p>
-          </div>
-          <div>
             <span className="text-xs font-medium text-stone-400">Connection Health</span>
             <p className="mt-0.5 font-semibold text-sm text-emerald-400 flex items-center gap-1.5">
               <ShieldCheck size={14} />
@@ -412,10 +392,6 @@ export function InstagramConnectionCard({
             </p>
           </div>
           <div className="sm:col-span-2 lg:col-span-5 pt-2 border-t border-line/60 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <span className="text-stone-400 flex items-center gap-1.5">
-              <Bell size={13} className="text-gold" />
-              Internal Lead WhatsApp: {statusData.lead_notification_whatsapp ? <span className="font-mono text-emerald-400">{statusData.lead_notification_whatsapp}</span> : <span className="text-stone-400">Not configured</span>}
-            </span>
             <span className="text-stone-400">
               Mode: <span className="text-stone-300">Text-only (Visual AI restricted)</span>
             </span>
@@ -540,21 +516,6 @@ export function InstagramConnectionCard({
               </DashboardField>
             )}
 
-            <DashboardField
-              label="Internal High-Intent WhatsApp Notification Destination"
-              helper="Internal phone number (e.g. +971527288586) to receive silent WhatsApp alerts for high-intent business leads and human support requests."
-            >
-              <DashboardInput
-                type="text"
-                value={leadWhatsAppDestination || leadNotificationWhatsapp}
-                onChange={(e) => {
-                  setLeadWhatsAppDestination(e.target.value);
-                  setLeadNotificationWhatsapp(e.target.value);
-                }}
-                placeholder="+971527288586"
-                disabled={!canManage || configureMutation.isPending}
-              />
-            </DashboardField>
 
             <DashboardField
               label="Instagram Access Token"
