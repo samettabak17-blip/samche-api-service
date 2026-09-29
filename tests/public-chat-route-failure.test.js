@@ -127,6 +127,7 @@ test('all public chat infrastructure failures use the shared localized boundary'
   for (const diagnostic of forbiddenPublicDiagnostics) {
     assert.equal(publicChatHandlers.includes(diagnostic), false, diagnostic);
   }
+  assert.doesNotMatch(publicChatHandlers, /WEB_CHAT_INBOUND_PERSIST_WARN/);
 });
 
 test('/chat retains Guide request validation and contains an unexpected terminal failure without exposing it', async () => {

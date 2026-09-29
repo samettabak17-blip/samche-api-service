@@ -37,6 +37,7 @@ function normalizedFailureCode(error) {
   if (status === 429 || /RESOURCE_EXHAUSTED|RATE_LIMIT|QUOTA|TOO_MANY_REQUESTS/.test(code)) return 'RATE_LIMITED';
   if (/TIMEOUT|TIMED_OUT|DEADLINE|ABORT/.test(`${code} ${name}`)) return 'TIMEOUT';
   if (/INVALID_RESPONSE|RESPONSE_INVALID|MALFORMED|EMPTY_RESPONSE|RESPONSE_EMPTY/.test(code)) return 'INVALID_RESPONSE';
+  if (code === 'INBOUND_PERSISTENCE_FAILED') return 'PERSISTENCE_FAILED';
   if (status !== null && status >= 500) return 'UPSTREAM_5XX';
   return 'UNEXPECTED';
 }

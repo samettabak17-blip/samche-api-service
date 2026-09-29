@@ -142,22 +142,21 @@ export async function ensureConversationCrmIdentity(client, {
 
   const stageResult = await client.query(
     `SELECT id FROM crm_pipeline_stages
-      WHERE tenant_id = $1
-      ORDER BY (CASE WHEN is_default = TRUE THEN 0 ELSE 1 END), position ASC, created_at ASC
+      WHERE tenant_id = $1 AND stage_key = 'NEW_LEAD'
       LIMIT 1`,
     [tenantId]
   );
   let defaultStageId = stageResult.rows[0]?.id ?? null;
 
   if (!defaultStageId) {
-    try {
-      await client.query('SELECT ensure_crm_default_pipeline($1)', [tenantId]);
-      const retryStage = await client.query(
-        `SELECT id FROM crm_pipeline_stages WHERE tenant_id = $1 ORDER BY position ASC, created_at ASC LIMIT 1`,
-        [tenantId]
-      );
-      defaultStageId = retryStage.rows[0]?.id ?? null;
-    } catch {}
+    await client.query('SELECT ensure_crm_default_pipeline($1)', [tenantId]);
+    const retryStage = await client.query(
+      `SELECT id FROM crm_pipeline_stages
+        WHERE tenant_id = $1 AND stage_key = 'NEW_LEAD'
+        LIMIT 1`,
+      [tenantId]
+    );
+    defaultStageId = retryStage.rows[0]?.id ?? null;
   }
 
   if (!defaultStageId) {
@@ -166,10 +165,10 @@ export async function ensureConversationCrmIdentity(client, {
 
   const insertedLead = await client.query(
     `INSERT INTO crm_leads
-      (tenant_id, contact_id, conversation_id, pipeline_stage_id, title, status)
-     VALUES ($1, $2, $3, $4, $5, 'NEW')
+      (tenant_id, contact_id, conversation_id, source_channel, pipeline_stage_id, last_activity_at)
+     VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
      RETURNING *`,
-    [tenantId, contact.id, conversationId, defaultStageId, `${source} Lead`]
+    [tenantId, contact.id, conversationId, source, defaultStageId]
   );
   const lead = insertedLead.rows[0];
   await recordCrmActivity(client, {

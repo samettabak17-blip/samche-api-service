@@ -85,6 +85,38 @@ async function createTenantFixture(client, label) {
   return { tenantId, assistantId, channelId, widgetKey };
 }
 
+test('Real PostgreSQL: Web Chat inbound uses the canonical migrated CRM schema', async () => {
+  const client = await database.connect();
+  try {
+    const fixture = await createTenantFixture(client, 'canonical-crm-schema');
+    const integration = {
+      tenant_id: fixture.tenantId,
+      channel_id: fixture.channelId,
+      assistant_id: fixture.assistantId,
+      channel_status: 'active',
+    };
+
+    const inbound = await persistWebChatInbound({
+      externalSessionId: crypto.randomUUID(),
+      content: 'Instagram bağlantım için yardıma ihtiyacım var.',
+      integration,
+      database,
+    });
+
+    const lead = await client.query(
+      `SELECT source_channel, status
+         FROM crm_leads
+        WHERE tenant_id = $1 AND conversation_id = $2`,
+      [fixture.tenantId, inbound.conversation.id],
+    );
+
+    assert.equal(lead.rowCount, 1);
+    assert.deepEqual(lead.rows[0], { source_channel: 'WEB_CHAT', status: 'open' });
+  } finally {
+    client.release();
+  }
+});
+
 test('Real PostgreSQL: multi-turn conversation persistence and hydration', async () => {
   const client = await database.connect();
   try {

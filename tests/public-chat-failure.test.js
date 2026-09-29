@@ -47,6 +47,7 @@ test('diagnostic logging normalizes provider failures without retaining raw erro
     { error: Object.assign(new Error('quota body RESOURCE_EXHAUSTED'), { code: 'RESOURCE_EXHAUSTED', status: 429 }), code: 'RATE_LIMITED', status: 429 },
     { error: Object.assign(new Error('request timed out'), { name: 'AbortError' }), code: 'TIMEOUT', status: null },
     { error: Object.assign(new Error('upstream body'), { statusCode: 503 }), code: 'UPSTREAM_5XX', status: 503 },
+    { error: Object.assign(new Error('internal persistence detail'), { code: 'INBOUND_PERSISTENCE_FAILED', status: 503 }), code: 'PERSISTENCE_FAILED', status: 503 },
     { error: Object.assign(new Error('bad shape'), { code: 'PROVIDER_RESPONSE_INVALID' }), code: 'INVALID_RESPONSE', status: null },
     { error: new Error('unexpected'), code: 'UNEXPECTED', status: null },
   ];

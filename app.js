@@ -3998,9 +3998,8 @@ app.post("/api/chat", async (req, res) => {
             .catch((err) => console.warn('WEB_CHAT_PUSH_NOTIF_WARN', err?.message));
         }
 
-      } catch (inboundErr) {
+      } catch {
         webChatInboundPersistenceFailed = true;
-        console.warn('WEB_CHAT_INBOUND_PERSIST_WARN:', inboundErr.message);
       }
 
       if (webChatInboundPersistenceFailed) {
