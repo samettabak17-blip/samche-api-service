@@ -1,4 +1,5 @@
 import axios from 'axios';
+import crypto from 'node:crypto';
 import { instagramGraphApiBase, metaGraphApiBase } from './meta-graph-api-version.js';
 
 export class InstagramDeliveryError extends Error {
@@ -8,6 +9,13 @@ export class InstagramDeliveryError extends Error {
     this.code = code;
     this.status = status;
   }
+}
+
+const recentOutboundDeliveries = new Map();
+
+function getDeliveryDedupeKey(recipientId, text) {
+  const hash = crypto.createHash('sha256').update(String(text || '').trim()).digest('hex').slice(0, 24);
+  return `${recipientId}:${hash}`;
 }
 
 function sanitizeMetaError(error) {
@@ -203,6 +211,14 @@ export async function deliverInstagramText({
   const token = accessToken.trim();
   const candidateEndpoints = resolveCandidateEndpoints({ authMode, instagramAccountId, pageId, instagramUserId, token });
 
+  // Outbound circuit breaker / duplicate send barrier
+  const dedupeKey = getDeliveryDedupeKey(cleanRecipientId, content);
+  const existingDelivery = recentOutboundDeliveries.get(dedupeKey);
+  if (existingDelivery && Date.now() - existingDelivery.timestamp < 6000) {
+    console.warn('INSTAGRAM_DUPLICATE_OUTBOUND_BLOCKED recipient=' + cleanRecipientId.slice(0, 8));
+    return existingDelivery.result;
+  }
+
   const rawChunks = splitIntoInstagramDmChunks(content, MAX_FINAL_INSTAGRAM_CHUNK_LENGTH);
   const chunks = [...rawChunks];
   let primaryProviderMessageId = null;
@@ -282,13 +298,18 @@ export async function deliverInstagramText({
     i++;
   }
 
-  return {
+  const result = {
     delivery: 'SENT_TO_INSTAGRAM',
     recipientId: cleanRecipientId,
     providerMessageId: primaryProviderMessageId,
     providerMessageIds: deliveredIds,
     chunkCount: chunks.length,
   };
+
+  recentOutboundDeliveries.set(dedupeKey, { timestamp: Date.now(), result });
+  setTimeout(() => recentOutboundDeliveries.delete(dedupeKey), 60000);
+
+  return result;
 }
 
 export async function deliverInstagramMedia({

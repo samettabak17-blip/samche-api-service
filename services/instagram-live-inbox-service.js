@@ -293,6 +293,16 @@ export async function persistInstagramInbound({
       messageText = `[Attachment: ${attachments[0].type || 'media'}]`;
     }
 
+    if (!messageText && attachments.length === 0) {
+      await client.query('COMMIT');
+      return {
+        duplicate: true,
+        integration,
+        conversation,
+        shouldInvokeAi: false,
+      };
+    }
+
     // Insert canonical message into conversation_messages
     const msgResult = await client.query(
       `INSERT INTO conversation_messages

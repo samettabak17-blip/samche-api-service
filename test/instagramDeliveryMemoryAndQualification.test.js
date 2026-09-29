@@ -1019,4 +1019,131 @@ describe('Mandatory Regression Suite: Safe Chunking, Multi-Turn Memory & CTA', (
     assert.deepEqual(senderActions, ['typing_on', 'typing_off']);
   });
 
+  // =========================================================================
+  // CONCURRENCY & DEDUPLICATION BARRIER TESTS (35 to 38)
+  // =========================================================================
+
+  it('35. 10 Concurrent Claims for same inbound: exactly 1 wins, 9 exit without generation', async () => {
+    let generationCount = 0;
+    const fakeHttp = {
+      post: async () => ({ data: { message_id: 'mid.concurrent.1' } }),
+    };
+
+    const mockDb = {
+      connect: async () => mockDb,
+      release: () => {},
+      query: async (sql, params) => {
+        if (/FROM conversations/i.test(sql)) {
+          return { rowCount: 1, rows: [{ id: 'conv-conc-1', tenant_id: 't-1', status: 'open', handling_mode: 'AI', handling_version: 1 }] };
+        }
+        if (/INSERT INTO conversation_messages/i.test(sql)) {
+          return { rowCount: 1, rows: [{ id: 'msg-ai-conc', content: params?.[3] }] };
+        }
+        if (/idempotency_key/i.test(sql)) {
+          return { rowCount: 0, rows: [] };
+        }
+        if (/FROM conversation_messages/i.test(sql)) {
+          return { rowCount: 1, rows: [{ id: 'msg-cust-conc', sender_type: 'CUSTOMER', content: 'Merhaba' }] };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+    };
+
+    const inboundState = {
+      duplicate: false,
+      handlingVersion: 1,
+      customerMessage: { id: 'msg-cust-conc' },
+      integration: {
+        tenant_id: 't-1',
+        assistant_id: 'ast-1',
+        config: { access_token: 'EAAB_token', instagram_account_id: '17841474291887372', activation_policy: 'ALL_MESSAGES' },
+      },
+      conversation: { id: 'conv-conc-1', tenant_id: 't-1', customer_external_id: '10203040', status: 'open', handling_mode: 'AI', handling_version: 1 },
+      shouldInvokeAi: true,
+    };
+
+    const results = await Promise.all(
+      Array.from({ length: 10 }).map(() =>
+        orchestrateInstagramInboundAiResponse({
+          database: mockDb,
+          inboundState,
+          senderIgsid: '10203040',
+          text: 'Merhaba',
+          http: fakeHttp,
+          generateAiResponse: async () => {
+            generationCount++;
+            await new Promise((r) => setTimeout(r, 20));
+            return 'Tek seferlik yanıt.';
+          },
+          applyPacing: false,
+        })
+      )
+    );
+
+    const successfulDeliveries = results.filter((r) => r.delivered === true);
+    assert.equal(successfulDeliveries.length, 1, 'Exactly ONE concurrent execution must deliver');
+    assert.equal(generationCount, 1, 'Generation must be invoked AT MOST once');
+  });
+
+  it('36. Delivery/read receipts without message/postback are dropped with null', async () => {
+    const { parseInstagramMessagingEvent } = await import('../services/instagram-inbound-adapter.js');
+
+    const deliveryReceipt = {
+      sender: { id: '91450420' },
+      recipient: { id: '17841400' },
+      timestamp: 1727603764000,
+      delivery: { mids: ['aWdfZAG1...'], watermark: 1727603764000 },
+    };
+    assert.equal(parseInstagramMessagingEvent({ id: '17841400' }, deliveryReceipt), null);
+
+    const readReceipt = {
+      sender: { id: '91450420' },
+      recipient: { id: '17841400' },
+      timestamp: 1727603764000,
+      read: { watermark: 1727603764000 },
+    };
+    assert.equal(parseInstagramMessagingEvent({ id: '17841400' }, readReceipt), null);
+  });
+
+  it('37. Outbound echo webhooks are recognized and flagged as isEcho: true', async () => {
+    const { parseInstagramMessagingEvent } = await import('../services/instagram-inbound-adapter.js');
+
+    const echoEvent = {
+      sender: { id: '17841400' },
+      recipient: { id: '91450420' },
+      timestamp: 1727603764000,
+      message: { mid: 'aWdfZAG1...', is_echo: true, text: 'Bot response' },
+    };
+    const parsed = parseInstagramMessagingEvent({ id: '17841400' }, echoEvent);
+    assert.ok(parsed);
+    assert.equal(parsed.isEcho, true);
+  });
+
+  it('38. Outbound circuit breaker prevents duplicate delivery within 6 seconds', async () => {
+    let httpSendCount = 0;
+    const fakeHttp = {
+      post: async () => {
+        httpSendCount++;
+        return { data: { message_id: `mid.cb.${httpSendCount}` } };
+      },
+    };
+
+    const res1 = await deliverInstagramText({
+      recipientId: '99887766',
+      content: 'Circuit breaker test content message.',
+      accessToken: 'EAAB_token',
+      http: fakeHttp,
+    });
+
+    const res2 = await deliverInstagramText({
+      recipientId: '99887766',
+      content: 'Circuit breaker test content message.',
+      accessToken: 'EAAB_token',
+      http: fakeHttp,
+    });
+
+    assert.equal(httpSendCount, 1, 'Provider HTTP call must be made exactly ONCE');
+    assert.equal(res1.providerMessageId, res2.providerMessageId);
+  });
+
 });

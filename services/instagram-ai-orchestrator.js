@@ -624,6 +624,11 @@ export async function orchestrateInstagramInboundAiResponse({
     return { skipped: true, reason: 'INVALID_INBOUND_STATE' };
   }
 
+  const rawInboundText = String(text || inboundState.customerMessage?.content || '').trim();
+  if (!rawInboundText) {
+    return { skipped: true, reason: 'EMPTY_INBOUND_TEXT' };
+  }
+
   const { integration, conversation, handlingVersion } = inboundState;
   const tenantId = integration.tenant_id;
   const conversationId = conversation.id;

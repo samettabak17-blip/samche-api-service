@@ -30,9 +30,28 @@ export function isWhatsAppWebhookEvent(body) {
 export function parseInstagramMessagingEvent(entry, messagingEvent) {
   if (!messagingEvent || typeof messagingEvent !== 'object') return null;
 
+  // Drop receipt and status notifications (delivery, read, reaction, account_linking, etc.)
+  // These are provider status updates, NEVER customer inbound messages.
+  if (
+    messagingEvent.delivery ||
+    messagingEvent.read ||
+    messagingEvent.reaction ||
+    messagingEvent.account_linking ||
+    messagingEvent.optin ||
+    messagingEvent.message_edit ||
+    messagingEvent.messaging_seen
+  ) {
+    return null;
+  }
+
+  // Must have either message or postback payload
+  if (!messagingEvent.message && !messagingEvent.postback) {
+    return null;
+  }
+
   const senderId = String(messagingEvent.sender?.id ?? '').trim();
   const recipientId = String(messagingEvent.recipient?.id ?? entry?.id ?? '').trim();
-  const timestamp = Number(messagingEvent.timestamp || entry?.time || Date.now());
+  const timestamp = Number(messagingEvent.timestamp || entry?.time || 0);
 
   // Echo and self-message detection (must be dropped to prevent message loops)
   const isEcho = Boolean(
@@ -49,19 +68,6 @@ export function parseInstagramMessagingEvent(entry, messagingEvent) {
   } else if (typeof messagingEvent.postback?.payload === 'string') {
     text = messagingEvent.postback.payload;
   }
-
-  const rawMessageId = messagingEvent.message?.mid
-    || messagingEvent.message?.id
-    || messagingEvent.id
-    || messagingEvent.postback?.mid
-    || messagingEvent.postback?.id
-    || null;
-
-  const messageId = rawMessageId || (
-    senderId && recipientId && timestamp
-      ? `ig_synth_${crypto.createHash('sha256').update(`${senderId}:${recipientId}:${timestamp}:${text.slice(0, 100)}`).digest('hex').slice(0, 32)}`
-      : null
-  );
 
   const quickReplyPayload = messagingEvent.message?.quick_reply?.payload || null;
   const postbackPayload = messagingEvent.postback?.payload || null;
@@ -81,6 +87,24 @@ export function parseInstagramMessagingEvent(entry, messagingEvent) {
       title: att?.title || null,
     };
   }).filter((att) => Boolean(att.url));
+
+  // If not an echo, but text, attachments, quickReply, and postback are all empty: drop event
+  if (!isEcho && !text.trim() && attachments.length === 0 && !quickReplyPayload && !postbackPayload) {
+    return null;
+  }
+
+  const rawMessageId = messagingEvent.message?.mid
+    || messagingEvent.message?.id
+    || messagingEvent.id
+    || messagingEvent.postback?.mid
+    || messagingEvent.postback?.id
+    || null;
+
+  const messageId = rawMessageId || (
+    senderId && recipientId && timestamp
+      ? `ig_synth_${crypto.createHash('sha256').update(`${senderId}:${recipientId}:${timestamp}:${text.slice(0, 100)}`).digest('hex').slice(0, 32)}`
+      : null
+  );
 
   // Determine if this is a story mention or share
   const isStoryMention = rawAttachments.some((att) => att?.type === 'story_mention');
