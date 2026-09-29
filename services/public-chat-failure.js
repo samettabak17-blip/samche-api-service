@@ -10,6 +10,7 @@ const PUBLIC_REPLIES = Object.freeze({
   en: "I'm having a temporary problem generating a response. Please try again shortly.",
   ar: 'أواجه مشكلة مؤقتة أثناء إنشاء الرد. يُرجى المحاولة مرة أخرى بعد قليل.',
 });
+const PUBLIC_ENGLISH_TURN = /\b(?:i\s+am|i['’]m|i\s+(?:get|have|receive)|getting|connection\s+(?:failed|failure)|failed\s+warning)\b/iu;
 
 function supportedLanguage(value) {
   const normalized = normalizeCommunicationLanguage(value);
@@ -41,7 +42,8 @@ function normalizedFailureCode(error) {
 }
 
 export function resolvePublicChatLanguage({ latestMessage, fallbackLocale } = {}) {
-  const latestLanguage = inferConservativeCommunicationLanguage(latestMessage);
+  const latestLanguage = inferConservativeCommunicationLanguage(latestMessage)
+    ?? (PUBLIC_ENGLISH_TURN.test(String(latestMessage ?? '')) ? 'en' : null);
   return supportedLanguage(latestLanguage) ?? supportedLanguage(fallbackLocale) ?? 'en';
 }
 

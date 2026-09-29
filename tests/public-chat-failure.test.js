@@ -17,6 +17,7 @@ test('latest customer message selects the public failure language before fallbac
   const cases = [
     { latestMessage: 'Bağlanılamadı uyarısı alıyorum', fallbackLocale: 'en', expected: 'tr' },
     { latestMessage: 'Hello, the connection failed', fallbackLocale: 'tr', expected: 'en' },
+    { latestMessage: 'I am getting a connection failed warning', fallbackLocale: 'tr', expected: 'en' },
     { latestMessage: 'أتلقى تحذيرًا بأن الاتصال فشل', fallbackLocale: 'en', expected: 'ar' },
   ];
 

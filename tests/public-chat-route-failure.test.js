@@ -6,6 +6,7 @@ process.env.NODE_ENV = 'test';
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 const { app, chatPostHandler } = await import('../app.js');
 
@@ -35,7 +36,7 @@ test('/api/chat contains quota, timeout, 5xx, malformed, and unexpected failures
     },
     {
       name: 'timeout',
-      message: 'Hello, I am getting a connection failed warning',
+      message: 'I am getting a connection failed warning',
       reply: REPLIES.en,
       result: () => { throw providerError({ message: 'RAW_TIMEOUT_BODY', name: 'AbortError' }); },
       forbidden: 'RAW_TIMEOUT_BODY',
@@ -100,6 +101,31 @@ test('/api/chat contains quota, timeout, 5xx, malformed, and unexpected failures
     delete app.locals.openaiClient;
     server.closeAllConnections?.();
     await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('all public chat infrastructure failures use the shared localized boundary', () => {
+  const appSource = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+  const guideChatStart = appSource.indexOf('app.post("/chat"');
+  const guideChatEnd = appSource.indexOf('app.post("/:slug/chat"', guideChatStart);
+  const webChatStart = appSource.indexOf('app.post("/api/chat"');
+  const webChatEnd = appSource.indexOf('// C) WHATSAPP BOT', webChatStart);
+  assert.ok(guideChatStart >= 0 && guideChatEnd > guideChatStart);
+  assert.ok(webChatStart >= 0 && webChatEnd > webChatStart);
+  const publicChatHandlers = `${appSource.slice(guideChatStart, guideChatEnd)}\n${appSource.slice(webChatStart, webChatEnd)}`;
+  const forbiddenPublicDiagnostics = [
+    'AI Guide assistant configuration is temporarily unavailable.',
+    'Web Chat knowledge authority is temporarily unavailable.',
+    'Web Chat assistant configuration is temporarily unavailable.',
+    'Message could not be persisted. Please try again.',
+    'Message could not be verified. Please try again.',
+    'Knowledge changed while generating the response. Please retry.',
+    'Response could not be delivered. Please try again.',
+    'Sorry, I could not process that right now. Please try again.',
+  ];
+
+  for (const diagnostic of forbiddenPublicDiagnostics) {
+    assert.equal(publicChatHandlers.includes(diagnostic), false, diagnostic);
   }
 });
 

@@ -1814,6 +1814,18 @@ app.post("/chat", chatPostHandler = async (req, res) => {
     publicFailureLatestMessage = typeof req.body?.text === 'string' ? req.body.text : '';
     publicFailureFallbackLocale = req.body?.language;
   } catch {}
+  const respondWithPublicChatFailure = ({ stage, error } = {}) => {
+    logPublicChatFailure({
+      route: '/chat',
+      stage,
+      correlationId: req.get?.('X-Request-ID') || randomUUID(),
+      error,
+    });
+    return res.status(503).json(buildPublicChatFailure({
+      latestMessage: publicFailureLatestMessage,
+      fallbackLocale: publicFailureFallbackLocale,
+    }));
+  };
   try {
     const {
       text,
@@ -1837,9 +1849,9 @@ app.post("/chat", chatPostHandler = async (req, res) => {
     try {
       guideRuntimeIntegration = await resolveGuideRuntimeScope(req);
       if (!guideRuntimeIntegration) {
-        console.error('CHAT_RESPONSE_503 stage=TENANT_PERSONA_UNAVAILABLE');
-        return res.status(503).json({
-          error: "AI Guide assistant configuration is temporarily unavailable.",
+        return respondWithPublicChatFailure({
+          stage: 'tenant_persona',
+          error: { code: 'TENANT_PERSONA_UNAVAILABLE', status: 503 },
         });
       }
       ({ resolved: publishedExperience } = await resolveGuideExperienceForRequest({ req, integration: guideRuntimeIntegration }));
@@ -1978,10 +1990,9 @@ app.post("/chat", chatPostHandler = async (req, res) => {
         resolveModel: () => (req.app?.locals?.googleGeminiProvider || googleGeminiProvider).runtimeMetadata(),
       });
     } catch (error) {
-      console.error('CHAT_RESPONSE_503 stage=RUNTIME_CONTEXT_UNAVAILABLE code=' + (error?.code ?? 'UNKNOWN'));
-      return res.status(503).json({
-        error: "AI Guide assistant configuration is temporarily unavailable.",
-        conversation_session: publicSession.token,
+      return respondWithPublicChatFailure({
+        stage: 'runtime_context',
+        error,
       });
     }
 
@@ -2133,17 +2144,10 @@ app.post("/chat", chatPostHandler = async (req, res) => {
     });
   } catch (err) {
     if (err instanceof GuideConversationError) return res.status(400).json({ error: 'Guide request is invalid.' });
-    if (err?.status === 503) console.error('CHAT_RESPONSE_503 stage=OUTER_HANDLER_ERROR');
-    logPublicChatFailure({
-      route: '/chat',
+    return respondWithPublicChatFailure({
       stage: 'outer_handler',
-      correlationId: req.get?.('X-Request-ID') || randomUUID(),
       error: err,
     });
-    return res.status(503).json(buildPublicChatFailure({
-      latestMessage: publicFailureLatestMessage,
-      fallbackLocale: publicFailureFallbackLocale,
-    }));
   }
 });
 app.post("/:slug/chat", (req, res, next) => {
@@ -3676,6 +3680,18 @@ app.post("/api/chat", async (req, res) => {
     publicFailureLatestMessage = typeof req.body?.message === 'string' ? req.body.message : '';
     publicFailureFallbackLocale = req.body?.page_context?.language || req.body?.language;
   } catch {}
+  const respondWithPublicChatFailure = ({ stage, error } = {}) => {
+    logPublicChatFailure({
+      route: '/api/chat',
+      stage,
+      correlationId: req.get?.('X-Request-ID') || randomUUID(),
+      error,
+    });
+    return res.status(503).json(buildPublicChatFailure({
+      latestMessage: publicFailureLatestMessage,
+      fallbackLocale: publicFailureFallbackLocale,
+    }));
+  };
   try {
     const database = req.app?.locals?.database || pool;
     const userMessage = req.body.message;
@@ -3714,7 +3730,10 @@ app.post("/api/chat", async (req, res) => {
       })
       : null;
     if (webChatIntegration && !webChatKnowledgeAuthority) {
-      return res.status(503).json({ error: 'Web Chat knowledge authority is temporarily unavailable.' });
+      return respondWithPublicChatFailure({
+        stage: 'knowledge_authority',
+        error: { code: 'KNOWLEDGE_AUTHORITY_UNAVAILABLE', status: 503 },
+      });
     }
 
     addWebMemory(userId, "user", normalizedMessage, webChatKnowledgeAuthority, {
@@ -3740,7 +3759,10 @@ app.post("/api/chat", async (req, res) => {
           assistantId: webChatIntegration.assistant_id,
         });
         if (!webChatRuntimePersona.available) {
-          return res.status(503).json({ error: 'Web Chat assistant configuration is temporarily unavailable.' });
+          return respondWithPublicChatFailure({
+            stage: 'assistant_configuration',
+            error: { code: 'ASSISTANT_CONFIGURATION_UNAVAILABLE', status: 503 },
+          });
         }
         publicFailureFallbackLocale = webChatRuntimePersona?.configuration?.language || publicFailureFallbackLocale;
         webChatRuntimeKnowledge = await resolveAssistantRuntimeKnowledgeContext({
@@ -3982,9 +4004,9 @@ app.post("/api/chat", async (req, res) => {
       }
 
       if (webChatInboundPersistenceFailed) {
-        return res.status(503).json({
-          error: 'Message could not be persisted. Please try again.',
-          reply: 'Sorry, I could not process that right now. Please try again.',
+        return respondWithPublicChatFailure({
+          stage: 'inbound_persistence',
+          error: { code: 'INBOUND_PERSISTENCE_FAILED', status: 503 },
         });
       }
 
@@ -4585,10 +4607,9 @@ If the user already provided sector info, NEVER ask again.`
           database,
         });
       } catch (eligibilityErr) {
-        console.warn('WEB_CHAT_AI_ELIGIBILITY_WARN:', eligibilityErr.message);
-        return res.status(503).json({
-          error: 'Message could not be verified. Please try again.',
-          reply: 'Sorry, I could not process that right now. Please try again.',
+        return respondWithPublicChatFailure({
+          stage: 'ai_eligibility',
+          error: eligibilityErr,
         });
       }
       if (!eligibility.allowed) return webChatHumanResponse();
@@ -4618,7 +4639,10 @@ If the user already provided sector info, NEVER ask again.`
         assistantId: webChatIntegration.assistant_id,
       });
       if (!isSameKnowledgeAuthority(currentKnowledgeAuthority, webChatKnowledgeAuthority)) {
-        return res.status(409).json({ error: 'Knowledge changed while generating the response. Please retry.' });
+        return respondWithPublicChatFailure({
+          stage: 'knowledge_authority_changed',
+          error: { code: 'KNOWLEDGE_AUTHORITY_CHANGED', status: 409 },
+        });
       }
     }
     let persistedAssistantResponse = { delivered: true };
@@ -4633,10 +4657,9 @@ If the user already provided sector info, NEVER ask again.`
         });
         if (!persistedAssistantResponse?.delivered) return webChatHumanResponse();
       } catch (outboundErr) {
-        console.warn('WEB_CHAT_OUTBOUND_PERSIST_WARN:', outboundErr.message);
-        return res.status(503).json({
-          error: 'Response could not be delivered. Please try again.',
-          reply: 'Sorry, I could not process that right now. Please try again.',
+        return respondWithPublicChatFailure({
+          stage: 'outbound_persistence',
+          error: outboundErr,
         });
       }
     }
@@ -4654,16 +4677,10 @@ If the user already provided sector info, NEVER ask again.`
       action: resolutionPlan?.action || null,
     });
   } catch (err) {
-    logPublicChatFailure({
-      route: '/api/chat',
+    return respondWithPublicChatFailure({
       stage: 'outer_handler',
-      correlationId: req.get?.('X-Request-ID') || randomUUID(),
       error: err,
     });
-    return res.status(503).json(buildPublicChatFailure({
-      latestMessage: publicFailureLatestMessage,
-      fallbackLocale: publicFailureFallbackLocale,
-    }));
   }
 });
 
