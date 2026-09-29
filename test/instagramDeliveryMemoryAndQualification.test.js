@@ -529,6 +529,38 @@ describe('Mandatory Regression Suite: Safe Chunking, Multi-Turn Memory & CTA', (
     assert.equal(memory.requestedTime, 'Cuma 14:00');
   });
 
+  it('20b. Contact-level CRM facts (crm_contacts.phone) feed durable memory and prevent re-asking phone', async () => {
+    const mockDb = {
+      connect: async () => mockDb,
+      release: () => {},
+      query: async (sql, params) => {
+        if (/FROM crm_contacts/i.test(sql)) {
+          return {
+            rowCount: 1,
+            rows: [{
+              display_name: 'Suleyman Isseven (@suleyman_isseven)',
+              phone: '+905312404965',
+            }],
+          };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+    };
+
+    const memory = await resolveDurableConversationMemory({
+      database: mockDb,
+      tenantId: 't-1',
+      conversationId: 'conv-crm-phone',
+      conversation: { contact_id: 'contact-uuid-1', contact_display_name: 'Suleyman' },
+      rawMessages: [],
+    });
+
+    assert.equal(memory.phone, '+905312404965');
+    const instruction = buildStructuredMemoryInstruction(memory);
+    assert.ok(instruction.includes('Contact Phone / WhatsApp: +905312404965'));
+    assert.ok(instruction.includes('Customer Phone is ALREADY KNOWN'));
+  });
+
   // =========================================================================
   // ACTIVATION TESTS (21 to 24)
   // =========================================================================

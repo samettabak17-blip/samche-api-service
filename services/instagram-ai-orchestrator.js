@@ -245,17 +245,25 @@ export function extractBothTopicsSignals(text = '') {
 
 /**
  * Generates an intelligent, context-aware fallback response from conversation memory
- * ensuring no eligible customer turn is ever silently dropped.
+ * ensuring no eligible customer turn is ever silently dropped and no fake contact promises are made.
  */
 export function generateContextualConversationalFallback({ text = '', conversationHistory = [], memory = {} } = {}) {
   const cleanText = String(text || '').trim();
   const phone = memory.phone || extractPhoneNumberFromText(cleanText);
   const requestedTime = memory.requestedTime || extractMeetingTimePreference(cleanText);
   const isUndecided = extractUndecidedSignals(cleanText);
+  const isQualified = Boolean(phone && requestedTime);
+
+  if (isQualified && memory.ctaUrl) {
+    return `Teşekkür ederim, görüşme talebinizi aldım. Aşağıdaki bağlantı üzerinden WhatsApp'tan doğrudan iletişime geçebilirsiniz:\n\n${memory.ctaUrl}`;
+  }
 
   if (isUndecided) {
     if (!requestedTime) {
       return 'Anladım, faaliyet alanı netleşmediyse sorun değil; görüşme sırasında detayları birlikte değerlendirebiliriz. Görüşme için size uygun gün ve saat aralığını paylaşabilir misiniz?';
+    }
+    if (phone && memory.ctaUrl) {
+      return `Anladım, detayları görüşmemizde birlikte netleştirebiliriz. Aşağıdaki bağlantı üzerinden WhatsApp'tan doğrudan iletişime geçebilirsiniz:\n\n${memory.ctaUrl}`;
     }
     return 'Anladım, detayları görüşmemizde birlikte netleştirebiliriz. Görüşme talebinizi aldım.';
   }
@@ -300,12 +308,28 @@ export async function resolveDurableConversationMemory({
   let visaCount = null;
   let requestedTime = null;
   let timezone = null;
+  let ctaDelivered = false;
+  let ctaUrl = null;
 
-  // 1. Check CRM Leads & Consultations if existing in DB
+  // 1. Check CRM Contacts, Leads & Consultations if existing in DB
   try {
     const isPool = typeof database?.connect === 'function' && typeof database?.query !== 'function';
     const client = isPool ? await database.connect() : database;
     try {
+      // 1a. Check CRM Contact directly
+      if (conversation?.contact_id) {
+        const contactRes = await client.query(
+          `SELECT display_name, phone FROM crm_contacts WHERE id = $1 AND tenant_id = $2 LIMIT 1`,
+          [conversation.contact_id, tenantId]
+        ).catch(() => ({ rowCount: 0, rows: [] }));
+        if (contactRes.rowCount > 0) {
+          const c = contactRes.rows[0];
+          if (c.phone && !phone) phone = c.phone;
+          if (c.display_name && !customerName) customerName = extractReliableCustomerName(c.display_name);
+        }
+      }
+
+      // 1b. Check CRM Leads
       const leadRes = await client.query(
         `SELECT contact_name, phone, service_interest, timeline, custom_fields
            FROM crm_leads
@@ -318,12 +342,13 @@ export async function resolveDurableConversationMemory({
         const lead = leadRes.rows[0];
         if (lead.contact_name && !customerName) customerName = lead.contact_name;
         if (lead.phone && !phone) phone = lead.phone;
-        if (lead.service_interest) activity = lead.service_interest;
+        if (lead.service_interest && !serviceRequested) serviceRequested = lead.service_interest;
         if (lead.timeline && !requestedTime) requestedTime = lead.timeline;
       }
 
+      // 1c. Check CRM Consultations
       const consultRes = await client.query(
-        `SELECT customer_name, phone, activity, service_requested, requested_time, timezone
+        `SELECT customer_name, phone, activity, service_requested, requested_time, timezone, cta_url, cta_delivered_at
            FROM crm_consultations
           WHERE tenant_id = $1 AND conversation_id = $2
           ORDER BY updated_at DESC
@@ -338,6 +363,8 @@ export async function resolveDurableConversationMemory({
         if (consult.service_requested && !serviceRequested) serviceRequested = consult.service_requested;
         if (consult.requested_time && !requestedTime) requestedTime = consult.requested_time;
         if (consult.timezone && !timezone) timezone = consult.timezone;
+        if (consult.cta_url) ctaUrl = consult.cta_url;
+        if (consult.cta_delivered_at) ctaDelivered = true;
       }
     } finally {
       if (isPool && typeof client?.release === 'function') client.release();
@@ -402,6 +429,8 @@ export async function resolveDurableConversationMemory({
     visaCount,
     requestedTime,
     timezone,
+    ctaDelivered,
+    ctaUrl,
   };
 }
 /**
@@ -409,6 +438,18 @@ export async function resolveDurableConversationMemory({
  * Contains durable facts, topic continuity rules, and strict anti-re-asking constraints.
  */
 export function buildStructuredMemoryInstruction(memory = {}) {
+  const isQualified = Boolean(memory.phone && memory.requestedTime);
+  const ctaInstruction = isQualified && memory.ctaUrl && !memory.ctaDelivered
+    ? [
+        '',
+        'MEETING QUALIFICATION COMPLETED (PHONE & MEETING TIME PRESENT):',
+        `- Both contact phone ("${memory.phone}") and preferred meeting time ("${memory.requestedTime}") have been collected.`,
+        '- DO NOT say "Sizinle paylaştığınız numara üzerinden iletişime geçilecektir", "Numaranız üzerinden sizinle iletişime geçeceğiz", or that an agent/team will call them.',
+        '- Acknowledge their meeting request warmly and present the customer-initiated WhatsApp contact link so the customer can initiate direct contact with Samed Bey on WhatsApp:',
+        memory.ctaUrl,
+      ]
+    : [];
+
   const lines = [
     'DURABLE CONVERSATION MEMORY & PERSISTED CRM FACTS:',
     `- Active Topic / Context: ${memory.serviceRequested || 'Company Formation & Consultancy (UAE / Dubai)'}`,
@@ -421,6 +462,7 @@ export function buildStructuredMemoryInstruction(memory = {}) {
     memory.jurisdictionPreference ? `- Jurisdiction Preference: ${memory.jurisdictionPreference}` : `- Jurisdiction Preference: Free Zone (Default)`,
     memory.phone ? `- Contact Phone / WhatsApp: ${memory.phone}` : `- Contact Phone / WhatsApp: Missing`,
     memory.requestedTime ? `- Preferred Meeting Time: ${memory.requestedTime}${memory.timezone ? ` (${memory.timezone})` : ''}` : `- Preferred Meeting Time: Missing`,
+    memory.ctaDelivered ? `- Customer WhatsApp CTA: Already delivered in a previous turn (Do NOT resend CTA link)` : null,
     '',
     'STRICT ANTI-REDUNDANT-QUESTION & CONVERSATION RULES:',
     '1. NEVER re-ask any fact listed above as already known or answered!',
@@ -432,6 +474,8 @@ export function buildStructuredMemoryInstruction(memory = {}) {
     '7. NATURAL MULTI-FIELD COLLECTION: When a customer requests a meeting, ask currently missing required details (phone, topic, preferred day/time) naturally in ONE response instead of interrogating one question per turn.',
     '8. UNDECIDED ANSWERS ARE VALID: If customer says "Henüz karar vermedim", "bilmiyorum", "fark etmez", etc., accept it smoothly, do not repeat the question, and proceed with scheduling the meeting.',
     '9. TOPIC CONTINUITY: Follow-up questions inherit the active subject.',
+    '10. NO FALSE PROMISES: NEVER say "Sizinle paylaştığınız numara üzerinden iletişime geçilecektir" or that an automated call will happen.',
+    ...ctaInstruction,
   ].filter((p) => p !== null);
 
   return lines.join('\n');
@@ -853,6 +897,28 @@ export async function orchestrateInstagramInboundAiResponse({
     rawMessages: historyData.rawMessages || [],
   });
 
+  // Evaluate / ensure high-intent lead qualification & CTA if qualified
+  let qualResult = null;
+  const isQualified = Boolean(durableMemory.phone && durableMemory.requestedTime);
+  const rawTurnText = history.map((h) => h.parts?.[0]?.text || h.content || '').join('\n') + '\n' + text;
+
+  if (isQualified || hasHighIntentAppointmentSignals(rawTurnText)) {
+    try {
+      qualResult = await evaluateAndProcessHighIntentLead({
+        tenantId,
+        conversationId,
+        database,
+        httpClient: http,
+      });
+      if (qualResult?.ctaUrl) {
+        durableMemory.ctaUrl = qualResult.ctaUrl;
+        durableMemory.prefilledText = qualResult.prefilledText;
+      }
+    } catch (qualErr) {
+      console.warn('INSTAGRAM_QUAL_EVAL_WARN', qualErr?.message);
+    }
+  }
+
   const structuredMemoryContext = buildStructuredMemoryInstruction(durableMemory);
 
   // 7. Build System Instruction with Channel Presentation Rules and Structured Memory Context
@@ -1005,6 +1071,21 @@ export async function orchestrateInstagramInboundAiResponse({
         messageId: persisted.message?.id,
         providerMessageId: deliveryResult?.providerMessageId,
       });
+
+      if (qualResult?.qualified || durableMemory.ctaUrl) {
+        const isPool = typeof database?.connect === 'function' && typeof database?.query !== 'function';
+        const client = isPool ? await database.connect() : database;
+        try {
+          await client.query(
+            `UPDATE crm_consultations
+                SET cta_delivered_at = CURRENT_TIMESTAMP
+              WHERE tenant_id = $1 AND conversation_id = $2 AND cta_delivered_at IS NULL`,
+            [tenantId, conversationId]
+          ).catch(() => {});
+        } finally {
+          if (isPool && typeof client?.release === 'function') client.release();
+        }
+      }
     } catch (deliveryErr) {
       deliveryError = deliveryErr;
       console.error('INSTAGRAM_OUTBOUND_DELIVERY_ERROR', deliveryErr?.code, deliveryErr?.message);
@@ -1135,6 +1216,27 @@ export async function generateAndDeliverInstagramAssistantResponse({
       rawMessages: historyData.rawMessages || [],
     });
 
+    let qualResult = null;
+    const isQualified = Boolean(durableMemory.phone && durableMemory.requestedTime);
+    const rawTurnText = history.map((h) => h.parts?.[0]?.text || h.content || '').join('\n') + '\n' + textToAnswer;
+
+    if (isQualified || hasHighIntentAppointmentSignals(rawTurnText)) {
+      try {
+        qualResult = await evaluateAndProcessHighIntentLead({
+          tenantId,
+          conversationId,
+          database: client,
+          httpClient: http,
+        });
+        if (qualResult?.ctaUrl) {
+          durableMemory.ctaUrl = qualResult.ctaUrl;
+          durableMemory.prefilledText = qualResult.prefilledText;
+        }
+      } catch (qualErr) {
+        console.warn('INSTAGRAM_QUAL_EVAL_WARN', qualErr?.message);
+      }
+    }
+
     const structuredMemoryContext = buildStructuredMemoryInstruction(durableMemory);
 
     const rawCustomerName = durableMemory.customerName || conversation?.contact_display_name || conversation?.display_name || null;
@@ -1264,6 +1366,15 @@ export async function generateAndDeliverInstagramAssistantResponse({
           messageId: persisted.message?.id,
           providerMessageId: deliveryResult?.providerMessageId,
         });
+
+        if (qualResult?.qualified || durableMemory.ctaUrl) {
+          await client.query(
+            `UPDATE crm_consultations
+                SET cta_delivered_at = CURRENT_TIMESTAMP
+              WHERE tenant_id = $1 AND conversation_id = $2 AND cta_delivered_at IS NULL`,
+            [tenantId, conversationId]
+          ).catch(() => {});
+        }
       } catch (deliveryErr) {
         deliveryError = deliveryErr;
         console.error('INSTAGRAM_OUTBOUND_DELIVERY_ERROR', deliveryErr?.code, deliveryErr?.message);
