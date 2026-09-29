@@ -3,7 +3,7 @@ import axios from 'axios';
 import pool from '../config/db.js';
 import { createConversationResource } from './conversation-resource-service.js';
 import { cancelConversationContextualFollowUps } from './durable-follow-up-service.js';
-import { instagramGraphApiBase } from './meta-graph-api-version.js';
+import { instagramGraphApiBase, metaGraphApiBase } from './meta-graph-api-version.js';
 
 export class InstagramInboxError extends Error {
   constructor(code, message) {
@@ -15,59 +15,93 @@ export class InstagramInboxError extends Error {
 
 const profileCache = new Map();
 
+/**
+ * Formats a clean, human-readable display identity from an Instagram profile.
+ * Priority: "Name (@username)" -> "@username" -> "Name" -> null.
+ * Rejects "Instagram User", empty strings, and raw numeric provider IDs.
+ */
+export function formatInstagramDisplayName({ name = null, username = null } = {}) {
+  const cleanName = typeof name === 'string' && name.trim() && name.trim().toLowerCase() !== 'instagram user' && !/^\d+$/.test(name.trim())
+    ? name.trim()
+    : null;
+  const cleanUsername = typeof username === 'string' && username.trim() && !/^\d+$/.test(username.trim())
+    ? username.trim().replace(/^@/, '')
+    : null;
+
+  if (cleanName && cleanUsername) {
+    return `${cleanName} (@${cleanUsername})`;
+  }
+  if (cleanUsername) {
+    return `@${cleanUsername}`;
+  }
+  if (cleanName) {
+    return cleanName;
+  }
+  return null;
+}
+
 export async function resolveInstagramUserProfile({
   senderIgsid,
   accessToken,
   http = axios,
   graphBaseUrl = null,
+  authMode = null,
 }) {
   if (!senderIgsid || !accessToken) return null;
   const cleanId = String(senderIgsid).replace(/^instagram:\s*/i, '').trim();
-  if (!cleanId) return null;
+  if (!cleanId || !/^\d+$/.test(cleanId)) return null;
 
   const cached = profileCache.get(cleanId);
   if (cached && Date.now() - cached.fetchedAt < 3600 * 1000) {
-    return cached;
+    if (cached.name || cached.username) return cached;
   }
-  const igBase = graphBaseUrl || instagramGraphApiBase();
-  try {
-    const res = await http.get(`${igBase}/${cleanId}`, {
-      params: { fields: 'name,username', access_token: accessToken },
-      headers: { Authorization: `Bearer ${accessToken}` },
-      timeout: 5000,
-    });
-    const profile = {
-      name: res.data?.name?.trim() || null,
-      username: res.data?.username?.trim() || null,
-      fetchedAt: Date.now(),
-    };
-    if (profile.name || profile.username) {
-      profileCache.set(cleanId, profile);
-      return profile;
-    }
-  } catch {
-    // If graph.instagram.com failed, attempt fallback to graph.facebook.com
-    try {
-      const { metaGraphApiBase } = await import('./meta-graph-api-version.js');
-      const fbBase = metaGraphApiBase();
-      const fbRes = await http.get(`${fbBase}/${cleanId}`, {
-        params: { fields: 'name,username', access_token: accessToken },
-        headers: { Authorization: `Bearer ${accessToken}` },
-        timeout: 5000,
-      });
-      const profile = {
-        name: fbRes.data?.name?.trim() || null,
-        username: fbRes.data?.username?.trim() || null,
-        fetchedAt: Date.now(),
-      };
-      if (profile.name || profile.username) {
-        profileCache.set(cleanId, profile);
-        return profile;
+
+  const token = accessToken.trim();
+  const fbBase = metaGraphApiBase();
+  const igBase = instagramGraphApiBase();
+
+  const isInstagramLoginToken = String(authMode || '').trim().toUpperCase() === 'INSTAGRAM_LOGIN'
+    || token.startsWith('IGA')
+    || token.startsWith('IGQ');
+
+  const baseUrls = isInstagramLoginToken
+    ? Array.from(new Set([graphBaseUrl, igBase, fbBase].filter(Boolean)))
+    : Array.from(new Set([graphBaseUrl, fbBase, igBase].filter(Boolean)));
+
+  const fieldSets = [
+    'name,username,profile_pic',
+    'name,username',
+    'username',
+    'name',
+  ];
+
+  for (const baseUrl of baseUrls) {
+    for (const fields of fieldSets) {
+      try {
+        const res = await http.get(`${baseUrl}/${cleanId}`, {
+          params: { fields, access_token: token },
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 4000,
+        });
+
+        const name = typeof res.data?.name === 'string' && res.data.name.trim() && res.data.name.trim().toLowerCase() !== 'instagram user' && !/^\d+$/.test(res.data.name.trim())
+          ? res.data.name.trim()
+          : null;
+        const username = typeof res.data?.username === 'string' && res.data.username.trim() && !/^\d+$/.test(res.data.username.trim())
+          ? res.data.username.trim().replace(/^@/, '')
+          : null;
+
+        if (name || username) {
+          const profile = { name, username, fetchedAt: Date.now() };
+          profileCache.set(cleanId, profile);
+          return profile;
+        }
+      } catch (err) {
+        // Continue fallback attempts across fieldSets and baseUrls
       }
-    } catch {
-      profileCache.set(cleanId, { name: null, username: null, fetchedAt: Date.now() });
     }
   }
+
   return null;
 }
 
@@ -226,13 +260,10 @@ export async function persistInstagramInbound({
           senderIgsid,
           accessToken: token,
           http,
+          authMode: integration.config?.auth_mode || null,
         });
-        if (profile?.name && profile?.username) {
-          resolvedDisplayName = `${profile.name} (@${profile.username.replace(/^@/, '')})`;
-        } else if (profile?.username) {
-          resolvedDisplayName = `@${profile.username.replace(/^@/, '')}`;
-        } else if (profile?.name) {
-          resolvedDisplayName = profile.name;
+        if (profile) {
+          resolvedDisplayName = formatInstagramDisplayName(profile);
         }
       } catch {}
     }
@@ -405,4 +436,75 @@ export async function persistInstagramInbound({
     client.release();
   }
 }
+/**
+ * Reconciles existing placeholder Instagram contacts ("Instagram User") with live Meta profiles.
+ * Purely passive: 0 AI executions, 0 outbound Meta sends, 0 push notifications, 0 typing, 0 CTA.
+ */
+export async function reconcileTenantInstagramContactIdentities({
+  tenantId = null,
+  database = pool,
+  http = axios,
+} = {}) {
+  const isPool = typeof database?.connect === 'function' && typeof database?.query !== 'function';
+  const client = isPool ? await database.connect() : database;
+  try {
+    const params = [];
+    let tenantFilter = '';
+    if (tenantId) {
+      params.push(tenantId);
+      tenantFilter = `AND c.tenant_id = $${params.length}`;
+    }
+
+    const placeholderContacts = await client.query(
+      `SELECT c.id AS contact_id, c.tenant_id, c.display_name, c.identity_hash,
+              conv.id AS conversation_id, conv.customer_external_id,
+              ci.config AS integration_config, tc.external_channel_id
+         FROM crm_contacts c
+         JOIN conversations conv ON conv.contact_id = c.id AND conv.tenant_id = c.tenant_id
+         JOIN tenant_channels tc ON tc.id = conv.channel_id AND tc.tenant_id = c.tenant_id
+         JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = c.tenant_id AND ci.integration_type = 'INSTAGRAM' AND ci.enabled = TRUE
+        WHERE tc.channel_type = 'INSTAGRAM'
+          ${tenantFilter}
+          AND (c.display_name IS NULL OR c.display_name = '' OR c.display_name = 'Instagram User' OR c.display_name LIKE 'instagram:%' OR c.display_name ~ '^\\d+$')
+        LIMIT 50`,
+      params
+    );
+
+    let updatedCount = 0;
+    for (const row of placeholderContacts.rows) {
+      const rawExternal = String(row.customer_external_id || '').replace(/^instagram:\s*/i, '').trim();
+      const token = row.integration_config?.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+      if (!rawExternal || !token || !/^\d+$/.test(rawExternal)) continue;
+
+      const profile = await resolveInstagramUserProfile({
+        senderIgsid: rawExternal,
+        accessToken: token,
+        http,
+        authMode: row.integration_config?.auth_mode || null,
+      });
+
+      if (profile?.name || profile?.username) {
+        const enrichedName = formatInstagramDisplayName(profile);
+        if (enrichedName) {
+          await client.query(
+            `UPDATE crm_contacts
+                SET display_name = $1,
+                    updated_at = CURRENT_TIMESTAMP
+              WHERE id = $2 AND tenant_id = $3`,
+            [enrichedName, row.contact_id, row.tenant_id]
+          );
+          updatedCount++;
+        }
+      }
+    }
+
+    return { totalScanned: placeholderContacts.rowCount, updatedCount };
+  } catch (err) {
+    console.warn('INSTAGRAM_CONTACT_RECONCILIATION_WARN', err?.message);
+    return { error: err?.message, updatedCount: 0 };
+  } finally {
+    if (isPool && typeof client?.release === 'function') client.release();
+  }
+}
+
 
