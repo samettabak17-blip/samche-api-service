@@ -1,5 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const DEFAULT_MODE = 'developer';
 const ALLOWED_MODES = new Set(['developer', 'vertex']);
@@ -19,27 +22,77 @@ function requiredString(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+export function resolveApiKey(env = process.env) {
+  return requiredString(env.GEMINI_API_KEY)
+    || requiredString(env.GOOGLE_API_KEY)
+    || requiredString(env.GOOGLE_GEMINI_API_KEY)
+    || requiredString(env.STAGING_GEMINI_API_KEY);
+}
+
+export function resolveGcpProject(env = process.env) {
+  return requiredString(env.GOOGLE_CLOUD_PROJECT)
+    || requiredString(env.GCP_PROJECT)
+    || requiredString(env.GCLOUD_PROJECT);
+}
+
+export function resolveGcpLocation(env = process.env) {
+  return requiredString(env.GOOGLE_CLOUD_LOCATION)
+    || requiredString(env.GCP_LOCATION)
+    || requiredString(env.GCLOUD_LOCATION)
+    || 'us-central1';
+}
+
+function ensureServiceAccountFile(env = process.env) {
+  const rawCreds = env.GOOGLE_APPLICATION_CREDENTIALS || env.GCP_SERVICE_ACCOUNT_KEY || env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  if (rawCreds && typeof rawCreds === 'string' && rawCreds.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(rawCreds);
+      const tmpPath = path.join(os.tmpdir(), `gcp-sa-${crypto.createHash('sha256').update(rawCreds).digest('hex').slice(0, 12)}.json`);
+      if (!fs.existsSync(tmpPath)) {
+        fs.writeFileSync(tmpPath, JSON.stringify(parsed), { encoding: 'utf8', mode: 0o600 });
+      }
+      process.env.GOOGLE_APPLICATION_CREDENTIALS = tmpPath;
+    } catch {}
+  }
+}
+
 export function getGoogleGeminiConfig(env = process.env) {
-  const mode = String(env.GOOGLE_GENAI_MODE || DEFAULT_MODE).trim().toLowerCase();
+  ensureServiceAccountFile(env);
+  const apiKey = resolveApiKey(env);
+  const project = resolveGcpProject(env);
+  const location = resolveGcpLocation(env);
+  const rawMode = requiredString(env.GOOGLE_GENAI_MODE);
+
+  let mode;
+  if (rawMode) {
+    mode = rawMode.toLowerCase();
+  } else if (apiKey) {
+    mode = 'developer';
+  } else if (project) {
+    mode = 'vertex';
+  } else {
+    mode = DEFAULT_MODE;
+  }
+
   if (!ALLOWED_MODES.has(mode)) {
     throw new GoogleGeminiProviderError('GOOGLE_GENAI_MODE_INVALID', 'GOOGLE_GENAI_MODE must be "developer" or "vertex"');
   }
 
-  if (mode === 'developer' && !requiredString(env.GEMINI_API_KEY)) {
+  if (mode === 'developer' && !apiKey) {
     throw new GoogleGeminiProviderError('GOOGLE_GEMINI_API_KEY_REQUIRED', 'GEMINI_API_KEY is required in developer mode');
   }
-  if (mode === 'vertex' && !requiredString(env.GOOGLE_CLOUD_PROJECT)) {
+  if (mode === 'vertex' && !project) {
     throw new GoogleGeminiProviderError('GOOGLE_CLOUD_PROJECT_REQUIRED', 'GOOGLE_CLOUD_PROJECT is required in vertex mode');
   }
-  if (mode === 'vertex' && !requiredString(env.GOOGLE_CLOUD_LOCATION)) {
+  if (mode === 'vertex' && !location) {
     throw new GoogleGeminiProviderError('GOOGLE_CLOUD_LOCATION_REQUIRED', 'GOOGLE_CLOUD_LOCATION is required in vertex mode');
   }
 
   return Object.freeze({
     mode,
-    project: requiredString(env.GOOGLE_CLOUD_PROJECT),
-    location: requiredString(env.GOOGLE_CLOUD_LOCATION),
-    apiKey: requiredString(env.GEMINI_API_KEY),
+    project,
+    location,
+    apiKey,
   });
 }
 
@@ -284,6 +337,16 @@ export function createGoogleGeminiProvider({ env = process.env, clientFactory, f
         const response = await client.models.generateContent(request);
         return normalizeResponse(response);
       } catch (error) {
+        if (config.mode === 'vertex' && (config.apiKey || resolveApiKey(env))) {
+          const fallbackKey = config.apiKey || resolveApiKey(env);
+          try {
+            const devClient = fetchImpl ? createDeveloperFetchClient({ apiKey: fallbackKey, fetchImpl }) : new GoogleGenAI({ apiKey: fallbackKey });
+            const devResponse = await devClient.models.generateContent(request);
+            return normalizeResponse(devResponse);
+          } catch (fallbackError) {
+            console.warn('GOOGLE_VERTEX_FALLBACK_DEV_WARN', fallbackError?.message);
+          }
+        }
         throw normalizeRequestError(error, config.mode, model);
       }
     },

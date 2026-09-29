@@ -6,9 +6,9 @@ BEGIN;
 CREATE TABLE IF NOT EXISTS crm_consultations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
-  lead_id UUID REFERENCES crm_leads(id, tenant_id) ON DELETE RESTRICT,
-  contact_id UUID REFERENCES crm_contacts(id, tenant_id) ON DELETE RESTRICT,
-  conversation_id UUID REFERENCES conversations(id, tenant_id) ON DELETE RESTRICT,
+  lead_id UUID,
+  contact_id UUID,
+  conversation_id UUID,
   channel_type VARCHAR(40) NOT NULL DEFAULT 'INSTAGRAM',
   status VARCHAR(40) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'CONFIRMED', 'COMPLETED', 'CANCELLED', 'NO_SHOW')),
   customer_name VARCHAR(255),
@@ -27,7 +27,13 @@ CREATE TABLE IF NOT EXISTS crm_consultations (
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT uq_crm_consultations_id_tenant UNIQUE (id, tenant_id),
-  CONSTRAINT uq_crm_consultations_conversation UNIQUE (tenant_id, conversation_id)
+  CONSTRAINT uq_crm_consultations_conversation UNIQUE (tenant_id, conversation_id),
+  CONSTRAINT fk_crm_consultations_lead FOREIGN KEY (lead_id, tenant_id)
+    REFERENCES crm_leads(id, tenant_id) ON DELETE RESTRICT,
+  CONSTRAINT fk_crm_consultations_contact FOREIGN KEY (contact_id, tenant_id)
+    REFERENCES crm_contacts(id, tenant_id) ON DELETE RESTRICT,
+  CONSTRAINT fk_crm_consultations_conversation FOREIGN KEY (conversation_id, tenant_id)
+    REFERENCES conversations(id, tenant_id) ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS idx_crm_consultations_tenant_status ON crm_consultations(tenant_id, status, created_at DESC);
