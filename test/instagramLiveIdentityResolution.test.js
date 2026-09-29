@@ -6,6 +6,7 @@ import {
   reconcileTenantInstagramContactIdentities,
   persistInstagramInbound,
 } from '../services/instagram-live-inbox-service.js';
+import { orchestrateInstagramInboundAiResponse } from '../services/instagram-ai-orchestrator.js';
 import { ensureConversationCrmIdentity } from '../services/crm-lead-service.js';
 
 class MockDbClient {
@@ -270,6 +271,53 @@ describe('Instagram Live Identity Resolution & Lifecycle Acceptance', () => {
     const profile = formatInstagramDisplayName({ name: null, username: 'tech_expert' });
     assert.equal(profile, '@tech_expert');
 
+    const formatted = formatInstagramDisplayName({ name: 'Tech Expert', username: 'tech_expert' });
+    assert.equal(formatted, 'Tech Expert (@tech_expert)');
+  });
+
+  it('E2. Conversation node participants fallback: resolves identity when direct node lookup fails', async () => {
+    const mockHttp = {
+      get: async (url) => {
+        if (url.includes('/me/conversations')) {
+          return {
+            data: {
+              data: [
+                {
+                  id: 'meta_conv_1',
+                  participants: {
+                    data: [
+                      { id: '17841400', username: 'my_business' },
+                      { id: '91450420999', username: 'real_customer_user', name: 'Real Customer' },
+                    ],
+                  },
+                },
+              ],
+            },
+          };
+        }
+        throw new Error('Direct node query not permitted');
+      },
+    };
+
+    const profile = await resolveInstagramUserProfile({
+      senderIgsid: '91450420999',
+      accessToken: 'test_token',
+      http: mockHttp,
+    });
+
+    assert.ok(profile);
+    assert.equal(profile.name, 'Real Customer');
+    assert.equal(profile.username, 'real_customer_user');
+    const formatted = formatInstagramDisplayName(profile);
+    assert.equal(formatted, 'Real Customer (@real_customer_user)');
+  });
+
+  it('F. Raw numeric IGSID: never rendered as human name', () => {
+    assert.equal(formatInstagramDisplayName({ name: '91450420111', username: '91450420111' }), null);
+    assert.equal(formatInstagramDisplayName({ name: '91450420111', username: 'valid_user' }), '@valid_user');
+    assert.equal(formatInstagramDisplayName({ name: 'Real Name', username: '91450420111' }), 'Real Name');
+  });
+
 
   it('G. Existing better verified name: not downgraded by fallback or empty string', async () => {
     const mockClient = new MockDbClient();
@@ -436,19 +484,93 @@ describe('Instagram Live Identity Resolution & Lifecycle Acceptance', () => {
     assert.equal(reconResult.updatedCount, 1);
     const updatedContact = mockClient.contacts.get(`ten_1:${hash}`);
     assert.equal(updatedContact.display_name, 'Reconciled Name (@reconciled_user)');
+
+  it('N. Terminal outcome: explicit SUPPRESSED_POLICY_MANUAL_ONLY when channel is MANUAL_ONLY and contact is AUTOMATIC', async () => {
+    const mockClient = new MockDbClient();
+
+    const inboundState = {
+      duplicate: false,
+      integration: {
+        tenant_id: 'ten_1',
+        channel_id: 'chan_1',
+        assistant_id: 'asst_1',
+        config: { activation_policy: 'MANUAL_ONLY', access_token: 'tok_1' },
+      },
+      conversation: {
+        id: 'conv_term_1',
+        status: 'open',
+        handling_mode: 'AI',
+        handling_version: 1,
+        ai_behavior_override: 'AUTOMATIC',
+      },
+      customerMessage: {
+        id: 'msg_term_1',
+        content: 'Merhaba samed bey',
+      },
+      shouldInvokeAi: true,
+    };
+
+    const outcome = await orchestrateInstagramInboundAiResponse({
+      database: mockClient,
+      inboundState,
+      senderIgsid: '91450420111',
+      text: 'Merhaba samed bey',
+      generateAiResponse: async () => 'AI reply',
+    });
+
+    assert.equal(outcome.aiInvoked, false);
+    assert.equal(outcome.suppressed, true);
+    assert.equal(outcome.outcome, 'SUPPRESSED_POLICY_MANUAL_ONLY');
+  });
+
+  it('O. Terminal outcome: explicit RESPONDED when contact is AI_ONLY', async () => {
+    const mockClient = new MockDbClient();
+
+    const inboundState = {
+      duplicate: false,
+      integration: {
+        tenant_id: 'ten_1',
+        channel_id: 'chan_1',
+        assistant_id: 'asst_1',
+        config: { activation_policy: 'MANUAL_ONLY', access_token: 'tok_1' },
+      },
+      conversation: {
+        id: 'conv_term_2',
+        status: 'open',
+        handling_mode: 'AI',
+        handling_version: 1,
+        ai_behavior_override: 'AI_ONLY',
+      },
+      customerMessage: {
+        id: 'msg_term_2',
+        content: 'Merhaba samed bey',
+      },
+      shouldInvokeAi: true,
+    };
+
+    const mockHttp = {
+      post: async () => ({ data: { message_id: 'mid_out_1' } }),
+      get: async () => ({ data: {} }),
+    };
+
+    const outcome = await orchestrateInstagramInboundAiResponse({
+      database: mockClient,
+      inboundState,
+      senderIgsid: '91450420111',
+      text: 'Merhaba samed bey',
+      http: mockHttp,
+      applyPacing: false,
+      generateAiResponse: async () => 'Merhaba! Nasıl yardımcı olabilirim?',
+    });
+
+    assert.equal(outcome.aiInvoked, true);
+    assert.equal(outcome.delivered, true);
+    assert.equal(outcome.outcome, 'RESPONDED');
+  });
+
     assert.equal(mockClient.messages.length, 0);
   });
 });
-
-    const formatted = formatInstagramDisplayName({ name: 'Tech Expert', username: 'tech_expert' });
-    assert.equal(formatted, 'Tech Expert (@tech_expert)');
-  });
-
-  it('F. Raw numeric IGSID: never rendered as human name', () => {
-    assert.equal(formatInstagramDisplayName({ name: '91450420111', username: '91450420111' }), null);
-    assert.equal(formatInstagramDisplayName({ name: '91450420111', username: 'valid_user' }), '@valid_user');
-    assert.equal(formatInstagramDisplayName({ name: 'Real Name', username: '91450420111' }), 'Real Name');
-  });
 
 
     return { rowCount: 0, rows: [] };

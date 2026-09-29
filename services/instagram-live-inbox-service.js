@@ -102,6 +102,43 @@ export async function resolveInstagramUserProfile({
     }
   }
 
+  // Conversation participants fallback (reliably exposes username & name from Meta conversations node)
+  for (const baseUrl of baseUrls) {
+    try {
+      const convRes = await http.get(`${baseUrl}/me/conversations`, {
+        params: {
+          fields: 'id,participants{id,username,name}',
+          limit: 10,
+          access_token: token,
+        },
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 5000,
+      });
+
+      const convList = Array.isArray(convRes.data?.data) ? convRes.data.data : [];
+      for (const c of convList) {
+        const parts = Array.isArray(c?.participants?.data) ? c.participants.data : [];
+        const match = parts.find((p) => String(p?.id || '').trim() === cleanId);
+        if (match) {
+          const name = typeof match.name === 'string' && match.name.trim() && match.name.trim().toLowerCase() !== 'instagram user' && !/^\d+$/.test(match.name.trim())
+            ? match.name.trim()
+            : null;
+          const username = typeof match.username === 'string' && match.username.trim() && !/^\d+$/.test(match.username.trim())
+            ? match.username.trim().replace(/^@/, '')
+            : null;
+
+          if (name || username) {
+            const profile = { name, username, fetchedAt: Date.now() };
+            profileCache.set(cleanId, profile);
+            return profile;
+          }
+        }
+      }
+    } catch {
+      // Continue
+    }
+  }
+
   return null;
 }
 
