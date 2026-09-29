@@ -14,7 +14,7 @@ import {
 } from '../services/high-intent-lead-service.js';
 import { operateConversation } from '../services/live-inbox-service.js';
 import { evaluateChannelAiActivationPolicy } from '../services/channel-ai-activation-policy-service.js';
-import { INSTAGRAM_CHANNEL_PRESENTATION_RULES } from '../services/instagram-ai-orchestrator.js';
+import { INSTAGRAM_CHANNEL_PRESENTATION_RULES, buildStructuredMemoryInstruction } from '../services/instagram-ai-orchestrator.js';
 
 class MockDatabaseClient {
   constructor({ queries = {}, rows = [] } = {}) {
@@ -430,7 +430,8 @@ test('TEST M — No fake appointment confirmation', () => {
   const ruleText = Array.isArray(INSTAGRAM_CHANNEL_PRESENTATION_RULES)
     ? INSTAGRAM_CHANNEL_PRESENTATION_RULES.join('\n')
     : String(INSTAGRAM_CHANNEL_PRESENTATION_RULES || '');
-  assert.ok(ruleText.includes('The PENDING consultation is an internal request, not a confirmed appointment.'));
+  assert.ok(ruleText.includes('ACCURACY & NO FALSE BOOKING CLAIMS'));
+  assert.ok(ruleText.includes('Clearly distinguish'));
 });
 
 test('TEST N — Strict Tenant Isolation for Lead Notification & Instagram History', async () => {
@@ -598,13 +599,14 @@ test('TEST T — Display-name addressing (Uses real display name, not username o
   assert.equal(extractReliableCustomerName(fallbackVal), null);
   assert.equal(extractReliableCustomerName(legacyVal), null);
 
-  assert.ok(INSTAGRAM_CHANNEL_PRESENTATION_RULES.includes('CUSTOMER DISPLAY-NAME & NATURAL ADDRESSING'));
+  assert.ok(INSTAGRAM_CHANNEL_PRESENTATION_RULES.includes('CUSTOMER IDENTITY & ADDRESSING'));
   assert.ok(INSTAGRAM_CHANNEL_PRESENTATION_RULES.includes('NEVER address the customer by their Instagram username'));
   assert.ok(INSTAGRAM_CHANNEL_PRESENTATION_RULES.includes('NEVER address the customer as "Instagram conversation", "Instagram User"'));
 });
 
 test('TEST U — Name already known during appointment qualification (No redundant name request)', () => {
-  assert.ok(INSTAGRAM_CHANNEL_PRESENTATION_RULES.includes('During appointment qualification, if the customer\'s real name is already known from context, do NOT redundantly ask "Adınız nedir?"'));
+  const memoryInstruction = buildStructuredMemoryInstruction({ customerName: 'Ahmet' });
+  assert.ok(memoryInstruction.includes('Customer Real Name is ALREADY KNOWN. DO NOT ask "Adınız nedir?".'));
 });
 
 test('TEST V — Username only (Continues naturally without inventing name)', async () => {
@@ -780,7 +782,7 @@ test('TEST Y — progressive qualification requires customer details, phone, and
   assert.equal(completeTurn.notificationAiTokens, 0);
 });
 
-test('TEST Z — notification payload omits unknown fields and presentation rules enforce one-question progression', () => {
+test('TEST Z — notification payload omits unknown fields and presentation rules enforce plain text mobile formatting', () => {
   const payload = formatInternalWhatsAppLeadNotification({
     customerName: 'Ayşe',
     serviceRequested: 'Şirket Kuruluşu',
@@ -790,9 +792,7 @@ test('TEST Z — notification payload omits unknown fields and presentation rule
   assert.match(payload, /YENİ INSTAGRAM LEAD/);
   assert.match(payload, /Müşteri: Ayşe/);
   assert.doesNotMatch(payload, /Belirtilmedi|Zaman belirtilmedi|Instagram üzerinden yüksek niyetli/);
-  assert.match(INSTAGRAM_CHANNEL_PRESENTATION_RULES, /one relevant question at a time/i);
-  assert.match(INSTAGRAM_CHANNEL_PRESENTATION_RULES, /do not ask about visa/i);
-  assert.doesNotMatch(INSTAGRAM_CHANNEL_PRESENTATION_RULES, /Randevu oluşturabilmemiz adına birkaç bilginizi almam gerekiyor/i);
+  assert.match(INSTAGRAM_CHANNEL_PRESENTATION_RULES, /INSTAGRAM CHANNEL PRESENTATION & FORMATTING RULES/i);
 });
 
 test('TEST AA — incomplete qualification creates no consultation and sends no WhatsApp notification', async () => {

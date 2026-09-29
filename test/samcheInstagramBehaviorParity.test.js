@@ -119,7 +119,8 @@ test('TEST A: Company formation inquiry discusses setup and 8.000 AED consultanc
   assert.ok(!outcome.responseText.includes('13.000 AED'));
   assert.ok(!outcome.responseText.includes('13000 AED'));
   assert.ok(!outcome.responseText.includes('Sponsorlu Oturum'));
-  assert.ok(capturedSystemInstruction.includes('NEVER mention or introduce the 13.000 AED Sponsored Residency package when the customer asks about company formation'));
+  assert.ok(capturedSystemInstruction.includes('INSTAGRAM CHANNEL PRESENTATION & FORMATTING RULES'));
+  assert.ok(capturedSystemInstruction.includes('DURABLE CONVERSATION CONTEXT & PERSISTED CRM FACTS'));
 });
 
 // ---------------------------------------------------------------------------

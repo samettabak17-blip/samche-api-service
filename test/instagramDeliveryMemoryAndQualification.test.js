@@ -401,13 +401,13 @@ describe('Mandatory Regression Suite: Safe Chunking, Multi-Turn Memory & CTA', (
   it('15e. Fallback safety: "Bilmiyorum" or "Emin değilim" returns friendly response without silent turn', () => {
     const memory = { phone: '+905312404965' };
     const fallback1 = generateContextualConversationalFallback({ text: 'Henüz karar vermedim', memory });
-    assert.ok(fallback1.includes('gün ve saat') || fallback1.includes('görüşme'));
+    assert.ok(fallback1.includes('netleşmediyse') || fallback1.includes('birlikte değerlendirebiliriz') || fallback1.includes('yardımcı'));
 
     const fallback2 = generateContextualConversationalFallback({ text: 'Bilmiyorum', memory });
-    assert.ok(fallback2.includes('gün ve saat') || fallback2.includes('görüşme'));
+    assert.ok(fallback2.includes('netleşmediyse') || fallback2.includes('birlikte değerlendirebiliriz') || fallback2.includes('yardımcı'));
 
     const fallback3 = generateContextualConversationalFallback({ text: 'Emin değilim', memory });
-    assert.ok(fallback3.includes('gün ve saat') || fallback3.includes('görüşme'));
+    assert.ok(fallback3.includes('netleşmediyse') || fallback3.includes('birlikte değerlendirebiliriz') || fallback3.includes('yardımcı'));
   });
 
   it('16. Follow-up "peki banka hesabı?" preserves active company-formation context', () => {
@@ -417,7 +417,7 @@ describe('Mandatory Regression Suite: Safe Chunking, Multi-Turn Memory & CTA', (
     };
     const instruction = buildStructuredMemoryInstruction(memory);
     assert.ok(instruction.includes('Active Topic / Context: Company Formation & Consultancy (UAE / Dubai)'));
-    assert.ok(instruction.includes('TOPIC CONTINUITY: Follow-up questions inherit the active subject'));
+    assert.ok(instruction.includes('answer it within the established context'));
   });
 
   it('17. Long conversation retains all durable qualification facts without token explosion', async () => {
@@ -1178,7 +1178,7 @@ describe('Mandatory Regression Suite: Safe Chunking, Multi-Turn Memory & CTA', (
     assert.equal(res1.providerMessageId, res2.providerMessageId);
   });
 
-  it('39. Exact physical failure reproduction: sanitizes false promise and deterministically appends Customer-Initiated WhatsApp CTA', async () => {
+  it('39. Exact physical failure reproduction: sanitizes false promise and removes Customer-Initiated WhatsApp CTA', async () => {
     let deliveredText = '';
     const fakeHttp = {
       post: async (url, payload) => {
@@ -1214,7 +1214,7 @@ describe('Mandatory Regression Suite: Safe Chunking, Multi-Turn Memory & CTA', (
               status: 'PENDING',
               phone: '+905312404965',
               requested_time: 'Yarın 14:00',
-              cta_url: 'https://wa.me/971527288586?text=' + encodeURIComponent('Merhaba Samed Bey, görüşme talebi oluşturdum.\nTelefon: +905312404965\nGörüşme: Yarın 14:00'),
+              cta_url: null,
               cta_delivered_at: null,
             }],
           };
@@ -1270,10 +1270,9 @@ describe('Mandatory Regression Suite: Safe Chunking, Multi-Turn Memory & CTA', (
     assert.equal(outcome.delivered, true);
     assert.ok(!deliveredText.includes('sizinle iletişime geçeceğiz'), 'False automated promise must be stripped');
     assert.ok(!deliveredText.includes('numara üzerinden'), 'False automated promise must be stripped');
-    assert.ok(deliveredText.includes('https://wa.me/971527288586?text='), 'Customer-Initiated WhatsApp CTA link must be appended');
-    assert.ok(decodeURIComponent(deliveredText).includes('+905312404965'), 'CTA text must contain persisted phone');
-    assert.ok(decodeURIComponent(deliveredText).includes('14:00'), 'CTA text must contain meeting time');
-    assert.equal(ctaDeliveredAtSet, true, 'cta_delivered_at must be updated after provider delivery');
+    assert.ok(!deliveredText.includes('https://wa.me/'), 'Customer-Initiated WhatsApp CTA link must NOT be appended');
+    assert.ok(!deliveredText.includes('wa.me'), 'wa.me link must not be present');
+    assert.ok(deliveredText.includes('görüşme talebinizi kaydettim'));
   });
 
 });

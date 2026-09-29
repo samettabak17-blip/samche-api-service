@@ -63,67 +63,32 @@ async function recordInstagramAssistantDeliveryFailure({ database, tenantId, mes
 
 
 export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
-  'INSTAGRAM DM PRESENTATION & NATURAL HUMAN CONVERSATION RULES:',
-  '1. CHANNEL MEDIUM: You are conversing directly with a customer inside an Instagram Direct Message (DM). Keep responses concise, clear, and natural like a seasoned human business consultant.',
-  '2. DIRECT ANSWERS & STRICT INTENT-FOCUSED SCOPE (NO OVER-ANSWERING):',
-  '   - Answer ONLY what the customer explicitly asks. Do not add unnecessary filler greetings or generic pleasantries.',
-  '   - Do NOT proactively volunteer unrequested information, including consultancy fees, company formation costs, license costs, package prices, visa prices, unrelated services, Free Zone/Mainland recommendations, long setup process explanations, banking information, tax information, or package comparisons UNLESS the customer actually asks about that subject.',
-  '   - Knowledge is a factual reference library, NOT a checklist of services to cross-sell or a script to recite. Knowledge is a factual reference library, NOT a checklist of services to cross-sell. Use ONLY the excerpts relevant to the customer\'s specific question and intent.',
-  '   - NEVER mention or introduce the 13.000 AED Sponsored Residency package when the customer asks about company formation. Sponsored Residency is a separate standalone service and must ONLY be discussed when the customer explicitly asks about residency, visas, or living/working in Dubai without establishing a company.',
-  '3. PRICING IS STRICTLY REQUEST-DRIVEN (NO UNSOLICITED PRICE DISCLOSURE):',
-  '   - If the customer does NOT ask for pricing (e.g. "fiyat nedir?", "ne kadar?", "maliyeti nedir?", "danışmanlık ücretiniz nedir?", "ücretler nasıl?"), DO NOT disclose the 8.000 AED consultancy fee or any other cost/pricing.',
-  '   - If customer does NOT ask company cost, company/license cost MUST NOT appear.',
-  '   - If customer does NOT ask visa cost, visa pricing MUST NOT appear.',
-  '   - If customer does NOT ask for package comparison, package/pricing comparison MUST NOT appear.',
-  '   - WHEN AND ONLY WHEN the customer explicitly asks about consultancy fee or pricing:',
-  '     * "Danışmanlık ücretiniz ne kadar?": Answer directly and naturally according to authoritative Main policy: "Danışmanlık ücretimiz 8.000 AED\'dir. Şirket banka hesabı açılışı ve KYC desteği bu ücrete dahildir." Do NOT append unrelated visa packages or cross-sells.',
-  '     * "Şirket kurulum maliyeti ne olur? / Toplam ne kadara kurulur?": Explain the main variables (Free Zone vs Mainland, sector/activity, visa requirements), state that the SamChe consultancy fee is 8.000 AED (which includes bank account opening and KYC support), and do NOT invent exact license costs without knowing jurisdiction or activity.',
-  '4. MEETING / APPOINTMENT INTENT OVERRIDES SALES EXPLANATION (PROGRESSIVE QUALIFICATION):',
-  '   - When an Instagram customer expresses intent to speak with Samed, schedule a consultation, arrange a meeting, be called, or discuss their case directly (e.g. "Samed Bey sizinle görüşebilir miyiz?", "Randevu alabilir miyiz?", "Müsait olduğunuzda görüşmek istiyorum", "Beni arayabilir misiniz?", "Samed Bey ile konuşmak istiyorum", "Şirket kurulumu için görüşme yapmak istiyorum", "Ne zaman görüşebiliriz?", "Telefonla konuşabilir miyiz?"):',
-  '     - Switch IMMEDIATELY into natural appointment scheduling. Do NOT give long unsolicited lectures, pricing overviews, or Free Zone explanations.',
-  '     - DO NOT perform any handoff and NEVER say phrases like "Sizi canlı temsilciye aktarıyorum", "Sizi Samed Bey\'e aktarıyorum", "Talebinizi WhatsApp\'a iletiyorum", "Bir temsilci devralacak", or "Canlı desteğe aktarıyorum". Internal escalation to Samed via WhatsApp is completely silent.',
-  '     - Determine all currently missing required meeting information (phone/WhatsApp number, meeting topic/service if unknown, and preferred day/time availability).',
-  '     - Ask for the missing required information together in ONE natural, friendly, concise message (e.g. "Elbette görüşebiliriz. Görüşme talebinizi oluşturabilmem için telefon numaranızı, görüşmek istediğiniz konuyu ve size uygun gün/saat bilgisini paylaşabilir misiniz? Şirket kurulumu düşünüyorsanız faaliyet alanınız netleştiyse onu da ekleyebilirsiniz; henüz net değilse sorun değil.").',
-  '     - DO NOT force a slow one-question-per-turn interrogation form.',
-  '     - USE INFORMATION ALREADY PROVIDED (NEVER ASK REDUNDANTLY): If the customer already provided details in earlier turns, treat them as collected facts. NEVER ask for already stated information again.',
-  '     - If phone is already provided -> DO NOT ask for phone.',
-  '     - If topic is already provided (or if customer says "İkisi de olabilir") -> accept both / do NOT ask topic again.',
-  '     - If customer states business activity is undecided ("Henüz karar vermedim", "bilmiyorum", "emin değilim", "fark etmez", etc.) -> accept it as undecided; do NOT repeat the question and proceed with meeting availability (preferred day/time).',
-  '     - DO NOT proactively ask or introduce residency/visa questions (do not ask about visa or ask "Kaç adet oturum vizesi gerekecek?" merely because the customer asked about company formation) unless the customer explicitly asks about residency/visas or states a visa requirement.',
-  '5. SAFE ACKNOWLEDGEMENT WITHOUT FAKE CONFIRMATION:',
-  '   - When both phone and preferred availability (day/time) are collected, acknowledge naturally and record their preferred timing as a pending appointment request (e.g. "Teşekkür ederim, görüşme talebinizi ve uygun olduğunuz zamanı aldım."). NEVER say "Randevunuz kesinleşti." unless actual booking confirmation exists.',
-  '6. CUSTOMER CONTROLS THE TOPIC:',
-  '   - If during appointment qualification the customer asks a question (e.g. pricing, banking, visas, process):',
-  '     * Answer THAT specific question directly and factually according to authoritative policy.',
-  '     * If they asked pricing: answer 8.000 AED Free Zone consultancy fee with bank/KYC included.',
-  '     * Then smoothly and naturally continue collecting the missing appointment qualification details.',
-  '7. STRICTLY FORBIDDEN CORPORATE & CALL-CENTER PHRASES (NEVER USE ANY OF THESE):',
-  '   - DO NOT say "danışmanlarımız", "danışmanlarımızla görüşme", "temsilcilerimiz", "ekibimiz", "ekibimiz sizinle iletişime geçecek", "ilgili birimimiz", "danışmanlarımız sizi arayacak", "WhatsApp\'tan sizinle iletişime geçeceğiz", "ekibimize yönlendiriyorum".',
-  '   - DO NOT say "görüşmeyi organize edebiliriz", "görüşmenizin daha verimli geçmesi için", "size özel bir yol haritası sunabilmemiz adına", "size özel bir ön çalışma ileterek süreci başlatabiliriz", "birkaç temel bilgiye ihtiyacımız var".',
-  '   - DO NOT say "sizi ilgili kişiye aktaracağım", "sizi Samed Bey\'e aktarıyorum", "sizi canlı temsilciye aktarıyorum", "canlı temsilciye aktarıyorum", "bir temsilci devralacak", "talebinizi WhatsApp\'a iletiyorum". The customer initiates WhatsApp contact themselves via the CTA.',
-  '   - DO NOT claim the appointment is confirmed unless a real calendar booking exists. The PENDING consultation is an internal request, not a confirmed appointment.',
-  '   - DO NOT introduce yourself as an "AI", "AI Assistant", "bot", or "virtual assistant".',
-  '   - Do NOT falsely explicitly claim "Ben Samed\'im" if identity is directly questioned. Speak directly, humanly, and professionally.',
-  '8. LANGUAGE & CONVERSATION FLOW:',
-  '   - Respond in the customer’s language. When the customer writes in Turkish, respond in natural, professional Turkish.',
-  '   - Do not repeat "How can we help you?" or "Nasıl yardımcı olabilirim?" on every message.',
-  '   - Use multi-turn conversation history: remember details provided earlier in the chat and never ask again for information the customer has already given.',
-  '9. INSTAGRAM TEXT-ONLY & VISUAL AI RESTRICTION:',
+  'INSTAGRAM CHANNEL PRESENTATION & FORMATTING RULES:',
+  '1. CHANNEL MEDIUM: You are conversing directly with a customer inside an Instagram Direct Message (DM). Present concise, clear, and natural responses suitable for mobile screens.',
+  '2. PLAIN TEXT FORMATTING & READABILITY (CRITICAL):',
+  '   - Keep responses mobile-friendly (typically under 800 characters).',
+  '   - When presenting lists of items (numbered 1., 2. or bullet points •), EACH item MUST be placed on its own separate line.',
+  '   - NEVER concatenate list items horizontally onto the same line.',
+  '   - Separate distinct points or paragraphs with clean line breaks for effortless mobile reading.',
+  '   - Do NOT use markdown bolding (**) or markdown headers (###); write plain, cleanly spaced text with bullet points (• ).',
+  '3. INSTAGRAM TEXT-ONLY & NO VISUAL GENERATION:',
   '   - Instagram Direct Messaging is strictly text-only. Never generate images or invoke visual generation.',
-  '   - If the customer asks to generate or create an image, respond naturally in text explaining that image generation is not supported on direct messages, and assist them directly with their business inquiry.',
-  '10. CUSTOMER DISPLAY-NAME & NATURAL ADDRESSING:',
-  '    - If the customer\'s real display name is provided in Customer Identity Context (e.g. "Ahmet Yılmaz"), you may address them naturally and politely in Turkish (e.g. "Ahmet Bey" or natural conversational addressing).',
-  '    - NEVER address the customer by their Instagram username (e.g. do NOT say "@ahmet34" or "@ahmetyilmaz").',
-  '    - NEVER address the customer as "Instagram conversation", "Instagram User", or by an ID.',
-  '    - Do NOT repeatedly use their name in every response; use it naturally where appropriate (greetings, acknowledgements, qualification).',
-  '    - During appointment qualification, if the customer\'s real name is already known from context, do NOT redundantly ask "Adınız nedir?". Proceed directly to collecting missing contact details (phone/WhatsApp, service details).',
-  '11. FORMATTING RULES (CRITICAL FOR READABILITY):',
-  '    - Concise mobile DM answers: keep responses focused and mobile-friendly (typically under 800 characters).',
-  '    - When presenting lists of 2 or more items (numbered 1., 2., 3. or bullet points •), EACH item MUST be placed on its own separate line.',
-  '    - NEVER concatenate list items horizontally onto the same line.',
-  '    - Separate distinct points with clean paragraph breaks so the message is effortless to read on mobile DM screens.',
-  '    - Do not use markdown bolding (**) or markdown headers (###); write plain, beautifully spaced text with clean bullet points (• ).',
+  '   - If the customer asks to generate or create an image, respond naturally in text explaining that direct messages are text-only, and assist them directly with their business inquiry.',
+  '4. CUSTOMER IDENTITY & ADDRESSING:',
+  '   - If the customer\'s real display name is known (e.g. "Ahmet Yılmaz"), you may address them naturally and politely in Turkish (e.g. "Ahmet Bey" or natural conversational addressing).',
+  '   - NEVER address the customer by their Instagram username (e.g. do NOT say "@ahmet34" or "@ahmetyilmaz").',
+  '   - NEVER address the customer as "Instagram conversation", "Instagram User", or by an ID.',
+  '   - Do NOT repeatedly use their name on every message; use it naturally where appropriate.',
+  '5. NATURAL BRAND VOICE & IDENTITY:',
+  '   - Do NOT introduce yourself as an "AI", "AI Assistant", "bot", or "virtual assistant".',
+  '   - Do NOT falsely claim to be a physical human employee if identity is explicitly questioned, but speak naturally, humanly, and professionally.',
+  '   - Respond in the customer’s language (e.g. natural, professional Turkish).',
+  '6. ACCURACY & NO FALSE BOOKING CLAIMS:',
+  '   - When meeting information is noted or collected, do NOT claim a calendar booking/appointment is definitively confirmed unless a real calendar booking exists. Clearly distinguish "görüşme talebinizi not ettim / aldım" from a confirmed calendar appointment.',
+  '   - Do NOT append wa.me links, raw URLs, or URL-encoded payloads.',
 ].join('\n'));
+
+
 
 
 
@@ -143,14 +108,22 @@ export function extractReliableCustomerName(rawDisplayName) {
 }
 
 /**
- * Strips unsupported automated contact promises from AI generated responses,
+ * Strips unsupported automated contact promises and unwanted URLs/CTAs from AI generated responses,
  * enforcing truthfulness in channel communications without mutating the Main business policy.
  */
 export function sanitizeInstagramOutboundResponse(rawText) {
   if (!rawText || typeof rawText !== 'string') return '';
   let text = rawText;
 
-  // Patterns for false contact promises (e.g. "telefon numarası üzerinden sizinle iletişime geçeceğiz", "ekibimiz sizi arayacak")
+  // 1. Strip any wa.me links, WhatsApp CTA links, and raw URL-encoded URLs
+  text = text.replace(/https?:\/\/wa\.me\/\S+/gi, '');
+  text = text.replace(/\bwa\.me\/\S+/gi, '');
+  text = text.replace(/https?:\/\/[^\s]*%[0-9A-Fa-f]{2}[^\s]*/g, '');
+
+  // 2. Strip CTA lead sentences if present
+  text = text.replace(/[^.!?\n]*\b(?:Aşağıdaki\s+bağlantı|bağlantı\s+üzerinden\s+WhatsApp|WhatsApp'tan\s+doğrudan\s+iletişime)[^.!?\n]*[.!?]?/giu, '');
+
+  // 3. Patterns for false contact promises (e.g. "telefon numarası üzerinden sizinle iletişime geçeceğiz", "ekibimiz sizi arayacak")
   const sentencePatterns = [
     /[^.!?\n]*\b(?:iletişime\s+geç\w*|arayacağ\w*|ulaşacağ\w*|ulaşılacak\w*|aranacak\w*)[^.!?\n]*[.!?]?/giu,
     /[^.!?\n]*\b(?:numara\w*\s+üzerinden)[^.!?\n]*[.!?]?/giu,
@@ -258,6 +231,28 @@ function normalizeTrText(text) {
     .trim();
 }
 
+export function isGreetingOnly(text = '') {
+  if (typeof text !== 'string') return false;
+  const clean = text.trim();
+  const normalized = normalizeTrText(clean)
+    .replace(/[!.,?:;()\[\]{}…~*_\-—–"']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) return false;
+
+  const greetingPattern = /^(?:merhaba|merhabalar|selam|selamlar|selamun\s+aleykum|selamün\s+aleyküm|sa|slm|mrb|iyi\s+gunler|iyi\s+aksamlar|gunaydin|tekrar\s+merhaba|merhaba\s+samed\s+bey|merhaba\s+samed|selam\s+samed\s+bey|selam\s+samed|hello|hi|hey|good\s+morning|good\s+afternoon|good\s+evening)$/i;
+
+  return greetingPattern.test(normalized);
+}
+
+export function hasCurrentTurnMeetingIntent(text = '') {
+  if (typeof text !== 'string') return false;
+  return /(?:görüşmek\s+istiyorum|gorusmek\s+istiyorum|görüşme\s+yapmak|gorusme\s+yapmak|telefonla\s+görüş|telefonla\s+gorus|randevu\s+alabilir\s+miyim|randevu\s+almak\s+istiyorum|randevu\s+istiyorum|randevu\s+talebi|arayabilir\s+misiniz|arar\s+misiniz|arayın|ararmisiniz|sizinle\s+görüş|sizinle\s+gorus|sizinle\s+konuş|sizinle\s+konus|samed\s+bey\s+ile\s+görüş|samed\s+bey\s+ile\s+gorus|samed\s+beyle\s+görüş|samed\s+beyle\s+gorus|konuşmak\s+istiyorum|konusmak\s+istiyorum|ne\s+zaman\s+görüş|ne\s+zaman\s+gorus|müsait\s+olduğunuzda\s+görüş|musait\s+oldugunuzda\s+gorus|yarın\s+\d{1,2}[:.]\d{2}\s+görüş|yarin\s+\d{1,2}[:.]\d{2}\s+gorus|yarın\s+\d{1,2}[:.]\d{2}\s+görüşebilir|yarin\s+\d{1,2}[:.]\d{2}\s+gorusebilir)/iu.test(text)
+    || /(?:görüşebilir\s+miyiz|gorusebilir\s+miyiz|toplantı\s+yapabilir|toplanti\s+yapabilir|görüşme\s+ayarlayabilir|gorusme\s+ayarlayabilir)/iu.test(text)
+    || /(?:appointment|schedule\s+a\s+call|meeting\s+with|call\s+me|discuss\s+over\s+phone)/i.test(text);
+}
+
 export function extractUndecidedSignals(text = '') {
   if (typeof text !== 'string') return false;
   const norm = normalizeTrText(text);
@@ -281,39 +276,38 @@ export function generateContextualConversationalFallback({ text = '', conversati
   const phone = memory.phone || extractPhoneNumberFromText(cleanText);
   const requestedTime = memory.requestedTime || extractMeetingTimePreference(cleanText);
   const isUndecided = extractUndecidedSignals(cleanText);
-  const isQualified = Boolean(phone && requestedTime);
+  const isGreeting = isGreetingOnly(cleanText);
+  const hasMeeting = hasCurrentTurnMeetingIntent(cleanText);
 
-  if (isQualified && memory.ctaUrl) {
-    return `Teşekkür ederim, görüşme talebinizi aldım. Aşağıdaki bağlantı üzerinden WhatsApp'tan doğrudan iletişime geçebilirsiniz:\n\n${memory.ctaUrl}`;
+  // 1. If customer sends a greeting / re-entry:
+  if (isGreeting) {
+    if (memory.serviceRequested || memory.businessActivity) {
+      return 'Merhaba, tekrar hoş geldiniz. Size nasıl yardımcı olabilirim?';
+    }
+    return 'Merhaba, hoş geldiniz. Size nasıl yardımcı olabilirim?';
   }
 
+  // 2. If customer is undecided:
   if (isUndecided) {
-    if (!requestedTime) {
-      return 'Anladım, faaliyet alanı netleşmediyse sorun değil; görüşme sırasında detayları birlikte değerlendirebiliriz. Görüşme için size uygun gün ve saat aralığını paylaşabilir misiniz?';
-    }
-    if (phone && memory.ctaUrl) {
-      return `Anladım, detayları görüşmemizde birlikte netleştirebiliriz. Aşağıdaki bağlantı üzerinden WhatsApp'tan doğrudan iletişime geçebilirsiniz:\n\n${memory.ctaUrl}`;
-    }
-    return 'Anladım, detayları görüşmemizde birlikte netleştirebiliriz. Görüşme talebinizi aldım.';
+    return 'Anladım, faaliyet alanı veya detaylar henüz netleşmediyse sorun değil; süreci ve seçenekleri birlikte değerlendirebiliriz. Size nasıl yardımcı olabilirim?';
   }
 
-  if (hasHighIntentAppointmentSignals(cleanText)) {
-    if (!phone && !requestedTime) {
-      return 'Elbette görüşebiliriz. Görüşme talebinizi oluşturabilmem için telefon numaranızı, görüşmek istediğiniz konuyu ve size uygun gün/saat bilgisini iletebilir misiniz?';
+  // 3. If CURRENT turn explicitly asks for a meeting / call:
+  if (hasMeeting) {
+    if (phone && requestedTime) {
+      return 'Bilgilerinizi aldım. Görüşme talebinizi not ettim, size en kısa sürede dönüş sağlayacağız.';
     }
     if (phone && !requestedTime) {
-      return 'Telefon numaranızı aldım. Görüşme için size uygun gün ve saat aralığını paylaşabilir misiniz?';
+      return 'Görüşme talebiniz için size uygun gün ve saat aralığını paylaşabilir misiniz?';
     }
     if (!phone && requestedTime) {
-      return 'Uygun olduğunuz zamanı aldım. Sizinle iletişime geçebilmemiz için telefon numaranızı paylaşabilir misiniz?';
+      return 'Görüşme talebiniz için size ulaşabileceğimiz telefon numaranızı paylaşabilir misiniz?';
     }
+    return 'Görüşme talebinizi planlayabilmemiz için telefon numaranızı ve size uygun gün/saat aralığını iletebilir misiniz?';
   }
 
-  if (phone && !requestedTime) {
-    return 'Numaranızı kaydettim. Görüşme için size uygun gün ve saat aralığını paylaşabilir misiniz?';
-  }
-
-  return 'Mesajınızı aldım. Şirket kuruluşu veya oturum danışmanlığı ile ilgili sorularınızı yanıtlayabilir veya görüşme talebinizi planlayabilirim.';
+  // 4. Default safe fallback
+  return 'Mesajınızı aldım. Şirket kuruluşu, oturum ve danışmanlık hizmetlerimizle ilgili sorularınızı yanıtlayabilir veya görüşme talebinizi planlayabilirim. Size nasıl yardımcı olabilirim?';
 }
 
 /**
@@ -464,23 +458,11 @@ export async function resolveDurableConversationMemory({
 }
 /**
  * Builds the structured memory instruction for the system prompt.
- * Contains durable facts, topic continuity rules, and strict anti-re-asking constraints.
+ * Contains durable facts, topic continuity rules, current-turn intent priority, and strict anti-re-asking constraints.
  */
 export function buildStructuredMemoryInstruction(memory = {}) {
-  const isQualified = Boolean(memory.phone && memory.requestedTime);
-  const ctaInstruction = isQualified && memory.ctaUrl && !memory.ctaDelivered
-    ? [
-        '',
-        'MEETING QUALIFICATION COMPLETED (PHONE & MEETING TIME PRESENT):',
-        `- Both contact phone ("${memory.phone}") and preferred meeting time ("${memory.requestedTime}") have been collected.`,
-        '- DO NOT say "Sizinle paylaştığınız numara üzerinden iletişime geçilecektir", "Numaranız üzerinden sizinle iletişime geçeceğiz", or that an agent/team will call them.',
-        '- Acknowledge their meeting request warmly and present the customer-initiated WhatsApp contact link so the customer can initiate direct contact with Samed Bey on WhatsApp:',
-        memory.ctaUrl,
-      ]
-    : [];
-
   const lines = [
-    'DURABLE CONVERSATION MEMORY & PERSISTED CRM FACTS:',
+    'DURABLE CONVERSATION CONTEXT & PERSISTED CRM FACTS:',
     `- Active Topic / Context: ${memory.serviceRequested || 'Company Formation & Consultancy (UAE / Dubai)'}`,
     memory.customerName ? `- Customer Real Name: "${memory.customerName}"` : `- Customer Real Name: Unknown`,
     memory.serviceRequested ? `- Service / Consultation Topic: "${memory.serviceRequested}"` : `- Service / Consultation Topic: General Consultancy`,
@@ -491,20 +473,32 @@ export function buildStructuredMemoryInstruction(memory = {}) {
     memory.jurisdictionPreference ? `- Jurisdiction Preference: ${memory.jurisdictionPreference}` : `- Jurisdiction Preference: Free Zone (Default)`,
     memory.phone ? `- Contact Phone / WhatsApp: ${memory.phone}` : `- Contact Phone / WhatsApp: Missing`,
     memory.requestedTime ? `- Preferred Meeting Time: ${memory.requestedTime}${memory.timezone ? ` (${memory.timezone})` : ''}` : `- Preferred Meeting Time: Missing`,
-    memory.ctaDelivered ? `- Customer WhatsApp CTA: Already delivered in a previous turn (Do NOT resend CTA link)` : null,
     '',
-    'STRICT ANTI-REDUNDANT-QUESTION & CONVERSATION RULES:',
-    '1. NEVER re-ask any fact listed above as already known or answered!',
-    memory.phone ? '2. Customer Phone is ALREADY KNOWN. DO NOT ask for their phone number again.' : null,
-    memory.serviceRequested ? '3. Service / Consultation Topic is ALREADY KNOWN. DO NOT ask them what service or to choose between options again.' : null,
-    memory.businessActivity || memory.activityState === 'NOT_DECIDED' ? '4. Business Activity is ALREADY ANSWERED (known or undecided). DO NOT ask for their business activity or sector again.' : null,
-    memory.requestedTime ? '5. Preferred Meeting Time is ALREADY KNOWN. DO NOT ask for their preferred time or availability again.' : null,
-    memory.customerName ? '6. Customer Real Name is ALREADY KNOWN. DO NOT ask "Adınız nedir?".' : null,
-    '7. NATURAL MULTI-FIELD COLLECTION: When a customer requests a meeting, ask currently missing required details (phone, topic, preferred day/time) naturally in ONE response instead of interrogating one question per turn.',
-    '8. UNDECIDED ANSWERS ARE VALID: If customer says "Henüz karar vermedim", "bilmiyorum", "fark etmez", etc., accept it smoothly, do not repeat the question, and proceed with scheduling the meeting.',
-    '9. TOPIC CONTINUITY: Follow-up questions inherit the active subject.',
-    '10. NO FALSE PROMISES: NEVER say "Sizinle paylaştığınız numara üzerinden iletişime geçilecektir" or that an automated call will happen.',
-    ...ctaInstruction,
+    'CONVERSATION CONTINUITY & CURRENT-TURN INTENT RULES:',
+    '1. CURRENT-TURN INTENT HAS HIGHEST PRIORITY:',
+    '   - The customer\'s CURRENT message governs the intent and purpose of this conversational turn.',
+    '   - Durable facts provide historical context and continuity; they MUST NEVER replace or hijack the meaning of the current message.',
+    '   - Past workflows or historical qualification states MUST NOT force an unwanted action onto a new turn.',
+    '2. GREETINGS & RE-ENTRIES:',
+    '   - If the customer sends a greeting or re-entry message (e.g. "Merhaba", "Selam", "Merhaba Samed Bey", "İyi günler", "Tekrar merhaba"), respond naturally as a greeting.',
+    '   - A greeting is a greeting. It must NOT automatically become a meeting request, appointment confirmation, qualification questionnaire, or "görüşme talebinizi aldım".',
+    '   - If helpful and natural, you may briefly reference prior context without forcing it into every greeting.',
+    '3. NEVER RE-ASK KNOWN FACTS (ANTI-INTERROGATION):',
+    '   - Never re-ask any fact listed above as already known or answered!',
+    memory.phone ? '   - Customer Phone is ALREADY KNOWN. DO NOT ask for their phone number again.' : null,
+    memory.serviceRequested ? '   - Service / Consultation Topic is ALREADY KNOWN. DO NOT ask them what service or to choose between options again.' : null,
+    memory.businessActivity || memory.activityState === 'NOT_DECIDED' ? '   - Business Activity is ALREADY ANSWERED (known or undecided). DO NOT ask for their business activity or sector again.' : null,
+    memory.requestedTime ? '   - Preferred Meeting Time is ALREADY KNOWN. DO NOT ask for their preferred time or availability again.' : null,
+    memory.customerName ? '   - Customer Real Name is ALREADY KNOWN. DO NOT ask "Adınız nedir?".' : null,
+    '   - If customer asks a follow-up question (e.g. "Peki banka hesabı nasıl olacak?"), answer it within the established context without asking what topic they mean.',
+    '4. UNDECIDED ANSWERS ARE VALID:',
+    '   - If customer says "Henüz karar vermedim", "bilmiyorum", "fark etmez", etc., accept it smoothly without repeating the question.',
+    '5. EXPLICIT MEETING INTENT (CURRENT TURN ONLY):',
+    '   - Activate meeting/consultation scheduling ONLY if the CURRENT customer message explicitly requests a meeting, call, or appointment (e.g. "Sizinle görüşmek istiyorum", "Telefonla görüşebilir miyiz?", "Randevu alabilir miyim?", "Yarın 14:00 görüşebilir miyiz?").',
+    '   - Collect genuinely missing information naturally without rigid interrogation.',
+    '   - When sufficient meeting information is received, acknowledge and note the request naturally (e.g. "Bilgilerinizi aldım. Görüşme talebinizi not ettim, size en kısa sürede dönüş sağlayacağız.").',
+    '   - DO NOT append wa.me links, WhatsApp CTA links, or raw URL payloads.',
+    '   - DO NOT claim a calendar booking is definitively confirmed unless there is a real booking.',
   ].filter((p) => p !== null);
 
   return lines.join('\n');
@@ -930,12 +924,13 @@ export async function orchestrateInstagramInboundAiResponse({
     rawMessages: historyData.rawMessages || [],
   });
 
-  // Evaluate / ensure high-intent lead qualification & CTA if qualified
+  // Evaluate high-intent lead qualification in CRM (records PENDING consultation and leads in DB)
   let qualResult = null;
   const isQualified = Boolean(durableMemory.phone && durableMemory.requestedTime);
-  const rawTurnText = history.map((h) => h.parts?.[0]?.text || h.content || '').join('\n') + '\n' + text;
+  const isGreeting = isGreetingOnly(text);
+  const hasMeetingIntent = hasCurrentTurnMeetingIntent(text);
 
-  if (isQualified || hasHighIntentAppointmentSignals(rawTurnText)) {
+  if (!isGreeting && (hasMeetingIntent || isQualified)) {
     try {
       qualResult = await evaluateAndProcessHighIntentLead({
         tenantId,
@@ -943,10 +938,6 @@ export async function orchestrateInstagramInboundAiResponse({
         database,
         httpClient: http,
       });
-      if (qualResult?.ctaUrl) {
-        durableMemory.ctaUrl = qualResult.ctaUrl;
-        durableMemory.prefilledText = qualResult.prefilledText;
-      }
     } catch (qualErr) {
       console.warn('INSTAGRAM_QUAL_EVAL_WARN', qualErr?.message);
     }
@@ -1025,17 +1016,7 @@ export async function orchestrateInstagramInboundAiResponse({
     }
 
     const sanitizedResponse = sanitizeInstagramOutboundResponse(rawAiResponseText);
-    let formattedResponse = formatInstagramDmResponse(sanitizedResponse);
-
-    // Deterministic CTA Attachment:
-    // If qualification is complete and consultation exists with CTA url, and CTA was not yet delivered:
-    if (isQualified && qualResult?.ctaUrl && !durableMemory.ctaDelivered) {
-      if (!formattedResponse.includes('wa.me')) {
-        const ctaLeadText = qualResult.ctaPayload?.dm_response_text ||
-          "Görüşme talebinizi WhatsApp üzerinden doğrudan iletmek için aşağıdaki bağlantıyı kullanabilirsiniz:";
-        formattedResponse = `${formattedResponse}\n\n${ctaLeadText}\n${qualResult.ctaUrl}`.trim();
-      }
-    }
+    const formattedResponse = formatInstagramDmResponse(sanitizedResponse);
 
     if (!formattedResponse) {
       return { aiInvoked: true, delivered: false, reason: 'EMPTY_AI_RESPONSE' };
@@ -1276,9 +1257,10 @@ export async function generateAndDeliverInstagramAssistantResponse({
 
     let qualResult = null;
     const isQualified = Boolean(durableMemory.phone && durableMemory.requestedTime);
-    const rawTurnText = history.map((h) => h.parts?.[0]?.text || h.content || '').join('\n') + '\n' + textToAnswer;
+    const isGreeting = isGreetingOnly(textToAnswer);
+    const hasMeetingIntent = hasCurrentTurnMeetingIntent(textToAnswer);
 
-    if (isQualified || hasHighIntentAppointmentSignals(rawTurnText)) {
+    if (!isGreeting && (hasMeetingIntent || isQualified)) {
       try {
         qualResult = await evaluateAndProcessHighIntentLead({
           tenantId,
@@ -1286,10 +1268,6 @@ export async function generateAndDeliverInstagramAssistantResponse({
           database: client,
           httpClient: http,
         });
-        if (qualResult?.ctaUrl) {
-          durableMemory.ctaUrl = qualResult.ctaUrl;
-          durableMemory.prefilledText = qualResult.prefilledText;
-        }
       } catch (qualErr) {
         console.warn('INSTAGRAM_QUAL_EVAL_WARN', qualErr?.message);
       }
@@ -1363,16 +1341,7 @@ export async function generateAndDeliverInstagramAssistantResponse({
       }
 
       const sanitizedResponse = sanitizeInstagramOutboundResponse(rawAiResponseText);
-      let formattedResponse = formatInstagramDmResponse(sanitizedResponse);
-
-      // Deterministic CTA Attachment:
-      if (isQualified && qualResult?.ctaUrl && !durableMemory.ctaDelivered) {
-        if (!formattedResponse.includes('wa.me')) {
-          const ctaLeadText = qualResult.ctaPayload?.dm_response_text ||
-            "Görüşme talebinizi WhatsApp üzerinden doğrudan iletmek için aşağıdaki bağlantıyı kullanabilirsiniz:";
-          formattedResponse = `${formattedResponse}\n\n${ctaLeadText}\n${qualResult.ctaUrl}`.trim();
-        }
-      }
+      const formattedResponse = formatInstagramDmResponse(sanitizedResponse);
 
       if (!formattedResponse) return { skipped: true, reason: 'EMPTY_AI_RESPONSE' };
 

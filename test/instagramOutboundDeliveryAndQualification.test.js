@@ -227,10 +227,10 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
     assert.equal(failUpdate.params[0], 'META_IG_ERROR_100', 'Must store sanitized Meta failure code');
   });
 
-  it('E & F: Appointment rules prohibit unsolicited residency/visa questions for company formation', () => {
+  it('E & F: Presentation rules enforce plain text mobile formatting', () => {
     const rules = Array.isArray(INSTAGRAM_CHANNEL_PRESENTATION_RULES) ? INSTAGRAM_CHANNEL_PRESENTATION_RULES : [String(INSTAGRAM_CHANNEL_PRESENTATION_RULES)];
-    assert.ok(rules.some(r => r.includes('DO NOT proactively ask or introduce residency/visa questions')), 'Must prohibit proactive visa questions');
-    assert.ok(rules.some(r => r.includes('reference library')), 'Must clarify Knowledge scope');
+    assert.ok(rules.some(r => r.includes('INSTAGRAM CHANNEL PRESENTATION & FORMATTING RULES')), 'Must include channel presentation rules');
+    assert.ok(rules.some(r => r.includes('PLAIN TEXT FORMATTING & READABILITY')), 'Must include plain text readability rules');
   });
 
   it('H: NEVER_AI suppression produces 0 AI generations and 0 Instagram outbound calls', async () => {
@@ -404,12 +404,11 @@ describe('Task 9: Real Instagram Outbound Delivery & Natural Appointment Qualifi
     assert.ok(text.includes('Kaynak: INSTAGRAM_AD') || text.includes('Kaynak: Instagram Ad') || text.includes('Instagram Ad'), 'Must preserve Instagram Ad source attribution');
   });
 
-  it('TEST F & G & H: Presentation rules enforce conversational Samed-voice without fake confirmation or handoff', () => {
+  it('TEST F & G & H: Presentation rules enforce natural brand voice without fake confirmation or raw URLs', () => {
     const rules = Array.isArray(INSTAGRAM_CHANNEL_PRESENTATION_RULES) ? INSTAGRAM_CHANNEL_PRESENTATION_RULES : [String(INSTAGRAM_CHANNEL_PRESENTATION_RULES)];
-    assert.ok(rules.some(r => r.includes('Internal escalation') || r.includes('The customer initiates WhatsApp contact themselves')));
-    assert.ok(rules.some(r => r.includes('NEVER say "Randevunuz kesinleşti."')));
-    assert.ok(rules.some(r => r.includes('stiff or corporate artificial phrases') || r.includes('FORBIDDEN CORPORATE')));
-    assert.ok(rules.some(r => r.includes("Danışmanlık ücretimiz 8.000 AED'dir")));
+    assert.ok(rules.some(r => r.includes('NATURAL BRAND VOICE & IDENTITY')));
+    assert.ok(rules.some(r => r.includes('ACCURACY & NO FALSE BOOKING CLAIMS')));
+    assert.ok(rules.some(r => r.includes('Do NOT append wa.me links')));
   });
   it('TEST 1: Generic intent signal ("Samed Bey ile görüşmek istiyorum") does not trigger HOT lead or WhatsApp notification', async () => {
     const httpCalls = [];

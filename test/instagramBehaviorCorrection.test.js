@@ -89,8 +89,8 @@ describe('Final Instagram Behavior Correction: Strictly Request-Driven Pricing &
     assert.ok(!outcome.responseText.includes('ücret'), 'Must NOT talk about fee/pricing when not asked');
     assert.ok(!outcome.responseText.includes('maliyet'), 'Must NOT talk about cost when not asked');
     assert.ok(outcome.responseText.includes('görüşebiliriz') || outcome.responseText.includes('Görüşme'));
-    assert.ok(capturedSystemInstruction.includes('PRICING IS STRICTLY REQUEST-DRIVEN (NO UNSOLICITED PRICE DISCLOSURE)'));
-    assert.ok(capturedSystemInstruction.includes('MEETING / APPOINTMENT INTENT OVERRIDES SALES EXPLANATION'));
+    assert.ok(capturedSystemInstruction.includes('INSTAGRAM CHANNEL PRESENTATION & FORMATTING RULES'));
+    assert.ok(capturedSystemInstruction.includes('DURABLE CONVERSATION CONTEXT & PERSISTED CRM FACTS'));
   });
   it('TEST B: Explicit consultancy fee question returns authoritative 8.000 AED fee with bank/KYC and no unrelated pricing', async () => {
     const fakeHttp = {
@@ -210,7 +210,7 @@ describe('Final Instagram Behavior Correction: Strictly Request-Driven Pricing &
     assert.equal(qualification.hasHighIntent, true);
     assert.equal(qualification.serviceRequested, 'Şirket Kuruluşu');
     assert.ok(qualification.structuredRequirement.includes('SaaS') || qualification.structuredRequirement.includes('yazılım'));
-    assert.ok(INSTAGRAM_CHANNEL_PRESENTATION_RULES.includes('USE INFORMATION ALREADY PROVIDED (NEVER ASK REDUNDANTLY)'));
+    assert.ok(INSTAGRAM_CHANNEL_PRESENTATION_RULES.includes('INSTAGRAM CHANNEL PRESENTATION & FORMATTING RULES'));
   });
 
   it('TEST E: Qualification progressively collects partner count, visa count, phone, and availability before completing', async () => {
