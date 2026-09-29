@@ -132,7 +132,8 @@ test('22-23. Successful runtime conversation history formats cleanly without con
 
 test('24. Server/provider failure still surfaces safe error handling without crashing', () => {
   assert.match(appSource, /catch \(err\) \{/);
-  assert.match(appSource, /Could not generate chat response\./);
+  assert.match(appSource, /buildPublicChatFailure\(\{/);
+  assert.match(appSource, /status\(503\)\.json\(buildPublicChatFailure\(\{/);
   assert.match(jsSource, /The guide is temporarily unavailable\. Please try again\./);
 });
 

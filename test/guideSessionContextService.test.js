@@ -182,8 +182,9 @@ test('app.js extracts canonical structured context and isolates conversation mes
   assert.doesNotMatch(chatRoute, /roadmapState\.messages\.push\(userMessage\)/);
   // Proves canonical roadmap and tool keys are passed into buildGuideSessionContextSummary
   assert.match(chatRoute, /buildGuideSessionContextSummary\(\{[\s\S]*roadmap:\s*canonicalRoadmapValues,[\s\S]*roadmap_result:\s*typeof generatedAnalysis === 'string' \? generatedAnalysis : '',[\s\S]*tool:\s*structuredPlanningValues,/);
-  // Proves safe error logging diagnostic with code, message, and location
-  assert.match(chatRoute, /console\.error\(`Samcheguide Chat error: name=\$\{safeName\}/);
+  // Proves the shared public boundary owns sanitized diagnostics.
+  assert.match(chatRoute, /logPublicChatFailure\(\{/);
+  assert.doesNotMatch(chatRoute, /safeMessage|safeStack|Samcheguide Chat error/);
   // Proves no tenant or customer specific names are hardcoded
   assert.doesNotMatch(chatRoute, /blue dune|bluedune/i);
 });
