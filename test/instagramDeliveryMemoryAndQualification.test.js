@@ -63,6 +63,13 @@ describe('Mandatory Regression Suite: Safe Chunking, Multi-Turn Memory & CTA', (
     }
   });
 
+  it('0. 500 chars -> exactly one chunk', () => {
+    const text500 = 'A'.repeat(500);
+    const chunks = splitIntoInstagramDmChunks(text500, MAX_FINAL_INSTAGRAM_CHUNK_LENGTH);
+    assert.equal(chunks.length, 1);
+    assert.equal(chunks[0].length, 500);
+  });
+
   it('5. Turkish Unicode characters are fully preserved without corruption', () => {
     const turkishText = 'Şirket kuruluşu için gerekli belgeler: Çözüm ortaklığı, İkamet izni, Sağlık testi, Ödeme dekontu ve Üyelik kaydı.';
     const chunks = splitIntoInstagramDmChunks(turkishText, 900);
@@ -73,6 +80,24 @@ describe('Mandatory Regression Suite: Safe Chunking, Multi-Turn Memory & CTA', (
     assert.ok(chunks[0].includes('İkamet'));
     assert.ok(chunks[0].includes('Ödeme'));
     assert.ok(chunks[0].includes('Üyelik'));
+  });
+
+  it('6. Arabic Unicode characters are fully preserved without corruption', () => {
+    const arabicText = 'تأسيس الشركات في دبي: استشارات قانونية وتراخيص تجارية وإقامة مستثمر.';
+    const chunks = splitIntoInstagramDmChunks(arabicText, 900);
+    assert.equal(chunks.length, 1);
+    assert.equal(chunks[0], arabicText);
+    assert.ok(chunks[0].includes('تأسيس'));
+    assert.ok(chunks[0].includes('دبي'));
+  });
+
+  it('6b. Emoji and multi-byte Unicode safety', () => {
+    const emojiText = 'Dubai Şirket Kuruluşu 🚀💼✨ • Ücretsiz Danışmanlık 👍💬';
+    const chunks = splitIntoInstagramDmChunks(emojiText, 900);
+    assert.equal(chunks.length, 1);
+    assert.equal(chunks[0], emojiText);
+    assert.ok(chunks[0].includes('🚀'));
+    assert.ok(chunks[0].includes('💼'));
   });
   it('7. Long wa.me CTA URLs and web links remain intact within chunks', () => {
     const ctaUrl = 'https://wa.me/971527288586?text=' + encodeURIComponent('Merhaba Samed Bey, Dubai şirket kuruluşu için görüşme talebi oluşturdum.');
@@ -681,6 +706,250 @@ describe('Mandatory Regression Suite: Safe Chunking, Multi-Turn Memory & CTA', (
 
     assert.ok(ctaTenantB.startsWith('https://wa.me/971509998877?text='));
     assert.ok(ctaTenantB.includes(encodeURIComponent('Fatma Hanım')));
+  });
+
+  // =========================================================================
+  // TYPING LIFECYCLE TESTS (31 to 34)
+  // =========================================================================
+
+  it('31. Normal Success: typing_on -> generate -> format -> deliver -> typing_off', async () => {
+    const senderActions = [];
+    const fakeHttp = {
+      post: async (url, payload) => {
+        if (payload?.sender_action) {
+          senderActions.push(payload.sender_action);
+          return { data: { recipient_id: payload.recipient?.id } };
+        }
+        return { data: { message_id: 'mid.success.1' } };
+      },
+    };
+
+    const mockDb = {
+      connect: async () => mockDb,
+      release: () => {},
+      query: async (sql, params) => {
+        if (/FROM conversations/i.test(sql)) {
+          return { rowCount: 1, rows: [{ id: 'conv-typing-1', tenant_id: 't-1', status: 'open', handling_mode: 'AI', handling_version: 1 }] };
+        }
+        if (/INSERT INTO conversation_messages/i.test(sql)) {
+          return { rowCount: 1, rows: [{ id: 'msg-ai-1', content: params?.[3] }] };
+        }
+        if (/idempotency_key/i.test(sql)) {
+          return { rowCount: 0, rows: [] };
+        }
+        if (/FROM conversation_messages/i.test(sql)) {
+          return { rowCount: 1, rows: [{ id: 'msg-cust-1', sender_type: 'CUSTOMER', content: 'Merhaba' }] };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+    };
+
+    const inboundState = {
+      duplicate: false,
+      handlingVersion: 1,
+      customerMessage: { id: 'msg-cust-1' },
+      integration: {
+        tenant_id: 't-1',
+        assistant_id: 'ast-1',
+        config: { access_token: 'EAAB_token', instagram_account_id: '17841474291887372', activation_policy: 'ALL_MESSAGES' },
+      },
+      conversation: { id: 'conv-typing-1', tenant_id: 't-1', customer_external_id: '10203040', status: 'open', handling_mode: 'AI', handling_version: 1 },
+      shouldInvokeAi: true,
+    };
+
+    const outcome = await orchestrateInstagramInboundAiResponse({
+      database: mockDb,
+      inboundState,
+      senderIgsid: '10203040',
+      text: 'Merhaba',
+      http: fakeHttp,
+      generateAiResponse: async () => 'SamChe danışmanlık hizmetlerine hoş geldiniz.',
+      applyPacing: false,
+    });
+
+    assert.equal(outcome.delivered, true);
+    assert.deepEqual(senderActions, ['typing_on', 'typing_off']);
+  });
+
+  it('32. Generation Failure after typing_on: typing_off must be attempted without hanging', async () => {
+    const senderActions = [];
+    const fakeHttp = {
+      post: async (url, payload) => {
+        if (payload?.sender_action) {
+          senderActions.push(payload.sender_action);
+          return { data: { recipient_id: payload.recipient?.id } };
+        }
+        return { data: { message_id: 'mid.1' } };
+      },
+    };
+
+    const mockDb = {
+      connect: async () => mockDb,
+      release: () => {},
+      query: async (sql) => {
+        if (/FROM conversations/i.test(sql)) {
+          return { rowCount: 1, rows: [{ id: 'conv-typing-2', tenant_id: 't-1', status: 'open', handling_mode: 'AI', handling_version: 1 }] };
+        }
+        if (/idempotency_key/i.test(sql)) {
+          return { rowCount: 0, rows: [] };
+        }
+        if (/FROM conversation_messages/i.test(sql)) {
+          return { rowCount: 1, rows: [{ id: 'msg-cust-1', sender_type: 'CUSTOMER', content: 'Merhaba' }] };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+    };
+
+    const inboundState = {
+      duplicate: false,
+      handlingVersion: 1,
+      customerMessage: { id: 'msg-cust-1' },
+      integration: {
+        tenant_id: 't-1',
+        assistant_id: 'ast-1',
+        config: { access_token: 'EAAB_token', instagram_account_id: '17841474291887372', activation_policy: 'ALL_MESSAGES' },
+      },
+      conversation: { id: 'conv-typing-2', tenant_id: 't-1', customer_external_id: '10203040', status: 'open', handling_mode: 'AI', handling_version: 1 },
+      shouldInvokeAi: true,
+    };
+
+    const outcome = await orchestrateInstagramInboundAiResponse({
+      database: mockDb,
+      inboundState,
+      senderIgsid: '10203040',
+      text: 'Merhaba',
+      http: fakeHttp,
+      generateAiResponse: async () => '', // Empty AI response
+      applyPacing: false,
+    });
+
+    assert.equal(outcome.delivered, false);
+    assert.equal(outcome.reason, 'EMPTY_AI_RESPONSE');
+    assert.deepEqual(senderActions, ['typing_on', 'typing_off']);
+  });
+
+  it('33. Generation Exception/Timeout: typing_off must be attempted', async () => {
+    const senderActions = [];
+    const fakeHttp = {
+      post: async (url, payload) => {
+        if (payload?.sender_action) {
+          senderActions.push(payload.sender_action);
+          return { data: { recipient_id: payload.recipient?.id } };
+        }
+        return { data: { message_id: 'mid.1' } };
+      },
+    };
+
+    const mockDb = {
+      connect: async () => mockDb,
+      release: () => {},
+      query: async (sql) => {
+        if (/FROM conversations/i.test(sql)) {
+          return { rowCount: 1, rows: [{ id: 'conv-typing-3', tenant_id: 't-1', status: 'open', handling_mode: 'AI', handling_version: 1 }] };
+        }
+        if (/idempotency_key/i.test(sql)) {
+          return { rowCount: 0, rows: [] };
+        }
+        if (/FROM conversation_messages/i.test(sql)) {
+          return { rowCount: 1, rows: [{ id: 'msg-cust-1', sender_type: 'CUSTOMER', content: 'Merhaba' }] };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+    };
+
+    const inboundState = {
+      duplicate: false,
+      handlingVersion: 1,
+      customerMessage: { id: 'msg-cust-1' },
+      integration: {
+        tenant_id: 't-1',
+        assistant_id: 'ast-1',
+        config: { access_token: 'EAAB_token', instagram_account_id: '17841474291887372', activation_policy: 'ALL_MESSAGES' },
+      },
+      conversation: { id: 'conv-typing-3', tenant_id: 't-1', customer_external_id: '10203040', status: 'open', handling_mode: 'AI', handling_version: 1 },
+      shouldInvokeAi: true,
+    };
+
+    await assert.rejects(
+      async () => {
+        await orchestrateInstagramInboundAiResponse({
+          database: mockDb,
+          inboundState,
+          senderIgsid: '10203040',
+          text: 'Merhaba',
+          http: fakeHttp,
+          generateAiResponse: async () => { throw new Error('LLM connection timed out'); },
+          applyPacing: false,
+        });
+      },
+      /LLM connection timed out/
+    );
+
+    assert.deepEqual(senderActions, ['typing_on', 'typing_off']);
+  });
+
+  it('34. Provider Rejection on Delivery: typing_off must be attempted', async () => {
+    const senderActions = [];
+    const fakeHttp = {
+      post: async (url, payload) => {
+        if (payload?.sender_action) {
+          senderActions.push(payload.sender_action);
+          return { data: { recipient_id: payload.recipient?.id } };
+        }
+        const err = new Error('Meta API 400 Bad Request');
+        err.response = { status: 400, data: { error: { message: 'Invalid token', code: 190 } } };
+        throw err;
+      },
+    };
+
+    const mockDb = {
+      connect: async () => mockDb,
+      release: () => {},
+      query: async (sql, params) => {
+        if (/FROM conversations/i.test(sql)) {
+          return { rowCount: 1, rows: [{ id: 'conv-typing-4', tenant_id: 't-1', status: 'open', handling_mode: 'AI', handling_version: 1 }] };
+        }
+        if (/INSERT INTO conversation_messages/i.test(sql)) {
+          return { rowCount: 1, rows: [{ id: 'msg-ai-1', content: params?.[3] }] };
+        }
+        if (/idempotency_key/i.test(sql)) {
+          return { rowCount: 0, rows: [] };
+        }
+        if (/FROM conversation_messages/i.test(sql)) {
+          return { rowCount: 1, rows: [{ id: 'msg-cust-1', sender_type: 'CUSTOMER', content: 'Merhaba' }] };
+        }
+        if (/UPDATE conversation_messages/i.test(sql)) {
+          return { rowCount: 1, rows: [] };
+        }
+        return { rowCount: 0, rows: [] };
+      },
+    };
+
+    const inboundState = {
+      duplicate: false,
+      handlingVersion: 1,
+      customerMessage: { id: 'msg-cust-1' },
+      integration: {
+        tenant_id: 't-1',
+        assistant_id: 'ast-1',
+        config: { access_token: 'EAAB_token', instagram_account_id: '17841474291887372', activation_policy: 'ALL_MESSAGES' },
+      },
+      conversation: { id: 'conv-typing-4', tenant_id: 't-1', customer_external_id: '10203040', status: 'open', handling_mode: 'AI', handling_version: 1 },
+      shouldInvokeAi: true,
+    };
+
+    const outcome = await orchestrateInstagramInboundAiResponse({
+      database: mockDb,
+      inboundState,
+      senderIgsid: '10203040',
+      text: 'Merhaba',
+      http: fakeHttp,
+      generateAiResponse: async () => 'SamChe danışmanlık.',
+      applyPacing: false,
+    });
+
+    assert.equal(outcome.delivered, false);
+    assert.deepEqual(senderActions, ['typing_on', 'typing_off']);
   });
 
 });

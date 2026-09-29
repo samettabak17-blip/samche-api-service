@@ -410,44 +410,111 @@ async function defaultGenerateInstagramAiResponse({
   const defaultModel = provider.runtimeMetadata().model;
   const runtimeModel = model || defaultModel;
 
-  // Prepare Gemini contents from history
-  const contents = [];
+  // Prepare Gemini contents from history:
+  // Gemini requires that the first turn has role 'user' and turns alternate strictly.
+  const rawContents = [];
   if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
     for (const h of conversationHistory) {
-      if (h.role && Array.isArray(h.parts) && h.parts.length > 0 && h.parts[0]?.text) {
-        contents.push({ role: h.role, parts: h.parts });
+      const role = h.role === 'model' || h.role === 'assistant' ? 'model' : 'user';
+      let turnText = '';
+      if (Array.isArray(h.parts)) {
+        turnText = h.parts.map((p) => p?.text || '').filter(Boolean).join('\n\n').trim();
+      } else if (typeof h.content === 'string') {
+        turnText = h.content.trim();
+      }
+      if (!turnText) continue;
+
+      if (rawContents.length > 0 && rawContents[rawContents.length - 1].role === role) {
+        rawContents[rawContents.length - 1].parts[0].text += '\n\n' + turnText;
+      } else {
+        rawContents.push({ role, parts: [{ text: turnText }] });
       }
     }
   }
 
-  // Ensure current user message is at the end if not already present
-  if (contents.length === 0 || contents[contents.length - 1].role !== 'user' || contents[contents.length - 1].parts?.[0]?.text !== text) {
-    contents.push({ role: 'user', parts: [{ text }] });
+  // Remove any leading 'model' turns so history begins with 'user'
+  while (rawContents.length > 0 && rawContents[0].role === 'model') {
+    rawContents.shift();
   }
+
+  // Ensure current user message is at the end
+  const currentPrompt = String(text || '').trim();
+  if (currentPrompt) {
+    if (rawContents.length === 0) {
+      rawContents.push({ role: 'user', parts: [{ text: currentPrompt }] });
+    } else if (rawContents[rawContents.length - 1].role === 'user') {
+      // If the last turn in history is already the current user message, leave it; otherwise ensure currentPrompt
+      if (rawContents[rawContents.length - 1].parts[0]?.text !== currentPrompt) {
+        rawContents[rawContents.length - 1].parts[0].text = currentPrompt;
+      }
+    } else {
+      rawContents.push({ role: 'user', parts: [{ text: currentPrompt }] });
+    }
+  }
+
+  // Fallback to minimal contents if empty
+  const contents = rawContents.length > 0
+    ? rawContents
+    : [{ role: 'user', parts: [{ text: currentPrompt || 'Merhaba' }] }];
+
+  const extractResponseText = (response) => {
+    if (!response) return null;
+    if (typeof response.structured_text === 'string' && response.structured_text.trim()) {
+      return response.structured_text.trim();
+    }
+    const candidates = Array.isArray(response.candidates) ? response.candidates : [];
+    if (candidates.length > 0) {
+      const parts = Array.isArray(candidates[0]?.content?.parts) ? candidates[0].content.parts : [];
+      const textParts = parts.filter((p) => p?.thought !== true && typeof p?.text === 'string' && p.text.trim());
+      if (textParts.length > 0) {
+        return textParts.map((p) => p.text.trim()).join('\n\n');
+      }
+    }
+    if (typeof response.text === 'string' && response.text.trim()) {
+      return response.text.trim();
+    }
+    return null;
+  };
+
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), 25000);
 
   try {
     const response = await provider.generateContent({
       model: runtimeModel,
       contents,
       systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
+      signal: abortController.signal,
     });
-    return response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
+    const parsedText = extractResponseText(response);
+    if (parsedText) return parsedText;
   } catch (genErr) {
     console.warn(`INSTAGRAM_AI_GENERATION_WARN model=${runtimeModel} code=${genErr?.code ?? 'UNKNOWN'} err=${genErr?.message}`);
-    if (runtimeModel !== defaultModel) {
-      try {
-        const retryRes = await provider.generateContent({
-          model: defaultModel,
-          contents,
-          systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
-        });
-        return retryRes.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
-      } catch (retryErr) {
-        console.error(`INSTAGRAM_AI_GENERATION_FALLBACK_ERROR model=${defaultModel} code=${retryErr?.code ?? 'UNKNOWN'} err=${retryErr?.message}`);
-      }
-    }
-    return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
+
+  // Fallback retry with default model if distinct from runtimeModel
+  if (runtimeModel !== defaultModel) {
+    const retryController = new AbortController();
+    const retryTimeoutId = setTimeout(() => retryController.abort(), 25000);
+    try {
+      const retryRes = await provider.generateContent({
+        model: defaultModel,
+        contents,
+        systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
+        signal: retryController.signal,
+      });
+      const fallbackText = extractResponseText(retryRes);
+      if (fallbackText) return fallbackText;
+    } catch (retryErr) {
+      console.error(`INSTAGRAM_AI_GENERATION_FALLBACK_ERROR model=${defaultModel} code=${retryErr?.code ?? 'UNKNOWN'} err=${retryErr?.message}`);
+    } finally {
+      clearTimeout(retryTimeoutId);
+    }
+  }
+
+  return null;
 }
 
 const activeInstagramOrchestrations = new Set();
@@ -722,11 +789,14 @@ export async function orchestrateInstagramInboundAiResponse({
 
 
   // 8. Start Instagram Typing Indicator (non-blocking)
+  const cleanSenderId = String(senderIgsid || '').replace(/^instagram:\s*/i, '').trim();
+  let typingActive = false;
   const generationStartedAt = Date.now();
-  if (accessToken && senderIgsid) {
+
+  if (accessToken && cleanSenderId) {
     try {
-      await sendInstagramTypingIndicator({
-        recipientId: senderIgsid,
+      const typingRes = await sendInstagramTypingIndicator({
+        recipientId: cleanSenderId,
         accessToken,
         instagramAccountId: accountId,
         pageId: accountId,
@@ -734,94 +804,94 @@ export async function orchestrateInstagramInboundAiResponse({
         authMode,
         http,
       });
+      if (typingRes?.ok) typingActive = true;
     } catch (typingErr) {
       console.warn('INSTAGRAM_TYPING_INDICATOR_NON_BLOCKING_WARN', typingErr?.message);
     }
   }
 
-  // 9. Generate AI response
-  let rawAiResponseText = '';
-  if (typeof generateAiResponse === 'function') {
-    rawAiResponseText = await generateAiResponse({
-      systemInstruction,
-      text,
-      conversationHistory: history,
-      model: assistantModel,
-    });
-  } else {
-    rawAiResponseText = await defaultGenerateInstagramAiResponse({
-      systemInstruction,
-      text,
-      conversationHistory: history,
-      model: assistantModel,
-    });
-  }
+  try {
+    // 9. Generate AI response
+    let rawAiResponseText = '';
+    if (typeof generateAiResponse === 'function') {
+      rawAiResponseText = await generateAiResponse({
+        systemInstruction,
+        text,
+        conversationHistory: history,
+        model: assistantModel,
+      });
+    } else {
+      rawAiResponseText = await defaultGenerateInstagramAiResponse({
+        systemInstruction,
+        text,
+        conversationHistory: history,
+        model: assistantModel,
+      });
+    }
 
-  const formattedResponse = formatInstagramDmResponse(rawAiResponseText);
-  if (!formattedResponse) {
-    return { aiInvoked: false, reason: 'EMPTY_AI_RESPONSE' };
-  }
+    const formattedResponse = formatInstagramDmResponse(rawAiResponseText);
+    if (!formattedResponse) {
+      return { aiInvoked: true, delivered: false, reason: 'EMPTY_AI_RESPONSE' };
+    }
 
-  // 10. Bounded Human-Like Adaptive Pacing
-  if (applyPacing !== false) {
-    await applyWhatsAppAdaptivePacing({
-      generationStartedAt,
-      content: formattedResponse,
-    });
-  }
+    // 10. Bounded Human-Like Adaptive Pacing
+    if (applyPacing !== false) {
+      await applyWhatsAppAdaptivePacing({
+        generationStartedAt,
+        content: formattedResponse,
+      });
+    }
 
-  // 11. Persist Assistant response atomically (guards against operator takeover race)
-  const persisted = await persistAssistantResponseIfCurrent({
-    tenantId,
-    conversationId,
-    content: formattedResponse,
-    handlingVersion,
-    idempotencyKey: inboundState.customerMessage?.id ? `instagram-ai:${inboundState.customerMessage.id}` : null,
-    deliveryStatus: 'SENDING',
-    database,
-  });
-
-  if (!persisted.delivered) {
-    console.info('INSTAGRAM_AI_RESPONSE_DROPPED reason=HANDLING_MODE_CHANGED');
-    return { delivered: false, dropped: true, reason: 'CONVERSATION_TAKEN_OVER' };
-  }
-
-  if (persisted.duplicate) {
-    console.info('INSTAGRAM_AI_RESPONSE_DROPPED reason=DUPLICATE_IDEMPOTENCY_KEY');
-    return {
-      aiInvoked: false,
-      delivered: false,
-      duplicate: true,
-      reason: 'DUPLICATE_PERSIST_SKIPPED',
-      assistantMessageId: persisted.message?.id || null,
-    };
-  }
-
-  if (!accessToken || !senderIgsid) {
-    const transportError = Object.assign(new Error('Instagram delivery transport is not configured'), {
-      code: 'INSTAGRAM_DELIVERY_NOT_CONFIGURED',
-    });
-    await recordInstagramAssistantDeliveryFailure({
-      database,
+    // 11. Persist Assistant response atomically (guards against operator takeover race)
+    const persisted = await persistAssistantResponseIfCurrent({
       tenantId,
-      messageId: persisted.message?.id,
-      error: transportError,
+      conversationId,
+      content: formattedResponse,
+      handlingVersion,
+      idempotencyKey: inboundState.customerMessage?.id ? `instagram-ai:${inboundState.customerMessage.id}` : null,
+      deliveryStatus: 'SENDING',
+      database,
     });
-    return {
-      aiInvoked: true,
-      delivered: false,
-      reason: transportError.code,
-      responseText: formattedResponse,
-      assistantMessageId: persisted.message?.id || null,
-    };
-  }
 
-  // 12. Deliver outbound message to Instagram
-  let deliveryResult = null;
-  let deliveryError = null;
-  const cleanSenderId = String(senderIgsid || '').replace(/^instagram:\s*/i, '').trim();
+    if (!persisted.delivered) {
+      console.info('INSTAGRAM_AI_RESPONSE_DROPPED reason=HANDLING_MODE_CHANGED');
+      return { delivered: false, dropped: true, reason: 'CONVERSATION_TAKEN_OVER' };
+    }
 
-  if (accessToken && cleanSenderId) {
+    if (persisted.duplicate) {
+      console.info('INSTAGRAM_AI_RESPONSE_DROPPED reason=DUPLICATE_IDEMPOTENCY_KEY');
+      return {
+        aiInvoked: false,
+        delivered: false,
+        duplicate: true,
+        reason: 'DUPLICATE_PERSIST_SKIPPED',
+        assistantMessageId: persisted.message?.id || null,
+      };
+    }
+
+    if (!accessToken || !cleanSenderId) {
+      const transportError = Object.assign(new Error('Instagram delivery transport is not configured'), {
+        code: 'INSTAGRAM_DELIVERY_NOT_CONFIGURED',
+      });
+      await recordInstagramAssistantDeliveryFailure({
+        database,
+        tenantId,
+        messageId: persisted.message?.id,
+        error: transportError,
+      });
+      return {
+        aiInvoked: true,
+        delivered: false,
+        reason: transportError.code,
+        responseText: formattedResponse,
+        assistantMessageId: persisted.message?.id || null,
+      };
+    }
+
+    // 12. Deliver outbound message to Instagram
+    let deliveryResult = null;
+    let deliveryError = null;
+
     try {
       deliveryResult = await deliverInstagramText({
         recipientId: cleanSenderId,
@@ -848,35 +918,41 @@ export async function orchestrateInstagramInboundAiResponse({
         messageId: persisted.message?.id,
         error: deliveryErr,
       });
-    } finally {
-      sendInstagramTypingOff({
-        recipientId: cleanSenderId,
-        accessToken,
-        instagramAccountId: accountId,
-        pageId: accountId,
-        instagramUserId,
-        authMode,
-        http,
-      }).catch(() => {});
+    }
+
+    // Trigger high-intent qualification and silent internal notification asynchronously
+    evaluateAndProcessHighIntentLead({
+      tenantId,
+      conversationId,
+      database,
+      httpClient: http,
+    }).catch((err) => console.warn('HIGH_INTENT_LEAD_EVALUATION_NON_BLOCKING_WARN', err?.message));
+
+    return {
+      aiInvoked: true,
+      delivered: !deliveryError && Boolean(deliveryResult),
+      deliveryError: deliveryError?.message || null,
+      responseText: formattedResponse,
+      deliveryResult,
+      assistantMessageId: persisted.message?.id || null,
+    };
+  } finally {
+    if (typingActive && accessToken && cleanSenderId) {
+      try {
+        await sendInstagramTypingOff({
+          recipientId: cleanSenderId,
+          accessToken,
+          instagramAccountId: accountId,
+          pageId: accountId,
+          instagramUserId,
+          authMode,
+          http,
+        });
+      } catch (typingOffErr) {
+        console.warn('INSTAGRAM_TYPING_OFF_WARN', typingOffErr?.message);
+      }
     }
   }
-
-  // Trigger high-intent qualification and silent internal notification asynchronously
-  evaluateAndProcessHighIntentLead({
-    tenantId,
-    conversationId,
-    database,
-    httpClient: http,
-  }).catch((err) => console.warn('HIGH_INTENT_LEAD_EVALUATION_NON_BLOCKING_WARN', err?.message));
-
-  return {
-    aiInvoked: true,
-    delivered: !deliveryError && Boolean(deliveryResult),
-    deliveryError: deliveryError?.message || null,
-    responseText: formattedResponse,
-    deliveryResult,
-    assistantMessageId: persisted.message?.id || null,
-  };
   } finally {
     activeInstagramOrchestrations.delete(orchestrationKey);
   }
@@ -991,10 +1067,13 @@ export async function generateAndDeliverInstagramAssistantResponse({
 
 
     const generationStartedAt = Date.now();
-    if (accessToken && recipientIgsid) {
+    const cleanRecipient = String(recipientIgsid || '').replace(/^instagram:\s*/i, '').trim();
+    let typingActive = false;
+
+    if (accessToken && cleanRecipient) {
       try {
-        await sendInstagramTypingIndicator({
-          recipientId: recipientIgsid,
+        const typingRes = await sendInstagramTypingIndicator({
+          recipientId: cleanRecipient,
           accessToken,
           instagramAccountId: accountId,
           pageId: accountId,
@@ -1002,75 +1081,75 @@ export async function generateAndDeliverInstagramAssistantResponse({
           authMode,
           http,
         });
+        if (typingRes?.ok) typingActive = true;
       } catch (typingErr) {
         console.warn('INSTAGRAM_TYPING_INDICATOR_NON_BLOCKING_WARN', typingErr?.message);
       }
     }
 
-    let rawAiResponseText = '';
-    if (typeof generateAiResponse === 'function') {
-      rawAiResponseText = await generateAiResponse({
-        systemInstruction,
-        text: textToAnswer,
-        conversationHistory: history,
-        model: assistantModel,
-      });
-    } else {
-      rawAiResponseText = await defaultGenerateInstagramAiResponse({
-        systemInstruction,
-        text: textToAnswer,
-        conversationHistory: history,
-        model: assistantModel,
-      });
-    }
+    try {
+      let rawAiResponseText = '';
+      if (typeof generateAiResponse === 'function') {
+        rawAiResponseText = await generateAiResponse({
+          systemInstruction,
+          text: textToAnswer,
+          conversationHistory: history,
+          model: assistantModel,
+        });
+      } else {
+        rawAiResponseText = await defaultGenerateInstagramAiResponse({
+          systemInstruction,
+          text: textToAnswer,
+          conversationHistory: history,
+          model: assistantModel,
+        });
+      }
 
-    const formattedResponse = formatInstagramDmResponse(rawAiResponseText);
-    if (!formattedResponse) return { skipped: true, reason: 'EMPTY_AI_RESPONSE' };
+      const formattedResponse = formatInstagramDmResponse(rawAiResponseText);
+      if (!formattedResponse) return { skipped: true, reason: 'EMPTY_AI_RESPONSE' };
 
-    if (applyPacing !== false) {
-      await applyWhatsAppAdaptivePacing({
-        generationStartedAt,
-        content: formattedResponse,
-      });
-    }
+      if (applyPacing !== false) {
+        await applyWhatsAppAdaptivePacing({
+          generationStartedAt,
+          content: formattedResponse,
+        });
+      }
 
-    const persisted = await persistAssistantResponseIfCurrent({
-      tenantId,
-      conversationId,
-      content: formattedResponse,
-      handlingVersion: conversation.handling_version,
-      idempotencyKey: latestMsg.id ? `instagram-ai:${latestMsg.id}` : null,
-      deliveryStatus: 'SENDING',
-      database,
-    });
-
-    if (!persisted.delivered) {
-      return { delivered: false, dropped: true, reason: 'CONVERSATION_TAKEN_OVER' };
-    }
-
-    if (!accessToken || !recipientIgsid) {
-      const transportError = Object.assign(new Error('Instagram delivery transport is not configured'), {
-        code: 'INSTAGRAM_DELIVERY_NOT_CONFIGURED',
-      });
-      await recordInstagramAssistantDeliveryFailure({
-        database: client,
+      const persisted = await persistAssistantResponseIfCurrent({
         tenantId,
-        messageId: persisted.message?.id,
-        error: transportError,
+        conversationId,
+        content: formattedResponse,
+        handlingVersion: conversation.handling_version,
+        idempotencyKey: latestMsg.id ? `instagram-ai:${latestMsg.id}` : null,
+        deliveryStatus: 'SENDING',
+        database,
       });
-      return {
-        delivered: false,
-        reason: transportError.code,
-        responseText: formattedResponse,
-        assistantMessageId: persisted.message?.id || null,
-      };
-    }
 
-    let deliveryResult = null;
-    let deliveryError = null;
-    const cleanRecipient = String(recipientIgsid || '').replace(/^instagram:\s*/i, '').trim();
+      if (!persisted.delivered) {
+        return { delivered: false, dropped: true, reason: 'CONVERSATION_TAKEN_OVER' };
+      }
 
-    if (accessToken && cleanRecipient) {
+      if (!accessToken || !cleanRecipient) {
+        const transportError = Object.assign(new Error('Instagram delivery transport is not configured'), {
+          code: 'INSTAGRAM_DELIVERY_NOT_CONFIGURED',
+        });
+        await recordInstagramAssistantDeliveryFailure({
+          database: client,
+          tenantId,
+          messageId: persisted.message?.id,
+          error: transportError,
+        });
+        return {
+          delivered: false,
+          reason: transportError.code,
+          responseText: formattedResponse,
+          assistantMessageId: persisted.message?.id || null,
+        };
+      }
+
+      let deliveryResult = null;
+      let deliveryError = null;
+
       try {
         deliveryResult = await deliverInstagramText({
           recipientId: cleanRecipient,
@@ -1097,34 +1176,41 @@ export async function generateAndDeliverInstagramAssistantResponse({
           messageId: persisted.message?.id,
           error: deliveryErr,
         });
-      } finally {
-        sendInstagramTypingOff({
-          recipientId: cleanRecipient,
-          accessToken,
-          instagramAccountId: accountId,
-          pageId: accountId,
-          instagramUserId,
-          authMode,
-          http,
-        }).catch(() => {});
+      }
+
+      // Trigger high-intent qualification and silent internal notification asynchronously
+      evaluateAndProcessHighIntentLead({
+        tenantId,
+        conversationId,
+        database: client,
+        httpClient: http,
+      }).catch((err) => console.warn('HIGH_INTENT_LEAD_EVALUATION_NON_BLOCKING_WARN', err?.message));
+
+      return {
+        aiInvoked: true,
+        delivered: !deliveryError && Boolean(deliveryResult),
+        deliveryError: deliveryError?.message || null,
+        responseText: formattedResponse,
+        deliveryResult,
+        assistantMessageId: persisted.message?.id || null,
+      };
+    } finally {
+      if (typingActive && accessToken && cleanRecipient) {
+        try {
+          await sendInstagramTypingOff({
+            recipientId: cleanRecipient,
+            accessToken,
+            instagramAccountId: accountId,
+            pageId: accountId,
+            instagramUserId,
+            authMode,
+            http,
+          });
+        } catch (typingOffErr) {
+          console.warn('INSTAGRAM_TYPING_OFF_WARN', typingOffErr?.message);
+        }
       }
     }
-
-    // Trigger high-intent qualification and silent internal notification asynchronously
-    evaluateAndProcessHighIntentLead({
-      tenantId,
-      conversationId,
-      database: client,
-      httpClient: http,
-    }).catch((err) => console.warn('HIGH_INTENT_LEAD_EVALUATION_NON_BLOCKING_WARN', err?.message));
-
-    return {
-      delivered: !deliveryError && Boolean(deliveryResult),
-      deliveryError: deliveryError?.message || null,
-      responseText: formattedResponse,
-      deliveryResult,
-      assistantMessageId: persisted.message?.id || null,
-    };
 
   } finally {
     if (shouldRelease && typeof client?.release === 'function') {

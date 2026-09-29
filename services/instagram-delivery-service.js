@@ -18,12 +18,36 @@ function sanitizeMetaError(error) {
   return new InstagramDeliveryError(code, message, status >= 500 ? 502 : 409);
 }
 
-export function resolveInstagramDeliveryTarget({ authMode = null, instagramAccountId = null, pageId = 'me' } = {}) {
+export function resolveInstagramDeliveryTarget({ authMode = null, instagramAccountId = null, pageId = 'me', instagramUserId = null } = {}) {
   const normalizedAuthMode = String(authMode || '').trim().toUpperCase();
   if (normalizedAuthMode === 'INSTAGRAM_LOGIN') return 'me';
   return String(instagramAccountId || pageId || 'me').trim();
 }
+
 export const MAX_FINAL_INSTAGRAM_CHUNK_LENGTH = 900;
+
+export function resolveCandidateEndpoints({ authMode, instagramAccountId, pageId, instagramUserId, token }) {
+  const igBaseUrl = instagramGraphApiBase();
+  const fbBaseUrl = metaGraphApiBase();
+  const targetId = resolveInstagramDeliveryTarget({ authMode, instagramAccountId, pageId, instagramUserId });
+  const isInstagramLoginToken = String(authMode || '').trim().toUpperCase() === 'INSTAGRAM_LOGIN'
+    || String(token || '').startsWith('IGA')
+    || String(token || '').startsWith('IGQ');
+
+  return isInstagramLoginToken
+    ? Array.from(new Set([
+        `${igBaseUrl}/me/messages`,
+        ...(targetId !== 'me' ? [`${igBaseUrl}/${targetId}/messages`] : []),
+        `${fbBaseUrl}/me/messages`,
+        ...(targetId !== 'me' ? [`${fbBaseUrl}/${targetId}/messages`] : []),
+      ]))
+    : Array.from(new Set([
+        `${fbBaseUrl}/${targetId}/messages`,
+        ...(targetId !== 'me' ? [`${fbBaseUrl}/me/messages`] : []),
+        `${igBaseUrl}/me/messages`,
+        ...(targetId !== 'me' ? [`${igBaseUrl}/${targetId}/messages`] : []),
+      ]));
+}
 
 /**
  * Splits message text into safe Instagram DM chunks strictly respecting MAX_FINAL_INSTAGRAM_CHUNK_LENGTH (900 chars).
@@ -177,42 +201,23 @@ export async function deliverInstagramText({
 
   const cleanRecipientId = String(recipientId).replace(/^instagram:\s*/i, '').trim();
   const token = accessToken.trim();
-  const igBaseUrl = instagramGraphApiBase();
-  const fbBaseUrl = metaGraphApiBase();
-  const targetId = resolveInstagramDeliveryTarget({ authMode, instagramAccountId, pageId, instagramUserId });
+  const candidateEndpoints = resolveCandidateEndpoints({ authMode, instagramAccountId, pageId, instagramUserId, token });
 
-  const isInstagramLoginToken = String(authMode || '').trim().toUpperCase() === 'INSTAGRAM_LOGIN'
-    || token.startsWith('IGA')
-    || token.startsWith('IGQ');
-
-  const candidateEndpoints = isInstagramLoginToken
-    ? Array.from(new Set([
-        `${igBaseUrl}/me/messages`,
-        ...(targetId !== 'me' ? [`${igBaseUrl}/${targetId}/messages`] : []),
-        `${fbBaseUrl}/me/messages`,
-        ...(targetId !== 'me' ? [`${fbBaseUrl}/${targetId}/messages`] : []),
-      ]))
-    : Array.from(new Set([
-        `${fbBaseUrl}/${targetId}/messages`,
-        ...(targetId !== 'me' ? [`${fbBaseUrl}/me/messages`] : []),
-        `${igBaseUrl}/me/messages`,
-        ...(targetId !== 'me' ? [`${igBaseUrl}/${targetId}/messages`] : []),
-      ]));
-
-  const chunks = splitIntoInstagramDmChunks(content, MAX_FINAL_INSTAGRAM_CHUNK_LENGTH);
+  const rawChunks = splitIntoInstagramDmChunks(content, MAX_FINAL_INSTAGRAM_CHUNK_LENGTH);
+  const chunks = [...rawChunks];
   let primaryProviderMessageId = null;
   const deliveredIds = [];
   let workingEndpoint = candidateEndpoints[0];
 
-  for (let i = 0; i < chunks.length; i++) {
+  let i = 0;
+  while (i < chunks.length) {
     const chunk = chunks[i];
 
     // Pre-send Hard Limit Assertion: Must never exceed MAX_FINAL_INSTAGRAM_CHUNK_LENGTH (900)
     if (chunk.length > MAX_FINAL_INSTAGRAM_CHUNK_LENGTH) {
       const emergencySubChunks = splitIntoInstagramDmChunks(chunk, MAX_FINAL_INSTAGRAM_CHUNK_LENGTH);
-      for (const subChunk of emergencySubChunks) {
-        chunks.splice(i, 1, subChunk);
-      }
+      chunks.splice(i, 1, ...emergencySubChunks);
+      continue;
     }
 
     const payload = {
@@ -273,6 +278,8 @@ export async function deliverInstagramText({
     if (i < chunks.length - 1) {
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
+
+    i++;
   }
 
   return {
@@ -379,25 +386,29 @@ export async function sendInstagramTypingIndicator({
   graphVersion,
 }) {
   if (!recipientId || !accessToken) return { ok: false, reason: 'CREDENTIALS_MISSING' };
-  const baseUrl = instagramGraphApiBase();
-  const targetId = resolveInstagramDeliveryTarget({ authMode, instagramAccountId, pageId, instagramUserId });
-  const endpoint = `${baseUrl}/${targetId}/messages`;
-  try {
-    await http.post(endpoint, {
-      recipient: { id: recipientId },
-      sender_action: 'typing_on',
-    }, {
-      headers: {
-        Authorization: `Bearer ${accessToken.trim()}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 5000,
-    });
-    return { ok: true };
-  } catch (err) {
-    console.warn('INSTAGRAM_TYPING_INDICATOR_WARN', err?.message);
-    return { ok: false, reason: err?.message };
+  const cleanRecipientId = String(recipientId).replace(/^instagram:\s*/i, '').trim();
+  const token = accessToken.trim();
+  const candidateEndpoints = resolveCandidateEndpoints({ authMode, instagramAccountId, pageId, instagramUserId, token });
+
+  let lastError = null;
+  for (const endpoint of candidateEndpoints) {
+    try {
+      await http.post(endpoint, {
+        recipient: { id: cleanRecipientId },
+        sender_action: 'typing_on',
+      }, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 5000,
+      });
+      return { ok: true };
+    } catch (err) {
+      lastError = err;
+    }
   }
+  return { ok: false, reason: lastError?.message || 'TYPING_INDICATOR_FAILED' };
 }
 
 export async function sendInstagramTypingOff({
@@ -411,24 +422,29 @@ export async function sendInstagramTypingOff({
   graphVersion,
 }) {
   if (!recipientId || !accessToken) return { ok: false, reason: 'CREDENTIALS_MISSING' };
-  const baseUrl = instagramGraphApiBase();
-  const targetId = resolveInstagramDeliveryTarget({ authMode, instagramAccountId, pageId, instagramUserId });
-  const endpoint = `${baseUrl}/${targetId}/messages`;
-  try {
-    await http.post(endpoint, {
-      recipient: { id: recipientId },
-      sender_action: 'typing_off',
-    }, {
-      headers: {
-        Authorization: `Bearer ${accessToken.trim()}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 5000,
-    });
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, reason: err?.message };
+  const cleanRecipientId = String(recipientId).replace(/^instagram:\s*/i, '').trim();
+  const token = accessToken.trim();
+  const candidateEndpoints = resolveCandidateEndpoints({ authMode, instagramAccountId, pageId, instagramUserId, token });
+
+  let lastError = null;
+  for (const endpoint of candidateEndpoints) {
+    try {
+      await http.post(endpoint, {
+        recipient: { id: cleanRecipientId },
+        sender_action: 'typing_off',
+      }, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 5000,
+      });
+      return { ok: true };
+    } catch (err) {
+      lastError = err;
+    }
   }
+  return { ok: false, reason: lastError?.message || 'TYPING_OFF_FAILED' };
 }
 
 
