@@ -59,6 +59,60 @@ test('SUPPORT INTELLIGENCE: Classifies support intents across diverse industries
   assert.equal(trArıza.primaryIntent, INTENT_TYPES.SUPPORT_TROUBLESHOOTING);
 });
 
+test('INSTAGRAM DM SUPPORT REGRESSION: multilingual connection failures stay in canonical troubleshooting without Guide sales fallback', () => {
+  const scenarios = [
+    {
+      language: 'tr',
+      first: 'Instagram mesajlarımı SamChe Dashboard üzerinden yönetebilir miyim?',
+      second: 'bağlanılamadı uyarısı alıyorum',
+    },
+    {
+      language: 'en',
+      first: 'Can I manage my Instagram messages through the SamChe Dashboard?',
+      second: 'I am getting a connection failed warning',
+    },
+    {
+      language: 'ar',
+      first: 'هل يمكنني إدارة رسائل إنستغرام من خلال لوحة معلومات SamChe؟',
+      second: 'أتلقى تحذيرًا بأن الاتصال تعذر',
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const history = [
+      { role: 'user', content: scenario.first },
+      { role: 'assistant', content: 'Please describe the warning shown while connecting Instagram.' },
+    ];
+    const intent = classifyConversationIntent({ message: scenario.second, conversationHistory: history });
+    const plan = evaluateSupportResolutionPlan({
+      intentClassification: intent,
+      conversationHistory: history,
+      hasRuntimeKnowledge: true,
+      hasPersona: true,
+    });
+    const instruction = buildTenantRuntimeSystemInstruction({
+      persona: {
+        available: true,
+        businessProfile: { company_identity: 'Example Platform', company_display_name: 'Example Platform' },
+        configuration: {
+          assistant_identity: 'Support Assistant',
+          instructions: 'Provide grounded product support in the customer’s latest-message language.',
+        },
+      },
+      knowledgeContext: 'Approved product knowledge: Instagram Direct Messages can be managed through the Dashboard after the Instagram channel is connected.',
+      conversationIntelligence: buildConversationIntelligencePromptSection(plan),
+    });
+
+    assert.equal(intent.isSupport, true, scenario.language);
+    assert.equal(intent.isSales, false, scenario.language);
+    assert.equal(intent.primaryIntent, INTENT_TYPES.SUPPORT_TROUBLESHOOTING, scenario.language);
+    assert.equal(plan.action, RESOLUTION_ACTIONS.AI_FIRST_RESOLVE, scenario.language);
+    assert.equal(plan.requiresHandoff, false, scenario.language);
+    assert.match(instruction, /Instagram Direct Messages/);
+    assert.doesNotMatch(instruction, /SAMCHEGUIDE_SYSTEM_PROMPT|aichatbot\.samchecompany\.com|tenantId|\/app\/|visa qualification|company formation qualification/i);
+  }
+});
+
 // ============================================================================
 // 2. SALES + SUPPORT COEXISTENCE
 // ============================================================================

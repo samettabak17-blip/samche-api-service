@@ -12,6 +12,7 @@ import OpenAI from "openai";
 import cron from "node-cron";
 import multer from "multer";
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { deliverWhatsAppText, deliverWhatsAppMedia, whatsappHttpsAgent, sendWhatsAppTypingIndicator } from "./services/whatsapp-delivery-service.js";
 import { resolveWhatsAppOutboundCredential } from "./services/whatsapp-credential-resolution-service.js";
 import { applyWhatsAppAdaptivePacing, MIN_COMPOSE_WINDOW_MS, MAX_ARTIFICIAL_DELAY_MS } from "./services/whatsapp-response-pacing-service.js";
@@ -160,6 +161,7 @@ import {
   retrieveRelevantTenantSiteContext,
   formatTenantSiteIntelligencePromptSection,
 } from './services/tenant-site-retrieval-service.js';
+import { buildPublicChatFailure, logPublicChatFailure } from './services/public-chat-failure.js';
 import {
   triggerTenantSiteDiscoveryBackground,
 } from './services/tenant-site-discovery-service.js';
@@ -1806,6 +1808,12 @@ app.get(["/guide/session-context", "/:slug/guide/session-context"], async (req, 
 let chatPostHandler;
 app.post("/chat", chatPostHandler = async (req, res) => {
   console.info('CHAT_REQUEST_RECEIVED');
+  let publicFailureLatestMessage = '';
+  let publicFailureFallbackLocale = null;
+  try {
+    publicFailureLatestMessage = typeof req.body?.text === 'string' ? req.body.text : '';
+    publicFailureFallbackLocale = req.body?.language;
+  } catch {}
   try {
     const {
       text,
@@ -1840,6 +1848,7 @@ app.post("/chat", chatPostHandler = async (req, res) => {
       if (error?.status === 503) console.error('CHAT_RESPONSE_503 stage=PUBLIC_SESSION_CONFIGURATION');
       throw error;
     }
+    publicFailureFallbackLocale = publishedExperience?.experience?.language || publicFailureFallbackLocale;
     const database = req.app?.locals?.database || pool;
     const userId = publicSession.sessionId;
     // --- Start: Load and Initialize Full Guide Session State ---
@@ -2066,6 +2075,7 @@ app.post("/chat", chatPostHandler = async (req, res) => {
       if (typeof originalText !== "string" || !originalText.trim()) {
         const error = new Error("Gemini returned no usable response.");
         error.status = 502;
+        error.code = 'PROVIDER_RESPONSE_INVALID';
         throw error;
       }
     }
@@ -2124,14 +2134,16 @@ app.post("/chat", chatPostHandler = async (req, res) => {
   } catch (err) {
     if (err instanceof GuideConversationError) return res.status(400).json({ error: 'Guide request is invalid.' });
     if (err?.status === 503) console.error('CHAT_RESPONSE_503 stage=OUTER_HANDLER_ERROR');
-    const safeName = typeof err?.name === 'string' ? err.name : 'Error';
-    const safeCode = typeof err?.code === 'string' ? err.code : '';
-    const safeMessage = typeof err?.message === 'string' ? err.message : '';
-    const safeStack = typeof err?.stack === 'string'
-      ? err.stack.split('\n').slice(0, 3).map((line) => line.trim()).join(' | ')
-      : '';
-    console.error(`Samcheguide Chat error: name=${safeName}${safeCode ? ` code=${safeCode}` : ''}${safeMessage ? ` message=${safeMessage}` : ''}${safeStack ? ` location=${safeStack}` : ''}`);
-    return res.status(err.status || 500).json({ error: "Could not generate chat response." });
+    logPublicChatFailure({
+      route: '/chat',
+      stage: 'outer_handler',
+      correlationId: req.get?.('X-Request-ID') || randomUUID(),
+      error: err,
+    });
+    return res.status(503).json(buildPublicChatFailure({
+      latestMessage: publicFailureLatestMessage,
+      fallbackLocale: publicFailureFallbackLocale,
+    }));
   }
 });
 app.post("/:slug/chat", (req, res, next) => {
@@ -3658,6 +3670,12 @@ app.post("/api/chat/reset", async (req, res) => {
 
 
 app.post("/api/chat", async (req, res) => {
+  let publicFailureLatestMessage = '';
+  let publicFailureFallbackLocale = null;
+  try {
+    publicFailureLatestMessage = typeof req.body?.message === 'string' ? req.body.message : '';
+    publicFailureFallbackLocale = req.body?.page_context?.language || req.body?.language;
+  } catch {}
   try {
     const database = req.app?.locals?.database || pool;
     const userMessage = req.body.message;
@@ -3724,6 +3742,7 @@ app.post("/api/chat", async (req, res) => {
         if (!webChatRuntimePersona.available) {
           return res.status(503).json({ error: 'Web Chat assistant configuration is temporarily unavailable.' });
         }
+        publicFailureFallbackLocale = webChatRuntimePersona?.configuration?.language || publicFailureFallbackLocale;
         webChatRuntimeKnowledge = await resolveAssistantRuntimeKnowledgeContext({
           database,
           embed: knowledgeEmbedder,
@@ -4582,7 +4601,13 @@ If the user already provided sector info, NEVER ask again.`
       messages
     });
 
-    let aiReply = completion.choices[0].message.content;
+    let aiReply = completion?.choices?.[0]?.message?.content;
+    if (typeof aiReply !== 'string' || !aiReply.trim()) {
+      const invalidResponse = new Error('Provider response did not contain usable assistant text.');
+      invalidResponse.status = 502;
+      invalidResponse.code = 'PROVIDER_RESPONSE_INVALID';
+      throw invalidResponse;
+    }
     aiReply = sanitizeSupportResponse({
       text: aiReply,
       supportState: resolutionPlan?.supportState,
@@ -4630,11 +4655,16 @@ If the user already provided sector info, NEVER ask again.`
       action: resolutionPlan?.action || null,
     });
   } catch (err) {
-    console.error("OpenAI Web Chatbot error:", err);
-    res.status(500).json({
-      error: "AI error, please try again.",
-      reply: "Üzgünüm, şu anda yanıt verilemiyor. Lütfen tekrar deneyin.",
+    logPublicChatFailure({
+      route: '/api/chat',
+      stage: 'outer_handler',
+      correlationId: req.get?.('X-Request-ID') || randomUUID(),
+      error: err,
     });
+    return res.status(503).json(buildPublicChatFailure({
+      latestMessage: publicFailureLatestMessage,
+      fallbackLocale: publicFailureFallbackLocale,
+    }));
   }
 });
 

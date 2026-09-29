@@ -22,7 +22,7 @@ test('REGRESSION CONTRACT: app.js /api/chat returns JSON on all runtime paths an
   assert.match(chatRoute, /res\.json\(\{\s*reply:\s*aiReply/);
   assert.match(chatRoute, /res\.status\(200\)\.json\(\{\s*reply:\s*limitationReply/);
   assert.match(chatRoute, /res\.status\(200\)\.json\(\{\s*reply:\s*''[\s\S]*?suppress_reply:\s*true[\s\S]*?handling_mode:\s*'HUMAN'/);
-  assert.match(chatRoute, /res\.status\(500\)\.json\(\{/);
+  assert.match(chatRoute, /return res\.status\(503\)\.json\(buildPublicChatFailure\(\{/);
 
   // Assert NO legacy raw text sends remain in the Web Chat handler
   assert.doesNotMatch(chatRoute, /res\.send\(aiReply\)/);

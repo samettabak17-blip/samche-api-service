@@ -235,7 +235,7 @@ test('/chat preserves a safe normalized provider code and logs only mode, model,
   assert.doesNotMatch(appSource, /console\.error\(`SAMCHE_GOOGLE_GEMINI_ERROR[^\n]*(?:cause|prompt|request|tenant|credential|headers|url)/i);
 });
 
-test('/chat emits safe stage diagnostics without changing its response paths', async () => {
+test('/chat emits safe stage diagnostics through the shared public failure boundary', async () => {
   const appSource = await readFile(new URL('../app.js', import.meta.url), 'utf8');
   const chatSource = appSource.slice(appSource.indexOf('app.post("/chat"'));
   const requestReceived = chatSource.indexOf('CHAT_REQUEST_RECEIVED');
@@ -253,7 +253,9 @@ test('/chat emits safe stage diagnostics without changing its response paths', a
   assert.match(chatSource, /CHAT_RESPONSE_503 stage=RUNTIME_CONTEXT_UNAVAILABLE/);
   assert.match(chatSource, /CHAT_RESPONSE_503 stage=OUTER_HANDLER_ERROR/);
   assert.match(chatSource, /return res\.status\(503\)\.json\(\{\s*error: "AI Guide assistant configuration is temporarily unavailable\."/);
-  assert.match(chatSource, /return res\.status\(err\.status \|\| 500\)\.json\(\{ error: "Could not generate chat response\." \}\)/);
+  assert.match(chatSource, /logPublicChatFailure\(\{[\s\S]*?route: '\/chat',[\s\S]*?stage: 'outer_handler'/);
+  assert.match(chatSource, /return res\.status\(503\)\.json\(buildPublicChatFailure\(\{/);
+  assert.doesNotMatch(chatSource, /safeMessage|safeStack|Could not generate chat response/);
 
   const diagnosticMessages = [...chatSource.matchAll(/['"`](CHAT_(?:REQUEST_RECEIVED|GEMINI_STARTED|GEMINI_FAILED|RESPONSE_503)[^'"`]*)['"`]/g)].map((match) => match[1]);
   assert.ok(diagnosticMessages.length >= 7);
