@@ -92,7 +92,13 @@ export async function ensureConversationCrmIdentity(client, {
      VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (tenant_id, identity_hash)
      DO UPDATE SET
-       display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), crm_contacts.display_name),
+       display_name = CASE
+         WHEN EXCLUDED.display_name IS NOT NULL AND EXCLUDED.display_name != '' AND EXCLUDED.display_name != 'Instagram User'
+           THEN EXCLUDED.display_name
+         WHEN crm_contacts.display_name IS NULL OR crm_contacts.display_name = '' OR crm_contacts.display_name = 'Instagram User'
+           THEN COALESCE(NULLIF(EXCLUDED.display_name, ''), crm_contacts.display_name)
+         ELSE crm_contacts.display_name
+       END,
        updated_at = CURRENT_TIMESTAMP
      RETURNING *`,
     [tenantId, identity.kind, identity.identityHash, effectiveDisplayName, identity.email, identity.phone, source]

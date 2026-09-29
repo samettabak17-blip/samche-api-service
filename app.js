@@ -29,7 +29,7 @@ import guideExperienceRoutes from "./routes/guideExperienceRoutes.js";
 import { fileURLToPath } from 'node:url';
 import { getSamcheguidePublicFeed, getWebChatPublicFeed, persistAssistantResponseIfCurrent, persistSamcheguideInbound, persistWebChatInbound, resolveWebChatAiEligibility, recordWhatsAppAssistantProviderAcceptance, recordWhatsAppDeliveryStatus, resetWebChatConversation, ensureWebChatConversation, ensureGuideConversation, linkConversationResourcesToMessage } from "./services/live-inbox-service.js";
 import { isInstagramWebhookEvent, extractInstagramInboundEvents } from "./services/instagram-inbound-adapter.js";
-import { persistInstagramInbound } from "./services/instagram-live-inbox-service.js";
+import { persistInstagramInbound, reconcileTenantInstagramContactIdentities } from "./services/instagram-live-inbox-service.js";
 import { orchestrateInstagramInboundAiResponse } from "./services/instagram-ai-orchestrator.js";
 import { persistWhatsAppInbound, whatsappPhoneNumberFingerprint } from "./services/whatsapp-live-inbox-service.js";
 import { resolveMetaGraphApiVersion, instagramGraphApiBase } from "./services/meta-graph-api-version.js";
@@ -445,6 +445,7 @@ app.get("/api/v1/health/whatsapp-diagnostics", async (_req, res) => {
 app.get("/api/v1/health/instagram-diagnostics", async (_req, res) => {
   try {
     await convergeTenantInstagramChannels().catch((err) => console.warn('INSTAGRAM_CONVERGENCE_DIAG_WARN', err?.message));
+    await reconcileTenantInstagramContactIdentities().catch((err) => console.warn('INSTAGRAM_RECONCILIATION_DIAG_WARN', err?.message));
 
 
     const channels = await pool.query(

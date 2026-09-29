@@ -836,15 +836,19 @@ export async function orchestrateInstagramInboundAiResponse({
   });
 
   if (!activationEvaluation.eligible) {
+    const outcome = `SUPPRESSED_${activationEvaluation.reasonCode || 'UNKNOWN'}`;
     console.info(
-      `INSTAGRAM_AI_ACTIVATION_SUPPRESSED tenant=${tenantId ? tenantId.slice(0, 8) : 'unknown'}` +
+      `INSTAGRAM_AI_TERMINAL_OUTCOME outcome=${outcome}` +
+      ` tenant=${tenantId ? tenantId.slice(0, 8) : 'unknown'}` +
       ` conversation=${conversationId ? conversationId.slice(0, 8) : 'unknown'}` +
-      ` policy=${activationEvaluation.policy}` +
-      ` reason=${activationEvaluation.reasonCode}`
+      ` inboundMid=${inboundState.customerMessage?.id ? String(inboundState.customerMessage.id).slice(0, 8) : 'none'}` +
+      ` orchestrationId=${orchestrationKey.slice(0, 8)}` +
+      ` policy=${activationEvaluation.policy}`
     );
     return {
       aiInvoked: false,
       suppressed: true,
+      outcome,
       activationEvaluation,
     };
   }
@@ -1146,10 +1150,23 @@ export async function orchestrateInstagramInboundAiResponse({
       httpClient: http,
     }).catch((err) => console.warn('HIGH_INTENT_LEAD_EVALUATION_NON_BLOCKING_WARN', err?.message));
 
+    const outcome = (!deliveryError && Boolean(deliveryResult))
+      ? 'RESPONDED'
+      : (deliveryError ? `DELIVERY_FAILED_${String(deliveryError?.code || 'UNKNOWN').slice(0, 32)}` : 'GENERATION_FAILED_NO_DELIVERY');
+
+    console.info(
+      `INSTAGRAM_AI_TERMINAL_OUTCOME outcome=${outcome}` +
+      ` tenant=${tenantId ? tenantId.slice(0, 8) : 'unknown'}` +
+      ` conversation=${conversationId ? conversationId.slice(0, 8) : 'unknown'}` +
+      ` inboundMid=${inboundState.customerMessage?.id ? String(inboundState.customerMessage.id).slice(0, 8) : 'none'}` +
+      ` orchestrationId=${orchestrationKey.slice(0, 8)}`
+    );
+
     return {
       aiInvoked: true,
       delivered: !deliveryError && Boolean(deliveryResult),
       deliveryError: deliveryError?.message || null,
+      outcome,
       responseText: formattedResponse,
       deliveryResult,
       assistantMessageId: persisted.message?.id || null,
