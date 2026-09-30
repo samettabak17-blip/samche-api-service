@@ -7,6 +7,7 @@ import {
   getGoogleGeminiConfig,
   resolveGoogleGeminiRuntimeModel,
   resolveGcpCredentials,
+  resolveGcpProject,
 } from '../services/google-gemini-provider.js';
 
 function fakeResponse(text = 'ok') {
@@ -266,6 +267,20 @@ test('resolveGcpCredentials parses service account JSON and normalizes escaped n
   assert.equal(resolved.credentials.project_id, 'gen-lang-client-0739267616');
   assert.ok(resolved.credentials.private_key.includes('\n'));
   assert.ok(!resolved.credentials.private_key.includes('\\n'));
+});
+
+test('resolveGcpProject prioritizes dedicated service account project over legacy gen-lang-client', () => {
+  const jsonCreds = JSON.stringify({
+    type: 'service_account',
+    project_id: 'samche-ai-development-2',
+    client_email: 'sa@samche-ai-development-2.iam.gserviceaccount.com',
+    private_key: '-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----\n',
+  });
+  const resolved = resolveGcpProject({
+    GOOGLE_CLOUD_PROJECT: 'gen-lang-client-0739267616',
+    GOOGLE_APPLICATION_CREDENTIALS: jsonCreds,
+  });
+  assert.equal(resolved, 'samche-ai-development-2');
 });
 
 test('vertex mode wires googleAuthOptions when service account credentials are present', () => {

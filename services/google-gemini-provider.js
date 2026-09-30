@@ -29,18 +29,6 @@ export function resolveApiKey(env = process.env) {
     || requiredString(env.STAGING_GEMINI_API_KEY);
 }
 
-export function resolveGcpProject(env = process.env) {
-  return requiredString(env.GOOGLE_CLOUD_PROJECT)
-    || requiredString(env.GCP_PROJECT)
-    || requiredString(env.GCLOUD_PROJECT);
-}
-
-export function resolveGcpLocation(env = process.env) {
-  return requiredString(env.GOOGLE_CLOUD_LOCATION)
-    || requiredString(env.GCP_LOCATION)
-    || requiredString(env.GCLOUD_LOCATION);
-}
-
 export function resolveGcpCredentials(env = process.env) {
   const rawCreds = env.GOOGLE_APPLICATION_CREDENTIALS || env.GCP_SERVICE_ACCOUNT_KEY || env.GOOGLE_SERVICE_ACCOUNT_KEY;
   if (!rawCreds || typeof rawCreds !== 'string' || !rawCreds.trim()) return null;
@@ -57,6 +45,23 @@ export function resolveGcpCredentials(env = process.env) {
     }
   }
   return { keyFilename: trimmed };
+}
+
+export function resolveGcpProject(env = process.env) {
+  const creds = resolveGcpCredentials(env);
+  const explicit = requiredString(env.GOOGLE_CLOUD_PROJECT)
+    || requiredString(env.GCP_PROJECT)
+    || requiredString(env.GCLOUD_PROJECT);
+  if (explicit && explicit.startsWith('gen-lang-client-') && creds?.credentials?.project_id && !creds.credentials.project_id.startsWith('gen-lang-client-')) {
+    return creds.credentials.project_id;
+  }
+  return explicit || requiredString(creds?.credentials?.project_id);
+}
+
+export function resolveGcpLocation(env = process.env) {
+  return requiredString(env.GOOGLE_CLOUD_LOCATION)
+    || requiredString(env.GCP_LOCATION)
+    || requiredString(env.GCLOUD_LOCATION);
 }
 
 function ensureServiceAccountFile(env = process.env) {
