@@ -351,7 +351,6 @@ export function createGoogleGeminiProvider({ env = process.env, clientFactory, f
         vertexai: true,
         project: config.project,
         location: config.location,
-        ...(config.apiKey ? { apiKey: config.apiKey } : {}),
         ...(gcpAuth ? {
           googleAuthOptions: {
             ...(gcpAuth.credentials ? { credentials: gcpAuth.credentials } : {}),
@@ -376,11 +375,10 @@ export function createGoogleGeminiProvider({ env = process.env, clientFactory, f
 
   const authDiagnostic = Object.freeze({
     mode: config.mode,
-    authType: gcpAuth?.credentials ? 'SERVICE_ACCOUNT_CREDENTIALS' : gcpAuth?.keyFilename ? 'SERVICE_ACCOUNT_KEYFILE' : config.apiKey ? 'API_KEY' : 'ADC',
+    authType: gcpAuth?.credentials ? 'SERVICE_ACCOUNT_CREDENTIALS' : gcpAuth?.keyFilename ? 'SERVICE_ACCOUNT_KEYFILE' : 'ADC',
     clientEmail: gcpAuth?.credentials?.client_email || null,
     projectId: config.project,
     location: config.location,
-    hasApiKey: Boolean(config.apiKey),
   });
 
   return Object.freeze({
