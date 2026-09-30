@@ -946,4 +946,186 @@ test('TASK 9.1 PHYSICAL REGRESSION FIX: Multi-turn PDF & URL natural follow-ups 
 });
 
 
+test('TASK 9.1 PHYSICAL REGRESSION FIX: Real Path WhatsApp URL Reading - Direct HTTPS on Vertex & OpenAI failover', async () => {
+  const { processMessageUrlIntelligence } = await import('../services/url-intelligence-service.js');
+  const { buildContextualIntelligencePromptSection, updateSessionBrowsingStateWithEntity } = await import('../services/contextual-intelligence-service.js');
+  const { buildWhatsAppActivePersonaTenantContext, buildWhatsAppTenantModelContext } = await import('../services/whatsapp-tenant-context-service.js');
+
+  const directHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Dubai Luxury Event Package 2026</title>
+        <meta property="og:description" content="Exclusive desert gala package with VIP setup and staging for 25000 AED." />
+      </head>
+      <body>
+        <h1>Dubai Luxury Event Package</h1>
+        <p>Complete luxury setup includes audio visual, catering, and venue management.</p>
+      </body>
+    </html>
+  `;
+
+  const mockDirectFetch = async () => ({
+    ok: true,
+    status: 200,
+    headers: new Headers({ 'content-type': 'text/html; charset=utf-8' }),
+    text: async () => directHtml,
+  });
+
+  const mockDnsLookup = async () => [{ address: '93.184.216.34', family: 4 }];
+
+  // 1. Inbound URL Detection & Safe Fetch
+  const urlResultA = await processMessageUrlIntelligence({
+    text: 'Please check our event link https://example.com/packages/luxury-desert-gala',
+    fetchImpl: mockDirectFetch,
+    lookupImpl: mockDnsLookup,
+  });
+
+  assert.equal(urlResultA.hasUrl, true);
+  assert.equal(urlResultA.success, true);
+  assert.ok(urlResultA.entity);
+  assert.match(urlResultA.entity.entity_name, /Dubai Luxury Event Package/i);
+  assert.match(urlResultA.entity.summary, /25000 AED/);
+
+  // 2. Canonical Context Construction
+  let browsingState = updateSessionBrowsingStateWithEntity({
+    currentState: null,
+    newEntity: urlResultA.entity,
+  });
+  const contextualSection = buildContextualIntelligencePromptSection({
+    currentEntity: browsingState.currentEntity,
+    channelType: 'WHATSAPP',
+  });
+
+  const activePersona = {
+    available: true,
+    companyIdentity: 'Blue Dune',
+    assistantIdentity: 'Blue Dune Assistant',
+    profile: {},
+    configuration: {},
+  };
+
+  const runtimeTenantContext = buildWhatsAppActivePersonaTenantContext({
+    persona: activePersona,
+    communicationLanguage: 'en',
+    contextualIntelligence: contextualSection,
+  });
+
+  const modelContextTurn1 = buildWhatsAppTenantModelContext({
+    tenant: runtimeTenantContext,
+    history: [],
+    customerText: 'Please check our event link https://example.com/packages/luxury-desert-gala',
+    communicationLanguage: 'en',
+  });
+
+  // Verify Vertex Primary receives extracted URL context & does not refuse
+  let vertexReceivedTurn1 = null;
+  const mockGemini = {
+    mode: 'vertex',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'vertex', model: 'gemini-3.7-flash', endpoint_class: 'VERTEX_GENERATE_CONTENT' }),
+    generateContent: async (p) => {
+      vertexReceivedTurn1 = p;
+      return { candidates: [{ content: { parts: [{ text: 'I checked your link. The Dubai Luxury Event Package is 25000 AED and includes VIP staging and desert gala setup.' }] } }] };
+    },
+  };
+  const runtimeVertex = createSharedAiRuntime({ geminiProvider: mockGemini, circuitBreaker: new ProviderCircuitBreaker() });
+  const resTurn1 = await runtimeVertex.generateAiResponse({
+    systemInstruction: modelContextTurn1.systemInstruction,
+    prompt: modelContextTurn1.userPrompt,
+    channel: 'WHATSAPP',
+  });
+  assert.equal(resTurn1.provider, 'vertex');
+  assert.match(resTurn1.text, /25000 AED/);
+  assert.doesNotMatch(resTurn1.text, /cannot access external links/i);
+  assert.ok(vertexReceivedTurn1.systemInstruction.parts[0].text.includes('Dubai Luxury Event Package'));
+
+  // Multi-turn Follow-up Turn 2: "What is included in the package on that page?"
+  const modelContextTurn2 = buildWhatsAppTenantModelContext({
+    tenant: runtimeTenantContext,
+    history: [
+      { sender_type: 'CUSTOMER', content: 'Please check our event link https://example.com/packages/luxury-desert-gala' },
+      { sender_type: 'ASSISTANT', content: resTurn1.text },
+    ],
+    customerText: 'What is included in the package on that page?',
+    communicationLanguage: 'en',
+  });
+
+  // Test Turn 2 on OpenAI Failover
+  const mockOpenAi = {
+    chat: {
+      completions: {
+        create: async (payload) => {
+          assert.ok(payload.messages[0].content.includes('25000 AED'));
+          return { choices: [{ message: { content: 'Based on the page you shared, the package includes audio visual, catering, and venue management.' } }] };
+        },
+      },
+    },
+  };
+  const mockFailingGemini = {
+    mode: 'vertex',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'vertex', model: 'gemini-3.7-flash', endpoint_class: 'VERTEX_GENERATE_CONTENT' }),
+    generateContent: async () => { throw Object.assign(new Error('503 High Demand'), { status: 503 }); },
+  };
+  const runtimeOpenAi = createSharedAiRuntime({ geminiProvider: mockFailingGemini, openaiClient: mockOpenAi, circuitBreaker: new ProviderCircuitBreaker() });
+  const resTurn2 = await runtimeOpenAi.generateAiResponse({
+    systemInstruction: modelContextTurn2.systemInstruction,
+    prompt: modelContextTurn2.userPrompt,
+    channel: 'WHATSAPP',
+  });
+  assert.equal(resTurn2.provider, 'openai');
+  assert.match(resTurn2.text, /audio visual/i);
+  assert.doesNotMatch(resTurn2.text, /cannot access external links/i);
+});
+
+
+test('TASK 9.1 PHYSICAL REGRESSION FIX: Real Path WhatsApp URL Reading - Safe Redirect & Share URL', async () => {
+  const { processMessageUrlIntelligence } = await import('../services/url-intelligence-service.js');
+
+  const redirectTargetHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Google Shared Doc - Conference Gala Schedule</title>
+        <meta property="og:description" content="Conference opening gala starts at 7:00 PM at Grand Ballroom." />
+      </head>
+      <body>
+        <p>Event schedule details</p>
+      </body>
+    </html>
+  `;
+
+  let redirectHopCount = 0;
+  const mockRedirectFetch = async (url) => {
+    if (url.includes('share.google/doc-123')) {
+      redirectHopCount++;
+      return {
+        status: 302,
+        ok: false,
+        headers: new Headers({ location: 'https://docs.google.com/document/d/doc-123/view' }),
+      };
+    }
+    return {
+      status: 200,
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/html; charset=utf-8' }),
+      text: async () => redirectTargetHtml,
+    };
+  };
+
+  const mockDnsLookup = async () => [{ address: '93.184.216.34', family: 4 }];
+
+  const urlResultB = await processMessageUrlIntelligence({
+    text: 'Here is the schedule link: https://share.google/doc-123',
+    fetchImpl: mockRedirectFetch,
+    lookupImpl: mockDnsLookup,
+  });
+
+  assert.equal(urlResultB.hasUrl, true);
+  assert.equal(urlResultB.success, true);
+  assert.equal(redirectHopCount, 1);
+  assert.match(urlResultB.entity.entity_name, /Conference Gala Schedule/i);
+  assert.match(urlResultB.entity.summary, /7:00 PM/);
+});
+
+
 
