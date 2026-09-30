@@ -1100,9 +1100,11 @@ async function requestGemini(payload, runtimeModel = canonicalSharedAiRuntime.ru
   try {
     const sysInstructionText = typeof payload?.systemInstruction === 'string'
       ? payload.systemInstruction
-      : (Array.isArray(payload?.systemInstruction?.parts) ? payload.systemInstruction.parts.map(p => p.text).join('\n\n') : null);
+      : (Array.isArray(payload?.systemInstruction?.parts) ? payload.systemInstruction.parts.map(p => (typeof p === 'string' ? p : (p?.text || ''))).filter(Boolean).join('\n\n') : null);
 
+    const activeProvider = provider || googleGeminiProvider;
     const result = await canonicalSharedAiRuntime.generateAiResponse({
+      geminiProvider: activeProvider,
       systemInstruction: sysInstructionText,
       contents: payload.contents,
       model: runtimeModel,
@@ -4630,11 +4632,15 @@ If the user already provided sector info, NEVER ask again.`
       if (!eligibility.allowed) return webChatHumanResponse();
     }
 
+    const activeOpenai = req.app?.locals?.openaiClient || openaiClient;
+    const activeGemini = req.app?.locals?.googleGeminiProvider || googleGeminiProvider;
     const activeSysInstruction = messages.find((m) => m.role === 'system')?.content || '';
     const activeHistory = messages.filter((m) => m.role !== 'system');
     let aiReply;
     try {
       const genResult = await canonicalSharedAiRuntime.generateAiResponse({
+        geminiProvider: activeGemini,
+        openaiClient: activeOpenai,
         systemInstruction: activeSysInstruction,
         messages,
         conversationHistory: activeHistory,

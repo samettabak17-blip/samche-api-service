@@ -142,7 +142,7 @@ function normalizeSystemInstructionText(systemInstruction) {
   if (!systemInstruction) return '';
   if (typeof systemInstruction === 'string') return systemInstruction.trim();
   if (Array.isArray(systemInstruction?.parts)) {
-    return systemInstruction.parts.map((p) => p?.text || '').filter(Boolean).join('\n\n').trim();
+    return systemInstruction.parts.map((p) => (typeof p === 'string' ? p : (p?.text || ''))).filter(Boolean).join('\n\n').trim();
   }
   return '';
 }
@@ -152,6 +152,85 @@ function normalizeUserPromptText(prompt, text, userMessage) {
   if (typeof text === 'string' && text.trim()) return text.trim();
   if (typeof userMessage === 'string' && userMessage.trim()) return userMessage.trim();
   return '';
+}
+
+function extractImageInfo(part) {
+  if (!part || typeof part !== 'object') return null;
+  if (part.inlineData || part.inline_data) {
+    const src = part.inlineData || part.inline_data;
+    const mimeType = src.mimeType || src.mime_type;
+    const data = src.data;
+    if (mimeType && data) {
+      return { mimeType: String(mimeType).trim().toLowerCase(), data: String(data).trim() };
+    }
+  }
+  if (part.type === 'image_url') {
+    const url = typeof part.image_url === 'string' ? part.image_url : part.image_url?.url;
+    if (typeof url === 'string') {
+      const match = /^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/.exec(url.trim());
+      if (match) {
+        return { mimeType: match[1].toLowerCase(), data: match[2] };
+      }
+      return { url };
+    }
+  }
+  if (part.mimeType && Buffer.isBuffer(part.buffer)) {
+    return { mimeType: String(part.mimeType).trim().toLowerCase(), data: part.buffer.toString('base64') };
+  }
+  if (part.mimeType && typeof part.data === 'string') {
+    return { mimeType: String(part.mimeType).trim().toLowerCase(), data: part.data.trim() };
+  }
+  return null;
+}
+
+function extractTextInfo(part) {
+  if (typeof part === 'string') return part.trim();
+  if (!part || typeof part !== 'object') return '';
+  if (part.thought === true) return '';
+  if (typeof part.text === 'string') return part.text.trim();
+  if (typeof part.safeContextText === 'string') return part.safeContextText.trim();
+  if (part.type === 'text' && typeof part.text === 'string') return part.text.trim();
+  return '';
+}
+
+function normalizeGeminiPart(part) {
+  if (typeof part === 'string') return { text: part };
+  if (!part || typeof part !== 'object') return null;
+  const img = extractImageInfo(part);
+  if (img?.data) {
+    return {
+      inlineData: { mimeType: img.mimeType, data: img.data },
+      inline_data: { mime_type: img.mimeType, data: img.data },
+    };
+  }
+  const text = extractTextInfo(part);
+  if (text) {
+    return { text };
+  }
+  return null;
+}
+
+function normalizeOpenAiPart(part) {
+  if (typeof part === 'string') return { type: 'text', text: part };
+  if (!part || typeof part !== 'object') return null;
+  const img = extractImageInfo(part);
+  if (img?.data) {
+    return {
+      type: 'image_url',
+      image_url: { url: `data:${img.mimeType};base64,${img.data}` },
+    };
+  }
+  if (img?.url) {
+    return {
+      type: 'image_url',
+      image_url: { url: img.url },
+    };
+  }
+  const text = extractTextInfo(part);
+  if (text) {
+    return { type: 'text', text };
+  }
+  return null;
 }
 
 function extractGeminiResponseText(response) {
@@ -177,16 +256,44 @@ function buildOpenAiMessages({
   systemInstruction,
   conversationHistory = [],
   messages = null,
+  contents = null,
   prompt = '',
   multimodalParts = null,
 }) {
   if (Array.isArray(messages) && messages.length > 0) {
-    return messages;
+    return messages.map((m) => {
+      if (typeof m.content === 'string') return m;
+      if (Array.isArray(m.content)) {
+        const normParts = m.content.map(normalizeOpenAiPart).filter(Boolean);
+        return { ...m, content: normParts };
+      }
+      return m;
+    });
   }
+
   const out = [];
   const sysText = normalizeSystemInstructionText(systemInstruction);
   if (sysText) {
     out.push({ role: 'system', content: sysText });
+  }
+
+  if (Array.isArray(contents) && contents.length > 0) {
+    for (const item of contents) {
+      const role = (item.role === 'model' || item.role === 'assistant') ? 'assistant' : 'user';
+      const parts = Array.isArray(item.parts) ? item.parts : (item.parts ? [item.parts] : []);
+      const openAiParts = parts.map(normalizeOpenAiPart).filter(Boolean);
+      if (openAiParts.length === 0) continue;
+      const hasImages = openAiParts.some((p) => p.type === 'image_url');
+      if (!hasImages) {
+        const combinedText = openAiParts.map((p) => p.text).filter(Boolean).join('\n\n');
+        if (combinedText) {
+          out.push({ role, content: combinedText });
+        }
+      } else {
+        out.push({ role, content: openAiParts });
+      }
+    }
+    return out;
   }
 
   if (Array.isArray(conversationHistory)) {
@@ -194,7 +301,7 @@ function buildOpenAiMessages({
       const role = (h.role === 'model' || h.role === 'assistant') ? 'assistant' : 'user';
       let content = '';
       if (Array.isArray(h.parts)) {
-        content = h.parts.map((p) => p?.text || '').filter(Boolean).join('\n\n').trim();
+        content = h.parts.map(extractTextInfo).filter(Boolean).join('\n\n').trim();
       } else if (typeof h.content === 'string') {
         content = h.content.trim();
       }
@@ -204,42 +311,100 @@ function buildOpenAiMessages({
     }
   }
 
-  const currentText = prompt.trim();
+  const currentText = String(prompt || '').trim();
+  const extraParts = Array.isArray(multimodalParts) ? multimodalParts : (multimodalParts ? [multimodalParts] : []);
+  const userParts = [];
   if (currentText) {
-    const last = out[out.length - 1];
-    if (!last || last.role !== 'user' || last.content !== currentText) {
-      out.push({ role: 'user', content: currentText });
+    userParts.push({ type: 'text', text: currentText });
+  }
+  for (const p of extraParts) {
+    const norm = normalizeOpenAiPart(p);
+    if (norm) userParts.push(norm);
+  }
+
+  if (userParts.length > 0) {
+    const hasImages = userParts.some((p) => p.type === 'image_url');
+    if (!hasImages) {
+      const joined = userParts.map((p) => p.text).filter(Boolean).join('\n\n');
+      if (joined) {
+        const last = out[out.length - 1];
+        if (!last || last.role !== 'user' || last.content !== joined) {
+          out.push({ role: 'user', content: joined });
+        }
+      }
+    } else {
+      out.push({ role: 'user', content: userParts });
     }
   }
 
-  return out;
+  return out.length > 0 ? out : [{ role: 'user', content: 'Merhaba' }];
 }
 
 function buildGeminiContents({
   conversationHistory = [],
   contents = null,
+  messages = null,
   prompt = '',
   multimodalParts = null,
 }) {
   if (Array.isArray(contents) && contents.length > 0) {
-    return contents;
+    return contents.map((c) => {
+      const parts = Array.isArray(c.parts) ? c.parts : (c.parts ? [c.parts] : []);
+      const normParts = parts.map(normalizeGeminiPart).filter(Boolean);
+      return {
+        role: (c.role === 'model' || c.role === 'assistant') ? 'model' : 'user',
+        parts: normParts.length > 0 ? normParts : [{ text: '...' }],
+      };
+    });
   }
+
+  if (Array.isArray(messages) && messages.length > 0) {
+    const out = [];
+    for (const m of messages) {
+      if (m.role === 'system') continue;
+      const role = (m.role === 'assistant' || m.role === 'model') ? 'model' : 'user';
+      const parts = [];
+      if (typeof m.content === 'string') {
+        if (m.content.trim()) parts.push({ text: m.content.trim() });
+      } else if (Array.isArray(m.content)) {
+        for (const p of m.content) {
+          const norm = normalizeGeminiPart(p);
+          if (norm) parts.push(norm);
+        }
+      }
+      if (parts.length > 0) {
+        if (out.length > 0 && out[out.length - 1].role === role) {
+          out[out.length - 1].parts.push(...parts);
+        } else {
+          out.push({ role, parts });
+        }
+      }
+    }
+    while (out.length > 0 && out[0].role === 'model') {
+      out.shift();
+    }
+    return out.length > 0 ? out : [{ role: 'user', parts: [{ text: 'Merhaba' }] }];
+  }
+
   const rawContents = [];
   if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
     for (const h of conversationHistory) {
       const role = (h.role === 'model' || h.role === 'assistant') ? 'model' : 'user';
-      let turnText = '';
+      const parts = [];
       if (Array.isArray(h.parts)) {
-        turnText = h.parts.map((p) => p?.text || '').filter(Boolean).join('\n\n').trim();
-      } else if (typeof h.content === 'string') {
-        turnText = h.content.trim();
+        for (const p of h.parts) {
+          const norm = normalizeGeminiPart(p);
+          if (norm) parts.push(norm);
+        }
+      } else if (typeof h.content === 'string' && h.content.trim()) {
+        parts.push({ text: h.content.trim() });
       }
-      if (!turnText) continue;
+      if (parts.length === 0) continue;
 
       if (rawContents.length > 0 && rawContents[rawContents.length - 1].role === role) {
-        rawContents[rawContents.length - 1].parts[0].text += '\n\n' + turnText;
+        rawContents[rawContents.length - 1].parts.push(...parts);
       } else {
-        rawContents.push({ role, parts: [{ text: turnText }] });
+        rawContents.push({ role, parts });
       }
     }
   }
@@ -250,15 +415,22 @@ function buildGeminiContents({
 
   const currentPrompt = String(prompt || '').trim();
   const extraParts = Array.isArray(multimodalParts) ? multimodalParts : (multimodalParts ? [multimodalParts] : []);
-  const parts = currentPrompt ? [{ text: currentPrompt }, ...extraParts] : extraParts;
+  const userParts = [];
+  if (currentPrompt) {
+    userParts.push({ text: currentPrompt });
+  }
+  for (const p of extraParts) {
+    const norm = normalizeGeminiPart(p);
+    if (norm) userParts.push(norm);
+  }
 
-  if (parts.length > 0) {
+  if (userParts.length > 0) {
     if (rawContents.length === 0) {
-      rawContents.push({ role: 'user', parts });
+      rawContents.push({ role: 'user', parts: userParts });
     } else if (rawContents[rawContents.length - 1].role === 'user') {
-      rawContents[rawContents.length - 1].parts = parts;
+      rawContents[rawContents.length - 1].parts = userParts;
     } else {
-      rawContents.push({ role: 'user', parts });
+      rawContents.push({ role: 'user', parts: userParts });
     }
   }
 
@@ -321,6 +493,8 @@ export function createSharedAiRuntime({
       signal = null,
       channel = 'UNKNOWN',
       disableFailover = false,
+      geminiProvider: callerGemini = null,
+      openaiClient: callerOpenai = null,
     } = {}) {
       const cleanPrompt = normalizeUserPromptText(prompt, text, userMessage);
       const vertexModel = resolveCanonicalPlatformModel({ model, provider: 'VERTEX', env });
@@ -331,10 +505,11 @@ export function createSharedAiRuntime({
       // 1. PRIMARY PROVIDER: Vertex AI / Google Gemini (if circuit is NOT OPEN)
       if (cbState !== 'OPEN') {
         try {
-          const provider = getGemini();
+          const provider = callerGemini || getGemini();
           const geminiContents = buildGeminiContents({
             conversationHistory,
             contents,
+            messages,
             prompt: cleanPrompt,
             multimodalParts,
           });
@@ -388,7 +563,7 @@ export function createSharedAiRuntime({
 
       // 2. SECONDARY PROVIDER: OpenAI Automatic Failover
       const openaiModel = resolveCanonicalPlatformModel({ model, provider: 'OPENAI', env });
-      const openai = getOpenAi();
+      const openai = callerOpenai || getOpenAi();
 
       if (openai) {
         try {
@@ -396,6 +571,7 @@ export function createSharedAiRuntime({
             systemInstruction,
             conversationHistory,
             messages,
+            contents,
             prompt: cleanPrompt,
             multimodalParts,
           });

@@ -380,4 +380,205 @@ test('B1 & B7: Business Brain & Tenant Isolation Context Equivalence across Prov
   assert.equal(openaiPayloadReceived.messages[3].content, userQuery);
 });
 
+test('TASK 9.1 RESTORATION: Inbound Image Context is preserved and forwarded with parity to Vertex and OpenAI failover', async () => {
+  const fakeBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const imagePart = {
+    inlineData: { mimeType: 'image/png', data: fakeBase64 },
+    inline_data: { mime_type: 'image/png', data: fakeBase64 },
+  };
+
+  let vertexReceived = null;
+  let openaiReceived = null;
+
+  const mockGemini = {
+    mode: 'vertex',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'vertex', model: 'gemini-3.7-flash', endpoint_class: 'VERTEX_GENERATE_CONTENT' }),
+    generateContent: async (p) => {
+      vertexReceived = p;
+      return { candidates: [{ content: { parts: [{ text: 'I see a red dot in the image.' }] } }] };
+    },
+  };
+
+  const mockOpenAi = {
+    chat: {
+      completions: {
+        create: async (p) => {
+          openaiReceived = p;
+          return { choices: [{ message: { content: 'OpenAI vision: I see an image with a red dot.' } }] };
+        },
+      },
+    },
+  };
+
+  const runtime = createSharedAiRuntime({
+    geminiProvider: mockGemini,
+    openaiClient: mockOpenAi,
+  });
+
+  // 1. Primary Vertex execution with image
+  const res1 = await runtime.generateAiResponse({
+    systemInstruction: 'You are Blue Dune visual assistant.',
+    prompt: 'What is this image?',
+    multimodalParts: [imagePart],
+    channel: 'WHATSAPP',
+  });
+  assert.equal(res1.provider, 'vertex');
+  assert.equal(res1.text, 'I see a red dot in the image.');
+  assert.ok(vertexReceived);
+  assert.equal(vertexReceived.contents[0].parts[0].text, 'What is this image?');
+  assert.equal(vertexReceived.contents[0].parts[1].inlineData.mimeType, 'image/png');
+  assert.equal(vertexReceived.contents[0].parts[1].inlineData.data, fakeBase64);
+
+  // 2. OpenAI failover execution with image
+  mockGemini.generateContent = async () => { throw Object.assign(new Error('503 High Demand'), { status: 503 }); };
+  const res2 = await runtime.generateAiResponse({
+    systemInstruction: 'You are Blue Dune visual assistant.',
+    prompt: 'What is this image?',
+    multimodalParts: [imagePart],
+    channel: 'WHATSAPP',
+  });
+  assert.equal(res2.provider, 'openai');
+  assert.equal(res2.text, 'OpenAI vision: I see an image with a red dot.');
+  assert.ok(openaiReceived);
+  const userMsg = openaiReceived.messages.find((m) => m.role === 'user');
+  assert.ok(userMsg);
+  assert.ok(Array.isArray(userMsg.content));
+  assert.equal(userMsg.content[0].type, 'text');
+  assert.equal(userMsg.content[0].text, 'What is this image?');
+  assert.equal(userMsg.content[1].type, 'image_url');
+  assert.equal(userMsg.content[1].image_url.url, `data:image/png;base64,${fakeBase64}`);
+});
+
+test('TASK 9.1 RESTORATION: Inbound PDF/Document Extracted Context is preserved and forwarded with parity', async () => {
+  const extractedPdfEvidence = '<customer_document_evidence>\nINVOICE #9821\nAmount Due: 4500 AED\nCompany: Blue Dune LLC\n</customer_document_evidence>';
+  const docPart = { text: extractedPdfEvidence };
+
+  let vertexReceived = null;
+  let openaiReceived = null;
+
+  const mockGemini = {
+    mode: 'vertex',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'vertex', model: 'gemini-3.7-flash', endpoint_class: 'VERTEX_GENERATE_CONTENT' }),
+    generateContent: async (p) => {
+      vertexReceived = p;
+      return { candidates: [{ content: { parts: [{ text: 'The invoice amount is 4500 AED.' }] } }] };
+    },
+  };
+
+  const mockOpenAi = {
+    chat: {
+      completions: {
+        create: async (p) => {
+          openaiReceived = p;
+          return { choices: [{ message: { content: 'OpenAI: Invoice #9821 is 4500 AED.' } }] };
+        },
+      },
+    },
+  };
+
+  const runtime = createSharedAiRuntime({
+    geminiProvider: mockGemini,
+    openaiClient: mockOpenAi,
+  });
+
+  // 1. Primary Vertex with PDF document text
+  const res1 = await runtime.generateAiResponse({
+    systemInstruction: 'You are document assistant.',
+    contents: [{
+      role: 'user',
+      parts: [
+        { text: 'Please summarize this PDF invoice' },
+        docPart,
+      ],
+    }],
+    channel: 'WHATSAPP',
+  });
+  assert.equal(res1.provider, 'vertex');
+  assert.equal(res1.text, 'The invoice amount is 4500 AED.');
+  assert.equal(vertexReceived.contents[0].parts[0].text, 'Please summarize this PDF invoice');
+  assert.equal(vertexReceived.contents[0].parts[1].text, extractedPdfEvidence);
+
+  // 2. OpenAI failover with PDF document text
+  mockGemini.generateContent = async () => { throw new Error('Vertex 503'); };
+  const res2 = await runtime.generateAiResponse({
+    systemInstruction: 'You are document assistant.',
+    contents: [{
+      role: 'user',
+      parts: [
+        { text: 'Please summarize this PDF invoice' },
+        docPart,
+      ],
+    }],
+    channel: 'WHATSAPP',
+  });
+  assert.equal(res2.provider, 'openai');
+  assert.equal(res2.text, 'OpenAI: Invoice #9821 is 4500 AED.');
+  const userMsg = openaiReceived.messages.find((m) => m.role === 'user');
+  assert.ok(userMsg);
+  assert.ok(userMsg.content.includes(extractedPdfEvidence));
+});
+
+
+
+test('TASK 9.1 RESTORATION: Inbound URL/Link reading context is preserved and forwarded with parity', async () => {
+  const urlPageContext = 'EXTERNAL_URL_CONTEXT:\nTitle: Dubai Mainland Commercial License Guide\nSummary: 100% foreign ownership allowed.';
+  const urlImageBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const urlImagePart = {
+    inlineData: { mimeType: 'image/jpeg', data: urlImageBase64 },
+    inline_data: { mime_type: 'image/jpeg', data: urlImageBase64 },
+  };
+
+  let vertexReceived = null;
+  let openaiReceived = null;
+
+  const mockGemini = {
+    mode: 'vertex',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'vertex', model: 'gemini-3.7-flash', endpoint_class: 'VERTEX_GENERATE_CONTENT' }),
+    generateContent: async (p) => {
+      vertexReceived = p;
+      return { candidates: [{ content: { parts: [{ text: 'Based on the link, 100% foreign ownership is supported.' }] } }] };
+    },
+  };
+
+  const mockOpenAi = {
+    chat: {
+      completions: {
+        create: async (p) => {
+          openaiReceived = p;
+          return { choices: [{ message: { content: 'OpenAI: The link confirms 100% foreign ownership.' } }] };
+        },
+      },
+    },
+  };
+
+  const runtime = createSharedAiRuntime({
+    geminiProvider: mockGemini,
+    openaiClient: mockOpenAi,
+  });
+
+  const res1 = await runtime.generateAiResponse({
+    systemInstruction: `You are company consultant.\n${urlPageContext}`,
+    prompt: 'Check this license link https://example.com/dubai-license',
+    multimodalParts: [urlImagePart],
+    channel: 'WHATSAPP',
+  });
+
+  assert.equal(res1.provider, 'vertex');
+  assert.ok(vertexReceived.systemInstruction.parts[0].text.includes(urlPageContext));
+  assert.equal(vertexReceived.contents[0].parts[1].inlineData.mimeType, 'image/jpeg');
+
+  mockGemini.generateContent = async () => { throw new Error('Vertex 503'); };
+  const res2 = await runtime.generateAiResponse({
+    systemInstruction: `You are company consultant.\n${urlPageContext}`,
+    prompt: 'Check this license link https://example.com/dubai-license',
+    multimodalParts: [urlImagePart],
+    channel: 'WHATSAPP',
+  });
+
+  assert.equal(res2.provider, 'openai');
+  assert.ok(openaiReceived.messages[0].content.includes(urlPageContext));
+  const userMsg = openaiReceived.messages.find((m) => m.role === 'user');
+  assert.equal(userMsg.content[1].type, 'image_url');
+});
+
 
