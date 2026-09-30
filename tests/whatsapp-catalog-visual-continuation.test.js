@@ -71,6 +71,36 @@ test('catalog turn one retains the current customer target and requires approved
   assert.equal(result.catalogRequested, true);
 });
 
+test('explicit catalog-grounded visual creation reuses the preceding customer image', async () => {
+  const result = await resolveWhatsAppVisualRequestState({
+    database: conversationDatabase(),
+    tenantId,
+    conversationId,
+    message: 'Find the product from the catalog that best suits my room and create a visual for my room.',
+  });
+
+  assert.equal(result.intentClassification.isVisualGeneration, true);
+  assert.equal(result.state, 'READY_FOR_GENERATION');
+  assert.equal(result.catalogRequested, true);
+  assert.equal(result.targetResourceId, customerTargetId);
+  assert.equal(result.originalCustomerTargetResourceId, customerTargetId);
+
+  const database = generationDatabase([catalogEntries[0]]);
+  const queued = await visual.orchestrateWhatsAppVisualAiJob({
+    database,
+    tenantId,
+    conversationId,
+    targetResourceId: result.targetResourceId,
+    promptInstruction: 'Find the product from the catalog that best suits my room and create a visual for my room.',
+    catalogRequested: result.catalogRequested,
+    assistantId,
+  });
+  assert.equal(queued.status, 'QUEUED');
+  assert.equal(database.state.inserted, 1);
+  assert.equal(database.state.job.grounding_context.catalog.entityId, selectedEntityId);
+  assert.deepEqual(database.state.job.grounding_context.catalog.mediaIds, [selectedMediaId]);
+});
+
 test('another catalog option continues from the durable prior job and excludes generated output as target', async () => {
   const result = await resolveWhatsAppVisualRequestState({
     database: conversationDatabase({ previousJob: {

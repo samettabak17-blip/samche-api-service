@@ -22,12 +22,14 @@ export const CANONICAL_VISUAL_INTENT_TYPES = Object.freeze({
 
 const VISUAL_GENERATION_PATTERNS = [
   /(?:make|turn|transform|redesign|redecorate|style|visualize|render|convert|apply|show)\s+this/i,
+  /(?:create|generate|make|produce)\s+(?:an?\s+)?(?:visual|visualization|image|preview|rendering|mockup|composition)\b/i,
+  /(?:place|put|insert|add)\s+.+\s+(?:in|into|on|onto)\s+(?:my\s+)?(?:image|photo|picture|scene|space)\b/i,
   /(?:look\s+like|design\s+as\s+inspiration|how\s+.*would\s+look|how\s+.*looks|show\s+me\s+how|show\s+me\s+this|show\s+this)/i,
   /(?:modern|scandinavian|mediterranean|rustic|minimalist|industrial|boho|luxury|contemporary)\s+(?:style|look|design|theme)/i,
   /(?:garden|room|kitchen|bedroom|living\s+room|wall|wallpaper|car|vehicle|furniture|stage|product|garment|unit)\s+(?:redesign|transformation|concept|preview|pattern)/i,
   /(?:wallpaper\s+.*on\s+(?:my\s+)?(?:wall|room))/i,
-  /(?:bunu\s+.*dönüştür|yeniden\s+tasarla|böyle\s+görünmesini\s+sağla|nasıl\s+durur\s+göster|tasarım\s+önerisi\s+oluştur)/i,
-  /(?:أعد\s+تصميم|حول\s+.*|غير\s+تصميم|صمم\s+لي|كيف\s+يبدو)/u,
+  /(?:bunu\s+.*dönüştür|yeniden\s+tasarla|böyle\s+görünmesini\s+sağla|nasıl\s+durur\s+göster|tasarım\s+önerisi\s+oluştur|görsel(?:leştirme)?\s+oluştur|görsel\s+üret|görselime\s+yerleştir)/i,
+  /(?:أعد\s+تصميم|حول\s+.*|غير\s+تصميم|صمم\s+لي|كيف\s+يبدو|أنشئ\s+(?:تصوراً|صورة)|ولّد\s+(?:تصوراً|صورة)|ضع\s+.*\s+(?:في|داخل)\s+(?:صورتي|الصورة))/u,
 ];
 
 const SUPPORT_OR_QA_PATTERNS = [
