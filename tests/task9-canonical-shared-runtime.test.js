@@ -1128,4 +1128,75 @@ test('TASK 9.1 PHYSICAL REGRESSION FIX: Real Path WhatsApp URL Reading - Safe Re
 });
 
 
+test('TASK 9.1 PHYSICAL REGRESSION FIX: Follow-up Generation & Normalization prevents Email style and Placeholders', async () => {
+  const { normalizeGeneratedFollowUpText, buildTenantFollowUpRequest } = await import('../services/tenant-follow-up-service.js');
+
+  // Test 1: Normalizer strips Subject lines, Salutations, Sign-offs, and Placeholders
+  const emailStyleOutput = `Subject: Checking In on Your Recent Inquiry
+
+Dear [Customer's Name],
+
+We spoke a short while ago regarding the details of your booking. I wanted to follow up to see if you still have any questions or if there are unresolved issues related to the booking of your event.
+
+Please let me know how I can assist you further.
+
+Best regards,
+
+[Your Name]
+Blue Dune Event Management LLC`;
+
+  const cleaned = normalizeGeneratedFollowUpText(emailStyleOutput);
+  assert.doesNotMatch(cleaned, /Subject:/i);
+  assert.doesNotMatch(cleaned, /Dear/i);
+  assert.doesNotMatch(cleaned, /Best regards/i);
+  assert.doesNotMatch(cleaned, /\[Your Name\]/i);
+  assert.doesNotMatch(cleaned, /\[Customer's Name\]/i);
+  assert.match(cleaned, /We spoke a short while ago regarding the details of your booking/);
+
+  // Test 2: Unresolved corrupt placeholders reject safely
+  const corruptPlaceholderOutput = 'Hello {{customer_name}}, this is ${your_name}.';
+  assert.equal(normalizeGeneratedFollowUpText(corruptPlaceholderOutput), '');
+
+  // Test 3: Prompt parts explicitly enforce direct mobile chat formatting
+  const prompt = buildTenantFollowUpRequest({
+    persona: {
+      available: true,
+      companyIdentity: 'Blue Dune Event Management LLC',
+      assistantIdentity: 'Blue Dune Concierge',
+      configuration: { follow_up_behavior: { enabled: true, timing_strategy: ['10m', '3h', '24h'] } },
+    },
+    stage: '10m',
+    language: 'en',
+    conversationContext: 'CUSTOMER: I am asking about booking conference hall.\nASSISTANT: We have the grand hall available.',
+  });
+
+  assert.match(prompt, /CHANNEL MEDIUM: Direct mobile chat follow-up \(WhatsApp\)/);
+  assert.match(prompt, /NEVER format this as an email letter/);
+  assert.match(prompt, /NEVER include Subject lines/);
+});
+
+test('TASK 9.1 PHYSICAL REGRESSION FIX: Human Takeover Suppression & Return to AI Continuity', async () => {
+  const { buildTenantFollowUpRequest } = await import('../services/tenant-follow-up-service.js');
+  const { evaluateChannelAiActivationPolicy } = await import('../services/channel-ai-activation-policy-service.js');
+
+  // Test 1: Follow-up is suppressed when humanHandling is active
+  const followUpSuppressed = buildTenantFollowUpRequest({
+    persona: { companyIdentity: 'Blue Dune', assistantIdentity: 'Blue Dune Assistant', configuration: { follow_up_behavior: { enabled: true } } },
+    stage: '10m',
+    humanHandling: true,
+  });
+  assert.equal(followUpSuppressed.available, false);
+  assert.equal(followUpSuppressed.code, 'HUMAN_HANDLING');
+
+  // Test 2: Normal AI turn is suppressed when conversation is in HUMAN handling mode
+  const activationEvaluation = await evaluateChannelAiActivationPolicy({
+    messageText: 'Hello',
+    conversation: { handling_mode: 'HUMAN', status: 'open' },
+    channelConfig: {},
+  });
+  assert.equal(activationEvaluation.eligible, false);
+  assert.equal(activationEvaluation.reasonCode, 'HUMAN_MODE_ACTIVE');
+});
+
+
 

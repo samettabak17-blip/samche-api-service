@@ -1540,15 +1540,20 @@ async function resolveContextualFollowUpWorkerContext(job) {
     return null;
   }
   console.info(`FOLLOWUP_REVALIDATED tenant=${String(job.tenant_id).slice(0, 8)} job_id=${job.id} language=${language}`);
-  return { conversation, language, prompt, sendGate };
+  return { conversation, language, prompt, sendGate, persona };
 }
 
 async function processContextualFollowUpJobs() {
   return processDueContextualFollowUps({
     database: pool,
     resolveContext: resolveContextualFollowUpWorkerContext,
-    generate: async ({ job, prompt }) => {
-      const rawGenerated = await callWpGemini(prompt, null, null);
+    generate: async ({ job, context, prompt }) => {
+      const systemInstruction = buildTenantRuntimeSystemInstruction({
+        persona: context?.persona,
+        knowledgeContext: '',
+        channelRules: 'You are sending a natural, concise 1-3 sentence WhatsApp chat follow-up directly continuing the recent conversation. Never write an email letter, Subject line, or signature block. Never use placeholder brackets.',
+      });
+      const rawGenerated = await callWpGemini(prompt, null, systemInstruction);
       const generated = normalizeGeneratedFollowUpText(rawGenerated);
       if (generated) {
         console.info(`FOLLOWUP_GENERATED tenant=${String(job.tenant_id).slice(0, 8)} job_id=${job.id} length=${generated.length}`);

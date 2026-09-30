@@ -317,6 +317,24 @@ export function normalizeGeneratedFollowUpText(raw) {
     text = text.slice(1, -1).trim();
   }
   text = text.replace(/^(?:(?:assistant|ai|bot|advisor|agent):\s*)/i, '').trim();
+
+  // Strip accidental email subject lines
+  text = text.replace(/^(?:subject|konu|الموضوع):\s*[^\n]+\n+/i, '').trim();
+
+  // Strip accidental email salutations (e.g. "Dear [Customer's Name],", "Sayın Müşteri,")
+  text = text.replace(/^(?:dear|sayın|sevgili|عزيزي|عزيزتي)\s+(?:\[[^\]]+\]|customer|client|müşteri)?[,:\n\s]+/i, '').trim();
+
+  // Strip accidental sign-off / signature blocks
+  text = text.replace(/\n+(?:best regards|warm regards|sincerely|kind regards|regards|saygılarımızla|iyi çalışmalar|مع أطيب التحيات|تحياتي|مع خالص التقدير)[,\s\S]*$/i, '').trim();
+
+  // Strip generic bracketed placeholders
+  text = text.replace(/\[(?:Customer['’]?s?\s*Name|Your\s*Name|Client['’]?s?\s*Name|Insert\s*[^\]]+)\]/gi, '').trim();
+
+  // Placeholder Safety Guard: If unresolved placeholder tokens remain, reject rather than sending corrupt template tokens
+  if (/\[(?:Customer['’]?s?\s*Name|Your\s*Name)\]/i.test(text) || /\{\{[^}]+\}\}/.test(text) || /\$\{[^}]+\}/.test(text)) {
+    return '';
+  }
+
   return text;
 }
 
@@ -405,6 +423,11 @@ export function buildTenantFollowUpRequest({
   const promptParts = [
     `Generate one ${resolved.kind} message for ${persona.companyIdentity} as ${persona.assistantIdentity}.`,
     `Output language: ${language}.`,
+    `CHANNEL MEDIUM: Direct mobile chat follow-up (WhatsApp). Write a concise, natural, 1-3 sentence conversational follow-up message continuing the conversation.`,
+    `CRITICAL CHANNEL & FORMATTING RULES:`,
+    `- NEVER format this as an email letter.`,
+    `- NEVER include Subject lines, "Dear [Name]", sign-offs ("Best regards", "Sincerely"), or sender signatures.`,
+    `- NEVER output template placeholders or bracketed variables like [Customer's Name], [Your Name], {{name}}, \${name}. Address the customer directly and naturally.`,
     `ACTIVE tenant services/context: ${JSON.stringify(persona.profile?.services ?? [])}.`,
     `ACTIVE tenant tone: ${String(persona.configuration?.tone ?? '')}.`,
     `Approved ${resolved.kind} behavior: ${JSON.stringify(resolved.policy)}.`,
