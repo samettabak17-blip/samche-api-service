@@ -87,6 +87,23 @@ export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
   '6. ACCURACY & NO FALSE BOOKING CLAIMS:',
   '   - When meeting information is noted or collected, do NOT claim a calendar booking/appointment is definitively confirmed unless a real calendar booking exists. Clearly distinguish "görüşme talebinizi not ettim / aldım" from a confirmed calendar appointment.',
   '   - Do NOT append wa.me links, raw URLs, or URL-encoded payloads.',
+  '7. INSTAGRAM DM MEDIA + TEXT INTENT PRIORITY (META ADS & SHARED MEDIA):',
+  '   - Priority Hierarchy in Instagram DM: (1) Current user text message, (2) Previous conversation context, (3) Approved tenant knowledge / profile, (4) Media understanding.',
+  '   - WRITTEN QUESTION HAS HIGHEST PRIORITY: When a customer sends an advertisement video, image, story mention, reel, post, or document accompanied by a written question or statement (e.g. "Dubai oturum ücretleri nedir?", "Nasıl oturum alırım?", "Bu hizmet nasıl çalışıyor?", "Peki fiyat nedir?"):',
+  '     * You MUST directly and thoroughly answer the customer\'s written question grounded strictly in approved tenant knowledge.',
+  '     * You MUST NOT ask "Videoyla/görselle ilgili nasıl yardımcı olabilirim?" or ask what the video is about when a written question is present.',
+  '     * You MUST NOT explain, describe, or summarize the advertisement/media first instead of answering their question.',
+  '     * You MUST NOT treat advertisement text/visuals as the user\'s question or assume unstated intent.',
+  '     * Media serves solely as optional supporting context if the text is ambiguous, but NEVER overrides or delays answering the written question.',
+  '   - MEDIA CONTENT IS NEVER AN AUTHORITATIVE BUSINESS SOURCE: Never extract prices, policies, guarantees, or service details from unverified advertisement media or user images. All factual claims must come strictly from approved tenant knowledge, business profile, and conversation memory.',
+  '8. ONLY MEDIA WITHOUT TEXT INBOUND:',
+  '   - If the user sends ONLY a media attachment (video, image, reel, story mention, or PDF/document) with NO written question or text:',
+  '     * Ask: "Bu içerikle ilgili size nasıl yardımcı olabilirim?" (or in the customer\'s language).',
+  '     * Do NOT automatically assume intent or make ungrounded assertions about unverified media.',
+  '9. CONVERSATION CONTINUITY ACROSS TURNS:',
+  '   - When a customer asks follow-up questions after sending media (e.g. Turn 1: [Ad video] "Bu hizmet nasıl oluyor?" -> Turn 2: "Peki fiyat nedir?"):',
+  '     * Maintain seamless conversation context on the established topic.',
+  '     * Do NOT restart the conversation, do NOT re-interrogate, and do NOT re-describe the media.',
 ].join('\n'));
 
 
@@ -268,6 +285,13 @@ export function extractBothTopicsSignals(text = '') {
     || /(?:ikisi\s+de\s+olabilir|ikiside\s+olabilir|her\s+ikisi|hem\s+şirket\s+hem\s+oturum|ikisi\s+de|ikiside)/iu.test(text);
 }
 
+export function isMediaOnlyInbound(text = '') {
+  if (typeof text !== 'string') return false;
+  const clean = text.trim();
+  if (!clean) return true;
+  return /^\[(?:attachment|attached_image|attached_document):\s*[^\]]+\]$/i.test(clean);
+}
+
 /**
  * Generates an intelligent, context-aware fallback response from conversation memory
  * ensuring no eligible customer turn is ever silently dropped and no fake contact promises are made.
@@ -279,6 +303,12 @@ export function generateContextualConversationalFallback({ text = '', conversati
   const isUndecided = extractUndecidedSignals(cleanText);
   const isGreeting = isGreetingOnly(cleanText);
   const hasMeeting = hasCurrentTurnMeetingIntent(cleanText);
+  const isMediaOnly = isMediaOnlyInbound(cleanText);
+
+  // 0. If customer sends ONLY media without written text (Case 2):
+  if (isMediaOnly) {
+    return 'Bu içerikle ilgili size nasıl yardımcı olabilirim?';
+  }
 
   // 1. If customer sends a greeting / re-entry:
   if (isGreeting) {
