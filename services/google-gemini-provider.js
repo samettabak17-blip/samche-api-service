@@ -30,7 +30,13 @@ export function resolveApiKey(env = process.env) {
 }
 
 export function resolveGcpCredentials(env = process.env) {
-  const rawCreds = env.GOOGLE_APPLICATION_CREDENTIALS || env.GCP_SERVICE_ACCOUNT_KEY || env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  const rawCreds = env.GOOGLE_APPLICATION_CREDENTIALS
+    || env.GCP_SERVICE_ACCOUNT_KEY
+    || env.GOOGLE_SERVICE_ACCOUNT_KEY
+    || env.GCP_CREDENTIALS
+    || env.GCP_SA_KEY
+    || env.GOOGLE_CREDENTIALS
+    || env.GOOGLE_AUTH_CREDENTIALS;
   if (!rawCreds || typeof rawCreds !== 'string' || !rawCreds.trim()) return null;
   const trimmed = rawCreds.trim();
   if (trimmed.startsWith('{')) {
@@ -345,6 +351,7 @@ export function createGoogleGeminiProvider({ env = process.env, clientFactory, f
         vertexai: true,
         project: config.project,
         location: config.location,
+        ...(config.apiKey ? { apiKey: config.apiKey } : {}),
         ...(gcpAuth ? {
           googleAuthOptions: {
             ...(gcpAuth.credentials ? { credentials: gcpAuth.credentials } : {}),
@@ -367,8 +374,18 @@ export function createGoogleGeminiProvider({ env = process.env, clientFactory, f
     throw new GoogleGeminiProviderError('GOOGLE_GEMINI_CLIENT_INVALID', 'Google Gemini client is invalid');
   }
 
+  const authDiagnostic = Object.freeze({
+    mode: config.mode,
+    authType: gcpAuth?.credentials ? 'SERVICE_ACCOUNT_CREDENTIALS' : gcpAuth?.keyFilename ? 'SERVICE_ACCOUNT_KEYFILE' : config.apiKey ? 'API_KEY' : 'ADC',
+    clientEmail: gcpAuth?.credentials?.client_email || null,
+    projectId: config.project,
+    location: config.location,
+    hasApiKey: Boolean(config.apiKey),
+  });
+
   return Object.freeze({
     mode: config.mode,
+    authDiagnostic,
     runtimeMetadata() {
       return Object.freeze({
         provider: 'GOOGLE_GEMINI',
@@ -411,10 +428,16 @@ export function createGoogleGeminiProvider({ env = process.env, clientFactory, f
             console.warn(`GOOGLE_VERTEX_RETRY_WARN model=${defaultModel}`, retryError?.message);
           }
         }
-        console.error('GOOGLE_VERTEX_ORIGINAL_ERROR', {
+        console.error('GOOGLE_VERTEX_RAW_ERROR', {
+          constructor: error?.constructor?.name,
+          name: error?.name,
           status: error?.status ?? error?.statusCode ?? error?.code,
+          code: error?.code,
           message: error?.message,
-          details: error?.details,
+          responseStatus: error?.response?.status,
+          responseDataStatus: error?.response?.data?.error?.status,
+          responseDataCode: error?.response?.data?.error?.code,
+          responseDataMessage: error?.response?.data?.error?.message,
           permission: error?.permission || error?.error?.details?.[0]?.metadata?.permission,
           resource: error?.resource || error?.error?.details?.[0]?.metadata?.resource,
         });
