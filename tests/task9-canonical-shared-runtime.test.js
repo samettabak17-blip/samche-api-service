@@ -581,4 +581,100 @@ test('TASK 9.1 RESTORATION: Inbound URL/Link reading context is preserved and fo
   assert.equal(userMsg.content[1].type, 'image_url');
 });
 
+test('TASK 9.1 ADDENDUM: Visual AI Coexistence and Orchestration Parity during Provider Failover', async () => {
+  // Visual AI intent classification and request parsing operate before inference
+  const visualUserText = 'Can you generate an image of a luxury modern office in Dubai?';
+  const tenantGrounding = 'BUSINESS_IDENTITY: Blue Dune Luxury Real Estate & Design.';
+  let openaiCalled = false;
+
+  const mockGemini = {
+    mode: 'vertex',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'vertex', model: 'gemini-3.7-flash', endpoint_class: 'VERTEX_GENERATE_CONTENT' }),
+    generateContent: async () => {
+      // Simulate Vertex capacity outage
+      throw Object.assign(new Error('503 Service Unavailable'), { status: 503 });
+    },
+  };
+
+  const mockOpenAi = {
+    chat: {
+      completions: {
+        create: async (payload) => {
+          openaiCalled = true;
+          assert.ok(payload.messages[0].content.includes(tenantGrounding));
+          assert.equal(payload.messages[1].content, visualUserText);
+          return {
+            choices: [{
+              message: {
+                content: 'I will prepare your visual generation request for the luxury modern office in Dubai.',
+              },
+            }],
+          };
+        },
+      },
+    },
+  };
+
+  const runtime = createSharedAiRuntime({
+    geminiProvider: mockGemini,
+    openaiClient: mockOpenAi,
+  });
+
+  const res = await runtime.generateAiResponse({
+    systemInstruction: tenantGrounding,
+    prompt: visualUserText,
+    channel: 'WHATSAPP',
+  });
+
+  assert.equal(res.provider, 'openai');
+  assert.equal(openaiCalled, true);
+  assert.ok(res.text.includes('luxury modern office'));
+});
+
+test('TASK 9.1 ADDENDUM: Web Chat Page & Entity Awareness Parity during Provider Failover', async () => {
+  const pageContextPrompt = 'PAGE_CONTEXT:\nActive Page: https://example.com/products/dubai-pro-setup\nEntity: Dubai Pro Setup Package\nPrice: 12500 AED';
+  const customerQuestion = 'What is included in the package shown on my screen?';
+
+  let openaiPayload = null;
+  const mockGemini = {
+    mode: 'vertex',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'vertex', model: 'gemini-3.7-flash', endpoint_class: 'VERTEX_GENERATE_CONTENT' }),
+    generateContent: async () => { throw new Error('Vertex 503'); },
+  };
+  const mockOpenAi = {
+    chat: {
+      completions: {
+        create: async (p) => {
+          openaiPayload = p;
+          return {
+            choices: [{
+              message: {
+                content: 'The Dubai Pro Setup Package on your screen includes licensing, visa quota, and corporate bank assistance.',
+              },
+            }],
+          };
+        },
+      },
+    },
+  };
+
+  const runtime = createSharedAiRuntime({
+    geminiProvider: mockGemini,
+    openaiClient: mockOpenAi,
+  });
+
+  const res = await runtime.generateAiResponse({
+    systemInstruction: `You are assistant.\n${pageContextPrompt}`,
+    prompt: customerQuestion,
+    channel: 'WEB_CHAT',
+  });
+
+  assert.equal(res.provider, 'openai');
+  assert.ok(openaiPayload);
+  assert.ok(openaiPayload.messages[0].content.includes(pageContextPrompt));
+  assert.equal(openaiPayload.messages[1].content, customerQuestion);
+  assert.ok(res.text.includes('Dubai Pro Setup Package'));
+});
+
+
 
