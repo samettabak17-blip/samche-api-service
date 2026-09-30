@@ -444,6 +444,7 @@ export const SAMCHE_STAGING_BUSINESS_PROFILE = Object.freeze({
     'Free Zone otoritesi kampanyalarını/promosyonlarını takip edin',
     'Family Visa bağımsız çalışma hakkı sağlar',
     'Sağlık sigortası sponsorlu oturum paketine dahildir',
+    'Sağlık sigortası Emirates ID veya oturum süreci için yasal bir zorunluluktur',
   ],
 });
 
@@ -521,6 +522,9 @@ Aktarım sonrasında asistan hiçbir ek açıklama yapmaz ve sessiz kalır.`,
     'Dubai’de iş bulma desteği veriyoruz',
     'Mainland şirketler için yerel sponsor zorunludur',
     'Freezone otoritesi kampanyalarını takip edin',
+    'Family Visa bağımsız çalışma hakkı sağlar',
+    'Sağlık sigortası sponsorlu oturum paketine dahildir',
+    'Sağlık sigortası Emirates ID veya oturum süreci için yasal bir zorunluluktur',
   ],
   unsupported_claim_behavior: 'Yanıltıcı veya yasal olmayan iddialarda bulunma, BAE resmi yasal çerçevesini açıkla.',
   terminology: 'Mainland (DET Anakara), Free Zone (Serbest Bölge), NOC, Emirates ID, Ejari, FTA.',

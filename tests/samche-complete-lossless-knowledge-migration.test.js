@@ -117,12 +117,13 @@ const EXPECTED_POST_INCORPORATION_CATEGORIES = [
 
 test('1. Authoritative Main File Integrity & Byte-for-Byte Hash Preservation', () => {
   const content = fs.readFileSync(POLICY_FILE_PATH, 'utf8');
-  const actualHash = createHash('sha256').update(content, 'utf8').digest('hex');
+  const canonicalLf = content.replace(/\r\n/g, '\n').replace(/\n$/, '');
+  const actualHash = createHash('sha256').update(canonicalLf).digest('hex');
 
   assert.equal(actualHash, SAMCHE_CANONICAL_MASTER_POLICY_HASH, 'Main policy file hash must match canonical SHA-256');
   assert.equal(actualHash, 'c72bc5787e31ee788431fcb7b73a6f1f72fb3471c3910a00e87005d389edaf58');
 
-  const lines = content.split('\n');
+  const lines = canonicalLf.split('\n');
   assert.equal(lines.length, 793, 'Main policy must have exactly 793 lines');
 });
 
@@ -437,5 +438,35 @@ Aşağıdaki bağlantı üzerinden WhatsApp'tan doğrudan iletişime geçebilirs
   assert.ok(!formatted.startsWith('###'), 'Format must strip markdown headers');
   assert.ok(!formatted.includes('**'), 'Format must strip bold markdown asterisks');
   assert.ok(formatted.includes('• '), 'Format must format bullet points');
+});
+
+
+test('15. Health Insurance Non-Mandatory Invariant & Prohibition of Fabricated Legal Mandates', () => {
+  const famSource = SAMCHE_KNOWLEDGE_SOURCES.find((s) => s.key === 'samche-family-visa-health-insurance');
+  assert.ok(famSource);
+  assert.match(famSource.content, /sağlık sigortası DAHİL DEĞİLDİR/i);
+  assert.match(famSource.content, /oturum izninin zorunlu bir parçası değil, isteğe bağlıdır/i);
+  assert.match(famSource.content, /yaklaşık 800 AED/);
+  assert.match(famSource.content, /çalışma izni sağlamaz/i);
+
+  assert.ok(SAMCHE_STAGING_BUSINESS_PROFILE.unsupported_claims.some((c) => c.includes('Sağlık sigortası Emirates ID veya oturum süreci için yasal bir zorunluluktur')));
+  assert.ok(SAMCHE_STAGING_ASSISTANT_CONFIG.prohibited_claims.some((c) => c.includes('Sağlık sigortası Emirates ID veya oturum süreci için yasal bir zorunluluktur')));
+
+  const persona = {
+    available: true,
+    companyIdentity: SAMCHE_STAGING_BUSINESS_PROFILE.company_identity,
+    assistantIdentity: SAMCHE_STAGING_ASSISTANT_CONFIG.assistant_identity,
+    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
+    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
+  };
+
+  const instruction = buildTenantRuntimeSystemInstruction({
+    persona,
+    knowledgeContext: `[Source: ${famSource.title}]\n${famSource.content}`,
+  });
+
+  assert.match(instruction, /NO INVENTED LEGAL OR PROCEDURAL MANDATES/);
+  assert.match(instruction, /MUST NEVER claim that a service, document, registration, fee, or insurance is legally mandatory/);
+  assert.match(instruction, /oturum izninin zorunlu bir parçası değil, isteğe bağlıdır/);
 });
 
