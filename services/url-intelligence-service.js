@@ -1009,7 +1009,18 @@ export function extractContentFromHtml(html, pageUrl) {
     else if (/fiyat|stok|satın\s+al|ürün|product|price|sku|catalog|cart/i.test(corpus)) entityType = 'PRODUCT';
   }
 
-  const finalSummary = ogDesc || metaDescription || (attributes['description'] ? String(attributes['description']) : null);
+  let bodySummary = null;
+  const pMatches = [...html.matchAll(/<(?:p|h[1-6]|li|blockquote|article|section)\b[^>]*>([\s\S]*?)<\/(?:p|h[1-6]|li|blockquote|article|section)>/gi)];
+  if (pMatches.length > 0) {
+    const extractedLines = pMatches
+      .map((m) => sanitizeText(m[1], 300))
+      .filter((t) => t.length > 15 && !/cookie|javascript|copyright|all rights reserved|privacy policy|terms of service/i.test(t));
+    if (extractedLines.length > 0) {
+      bodySummary = sanitizeText(extractedLines.slice(0, 10).join(' '), URL_INTELLIGENCE_LIMITS.MAX_SUMMARY_LENGTH);
+    }
+  }
+
+  const finalSummary = ogDesc || metaDescription || (attributes['description'] ? String(attributes['description']) : null) || bodySummary;
 
   return {
     title: title || entityName,

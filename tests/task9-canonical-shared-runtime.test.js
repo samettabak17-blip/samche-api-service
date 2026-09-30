@@ -1199,4 +1199,212 @@ test('TASK 9.1 PHYSICAL REGRESSION FIX: Human Takeover Suppression & Return to A
 });
 
 
+test('TASK 9.1 PHYSICAL REGRESSION FIX: Real Path share.google -> smrmimarlik.com extraction and grounding', async () => {
+  const { processMessageUrlIntelligence } = await import('../services/url-intelligence-service.js');
+  const { buildContextualIntelligencePromptSection, updateSessionBrowsingStateWithEntity } = await import('../services/contextual-intelligence-service.js');
+  const { buildWhatsAppActivePersonaTenantContext, buildWhatsAppTenantModelContext } = await import('../services/whatsapp-tenant-context-service.js');
+
+  const smrHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>SMR Mimarlık - Resmi Web Sayfası</title>
+      </head>
+      <body>
+        <h1>SMR Mimarlık Hizmetlerimiz</h1>
+        <p>Epoksi Kaplama, Karo ve Rulo Halı, Proje Planlama ve Yönetimi, Müteahhitlik Hizmeti.</p>
+        <p>İletişim: info@smrmimarlik.com +90 533 059 42 21</p>
+      </body>
+    </html>
+  `;
+
+  const mockShareGoogleFetch = async (url) => {
+    if (url.includes('share.google/smr-preview')) {
+      return {
+        status: 302,
+        ok: false,
+        headers: new Headers({ location: 'https://www.smrmimarlik.com' }),
+      };
+    }
+    return {
+      status: 200,
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/html; charset=utf-8' }),
+      text: async () => smrHtml,
+    };
+  };
+
+  const mockDnsLookup = async () => [{ address: '216.239.32.27', family: 4 }];
+
+  // 1. Process inbound share.google link
+  const urlResult = await processMessageUrlIntelligence({
+    text: 'Check this architecture site https://share.google/smr-preview',
+    fetchImpl: mockShareGoogleFetch,
+    lookupImpl: mockDnsLookup,
+  });
+
+  assert.equal(urlResult.hasUrl, true);
+  assert.equal(urlResult.success, true);
+  assert.match(urlResult.finalUrl, /https:\/\/www\.smrmimarlik\.com/);
+  assert.match(urlResult.entity.entity_name, /SMR Mimarlık/i);
+  assert.match(urlResult.entity.summary, /Epoksi Kaplama/i);
+  assert.match(urlResult.entity.summary, /Müteahhitlik Hizmeti/i);
+
+  // 2. Canonical Context & Prompt Synthesis
+  const browsingState = updateSessionBrowsingStateWithEntity({
+    currentState: null,
+    newEntity: urlResult.entity,
+  });
+  const contextualSection = buildContextualIntelligencePromptSection({
+    currentEntity: browsingState.currentEntity,
+    channelType: 'WHATSAPP',
+  });
+
+  const tenant = {
+    companyName: 'Blue Dune',
+    assistantName: 'Blue Dune Assistant',
+    systemPrompt: 'Blue Dune event management and luxury design policy.',
+  };
+
+  const runtimeTenantContext = buildWhatsAppActivePersonaTenantContext({
+    persona: { available: true, companyIdentity: 'Blue Dune', assistantIdentity: 'Blue Dune Assistant', profile: {}, configuration: {} },
+    communicationLanguage: 'tr',
+    contextualIntelligence: contextualSection,
+  });
+
+  const modelContext = buildWhatsAppTenantModelContext({
+    tenant: runtimeTenantContext,
+    history: [],
+    customerText: 'Check this architecture site https://share.google/smr-preview',
+    communicationLanguage: 'tr',
+  });
+
+  // Verify Vertex Primary
+  const mockGemini = {
+    mode: 'vertex',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'vertex', model: 'gemini-3.7-flash', endpoint_class: 'VERTEX_GENERATE_CONTENT' }),
+    generateContent: async ({ contents, systemInstruction }) => {
+      assert.ok(systemInstruction.parts[0].text.includes('SMR Mimarlık'));
+      assert.ok(systemInstruction.parts[0].text.includes('Epoksi Kaplama'));
+      return { candidates: [{ content: { parts: [{ text: 'Paylaştığınız bağlantıyı inceledim. SMR Mimarlık; epoksi kaplama, karo ve rulo halı, proje planlama ve müteahhitlik hizmetleri sunmaktadır.' }] } }] };
+    },
+  };
+
+  const runtime = createSharedAiRuntime({ geminiProvider: mockGemini, circuitBreaker: new ProviderCircuitBreaker() });
+  const res = await runtime.generateAiResponse({
+    systemInstruction: modelContext.systemInstruction,
+    prompt: modelContext.userPrompt,
+    channel: 'WHATSAPP',
+  });
+
+  assert.equal(res.provider, 'vertex');
+  assert.match(res.text, /SMR Mimarlık/i);
+  assert.match(res.text, /epoksi kaplama/i);
+  assert.doesNotMatch(res.text, /cannot access external links|bağlantılara erişemiyorum/i);
+});
+
+test('TASK 9.1 PHYSICAL REGRESSION FIX: SSRF Security Invariants (Private IP, Localhost, Cloud Metadata, Redirect-to-Private Block)', async () => {
+  const { processMessageUrlIntelligence, validateSafeUrl } = await import('../services/url-intelligence-service.js');
+
+  // 1. Localhost / Private IP direct block
+  assert.throws(() => validateSafeUrl('http://127.0.0.1:8080/admin'), { code: 'SSRF_BLOCKED_TARGET' });
+  assert.throws(() => validateSafeUrl('http://localhost:3000/internal'), { code: 'SSRF_BLOCKED_TARGET' });
+  assert.throws(() => validateSafeUrl('http://192.168.1.1/router'), { code: 'SSRF_BLOCKED_TARGET' });
+  assert.throws(() => validateSafeUrl('http://10.0.0.5/api'), { code: 'SSRF_BLOCKED_TARGET' });
+  assert.throws(() => validateSafeUrl('http://169.254.169.254/latest/meta-data/'), { code: 'SSRF_BLOCKED_TARGET' });
+  assert.throws(() => validateSafeUrl('http://metadata.google.internal/computeMetadata/v1/'), { code: 'SSRF_BLOCKED_TARGET' });
+
+  // 2. Redirect to Private IP Hop Block
+  const mockRedirectToPrivateFetch = async (url) => {
+    if (url.includes('public-site.com/redirect')) {
+      return {
+        status: 302,
+        ok: false,
+        headers: new Headers({ location: 'http://169.254.169.254/meta-data' }),
+      };
+    }
+    return { status: 200, ok: true, headers: new Headers({ 'content-type': 'text/html' }), text: async () => '<html></html>' };
+  };
+
+  const res = await processMessageUrlIntelligence({
+    text: 'Check this link http://public-site.com/redirect',
+    fetchImpl: mockRedirectToPrivateFetch,
+    lookupImpl: async () => [{ address: '93.184.216.34', family: 4 }],
+  });
+
+  assert.equal(res.hasUrl, true);
+  assert.equal(res.success, false);
+  assert.equal(res.code, 'SSRF_BLOCKED_TARGET');
+});
+
+
+test('TASK 9.1 PHYSICAL REGRESSION FIX: Visual AI Real Path (Intent, Orchestration, Failover Reasoning, Delivery, Human Suppression)', async () => {
+  const { resolveWhatsAppVisualRequestState, formatVisualCatalogFallback, formatVisualCatalogTargetPrompt } = await import('../services/visual-intelligence-intent-service.js');
+
+  // 1. Visual request intent parsing (Image edit/generation request with target image)
+  const reqState = await resolveWhatsAppVisualRequestState({
+    database: {
+      query: async (sql) => {
+        if (sql.includes('SELECT id, source_type')) {
+          return { rows: [{ id: '33333333-3333-4333-8333-333333333333', source_type: 'WHATSAPP_MEDIA', media_category: 'IMAGE', mime_type: 'image/png' }] };
+        }
+        return { rows: [] };
+      },
+    },
+    tenantId: '11111111-1111-4111-8111-111111111111',
+    conversationId: '22222222-2222-4222-8222-222222222222',
+    message: 'Make this stage look luxury modern with lighting and gold decor',
+    currentResourceIds: ['33333333-3333-4333-8333-333333333333'],
+    recentHistory: [],
+    language: 'en',
+  });
+
+  assert.equal(reqState.state, 'READY_FOR_GENERATION');
+  assert.equal(reqState.targetResourceId, '33333333-3333-4333-8333-333333333333');
+  assert.match(reqState.promptInstruction, /luxury modern/i);
+
+  // 2. Visual catalog target prompts localization
+  const trPrompt = formatVisualCatalogTargetPrompt('tr');
+  const enPrompt = formatVisualCatalogTargetPrompt('en');
+  const arPrompt = formatVisualCatalogTargetPrompt('ar');
+  assert.match(trPrompt, /görsel|fotoğraf/i);
+  assert.match(enPrompt, /photo|image/i);
+  assert.match(arPrompt, /صورة/);
+
+  // 3. Visual AI failure fallbacks localization
+  const trFallback = formatVisualCatalogFallback('tr', 'TEMPORARILY_UNAVAILABLE');
+  const enFallback = formatVisualCatalogFallback('en', 'TEMPORARILY_UNAVAILABLE');
+  assert.match(trFallback, /görsel(?:leştirme| oluşturma)?/i);
+  assert.match(enFallback, /Visual/i);
+
+  // 4. Human Takeover cancels Visual AI job before provider execution
+  const mockDbWithHumanMode = {
+    query: async (sql) => {
+      if (sql.includes('SELECT status, handling_mode FROM conversations')) {
+        return { rowCount: 1, rows: [{ status: 'open', handling_mode: 'HUMAN' }] };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+  const { processOneVisualAiGenerationJob } = await import('../services/visual-ai-generation-worker.js');
+  let workerExecutedProvider = false;
+  const mockVisualProvider = {
+    generateImage: async () => {
+      workerExecutedProvider = true;
+      return { imageBuffer: Buffer.from('png'), mimeType: 'image/png' };
+    },
+  };
+
+  const outcome = await processOneVisualAiGenerationJob({
+    database: mockDbWithHumanMode,
+    storage: { put: async () => {} },
+    visualProvider: mockVisualProvider,
+    deliverWhatsAppMedia: async () => ({ providerMessageId: 'msg-123' }),
+    job: { id: 'job-1', tenant_id: 'tenant-1', conversation_id: 'conv-1', target_resource_id: 'res-1' },
+  });
+
+  assert.equal(workerExecutedProvider, false, 'Visual provider MUST NOT run during human takeover');
+});
+
+
 
