@@ -271,13 +271,13 @@ function safeRequestMetadata({ mode, model, status = null }) {
 }
 
 function normalizeRequestError(error, mode, model) {
-  const status = Number(error?.status ?? error?.statusCode ?? error?.code ?? error?.httpStatus ?? error?.response?.status);
+  const status = Number(error?.status ?? error?.statusCode ?? error?.code ?? error?.httpStatus ?? error?.response?.status ?? error?.error?.code ?? error?.response?.data?.error?.code);
   const safeMetadata = safeRequestMetadata({ mode, model, status: Number.isInteger(status) ? status : null });
-  const msg = String(error?.message || error?.details || '');
+  const msg = String(error?.message || error?.details || error?.cause?.message || '');
   if (error?.name === 'AbortError' || /timeout|deadline exceeded/i.test(msg)) {
     return new GoogleGeminiProviderError('GOOGLE_GEMINI_TIMEOUT', 'Google Gemini request timed out', { cause: error, safeMetadata });
   }
-  if (status === 503 || /503|high demand|overloaded|service unavailable|temporarily unavailable/i.test(msg)) {
+  if (status === 503 || /503|high demand|overloaded|service unavailable|temporarily unavailable|unavailable/i.test(msg)) {
     return new GoogleGeminiProviderError('GOOGLE_GEMINI_CAPACITY_UNAVAILABLE', 'Google Gemini service is temporarily unavailable due to high demand', { cause: error, safeMetadata });
   }
   if (status === 429 || /429|resource exhausted|rate limit|quota/i.test(msg)) {
@@ -286,7 +286,7 @@ function normalizeRequestError(error, mode, model) {
   if (status === 404 || /404|not found|no longer available|is not found/i.test(msg)) {
     return new GoogleGeminiProviderError('GOOGLE_GEMINI_MODEL_UNAVAILABLE', `Gemini model is unavailable: ${model}`, { cause: error, safeMetadata });
   }
-  if (status === 401 || status === 403 || /unauthenticated|permission denied|forbidden/i.test(msg)) {
+  if (status === 401 || status === 403 || /401|403|unauthenticated|permission denied|permission was denied|forbidden/i.test(msg)) {
     return new GoogleGeminiProviderError(mode === 'vertex' ? 'GOOGLE_VERTEX_PERMISSION_DENIED' : 'GOOGLE_GEMINI_AUTH_FAILED', mode === 'vertex' ? 'Vertex AI authentication or permission was denied' : 'Gemini Developer API authentication failed', { cause: error, safeMetadata });
   }
   if (status >= 400 && status < 500) {

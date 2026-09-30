@@ -5254,6 +5254,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           knowledgeContext: runtime.knowledge.knowledgeContext,
           communicationLanguage: tenantContext.communicationLanguage,
           contextualIntelligence: whatsappContextualSection,
+          currentEntity: whatsappVisitorContext?.currentEntity || null,
         });
         console.info(
           'KNOWLEDGE_RUNTIME_CONTEXT channel=WHATSAPP active_configuration=' + (runtime.knowledge.activeConfiguration ? '1' : '0') +
@@ -5309,6 +5310,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           history: whatsappInbox.conversationHistory,
           customerText: text,
           communicationLanguage: tenantContext.communicationLanguage,
+          urlEntity: whatsappVisitorContext?.currentEntity || null,
         });
       } catch (error) {
         const reason = error instanceof WhatsAppTenantContextError
