@@ -9,6 +9,9 @@ if (!process.env.GOOGLE_CLOUD_PROJECT) {
 if (!process.env.GOOGLE_CLOUD_LOCATION) {
   process.env.GOOGLE_CLOUD_LOCATION = 'global';
 }
+if (!process.env.GOOGLE_GEMINI_RUNTIME_MODEL) {
+  process.env.GOOGLE_GEMINI_RUNTIME_MODEL = 'gemini-3.7-flash';
+}
 
 async function runSafeProviderSmoke() {
   try {
@@ -48,4 +51,5 @@ async function runSafeProviderSmoke() {
 }
 
 runSafeProviderSmoke();
+
 

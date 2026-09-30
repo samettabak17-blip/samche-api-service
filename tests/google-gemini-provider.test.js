@@ -17,7 +17,7 @@ function fakeResponse(text = 'ok') {
 test('runtime model is resolved at the platform provider boundary, never from tenant input', () => {
   assert.equal(resolveGoogleGeminiRuntimeModel({ GOOGLE_GEMINI_RUNTIME_MODEL: 'platform-model' }), 'platform-model');
   assert.equal(resolveGoogleGeminiRuntimeModel({ WHATSAPP_GEMINI_MODEL: 'legacy-platform-model' }), 'legacy-platform-model');
-  assert.equal(resolveGoogleGeminiRuntimeModel({}), 'gemini-2.5-flash');
+  assert.equal(resolveGoogleGeminiRuntimeModel({}), 'gemini-3.7-flash');
 });
 
 test('developer mode creates a Gemini Developer API client with the API key', () => {
@@ -319,7 +319,7 @@ test('vertex mode retries with default model when primary model fails', async ()
       GOOGLE_GENAI_MODE: 'vertex',
       GOOGLE_CLOUD_PROJECT: 'samche-test',
       GOOGLE_CLOUD_LOCATION: 'global',
-      GOOGLE_GEMINI_RUNTIME_MODEL: 'gemini-2.5-flash',
+      GOOGLE_GEMINI_RUNTIME_MODEL: 'gemini-3.7-flash',
     },
     clientFactory: () => ({
       models: {
@@ -341,7 +341,38 @@ test('vertex mode retries with default model when primary model fails', async ()
     contents: [{ role: 'user', parts: [{ text: 'test' }] }],
   });
 
-  assert.deepEqual(modelsCalled, ['gemini-2.5-pro', 'gemini-2.5-flash']);
+  assert.deepEqual(modelsCalled, ['gemini-2.5-pro', 'gemini-3.7-flash']);
   assert.equal(res.structured_text, 'retry-success');
+});
+
+test('normalizeRequestError correctly distinguishes 404 model unavailable from permission denied', async () => {
+  const provider = createGoogleGeminiProvider({
+    env: {
+      GOOGLE_GENAI_MODE: 'vertex',
+      GOOGLE_CLOUD_PROJECT: 'samche-test',
+      GOOGLE_CLOUD_LOCATION: 'global',
+    },
+    clientFactory: () => ({
+      models: {
+        generateContent: async () => {
+          const err = new Error('This model is no longer available to new users. Please update your code to use models/gemini-3.8-flash');
+          err.status = 404;
+          throw err;
+        },
+      },
+    }),
+  });
+
+  await assert.rejects(
+    () => provider.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [{ role: 'user', parts: [{ text: 'test' }] }],
+    }),
+    (err) => {
+      assert.equal(err.code, 'GOOGLE_GEMINI_MODEL_UNAVAILABLE');
+      assert.equal(err.safeMetadata.http_status, 404);
+      return true;
+    },
+  );
 });
 
