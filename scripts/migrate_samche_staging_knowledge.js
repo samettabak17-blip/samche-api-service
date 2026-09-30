@@ -38,24 +38,43 @@ export async function executeSamcheStagingKnowledgeMigration({
     );
     const businessIdentity = identityRes.rows[0];
 
-    // 2. Ingest 7 Knowledge Sources
+    // 2. Ingest / Update 7 Knowledge Sources idempotently
     const createdSources = [];
     const sourceIds = [];
 
     for (const src of SAMCHE_KNOWLEDGE_SOURCES) {
       const contentHash = createHash('sha256').update(src.content, 'utf8').digest('hex');
-      const docRes = await client.query(
-        `INSERT INTO knowledge_base_documents (
-           id, tenant_id, title, content, status, source_type,
-           mime_type, content_hash, processing_status, indexing_status, enabled, uploaded_by
-         ) VALUES (
-           $1, $2, $3, $4, 'active', 'MANUAL',
-           'text/plain', $5, 'READY', 'READY', TRUE, $6
-         )
-         RETURNING id, title, content_hash, source_type, processing_status`,
-        [randomUUID(), tenantId, src.title, src.content, contentHash, actorUserId]
+      const existingDoc = await client.query(
+        `SELECT id, title, content_hash FROM knowledge_base_documents WHERE tenant_id = $1 AND title = $2 LIMIT 1`,
+        [tenantId, src.title]
       );
-      const sourceRow = docRes.rows[0];
+
+      let sourceRow;
+      if (existingDoc.rows.length > 0) {
+        const updateRes = await client.query(
+          `UPDATE knowledge_base_documents
+              SET content = $1, content_hash = $2, status = 'active', processing_status = 'READY',
+                  indexing_status = 'READY', enabled = TRUE, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $3 AND tenant_id = $4
+            RETURNING id, title, content_hash, source_type, processing_status`,
+          [src.content, contentHash, existingDoc.rows[0].id, tenantId]
+        );
+        sourceRow = updateRes.rows[0];
+      } else {
+        const docRes = await client.query(
+          `INSERT INTO knowledge_base_documents (
+             id, tenant_id, title, content, status, source_type,
+             mime_type, content_hash, processing_status, indexing_status, enabled, uploaded_by
+           ) VALUES (
+             $1, $2, $3, $4, 'active', 'MANUAL',
+             'text/plain', $5, 'READY', 'READY', TRUE, $6
+           )
+           RETURNING id, title, content_hash, source_type, processing_status`,
+          [randomUUID(), tenantId, src.title, src.content, contentHash, actorUserId]
+        );
+        sourceRow = docRes.rows[0];
+      }
+
       createdSources.push(sourceRow);
       sourceIds.push(sourceRow.id);
 
@@ -173,13 +192,49 @@ export async function executeSamcheStagingKnowledgeMigration({
       [configVersion.id, stagingAssistant.id, tenantId]
     );
 
-    for (const sId of sourceIds) {
-      await client.query(
-        `INSERT INTO knowledge_source_assistants (tenant_id, source_id, assistant_id)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (tenant_id, source_id, assistant_id) DO NOTHING`,
-        [tenantId, sId, stagingAssistant.id]
-      );
+    // 6. Bind all assistants for this tenant to the active configuration and knowledge sources
+    const allTenantAssistants = await client.query(
+      `SELECT id FROM ai_assistants WHERE tenant_id = $1`,
+      [tenantId]
+    );
+    for (const ast of allTenantAssistants.rows) {
+      if (ast.id !== stagingAssistant.id) {
+        const astConfigRes = await client.query(
+          `INSERT INTO assistant_configuration_versions (
+             id, tenant_id, assistant_id, schema_version, configuration_data,
+             source_profile_version_id, generated_by, status, approved_by, approved_at,
+             activated_by, activated_at
+           ) VALUES (
+             $1, $2, $3, 2, $4::jsonb,
+             $5, 'HUMAN', 'ACTIVE', $6, CURRENT_TIMESTAMP,
+             $6, CURRENT_TIMESTAMP
+           )
+           RETURNING id`,
+          [
+            randomUUID(),
+            tenantId,
+            ast.id,
+            JSON.stringify(SAMCHE_STAGING_ASSISTANT_CONFIG),
+            bpVersion.id,
+            actorUserId,
+          ]
+        );
+        const astConfigVersion = astConfigRes.rows[0];
+        await client.query(
+          `UPDATE ai_assistants
+              SET active_configuration_version_id = $1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $2 AND tenant_id = $3`,
+          [astConfigVersion.id, ast.id, tenantId]
+        );
+      }
+      for (const sId of sourceIds) {
+        await client.query(
+          `INSERT INTO knowledge_source_assistants (tenant_id, source_id, assistant_id)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (tenant_id, source_id, assistant_id) DO NOTHING`,
+          [tenantId, sId, ast.id]
+        );
+      }
     }
 
     if (client.query) await client.query('COMMIT');
