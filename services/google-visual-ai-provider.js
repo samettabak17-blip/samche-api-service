@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { resolveGcpCredentials } from './google-gemini-provider.js';
 import {
   VisualAIProviderError,
   VisualAISafetyError,
@@ -101,8 +102,14 @@ export function createGoogleVisualAIProvider({ env = process.env, clientFactory,
     throw new ErrorClass('VISUAL_AI_PROVIDER_CONFIGURATION_INVALID', 'Google Visual AI configuration is unavailable.', { retryable: false, status: 503 });
   }
 
+  const gcpAuth = config.mode === 'vertex' ? resolveGcpCredentials(env) : null;
   const clientOptions = config.mode === 'vertex'
-    ? { vertexai: true, project: config.project, location: config.location }
+    ? {
+        vertexai: true,
+        project: config.project,
+        location: config.location,
+        ...(gcpAuth ? { googleAuthOptions: { ...gcpAuth, projectId: config.project, scopes: ['https://www.googleapis.com/auth/cloud-platform'] } } : {}),
+      }
     : { apiKey: config.apiKey };
   let client;
   try {

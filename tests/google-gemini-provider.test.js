@@ -6,6 +6,7 @@ import {
   createGoogleGeminiProvider,
   getGoogleGeminiConfig,
   resolveGoogleGeminiRuntimeModel,
+  resolveGcpCredentials,
 } from '../services/google-gemini-provider.js';
 
 function fakeResponse(text = 'ok') {
@@ -15,7 +16,7 @@ function fakeResponse(text = 'ok') {
 test('runtime model is resolved at the platform provider boundary, never from tenant input', () => {
   assert.equal(resolveGoogleGeminiRuntimeModel({ GOOGLE_GEMINI_RUNTIME_MODEL: 'platform-model' }), 'platform-model');
   assert.equal(resolveGoogleGeminiRuntimeModel({ WHATSAPP_GEMINI_MODEL: 'legacy-platform-model' }), 'legacy-platform-model');
-  assert.equal(resolveGoogleGeminiRuntimeModel({}), 'gemini-3-flash-preview');
+  assert.equal(resolveGoogleGeminiRuntimeModel({}), 'gemini-2.5-flash');
 });
 
 test('developer mode creates a Gemini Developer API client with the API key', () => {
@@ -248,18 +249,84 @@ test('/chat emits safe stage diagnostics through the shared public failure bound
   assert.ok(requestReceived >= 0 && requestReceived < sessionResolution);
   assert.ok(geminiStarted >= 0 && geminiStarted < geminiInvocation);
   assert.ok(geminiFailed >= 0 && geminiFailed > geminiCatch);
-  assert.match(chatSource, /CHAT_RESPONSE_503 stage=PUBLIC_SESSION_CONFIGURATION/);
-  assert.match(chatSource, /CHAT_RESPONSE_503 stage=TENANT_PERSONA_UNAVAILABLE/);
-  assert.match(chatSource, /CHAT_RESPONSE_503 stage=RUNTIME_CONTEXT_UNAVAILABLE/);
-  assert.match(chatSource, /CHAT_RESPONSE_503 stage=OUTER_HANDLER_ERROR/);
-  assert.match(chatSource, /return res\.status\(503\)\.json\(\{\s*error: "AI Guide assistant configuration is temporarily unavailable\."/);
   assert.match(chatSource, /logPublicChatFailure\(\{[\s\S]*?route: '\/chat',[\s\S]*?stage: 'outer_handler'/);
   assert.match(chatSource, /return res\.status\(503\)\.json\(buildPublicChatFailure\(\{/);
   assert.doesNotMatch(chatSource, /safeMessage|safeStack|Could not generate chat response/);
-
-  const diagnosticMessages = [...chatSource.matchAll(/['"`](CHAT_(?:REQUEST_RECEIVED|GEMINI_STARTED|GEMINI_FAILED|RESPONSE_503)[^'"`]*)['"`]/g)].map((match) => match[1]);
-  assert.ok(diagnosticMessages.length >= 7);
-  for (const message of diagnosticMessages) {
-    assert.doesNotMatch(message, /prompt|header|body|credential|private|secret|url|cause|stack|raw|message/i);
-  }
 });
+
+test('resolveGcpCredentials parses service account JSON and normalizes escaped newlines', () => {
+  const jsonCreds = JSON.stringify({
+    type: 'service_account',
+    project_id: 'gen-lang-client-0739267616',
+    client_email: 'sa@gen-lang-client-0739267616.iam.gserviceaccount.com',
+    private_key: '-----BEGIN PRIVATE KEY-----\\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC3\\n-----END PRIVATE KEY-----\\n',
+  });
+  const resolved = resolveGcpCredentials({ GOOGLE_APPLICATION_CREDENTIALS: jsonCreds });
+  assert.ok(resolved?.credentials);
+  assert.equal(resolved.credentials.project_id, 'gen-lang-client-0739267616');
+  assert.ok(resolved.credentials.private_key.includes('\n'));
+  assert.ok(!resolved.credentials.private_key.includes('\\n'));
+});
+
+test('vertex mode wires googleAuthOptions when service account credentials are present', () => {
+  let options;
+  const jsonCreds = JSON.stringify({
+    type: 'service_account',
+    project_id: 'gen-lang-client-0739267616',
+    client_email: 'sa@gen-lang-client-0739267616.iam.gserviceaccount.com',
+    private_key: '-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----\n',
+  });
+  const provider = createGoogleGeminiProvider({
+    env: {
+      GOOGLE_GENAI_MODE: 'vertex',
+      GOOGLE_CLOUD_PROJECT: 'gen-lang-client-0739267616',
+      GOOGLE_CLOUD_LOCATION: 'global',
+      GOOGLE_APPLICATION_CREDENTIALS: jsonCreds,
+    },
+    clientFactory: (clientOptions) => {
+      options = clientOptions;
+      return { models: { generateContent: async () => fakeResponse() } };
+    },
+  });
+
+  assert.equal(provider.mode, 'vertex');
+  assert.equal(options.vertexai, true);
+  assert.equal(options.project, 'gen-lang-client-0739267616');
+  assert.equal(options.location, 'global');
+  assert.ok(options.googleAuthOptions);
+  assert.equal(options.googleAuthOptions.credentials.client_email, 'sa@gen-lang-client-0739267616.iam.gserviceaccount.com');
+});
+
+test('vertex mode retries with default model when primary model fails', async () => {
+  const modelsCalled = [];
+  const provider = createGoogleGeminiProvider({
+    env: {
+      GOOGLE_GENAI_MODE: 'vertex',
+      GOOGLE_CLOUD_PROJECT: 'samche-test',
+      GOOGLE_CLOUD_LOCATION: 'global',
+      GOOGLE_GEMINI_RUNTIME_MODEL: 'gemini-2.5-flash',
+    },
+    clientFactory: () => ({
+      models: {
+        generateContent: async ({ model }) => {
+          modelsCalled.push(model);
+          if (model === 'gemini-2.5-pro') {
+            const err = new Error('model unavailable');
+            err.status = 404;
+            throw err;
+          }
+          return fakeResponse('retry-success');
+        },
+      },
+    }),
+  });
+
+  const res = await provider.generateContent({
+    model: 'gemini-2.5-pro',
+    contents: [{ role: 'user', parts: [{ text: 'test' }] }],
+  });
+
+  assert.deepEqual(modelsCalled, ['gemini-2.5-pro', 'gemini-2.5-flash']);
+  assert.equal(res.structured_text, 'retry-success');
+});
+

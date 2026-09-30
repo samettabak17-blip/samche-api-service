@@ -7,7 +7,7 @@ import path from 'node:path';
 const DEFAULT_MODE = 'developer';
 const ALLOWED_MODES = new Set(['developer', 'vertex']);
 const DEFAULT_REQUEST_TIMEOUT_MS = 20000;
-const DEFAULT_RUNTIME_MODEL = 'gemini-3-flash-preview';
+const DEFAULT_RUNTIME_MODEL = 'gemini-2.5-flash';
 
 export class GoogleGeminiProviderError extends Error {
   constructor(code, message, options = {}) {
@@ -38,15 +38,35 @@ export function resolveGcpProject(env = process.env) {
 export function resolveGcpLocation(env = process.env) {
   return requiredString(env.GOOGLE_CLOUD_LOCATION)
     || requiredString(env.GCP_LOCATION)
-    || requiredString(env.GCLOUD_LOCATION)
-    || 'us-central1';
+    || requiredString(env.GCLOUD_LOCATION);
+}
+
+export function resolveGcpCredentials(env = process.env) {
+  const rawCreds = env.GOOGLE_APPLICATION_CREDENTIALS || env.GCP_SERVICE_ACCOUNT_KEY || env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  if (!rawCreds || typeof rawCreds !== 'string' || !rawCreds.trim()) return null;
+  const trimmed = rawCreds.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed.private_key && typeof parsed.private_key === 'string' && parsed.private_key.includes('\\n')) {
+        parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
+      }
+      return { credentials: parsed };
+    } catch (err) {
+      console.warn('GCP_CREDENTIALS_JSON_PARSE_WARN', err?.message);
+    }
+  }
+  return { keyFilename: trimmed };
 }
 
 function ensureServiceAccountFile(env = process.env) {
   const rawCreds = env.GOOGLE_APPLICATION_CREDENTIALS || env.GCP_SERVICE_ACCOUNT_KEY || env.GOOGLE_SERVICE_ACCOUNT_KEY;
   if (rawCreds && typeof rawCreds === 'string' && rawCreds.trim().startsWith('{')) {
     try {
-      const parsed = JSON.parse(rawCreds);
+      const parsed = JSON.parse(rawCreds.trim());
+      if (parsed.private_key && typeof parsed.private_key === 'string' && parsed.private_key.includes('\\n')) {
+        parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
+      }
       const tmpPath = path.join(os.tmpdir(), `gcp-sa-${crypto.createHash('sha256').update(rawCreds).digest('hex').slice(0, 12)}.json`);
       if (!fs.existsSync(tmpPath)) {
         fs.writeFileSync(tmpPath, JSON.stringify(parsed), { encoding: 'utf8', mode: 0o600 });
@@ -289,9 +309,16 @@ function createDeveloperFetchClient({ apiKey, fetchImpl }) {
 }
 
 export function createGoogleGeminiProvider({ env = process.env, clientFactory, fetchImpl = null } = {}) {
+  ensureServiceAccountFile(env);
   const config = getGoogleGeminiConfig(env);
+  const gcpAuth = config.mode === 'vertex' ? resolveGcpCredentials(env) : null;
   const clientOptions = config.mode === 'vertex'
-    ? { vertexai: true, project: config.project, location: config.location }
+    ? {
+        vertexai: true,
+        project: config.project,
+        location: config.location,
+        ...(gcpAuth ? { googleAuthOptions: { ...gcpAuth, projectId: config.project, scopes: ['https://www.googleapis.com/auth/cloud-platform'] } } : {}),
+      }
     : { apiKey: config.apiKey };
   let client;
   try {
@@ -316,8 +343,10 @@ export function createGoogleGeminiProvider({ env = process.env, clientFactory, f
       });
     },
     async generateContent({ model, contents, generationConfig = undefined, systemInstruction = undefined, signal = undefined }) {
+      const defaultModel = resolveGoogleGeminiRuntimeModel(env);
+      const activeModel = model || defaultModel;
       const request = {
-        model,
+        model: activeModel,
         contents: normalizeContents(contents),
         ...(generationConfig ? { config: { ...generationConfig } } : {}),
       };
@@ -337,17 +366,29 @@ export function createGoogleGeminiProvider({ env = process.env, clientFactory, f
         const response = await client.models.generateContent(request);
         return normalizeResponse(response);
       } catch (error) {
+        // If Vertex primary model failed and differed from default runtime model, retry Vertex with default model
+        if (config.mode === 'vertex' && activeModel !== defaultModel) {
+          try {
+            const retryRequest = { ...request, model: defaultModel };
+            const retryResponse = await client.models.generateContent(retryRequest);
+            return normalizeResponse(retryResponse);
+          } catch (retryError) {
+            console.warn(`GOOGLE_VERTEX_RETRY_WARN model=${defaultModel}`, retryError?.message);
+          }
+        }
+        // Fallback to Developer API if available
         if (config.mode === 'vertex' && (config.apiKey || resolveApiKey(env))) {
           const fallbackKey = config.apiKey || resolveApiKey(env);
           try {
             const devClient = fetchImpl ? createDeveloperFetchClient({ apiKey: fallbackKey, fetchImpl }) : new GoogleGenAI({ apiKey: fallbackKey });
-            const devResponse = await devClient.models.generateContent(request);
+            const devRequest = { ...request, model: defaultModel };
+            const devResponse = await devClient.models.generateContent(devRequest);
             return normalizeResponse(devResponse);
           } catch (fallbackError) {
             console.warn('GOOGLE_VERTEX_FALLBACK_DEV_WARN', fallbackError?.message);
           }
         }
-        throw normalizeRequestError(error, config.mode, model);
+        throw normalizeRequestError(error, config.mode, activeModel);
       }
     },
   });
