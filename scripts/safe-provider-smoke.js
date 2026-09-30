@@ -1,17 +1,14 @@
 import { getGoogleGeminiConfig } from '../services/google-gemini-provider.js';
 import { canonicalSharedAiRuntime } from '../services/shared-ai-provider-resilience.js';
 
-if (!process.env.GOOGLE_GENAI_MODE && (process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_APPLICATION_CREDENTIALS || true)) {
-  process.env.GOOGLE_GENAI_MODE = 'vertex';
-}
 if (!process.env.GOOGLE_CLOUD_PROJECT) {
   process.env.GOOGLE_CLOUD_PROJECT = 'samche-ai-development-2';
 }
 if (!process.env.GOOGLE_CLOUD_LOCATION) {
   process.env.GOOGLE_CLOUD_LOCATION = 'global';
 }
-if (!process.env.GOOGLE_GEMINI_RUNTIME_MODEL) {
-  process.env.GOOGLE_GEMINI_RUNTIME_MODEL = 'gemini-3.7-flash';
+if (!process.env.GOOGLE_GENAI_MODE) {
+  process.env.GOOGLE_GENAI_MODE = 'vertex';
 }
 
 async function runSafeProviderSmoke() {
@@ -52,6 +49,7 @@ async function runSafeProviderSmoke() {
 }
 
 runSafeProviderSmoke();
+
 
 
 

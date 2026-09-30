@@ -54,28 +54,38 @@ export function resolveCanonicalPlatformModel({ model = null, provider = 'VERTEX
 
 export function classifyAiProviderError(error, provider = 'VERTEX') {
   if (!error) return 'UNKNOWN';
-  const status = Number(error?.status ?? error?.statusCode ?? error?.code ?? error?.httpStatus ?? error?.response?.status ?? error?.safeMetadata?.http_status);
+  const code = String(error?.code || '').trim();
+  const status = Number(error?.status ?? error?.statusCode ?? error?.httpStatus ?? error?.response?.status ?? error?.safeMetadata?.http_status);
   const msg = String(error?.message || error?.details || error?.cause?.message || '');
 
-  if (error?.name === 'AbortError' || /timeout|deadline exceeded/i.test(msg)) {
+  if (error?.name === 'AbortError' || /request was aborted|operation was aborted|aborted/i.test(msg)) {
+    if (/timeout|deadline exceeded/i.test(msg) || code === 'GOOGLE_GEMINI_TIMEOUT') {
+      return 'PROVIDER_TIMEOUT';
+    }
+    return 'PROVIDER_REQUEST_ABORTED';
+  }
+  if (/timeout|deadline exceeded/i.test(msg) || code === 'GOOGLE_GEMINI_TIMEOUT' || code === 'ETIMEDOUT') {
     return 'PROVIDER_TIMEOUT';
   }
-  if (status === 503 || /503|high demand|overloaded|service unavailable|temporarily unavailable/i.test(msg)) {
+  if (status === 503 || /503|high demand|overloaded|service unavailable|temporarily unavailable/i.test(msg) || code === 'GOOGLE_GEMINI_CAPACITY_UNAVAILABLE') {
     return 'PROVIDER_CAPACITY_UNAVAILABLE';
   }
-  if (status === 429 || /429|resource exhausted|rate limit|quota/i.test(msg)) {
+  if (status === 429 || /429|resource exhausted|rate limit|quota/i.test(msg) || code === 'GOOGLE_GEMINI_RATE_LIMITED') {
     return 'PROVIDER_RATE_LIMITED';
   }
-  if (status === 404 || /404|not found|no longer available|is not found/i.test(msg)) {
+  if (status === 404 || /404|not found|no longer available|is not found/i.test(msg) || code === 'GOOGLE_GEMINI_MODEL_UNAVAILABLE') {
     return 'MODEL_UNAVAILABLE';
   }
-  if (status === 401 || status === 403 || /401|403|unauthenticated|permission denied|forbidden/i.test(msg)) {
+  if (status === 401 || /401|unauthenticated|invalid api key/i.test(msg) || code === 'GOOGLE_GEMINI_AUTH_FAILED' || code === 'GOOGLE_VERTEX_AUTH_FAILED') {
+    return 'PROVIDER_AUTHENTICATION_FAILED';
+  }
+  if (status === 403 || /403|permission denied|permission was denied|forbidden|denied/i.test(msg) || code === 'GOOGLE_VERTEX_PERMISSION_DENIED') {
     return 'PROVIDER_PERMISSION_DENIED';
   }
-  if (/ECONNRESET|ENOTFOUND|ETIMEDOUT|fetch failed|network/i.test(msg)) {
+  if (/ECONNRESET|ENOTFOUND|fetch failed|network|socket/i.test(msg)) {
     return 'PROVIDER_NETWORK_ERROR';
   }
-  if (/empty response|empty text|no usable response|no text returned/i.test(msg)) {
+  if (/empty response|empty text|no usable response|no text returned/i.test(msg) || code === 'EMPTY_RESPONSE') {
     return 'EMPTY_RESPONSE';
   }
   if (status >= 500 && status < 600) {
@@ -502,8 +512,22 @@ export function createSharedAiRuntime({
       let vertexError = null;
       let vertexClassification = null;
 
+      // Check if upstream caller already aborted before initiating work
+      if (signal?.aborted) {
+        const callerAbortErr = signal.reason || new Error('Request was aborted by caller');
+        callerAbortErr.name = 'AbortError';
+        throw callerAbortErr;
+      }
+
       // 1. PRIMARY PROVIDER: Vertex AI / Google Gemini (if circuit is NOT OPEN)
       if (cbState !== 'OPEN') {
+        const primaryController = new AbortController();
+        const primaryTimeoutId = setTimeout(() => primaryController.abort(new Error('Vertex primary timeout exceeded')), 12000);
+        const onCallerAbortPrimary = () => primaryController.abort(signal?.reason || new Error('Request was aborted by caller'));
+        if (signal) {
+          signal.addEventListener('abort', onCallerAbortPrimary, { once: true });
+        }
+
         try {
           const provider = callerGemini || getGemini();
           const geminiContents = buildGeminiContents({
@@ -520,7 +544,7 @@ export function createSharedAiRuntime({
             contents: geminiContents,
             systemInstruction: sysInstrText ? { parts: [{ text: sysInstrText }] } : undefined,
             generationConfig,
-            signal,
+            signal: primaryController.signal,
           });
 
           const extractedText = extractGeminiResponseText(geminiResponse);
@@ -546,13 +570,24 @@ export function createSharedAiRuntime({
           vertexClassification = classifyAiProviderError(err, 'VERTEX');
           circuitBreaker.recordFailure(vertexClassification);
           logger.warn?.(`SHARED_AI_PRIMARY_FAILURE channel=${channel} model=${vertexModel} classification=${vertexClassification} err=${err?.message}`);
+        } finally {
+          clearTimeout(primaryTimeoutId);
+          if (signal) {
+            signal.removeEventListener('abort', onCallerAbortPrimary);
+          }
         }
       } else {
         vertexClassification = 'CIRCUIT_BREAKER_OPEN';
         logger.warn?.(`SHARED_AI_PRIMARY_CIRCUIT_OPEN channel=${channel} model=${vertexModel}`);
       }
 
-      // If failover is explicitly disabled, rethrow Vertex error
+      // If caller aborted or failover is explicitly disabled:
+      if (signal?.aborted) {
+        const callerAbortErr = signal.reason || new Error('Request was aborted by caller');
+        callerAbortErr.name = 'AbortError';
+        throw callerAbortErr;
+      }
+
       if (disableFailover) {
         if (vertexError) throw vertexError;
         const cbErr = new Error('Circuit breaker is open and failover is disabled');
@@ -561,11 +596,18 @@ export function createSharedAiRuntime({
       }
 
 
-      // 2. SECONDARY PROVIDER: OpenAI Automatic Failover
+      // 2. SECONDARY PROVIDER: OpenAI Automatic Failover with a FRESH unpoisoned controller
       const openaiModel = resolveCanonicalPlatformModel({ model, provider: 'OPENAI', env });
       const openai = callerOpenai || getOpenAi();
 
       if (openai) {
+        const secondaryController = new AbortController();
+        const secondaryTimeoutId = setTimeout(() => secondaryController.abort(new Error('OpenAI secondary timeout exceeded')), 15000);
+        const onCallerAbortSecondary = () => secondaryController.abort(signal?.reason || new Error('Request was aborted by caller'));
+        if (signal) {
+          signal.addEventListener('abort', onCallerAbortSecondary, { once: true });
+        }
+
         try {
           const openAiMessages = buildOpenAiMessages({
             systemInstruction,
@@ -581,7 +623,7 @@ export function createSharedAiRuntime({
             messages: openAiMessages,
             ...(generationConfig?.temperature !== undefined ? { temperature: generationConfig.temperature } : {}),
             ...(generationConfig?.maxOutputTokens ? { max_tokens: generationConfig.maxOutputTokens } : {}),
-          }, signal ? { signal } : undefined);
+          }, { signal: secondaryController.signal });
 
           const openAiText = completion?.choices?.[0]?.message?.content?.trim();
           if (!openAiText) {
@@ -607,6 +649,11 @@ export function createSharedAiRuntime({
         } catch (openaiErr) {
           const openaiClassification = classifyAiProviderError(openaiErr, 'OPENAI');
           logger.error?.(`SHARED_AI_FAILOVER_FAILURE channel=${channel} provider=openai classification=${openaiClassification} err=${openaiErr?.message}`);
+        } finally {
+          clearTimeout(secondaryTimeoutId);
+          if (signal) {
+            signal.removeEventListener('abort', onCallerAbortSecondary);
+          }
         }
       } else {
         logger.warn?.(`SHARED_AI_OPENAI_UNAVAILABLE channel=${channel} reason=NO_API_KEY`);

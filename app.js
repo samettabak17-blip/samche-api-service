@@ -999,6 +999,16 @@ const processedIgMessages = new Set();
 // ============================================================================
 // 1. GENEL API YAPILANDIRMALARI
 // ============================================================================
+if (!process.env.GOOGLE_CLOUD_PROJECT) {
+  process.env.GOOGLE_CLOUD_PROJECT = 'samche-ai-development-2';
+}
+if (!process.env.GOOGLE_CLOUD_LOCATION) {
+  process.env.GOOGLE_CLOUD_LOCATION = 'global';
+}
+if (!process.env.GOOGLE_GENAI_MODE) {
+  process.env.GOOGLE_GENAI_MODE = 'vertex';
+}
+
 let googleGeminiProvider = null;
 try {
   googleGeminiProvider = createGoogleGeminiProvider();
@@ -1092,7 +1102,7 @@ const parseLinksToHTML = (text) => {
   );
 };
 
-const GEMINI_REQUEST_TIMEOUT_MS = 20000;
+const GEMINI_REQUEST_TIMEOUT_MS = 35000;
 
 async function requestGemini(payload, runtimeModel = canonicalSharedAiRuntime.runtimeMetadata().model, provider = googleGeminiProvider) {
   const controller = new AbortController();

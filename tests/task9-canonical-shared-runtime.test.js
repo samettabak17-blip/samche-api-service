@@ -678,3 +678,164 @@ test('TASK 9.1 ADDENDUM: Web Chat Page & Entity Awareness Parity during Provider
 
 
 
+test('TASK 9.1 PHYSICAL FIX: Real Guide Path Tests (Vertex success, 403 failover, 503 failover, timeout failover, user cancellation)', async () => {
+  const guideSystemInstruction = 'You are SamChe AI Guide. Provide strategic business planning.';
+  const guideUserText = 'Plan our tech startup formation in Dubai.';
+
+  // Test 1: Guide -> Vertex Success
+  const mockGeminiSuccess = {
+    mode: 'vertex',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'vertex', model: 'gemini-3.7-flash', endpoint_class: 'VERTEX_GENERATE_CONTENT' }),
+    generateContent: async () => ({ candidates: [{ content: { parts: [{ text: 'Vertex Guide Plan for Tech Startup' }] } }] }),
+  };
+  let openaiCalled1 = false;
+  const mockOpenAi1 = {
+    chat: {
+      completions: {
+        create: async () => {
+          openaiCalled1 = true;
+          return { choices: [{ message: { content: 'OpenAI output' } }] };
+        },
+      },
+    },
+  };
+  const runtime1 = createSharedAiRuntime({ geminiProvider: mockGeminiSuccess, openaiClient: mockOpenAi1, circuitBreaker: new ProviderCircuitBreaker() });
+  const res1 = await runtime1.generateAiResponse({
+    systemInstruction: guideSystemInstruction,
+    prompt: guideUserText,
+    channel: 'SAMCHEGUIDE',
+  });
+  assert.equal(res1.provider, 'vertex');
+  assert.equal(res1.text, 'Vertex Guide Plan for Tech Startup');
+  assert.equal(openaiCalled1, false);
+
+  // Test 2: Guide -> Simulated Vertex 403 -> OpenAI called
+  const mockGemini403 = {
+    mode: 'vertex',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'vertex', model: 'gemini-3.7-flash', endpoint_class: 'VERTEX_GENERATE_CONTENT' }),
+    generateContent: async () => { throw Object.assign(new Error('Vertex AI authentication or permission was denied'), { code: 'GOOGLE_VERTEX_PERMISSION_DENIED', status: 403 }); },
+  };
+  const mockOpenAi2 = {
+    chat: {
+      completions: {
+        create: async () => ({ choices: [{ message: { content: 'OpenAI Guide Plan for Tech Startup (403 Failover)' } }] }),
+      },
+    },
+  };
+  const runtime2 = createSharedAiRuntime({ geminiProvider: mockGemini403, openaiClient: mockOpenAi2, circuitBreaker: new ProviderCircuitBreaker() });
+  const res2 = await runtime2.generateAiResponse({
+    systemInstruction: guideSystemInstruction,
+    prompt: guideUserText,
+    channel: 'SAMCHEGUIDE',
+  });
+  assert.equal(res2.provider, 'openai');
+  assert.equal(res2.text, 'OpenAI Guide Plan for Tech Startup (403 Failover)');
+
+  // Test 3: Guide -> Simulated Vertex 503 -> OpenAI called
+  const mockGemini503 = {
+    mode: 'vertex',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'vertex', model: 'gemini-3.7-flash', endpoint_class: 'VERTEX_GENERATE_CONTENT' }),
+    generateContent: async () => { throw Object.assign(new Error('503 The service is temporarily unavailable due to high demand'), { status: 503 }); },
+  };
+  const runtime3 = createSharedAiRuntime({ geminiProvider: mockGemini503, openaiClient: mockOpenAi2, circuitBreaker: new ProviderCircuitBreaker() });
+  const res3 = await runtime3.generateAiResponse({
+    systemInstruction: guideSystemInstruction,
+    prompt: guideUserText,
+    channel: 'SAMCHEGUIDE',
+  });
+  assert.equal(res3.provider, 'openai');
+  assert.equal(res3.failoverReason, 'PROVIDER_CAPACITY_UNAVAILABLE');
+
+  // Test 4: Guide -> Simulated Vertex Timeout -> Fresh OpenAI attempt succeeds
+  const mockGeminiTimeout = {
+    mode: 'vertex',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'vertex', model: 'gemini-3.7-flash', endpoint_class: 'VERTEX_GENERATE_CONTENT' }),
+    generateContent: async () => {
+      const err = new Error('Google Gemini request timed out');
+      err.name = 'AbortError';
+      err.code = 'GOOGLE_GEMINI_TIMEOUT';
+      throw err;
+    },
+  };
+  let openaiReceivedSignalAborted = null;
+  const mockOpenAi4 = {
+    chat: {
+      completions: {
+        create: async (payload, options) => {
+          openaiReceivedSignalAborted = Boolean(options?.signal?.aborted);
+          return { choices: [{ message: { content: 'OpenAI Guide Plan after Vertex Timeout' } }] };
+        },
+      },
+    },
+  };
+  const runtime4 = createSharedAiRuntime({ geminiProvider: mockGeminiTimeout, openaiClient: mockOpenAi4, circuitBreaker: new ProviderCircuitBreaker() });
+  const callerController = new AbortController();
+  const res4 = await runtime4.generateAiResponse({
+    systemInstruction: guideSystemInstruction,
+    prompt: guideUserText,
+    signal: callerController.signal,
+    channel: 'SAMCHEGUIDE',
+  });
+  assert.equal(res4.provider, 'openai');
+  assert.equal(res4.text, 'OpenAI Guide Plan after Vertex Timeout');
+  assert.equal(openaiReceivedSignalAborted, false, 'OpenAI MUST receive a fresh UNABORTED signal');
+
+  // Test 5: Upstream / User cancellation -> cancels all provider work safely
+  const canceledController = new AbortController();
+  canceledController.abort(new Error('Client socket closed'));
+  await assert.rejects(
+    () => runtime1.generateAiResponse({
+      systemInstruction: guideSystemInstruction,
+      prompt: guideUserText,
+      signal: canceledController.signal,
+      channel: 'SAMCHEGUIDE',
+    }),
+    (err) => {
+      assert.match(err.message, /Client socket closed|Request was aborted by caller/);
+      return true;
+    }
+  );
+});
+
+test('TASK 9.1 PHYSICAL FIX: Real Orchestration Paths for WhatsApp, Instagram, Web Chat, Guide failover', async () => {
+  const mockFailingGemini = {
+    mode: 'vertex',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'vertex', model: 'gemini-3.7-flash', endpoint_class: 'VERTEX_GENERATE_CONTENT' }),
+    generateContent: async () => { throw Object.assign(new Error('Vertex 503 High Demand'), { status: 503 }); },
+  };
+
+  const channelsToTest = ['WHATSAPP', 'INSTAGRAM', 'WEB_CHAT', 'SAMCHEGUIDE'];
+  for (const ch of channelsToTest) {
+    let capturedOpenAiChannel = null;
+    const mockOpenAi = {
+      chat: {
+        completions: {
+          create: async () => {
+            capturedOpenAiChannel = ch;
+            return { choices: [{ message: { content: `OpenAI response for channel ${ch}` } }] };
+          },
+        },
+      },
+    };
+
+    const runtime = createSharedAiRuntime({
+      geminiProvider: mockFailingGemini,
+      openaiClient: mockOpenAi,
+      circuitBreaker: new ProviderCircuitBreaker({ failureThreshold: 10 }),
+    });
+
+    const res = await runtime.generateAiResponse({
+      systemInstruction: `You are assistant on channel ${ch}.`,
+      prompt: `Customer message on ${ch}`,
+      channel: ch,
+    });
+
+    assert.equal(res.provider, 'openai');
+    assert.equal(res.text, `OpenAI response for channel ${ch}`);
+    assert.equal(capturedOpenAiChannel, ch);
+    assert.equal(res.fallbackUsed, false);
+  }
+});
+
+
+

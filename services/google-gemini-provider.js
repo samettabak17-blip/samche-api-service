@@ -84,6 +84,7 @@ function ensureServiceAccountFile(env = process.env) {
 export function getGoogleGeminiConfig(env = process.env) {
   ensureServiceAccountFile(env);
   const apiKey = resolveApiKey(env);
+  const creds = resolveGcpCredentials(env);
   const project = resolveGcpProject(env);
   const location = resolveGcpLocation(env);
   const rawMode = requiredString(env.GOOGLE_GENAI_MODE);
@@ -91,12 +92,12 @@ export function getGoogleGeminiConfig(env = process.env) {
   let mode;
   if (rawMode) {
     mode = rawMode.toLowerCase();
+  } else if (project || creds || env.GOOGLE_APPLICATION_CREDENTIALS || env.GCP_SERVICE_ACCOUNT_KEY || env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    mode = 'vertex';
   } else if (apiKey) {
     mode = 'developer';
-  } else if (project) {
-    mode = 'vertex';
   } else {
-    mode = DEFAULT_MODE;
+    mode = 'vertex';
   }
 
   if (!ALLOWED_MODES.has(mode)) {
