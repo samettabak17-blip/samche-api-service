@@ -838,4 +838,112 @@ test('TASK 9.1 PHYSICAL FIX: Real Orchestration Paths for WhatsApp, Instagram, W
 });
 
 
+test('TASK 9.1 PHYSICAL REGRESSION FIX: WhatsApp Multi-turn Image Follow-up (Vertex & OpenAI failover)', async () => {
+  // Scenario: Turn 1 image uploaded ("SAMCHE IMAGE 8472"), Turn 2 customer asks "WHAT IS THE NUMBER?"
+  const fakeBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const imagePart = {
+    inlineData: { mimeType: 'image/png', data: fakeBase64 },
+    inline_data: { mime_type: 'image/png', data: fakeBase64 },
+  };
+
+  const history = [
+    { sender_type: 'CUSTOMER', content: '' },
+    { sender_type: 'ASSISTANT', content: 'Your image has been received. What would you like me to examine? I can read visible text, inspect specific details, or answer questions based on the image.' },
+  ];
+
+  const tenant = {
+    companyName: 'Blue Dune',
+    assistantName: 'Blue Dune Assistant',
+    systemPrompt: 'Blue Dune event management and luxury design policy.',
+  };
+
+  const { systemInstruction, userPrompt } = (await import('../services/whatsapp-tenant-context-service.js')).buildWhatsAppTenantModelContext({
+    tenant,
+    history,
+    customerText: 'WHAT IS THE NUMBER?',
+    communicationLanguage: 'en',
+  });
+
+  // Verify prompt and history formatting
+  assert.ok(systemInstruction.includes('ATTACHED EVIDENCE & MULTIMODAL GROUNDING'));
+  assert.ok(userPrompt.includes('WHAT IS THE NUMBER?'));
+
+  // Test 1: Vertex Primary execution
+  let vertexReceivedParts = null;
+  const mockGemini = {
+    mode: 'vertex',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'vertex', model: 'gemini-3.7-flash', endpoint_class: 'VERTEX_GENERATE_CONTENT' }),
+    generateContent: async ({ contents }) => {
+      vertexReceivedParts = contents[0].parts;
+      return { candidates: [{ content: { parts: [{ text: 'The number visible in the image is 8472.' }] } }] };
+    },
+  };
+  const runtime1 = createSharedAiRuntime({ geminiProvider: mockGemini, circuitBreaker: new ProviderCircuitBreaker() });
+  const res1 = await runtime1.generateAiResponse({
+    systemInstruction,
+    prompt: userPrompt,
+    multimodalParts: [imagePart],
+    channel: 'WHATSAPP',
+  });
+  assert.equal(res1.provider, 'vertex');
+  assert.match(res1.text, /8472/);
+  assert.ok(vertexReceivedParts.some((p) => p.inlineData?.data === fakeBase64));
+
+  // Test 2: OpenAI Failover execution
+  let openaiReceivedContent = null;
+  const mockOpenAi = {
+    chat: {
+      completions: {
+        create: async (payload) => {
+          openaiReceivedContent = payload.messages[1].content;
+          return { choices: [{ message: { content: 'Based on the attached image, the number is 8472.' } }] };
+        },
+      },
+    },
+  };
+  const mockFailingGemini = {
+    mode: 'vertex',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'vertex', model: 'gemini-3.7-flash', endpoint_class: 'VERTEX_GENERATE_CONTENT' }),
+    generateContent: async () => { throw Object.assign(new Error('503 High Demand'), { status: 503 }); },
+  };
+  const runtime2 = createSharedAiRuntime({ geminiProvider: mockFailingGemini, openaiClient: mockOpenAi, circuitBreaker: new ProviderCircuitBreaker() });
+  const res2 = await runtime2.generateAiResponse({
+    systemInstruction,
+    prompt: userPrompt,
+    multimodalParts: [imagePart],
+    channel: 'WHATSAPP',
+  });
+  assert.equal(res2.provider, 'openai');
+  assert.match(res2.text, /8472/);
+  assert.ok(Array.isArray(openaiReceivedContent));
+  assert.equal(openaiReceivedContent[1].type, 'image_url');
+  assert.equal(openaiReceivedContent[1].image_url.url, `data:image/png;base64,${fakeBase64}`);
+});
+
+test('TASK 9.1 PHYSICAL REGRESSION FIX: Multi-turn PDF & URL natural follow-ups and intent switching', async () => {
+  // 1. PDF follow-up
+  const pdfEvidence = '<customer_document_evidence>\nINVOICE #9821\nTotal: 4500 AED\n</customer_document_evidence>';
+  const mockGeminiPdf = {
+    mode: 'vertex',
+    runtimeMetadata: () => ({ provider: 'GOOGLE_GEMINI', mode: 'vertex', model: 'gemini-3.7-flash', endpoint_class: 'VERTEX_GENERATE_CONTENT' }),
+    generateContent: async () => ({ candidates: [{ content: { parts: [{ text: 'The total amount on invoice #9821 is 4500 AED.' }] } }] }),
+  };
+  const runtimePdf = createSharedAiRuntime({ geminiProvider: mockGeminiPdf, circuitBreaker: new ProviderCircuitBreaker() });
+  const resPdf = await runtimePdf.generateAiResponse({
+    systemInstruction: 'You are assistant with attached document grounding.',
+    prompt: 'Recent conversation history:\nASSISTANT: Your document has been received.\n\nCurrent customer message:\nWhat is the total?',
+    multimodalParts: [{ text: pdfEvidence }],
+    channel: 'WHATSAPP',
+  });
+  assert.equal(resPdf.provider, 'vertex');
+  assert.match(resPdf.text, /4500 AED/);
+
+  // 2. Intent Switching (User changes topic to booking problem)
+  const bookingQuestion = 'I have a problem with an existing booking.';
+  const { classifyWhatsAppCurrentCustomerIntent } = await import('../services/whatsapp-tenant-context-service.js');
+  const classifiedIntent = classifyWhatsAppCurrentCustomerIntent(bookingQuestion);
+  assert.equal(classifiedIntent, 'TOPIC_PRESENT');
+});
+
+
 
