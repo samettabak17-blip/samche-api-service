@@ -44,6 +44,20 @@ export function resolveGcpCredentials(env = process.env) {
       console.warn('GCP_CREDENTIALS_JSON_PARSE_WARN', err?.message);
     }
   }
+  if (fs.existsSync(trimmed)) {
+    try {
+      const fileContent = fs.readFileSync(trimmed, 'utf8');
+      if (fileContent.trim().startsWith('{')) {
+        const parsed = JSON.parse(fileContent.trim());
+        if (parsed.private_key && typeof parsed.private_key === 'string' && parsed.private_key.includes('\\n')) {
+          parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
+        }
+        return { credentials: parsed, keyFilename: trimmed };
+      }
+    } catch (err) {
+      console.warn('GCP_CREDENTIALS_FILE_READ_WARN', err?.message);
+    }
+  }
   return { keyFilename: trimmed };
 }
 
@@ -55,13 +69,14 @@ export function resolveGcpProject(env = process.env) {
   if (explicit && explicit.startsWith('gen-lang-client-') && creds?.credentials?.project_id && !creds.credentials.project_id.startsWith('gen-lang-client-')) {
     return creds.credentials.project_id;
   }
-  return explicit || requiredString(creds?.credentials?.project_id);
+  return explicit || requiredString(creds?.credentials?.project_id) || 'samche-ai-development-2';
 }
 
 export function resolveGcpLocation(env = process.env) {
   return requiredString(env.GOOGLE_CLOUD_LOCATION)
     || requiredString(env.GCP_LOCATION)
-    || requiredString(env.GCLOUD_LOCATION);
+    || requiredString(env.GCLOUD_LOCATION)
+    || 'global';
 }
 
 function ensureServiceAccountFile(env = process.env) {
@@ -330,7 +345,14 @@ export function createGoogleGeminiProvider({ env = process.env, clientFactory, f
         vertexai: true,
         project: config.project,
         location: config.location,
-        ...(gcpAuth ? { googleAuthOptions: { ...gcpAuth, projectId: config.project, scopes: ['https://www.googleapis.com/auth/cloud-platform'] } } : {}),
+        ...(gcpAuth ? {
+          googleAuthOptions: {
+            ...(gcpAuth.credentials ? { credentials: gcpAuth.credentials } : {}),
+            ...(gcpAuth.keyFilename ? { keyFilename: gcpAuth.keyFilename } : {}),
+            projectId: config.project,
+            scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+          },
+        } : {}),
       }
     : { apiKey: config.apiKey };
   let client;
@@ -389,6 +411,13 @@ export function createGoogleGeminiProvider({ env = process.env, clientFactory, f
             console.warn(`GOOGLE_VERTEX_RETRY_WARN model=${defaultModel}`, retryError?.message);
           }
         }
+        console.error('GOOGLE_VERTEX_ORIGINAL_ERROR', {
+          status: error?.status ?? error?.statusCode ?? error?.code,
+          message: error?.message,
+          details: error?.details,
+          permission: error?.permission || error?.error?.details?.[0]?.metadata?.permission,
+          resource: error?.resource || error?.error?.details?.[0]?.metadata?.resource,
+        });
         throw normalizeRequestError(error, config.mode, activeModel);
       }
     },
