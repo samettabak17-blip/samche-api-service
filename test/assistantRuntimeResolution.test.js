@@ -73,21 +73,21 @@ test('WhatsApp runtime resolves each tenant assistant model without cross-tenant
     assistant_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
     channel_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
     channel_assistant_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-    assistant_model: 'gemini-2.5-pro',
+    assistant_model: 'gemini-3.7-flash',
   });
   const runtimeB = await resolveForScope({
     tenant_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
     assistant_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
     channel_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
     channel_assistant_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
-    assistant_model: 'gemini-2.5-flash',
+    assistant_model: 'gemini-2.0-flash',
   });
 
-  assert.equal(runtimeA.model, 'gemini-2.5-pro');
-  assert.equal(runtimeB.model, 'gemini-2.5-flash');
+  assert.equal(runtimeA.model, 'gemini-3.7-flash');
+  assert.equal(runtimeB.model, 'gemini-2.0-flash');
   assert.notEqual(runtimeA.model, runtimeB.model);
-  assert.notEqual(runtimeA.model, 'gemini-2.5-flash');
-  assert.notEqual(runtimeB.model, 'gemini-2.5-pro');
+  assert.notEqual(runtimeA.model, 'gemini-2.0-flash');
+  assert.notEqual(runtimeB.model, 'gemini-3.7-flash');
 });
 
 test('shared runtime resolver fails closed without invoking provider selection for mismatched channel ownership', async () => {

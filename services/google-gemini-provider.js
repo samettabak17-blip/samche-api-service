@@ -389,18 +389,6 @@ export function createGoogleGeminiProvider({ env = process.env, clientFactory, f
             console.warn(`GOOGLE_VERTEX_RETRY_WARN model=${defaultModel}`, retryError?.message);
           }
         }
-        // Fallback to Developer API if available
-        if (config.mode === 'vertex' && (config.apiKey || resolveApiKey(env))) {
-          const fallbackKey = config.apiKey || resolveApiKey(env);
-          try {
-            const devClient = fetchImpl ? createDeveloperFetchClient({ apiKey: fallbackKey, fetchImpl }) : new GoogleGenAI({ apiKey: fallbackKey });
-            const devRequest = { ...request, model: defaultModel };
-            const devResponse = await devClient.models.generateContent(devRequest);
-            return normalizeResponse(devResponse);
-          } catch (fallbackError) {
-            console.warn('GOOGLE_VERTEX_FALLBACK_DEV_WARN', fallbackError?.message);
-          }
-        }
         throw normalizeRequestError(error, config.mode, activeModel);
       }
     },
