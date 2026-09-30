@@ -276,6 +276,12 @@ function normalizeRequestError(error, mode, model) {
   if (error?.name === 'AbortError' || /timeout|deadline exceeded/i.test(msg)) {
     return new GoogleGeminiProviderError('GOOGLE_GEMINI_TIMEOUT', 'Google Gemini request timed out', { cause: error, safeMetadata });
   }
+  if (status === 503 || /503|high demand|overloaded|service unavailable|temporarily unavailable/i.test(msg)) {
+    return new GoogleGeminiProviderError('GOOGLE_GEMINI_CAPACITY_UNAVAILABLE', 'Google Gemini service is temporarily unavailable due to high demand', { cause: error, safeMetadata });
+  }
+  if (status === 429 || /429|resource exhausted|rate limit|quota/i.test(msg)) {
+    return new GoogleGeminiProviderError('GOOGLE_GEMINI_RATE_LIMITED', 'Google Gemini rate limit or quota exceeded', { cause: error, safeMetadata });
+  }
   if (status === 404 || /404|not found|no longer available|is not found/i.test(msg)) {
     return new GoogleGeminiProviderError('GOOGLE_GEMINI_MODEL_UNAVAILABLE', `Gemini model is unavailable: ${model}`, { cause: error, safeMetadata });
   }

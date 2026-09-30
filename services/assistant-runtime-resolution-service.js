@@ -33,8 +33,11 @@ function assertHealthyScope(scope, options) {
 }
 
 function normalizeModel(providerRuntime) {
-  const model = typeof providerRuntime?.model === 'string' ? providerRuntime.model.trim() : '';
+  let model = typeof providerRuntime?.model === 'string' ? providerRuntime.model.trim() : '';
   if (!model) throw new AssistantRuntimeResolutionError('RUNTIME_MODEL_UNAVAILABLE');
+  if (model === 'gemini-2.5-pro' || model === 'gemini-2.5-flash' || model === 'gemini-1.5-pro' || model === 'gemini-1.5-flash') {
+    model = 'gemini-3.7-flash';
+  }
   return {
     provider: typeof providerRuntime?.provider === 'string' ? providerRuntime.provider : 'UNKNOWN',
     mode: typeof providerRuntime?.mode === 'string' ? providerRuntime.mode : 'unknown',

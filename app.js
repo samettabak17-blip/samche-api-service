@@ -90,6 +90,7 @@ import { createGeminiImageKnowledgeExtractor } from "./services/image-knowledge-
 import { createImageKnowledgeSemanticClassifier } from "./services/image-knowledge-semantic-service.js";
 import { createKnowledgeGenerationProvider } from "./services/knowledge-generation-provider.js";
 import { createGoogleGeminiProvider } from "./services/google-gemini-provider.js";
+import { canonicalSharedAiRuntime, resolveCanonicalPlatformModel, AllAiProvidersFailedError } from "./services/shared-ai-provider-resilience.js";
 import { startImageSemanticGenerationWorker } from "./services/knowledge-semantic-generation-job-service.js";
 import { generateAssistantConfigurationVersion, generateAssistantRecommendation } from "./services/knowledge-assistant-lifecycle.js";
 import { generateBusinessProfileVersion } from "./services/knowledge-profile-lifecycle.js";
@@ -1093,21 +1094,34 @@ const parseLinksToHTML = (text) => {
 
 const GEMINI_REQUEST_TIMEOUT_MS = 20000;
 
-async function requestGemini(payload, runtimeModel = googleGeminiProvider.runtimeMetadata().model, provider = googleGeminiProvider) {
+async function requestGemini(payload, runtimeModel = canonicalSharedAiRuntime.runtimeMetadata().model, provider = googleGeminiProvider) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), GEMINI_REQUEST_TIMEOUT_MS);
   try {
-    const activeProvider = provider || googleGeminiProvider;
-    return await activeProvider.generateContent({
-      model: runtimeModel,
+    const sysInstructionText = typeof payload?.systemInstruction === 'string'
+      ? payload.systemInstruction
+      : (Array.isArray(payload?.systemInstruction?.parts) ? payload.systemInstruction.parts.map(p => p.text).join('\n\n') : null);
+
+    const result = await canonicalSharedAiRuntime.generateAiResponse({
+      systemInstruction: sysInstructionText,
       contents: payload.contents,
+      model: runtimeModel,
       generationConfig: payload.generationConfig,
-      systemInstruction: payload.systemInstruction,
       signal: controller.signal,
+      channel: 'SAMCHEGUIDE',
     });
+    return {
+      candidates: [{
+        content: {
+          parts: [{ text: result.text }]
+        }
+      }],
+      structured_text: result.text,
+      text: result.text,
+    };
   } catch (error) {
     if (error.status) throw error;
-    const safeCode = typeof error?.code === 'string' && /^GOOGLE_(?:VERTEX|GEMINI)_[A-Z0-9_]+$/.test(error.code)
+    const safeCode = typeof error?.code === 'string' && /^(?:GOOGLE_(?:VERTEX|GEMINI)_[A-Z0-9_]+|ALL_AI_PROVIDERS_FAILED|PROVIDER_[A-Z0-9_]+)$/.test(error.code)
       ? error.code
       : 'GOOGLE_GEMINI_REQUEST_FAILED';
     console.error(`SAMCHE_GOOGLE_GEMINI_ERROR mode=${(provider || googleGeminiProvider).mode} model=${runtimeModel} code=${safeCode}`);
@@ -1591,14 +1605,15 @@ async function callWpGemini(prompt, multimodalParts = null, systemInstruction = 
       ? multimodalParts
       : (multimodalParts ? [multimodalParts] : []);
     parts.push(...contextualParts);
-    const response = await googleGeminiProvider.generateContent({
+    const result = await canonicalSharedAiRuntime.generateAiResponse({
       model: runtimeModel,
       contents: [{ role: 'user', parts }],
       systemInstruction: typeof systemInstruction === 'string' && systemInstruction.trim()
         ? { parts: [{ text: systemInstruction }] }
         : undefined,
+      channel: 'WHATSAPP',
     });
-    return response.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
+    return result?.text?.trim() || null;
   } catch (err) {
     const safeCode = typeof err?.code === 'string' ? err.code : 'GOOGLE_GEMINI_REQUEST_FAILED';
     const safeStatus = Number.isInteger(err?.safeMetadata?.http_status) ? err.safeMetadata.http_status : 'none';
@@ -4615,13 +4630,25 @@ If the user already provided sector info, NEVER ask again.`
       if (!eligibility.allowed) return webChatHumanResponse();
     }
 
-    const activeOpenai = req.app?.locals?.openaiClient || openaiClient;
-    const completion = await activeOpenai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages
-    });
+    const activeSysInstruction = messages.find((m) => m.role === 'system')?.content || '';
+    const activeHistory = messages.filter((m) => m.role !== 'system');
+    let aiReply;
+    try {
+      const genResult = await canonicalSharedAiRuntime.generateAiResponse({
+        systemInstruction: activeSysInstruction,
+        messages,
+        conversationHistory: activeHistory,
+        prompt: normalizedMessage,
+        channel: 'WEB_CHAT',
+      });
+      aiReply = genResult?.text;
+    } catch (genErr) {
+      return respondWithPublicChatFailure({
+        stage: 'provider_generation',
+        error: genErr,
+      });
+    }
 
-    let aiReply = completion?.choices?.[0]?.message?.content;
     if (typeof aiReply !== 'string' || !aiReply.trim()) {
       const invalidResponse = new Error('Provider response did not contain usable assistant text.');
       invalidResponse.status = 502;

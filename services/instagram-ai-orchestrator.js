@@ -10,6 +10,7 @@ import { resolveCommunicationLanguage } from './conversation-communication-langu
 import { evaluateChannelAiActivationPolicy } from './channel-ai-activation-policy-service.js';
 import { applyWhatsAppAdaptivePacing } from './whatsapp-response-pacing-service.js';
 import { createGoogleGeminiProvider } from './google-gemini-provider.js';
+import { canonicalSharedAiRuntime } from './shared-ai-provider-resilience.js';
 import {
   evaluateAndProcessHighIntentLead,
   hasHighIntentAppointmentSignals,
@@ -538,7 +539,7 @@ async function loadRecentConversationHistory(database, tenantId, conversationId,
 
 
 /**
- * Invokes the canonical Google Gemini provider with active system instruction & history.
+ * Invokes the canonical Shared AI Runtime with active system instruction & history.
  */
 async function defaultGenerateInstagramAiResponse({
   systemInstruction,
@@ -547,164 +548,21 @@ async function defaultGenerateInstagramAiResponse({
   model = null,
   memory = {},
 }) {
-  let provider;
-  try {
-    provider = createGoogleGeminiProvider();
-  } catch (providerErr) {
-    console.error('INSTAGRAM_GEMINI_PROVIDER_INIT_ERROR', providerErr?.message);
-    const fallbackText = generateContextualConversationalFallback({ text, conversationHistory, memory });
-    return {
-      text: fallbackText,
-      model: 'none',
-      fallbackUsed: true,
-      fallbackReason: `PROVIDER_INIT_FAILED: ${providerErr?.message}`,
-    };
-  }
-
-  const defaultModel = provider.runtimeMetadata().model;
-  const runtimeModel = model || defaultModel;
-
-  // Build clean conversational history summary for single prompt fallback
-  const historyText = Array.isArray(conversationHistory) && conversationHistory.length > 0
-    ? conversationHistory.slice(-8).map((m) => {
-        const role = m.role === 'model' || m.role === 'assistant' ? 'ASSISTANT' : 'CUSTOMER';
-        const t = (Array.isArray(m.parts) ? m.parts.map((p) => p?.text || '').filter(Boolean).join('\n') : (m.content || '')).trim();
-        return `${role}: ${t}`;
-      }).filter(Boolean).join('\n')
-    : '';
-
-  const singlePromptText = [
-    historyText ? `Recent conversation history:\n${historyText}\n` : '',
-    `Current customer message:\n${text}`,
-  ].filter(Boolean).join('\n\n');
-
-  // Prepare Gemini contents from history:
-  // Gemini requires that the first turn has role 'user' and turns alternate strictly.
-  const rawContents = [];
-  if (Array.isArray(conversationHistory) && conversationHistory.length > 0) {
-    for (const h of conversationHistory) {
-      const role = h.role === 'model' || h.role === 'assistant' ? 'model' : 'user';
-      let turnText = '';
-      if (Array.isArray(h.parts)) {
-        turnText = h.parts.map((p) => p?.text || '').filter(Boolean).join('\n\n').trim();
-      } else if (typeof h.content === 'string') {
-        turnText = h.content.trim();
-      }
-      if (!turnText) continue;
-
-      if (rawContents.length > 0 && rawContents[rawContents.length - 1].role === role) {
-        rawContents[rawContents.length - 1].parts[0].text += '\n\n' + turnText;
-      } else {
-        rawContents.push({ role, parts: [{ text: turnText }] });
-      }
-    }
-  }
-
-  // Remove any leading 'model' turns so history begins with 'user'
-  while (rawContents.length > 0 && rawContents[0].role === 'model') {
-    rawContents.shift();
-  }
-
-  // Ensure current user message is at the end
-  const currentPrompt = String(text || '').trim();
-  if (currentPrompt) {
-    if (rawContents.length === 0) {
-      rawContents.push({ role: 'user', parts: [{ text: currentPrompt }] });
-    } else if (rawContents[rawContents.length - 1].role === 'user') {
-      if (rawContents[rawContents.length - 1].parts[0]?.text !== currentPrompt) {
-        rawContents[rawContents.length - 1].parts[0].text = currentPrompt;
-      }
-    } else {
-      rawContents.push({ role: 'user', parts: [{ text: currentPrompt }] });
-    }
-  }
-
-  // Fallback to minimal contents if empty
-  const contents = rawContents.length > 0
-    ? rawContents
-    : [{ role: 'user', parts: [{ text: currentPrompt || 'Merhaba' }] }];
-
-  const extractResponseText = (response) => {
-    if (!response) return null;
-    if (typeof response.structured_text === 'string' && response.structured_text.trim()) {
-      return response.structured_text.trim();
-    }
-    const candidates = Array.isArray(response.candidates) ? response.candidates : [];
-    if (candidates.length > 0) {
-      const parts = Array.isArray(candidates[0]?.content?.parts) ? candidates[0].content.parts : [];
-      const textParts = parts.filter((p) => p?.thought !== true && typeof p?.text === 'string' && p.text.trim());
-      if (textParts.length > 0) {
-        return textParts.map((p) => p.text.trim()).join('\n\n');
-      }
-    }
-    if (typeof response.text === 'string' && response.text.trim()) {
-      return response.text.trim();
-    }
-    return null;
-  };
-
-  const primaryAbortController = new AbortController();
-  const primaryTimeoutId = setTimeout(() => primaryAbortController.abort(), 20000);
-  let parsedText = null;
-  let activeModel = runtimeModel;
-  let fallbackReason = null;
-
-  try {
-    const response = await provider.generateContent({
-      model: runtimeModel,
-      contents,
-      systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
-      signal: primaryAbortController.signal,
-    });
-    parsedText = extractResponseText(response);
-  } catch (genErr) {
-    console.warn(`INSTAGRAM_AI_GENERATION_PRIMARY_WARN model=${runtimeModel} code=${genErr?.code ?? 'UNKNOWN'} err=${genErr?.message}`);
-    fallbackReason = `${runtimeModel}_FAILED_${genErr?.code ?? genErr?.message}`;
-  } finally {
-    clearTimeout(primaryTimeoutId);
-  }
-
-  // Fallback retry with single-prompt format and defaultModel if primary failed
-  if (!parsedText) {
-    const retryController = new AbortController();
-    const retryTimeoutId = setTimeout(() => retryController.abort(), 20000);
-    try {
-      activeModel = defaultModel;
-      const retryContents = [{ role: 'user', parts: [{ text: singlePromptText }] }];
-      const retryRes = await provider.generateContent({
-        model: defaultModel,
-        contents: retryContents,
-        systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
-        signal: retryController.signal,
-      });
-      parsedText = extractResponseText(retryRes);
-      if (parsedText) {
-        fallbackReason = null;
-      }
-    } catch (retryErr) {
-      console.error(`INSTAGRAM_AI_GENERATION_RETRY_ERROR model=${defaultModel} code=${retryErr?.code ?? 'UNKNOWN'} err=${retryErr?.message}`);
-      fallbackReason = `${defaultModel}_FAILED_${retryErr?.code ?? retryErr?.message}`;
-    } finally {
-      clearTimeout(retryTimeoutId);
-    }
-  }
-
-  if (parsedText) {
-    return {
-      text: parsedText,
-      model: activeModel,
-      fallbackUsed: false,
-      fallbackReason: null,
-    };
-  }
-
-  // Safe fallback if model generation could not produce text
-  const fallbackText = generateContextualConversationalFallback({ text, conversationHistory, memory });
+  const result = await canonicalSharedAiRuntime.generateAiResponse({
+    systemInstruction,
+    text,
+    conversationHistory,
+    model,
+    channel: 'INSTAGRAM',
+  });
   return {
-    text: fallbackText,
-    model: activeModel,
-    fallbackUsed: true,
-    fallbackReason: fallbackReason || 'EMPTY_MODEL_RESPONSE',
+    text: result.text,
+    model: result.model,
+    provider: result.provider,
+    canonicalSharedRuntime: true,
+    providerSuccess: true,
+    fallbackUsed: false,
+    fallbackReason: null,
   };
 }
 
