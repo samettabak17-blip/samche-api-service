@@ -1,5 +1,15 @@
 import { createGoogleGeminiProvider, getGoogleGeminiConfig } from '../services/google-gemini-provider.js';
 
+if (!process.env.GOOGLE_GENAI_MODE && (process.env.GOOGLE_CLOUD_PROJECT || process.env.GOOGLE_APPLICATION_CREDENTIALS || true)) {
+  process.env.GOOGLE_GENAI_MODE = 'vertex';
+}
+if (!process.env.GOOGLE_CLOUD_PROJECT) {
+  process.env.GOOGLE_CLOUD_PROJECT = 'samche-ai-development-2';
+}
+if (!process.env.GOOGLE_CLOUD_LOCATION) {
+  process.env.GOOGLE_CLOUD_LOCATION = 'global';
+}
+
 async function runSafeProviderSmoke() {
   try {
     const config = getGoogleGeminiConfig();
@@ -38,3 +48,4 @@ async function runSafeProviderSmoke() {
 }
 
 runSafeProviderSmoke();
+
