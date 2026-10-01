@@ -3,22 +3,26 @@ const STANDALONE_MEDIA_ACKNOWLEDGEMENTS = {
     DOCUMENT: 'Belgeniz alındı. Bu belgeyle ilgili hangi konuda yardımcı olmamı istersiniz? Örneğin içeriğini özetleyebilir, belirli bilgileri çıkarabilir veya sorularınızı belgeye göre yanıtlayabilirim.',
     IMAGE: 'Görseliniz alındı. Bu görselle ilgili neyi incelememi istersiniz? Görseldeki yazıları okuyabilir, belirli detayları inceleyebilir veya sorularınızı görsele göre yanıtlayabilirim.',
     AUDIO: 'Sesli mesajınız alındı.',
+    VIDEO: 'Videonuz alındı. Bu videoyla ilgili size nasıl yardımcı olmamı istersiniz?',
   },
   en: {
     DOCUMENT: 'Your document has been received. How would you like me to help with it? For example, I can summarize it, extract specific information, or answer questions based on the document.',
     IMAGE: 'Your image has been received. What would you like me to examine? I can read visible text, inspect specific details, or answer questions based on the image.',
     AUDIO: 'Your voice message has been received.',
+    VIDEO: 'What would you like me to help you with regarding this video?',
   },
   ar: {
     DOCUMENT: 'تم استلام المستند. كيف تود أن أساعدك بشأنه؟ يمكنني تلخيصه أو استخراج معلومات محددة أو الإجابة عن أسئلتك استنادًا إلى المستند.',
     IMAGE: 'تم استلام الصورة. ما الذي تود أن أفحصه فيها؟ يمكنني قراءة النص الظاهر أو فحص تفاصيل محددة أو الإجابة عن أسئلتك بناءً على الصورة.',
     AUDIO: 'تم استلام رسالتك الصوتية.',
+    VIDEO: 'تم استلام الفيديو. ما الذي تود أن أساعدك به بخصوص هذا الفيديو؟',
   },
 };
 
 function mediaCategory(descriptor) {
   const mimeType = String(descriptor?.declaredMimeType ?? '').toLowerCase();
   if (mimeType.startsWith('image/')) return 'IMAGE';
+  if (mimeType.startsWith('video/')) return 'VIDEO';
   if (mimeType.startsWith('audio/')) return 'AUDIO';
   return 'DOCUMENT';
 }

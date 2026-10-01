@@ -428,3 +428,286 @@ test('jpeg and jpg mime types are supported in visual catalog selection', async 
   assert.equal(database.state.job.grounding_context.catalog.entityId, selectedEntityId);
   assert.deepEqual(database.state.job.grounding_context.catalog.mediaIds, [jpegMediaId]);
 });
+
+test('E2E TRACE: Turn 1 visual catalog generation delivers media, Turn 2 "Make it suitable for my bed" preserves room image and selected product', async () => {
+  // Step 1: User uploads image & requests catalog matching
+  const turn1Req = await resolveWhatsAppVisualRequestState({
+    database: conversationDatabase(),
+    tenantId,
+    conversationId,
+    currentResourceIds: [customerTargetId],
+    message: 'Find the product from the catalog that best suits my room and create a visual for my room.',
+  });
+
+  assert.equal(turn1Req.state, 'READY_FOR_GENERATION');
+  assert.equal(turn1Req.catalogRequested, true);
+  assert.equal(turn1Req.targetResourceId, customerTargetId);
+
+  // Step 2: Queue Turn 1 job
+  const database1 = generationDatabase([catalogEntries[0]]);
+  const turn1Queued = await visual.orchestrateWhatsAppVisualAiJob({
+    database: database1,
+    tenantId,
+    conversationId,
+    targetResourceId: turn1Req.targetResourceId,
+    promptInstruction: turn1Req.promptInstruction,
+    catalogRequested: turn1Req.catalogRequested,
+    assistantId,
+  });
+
+  assert.equal(turn1Queued.status, 'QUEUED');
+  assert.equal(database1.state.job.grounding_context.catalog.entityId, selectedEntityId);
+
+  // Step 3: Worker execution & WhatsApp delivery for Turn 1
+  const storage = {
+    async get({ key }) { return Buffer.from('mock-bytes'); },
+    async put() {},
+  };
+  let mediaSent = false;
+  let deliveredPayload = null;
+
+  const workerDatabase1 = {
+    async query(sql, params = []) {
+      if (sql.includes('stale') || sql.includes('UPDATE visual_ai_generation_jobs') && sql.includes('status = $1')) return { rows: [] };
+      if (sql.includes('FOR UPDATE SKIP LOCKED')) return { rows: [database1.state.job] };
+      if (sql.includes('SELECT status, handling_mode FROM conversations')) return { rowCount: 1, rows: [{ status: 'open', handling_mode: 'AI' }] };
+      if (sql.includes('FROM conversations c JOIN tenant_channels tc')) return {
+        rows: [{
+          customer_external_id: '+1234567890',
+          external_channel_id: 'channel_123',
+          config: {},
+          communication_language: 'en',
+        }],
+      };
+      if (sql.includes('FROM conversation_messages WHERE id = $1')) return { rows: [{ external_message_id: 'msg_123' }] };
+      if (sql.includes('FROM conversation_resources WHERE id = $1')) return { rowCount: 1, rows: [{ id: customerTargetId, source_type: 'WHATSAPP_MEDIA', media_category: 'IMAGE', processing_status: 'READY', storage_key: 'target', mime_type: 'image/jpeg', original_filename: 'room.jpg' }] };
+      if (sql.includes('FROM knowledge_entities e')) return { rows: [catalogEntries[0]] };
+      if (sql.includes('INSERT INTO conversation_resources')) return { rows: [{ id: jobId, storage_key: 'output', mime_type: 'image/png', original_filename: 'output.png' }] };
+      if (sql.includes('UPDATE visual_ai_generation_jobs')) return { rows: [database1.state.job] };
+      if (sql.includes('INSERT INTO conversation_messages')) return { rows: [{ id: 'assistant_msg_1', content: 'Your visual concept preview is ready.' }] };
+      if (sql.includes('UPDATE conversation_resources')) return { rows: [] };
+      if (sql.includes('SELECT provider_message_id FROM visual_ai_generation_jobs')) return { rows: [{ provider_message_id: null }] };
+      return { rows: [] };
+    },
+  };
+
+  const workerResult1 = await processOneVisualAiGenerationJob({
+    database: workerDatabase1,
+    storage,
+    visualProvider: {
+      getCapabilities: () => ({ imageConditionedGeneration: true }),
+      async generateConcept() {
+        return { imageBuffer: Buffer.from('turn-1-image'), mimeType: 'image/png', provider: 'MOCK', model: 'mock-v1' };
+      },
+    },
+    deliverWhatsAppMedia: async (payload) => {
+      mediaSent = true;
+      deliveredPayload = payload;
+      return { providerMessageId: 'wamid.HBgLMTIz' };
+    },
+  });
+
+  assert.equal(workerResult1.status, 'COMPLETED');
+  assert.equal(mediaSent, true);
+  assert.equal(deliveredPayload.recipient, '+1234567890');
+
+  // Step 4: Turn 2 Continuation: "Make it suitable for my bed."
+  const completedJobTurn1 = {
+    id: jobId,
+    target_resource_id: customerTargetId,
+    generated_resource_id: jobId,
+    grounding_context: {
+      catalogRequested: true,
+      originalCustomerTargetResourceId: customerTargetId,
+      catalog: { entityId: selectedEntityId, mediaIds: [selectedMediaId] },
+      entity: catalogEntries[0],
+    },
+    status: 'COMPLETED',
+  };
+
+  const turn2Req = await resolveWhatsAppVisualRequestState({
+    database: conversationDatabase({ previousJob: completedJobTurn1 }),
+    tenantId,
+    conversationId,
+    message: 'Make it suitable for my bed.',
+  });
+
+  assert.equal(turn2Req.state, 'READY_FOR_GENERATION', 'Continuation must trigger visual generation');
+  assert.equal(turn2Req.targetResourceId, customerTargetId, 'Must reuse original room image');
+  assert.equal(turn2Req.originalCustomerTargetResourceId, customerTargetId);
+  assert.equal(turn2Req.catalogRequested, true, 'Must maintain catalog grounding context');
+  assert.equal(turn2Req.previousEntityId, selectedEntityId, 'Must preserve selected product entity ID');
+  assert.equal(turn2Req.requireDifferentEntity, false, 'Must keep same product without forcing different option');
+
+  // Step 5: Queue Turn 2 job
+  const database2 = generationDatabase([catalogEntries[0]]);
+  const turn2Queued = await visual.orchestrateWhatsAppVisualAiJob({
+    database: database2,
+    tenantId,
+    conversationId,
+    targetResourceId: turn2Req.targetResourceId,
+    promptInstruction: turn2Req.promptInstruction,
+    catalogRequested: turn2Req.catalogRequested,
+    previousEntityId: turn2Req.previousEntityId,
+    requireDifferentEntity: turn2Req.requireDifferentEntity,
+    assistantId,
+  });
+
+  assert.equal(turn2Queued.status, 'QUEUED');
+  assert.equal(database2.state.job.target_resource_id, customerTargetId);
+  assert.equal(database2.state.job.grounding_context.catalog.entityId, selectedEntityId);
+});
+
+
+test('REGRESSION TEST A: Catalog product A selected, provider payload contains entity and reference A, no unrelated brands allowed', async () => {
+  const database = generationDatabase([catalogEntries[0]]);
+  const queued = await visual.orchestrateWhatsAppVisualAiJob({
+    database,
+    tenantId,
+    conversationId,
+    targetResourceId: customerTargetId,
+    promptInstruction: 'Bu odaya en uygun kataloglardaki ürünü bul ve odamda tasarla',
+    catalogRequested: true,
+    assistantId,
+  });
+
+  assert.equal(queued.status, 'QUEUED');
+  assert.equal(database.state.job.grounding_context.catalog.entityId, selectedEntityId);
+  assert.equal(database.state.job.grounding_context.entity.id, selectedEntityId);
+
+  let providerPayload = null;
+  const storage = {
+    async get({ key }) { return Buffer.from(key === 'target' ? 'customer-room-bytes' : 'approved-item-alpha-bytes'); },
+    async put() {},
+  };
+  await processVisualAiGenerationJob({
+    database,
+    storage,
+    job: database.state.job,
+    visualProvider: {
+      async generateConcept(input) {
+        providerPayload = input;
+        return { imageBuffer: Buffer.from('generated-image'), mimeType: 'image/png', provider: 'MOCK', model: 'mock' };
+      },
+    },
+  });
+
+  assert.ok(providerPayload, 'Provider must receive payload');
+  assert.equal(providerPayload.targetImage.buffer.toString(), 'customer-room-bytes');
+  assert.equal(providerPayload.referenceImages[0].buffer.toString(), 'approved-item-alpha-bytes');
+  assert.equal(providerPayload.referenceImages[0].entityId, selectedEntityId);
+  assert.equal(providerPayload.groundingContext.entity.id, selectedEntityId);
+  assert.match(providerPayload.instruction, /Approved Item Alpha/);
+  assert.match(providerPayload.instruction, /Do not introduce external brands/);
+  assert.match(providerPayload.instruction, /no IKEA/);
+});
+
+test('REGRESSION TEST B: Room preservation prompt contract strictly enforces target room unchanged', async () => {
+  const instruction = visual.buildGroundedVisualInstruction({
+    instruction: 'Bu odaya en uygun kataloglardaki ürünü bul ve odamda tasarla',
+    groundingContext: {
+      catalogRequested: true,
+      entity: catalogEntries[0],
+    },
+  });
+
+  assert.match(instruction, /Keep the original room unchanged/);
+  assert.match(instruction, /Preserve the exact camera angle, perspective, room geometry, walls, windows, floor, and lighting/);
+  assert.match(instruction, /Use only the provided catalog product reference/);
+  assert.match(instruction, /Only visualize the selected product in this room/);
+  assert.match(instruction, /Do not create a new product/);
+  assert.match(instruction, /Do not redesign the room, alter architecture, or replace the entire scene/);
+});
+
+test('REGRESSION TEST C: Continuation turn "bunu yatağıma uygun hale getir" reuses same product and same room target', async () => {
+  const priorCompletedJob = {
+    id: jobId,
+    target_resource_id: customerTargetId,
+    generated_resource_id: generatedOutputId,
+    grounding_context: {
+      catalogRequested: true,
+      originalCustomerTargetResourceId: customerTargetId,
+      catalog: { entityId: selectedEntityId, mediaIds: [selectedMediaId] },
+      entity: catalogEntries[0],
+    },
+    status: 'COMPLETED',
+  };
+
+  const req = await resolveWhatsAppVisualRequestState({
+    database: conversationDatabase({ previousJob: priorCompletedJob }),
+    tenantId,
+    conversationId,
+    message: 'bunu yatağıma uygun hale getir',
+  });
+
+  assert.equal(req.state, 'READY_FOR_GENERATION');
+  assert.equal(req.targetResourceId, customerTargetId, 'Must keep the exact same customer room target');
+  assert.equal(req.originalCustomerTargetResourceId, customerTargetId);
+  assert.equal(req.catalogRequested, true);
+  assert.equal(req.previousEntityId, selectedEntityId);
+  assert.equal(req.requireDifferentEntity, false, 'Must not force a different entity for continuation');
+
+  const database = generationDatabase([catalogEntries[0]]);
+  const queued = await visual.orchestrateWhatsAppVisualAiJob({
+    database,
+    tenantId,
+    conversationId,
+    targetResourceId: req.targetResourceId,
+    promptInstruction: req.promptInstruction,
+    catalogRequested: req.catalogRequested,
+    previousEntityId: req.previousEntityId,
+    requireDifferentEntity: req.requireDifferentEntity,
+    assistantId,
+  });
+
+  assert.equal(queued.status, 'QUEUED');
+  assert.equal(database.state.job.target_resource_id, customerTargetId);
+  assert.equal(database.state.job.grounding_context.catalog.entityId, selectedEntityId);
+});
+
+test('REGRESSION TEST D: Different product request switches entity while preserving the original room target', async () => {
+  const priorCompletedJob = {
+    id: jobId,
+    target_resource_id: customerTargetId,
+    generated_resource_id: generatedOutputId,
+    grounding_context: {
+      catalogRequested: true,
+      originalCustomerTargetResourceId: customerTargetId,
+      catalog: { entityId: selectedEntityId, mediaIds: [selectedMediaId] },
+      entity: catalogEntries[0],
+    },
+    status: 'COMPLETED',
+  };
+
+  const req = await resolveWhatsAppVisualRequestState({
+    database: conversationDatabase({ previousJob: priorCompletedJob }),
+    tenantId,
+    conversationId,
+    message: 'Farklı bir katalog ürünü seç ve odamda göster',
+  });
+
+  assert.equal(req.state, 'READY_FOR_GENERATION');
+  assert.equal(req.targetResourceId, customerTargetId, 'Must keep original customer room image');
+  assert.equal(req.catalogRequested, true);
+  assert.equal(req.previousEntityId, selectedEntityId);
+  assert.equal(req.requireDifferentEntity, true, 'Must detect explicit request for a different product');
+
+  const database = generationDatabase(catalogEntries);
+  const queued = await visual.orchestrateWhatsAppVisualAiJob({
+    database,
+    tenantId,
+    conversationId,
+    targetResourceId: req.targetResourceId,
+    promptInstruction: req.promptInstruction,
+    catalogRequested: req.catalogRequested,
+    previousEntityId: req.previousEntityId,
+    requireDifferentEntity: req.requireDifferentEntity,
+    assistantId,
+  });
+
+  assert.equal(queued.status, 'QUEUED');
+  assert.equal(database.state.job.target_resource_id, customerTargetId);
+  assert.equal(database.state.job.grounding_context.catalog.entityId, alternativeEntityId, 'Must switch to alternative entity B');
+});
+
+

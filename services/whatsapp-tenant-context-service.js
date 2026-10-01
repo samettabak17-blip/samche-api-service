@@ -21,6 +21,7 @@ export function buildWhatsAppActivePersonaTenantContext({
   communicationLanguage = 'und',
   deterministicTemplates = null,
   contextualIntelligence = '',
+  visualSessionContext = '',
   currentEntity = null,
 }) {
   if (!persona?.available) throw new WhatsAppTenantContextError('WHATSAPP_TENANT_PERSONA_NOT_ACTIVE');
@@ -33,6 +34,7 @@ export function buildWhatsAppActivePersonaTenantContext({
       knowledgeContext,
       channelRules: 'Use concise conversational plain text suitable for WhatsApp. Do not expose internal metadata.',
       contextualIntelligence,
+      visualSessionContext,
     }),
     // Legacy Assistant templates can contain a different tenant's business
     // identity. Mapped V2 traffic accepts deterministic wording only from the
@@ -43,6 +45,7 @@ export function buildWhatsAppActivePersonaTenantContext({
     communicationLanguage,
     contextualIntelligence,
     currentEntity,
+    visualSessionContext,
   };
 }
 
@@ -226,6 +229,10 @@ export function buildWhatsAppTenantModelContext({ tenant, history = [], customer
 
   if (urlEvidence) {
     userPromptParts.push(urlEvidence);
+  }
+
+  if (tenant?.visualSessionContext) {
+    userPromptParts.push(bounded(tenant.visualSessionContext, 3000));
   }
 
   userPromptParts.push(

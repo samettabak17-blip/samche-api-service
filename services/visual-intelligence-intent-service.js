@@ -41,8 +41,21 @@ const SUPPORT_OR_QA_PATTERNS = [
 
 const CATALOG_REFERENCE = /\b(?:catalog(?:ue)?|inventory|your\s+(?:products?|items?|options?))\b|(?:katalog|ürünleriniz|urunleriniz)|(?:كتالوج|منتجاتكم)/iu;
 const DIFFERENT_OPTION = /\b(?:another|different|alternative|other\s+(?:one|option|product|item))\b|(?:başka|farklı|baska|farkli)|(?:آخر|أخرى|مختلف)/iu;
-const VISUAL_CONTINUATION = /\b(?:another|different|alternative|previous|darker|lighter|brighter|style|version|option|matching\s+item)\b|(?:başka|farklı|önceki|koyu|açık|baska|farkli)|(?:آخر|أخرى|مختلف|أغمق|أفتح)/iu;
+const VISUAL_CONTINUATION = /\b(?:another|different|alternative|previous|prior|darker|lighter|brighter|warmer|cooler|shade|tone|contrast|hue|color|colour|blue|green|red|black|white|grey|gray|beige|gold|silver|navy|style|version|option|matching\s+item|theme|look|pattern|suitable|fit|fits|fitting|adapt|place|placement|position|put|move|adjust|align|modify|rotate|resize|larger|smaller|add|remove|replace|change|switch|make\s+it|turn\s+it|show\s+it|render\s+it|try\s+it|do\s+it)\b|(?:başka|farklı|önceki|koyu|açık|parlak|ton|renk|rengi|rengini|mavi|yeşil|kırmızı|siyah|beyaz|gri|bej|baska|farkli|uygun|uyarla|uyarlansın|sığdır|yerleştir|konumlandır|taşı|ayarla|düzelt|değiştir|büyüt|küçült|ekle|çıkar|kaldır|yap|olsun|dene|göster|aynısı)|(?:آخر|أخرى|مختلف|أغمق|أفتح|لون|أزرق|أخضر|أحمر|أسود|أبيض|مناسب|طابق|عدل|ضع|انقل|غير|كبر|صغر|أضف|احذف|اجعله|حوله|أره|جرب)/iu;
 const ADDITIVE_VISUAL_EDIT = /\b(?:add|include)\s+(?:another|a\s+matching|an\s+additional)\b|(?:başka\s+bir\s+.*ekle|bir\s+.*daha\s+ekle)|(?:أضف\s+.*آخر)/iu;
+
+const TEXT_QUESTION_PATTERNS = [
+  /\b(?:price|cost|how\s+much|pricing|fee|rate|expensive|cheap|quote)\b/i,
+  /\b(?:why\s+did\s+you\s+choose|why\s+this|reason\s+for|explain\s+why|why\s+choose)\b/i,
+  /\b(?:size|sizes|dimension|dimensions|spec|specs|specification|specifications|material|materials|fabric|color\s+options|in\s+stock|available|warranty)\b/i,
+  /\b(?:what\s+is\s+the|tell\s+me\s+about|information\s+about|details\s+of|features\s+of|who\s+are\s+you|where\s+are\s+you)\b/i,
+  /(?:fiyat|ücret|kaç\s+para|ne\s+kadar|maliyet|pahalı|ucuz|teklif)/iu,
+  /(?:neden\s+bu|neden\s+seçtin|sebebi\s+ne|açıkla|niye)/iu,
+  /(?:boyut|ebat|ölçü|ölçüleri|özellik|özellikleri|materyal|malzeme|kumaş|stokta|stok|garanti)/iu,
+  /(?:سعر|كم\s+السعر|تكلفة|كم\s+يكلف)/u,
+  /(?:لماذا\s+اخترت|لماذا\s+هذا|ما\s+السبب)/u,
+  /(?:مقاس|مقاسات|أبعاد|مواصفات|مادة|قماش|متوفر|ضمان)/u,
+];
 
 export function classifyVisualIntent({
   message = '',
@@ -68,14 +81,29 @@ export function classifyVisualIntent({
 
   // 2. Check for explicit Visual Generation patterns
   const isGenerationPattern = VISUAL_GENERATION_PATTERNS.some((p) => p.test(text));
-  const hasTransformationVerb = /(?:redesign|transform|make|visualize|edit|modify|change|dönüştür|tasarla|düzenle|değiştir)/i.test(text);
+  const hasTransformationVerb = /(?:redesign|transform|make|visualize|edit|modify|change|dönüştür|tasarla|düzenle|değiştir|uyarla|yerleştir)/i.test(text);
 
   // 3. Multi-turn context check: Did the assistant ask for a photo on the previous turn?
   const lastAssistantMsg = [...recentHistory].reverse().find((m) => m.role === 'assistant' || m.sender_type === 'ASSISTANT');
   const wasPromptedForPhoto = lastAssistantMsg && /(?:send\s+(?:a\s+)?photo|upload\s+(?:a\s+)?photo|resim\s+gönderin|fotoğraf\s+atın)/i.test(String(lastAssistantMsg.content || ''));
 
+  // 4. Check for pure text questions / inquiries (pricing, why chosen, dimensions, etc.)
+  const isTextQuestion = TEXT_QUESTION_PATTERNS.some((p) => p.test(text));
+  if (isTextQuestion && !isGenerationPattern && !wasPromptedForPhoto) {
+    return {
+      intent: VISUAL_INTENT_TYPES.GENERAL_CONVERSATION,
+      canonicalIntent: hasTargetImage
+        ? CANONICAL_VISUAL_INTENT_TYPES.UNDERSTAND_IMAGE
+        : CANONICAL_VISUAL_INTENT_TYPES.UNDERSTAND_IMAGE,
+      isVisualGeneration: false,
+      isSupport: false,
+      confidence: 0.9,
+      targetStatus: hasTargetImage ? 'PRESENT' : 'NOT_REQUIRED',
+    };
+  }
+
   if (isGenerationPattern || (hasTransformationVerb && (hasTargetImage || hasReferenceImage)) || (wasPromptedForPhoto && hasTargetImage)) {
-    const isEdit = /(?:edit|darker|lighter|change|replace|modify|düzenle|değiştir)/i.test(text);
+    const isEdit = /(?:edit|darker|lighter|change|replace|modify|düzenle|değiştir|uyarla|uygun)/i.test(text);
     return {
       intent: VISUAL_INTENT_TYPES.VISUAL_GENERATION,
       canonicalIntent: isEdit ? CANONICAL_VISUAL_INTENT_TYPES.VISUAL_EDIT : CANONICAL_VISUAL_INTENT_TYPES.VISUAL_GENERATION,
@@ -313,8 +341,35 @@ export function buildGroundedVisualInstruction({ instruction, groundingContext =
   const normalizedInstruction = String(instruction || '').trim();
   const sections = [normalizedInstruction];
 
+  const hasCatalogGrounding = Boolean(
+    groundingContext.catalogRequested ||
+    groundingContext.catalog ||
+    groundingContext.entity
+  );
+
   if (groundingContext.entity?.name) {
-    sections.push(`[Referenced Product/Entity: ${groundingContext.entity.name}${groundingContext.entity.description ? ` - ${groundingContext.entity.description}` : ''}]`);
+    const entityLines = [
+      `[Referenced Product/Entity: ${groundingContext.entity.name}${groundingContext.entity.type ? ` (${groundingContext.entity.type})` : ''}${groundingContext.entity.description ? ` - ${groundingContext.entity.description}` : ''}]`,
+    ];
+    if (groundingContext.entity.attributes && typeof groundingContext.entity.attributes === 'object') {
+      const attrEntries = Object.entries(groundingContext.entity.attributes).filter(([_, v]) => Boolean(v));
+      if (attrEntries.length > 0) {
+        entityLines.push(`[Product Specifications: ${attrEntries.map(([k, v]) => `${k}: ${v}`).join(', ')}]`);
+      }
+    }
+    sections.push(entityLines.join('\n'));
+  }
+
+  if (hasCatalogGrounding) {
+    sections.push(
+      '[Catalog Grounding & Room Preservation Contract]\n' +
+      '- Keep the original room unchanged. Preserve the exact camera angle, perspective, room geometry, walls, windows, floor, and lighting from the customer room image.\n' +
+      '- Use only the provided catalog product reference.\n' +
+      '- Only visualize the selected product in this room.\n' +
+      '- Do not create a new product.\n' +
+      '- Do not introduce external brands (strictly no IKEA or third-party brand hallucination).\n' +
+      '- Do not redesign the room, alter architecture, or replace the entire scene.'
+    );
   }
 
   if (Array.isArray(groundingContext.approvedKnowledge) && groundingContext.approvedKnowledge.length > 0) {
@@ -361,7 +416,10 @@ export async function resolveWhatsAppVisualRequestState({
   );
   const previousJob = priorResult.rows?.[0] || null;
   const previousCatalog = previousJob?.grounding_context?.catalog || null;
-  const catalogRequested = CATALOG_REFERENCE.test(String(message)) || Boolean(previousCatalog && VISUAL_CONTINUATION.test(String(message)));
+  const isExplicitTextQuestion = TEXT_QUESTION_PATTERNS.some((p) => p.test(String(message)));
+  const isContinuation = VISUAL_CONTINUATION.test(String(message));
+  const isAddEdit = ADDITIVE_VISUAL_EDIT.test(String(message));
+  const catalogRequested = CATALOG_REFERENCE.test(String(message)) || Boolean(previousCatalog && (isContinuation || isAddEdit));
   const requireDifferentEntity = Boolean(catalogRequested && DIFFERENT_OPTION.test(String(message)));
 
   let classification = classifyVisualIntent({
@@ -371,7 +429,7 @@ export async function resolveWhatsAppVisualRequestState({
     hasDocument: false,
     recentHistory,
   });
-  if (!classification.isSupport && !classification.isVisualGeneration && previousJob && VISUAL_CONTINUATION.test(String(message))) {
+  if (!classification.isSupport && !classification.isVisualGeneration && !isExplicitTextQuestion && previousJob && isContinuation) {
     classification = {
       ...classification,
       intent: VISUAL_INTENT_TYPES.VISUAL_GENERATION,
@@ -434,6 +492,14 @@ export async function resolveWhatsAppVisualRequestState({
     }
   }
   const referenceResourceId = catalogRequested ? null : (images.find((image) => image.id !== targetResourceId)?.id || null);
+
+  console.info('VISUAL_DEBUG_STAGE: intent_detected', {
+    tenantId,
+    conversationId,
+    intent: classification.canonicalIntent || classification.intent,
+    catalogRequested,
+    targetResourceId,
+  });
 
   return {
     state: 'READY_FOR_GENERATION',
@@ -502,6 +568,12 @@ export async function resolveVisualCatalogSelection({
   const media = selected.approved_media.filter((item) => UUID_REGEX.test(String(item.id))
     && String(item.storage_key || '').startsWith(`knowledge/${tenantId}/`)
     && /^image\/(?:png|jpe?g|webp)$/i.test(String(item.mime_type))).slice(0, 3);
+  console.info('VISUAL_DEBUG_STAGE: catalog_selected', {
+    tenantId,
+    entityId: selected.id,
+    entityName: selected.name,
+    mediaCount: media.length,
+  });
   return {
     state: 'SELECTED',
     entity: {
@@ -623,5 +695,132 @@ export async function orchestrateWhatsAppVisualAiJob({
     status: 'QUEUED',
     acknowledgmentText: formatVisualAiAcknowledgement(resolvedLanguage),
   };
+}
+
+/**
+ * Loads the active Visual AI session context for a conversation from durable storage
+ */
+export async function loadActiveVisualSessionContext({ database, tenantId, conversationId }) {
+  if (!database?.query || !UUID_REGEX.test(String(tenantId || '')) || !UUID_REGEX.test(String(conversationId || ''))) {
+    return null;
+  }
+
+  try {
+    const jobResult = await database.query(
+      `SELECT id, target_resource_id, reference_resource_id, reference_url,
+              generated_resource_id, prompt_instruction, grounding_context,
+              provider, model, status, created_at, updated_at
+         FROM visual_ai_generation_jobs
+        WHERE tenant_id = $1 AND conversation_id = $2 AND status = 'COMPLETED'
+        ORDER BY created_at DESC, id DESC LIMIT 1`,
+      [tenantId, conversationId]
+    );
+
+    const latestJob = jobResult.rows?.[0];
+    if (!latestJob) return null;
+
+    const originalTargetId = latestJob.grounding_context?.originalCustomerTargetResourceId
+      || latestJob.target_resource_id;
+
+    const resourcesResult = await database.query(
+      `SELECT id, source_type, media_category, mime_type, original_filename, storage_key, created_at
+         FROM conversation_resources
+        WHERE tenant_id = $1 AND conversation_id = $2 AND media_category = 'IMAGE' AND processing_status = 'READY'
+        ORDER BY created_at DESC LIMIT 10`,
+      [tenantId, conversationId]
+    );
+
+    const uploadedImages = (resourcesResult.rows || []).filter((r) => r.source_type !== 'VISUAL_AI_GENERATED');
+    const generatedImages = (resourcesResult.rows || []).filter((r) => r.source_type === 'VISUAL_AI_GENERATED');
+
+    const entity = latestJob.grounding_context?.entity || null;
+    const catalog = latestJob.grounding_context?.catalog || null;
+    const catalogRequested = Boolean(latestJob.grounding_context?.catalogRequested || catalog);
+
+    return {
+      active: true,
+      visualSessionActive: true,
+      jobId: latestJob.id,
+      tenantId,
+      conversationId,
+      originalCustomerTargetResourceId: originalTargetId,
+      targetResourceId: latestJob.target_resource_id,
+      generatedResourceId: latestJob.generated_resource_id,
+      selectedEntity: entity,
+      catalogRequested,
+      productId: entity?.id || entity?.externalCode || null,
+      productName: entity?.name || null,
+      productType: entity?.type || null,
+      productDescription: entity?.description || null,
+      productAttributes: entity?.attributes || {},
+      lastPromptInstruction: latestJob.prompt_instruction,
+      generationParameters: {
+        provider: latestJob.provider,
+        model: latestJob.model,
+      },
+      uploadedImagesCount: uploadedImages.length,
+      generatedImagesCount: generatedImages.length,
+      conversationGoal: latestJob.prompt_instruction,
+      createdAt: latestJob.created_at,
+    };
+  } catch (err) {
+    console.warn('LOAD_VISUAL_SESSION_CONTEXT_WARN:', err?.message);
+    return null;
+  }
+}
+
+/**
+ * Builds the canonical system prompt section for active Visual AI sessions
+ */
+export function buildVisualSessionPromptSection(visualSession) {
+  if (!visualSession || !visualSession.active) return '';
+
+  const lines = [
+    '================================================================================',
+    'ACTIVE MULTIMODAL VISUAL AI SESSION (VISUAL_SESSION_ACTIVE = true)',
+    '================================================================================',
+    'The customer is currently engaged in an active multimodal Visual AI session.',
+    `- Active Visual Goal / Request: "${visualSession.conversationGoal || visualSession.lastPromptInstruction || 'Visual creation/styling'}"`,
+  ];
+
+  if (visualSession.selectedEntity || visualSession.productName) {
+    lines.push(`- Selected Catalog Product / Item: ${visualSession.productName || visualSession.selectedEntity?.name || 'Selected product'}`);
+    if (visualSession.productType || visualSession.selectedEntity?.type) {
+      lines.push(`  Type/Category: ${visualSession.productType || visualSession.selectedEntity?.type}`);
+    }
+    if (visualSession.productId || visualSession.selectedEntity?.id) {
+      lines.push(`  Product ID/Code: ${visualSession.productId || visualSession.selectedEntity?.id}`);
+    }
+    if (visualSession.productDescription || visualSession.selectedEntity?.description) {
+      lines.push(`  Description: ${visualSession.productDescription || visualSession.selectedEntity?.description}`);
+    }
+    const attrs = visualSession.productAttributes || visualSession.selectedEntity?.attributes || {};
+    const attrEntries = Object.entries(attrs);
+    if (attrEntries.length > 0) {
+      lines.push('  Product Attributes:');
+      for (const [k, v] of attrEntries) {
+        lines.push(`    * ${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`);
+      }
+    }
+  }
+
+  lines.push('- Visual Context State: Original customer room/space photo and generated visual preview are preserved.');
+  lines.push('');
+  lines.push('CANONICAL VISUAL SESSION RULES & CONTEXT PRIORITY:');
+  lines.push('1. CONTEXT PRIORITY ORDER (STRICT):');
+  lines.push('   1) Current user text intent (highest priority)');
+  lines.push('   2) Active conversation goal');
+  lines.push('   3) Previous visual session context');
+  lines.push('   4) Retrieved catalog/product knowledge');
+  lines.push('   5) General tenant knowledge');
+  lines.push('2. TEXT QUESTIONS DURING VISUAL SESSION: If the user asks about the selected product (e.g. price, sizes, specs, materials, why it was chosen):');
+  lines.push('   - Answer directly and accurately using the selected product information and catalog knowledge.');
+  lines.push('   - Maintain the visual session in the background; do NOT claim you forgot the image or reset the session.');
+  lines.push('3. VISUAL MODIFICATIONS: If the user requests adjustments (e.g. "make it darker", "try another color", "make it fit my bed"):');
+  lines.push('   - The system continues from this active session seamlessly without restarting or asking for a new photo.');
+  lines.push('4. NON-VISUAL QUESTIONS: If the user asks an unrelated business question (e.g. company services, residency, contact info), answer the written question directly without forcing visual deflection.');
+  lines.push('================================================================================');
+
+  return lines.join('\n');
 }
 

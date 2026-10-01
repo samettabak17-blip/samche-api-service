@@ -71,6 +71,12 @@ export async function processOneVisualAiGenerationJob({
   const job = await claimNextVisualAiGenerationJob(database);
   if (!job) return { processed: false };
 
+  console.info('VISUAL_DEBUG_STAGE: visual_worker_started', {
+    jobId: job.id,
+    tenantId: job.tenant_id,
+    conversationId: job.conversation_id,
+  });
+
   let stopTyping = () => {};
   try {
     const ownership = await database.query(
@@ -158,9 +164,20 @@ export async function processOneVisualAiGenerationJob({
     await database.query(`UPDATE visual_ai_generation_jobs SET output_message_id = COALESCE(output_message_id, $1) WHERE id = $2 AND tenant_id = $3 AND status = 'PROCESSING'`, [message.id, job.id, job.tenant_id]);
     const current = await database.query(`SELECT provider_message_id FROM visual_ai_generation_jobs WHERE id = $1 AND tenant_id = $2`, [job.id, job.tenant_id]);
     if (!current.rows[0]?.provider_message_id) {
+      console.info('VISUAL_DEBUG_STAGE: media_delivery_started', {
+        jobId: job.id,
+        tenantId: job.tenant_id,
+        recipient: delivery.customer_external_id,
+        resourceId: resource.id,
+      });
       const bytes = await readStorage(storage, resource.storage_key);
       const sent = await deliverWhatsAppMedia({ phoneNumberId: delivery.external_channel_id, recipient: delivery.customer_external_id, integrationConfig: delivery.config, mediaCategory: 'IMAGE', caption: message.content, idempotencyKey: `visual-ai-output:${job.id}`, file: { buffer: bytes, mimetype: resource.mime_type, originalname: resource.original_filename } });
       if (!sent?.providerMessageId) throw new VisualAIProviderError('WHATSAPP_MEDIA_SEND_UNCORRELATED', 'WhatsApp delivery did not return a durable provider correlation.', { retryable: true });
+      console.info('VISUAL_DEBUG_STAGE: media_delivery_completed', {
+        jobId: job.id,
+        tenantId: job.tenant_id,
+        providerMessageId: sent.providerMessageId,
+      });
       await database.query(`UPDATE visual_ai_generation_jobs SET provider_message_id = $1, delivery_status = 'SENT' WHERE id = $2 AND tenant_id = $3 AND provider_message_id IS NULL AND status = 'PROCESSING'`, [sent.providerMessageId, job.id, job.tenant_id]);
     }
     stopTyping();

@@ -130,7 +130,15 @@ export async function enqueueVisualAiGenerationJob({
      RETURNING *`,
     [tenantId, conversationId, messageId, targetResourceId, referenceResourceId, referenceUrl, instruction, JSON.stringify(groundingContext), provider, model, maxAttempts, resolvedIdempotencyKey]
   );
-  return result.rows[0];
+  const job = result.rows[0];
+  console.info('VISUAL_DEBUG_STAGE: visual_job_created', {
+    jobId: job?.id,
+    tenantId,
+    conversationId,
+    targetResourceId,
+    catalogRequested: Boolean(groundingContext?.catalogRequested),
+  });
+  return job;
 }
 
 export async function claimNextVisualAiGenerationJob(database, { leaseDurationSeconds = 300 } = {}) {
@@ -199,6 +207,12 @@ export async function completeVisualAiGenerationJob({ database, storage, tenantI
   if (!updatedJob.rows[0]) {
     throw new VisualAiJobError('JOB_LEASE_LOST', 'Visual generation job lease is no longer active.');
   }
+  console.info('VISUAL_DEBUG_STAGE: image_generation_completed', {
+    jobId,
+    tenantId,
+    conversationId,
+    resourceId: resource.id,
+  });
   return { job: updatedJob.rows[0], resource };
 }
 
@@ -334,6 +348,13 @@ export async function processVisualAiGenerationJob({ database, storage, job, vis
     const groundedInstruction = buildGroundedVisualInstruction({
       instruction: job.prompt_instruction,
       groundingContext: providerGroundingContext,
+    });
+
+    console.info('VISUAL_DEBUG_STAGE: image_generation_requested', {
+      jobId: job.id,
+      tenantId: job.tenant_id,
+      provider: job.provider,
+      instruction: groundedInstruction,
     });
 
     const providerResult = await visualProvider.generateConcept({

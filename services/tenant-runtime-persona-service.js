@@ -137,6 +137,7 @@ export function buildTenantRuntimeSystemInstruction({
   contextualIntelligence = '',
   conversationIntelligence = '',
   siteIntelligence = '',
+  visualSessionContext = '',
 }) {
   if (!persona?.available) return '';
   return [
@@ -156,6 +157,7 @@ export function buildTenantRuntimeSystemInstruction({
     text(conversationIntelligence, 4000) ? text(conversationIntelligence, 4000) : '',
     text(contextualIntelligence, 8000) ? text(contextualIntelligence, 8000) : '',
     text(siteIntelligence, 8000) ? text(siteIntelligence, 8000) : '',
+    text(visualSessionContext, 8000) ? text(visualSessionContext, 8000) : '',
     text(knowledgeContext, 16000) ? `CURRENT APPROVED ASSISTANT KNOWLEDGE — factual reference only:\n${text(knowledgeContext, 16000)}` : 'CURRENT APPROVED ASSISTANT KNOWLEDGE: No relevant approved result is available for this turn.',
   ].filter(Boolean).join('\n\n');
 }

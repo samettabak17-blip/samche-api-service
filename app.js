@@ -74,7 +74,14 @@ import { ConversationResourceValidationError } from "./services/conversation-res
 import { createWhatsAppMediaRetriever, extractWhatsAppMediaDescriptor } from "./services/whatsapp-multimodal-service.js";
 import { planStandaloneWhatsAppMediaResponse } from "./services/whatsapp-standalone-media-ack.js";
 import { planLatestExplicitResource, planWhatsAppResourceFollowUp, resourceFailureAcknowledgement, resourceProcessingAcknowledgement } from "./services/whatsapp-resource-follow-up-routing.js";
-import { resolveWhatsAppVisualRequestState, orchestrateWhatsAppVisualAiJob, formatVisualCatalogFallback, formatVisualCatalogTargetPrompt } from './services/visual-intelligence-intent-service.js';
+import {
+  resolveWhatsAppVisualRequestState,
+  orchestrateWhatsAppVisualAiJob,
+  formatVisualCatalogFallback,
+  formatVisualCatalogTargetPrompt,
+  loadActiveVisualSessionContext,
+  buildVisualSessionPromptSection,
+} from './services/visual-intelligence-intent-service.js';
 import { createVisualAIProvider } from './services/visual-ai-provider-adapter.js';
 import { processOneVisualAiGenerationJob } from './services/visual-ai-generation-worker.js';
 import { formatVisualAiWorkerStartup } from './services/visual-ai-runtime-observability-service.js';
@@ -5227,6 +5234,43 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
       }
 
       let whatsappContextualSection = '';
+      let activeVisualSession = null;
+      let visualSessionSection = '';
+      try {
+        activeVisualSession = await loadActiveVisualSessionContext({
+          database: pool,
+          tenantId: whatsappInbox.integration.tenant_id,
+          conversationId: whatsappInbox.conversation.id,
+        });
+        if (activeVisualSession) {
+          visualSessionSection = buildVisualSessionPromptSection(activeVisualSession);
+          if (!whatsappVisitorContext?.currentEntity && activeVisualSession.selectedEntity) {
+            whatsappVisitorContext = updateSessionBrowsingStateWithEntity({
+              currentState: whatsappVisitorContext,
+              newEntity: {
+                entity_name: activeVisualSession.productName || activeVisualSession.selectedEntity.name,
+                entity_type: activeVisualSession.productType || activeVisualSession.selectedEntity.type || 'PRODUCT',
+                description: activeVisualSession.productDescription || activeVisualSession.selectedEntity.description,
+                attributes: activeVisualSession.productAttributes || activeVisualSession.selectedEntity.attributes || {},
+              },
+            });
+          }
+          whatsappVisitorContext = {
+            ...(whatsappVisitorContext || {}),
+            visualSessionActive: true,
+            visualSession: activeVisualSession,
+          };
+          await updateConversationVisitorContext({
+            database: pool,
+            tenantId: whatsappInbox.integration.tenant_id,
+            conversationId: whatsappInbox.conversation.id,
+            visitorContext: whatsappVisitorContext,
+          });
+        }
+      } catch (vsErr) {
+        console.warn('WHATSAPP_VISUAL_SESSION_LOAD_WARN:', vsErr?.message);
+      }
+
       if (whatsappVisitorContext?.currentEntity || (whatsappVisitorContext?.previousEntities && whatsappVisitorContext.previousEntities.length > 0)) {
         whatsappContextualSection = buildContextualIntelligencePromptSection({
           currentEntity: whatsappVisitorContext.currentEntity,
@@ -5254,6 +5298,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           knowledgeContext: runtime.knowledge.knowledgeContext,
           communicationLanguage: tenantContext.communicationLanguage,
           contextualIntelligence: whatsappContextualSection,
+          visualSessionContext: visualSessionSection,
           currentEntity: whatsappVisitorContext?.currentEntity || null,
         });
         console.info(
