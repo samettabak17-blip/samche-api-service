@@ -265,6 +265,39 @@ export async function rollbackAssistantConfigurationVersion(options) {
   return activateConfigurationVersion({ ...options, allowSuperseded: true });
 }
 
+export async function createAssistantConfigurationRevision({ database, tenantId, assistantId, versionId }) {
+  uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
+  uuid(assistantId, 'KNOWLEDGE_ASSISTANT_INVALID');
+  uuid(versionId, 'KNOWLEDGE_CONFIGURATION_INVALID');
+
+  return transaction(database, async (client) => {
+    const current = await client.query(
+      `SELECT configuration.id, configuration.configuration_data, configuration.source_profile_version_id,
+              configuration.source_recommendation_id, configuration.schema_version, configuration.status
+         FROM assistant_configuration_versions configuration
+        WHERE configuration.id = $1 AND configuration.tenant_id = $2 AND configuration.assistant_id = $3
+          AND configuration.status = 'ACTIVE'
+        FOR UPDATE`,
+      [versionId, tenantId, assistantId],
+    );
+    const source = current.rows[0];
+    if (!source) throw new KnowledgeConfigurationError('KNOWLEDGE_CONFIGURATION_NOT_EDITABLE', 'Only the active assistant configuration can start an edit revision');
+    assertRuntimeAssistantIdentity(source.configuration_data);
+
+    const result = await client.query(
+      `INSERT INTO assistant_configuration_versions
+        (tenant_id, assistant_id, configuration_data, source_profile_version_id, source_recommendation_id,
+         schema_version, generated_by, status, supersedes_version_id)
+       VALUES ($1, $2, $3, $4, $5, $6, 'HUMAN_EDIT', 'NEEDS_REVIEW', $7)
+       RETURNING id, schema_version, configuration_data, source_profile_version_id, source_recommendation_id,
+                 generated_by, status, created_at, updated_at`,
+      [tenantId, assistantId, source.configuration_data, source.source_profile_version_id, source.source_recommendation_id, source.schema_version, versionId],
+    );
+    if (!result.rows[0]) throw new KnowledgeConfigurationError('KNOWLEDGE_CONFIGURATION_REVISION_FAILED', 'Assistant configuration edit revision could not be created');
+    return result.rows[0];
+  });
+}
+
 export async function updateAssistantConfigurationReview({ database, tenantId, assistantId, versionId, configurationData }) {
   uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID');
   uuid(assistantId, 'KNOWLEDGE_ASSISTANT_INVALID');
@@ -272,6 +305,7 @@ export async function updateAssistantConfigurationReview({ database, tenantId, a
   if (!configurationData || typeof configurationData !== 'object' || Array.isArray(configurationData) || !Object.keys(configurationData).length) {
     throw new KnowledgeConfigurationError('KNOWLEDGE_CONFIGURATION_DATA_INVALID', 'Assistant configuration review data is invalid');
   }
+  assertRuntimeAssistantIdentity(configurationData);
   const result = await database.query(
     `UPDATE assistant_configuration_versions
         SET configuration_data = $4, updated_at = CURRENT_TIMESTAMP

@@ -23,6 +23,7 @@ test('configuration review and activation endpoints remain tenant-admin scoped',
   assert.match(source, /:tenantId\/knowledge-intelligence\/assistants\/:assistantId\/retrieval-preview/);
   assert.match(source, /router\.put\('\/:tenantId\/knowledge-intelligence\/profiles\/:versionId'/);
   assert.match(source, /router\.put\('\/:tenantId\/knowledge-intelligence\/assistants\/:assistantId\/configurations\/:versionId'/);
+  assert.match(source, /router\.post\('\/:tenantId\/knowledge-intelligence\/assistants\/:assistantId\/configurations\/:versionId\/edit'/);
   assert.match(source, /profiles\/:versionId\/rollback/);
   assert.match(source, /configurations\/:versionId\/rollback/);
   assert.match(source, /requireTenantAccess, requireTenantAdmin/);

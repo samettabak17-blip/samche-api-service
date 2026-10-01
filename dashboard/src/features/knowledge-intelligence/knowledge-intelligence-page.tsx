@@ -18,9 +18,11 @@ import {
   DashboardFormMessage,
   DashboardSelect,
   DashboardTab,
+  DashboardTextarea,
 } from "../../components/ui/dashboard-control";
 import type {
   Assistant,
+  AssistantConfigurationVersion,
   BusinessIdentityScopeAnalysis,
   BusinessProfileVersion,
   KnowledgeRecommendation,
@@ -129,6 +131,14 @@ const hasRuntimeCompanyIdentity = (data: Record<string, unknown> | null | undefi
   [data?.company_identity, data?.company_display_name].some(
     (value) => typeof value === "string" && Boolean(value.trim()),
   );
+const instagramBehavioralPrompt = (data: Record<string, unknown>) => {
+  const channelAdaptations = data.channel_adaptations;
+  if (!channelAdaptations || typeof channelAdaptations !== "object" || Array.isArray(channelAdaptations)) return null;
+  const instagram = (channelAdaptations as Record<string, unknown>).instagram;
+  if (!instagram || typeof instagram !== "object" || Array.isArray(instagram)) return null;
+  const prompt = (instagram as Record<string, unknown>).behavioral_prompt;
+  return typeof prompt === "string" ? prompt : null;
+};
 const isRuntimeEligibleConfiguration = (
   configuration: {
     status: string;
@@ -419,6 +429,8 @@ export function KnowledgeIntelligencePage() {
     kind: "profile" | "configuration";
     id: string;
     value: string;
+    revision?: boolean;
+    instagramPrompt?: string | null;
   } | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -1047,6 +1059,20 @@ export function KnowledgeIntelligencePage() {
           : tenantApi.rollbackAssistantConfiguration(tenantId, assistantId, id),
     onSuccess: refreshConfigurations,
   });
+  const createConfigurationRevision = useMutation({
+    mutationFn: (versionId: string) =>
+      tenantApi.createAssistantConfigurationRevision(tenantId, assistantId, versionId),
+    onSuccess: (configuration: AssistantConfigurationVersion) => {
+      setEditorError(null);
+      setEditor({
+        kind: "configuration",
+        id: configuration.id,
+        revision: true,
+        value: JSON.stringify(configuration.configuration_data, null, 2),
+        instagramPrompt: instagramBehavioralPrompt(configuration.configuration_data),
+      });
+    },
+  });
   const saveConfiguration = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
       tenantApi.updateAssistantConfiguration(tenantId, assistantId, id, data),
@@ -1068,6 +1094,46 @@ export function KnowledgeIntelligencePage() {
     setEditorError(null);
     if (editor.kind === "profile") saveProfile.mutate({ id: editor.id, data });
     else saveConfiguration.mutate({ id: editor.id, data });
+  };
+
+  const openConfigurationEditor = (row: AssistantConfigurationVersion) => {
+    setEditorError(null);
+    if (row.status === "ACTIVE") {
+      createConfigurationRevision.mutate(row.id);
+      return;
+    }
+    setEditor({
+      kind: "configuration",
+      id: row.id,
+      value: JSON.stringify(row.configuration_data, null, 2),
+      instagramPrompt: instagramBehavioralPrompt(row.configuration_data),
+    });
+  };
+
+  const updateInstagramPrompt = (value: string) => {
+    if (!editor || editor.kind !== "configuration") return;
+    try {
+      const data = JSON.parse(editor.value) as Record<string, unknown>;
+      const channelAdaptations = data.channel_adaptations && typeof data.channel_adaptations === "object" && !Array.isArray(data.channel_adaptations)
+        ? data.channel_adaptations as Record<string, unknown>
+        : {};
+      const instagram = channelAdaptations.instagram && typeof channelAdaptations.instagram === "object" && !Array.isArray(channelAdaptations.instagram)
+        ? channelAdaptations.instagram as Record<string, unknown>
+        : {};
+      setEditor({
+        ...editor,
+        instagramPrompt: value,
+        value: JSON.stringify({
+          ...data,
+          channel_adaptations: {
+            ...channelAdaptations,
+            instagram: { ...instagram, behavioral_prompt: value },
+          },
+        }, null, 2),
+      });
+    } catch {
+      setEditor({ ...editor, instagramPrompt: value });
+    }
   };
 
   const assistantSelect = (label = "Assistant", placeholder = "Select an assistant") => (
@@ -2790,7 +2856,8 @@ export function KnowledgeIntelligencePage() {
               recommendationAction.error ??
               generateConfiguration.error ??
               configurationAction.error ??
-              saveConfiguration.error
+              saveConfiguration.error ??
+              createConfigurationRevision.error
             }
           />
           {assistantId && (
@@ -2944,46 +3011,41 @@ export function KnowledgeIntelligencePage() {
                         </p>
                         {canManage && (
                           <div className="mt-3 flex flex-wrap gap-2">
-                            {row.status === "NEEDS_REVIEW" && (
+                            {(row.status === "ACTIVE" || row.status === "NEEDS_REVIEW") && (
                               <>
                                 <button
                                   className={actionClass}
-                                  onClick={() =>
-                                    setEditor({
-                                      kind: "configuration",
-                                      id: row.id,
-                                      value: JSON.stringify(
-                                        row.configuration_data,
-                                        null,
-                                        2,
-                                      ),
-                                    })
-                                  }
+                                  disabled={createConfigurationRevision.isPending}
+                                  onClick={() => openConfigurationEditor(row)}
                                 >
-                                  Edit
+                                  {row.status === "ACTIVE" ? "Edit Configuration" : "Edit"}
                                 </button>
-                                <button
-                                  className={primaryActionClass}
-                                  onClick={() =>
-                                    configurationAction.mutate({
-                                      id: row.id,
-                                      action: "approve",
-                                    })
-                                  }
-                                >
-                                  Approve
-                                </button>
-                                <button
-                                  className={destructiveActionClass}
-                                  onClick={() =>
-                                    configurationAction.mutate({
-                                      id: row.id,
-                                      action: "reject",
-                                    })
-                                  }
-                                >
-                                  Reject
-                                </button>
+                                {row.status === "NEEDS_REVIEW" && (
+                                  <>
+                                    <button
+                                      className={primaryActionClass}
+                                      onClick={() =>
+                                        configurationAction.mutate({
+                                          id: row.id,
+                                          action: "approve",
+                                        })
+                                      }
+                                    >
+                                      Approve
+                                    </button>
+                                    <button
+                                      className={destructiveActionClass}
+                                      onClick={() =>
+                                        configurationAction.mutate({
+                                          id: row.id,
+                                          action: "reject",
+                                        })
+                                      }
+                                    >
+                                      Reject
+                                    </button>
+                                  </>
+                                )}
                               </>
                             )}
                             {row.status === "APPROVED" && (
@@ -3033,7 +3095,7 @@ export function KnowledgeIntelligencePage() {
         >
           <label className="block text-sm font-medium text-ink">
             Review JSON
-            <textarea
+            <DashboardTextarea
               aria-label="Review JSON"
               rows={10}
               value={editor.value}
@@ -3041,14 +3103,25 @@ export function KnowledgeIntelligencePage() {
                 setEditorError(null);
                 setEditor({ ...editor, value: event.target.value });
               }}
-              className="mt-2 w-full rounded-lg border border-line bg-elevated p-3 font-mono text-xs text-ink"
+              className="font-mono text-xs"
             />
           </label>
+          {editor.kind === "configuration" && editor.instagramPrompt !== null && editor.instagramPrompt !== undefined && (
+            <DashboardField label="Instagram Behavioral Prompt" helper="This targeted edit updates only this field and keeps the remaining configuration JSON intact.">
+              <DashboardTextarea
+                aria-label="Instagram Behavioral Prompt"
+                rows={6}
+                value={editor.instagramPrompt}
+                onChange={(event) => updateInstagramPrompt(event.target.value)}
+                className="font-mono text-xs"
+              />
+            </DashboardField>
+          )}
           {editorError && <p role="alert" className="mt-2 text-sm text-red-300">{editorError}</p>}
           <div className="mt-3 flex gap-2">
-            <button className={actionClass} onClick={saveEditor}>
-              Save review
-            </button>
+            <DashboardButton variant="secondary" onClick={saveEditor}>
+              {editor.kind === "configuration" && editor.revision ? "Save configuration" : "Save review"}
+            </DashboardButton>
             <button className={actionClass} onClick={() => setEditor(null)}>
               Cancel
             </button>

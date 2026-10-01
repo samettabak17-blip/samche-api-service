@@ -66,6 +66,7 @@ vi.mock("../dashboard/dashboard-api", async (importOriginal) => {
       reviewRecommendation: vi.fn(),
       generateAssistantConfiguration: vi.fn(),
       getAssistantConfigurationGenerationJob: vi.fn(),
+      createAssistantConfigurationRevision: vi.fn(),
       updateAssistantConfiguration: vi.fn(),
       reviewAssistantConfiguration: vi.fn(),
       activateAssistantConfiguration: vi.fn(),
@@ -1308,6 +1309,116 @@ it("renders structured Assistant configuration and a safe runtime preview", asyn
   expect(screen.getAllByText("Meridian Client Advisor")).toHaveLength(2);
   expect(screen.getAllByText("AI RECOMMENDED").length).toBeGreaterThan(0);
   expect(screen.queryByText(/PLATFORM RUNTIME SAFETY/)).not.toBeInTheDocument();
+});
+
+it("opens an active configuration as a full editable revision and preserves unknown fields during targeted edits", async () => {
+  const currentConfiguration = {
+    assistant_identity: "Meridian Client Advisor",
+    company_context: { region: "Dubai" },
+    operating_rules: ["Use approved facts"],
+    channel_adaptations: {
+      instagram: { behavioral_prompt: "OLD_PROMPT" },
+    },
+    future_unknown_field: { foo: "bar" },
+  };
+  mockedApi.listAssistants.mockResolvedValue([
+    { id: "assistant-a", tenant_id: "tenant-a", name: "Meridian Advisor" },
+  ]);
+  mockedApi.listBusinessProfiles.mockResolvedValue([{
+    id: "profile-active",
+    schema_version: 2,
+    profile_data: { company_identity: "Meridian Arc Technologies LLC" },
+    status: "ACTIVE",
+    active_version_id: "profile-active",
+  }]);
+  mockedApi.listAssistantConfigurations.mockResolvedValue([{
+    id: "config-active",
+    schema_version: 2,
+    source_profile_version_id: "profile-active",
+    configuration_data: currentConfiguration,
+    status: "ACTIVE",
+  }]);
+  mockedApi.createAssistantConfigurationRevision.mockResolvedValue({
+    id: "config-draft",
+    schema_version: 2,
+    configuration_data: currentConfiguration,
+    status: "NEEDS_REVIEW",
+  });
+  mockedApi.updateAssistantConfiguration.mockResolvedValue({
+    id: "config-draft",
+    schema_version: 2,
+    configuration_data: {
+      ...currentConfiguration,
+      channel_adaptations: {
+        instagram: { behavioral_prompt: "NEW_PROMPT" },
+      },
+    },
+    status: "NEEDS_REVIEW",
+  });
+
+  renderPage(true, "/app/tenant-a/knowledge-base/configurations");
+  const assistant = await screen.findByRole("combobox", { name: "Assistant" });
+  await screen.findByRole("option", { name: "Meridian Advisor" });
+  fireEvent.change(assistant, { target: { value: "assistant-a" } });
+  fireEvent.click(await screen.findByRole("button", { name: "Edit Configuration" }));
+  await waitFor(() => expect(mockedApi.createAssistantConfigurationRevision).toHaveBeenCalledWith(
+    "tenant-a",
+    "assistant-a",
+    "config-active",
+  ));
+
+  const editor = await screen.findByRole("textbox", { name: "Review JSON" });
+  expect(editor).toHaveValue(JSON.stringify(currentConfiguration, null, 2));
+  expect(screen.getByRole("textbox", { name: "Instagram Behavioral Prompt" })).toHaveValue("OLD_PROMPT");
+
+  fireEvent.change(screen.getByRole("textbox", { name: "Instagram Behavioral Prompt" }), {
+    target: { value: "NEW_PROMPT" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save configuration" }));
+
+  await waitFor(() => expect(mockedApi.updateAssistantConfiguration).toHaveBeenCalledWith(
+    "tenant-a",
+    "assistant-a",
+    "config-draft",
+    expect.objectContaining({
+      assistant_identity: "Meridian Client Advisor",
+      company_context: { region: "Dubai" },
+      operating_rules: ["Use approved facts"],
+      future_unknown_field: { foo: "bar" },
+      channel_adaptations: { instagram: { behavioral_prompt: "NEW_PROMPT" } },
+    }),
+  ));
+});
+
+it("shows a visible error and does not save invalid configuration JSON", async () => {
+  mockedApi.listAssistants.mockResolvedValue([
+    { id: "assistant-a", tenant_id: "tenant-a", name: "Meridian Advisor" },
+  ]);
+  mockedApi.listBusinessProfiles.mockResolvedValue([]);
+  mockedApi.listAssistantConfigurations.mockResolvedValue([{
+    id: "config-review",
+    configuration_data: { assistant_identity: "Meridian Client Advisor" },
+    status: "NEEDS_REVIEW",
+  }]);
+
+  renderPage(true, "/app/tenant-a/knowledge-base/configurations");
+  const assistant = await screen.findByRole("combobox", { name: "Assistant" });
+  await screen.findByRole("option", { name: "Meridian Advisor" });
+  fireEvent.change(assistant, {
+    target: { value: "assistant-a" },
+  });
+  await waitFor(() => expect(mockedApi.listAssistantConfigurations).toHaveBeenCalledWith(
+    "tenant-a",
+    "assistant-a",
+  ));
+  fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+  fireEvent.change(await screen.findByRole("textbox", { name: "Review JSON" }), {
+    target: { value: "{invalid" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save review" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Review JSON must be valid JSON before it can be saved.");
+  expect(mockedApi.updateAssistantConfiguration).not.toHaveBeenCalled();
 });
 
 it("does not label an ACTIVE configuration without assistant identity as ACTIVE RUNTIME", async () => {

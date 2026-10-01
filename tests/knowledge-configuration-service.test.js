@@ -1,6 +1,63 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { activateAssistantConfigurationVersion, approveAssistantConfigurationVersion, approveBusinessProfileVersion, resolveActiveAssistantKnowledgeConfiguration, rollbackAssistantConfigurationVersion, updateAssistantConfigurationReview } from '../services/knowledge-configuration-service.js';
+import { activateAssistantConfigurationVersion, approveAssistantConfigurationVersion, approveBusinessProfileVersion, createAssistantConfigurationRevision, resolveActiveAssistantKnowledgeConfiguration, rollbackAssistantConfigurationVersion, updateAssistantConfigurationReview } from '../services/knowledge-configuration-service.js';
+
+test('editing an active configuration creates a review revision without changing runtime authority', async () => {
+  const calls = [];
+  const currentConfiguration = {
+    assistant_identity: 'Meridian Client Advisor',
+    company_context: { region: 'Dubai' },
+    channel_adaptations: { instagram: { behavioral_prompt: 'OLD_PROMPT' } },
+    future_unknown_field: { foo: 'bar' },
+  };
+  const database = {
+    async query(sql, params = []) {
+      calls.push({ sql, params });
+      if (/SELECT configuration\.id/i.test(sql)) {
+        return { rows: [{
+          id: params[0],
+          configuration_data: currentConfiguration,
+          source_profile_version_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+          source_recommendation_id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+          schema_version: 2,
+          status: 'ACTIVE',
+        }] };
+      }
+      if (/INSERT INTO assistant_configuration_versions/i.test(sql)) {
+        return { rows: [{ id: '99999999-9999-4999-8999-999999999999', status: 'NEEDS_REVIEW', configuration_data: params[2] }] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  const revision = await createAssistantConfigurationRevision({
+    database,
+    tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    assistantId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    versionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+  });
+
+  assert.equal(revision.status, 'NEEDS_REVIEW');
+  assert.deepEqual(revision.configuration_data, currentConfiguration);
+  const insert = calls.find(({ sql }) => /INSERT INTO assistant_configuration_versions/i.test(sql));
+  assert.equal(insert.params[1], 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+  assert.deepEqual(insert.params[2], currentConfiguration);
+  assert.equal(insert.params[6], 'cccccccc-cccc-4ccc-8ccc-cccccccccccc');
+  assert.equal(calls.some(({ sql }) => /active_configuration_version_id|SET status = 'ACTIVE'/i.test(sql)), false);
+});
+
+test('configuration edits reject destructive replacement without assistant identity', async () => {
+  await assert.rejects(
+    updateAssistantConfigurationReview({
+      database: { query: async () => ({ rows: [] }) },
+      tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      assistantId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      versionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      configurationData: { channel_adaptations: { instagram: { behavioral_prompt: 'NEW_PROMPT' } } },
+    }),
+    (error) => error.code === 'KNOWLEDGE_CONFIGURATION_RUNTIME_IDENTITY_REQUIRED',
+  );
+});
 
 test('activating an approved assistant configuration supersedes only the previously active version', async () => {
   const calls = [];
@@ -130,7 +187,7 @@ test('edits only NEEDS_REVIEW configuration data without activating it', async (
     calls.push({ sql, params });
     return { rows: [{ id: params[0], status: 'NEEDS_REVIEW', configuration_data: params[3] }] };
   } };
-  const configurationData = { tone: 'concise' };
+  const configurationData = { assistant_identity: 'Meridian Client Advisor', tone: 'concise' };
   const result = await updateAssistantConfigurationReview({ database, tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', assistantId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', versionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', configurationData });
   assert.equal(result.status, 'NEEDS_REVIEW');
   assert.match(calls[0].sql, /status = 'NEEDS_REVIEW'/i);

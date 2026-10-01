@@ -40,6 +40,7 @@ import {
   activateBusinessProfileVersion,
   approveAssistantConfigurationVersion,
   approveBusinessProfileVersion,
+  createAssistantConfigurationRevision,
   rollbackAssistantConfigurationVersion,
   updateAssistantConfigurationReview,
 } from '../services/knowledge-configuration-service.js';
@@ -1107,6 +1108,17 @@ router.put('/:tenantId/knowledge-intelligence/assistants/:assistantId/configurat
     const configuration = await updateAssistantConfigurationReview({ database: pool, tenantId, assistantId, versionId: req.params.versionId, configurationData: req.body?.configuration_data });
     return res.json({ configuration });
   } catch (error) { return safeError(res, error); }
+});
+
+router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/configurations/:versionId/edit', requireTenantAccess, requireTenantAdmin, async (req, res) => {
+  const tenantId = tenant(req, res); const assistantId = req.params.assistantId;
+  if (!tenantId || !isValidUUID(assistantId) || !isValidUUID(req.params.versionId)) return res.status(400).json({ error: 'Invalid Assistant configuration ID' });
+  try {
+    const configuration = await createAssistantConfigurationRevision({ database: pool, tenantId, assistantId, versionId: req.params.versionId });
+    return res.status(201).json({ configuration });
+  } catch (error) {
+    return safeError(res, error);
+  }
 });
 
 router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/configurations/:versionId/reject', requireTenantAccess, requireTenantAdmin, async (req, res) => {

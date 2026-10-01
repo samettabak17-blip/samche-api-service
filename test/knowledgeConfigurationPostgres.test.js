@@ -7,6 +7,7 @@ import {
   activateAssistantConfigurationVersion,
   activateBusinessProfileVersion,
   approveBusinessProfileVersion,
+  createAssistantConfigurationRevision,
 } from '../services/knowledge-configuration-service.js';
 
 const { Pool } = pg;
@@ -165,6 +166,63 @@ test('real PostgreSQL activates an Assistant Configuration whose source profile 
       [fixture.assistantId, fixture.tenantId],
     );
     assert.equal(pointer.rows[0].active_configuration_version_id, configurationId);
+  } finally {
+    await pool.end();
+  }
+});
+
+test('real PostgreSQL creates a tenant-scoped review revision from an active configuration without moving the runtime pointer', async () => {
+  const pool = database();
+  try {
+    const fixture = await createFixture(pool, { profileStatus: 'APPROVED' });
+    await pool.query(
+      `UPDATE business_profiles
+          SET approved_version_id = $1, active_version_id = $1
+        WHERE id = $2 AND tenant_id = $3`,
+      [fixture.versionId, fixture.profileId, fixture.tenantId],
+    );
+    const configurationId = randomUUID();
+    await pool.query(
+      `INSERT INTO assistant_configuration_versions
+         (id, tenant_id, assistant_id, configuration_data, source_profile_version_id, generated_by, status)
+       VALUES ($1, $2, $3, $4::jsonb, $5, 'AI', 'ACTIVE')`,
+      [configurationId, fixture.tenantId, fixture.assistantId, JSON.stringify({ assistant_identity: 'Fixture Assistant', future_unknown_field: { foo: 'bar' } }), fixture.versionId],
+    );
+    await pool.query(
+      `UPDATE ai_assistants SET active_configuration_version_id = $1 WHERE id = $2 AND tenant_id = $3`,
+      [configurationId, fixture.assistantId, fixture.tenantId],
+    );
+
+    const revision = await createAssistantConfigurationRevision({
+      database: pool,
+      tenantId: fixture.tenantId,
+      assistantId: fixture.assistantId,
+      versionId: configurationId,
+    });
+
+    assert.equal(revision.status, 'NEEDS_REVIEW');
+    assert.deepEqual(revision.configuration_data, { assistant_identity: 'Fixture Assistant', future_unknown_field: { foo: 'bar' } });
+    const persisted = await pool.query(
+      `SELECT status, configuration_data FROM assistant_configuration_versions WHERE id = $1 AND tenant_id = $2`,
+      [configurationId, fixture.tenantId],
+    );
+    assert.equal(persisted.rows[0].status, 'ACTIVE');
+    const pointer = await pool.query(
+      `SELECT active_configuration_version_id FROM ai_assistants WHERE id = $1 AND tenant_id = $2`,
+      [fixture.assistantId, fixture.tenantId],
+    );
+    assert.equal(pointer.rows[0].active_configuration_version_id, configurationId);
+
+    const otherTenant = await createFixture(pool);
+    await assert.rejects(
+      createAssistantConfigurationRevision({
+        database: pool,
+        tenantId: otherTenant.tenantId,
+        assistantId: otherTenant.assistantId,
+        versionId: configurationId,
+      }),
+      (error) => error.code === 'KNOWLEDGE_CONFIGURATION_NOT_EDITABLE',
+    );
   } finally {
     await pool.end();
   }
