@@ -1936,3 +1936,54 @@ it("keeps the entity section visible while its query loads and when it fails", a
   expect(await screen.findByText("Unable to load extracted entities.")).toBeVisible();
   expect(screen.getByRole("button", { name: "Retry" })).toBeVisible();
 });
+
+it("explains invalid JSON rather than silently dropping an Instagram behavioral policy edit", async () => {
+  mockedApi.listAssistants.mockResolvedValue([
+    { id: "assistant-a", tenant_id: "tenant-a", name: "Meridian Advisor" },
+  ]);
+  mockedApi.listBusinessProfiles.mockResolvedValue([
+    {
+      id: "profile-active",
+      schema_version: 2,
+      profile_data: { company_identity: "Meridian Arc Technologies LLC" },
+      status: "ACTIVE",
+      active_version_id: "profile-active",
+    },
+  ]);
+  mockedApi.listAssistantConfigurations.mockResolvedValue([
+    {
+      id: "configuration-review",
+      schema_version: 2,
+      source_profile_version_id: "profile-active",
+      status: "NEEDS_REVIEW",
+      configuration_data: { assistant_identity: "Meridian Advisor" },
+    },
+  ]);
+
+  renderPage(true, "/app/tenant-a/knowledge-base/configurations");
+  const assistant = await screen.findByRole("combobox", { name: "Assistant" });
+  await screen.findByRole("option", { name: "Meridian Advisor" });
+  fireEvent.change(assistant, { target: { value: "assistant-a" } });
+  await waitFor(() => expect(assistant).toHaveValue("assistant-a"));
+  const activeProfile = screen.getByRole("combobox", { name: "ACTIVE Business Profile" });
+  await screen.findByRole("option", { name: /Business Profile profile-/ });
+  fireEvent.change(activeProfile, {
+    target: { value: "profile-active" },
+  });
+  await waitFor(() =>
+    expect(mockedApi.listAssistantConfigurations).toHaveBeenCalledWith(
+      "tenant-a",
+      "assistant-a",
+    ),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Review JSON" }), {
+    target: {
+      value: '{"channel_adaptations":{"instagram":{"behavioral_prompt":"line one\nline two"}}}',
+    },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save review" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Review JSON must be valid JSON before it can be saved.");
+  expect(mockedApi.updateAssistantConfiguration).not.toHaveBeenCalled();
+});

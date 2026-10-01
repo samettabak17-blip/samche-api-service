@@ -420,6 +420,7 @@ export function KnowledgeIntelligencePage() {
     id: string;
     value: string;
   } | null>(null);
+  const [editorError, setEditorError] = useState<string | null>(null);
   const queryClient = useQueryClient();
   useEffect(() => {
     dispatchProfileGeneration({ type: "RESET" });
@@ -1061,8 +1062,10 @@ export function KnowledgeIntelligencePage() {
     try {
       data = JSON.parse(editor.value) as Record<string, unknown>;
     } catch {
+      setEditorError("Review JSON must be valid JSON before it can be saved.");
       return;
     }
+    setEditorError(null);
     if (editor.kind === "profile") saveProfile.mutate({ id: editor.id, data });
     else saveConfiguration.mutate({ id: editor.id, data });
   };
@@ -3034,12 +3037,14 @@ export function KnowledgeIntelligencePage() {
               aria-label="Review JSON"
               rows={10}
               value={editor.value}
-              onChange={(event) =>
-                setEditor({ ...editor, value: event.target.value })
-              }
+              onChange={(event) => {
+                setEditorError(null);
+                setEditor({ ...editor, value: event.target.value });
+              }}
               className="mt-2 w-full rounded-lg border border-line bg-elevated p-3 font-mono text-xs text-ink"
             />
           </label>
+          {editorError && <p role="alert" className="mt-2 text-sm text-red-300">{editorError}</p>}
           <div className="mt-3 flex gap-2">
             <button className={actionClass} onClick={saveEditor}>
               Save review

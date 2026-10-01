@@ -137,6 +137,51 @@ test('edits only NEEDS_REVIEW configuration data without activating it', async (
   assert.equal(calls.some(({ sql }) => /active_configuration_version_id/.test(sql)), false);
 });
 
+test('preserves an Instagram behavioral prompt verbatim through edit, approval, and activation', async () => {
+  const calls = [];
+  const behavioralPrompt = `Instagram policy\n${'x'.repeat(64_000)}`;
+  const configurationData = {
+    assistant_identity: 'Meridian Client Advisor',
+    channel_adaptations: {
+      instagram: { behavioral_prompt: behavioralPrompt },
+      whatsapp: { deterministic_templates: { welcome: 'Existing WhatsApp template' } },
+    },
+  };
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/SET configuration_data = \$4/i.test(sql)) {
+      return { rows: [{ id: params[0], status: 'NEEDS_REVIEW', configuration_data: params[3] }] };
+    }
+    if (/SELECT configuration_data/i.test(sql)) return { rows: [{ configuration_data: params[0] ? configurationData : null }] };
+    if (/SET status = 'APPROVED'/i.test(sql)) return { rows: [{ id: params[0], status: 'APPROVED' }] };
+    if (/SELECT configuration\.id/i.test(sql)) {
+      return { rows: [{
+        id: params[0], status: 'APPROVED', configuration_data: configurationData,
+        source_profile_version_id: 'profile-v1', current_active_profile_version_id: 'profile-v1',
+      }] };
+    }
+    return { rows: [] };
+  } };
+  const ids = {
+    tenantId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    assistantId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    versionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    actorId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+  };
+
+  const review = await updateAssistantConfigurationReview({ database, ...ids, configurationData });
+  await approveAssistantConfigurationVersion({ database, ...ids, approvedBy: ids.actorId });
+  const activation = await activateAssistantConfigurationVersion({ database, ...ids, activatedBy: ids.actorId });
+
+  assert.equal(review.configuration_data.channel_adaptations.instagram.behavioral_prompt, behavioralPrompt);
+  assert.equal(review.configuration_data.channel_adaptations.instagram.behavioral_prompt.length, behavioralPrompt.length);
+  assert.deepEqual(review.configuration_data.channel_adaptations.whatsapp, configurationData.channel_adaptations.whatsapp);
+  assert.equal(activation.status, 'ACTIVE');
+  assert.ok(calls.some(({ sql }) => /SET status = 'APPROVED'/.test(sql)));
+  assert.ok(calls.some(({ sql }) => /SET status = 'ACTIVE'/.test(sql)));
+  assert.equal(calls.some(({ sql }) => /tenant_channels|channel_integrations/i.test(sql)), false);
+});
+
 test('explicit rollback reactivates only a SUPERSEDED configuration target', async () => {
   const calls = [];
   const database = { query: async (sql, params = []) => {
