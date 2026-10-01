@@ -176,6 +176,56 @@ test('2. Instagram advertisement video + text question → text intent wins over
   assert.match(result.responseText, /13\.000 AED/);
 });
 
+test('Instagram logs safe behavioral-policy diagnostics before invoking generation', async () => {
+  const mockDb = new MockDatabaseClient();
+  const inboundState = {
+    shouldInvokeAi: true,
+    duplicate: false,
+    handlingVersion: 1,
+    integration: {
+      tenant_id: 'b85d7e7b-d52e-4541-92e7-284a6a67024b',
+      assistant_id: 'ast-1',
+      config: { access_token: 'test_token', instagram_account_id: 'page_123', activation_policy: 'ALL_MESSAGES' },
+    },
+    conversation: { id: '22222222-2222-4222-8222-222222222222', status: 'open', handling_mode: 'AI', handling_version: 1 },
+    customerMessage: { id: 'm1', content: 'Merhaba' },
+  };
+  const events = [];
+  const originalInfo = console.info;
+  console.info = (...args) => events.push(args.join(' '));
+  try {
+    await orchestrateInstagramInboundAiResponse({
+      database: mockDb,
+      inboundState,
+      senderIgsid: '123456789',
+      text: 'Merhaba',
+      http: mockHttp,
+      applyPacing: false,
+      generateAiResponse: async () => {
+        assert.ok(events.some((event) => event.startsWith('INSTAGRAM_AI_GENERATION_START')));
+        assert.ok(events.some((event) => event.startsWith('INSTAGRAM_AI_RUNTIME_CONTEXT')));
+        return 'Merhaba, size nasıl yardımcı olabilirim?';
+      },
+    });
+  } finally {
+    console.info = originalInfo;
+  }
+
+  const diagnostic = events.find((event) => event.startsWith('INSTAGRAM_AI_GENERATION_START'));
+  assert.match(diagnostic, /assistant=ast-1/);
+  assert.match(diagnostic, /activeConfiguration=none/);
+  assert.match(diagnostic, /behavioralPromptPresent=0/);
+  assert.match(diagnostic, /behavioralPromptLength=0/);
+  assert.match(diagnostic, /behavioralPolicyVersion=none/);
+
+  const runtimeContext = events.find((event) => event.startsWith('INSTAGRAM_AI_RUNTIME_CONTEXT'));
+  assert.match(runtimeContext, /finalSystemInstructionLength=\d+/);
+  assert.match(runtimeContext, /behavioralPromptPresent=0/);
+  assert.match(runtimeContext, /behavioralPromptLength=0/);
+  assert.match(runtimeContext, /tenantContextLength=0/);
+  assert.match(runtimeContext, /activeConfiguration=none/);
+});
+
 test('3. Instagram image + pricing question → knowledge grounded answer, not image description', async () => {
   const mockDb = new MockDatabaseClient({
     messages: [

@@ -307,7 +307,8 @@ export async function deliverInstagramText({
   };
 
   recentOutboundDeliveries.set(dedupeKey, { timestamp: Date.now(), result });
-  setTimeout(() => recentOutboundDeliveries.delete(dedupeKey), 60000);
+  const dedupeCleanupTimer = setTimeout(() => recentOutboundDeliveries.delete(dedupeKey), 60000);
+  dedupeCleanupTimer.unref?.();
 
   return result;
 }

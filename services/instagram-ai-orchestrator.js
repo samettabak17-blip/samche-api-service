@@ -9,6 +9,7 @@ import { resolveAssistantRuntimeKnowledgeContext } from './knowledge-runtime-con
 import { resolveCommunicationLanguage } from './conversation-communication-language.js';
 import { evaluateChannelAiActivationPolicy } from './channel-ai-activation-policy-service.js';
 import { applyWhatsAppAdaptivePacing } from './whatsapp-response-pacing-service.js';
+import { resolveInstagramBehavioralPolicy } from './instagram-behavioral-policy-service.js';
 import { createGoogleGeminiProvider } from './google-gemini-provider.js';
 import { canonicalSharedAiRuntime } from './shared-ai-provider-resilience.js';
 import {
@@ -23,6 +24,8 @@ import {
   extractShareholderCount,
   extractCustomerNameFromText,
 } from './high-intent-lead-service.js';
+
+const INSTAGRAM_BEHAVIORAL_CHANNEL_RULES_LIMIT = 80_000;
 
 async function recordInstagramAssistantDeliverySuccess({ database, tenantId, messageId, providerMessageId }) {
   if (!messageId || !providerMessageId) return;
@@ -110,6 +113,84 @@ export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
 
 
 
+
+export function buildInstagramBehavioralInstruction({
+  currentIntent = '',
+  conversationContext = '',
+  behavioralPolicy = '',
+} = {}) {
+  const intent = String(currentIntent || '').trim();
+  const context = String(conversationContext || '').trim();
+  const policy = typeof behavioralPolicy === 'string' ? behavioralPolicy : '';
+
+  return [
+    intent ? `CURRENT CUSTOMER MESSAGE / HIGHEST PRIORITY INTENT:\n${intent}` : '',
+    context ? `PERSISTED INSTAGRAM CONVERSATION CONTEXT:\n${context}` : '',
+    policy.trim()
+      ? [
+          'INSTAGRAM BEHAVIORAL POLICY (MANDATORY BEHAVIORAL AUTHORITY):',
+          'Execute these tenant-approved response rules, triggers, prepared answers, prohibitions, continuity rules, and formatting requirements before generating a response.',
+          'When the policy defines a prepared answer or response behavior, preserve it exactly. Do not invent alternative procedures, legal requirements, prices, summaries, or workflows.',
+          'This behavioral authority must not be overridden by general model knowledge or advertisement media. Approved tenant knowledge remains factual reference only.',
+          policy,
+        ].join('\n')
+      : '',
+  ].filter(Boolean).join('\n\n');
+}
+
+export function buildInstagramChannelRules({
+  persona,
+  currentIntent = '',
+  conversationContext = '',
+  customerIdentityContext = '',
+} = {}) {
+  const behavioralPolicy = resolveInstagramBehavioralPolicy({ persona }).policy;
+  return [
+    buildInstagramBehavioralInstruction({
+      currentIntent,
+      conversationContext,
+      behavioralPolicy,
+    }),
+    INSTAGRAM_CHANNEL_PRESENTATION_RULES,
+    customerIdentityContext,
+  ].filter(Boolean).join('\n\n');
+}
+
+function logInstagramBehavioralPolicyDiagnostics({ assistantId, persona }) {
+  const behavioralPolicy = resolveInstagramBehavioralPolicy({ persona });
+  const policyVersion = persona?.configuration?.channel_adaptations?.instagram?.behavioral_policy_version;
+  const safeAssistantId = assistantId ? String(assistantId).slice(0, 64) : 'unknown';
+  const safeConfigurationId = persona?.configurationVersionId ? String(persona.configurationVersionId).slice(0, 64) : 'none';
+  const safePolicyVersion = typeof policyVersion === 'string' && policyVersion.trim()
+    ? policyVersion.trim().slice(0, 64)
+    : 'none';
+
+  console.info(
+    `INSTAGRAM_AI_GENERATION_START` +
+    ` assistant=${safeAssistantId}` +
+    ` activeConfiguration=${safeConfigurationId}` +
+    ` behavioralPromptPresent=${behavioralPolicy.configured ? '1' : '0'}` +
+    ` behavioralPromptLength=${behavioralPolicy.policy.length}` +
+    ` behavioralPolicyVersion=${safePolicyVersion}`,
+  );
+}
+
+function logInstagramRuntimeContextDiagnostics({ systemInstruction, persona, knowledge }) {
+  const behavioralPolicy = resolveInstagramBehavioralPolicy({ persona });
+  const activeConfigurationId = persona?.configurationVersionId
+    ? String(persona.configurationVersionId).slice(0, 64)
+    : 'none';
+  const tenantContext = typeof knowledge?.knowledgeContext === 'string' ? knowledge.knowledgeContext : '';
+
+  console.info(
+    `INSTAGRAM_AI_RUNTIME_CONTEXT` +
+    ` finalSystemInstructionLength=${String(systemInstruction || '').length}` +
+    ` behavioralPromptPresent=${behavioralPolicy.configured ? '1' : '0'}` +
+    ` behavioralPromptLength=${behavioralPolicy.policy.length}` +
+    ` tenantContextLength=${tenantContext.length}` +
+    ` activeConfiguration=${activeConfigurationId}`,
+  );
+}
 
 export function extractReliableCustomerName(rawDisplayName) {
   if (!rawDisplayName || typeof rawDisplayName !== 'string') return null;
@@ -874,23 +955,27 @@ export async function orchestrateInstagramInboundAiResponse({
     ? `CUSTOMER IDENTITY CONTEXT:\n- Customer Real Display Name: "${reliableCustomerName}"\n- You may address the customer naturally as "${reliableCustomerName}" / in Turkish.\n- Do NOT treat their username as a real name.\n- During appointment qualification, since their name is already known, do NOT ask "Adınız nedir?".`
     : '';
 
-  const channelRules = [
-    INSTAGRAM_CHANNEL_PRESENTATION_RULES,
+  const channelRules = buildInstagramChannelRules({
+    persona,
+    currentIntent: text,
+    conversationContext: structuredMemoryContext,
     customerIdentityContext,
-    structuredMemoryContext,
-  ].filter(Boolean).join('\n\n');
+  });
 
   const systemInstruction = persona?.available
     ? buildTenantRuntimeSystemInstruction({
         persona,
         knowledgeContext: knowledge?.knowledgeContext || '',
         channelRules,
+        channelRulesLimit: INSTAGRAM_BEHAVIORAL_CHANNEL_RULES_LIMIT,
       })
     : [
         'PLATFORM RUNTIME SAFETY: Enforce tenant isolation and channel delivery rules.',
         channelRules,
         knowledge?.knowledgeContext ? `APPROVED KNOWLEDGE:\n${knowledge.knowledgeContext}` : '',
       ].filter(Boolean).join('\n\n');
+
+  logInstagramRuntimeContextDiagnostics({ systemInstruction, persona, knowledge });
 
 
 
@@ -919,6 +1004,7 @@ export async function orchestrateInstagramInboundAiResponse({
 
   try {
     // 9. Generate AI response
+    logInstagramBehavioralPolicyDiagnostics({ assistantId, persona });
     let genResult = { text: '', model: assistantModel || 'default', fallbackUsed: false, fallbackReason: null };
     if (typeof generateAiResponse === 'function') {
       const generated = await generateAiResponse({
@@ -1222,23 +1308,27 @@ export async function generateAndDeliverInstagramAssistantResponse({
       ? `CUSTOMER IDENTITY CONTEXT:\n- Customer Real Display Name: "${reliableCustomerName}"\n- You may address the customer naturally as "${reliableCustomerName}" / in Turkish.\n- Do NOT treat their username as a real name.\n- During appointment qualification, since their name is already known, do NOT ask "Adınız nedir?".`
       : '';
 
-    const channelRules = [
-      INSTAGRAM_CHANNEL_PRESENTATION_RULES,
+    const channelRules = buildInstagramChannelRules({
+      persona,
+      currentIntent: textToAnswer,
+      conversationContext: structuredMemoryContext,
       customerIdentityContext,
-      structuredMemoryContext,
-    ].filter(Boolean).join('\n\n');
+    });
 
     const systemInstruction = persona?.available
       ? buildTenantRuntimeSystemInstruction({
           persona,
           knowledgeContext: knowledge?.knowledgeContext || '',
           channelRules,
+          channelRulesLimit: INSTAGRAM_BEHAVIORAL_CHANNEL_RULES_LIMIT,
         })
       : [
           'PLATFORM RUNTIME SAFETY: Enforce tenant isolation and channel delivery rules.',
           channelRules,
           knowledge?.knowledgeContext ? `APPROVED KNOWLEDGE:\n${knowledge.knowledgeContext}` : '',
         ].filter(Boolean).join('\n\n');
+
+    logInstagramRuntimeContextDiagnostics({ systemInstruction, persona, knowledge });
 
 
     const generationStartedAt = Date.now();
@@ -1264,6 +1354,7 @@ export async function generateAndDeliverInstagramAssistantResponse({
 
     try {
       let genResult = { text: '', model: assistantModel || 'default', fallbackUsed: false, fallbackReason: null };
+      logInstagramBehavioralPolicyDiagnostics({ assistantId, persona });
       if (typeof generateAiResponse === 'function') {
         const generated = await generateAiResponse({
           systemInstruction,
