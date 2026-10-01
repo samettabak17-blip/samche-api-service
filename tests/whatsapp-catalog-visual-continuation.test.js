@@ -471,7 +471,7 @@ test('E2E TRACE: Turn 1 visual catalog generation delivers media, Turn 2 "Make i
       if (sql.includes('stale') || sql.includes('UPDATE visual_ai_generation_jobs') && sql.includes('status = $1')) return { rows: [] };
       if (sql.includes('FOR UPDATE SKIP LOCKED')) return { rows: [database1.state.job] };
       if (sql.includes('SELECT status, handling_mode FROM conversations')) return { rowCount: 1, rows: [{ status: 'open', handling_mode: 'AI' }] };
-      if (sql.includes('FROM conversations c JOIN tenant_channels tc')) return {
+      if (sql.includes('FROM conversations c')) return {
         rows: [{
           customer_external_id: '+1234567890',
           external_channel_id: 'channel_123',
@@ -728,6 +728,145 @@ test('TEST E: Different product request - different approved entity selected whi
   assert.equal(queued.status, 'QUEUED');
   assert.equal(database.state.job.target_resource_id, customerTargetId);
   assert.equal(database.state.job.grounding_context.catalog.entityId, alternativeEntityId, 'Must switch to alternative entity B');
+});
+
+
+test('WORKER LIFECYCLE: New arbitrary tenant creates catalog visual job and worker claims and executes it', async () => {
+  const newTenantId = '77777777-7777-4777-8777-777777777777';
+  const newConversationId = '88888888-8888-4888-8888-888888888888';
+  const newTargetId = '99999999-9999-4999-8999-999999999999';
+  const newEntityId = '12345678-1234-4234-8234-123456789012';
+  const newMediaId = '87654321-4321-4321-8321-210987654321';
+  const newJobId = 'abcdef01-abcd-4bcd-8bcd-abcdef012345';
+
+  const newCatalogEntries = [
+    {
+      id: newEntityId,
+      tenant_id: newTenantId,
+      name: 'Instant traditional',
+      entity_type: 'CARPET',
+      description: 'Handcrafted traditional wool carpet',
+      confidence: 0.99,
+      approved_media: [
+        { id: newMediaId, mime_type: 'image/png', storage_key: `knowledge/${newTenantId}/source/carpet.png` },
+      ],
+    },
+  ];
+
+  let jobState = null;
+  const db = {
+    async query(sql, params = []) {
+      if (sql.includes('tenant_visual_ai_config')) return { rows: [{ enabled: true }] };
+      if (sql.includes('FROM knowledge_entities e')) {
+        return { rows: newCatalogEntries };
+      }
+      if (sql.includes('FROM conversation_resources') && sql.includes('id = $1')) {
+        return {
+          rowCount: 1,
+          rows: [
+            { id: newTargetId, source_type: 'WHATSAPP_MEDIA', media_category: 'IMAGE', processing_status: 'READY', storage_key: 'target', mime_type: 'image/jpeg', original_filename: 'room.jpg' },
+          ],
+        };
+      }
+      if (sql.includes('INSERT INTO visual_ai_generation_jobs')) {
+        jobState = {
+          id: newJobId,
+          tenant_id: newTenantId,
+          conversation_id: newConversationId,
+          target_resource_id: newTargetId,
+          reference_resource_id: null,
+          prompt_instruction: params[6],
+          grounding_context: JSON.parse(params[7]),
+          status: 'PENDING',
+          attempts: 0,
+          max_attempts: 2,
+        };
+        return { rows: [jobState] };
+      }
+      if (sql.includes('WITH candidate AS') || sql.includes('FOR UPDATE SKIP LOCKED')) {
+        if (jobState && (jobState.status === 'PENDING' || jobState.status === 'PROCESSING')) {
+          jobState.status = 'PROCESSING';
+          jobState.attempts++;
+          return { rows: [jobState] };
+        }
+        return { rows: [] };
+      }
+      if (sql.includes('SELECT status, handling_mode FROM conversations')) {
+        return { rowCount: 1, rows: [{ status: 'open', handling_mode: 'AI' }] };
+      }
+      if (sql.includes('FROM conversations c')) {
+        return {
+          rows: [{
+            customer_external_id: '+905551234567',
+            external_channel_id: 'phone_channel_01',
+            config: {},
+            communication_language: 'tr',
+          }],
+        };
+      }
+      if (sql.includes('FROM conversation_messages WHERE id = $1')) {
+        return { rows: [{ external_message_id: 'wamid.inbound_01' }] };
+      }
+      if (sql.includes('INSERT INTO conversation_resources')) {
+        return { rows: [{ id: newJobId, storage_key: 'output', mime_type: 'image/png', original_filename: 'output.png' }] };
+      }
+      if (sql.includes('UPDATE visual_ai_generation_jobs')) {
+        return { rows: [jobState] };
+      }
+      if (sql.includes('INSERT INTO conversation_messages')) {
+        return { rows: [{ id: 'assistant_msg_new', content: 'Görsel konsept önizlemeniz hazır.' }] };
+      }
+      if (sql.includes('SELECT provider_message_id FROM visual_ai_generation_jobs')) {
+        return { rows: [{ provider_message_id: null }] };
+      }
+      return { rows: [] };
+    },
+  };
+
+  // 1. Enqueue job
+  const queued = await visual.orchestrateWhatsAppVisualAiJob({
+    database: db,
+    tenantId: newTenantId,
+    conversationId: newConversationId,
+    targetResourceId: newTargetId,
+    promptInstruction: 'Bu odaya en uygun kataloglardaki ürünü bul ve odamda tasarla',
+    catalogRequested: true,
+    assistantId: '99999999-9999-4999-8999-999999999999',
+  });
+
+  assert.equal(queued.status, 'QUEUED');
+  assert.equal(jobState.status, 'PENDING');
+  assert.equal(jobState.grounding_context.catalog.entityId, newEntityId);
+
+  // 2. Process job via worker
+  const storage = {
+    async get({ key }) { return Buffer.from('mock-target-and-reference'); },
+    async put() {},
+  };
+  let mediaSent = false;
+  let sentCaption = '';
+
+  const workerResult = await processOneVisualAiGenerationJob({
+    database: db,
+    storage,
+    visualProvider: {
+      getCapabilities: () => ({ imageConditionedGeneration: true, referenceImages: true }),
+      async generateConcept(input) {
+        assert.equal(input.groundingContext.entity.id, newEntityId);
+        assert.match(input.instruction, /Instant traditional/);
+        return { imageBuffer: Buffer.from('generated-png'), mimeType: 'image/png', provider: 'MOCK', model: 'mock-v1' };
+      },
+    },
+    deliverWhatsAppMedia: async (payload) => {
+      mediaSent = true;
+      sentCaption = payload.caption;
+      return { providerMessageId: 'wamid.media_delivered_01' };
+    },
+  });
+
+  assert.equal(workerResult.status, 'COMPLETED');
+  assert.equal(mediaSent, true);
+  assert.match(sentCaption, /hazır/);
 });
 
 

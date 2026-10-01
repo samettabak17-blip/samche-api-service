@@ -126,7 +126,16 @@ export async function enqueueVisualAiGenerationJob({
        max_attempts, idempotency_key
      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)
      ON CONFLICT (tenant_id, idempotency_key)
-     DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+     DO UPDATE SET
+       status = CASE WHEN visual_ai_generation_jobs.status IN ('FAILED', 'CANCELLED') THEN 'PENDING' ELSE visual_ai_generation_jobs.status END,
+       available_at = CASE WHEN visual_ai_generation_jobs.status IN ('FAILED', 'CANCELLED') THEN CURRENT_TIMESTAMP ELSE visual_ai_generation_jobs.available_at END,
+       attempts = CASE WHEN visual_ai_generation_jobs.status IN ('FAILED', 'CANCELLED') THEN 0 ELSE visual_ai_generation_jobs.attempts END,
+       locked_at = CASE WHEN visual_ai_generation_jobs.status IN ('FAILED', 'CANCELLED') THEN NULL ELSE visual_ai_generation_jobs.locked_at END,
+       locked_until = CASE WHEN visual_ai_generation_jobs.status IN ('FAILED', 'CANCELLED') THEN NULL ELSE visual_ai_generation_jobs.locked_until END,
+       last_error_code = CASE WHEN visual_ai_generation_jobs.status IN ('FAILED', 'CANCELLED') THEN NULL ELSE visual_ai_generation_jobs.last_error_code END,
+       grounding_context = EXCLUDED.grounding_context,
+       message_id = COALESCE(EXCLUDED.message_id, visual_ai_generation_jobs.message_id),
+       updated_at = CURRENT_TIMESTAMP
      RETURNING *`,
     [tenantId, conversationId, messageId, targetResourceId, referenceResourceId, referenceUrl, instruction, JSON.stringify(groundingContext), provider, model, maxAttempts, resolvedIdempotencyKey]
   );
@@ -143,6 +152,7 @@ export async function enqueueVisualAiGenerationJob({
 
 export async function claimNextVisualAiGenerationJob(database, { leaseDurationSeconds = 300 } = {}) {
   if (!database?.query) throw new VisualAiJobError('DATABASE_UNAVAILABLE', 'Database is unavailable.');
+  console.info('VISUAL_DEBUG_STAGE: job_claim_attempted', { timestamp: new Date().toISOString() });
   const result = await database.query(
     `WITH candidate AS (
        SELECT id FROM visual_ai_generation_jobs
@@ -154,7 +164,16 @@ export async function claimNextVisualAiGenerationJob(database, { leaseDurationSe
          FROM candidate WHERE job.id = candidate.id RETURNING job.*`,
     [leaseDurationSeconds]
   );
-  return result.rows[0] ?? null;
+  const claimedJob = result.rows[0] ?? null;
+  if (claimedJob) {
+    console.info('VISUAL_DEBUG_STAGE: job_claimed', {
+      jobId: claimedJob.id,
+      tenantId: claimedJob.tenant_id,
+      conversationId: claimedJob.conversation_id,
+      targetResourceId: claimedJob.target_resource_id,
+    });
+  }
+  return claimedJob;
 }
 
 export async function completeVisualAiGenerationJob({ database, storage, tenantId, jobId, conversationId, result }) {

@@ -84,6 +84,16 @@ export async function processOneVisualAiGenerationJob({
       [job.conversation_id, job.tenant_id]
     );
     if (ownership.rowCount !== 1 || ownership.rows[0].status !== 'open' || ownership.rows[0].handling_mode !== 'AI') {
+      const skipReason = ownership.rowCount !== 1
+        ? 'CONVERSATION_NOT_FOUND'
+        : (ownership.rows[0].status !== 'open'
+          ? `CONVERSATION_STATUS_${ownership.rows[0].status}`
+          : `HANDLING_MODE_${ownership.rows[0].handling_mode}`);
+      console.info('VISUAL_DEBUG_STAGE: worker_skipped_reason', {
+        jobId: job.id,
+        tenantId: job.tenant_id,
+        reason: skipReason,
+      });
       await database.query(
         `UPDATE visual_ai_generation_jobs
             SET status = 'CANCELLED', delivery_status = 'NOT_REQUIRED', last_error_code = 'VISUAL_AI_HUMAN_OWNERSHIP_SUPPRESSED',
@@ -91,14 +101,18 @@ export async function processOneVisualAiGenerationJob({
           WHERE id = $1 AND tenant_id = $2 AND status = 'PROCESSING'`,
         [job.id, job.tenant_id]
       );
-      return { processed: true, status: 'CANCELLED', jobId: job.id };
+      return { processed: true, status: 'CANCELLED', jobId: job.id, reason: skipReason };
     }
 
     const route = await database.query(
       `SELECT c.customer_external_id, tc.external_channel_id, ci.config, c.communication_language
-         FROM conversations c JOIN tenant_channels tc ON tc.id = c.channel_id AND tc.tenant_id = c.tenant_id
+         FROM conversations c
+         LEFT JOIN tenant_channels tc ON (tc.id = c.channel_id OR tc.tenant_id = c.tenant_id) AND tc.tenant_id = c.tenant_id AND UPPER(tc.channel_type) = 'WHATSAPP'
          LEFT JOIN channel_integrations ci ON ci.channel_id = tc.id AND ci.tenant_id = tc.tenant_id AND ci.enabled = TRUE
-        WHERE c.id = $1 AND c.tenant_id = $2 AND tc.channel_type = 'WHATSAPP'`, [job.conversation_id, job.tenant_id]);
+        WHERE c.id = $1 AND c.tenant_id = $2
+        ORDER BY (CASE WHEN tc.id = c.channel_id THEN 0 ELSE 1 END), tc.created_at ASC LIMIT 1`,
+      [job.conversation_id, job.tenant_id]
+    );
     const delivery = route.rows[0];
 
     // Look up incoming message id for typing presence
@@ -134,6 +148,11 @@ export async function processOneVisualAiGenerationJob({
     const capabilities = visualProvider?.getCapabilities?.() || {};
     if (!capabilities.imageConditionedGeneration) {
       stopTyping();
+      console.info('VISUAL_DEBUG_STAGE: worker_failed_reason', {
+        jobId: job.id,
+        tenantId: job.tenant_id,
+        reason: 'VISUAL_AI_CAPABILITY_UNSUPPORTED',
+      });
       await database.query(
         `UPDATE visual_ai_generation_jobs SET status = 'FAILED', last_error_code = 'VISUAL_AI_CAPABILITY_UNSUPPORTED', locked_at = NULL, locked_until = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_id = $2 AND status = 'PROCESSING'`,
         [job.id, job.tenant_id]
@@ -185,6 +204,11 @@ export async function processOneVisualAiGenerationJob({
     return { processed: true, status: 'COMPLETED', jobId: job.id, resourceId: resource.id, messageId: message.id };
   } catch (error) {
     stopTyping();
+    console.info('VISUAL_DEBUG_STAGE: worker_failed_reason', {
+      jobId: job.id,
+      tenantId: job.tenant_id,
+      reason: error?.code || error?.message || 'UNKNOWN_ERROR',
+    });
     // Infrastructure failures (including an interrupted database write) are
     // retried. Explicit provider, validation, safety, and delivery boundary
     // classifications retain their declared retryability.

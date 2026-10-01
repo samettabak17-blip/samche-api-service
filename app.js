@@ -1086,11 +1086,11 @@ function startKnowledgeWorkers() {
 }
 
 function startVisualAiWorker() {
-  if (process.env.VISUAL_AI_WORKER_ENABLED !== 'true') {
+  if (process.env.VISUAL_AI_WORKER_ENABLED === 'false') {
     console.info(formatVisualAiWorkerStartup({ enabled: false }));
     return () => {};
   }
-  const provider = createVisualAIProvider({ env: process.env });
+  const provider = createVisualAIProvider({ env: process.env, providerType: process.env.VISUAL_AI_PROVIDER || 'GOOGLE' });
   console.info(formatVisualAiWorkerStartup({ enabled: true, provider }));
   const timer = setInterval(() => {
     processOneVisualAiGenerationJob({ database: pool, storage: createConversationResourceStorage(), visualProvider: provider, deliverWhatsAppMedia })
@@ -5090,6 +5090,18 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
             }
             const persisted = await persistAssistantResponseIfCurrent({ tenantId: whatsappInbox.integration.tenant_id, conversationId: whatsappInbox.conversation.id, content: queued.acknowledgmentText, handlingVersion: whatsappInbox.handlingVersion, knowledgeAuthority: whatsappInbox.knowledgeAuthority });
             if (persisted.delivered) await sendMessage(cleanFrom, queued.acknowledgmentText, whatsappInbox.integration.external_channel_id);
+
+            // Immediate async worker dispatch so jobs are processed without waiting for poller ticks
+            const immediateProvider = createVisualAIProvider({ env: process.env, providerType: process.env.VISUAL_AI_PROVIDER || 'GOOGLE' });
+            void processOneVisualAiGenerationJob({
+              database: pool,
+              storage: createConversationResourceStorage(),
+              visualProvider: immediateProvider,
+              deliverWhatsAppMedia,
+            }).catch((err) => {
+              console.info('VISUAL_AI_WORKER_IMMEDIATE_TRIGGER_WARN code=' + String(err?.code ?? 'UNKNOWN').slice(0, 80));
+            });
+
             return;
           } catch (visualError) {
             if (visualError?.code === 'VISUAL_AI_NOT_ENABLED') return;
