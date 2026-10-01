@@ -10,6 +10,170 @@ Read this file together with the existing guidance in `.agent/budget-policy.md`
 and `docs/engineering/`. Those sources remain authoritative for their own
 topics; do not duplicate or replace them here.
 
+Before starting every task, agents MUST also read the repository-root
+`GREEN_BASELINES.md` registry when it exists. That registry is the canonical
+record of completed and verified GREEN capabilities.
+
+## 0. Agent governance and GREEN baseline protection
+
+This section is a permanent governance rule for every future Codex, Cline,
+Aider, supervisor, or other coding/execution agent.
+
+### Mandatory task-start check
+
+At the beginning of every task, before analysis or edits, the agent MUST
+record:
+
+```text
+GREEN_BASELINE_REVIEW:
+AGENTS_READ:
+YES
+
+GREEN_BASELINES_READ:
+YES
+
+CURRENT_TASK_CONFLICTS_WITH_GREEN:
+YES/NO
+
+GREEN_AREAS_AFFECTED:
+```
+
+The agent must identify the protected areas relevant to the task, confirm that
+the requested scope does not conflict with them, and stop for human direction
+if the target, ownership, or intended behavior is unclear.
+
+### GREEN baseline protection
+
+Completed and verified GREEN tasks are protected baselines. Agents MUST NOT
+reopen completed GREEN tasks, redo previous GREEN implementations, refactor
+GREEN areas without a new explicit requirement, redesign working architecture,
+remove existing safeguards, or change unrelated files. Existing working
+architecture must remain stable unless the requested task requires a specific
+change.
+
+If a future task requires modifying a GREEN area, the agent MUST document this
+before editing:
+
+```text
+GREEN_AREA_MODIFICATION_REQUIRED:
+YES
+
+REASON:
+
+WHY_CURRENT_IMPLEMENTATION_IS_NOT_ENOUGH:
+
+EXPECTED_IMPACT:
+
+REGRESSION_TEST_REQUIRED:
+```
+
+### Modification boundary
+
+Agents may modify only files explicitly required by the task and directly
+referenced dependencies that are strictly necessary. Application source,
+services, tests, migrations, and runtime behavior remain protected unless the
+task explicitly authorizes a change to them. Documentation and agent-rule
+changes must not be used to justify unrelated implementation refactors.
+
+Every change must preserve existing architecture, tests, contracts, safeguards,
+tenant isolation, historical/fresh tenant parity, and valid user-visible
+behavior. Broad refactoring, speculative cleanup, and redesign of working
+systems are outside scope.
+
+### Protected GREEN areas
+
+The following completed and verified areas are protected regression baselines.
+Any change touching them requires the GREEN modification declaration above and
+focused regression evidence.
+
+#### Instagram
+
+- Instagram DM orchestration
+- Reel/video priority handling
+- stale response prevention
+- human takeover behavior
+- appointment qualification
+- provider parity
+
+#### WhatsApp
+
+- inbound lifecycle
+- human takeover
+- notification flow
+- tenant isolation
+
+#### Appointment System
+
+- purpose detection
+- missing information handling
+- date/time validation
+- slot invention prevention
+- conversation context memory
+
+#### Visual AI
+
+- visual job lifecycle
+- worker processing
+- job claim logic
+- approved catalog only rule
+- product identity lock
+- room preservation
+- continuation memory
+- product label behavior
+
+#### Knowledge Intelligence
+
+- approval workflow
+- runtime-only APPROVED knowledge usage
+- tenant isolation
+- evidence tracking
+- draft/review separation
+
+### Tenant-generic implementation rule
+
+Every implementation MUST work for all tenants. Tenant-specific hardcoding,
+customer-specific exceptions, and SamChe-only logic are forbidden. Code such
+as `if tenant == samche` is explicitly forbidden.
+
+Behavior must be controlled through generic architecture, supported
+configuration, and tenant-owned knowledge/data. No customer name, tenant ID,
+prompt branch, or one-off source-code path may be introduced to change platform
+behavior. White-label behavior and canonical shared capabilities must remain
+consistent for historical and fresh tenants.
+
+### Minimal-change rule
+
+Agents MUST modify only what is required, avoid broad refactoring, preserve
+the existing architecture, and preserve all existing tests and contracts.
+
+### Required final task report
+
+Every agent final report MUST include:
+
+```text
+TASK_STATUS:
+
+FILES_CHANGED:
+
+GREEN_AREAS_TOUCHED: YES/NO
+
+IF YES:
+EXPLANATION:
+
+TENANT_GENERIC: PASS/FAIL
+
+REGRESSION_TESTS:
+
+COMMIT:
+
+PUSH:
+```
+
+The report must also state files read, verification performed, and any
+remaining limitation. A documentation-only task must explicitly confirm that
+no application source, services, tests, migrations, or runtime behavior were
+changed.
+
 ## 1. Mandatory task preflight and contract acknowledgement
 
 Before inspecting, changing, testing, committing, pushing, or deploying for
