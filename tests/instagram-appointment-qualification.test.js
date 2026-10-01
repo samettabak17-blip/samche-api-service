@@ -85,6 +85,33 @@ test('current user time overrides an older appointment preference', () => {
   assert.equal(qualification.timePrecision, 'APPROXIMATE');
 });
 
+test('appointment purpose can come from the active conversation topic without re-asking', () => {
+  const qualification = deriveInstagramLeadQualification({
+    customerMessages: ['Mainland şirket kurmak istiyorum, 2 vizem olacak.', 'Samet Bey ile görüşebilir miyim?'],
+    currentMessage: 'Samet Bey ile görüşebilir miyim?',
+    activeConversationTopic: 'Mainland şirket kuruluşu / 2 vize',
+  });
+  const instruction = buildStructuredMemoryInstruction({ appointmentState: qualification });
+
+  assert.equal(qualification.purposeKnown, true);
+  assert.equal(qualification.purposeSource, 'ACTIVE_CONVERSATION_TOPIC');
+  assert.equal(qualification.meetingReason, 'Mainland şirket kuruluşu / 2 vize');
+  assert.doesNotMatch(instruction, /meeting_reason.*Unknown/i);
+});
+
+test('current user topic overrides an older active conversation topic', () => {
+  const qualification = deriveInstagramLeadQualification({
+    customerMessages: ['Samet Bey ile görüşebilir miyim?'],
+    currentMessage: 'Aslında şirket kuruluşu hakkında görüşmek istiyorum.',
+    activeConversationTopic: 'Sponsorlu oturum',
+  });
+
+  assert.equal(qualification.purposeKnown, true);
+  assert.equal(qualification.purposeSource, 'CURRENT_USER_MESSAGE');
+  assert.match(qualification.meetingReason, /şirket kuruluşu/i);
+  assert.doesNotMatch(qualification.meetingReason, /sponsorlu oturum/i);
+});
+
 test('does not complete an Instagram appointment when the meeting purpose is unknown', () => {
   const qualification = deriveInstagramLeadQualification({
     contactPhone: CONTACT_PHONE,

@@ -552,7 +552,22 @@ export async function persistWebChatInbound({ externalSessionId, content, idempo
   }
 }
 
-export async function persistAssistantResponseIfCurrent({ tenantId, conversationId, content, handlingVersion, knowledgeAuthority = null, idempotencyKey = null, deliveryStatus = null, database = pool }) {
+function isCanonicalMediaOnlyCustomerMessage(content) {
+  return /^\[(?:attachment|attached_image|attached_document):\s*[^\]]+\]$/i.test(String(content || '').trim());
+}
+
+export async function persistAssistantResponseIfCurrent({
+  tenantId,
+  conversationId,
+  content,
+  handlingVersion,
+  knowledgeAuthority = null,
+  idempotencyKey = null,
+  deliveryStatus = null,
+  sourceCustomerMessageId = null,
+  suppressIfNewerExplicitCustomerMessage = false,
+  database = pool,
+}) {
   const client = await database.connect();
   let operatorSendStage = 'BEGIN_TRANSACTION';
   const traceStage = (stage) => {
@@ -569,6 +584,34 @@ export async function persistAssistantResponseIfCurrent({ tenantId, conversation
     if (!conversation || conversation.status !== 'open' || conversation.handling_mode !== 'AI' || conversation.handling_version !== handlingVersion) {
       await client.query('COMMIT');
       return { delivered: false };
+    }
+
+    if (suppressIfNewerExplicitCustomerMessage && sourceCustomerMessageId) {
+      const latestCustomer = await client.query(
+        `SELECT id, content
+           FROM conversation_messages
+          WHERE tenant_id = $1
+            AND conversation_id = $2
+            AND sender_type = 'CUSTOMER'
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1`,
+        [tenantId, conversationId]
+      );
+      const latest = latestCustomer.rows?.[0] || null;
+      const newerExplicitUserMessage = Boolean(
+        latest
+        && String(latest.id) !== String(sourceCustomerMessageId)
+        && !isCanonicalMediaOnlyCustomerMessage(latest.content),
+      );
+      if (newerExplicitUserMessage) {
+        await client.query('COMMIT');
+        return {
+          delivered: false,
+          reason: 'STALE_SHARED_CONTENT_TURN',
+          newerExplicitUserMessage: true,
+          turnStillCurrent: false,
+        };
+      }
     }
 
     if (knowledgeAuthority) {
@@ -605,7 +648,7 @@ export async function persistAssistantResponseIfCurrent({ tenantId, conversation
     );
     await notify(client, tenantId, conversationId, 'ASSISTANT_MESSAGE');
     await client.query('COMMIT');
-    return { delivered: true, message };
+    return { delivered: true, message, newerExplicitUserMessage: false, turnStillCurrent: true };
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;

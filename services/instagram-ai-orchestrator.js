@@ -222,7 +222,7 @@ function logInstagramSharedContentDiagnostics({ sharedContentContext, explicitTe
   );
 }
 
-function resolveInstagramAppointmentState({ rawMessages = [], currentText = '', contactPhone = null } = {}) {
+function resolveInstagramAppointmentState({ rawMessages = [], currentText = '', contactPhone = null, activeConversationTopic = null } = {}) {
   const messages = [...(Array.isArray(rawMessages) ? rawMessages : [])];
   if (currentText && !messages.some((message) => message?.sender_type === 'CUSTOMER' && message?.content === currentText)) {
     messages.push({ sender_type: 'CUSTOMER', content: currentText });
@@ -230,8 +230,37 @@ function resolveInstagramAppointmentState({ rawMessages = [], currentText = '', 
   return deriveInstagramLeadQualification({
     customerMessages: messages,
     currentMessage: currentText,
+    activeConversationTopic,
     contactPhone,
   });
+}
+
+function logInstagramAppointmentContextResolution({ appointmentState, activeTopicPresent = false }) {
+  if (!appointmentState?.hasHighIntent) return;
+  console.info(
+    `APPOINTMENT_CONTEXT_RESOLUTION` +
+    ` purposeKnown=${appointmentState.purposeKnown ? 'true' : 'false'}` +
+    ` purposeSource=${appointmentState.purposeSource || 'UNKNOWN'}` +
+    ` activeTopicPresent=${activeTopicPresent ? 'true' : 'false'}` +
+    ` dateKnown=${appointmentState.preferredDate ? 'true' : 'false'}` +
+    ` timeKnown=${appointmentState.preferredTime ? 'true' : 'false'}` +
+    ` missingFields=${Array.isArray(appointmentState.missing) ? appointmentState.missing.join(',') : 'none'}`,
+  );
+}
+
+function resolveActiveInstagramConversationTopic({ durableMemory, rawMessages = [], sharedContentContext, currentText = '' } = {}) {
+  if (durableMemory?.serviceRequested) return durableMemory.serviceRequested;
+  if (!sharedContentContext?.topicText) return null;
+
+  const hasPriorExplicitCustomerTurn = (Array.isArray(rawMessages) ? rawMessages : []).some((message) => {
+    if (message?.sender_type !== 'CUSTOMER') return false;
+    const content = String(message.content || '').trim();
+    return content
+      && content !== String(currentText || '').trim()
+      && !isMediaOnlyInbound(content);
+  });
+
+  return hasPriorExplicitCustomerTurn ? sharedContentContext.topicText : null;
 }
 
 export function extractReliableCustomerName(rawDisplayName) {
@@ -839,7 +868,26 @@ async function defaultGenerateInstagramAiResponse({
   };
 }
 
-const activeInstagramOrchestrations = new Set();
+const activeInstagramOrchestrations = new Map();
+
+function resolveInstagramTriggerType(text = '') {
+  return isMediaOnlyInbound(text) ? 'REEL' : 'TEXT';
+}
+
+function trackInstagramOrchestration({ key, triggerId }) {
+  const active = activeInstagramOrchestrations.get(key) || new Set();
+  if (active.has(triggerId)) return false;
+  active.add(triggerId);
+  activeInstagramOrchestrations.set(key, active);
+  return true;
+}
+
+function untrackInstagramOrchestration({ key, triggerId }) {
+  const active = activeInstagramOrchestrations.get(key);
+  if (!active) return;
+  active.delete(triggerId);
+  if (active.size === 0) activeInstagramOrchestrations.delete(key);
+}
 
 export async function orchestrateInstagramInboundAiResponse({
   database = pool,
@@ -868,11 +916,12 @@ export async function orchestrateInstagramInboundAiResponse({
   const assistantModel = integration.assistant_model || null;
 
   const orchestrationKey = `${tenantId}:${conversationId}`;
-  if (activeInstagramOrchestrations.has(orchestrationKey)) {
-    console.info('INSTAGRAM_AI_ORCHESTRATION_ALREADY_IN_FLIGHT conversationId=' + conversationId);
+  const triggerType = resolveInstagramTriggerType(rawInboundText);
+  const triggerId = String(inboundState.customerMessage?.id || `${triggerType}:${rawInboundText}`);
+  if (!trackInstagramOrchestration({ key: orchestrationKey, triggerId })) {
+    console.info(`INSTAGRAM_AI_ORCHESTRATION_ALREADY_IN_FLIGHT conversationId=${conversationId} triggerType=${triggerType}`);
     return { aiInvoked: false, skipped: true, duplicate: true, reason: 'ORCHESTRATION_IN_FLIGHT' };
   }
-  activeInstagramOrchestrations.add(orchestrationKey);
 
   try {
     const accessToken = integration.config?.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
@@ -1089,10 +1138,17 @@ export async function orchestrateInstagramInboundAiResponse({
     conversation,
     rawMessages: historyData.rawMessages || [],
   });
+  const activeConversationTopic = resolveActiveInstagramConversationTopic({
+    durableMemory,
+    rawMessages: historyData.rawMessages || [],
+    sharedContentContext,
+    currentText: text,
+  });
   const appointmentState = resolveInstagramAppointmentState({
     rawMessages: historyData.rawMessages || [],
     currentText: text,
     contactPhone: durableMemory.phone,
+    activeConversationTopic,
   });
 
   // Evaluate high-intent lead qualification in CRM (records PENDING consultation and leads in DB)
@@ -1115,6 +1171,7 @@ export async function orchestrateInstagramInboundAiResponse({
   }
 
   logInstagramAppointmentStateDiagnostics({ appointmentState });
+  logInstagramAppointmentContextResolution({ appointmentState, activeTopicPresent: Boolean(activeConversationTopic) });
   logInstagramSharedContentDiagnostics({ sharedContentContext, explicitTextPresent: Boolean(text.trim()) && !isMediaOnlyInbound(text) });
   const structuredMemoryContext = buildStructuredMemoryInstruction({ ...durableMemory, appointmentState, sharedContentContext });
 
@@ -1235,12 +1292,23 @@ export async function orchestrateInstagramInboundAiResponse({
       handlingVersion,
       idempotencyKey: inboundState.customerMessage?.id ? `instagram-ai:${inboundState.customerMessage.id}` : null,
       deliveryStatus: 'SENDING',
+      sourceCustomerMessageId: inboundState.customerMessage?.id || null,
+      suppressIfNewerExplicitCustomerMessage: triggerType === 'REEL',
       database,
     });
 
+    console.info(
+      `INSTAGRAM_AI_TURN_VALIDITY` +
+      ` triggerType=${triggerType}` +
+      ` triggerMid=${inboundState.customerMessage?.id ? String(inboundState.customerMessage.id).slice(0, 64) : 'none'}` +
+      ` newerExplicitUserMessage=${persisted.newerExplicitUserMessage ? 'true' : 'false'}` +
+      ` turnStillCurrent=${persisted.turnStillCurrent !== false ? 'true' : 'false'}` +
+      ` responseSuppressedReason=${persisted.reason === 'STALE_SHARED_CONTENT_TURN' ? 'STALE_SHARED_CONTENT_TURN' : 'none'}`,
+    );
+
     if (!persisted.delivered) {
-      console.info('INSTAGRAM_AI_RESPONSE_DROPPED reason=HANDLING_MODE_CHANGED');
-      return { delivered: false, dropped: true, reason: 'CONVERSATION_TAKEN_OVER' };
+      console.info(`INSTAGRAM_AI_RESPONSE_DROPPED reason=${persisted.reason || 'HANDLING_MODE_CHANGED'}`);
+      return { delivered: false, dropped: true, reason: persisted.reason || 'CONVERSATION_TAKEN_OVER' };
     }
 
     if (persisted.duplicate) {
@@ -1367,7 +1435,7 @@ export async function orchestrateInstagramInboundAiResponse({
     }
   }
   } finally {
-    activeInstagramOrchestrations.delete(orchestrationKey);
+    untrackInstagramOrchestration({ key: orchestrationKey, triggerId });
   }
 }
 
@@ -1452,10 +1520,17 @@ export async function generateAndDeliverInstagramAssistantResponse({
       conversation,
       rawMessages: historyData.rawMessages || [],
     });
+    const activeConversationTopic = resolveActiveInstagramConversationTopic({
+      durableMemory,
+      rawMessages: historyData.rawMessages || [],
+      sharedContentContext,
+      currentText: textToAnswer,
+    });
     const appointmentState = resolveInstagramAppointmentState({
       rawMessages: historyData.rawMessages || [],
       currentText: textToAnswer,
       contactPhone: durableMemory.phone,
+      activeConversationTopic,
     });
 
     let qualResult = null;
@@ -1477,6 +1552,7 @@ export async function generateAndDeliverInstagramAssistantResponse({
     }
 
     logInstagramAppointmentStateDiagnostics({ appointmentState });
+    logInstagramAppointmentContextResolution({ appointmentState, activeTopicPresent: Boolean(activeConversationTopic) });
     logInstagramSharedContentDiagnostics({ sharedContentContext, explicitTextPresent: Boolean(textToAnswer) && !isMediaOnlyInbound(textToAnswer) });
     const structuredMemoryContext = buildStructuredMemoryInstruction({ ...durableMemory, appointmentState, sharedContentContext });
 
@@ -1588,11 +1664,23 @@ export async function generateAndDeliverInstagramAssistantResponse({
         handlingVersion: conversation.handling_version,
         idempotencyKey: latestMsg.id ? `instagram-ai:${latestMsg.id}` : null,
         deliveryStatus: 'SENDING',
+        sourceCustomerMessageId: latestMsg.id || null,
+        suppressIfNewerExplicitCustomerMessage: isMediaOnlyInbound(textToAnswer),
         database,
       });
 
+      const triggerType = resolveInstagramTriggerType(textToAnswer);
+      console.info(
+        `INSTAGRAM_AI_TURN_VALIDITY` +
+        ` triggerType=${triggerType}` +
+        ` triggerMid=${latestMsg.id ? String(latestMsg.id).slice(0, 64) : 'none'}` +
+        ` newerExplicitUserMessage=${persisted.newerExplicitUserMessage ? 'true' : 'false'}` +
+        ` turnStillCurrent=${persisted.turnStillCurrent !== false ? 'true' : 'false'}` +
+        ` responseSuppressedReason=${persisted.reason === 'STALE_SHARED_CONTENT_TURN' ? 'STALE_SHARED_CONTENT_TURN' : 'none'}`,
+      );
+
       if (!persisted.delivered) {
-        return { delivered: false, dropped: true, reason: 'CONVERSATION_TAKEN_OVER' };
+        return { delivered: false, dropped: true, reason: persisted.reason || 'CONVERSATION_TAKEN_OVER' };
       }
 
       if (!accessToken || !cleanRecipient) {

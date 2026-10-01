@@ -145,7 +145,13 @@ function isQualificationDetail(content = '') {
   return meaningful.length >= 10;
 }
 
-export function deriveInstagramLeadQualification({ customerMessages = [], currentMessage = null, contactName = null, contactPhone = null } = {}) {
+export function deriveInstagramLeadQualification({
+  customerMessages = [],
+  currentMessage = null,
+  activeConversationTopic = null,
+  contactName = null,
+  contactPhone = null,
+} = {}) {
   const historicalContents = customerMessages
     .map((message) => typeof message === 'string' ? message : message?.content)
     .map((content) => String(content || '').trim())
@@ -166,9 +172,22 @@ export function deriveInstagramLeadQualification({ customerMessages = [], curren
       : /(?:utc|gmt)/iu.test(combined) ? 'UTC' : null;
   const serviceRequested = inferRequestedService(combined);
   const hasHighIntent = hasHighIntentAppointmentSignals(combined);
-  const purposeKnown = hasConcreteBusinessRequirement(combined);
-  const meetingReason = purposeKnown ? structuredRequirement : null;
-  const serviceInterest = purposeKnown ? serviceRequested : null;
+  const currentTurnPurposeKnown = Boolean(currentTurn && hasConcreteBusinessRequirement(currentTurn));
+  const activeTopic = typeof activeConversationTopic === 'string' ? activeConversationTopic.trim().slice(0, 240) : '';
+  const purposeSource = currentTurnPurposeKnown
+    ? 'CURRENT_USER_MESSAGE'
+    : activeTopic
+      ? 'ACTIVE_CONVERSATION_TOPIC'
+      : 'UNKNOWN';
+  const purposeKnown = currentMessage !== null
+    ? currentTurnPurposeKnown || Boolean(activeTopic)
+    : hasConcreteBusinessRequirement(combined);
+  const meetingReason = currentTurnPurposeKnown
+    ? structuredRequirement
+    : activeTopic || (purposeKnown ? structuredRequirement : null);
+  const serviceInterest = purposeKnown
+    ? (currentTurnPurposeKnown ? serviceRequested : activeTopic || serviceRequested)
+    : null;
   const preferredDate = extractPreferredDate(requestedTime);
   const preferredTime = extractPreferredTime(requestedTime);
   const timePrecision = resolveTimePrecision(requestedTime);
@@ -195,6 +214,7 @@ export function deriveInstagramLeadQualification({ customerMessages = [], curren
     serviceRequested,
     businessActivity: structuredRequirement,
     structuredRequirement,
+    purposeSource,
     calendarConfirmed: false,
     calendarAvailabilityVerified: false,
     timeSource: requestedTime ? 'USER_PROVIDED_PREFERENCE' : 'NONE',
