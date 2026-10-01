@@ -176,7 +176,7 @@ function logInstagramBehavioralPolicyDiagnostics({ assistantId, persona }) {
   );
 }
 
-function logInstagramRuntimeContextDiagnostics({ systemInstruction, persona, knowledge }) {
+function logInstagramRuntimeContextDiagnostics({ systemInstruction, persona, knowledge, sharedContentContext = null }) {
   const behavioralPolicy = resolveInstagramBehavioralPolicy({ persona });
   const activeConfigurationId = persona?.configurationVersionId
     ? String(persona.configurationVersionId).slice(0, 64)
@@ -189,6 +189,7 @@ function logInstagramRuntimeContextDiagnostics({ systemInstruction, persona, kno
     ` behavioralPromptPresent=${behavioralPolicy.configured ? '1' : '0'}` +
     ` behavioralPromptLength=${behavioralPolicy.policy.length}` +
     ` tenantContextLength=${tenantContext.length}` +
+    ` sharedContentContextPresent=${sharedContentContext?.present ? '1' : '0'}` +
     ` activeConfiguration=${activeConfigurationId}`,
   );
 }
@@ -205,6 +206,19 @@ function logInstagramAppointmentStateDiagnostics({ appointmentState }) {
     ` timePrecision=${appointmentState.timePrecision || 'NONE'}` +
     ` missingFields=${missingFields}` +
     ` status=${appointmentState.status || 'COLLECTING'}`,
+  );
+}
+
+function logInstagramSharedContentDiagnostics({ sharedContentContext, explicitTextPresent = false }) {
+  if (!sharedContentContext?.present) return;
+  const item = (sharedContentContext.instruction.match(/Shared content type: ([^\n]+)/i)?.[1] || 'UNKNOWN').replace(/[^A-Z0-9_]/gi, '_');
+  console.info(
+    `INSTAGRAM_SHARED_CONTENT_CONTEXT type=${item.slice(0, 32)}` +
+    ` explicitTextPresent=${explicitTextPresent ? 'true' : 'false'}` +
+    ` captionPresent=${sharedContentContext.instruction.includes('- Caption:') ? 'true' : 'false'}` +
+    ` referralPresent=${sharedContentContext.instruction.includes('- Referral text:') ? 'true' : 'false'}` +
+    ` topicContextPresent=${sharedContentContext.topicContextPresent ? 'true' : 'false'}` +
+    ` primaryIntentSource=${explicitTextPresent ? 'USER_TEXT' : sharedContentContext.topicContextPresent ? 'SHARED_CONTENT_METADATA' : 'NONE'}`,
   );
 }
 
@@ -410,6 +424,7 @@ export function generateContextualConversationalFallback({ text = '', conversati
   const hasMeeting = hasCurrentTurnMeetingIntent(cleanText);
   const isMediaOnly = isMediaOnlyInbound(cleanText);
   const appointmentState = memory.appointmentState;
+  const sharedContentContext = memory.sharedContentContext;
   const appointmentContinuation = Boolean(appointmentState?.hasHighIntent && (hasMeeting || requestedTime));
 
   if (!isGreeting && !isMediaOnly && appointmentContinuation && appointmentState.missing?.includes('MEETING_PURPOSE')) {
@@ -424,6 +439,10 @@ export function generateContextualConversationalFallback({ text = '', conversati
         : normalizedTime)
       : 'uygun olduğunuz saat';
     return `${date} ${time} tercihinizi not ettim. Görüşmenin hangi konu veya amaç hakkında olacağını da paylaşabilir misiniz?`;
+  }
+
+  if (isMediaOnly && sharedContentContext?.topicContextPresent && sharedContentContext.topicText) {
+    return `Paylaşılan içeriğin konu bilgisi: ${sharedContentContext.topicText}. Bu konu hakkında hangi konuda yardımcı olabilirim?`;
   }
 
   // 0. If customer sends ONLY media without written text (Case 2):
@@ -648,6 +667,8 @@ export function buildStructuredMemoryInstruction(memory = {}) {
       ? '- Qualification is incomplete while any required field is missing. Ask only for the missing field(s); do not close the appointment flow.'
       : null,
     memory.appointmentState?.hasHighIntent ? '- A request/preference is not a confirmed calendar appointment. Never claim confirmation without a real calendar result.' : null,
+    memory.sharedContentContext?.present ? '' : null,
+    memory.sharedContentContext?.present ? memory.sharedContentContext.instruction : null,
     '',
     'CONVERSATION CONTINUITY & CURRENT-TURN INTENT RULES:',
     '1. CURRENT-TURN INTENT HAS HIGHEST PRIORITY:',
@@ -679,6 +700,61 @@ export function buildStructuredMemoryInstruction(memory = {}) {
   return lines.join('\n');
 }
 
+function boundedSharedContentText(value, maxLength = 1200) {
+  if (typeof value !== 'string') return null;
+  const clean = value.trim();
+  return clean ? clean.slice(0, maxLength) : null;
+}
+
+export function buildInstagramSharedContentContext(rawMessages = []) {
+  const items = [];
+  for (const message of Array.isArray(rawMessages) ? rawMessages : []) {
+    for (const resource of Array.isArray(message?.resources) ? message.resources : []) {
+      const metadata = resource?.metadata && typeof resource.metadata === 'object' ? resource.metadata : {};
+      const shared = metadata.shared_content || metadata.sharedContent;
+      if (!shared || typeof shared !== 'object') continue;
+      const type = boundedSharedContentText(shared.type || metadata.attachment_type, 32);
+      const caption = boundedSharedContentText(shared.caption);
+      const description = boundedSharedContentText(shared.description);
+      const referralText = boundedSharedContentText(shared.referral_text || shared.referralText);
+      const source = boundedSharedContentText(shared.source, 80);
+      const topicText = caption || description || referralText || null;
+      items.push({ type, caption, description, referralText, source, topicText });
+    }
+  }
+
+  const uniqueItems = [];
+  const seen = new Set();
+  for (const item of items) {
+    const key = JSON.stringify(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniqueItems.push(item);
+  }
+  const topicText = uniqueItems.map((item) => item.topicText).filter(Boolean).join('\n').slice(0, 2400) || null;
+  const instruction = uniqueItems.length > 0
+    ? [
+        'SHARED CONTENT CONTEXT (TRUSTED META METADATA, CONVERSATION-SCOPED):',
+        ...uniqueItems.map((item) => [
+          item.type ? `- Shared content type: ${item.type}` : null,
+          item.source ? `- Shared content source: ${item.source}` : null,
+          item.caption ? `- Caption: ${item.caption}` : null,
+          item.description ? `- Description: ${item.description}` : null,
+          item.referralText ? `- Referral text: ${item.referralText}` : null,
+        ].filter(Boolean).join('\n')),
+        '- CURRENT USER TEXT ALWAYS OVERRIDES shared-content metadata and older attachment context.',
+        '- Shared-content metadata is contextual only, not tenant business truth or Knowledge. Do not claim to have watched, seen, or analyzed the media.',
+      ].join('\n')
+    : '';
+
+  return {
+    present: uniqueItems.length > 0,
+    topicContextPresent: Boolean(topicText),
+    topicText,
+    instruction,
+  };
+}
+
 /**
  * Loads recent chronological conversation history for multi-turn AI context.
  */
@@ -688,10 +764,20 @@ async function loadRecentConversationHistory(database, tenantId, conversationId,
     const client = isPool ? await database.connect() : database;
     try {
       const res = await client.query(
-        `SELECT id, sender_type, content, created_at
-           FROM conversation_messages
-          WHERE tenant_id = $1 AND conversation_id = $2
-          ORDER BY created_at DESC, id DESC
+        `SELECT m.id, m.sender_type, m.content, m.created_at,
+                COALESCE(json_agg(json_build_object(
+                  'metadata', r.metadata,
+                  'media_category', r.media_category,
+                  'mime_type', r.mime_type,
+                  'original_filename', r.original_filename
+                )) FILTER (WHERE r.id IS NOT NULL), '[]'::json) AS resources
+           FROM conversation_messages m
+           LEFT JOIN conversation_resources r
+             ON r.message_id = m.id
+            AND r.tenant_id = m.tenant_id
+          WHERE m.tenant_id = $1 AND m.conversation_id = $2
+          GROUP BY m.id, m.sender_type, m.content, m.created_at
+          ORDER BY m.created_at DESC, m.id DESC
           LIMIT $3`,
         [tenantId, conversationId, limit]
       );
@@ -982,6 +1068,7 @@ export async function orchestrateInstagramInboundAiResponse({
   // 6. Load Recent Conversation History & Resolve Durable Memory
   const historyData = await loadRecentConversationHistory(database, tenantId, conversationId, 20);
   const history = historyData.mergedTurns || [];
+  const sharedContentContext = buildInstagramSharedContentContext(historyData.rawMessages || []);
   const durableMemory = await resolveDurableConversationMemory({
     database,
     tenantId,
@@ -1015,7 +1102,8 @@ export async function orchestrateInstagramInboundAiResponse({
   }
 
   logInstagramAppointmentStateDiagnostics({ appointmentState });
-  const structuredMemoryContext = buildStructuredMemoryInstruction({ ...durableMemory, appointmentState });
+  logInstagramSharedContentDiagnostics({ sharedContentContext, explicitTextPresent: Boolean(text.trim()) && !isMediaOnlyInbound(text) });
+  const structuredMemoryContext = buildStructuredMemoryInstruction({ ...durableMemory, appointmentState, sharedContentContext });
 
   // 7. Build System Instruction with Channel Presentation Rules and Structured Memory Context
   const rawCustomerName = durableMemory.customerName || conversation?.contact_display_name || conversation?.display_name || null;
@@ -1044,7 +1132,7 @@ export async function orchestrateInstagramInboundAiResponse({
         knowledge?.knowledgeContext ? `APPROVED KNOWLEDGE:\n${knowledge.knowledgeContext}` : '',
       ].filter(Boolean).join('\n\n');
 
-  logInstagramRuntimeContextDiagnostics({ systemInstruction, persona, knowledge });
+  logInstagramRuntimeContextDiagnostics({ systemInstruction, persona, knowledge, sharedContentContext });
 
 
 
@@ -1093,7 +1181,7 @@ export async function orchestrateInstagramInboundAiResponse({
         text,
         conversationHistory: history,
         model: assistantModel,
-        memory: { ...durableMemory, appointmentState },
+        memory: { ...durableMemory, appointmentState, sharedContentContext },
       });
     }
 
@@ -1343,6 +1431,7 @@ export async function generateAndDeliverInstagramAssistantResponse({
 
     const historyData = await loadRecentConversationHistory(client, tenantId, conversationId, 20);
     const history = historyData.mergedTurns || [];
+    const sharedContentContext = buildInstagramSharedContentContext(historyData.rawMessages || []);
     const durableMemory = await resolveDurableConversationMemory({
       database: client,
       tenantId,
@@ -1375,7 +1464,8 @@ export async function generateAndDeliverInstagramAssistantResponse({
     }
 
     logInstagramAppointmentStateDiagnostics({ appointmentState });
-    const structuredMemoryContext = buildStructuredMemoryInstruction({ ...durableMemory, appointmentState });
+    logInstagramSharedContentDiagnostics({ sharedContentContext, explicitTextPresent: Boolean(textToAnswer) && !isMediaOnlyInbound(textToAnswer) });
+    const structuredMemoryContext = buildStructuredMemoryInstruction({ ...durableMemory, appointmentState, sharedContentContext });
 
     const rawCustomerName = durableMemory.customerName || conversation?.contact_display_name || conversation?.display_name || null;
     const reliableCustomerName = extractReliableCustomerName(rawCustomerName);
@@ -1403,7 +1493,7 @@ export async function generateAndDeliverInstagramAssistantResponse({
           knowledge?.knowledgeContext ? `APPROVED KNOWLEDGE:\n${knowledge.knowledgeContext}` : '',
         ].filter(Boolean).join('\n\n');
 
-    logInstagramRuntimeContextDiagnostics({ systemInstruction, persona, knowledge });
+    logInstagramRuntimeContextDiagnostics({ systemInstruction, persona, knowledge, sharedContentContext });
 
 
     const generationStartedAt = Date.now();
@@ -1448,7 +1538,7 @@ export async function generateAndDeliverInstagramAssistantResponse({
           text: textToAnswer,
           conversationHistory: history,
           model: assistantModel,
-          memory: { ...durableMemory, appointmentState },
+          memory: { ...durableMemory, appointmentState, sharedContentContext },
         });
       }
 

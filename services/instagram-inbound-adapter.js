@@ -27,6 +27,56 @@ export function isWhatsAppWebhookEvent(body) {
   return false;
 }
 
+function boundedText(value, maxLength = 2000) {
+  if (typeof value !== 'string') return null;
+  const clean = value.trim();
+  return clean ? clean.slice(0, maxLength) : null;
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    const text = boundedText(value);
+    if (text) return text;
+  }
+  return null;
+}
+
+function normalizeInstagramAttachmentType(rawType, payloadType = '') {
+  const type = String(rawType || '').trim().toLowerCase();
+  const payload = String(payloadType || '').trim().toLowerCase();
+  const aliases = {
+    ig_reel: 'reel',
+    instagram_reel: 'reel',
+    ig_post: 'post',
+    shared_post: 'post',
+  };
+  const normalized = aliases[type] || type;
+  if (normalized === 'share' && /^(reel|post|video|image)$/.test(payload)) return payload;
+  return normalized || 'file';
+}
+
+export function normalizeInstagramSharedContent({ attachment = {}, referral = null } = {}) {
+  const payload = attachment?.payload && typeof attachment.payload === 'object' ? attachment.payload : {};
+  const normalizedType = normalizeInstagramAttachmentType(attachment?.type || payload.type, payload.type);
+  const caption = firstText(payload.caption, payload.post_caption, payload.text);
+  const description = firstText(payload.description, payload.post_description);
+  const referralText = firstText(referral?.text, referral?.referral_text, referral?.title, referral?.description);
+  const id = firstText(payload.id, payload.media_id, payload.post_id, payload.reel_id);
+  const permalink = firstText(payload.permalink_url, payload.permalink, payload.url);
+  const source = firstText(referral?.source, payload.source);
+
+  if (!normalizedType && !caption && !description && !referralText) return null;
+  return {
+    type: normalizedType ? normalizedType.toUpperCase() : null,
+    id,
+    caption,
+    description,
+    referralText,
+    source,
+    permalink,
+  };
+}
+
 export function parseInstagramMessagingEvent(entry, messagingEvent) {
   if (!messagingEvent || typeof messagingEvent !== 'object') return null;
 
@@ -79,12 +129,16 @@ export function parseInstagramMessagingEvent(entry, messagingEvent) {
     : [];
 
   const attachments = rawAttachments.map((att) => {
-    const type = String(att?.type ?? 'file').toLowerCase();
+    const payloadType = String(att?.payload?.type || '').trim().toLowerCase();
+    const rawType = String(att?.type ?? 'file').toLowerCase();
+    const type = normalizeInstagramAttachmentType(rawType, payloadType);
     const url = typeof att?.payload?.url === 'string' ? att.payload.url.trim() : null;
+    const sharedContent = normalizeInstagramSharedContent({ attachment: att, referral: messagingEvent.referral || messagingEvent.postback?.referral || messagingEvent.message?.referral || null });
     return {
       type,
       url,
       title: att?.title || null,
+      sharedContent,
     };
   }).filter((att) => Boolean(att.url));
 
@@ -108,7 +162,7 @@ export function parseInstagramMessagingEvent(entry, messagingEvent) {
 
   // Determine if this is a story mention or share
   const isStoryMention = rawAttachments.some((att) => att?.type === 'story_mention');
-  const isShare = rawAttachments.some((att) => att?.type === 'share');
+  const isShare = rawAttachments.some((att) => /^(share|ig_reel|instagram_reel|ig_post|shared_post|reel|post)$/i.test(String(att?.type || '')));
 
   // Meta Ads / Messaging Referral context
   const rawReferral = messagingEvent.referral || messagingEvent.postback?.referral || messagingEvent.message?.referral || null;
@@ -117,6 +171,10 @@ export function parseInstagramMessagingEvent(entry, messagingEvent) {
     type: rawReferral.type || null,
     ref: rawReferral.ref || null,
     adId: rawReferral.ad_id || null,
+    text: firstText(rawReferral.text, rawReferral.referral_text),
+    title: firstText(rawReferral.title),
+    description: firstText(rawReferral.description),
+    permalink: firstText(rawReferral.permalink_url, rawReferral.permalink),
     adsContextData: rawReferral.ads_context_data || null,
   } : null;
 

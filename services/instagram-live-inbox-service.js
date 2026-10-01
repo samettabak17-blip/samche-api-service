@@ -15,6 +15,25 @@ export class InstagramInboxError extends Error {
 
 const profileCache = new Map();
 
+export function buildInstagramAttachmentResourceMetadata(attachment = {}) {
+  const sharedContent = attachment.sharedContent && typeof attachment.sharedContent === 'object'
+    ? {
+        type: attachment.sharedContent.type || null,
+        id: attachment.sharedContent.id || null,
+        caption: attachment.sharedContent.caption || null,
+        description: attachment.sharedContent.description || null,
+        referral_text: attachment.sharedContent.referralText || null,
+        source: attachment.sharedContent.source || null,
+        permalink: attachment.sharedContent.permalink || null,
+      }
+    : null;
+  return {
+    provider: 'INSTAGRAM',
+    attachment_type: attachment.type || null,
+    shared_content: sharedContent,
+  };
+}
+
 /**
  * Formats a clean, human-readable display identity from an Instagram profile.
  * Priority: "Name (@username)" -> "@username" -> "Name" -> null.
@@ -396,7 +415,8 @@ export async function persistInstagramInbound({
     // Ingest media attachments into conversation_resources
     for (const att of attachments) {
       try {
-        const category = att.type === 'image' ? 'IMAGE'
+        const attachmentType = String(att.type || '').toLowerCase();
+        const category = att.type === 'image' || attachmentType === 'reel' ? 'IMAGE'
           : att.type === 'audio' ? 'AUDIO'
           : att.type === 'video' ? 'IMAGE'
           : 'DOCUMENT';
@@ -407,11 +427,12 @@ export async function persistInstagramInbound({
           messageId: customerMessage.id,
           sourceType: 'URL',
           mediaCategory: category,
-          originalFilename: att.title || `instagram_${att.type}`,
+          originalFilename: att.title || (attachmentType === 'reel' ? 'Instagram Reel' : attachmentType === 'post' ? 'Instagram Shared Post' : `instagram_${att.type}`),
+          mimeType: attachmentType === 'reel' ? 'video/mp4' : null,
           sourceUrl: att.url,
           sourceReference: `instagram:${att.type}:${messageId || customerMessage.id}`,
           processingStatus: 'READY',
-          metadata: { provider: 'INSTAGRAM', attachment_type: att.type },
+          metadata: buildInstagramAttachmentResourceMetadata(att),
         });
       } catch (resErr) {
         console.warn('INSTAGRAM_ATTACHMENT_INGESTION_WARN', resErr?.message);
