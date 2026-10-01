@@ -13,6 +13,78 @@ import { createSharedAiRuntime } from '../services/shared-ai-provider-resilience
 
 const CONTACT_PHONE = '+971501234567';
 
+const PHYSICAL_MEETING_REQUEST = 'Samet bey merhaba YouTube videolarınızı izledim sizinle görüşebilir miyiz müsait zamanınızda?';
+
+test('physical meeting request asks for purpose first and never invents a slot', () => {
+  const qualification = deriveInstagramLeadQualification({
+    customerMessages: [PHYSICAL_MEETING_REQUEST],
+  });
+  const response = generateContextualConversationalFallback({
+    text: PHYSICAL_MEETING_REQUEST,
+    memory: { appointmentState: qualification },
+  });
+  const instruction = buildStructuredMemoryInstruction({ appointmentState: qualification });
+
+  assert.equal(qualification.hasHighIntent, true);
+  assert.equal(qualification.purposeKnown, false);
+  assert.equal(qualification.preferredDate, null);
+  assert.equal(qualification.preferredTime, null);
+  assert.equal(qualification.calendarAvailabilityVerified, false);
+  assert.match(response, /konu|amaç/i);
+  assert.doesNotMatch(response, /(?:bugün|yarın|18[:.]00|14[:.]00|saat\s+\d{1,2}|uygun.*saat)/i);
+  assert.match(instruction, /preferred_date=UNKNOWN/);
+  assert.match(instruction, /preferred_time=UNKNOWN/);
+  assert.match(instruction, /calendarAvailabilityVerified=false/);
+  assert.match(instruction, /never propose|never invent/i);
+});
+
+test('known purpose without time asks for user availability without proposing a slot', () => {
+  const qualification = deriveInstagramLeadQualification({
+    customerMessages: ['Şirket kuruluşu hakkında görüşmek istiyorum.'],
+  });
+  const response = generateContextualConversationalFallback({
+    text: 'Şirket kuruluşu hakkında görüşmek istiyorum.',
+    memory: { appointmentState: qualification },
+  });
+
+  assert.equal(qualification.purposeKnown, true);
+  assert.equal(qualification.preferredDate, null);
+  assert.equal(qualification.preferredTime, null);
+  assert.match(response, /gün|saat|zaman|uygun/i);
+  assert.doesNotMatch(response, /(?:bugün|yarın|18[:.]00|14[:.]00|saat\s+\d{1,2})/i);
+});
+
+test('new explicit meeting request does not inherit stale appointment preference', () => {
+  const historical = [
+    'Şirket kuruluşu hakkında görüşmek istiyorum. Yarın 18:00 uygunum.',
+    PHYSICAL_MEETING_REQUEST,
+  ];
+  const qualification = deriveInstagramLeadQualification({
+    customerMessages: historical,
+    currentMessage: PHYSICAL_MEETING_REQUEST,
+  });
+
+  assert.equal(qualification.purposeKnown, false);
+  assert.equal(qualification.requestedTime, null);
+  assert.equal(qualification.preferredDate, null);
+  assert.equal(qualification.preferredTime, null);
+});
+
+test('current user time overrides an older appointment preference', () => {
+  const qualification = deriveInstagramLeadQualification({
+    customerMessages: [
+      'Şirket kuruluşu hakkında görüşmek istiyorum. Yarın 18:00 uygunum.',
+      'yarın 14 gibi uygun olur',
+    ],
+    currentMessage: 'yarın 14 gibi uygun olur',
+  });
+
+  assert.equal(qualification.requestedTime, 'yarın 14 gibi');
+  assert.equal(qualification.preferredDate, 'yarın');
+  assert.equal(qualification.preferredTime, '14 gibi');
+  assert.equal(qualification.timePrecision, 'APPROXIMATE');
+});
+
 test('does not complete an Instagram appointment when the meeting purpose is unknown', () => {
   const qualification = deriveInstagramLeadQualification({
     contactPhone: CONTACT_PHONE,
@@ -96,7 +168,11 @@ test('Vertex timeout failover sends the same appointment context to OpenAI', asy
     recordFailure: () => {},
     recordSuccess: () => {},
   };
-  const systemInstruction = 'APPOINTMENT STATE: intent=true; missing=meeting_reason';
+  const systemInstruction = [
+    'APPOINTMENT STATE: intent=true; missing=meeting_reason',
+    'preferred_date=UNKNOWN; preferred_time=UNKNOWN; calendarAvailabilityVerified=false',
+    'When date/time are UNKNOWN, never propose or invent a slot.',
+  ].join('\n');
   const conversationHistory = [{ role: 'user', content: 'yarin 14 gibi uygun olur' }];
   const geminiProvider = {
     generateContent: async (request) => {
@@ -133,4 +209,6 @@ test('Vertex timeout failover sends the same appointment context to OpenAI', asy
   assert.equal(calls[1].request.messages[0].content, systemInstruction);
   assert.match(JSON.stringify(calls[0].request), /yarin 14 gibi uygun olur/);
   assert.match(JSON.stringify(calls[1].request), /yarin 14 gibi uygun olur/);
+  assert.match(JSON.stringify(calls[1].request), /calendarAvailabilityVerified=false/);
+  assert.match(JSON.stringify(calls[1].request), /never propose or invent a slot/i);
 });

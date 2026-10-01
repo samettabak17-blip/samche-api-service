@@ -145,17 +145,20 @@ function isQualificationDetail(content = '') {
   return meaningful.length >= 10;
 }
 
-export function deriveInstagramLeadQualification({ customerMessages = [], contactName = null, contactPhone = null } = {}) {
-  const contents = customerMessages
+export function deriveInstagramLeadQualification({ customerMessages = [], currentMessage = null, contactName = null, contactPhone = null } = {}) {
+  const historicalContents = customerMessages
     .map((message) => typeof message === 'string' ? message : message?.content)
     .map((content) => String(content || '').trim())
     .filter(Boolean);
+  const currentTurn = typeof currentMessage === 'string' ? currentMessage.trim() : '';
+  const startsNewAppointmentRequest = Boolean(currentTurn && hasHighIntentAppointmentSignals(currentTurn));
+  const contents = startsNewAppointmentRequest ? [currentTurn] : historicalContents;
   const combined = contents.join('\n');
   const detailCandidates = contents.filter(isQualificationDetail);
   const structuredRequirement = detailCandidates.at(-1)?.slice(0, 240) || null;
   const phone = extractPhoneNumberFromText(combined) || contactPhone || null;
   const customerName = extractCustomerNameFromText(combined) || contactName || null;
-  const requestedTime = extractMeetingTimePreference(combined);
+  const requestedTime = extractMeetingTimePreference(currentTurn) || extractMeetingTimePreference(combined);
   const timezone = /(?:dubai|bae|uae)(?:\s+saati)?/iu.test(combined)
     ? 'Asia/Dubai'
     : /(?:türkiye|turkiye)(?:\s+saati)?/iu.test(combined)
@@ -193,6 +196,8 @@ export function deriveInstagramLeadQualification({ customerMessages = [], contac
     businessActivity: structuredRequirement,
     structuredRequirement,
     calendarConfirmed: false,
+    calendarAvailabilityVerified: false,
+    timeSource: requestedTime ? 'USER_PROVIDED_PREFERENCE' : 'NONE',
     customerMessageCount: contents.length,
     missing,
     notificationLlmCalls: 0,

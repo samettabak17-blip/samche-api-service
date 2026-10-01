@@ -227,7 +227,11 @@ function resolveInstagramAppointmentState({ rawMessages = [], currentText = '', 
   if (currentText && !messages.some((message) => message?.sender_type === 'CUSTOMER' && message?.content === currentText)) {
     messages.push({ sender_type: 'CUSTOMER', content: currentText });
   }
-  return deriveInstagramLeadQualification({ customerMessages: messages, contactPhone });
+  return deriveInstagramLeadQualification({
+    customerMessages: messages,
+    currentMessage: currentText,
+    contactPhone,
+  });
 }
 
 export function extractReliableCustomerName(rawDisplayName) {
@@ -425,9 +429,12 @@ export function generateContextualConversationalFallback({ text = '', conversati
   const isMediaOnly = isMediaOnlyInbound(cleanText);
   const appointmentState = memory.appointmentState;
   const sharedContentContext = memory.sharedContentContext;
-  const appointmentContinuation = Boolean(appointmentState?.hasHighIntent && (hasMeeting || requestedTime));
+  const appointmentPurposeUnknown = Boolean(appointmentState?.hasHighIntent && !appointmentState?.purposeKnown);
 
-  if (!isGreeting && !isMediaOnly && appointmentContinuation && appointmentState.missing?.includes('MEETING_PURPOSE')) {
+  if (!isGreeting && !isMediaOnly && appointmentPurposeUnknown && appointmentState.missing?.includes('MEETING_PURPOSE')) {
+    if (!requestedTime) {
+      return 'Görüşmenin hangi konu veya amaç hakkında olacağını paylaşabilir misiniz?';
+    }
     const date = appointmentState.preferredDate || 'uygun olduğunuz gün';
     const timeMatch = appointmentState.preferredTime?.match(/^(\d{1,2})(?::(\d{2})|\.(\d{2}))?(?:\s*(?:gibi|civarı|civari|around|about))?$/i);
     const normalizedTime = timeMatch
@@ -667,6 +674,12 @@ export function buildStructuredMemoryInstruction(memory = {}) {
       ? '- Qualification is incomplete while any required field is missing. Ask only for the missing field(s); do not close the appointment flow.'
       : null,
     memory.appointmentState?.hasHighIntent ? '- A request/preference is not a confirmed calendar appointment. Never claim confirmation without a real calendar result.' : null,
+    memory.appointmentState?.hasHighIntent
+      ? `- Slot contract: preferred_date=${memory.appointmentState.preferredDate || 'UNKNOWN'}, preferred_time=${memory.appointmentState.preferredTime || 'UNKNOWN'}, calendarAvailabilityVerified=${memory.appointmentState.calendarAvailabilityVerified === true ? 'true' : 'false'}, timeSource=${memory.appointmentState.timeSource || 'NONE'}`
+      : null,
+    memory.appointmentState?.hasHighIntent
+      ? '- SLOT INVENTION GUARD: If preferred date or preferred time is UNKNOWN and calendar availability is not verified, never propose, invent, assume, or claim a specific day, date, time, time range, appointment slot, or availability. Ask for the missing user-provided preference; if meeting purpose is also missing, ask for purpose first.'
+      : null,
     memory.sharedContentContext?.present ? '' : null,
     memory.sharedContentContext?.present ? memory.sharedContentContext.instruction : null,
     '',
