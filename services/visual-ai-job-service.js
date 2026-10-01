@@ -153,10 +153,14 @@ export async function enqueueVisualAiGenerationJob({
 export async function claimNextVisualAiGenerationJob(database, { leaseDurationSeconds = 300 } = {}) {
   if (!database?.query) throw new VisualAiJobError('DATABASE_UNAVAILABLE', 'Database is unavailable.');
   console.info('VISUAL_DEBUG_STAGE: job_claim_attempted', { timestamp: new Date().toISOString() });
+  console.info('VISUAL_DEBUG_STAGE: job_claim_query_started', {
+    timestamp: new Date().toISOString(),
+    leaseDurationSeconds,
+  });
   const result = await database.query(
     `WITH candidate AS (
        SELECT id FROM visual_ai_generation_jobs
-        WHERE status = 'PENDING' AND available_at <= CURRENT_TIMESTAMP
+        WHERE status = 'PENDING' AND (available_at IS NULL OR available_at <= CURRENT_TIMESTAMP + INTERVAL '5 seconds')
         ORDER BY created_at ASC FOR UPDATE SKIP LOCKED LIMIT 1
      ) UPDATE visual_ai_generation_jobs job
           SET status = 'PROCESSING', attempts = job.attempts + 1, locked_at = CURRENT_TIMESTAMP,
@@ -166,12 +170,41 @@ export async function claimNextVisualAiGenerationJob(database, { leaseDurationSe
   );
   const claimedJob = result.rows[0] ?? null;
   if (claimedJob) {
+    const tenantHash = crypto.createHash('sha256').update(String(claimedJob.tenant_id || '')).digest('hex').slice(0, 12);
     console.info('VISUAL_DEBUG_STAGE: job_claimed', {
       jobId: claimedJob.id,
+      tenantIdHash: tenantHash,
       tenantId: claimedJob.tenant_id,
-      conversationId: claimedJob.conversation_id,
-      targetResourceId: claimedJob.target_resource_id,
+      status: claimedJob.status,
+      attempts: claimedJob.attempts,
     });
+  } else {
+    try {
+      const pendingCheck = await database.query(
+        `SELECT id, tenant_id, status, attempts, available_at, locked_until
+           FROM visual_ai_generation_jobs
+          WHERE status IN ('PENDING', 'PROCESSING')
+          ORDER BY created_at DESC LIMIT 1`
+      );
+      const topJob = pendingCheck.rows?.[0] || null;
+      let noMatchReason = 'NO_PENDING_JOBS';
+      if (topJob) {
+        if (topJob.status === 'PROCESSING') noMatchReason = 'JOB_CURRENTLY_LOCKED_PROCESSING';
+        else if (topJob.available_at && new Date(topJob.available_at) > new Date()) noMatchReason = 'JOB_AVAILABLE_AT_IN_FUTURE';
+      }
+      const topTenantHash = topJob ? crypto.createHash('sha256').update(String(topJob.tenant_id || '')).digest('hex').slice(0, 12) : null;
+      console.info('VISUAL_DEBUG_STAGE: job_claim_no_match_reason', {
+        reason: noMatchReason,
+        ...(topJob ? {
+          jobId: topJob.id,
+          tenantIdHash: topTenantHash,
+          status: topJob.status,
+          attempts: topJob.attempts,
+        } : {}),
+      });
+    } catch {
+      console.info('VISUAL_DEBUG_STAGE: job_claim_no_match_reason', { reason: 'NO_PENDING_JOBS' });
+    }
   }
   return claimedJob;
 }

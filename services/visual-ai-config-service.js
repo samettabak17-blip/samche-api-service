@@ -13,14 +13,19 @@ export class VisualAiJobError extends Error {
 export function computeVisualAiIdempotencyKey({
   tenantId,
   conversationId,
+  messageId = null,
   targetResourceId,
   referenceResourceId = null,
   referenceUrl = null,
   promptInstruction,
 }) {
-  return crypto.createHash('sha256')
+  const hash = crypto.createHash('sha256')
     .update(String(tenantId || ''))
-    .update(String(conversationId || ''))
+    .update(String(conversationId || ''));
+  if (messageId) {
+    hash.update(String(messageId));
+  }
+  return hash
     .update(String(targetResourceId || ''))
     .update(String(referenceResourceId || ''))
     .update(String(referenceUrl || ''))
