@@ -330,7 +330,14 @@ export async function processVisualAiGenerationJob({ database, storage, job, vis
         else for await (const chunk of value) chunks.push(Buffer.from(chunk));
         const buffer = Buffer.concat(chunks);
         if (!buffer.length) throw new VisualAiJobError('CATALOG_MEDIA_UNAVAILABLE', 'Catalog reference image is empty.');
-        referenceImages.push({ buffer, mimeType: media.mime_type, originalFilename: media.original_filename, mediaId: media.id, entityId: catalogReference.entity.id });
+        referenceImages.push({
+          buffer,
+          mimeType: media.mime_type,
+          originalFilename: media.original_filename,
+          mediaId: media.id,
+          entityId: catalogReference.entity.id,
+          sourceId: catalogReference.entity.source_id || job.grounding_context?.entity?.sourceId || null,
+        });
       }
     }
     const sourceImages = [targetImage];
@@ -343,7 +350,10 @@ export async function processVisualAiGenerationJob({ database, storage, job, vis
         type: catalogReference.entity.entity_type,
         description: catalogReference.entity.description,
         attributes: catalogReference.entity.attributes || {},
+        sourceId: catalogReference.entity.source_id || job.grounding_context?.entity?.sourceId || null,
+        externalCode: catalogReference.entity.external_code || job.grounding_context?.entity?.externalCode || null,
       },
+      tenantKnowledgeSource: catalogReference.entity.source_id || job.grounding_context?.catalog?.sourceId || null,
     } : job.grounding_context;
     const groundedInstruction = buildGroundedVisualInstruction({
       instruction: job.prompt_instruction,

@@ -347,6 +347,8 @@ export function buildGroundedVisualInstruction({ instruction, groundingContext =
     groundingContext.entity
   );
 
+  const productName = groundingContext.entity?.name || groundingContext.productName || null;
+
   if (groundingContext.entity?.name) {
     const entityLines = [
       `[Referenced Product/Entity: ${groundingContext.entity.name}${groundingContext.entity.type ? ` (${groundingContext.entity.type})` : ''}${groundingContext.entity.description ? ` - ${groundingContext.entity.description}` : ''}]`,
@@ -361,14 +363,18 @@ export function buildGroundedVisualInstruction({ instruction, groundingContext =
   }
 
   if (hasCatalogGrounding) {
+    const labelText = productName ? `Product: ${productName}` : 'Product: Catalog Item';
     sections.push(
       '[Catalog Grounding & Room Preservation Contract]\n' +
-      '- Keep the original room unchanged. Preserve the exact camera angle, perspective, room geometry, walls, windows, floor, and lighting from the customer room image.\n' +
-      '- Use only the provided catalog product reference.\n' +
-      '- Only visualize the selected product in this room.\n' +
-      '- Do not create a new product.\n' +
+      '- Source of Truth Priority:\n' +
+      '  * PRODUCT: Approved catalog product reference image is the sole source of truth for the product identity, shape, pattern, colors, textures, materials, and visual details.\n' +
+      '  * ENVIRONMENT: Customer uploaded image is the sole source of truth for room geometry, camera angle, perspective, walls, windows, floor, lighting, and spatial environment.\n' +
+      '- Product Identity Lock: The generated image must strictly preserve the exact product identity, pattern, colors, materials, and visual characteristics from the catalog reference. Do not redesign the product, change its colors, simplify details, or replace it with a similar or style-inspired item.\n' +
+      '- Approved Knowledge Catalog Only: Use only the provided approved catalog product reference from tenant knowledge.\n' +
+      '- Do not create a new product, alter product design, or invent unapproved variations.\n' +
       '- Do not introduce external brands (strictly no IKEA or third-party brand hallucination).\n' +
-      '- Do not redesign the room, alter architecture, or replace the entire scene.'
+      '- Room Preservation: Keep the original room unchanged. Preserve the exact camera angle, perspective, room geometry, walls, windows, floor, and lighting from the customer room image. Do not redesign the room, alter architecture, or replace the entire scene.\n' +
+      `- Visual Result Label: Add a small, elegant, non-intrusive label at the bottom corner reading "${labelText}". Place it neatly in the bottom corner without obstructing the product or room.`
     );
   }
 
@@ -579,6 +585,8 @@ export async function resolveVisualCatalogSelection({
     entity: {
       id: selected.id, name: selected.name, type: selected.entity_type,
       description: selected.description, attributes: selected.attributes || {},
+      sourceId: selected.source_id || null,
+      externalCode: selected.external_code || null,
     },
     mediaIds: media.map((item) => item.id),
   };

@@ -559,7 +559,7 @@ test('E2E TRACE: Turn 1 visual catalog generation delivers media, Turn 2 "Make i
 });
 
 
-test('REGRESSION TEST A: Catalog product A selected, provider payload contains entity and reference A, no unrelated brands allowed', async () => {
+test('TEST A: Approved catalog product selected - provider receives exact entity/reference image', async () => {
   const database = generationDatabase([catalogEntries[0]]);
   const queued = await visual.orchestrateWhatsAppVisualAiJob({
     database,
@@ -598,11 +598,30 @@ test('REGRESSION TEST A: Catalog product A selected, provider payload contains e
   assert.equal(providerPayload.referenceImages[0].entityId, selectedEntityId);
   assert.equal(providerPayload.groundingContext.entity.id, selectedEntityId);
   assert.match(providerPayload.instruction, /Approved Item Alpha/);
+  assert.match(providerPayload.instruction, /Product Identity Lock/);
   assert.match(providerPayload.instruction, /Do not introduce external brands/);
   assert.match(providerPayload.instruction, /no IKEA/);
 });
 
-test('REGRESSION TEST B: Room preservation prompt contract strictly enforces target room unchanged', async () => {
+test('TEST B: No approved catalog product exists - no visual generation and no invented product', async () => {
+  const emptyDb = generationDatabase([]);
+  const result = await visual.orchestrateWhatsAppVisualAiJob({
+    database: emptyDb,
+    tenantId,
+    conversationId,
+    targetResourceId: customerTargetId,
+    promptInstruction: 'Find a suitable product from your catalog and visualize it',
+    catalogRequested: true,
+    assistantId,
+  });
+
+  assert.equal(result.status, 'CATALOG_UNRESOLVED');
+  assert.equal(result.reason, 'NO_APPROVED_CATALOG');
+  assert.equal(emptyDb.state.inserted, 0, 'Must not insert visual generation job when catalog item is missing');
+  assert.doesNotMatch(result.acknowledgmentText, /preview is being created/i);
+});
+
+test('TEST C: Generated visual - small catalog product label exists in prompt contract', () => {
   const instruction = visual.buildGroundedVisualInstruction({
     instruction: 'Bu odaya en uygun kataloglardaki ürünü bul ve odamda tasarla',
     groundingContext: {
@@ -611,15 +630,16 @@ test('REGRESSION TEST B: Room preservation prompt contract strictly enforces tar
     },
   });
 
+  assert.match(instruction, /Product: Approved Item Alpha/);
+  assert.match(instruction, /Visual Result Label: Add a small, elegant, non-intrusive label at the bottom corner reading "Product: Approved Item Alpha"/);
   assert.match(instruction, /Keep the original room unchanged/);
   assert.match(instruction, /Preserve the exact camera angle, perspective, room geometry, walls, windows, floor, and lighting/);
-  assert.match(instruction, /Use only the provided catalog product reference/);
-  assert.match(instruction, /Only visualize the selected product in this room/);
+  assert.match(instruction, /Product Identity Lock/);
+  assert.match(instruction, /Approved Knowledge Catalog Only/);
   assert.match(instruction, /Do not create a new product/);
-  assert.match(instruction, /Do not redesign the room, alter architecture, or replace the entire scene/);
 });
 
-test('REGRESSION TEST C: Continuation turn "bunu yatağıma uygun hale getir" reuses same product and same room target', async () => {
+test('TEST D: Continuation - same approved product and same room reused', async () => {
   const priorCompletedJob = {
     id: jobId,
     target_resource_id: customerTargetId,
@@ -665,7 +685,7 @@ test('REGRESSION TEST C: Continuation turn "bunu yatağıma uygun hale getir" re
   assert.equal(database.state.job.grounding_context.catalog.entityId, selectedEntityId);
 });
 
-test('REGRESSION TEST D: Different product request switches entity while preserving the original room target', async () => {
+test('TEST E: Different product request - different approved entity selected while preserving room target', async () => {
   const priorCompletedJob = {
     id: jobId,
     target_resource_id: customerTargetId,
@@ -683,7 +703,7 @@ test('REGRESSION TEST D: Different product request switches entity while preserv
     database: conversationDatabase({ previousJob: priorCompletedJob }),
     tenantId,
     conversationId,
-    message: 'Farklı bir katalog ürünü seç ve odamda göster',
+    message: 'Try another model from your catalog',
   });
 
   assert.equal(req.state, 'READY_FOR_GENERATION');
