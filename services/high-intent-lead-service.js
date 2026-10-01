@@ -84,23 +84,41 @@ export function extractCustomerNameFromText(text = '') {
 export function extractMeetingTimePreference(text = '') {
   if (typeof text !== 'string') return null;
 
-  // Match full day + time combinations: e.g. "yarın 15:00", "pazartesi 14:00", "bugün 18:00", "yarın Dubai saatiyle 15:00", "Salı saat 14:00 Dubai saati"
-  const fullMatch = text.match(/(?:yarın|bugün|pazartesi|salı|sali|çarşamba|carsamba|perşembe|persembe|cuma|cumartesi|pazar|haftaya)(?:\s+(?:günü|öğleden\s+sonra|sabah|akşam|Dubai saatiyle|Dubai saati|Türkiye saatiyle|saat))*\s+(?:\d{1,2}[:.]\d{2})(?:\s+(?:Dubai saatiyle|Dubai saati|Türkiye saatiyle|TSI))?/i);
+  // Match full day + exact or approximate time combinations.
+  const fullMatch = text.match(/(?:yarın|yarin|bugün|bugun|pazartesi|salı|sali|çarşamba|carsamba|perşembe|persembe|cuma|cumartesi|pazar|haftaya)(?:\s+(?:günü|öğleden\s+sonra|sabah|akşam|Dubai saatiyle|Dubai saati|Türkiye saatiyle|saat|tam))*\s+(?:\d{1,2}(?::\d{2})?)(?:\s*(?:gibi|civarı|civari|around|about))?(?:\s+(?:Dubai saatiyle|Dubai saati|Türkiye saatiyle|TSI))?/i);
   if (fullMatch) return fullMatch[0].trim();
 
-  // Match time with saat prefix: e.g. "saat 18:00", "saat 14"
-  const saatMatch = text.match(/saat\s+\d{1,2}(?::\d{2})?(?:\s+(?:Dubai saatiyle|Dubai saati|Türkiye saatiyle|TSI))?/i);
+  // Match time with saat prefix: e.g. "saat 18:00", "saat 14 gibi"
+  const saatMatch = text.match(/saat\s+\d{1,2}(?::\d{2})?(?:\s*(?:gibi|civarı|civari|around|about))?(?:\s+(?:Dubai saatiyle|Dubai saati|Türkiye saatiyle|TSI))?/i);
   if (saatMatch) return saatMatch[0].trim();
 
-  // Match standalone HH:MM time: e.g. "18:00", "14.00"
-  const timeMatch = text.match(/\b\d{1,2}[:.]\d{2}\b(?:\s+(?:Dubai saatiyle|Dubai saati|Türkiye saatiyle|TSI))?/i);
+  // Match standalone exact or approximate time: e.g. "18:00", "14.00", "14 gibi"
+  const timeMatch = text.match(/(?:\b\d{1,2}[:.]\d{2}\b|\b\d{1,2}\b(?=\s*(?:gibi|civarı|civari|around|about)))(?:\s*(?:gibi|civarı|civari|around|about))?(?:\s+(?:Dubai saatiyle|Dubai saati|Türkiye saatiyle|TSI))?/i);
   if (timeMatch) return timeMatch[0].trim();
 
   // Match days or dates without specific time: e.g. "yarın", "bugün", "pazartesi"
-  const dayMatch = text.match(/(?:yarın|pazartesi|salı|sali|çarşamba|carsamba|perşembe|persembe|cuma|cumartesi|pazar|bugün|haftaya|\d{1,2}\s+(?:ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık))/i);
+  const dayMatch = text.match(/(?:yarın|yarin|pazartesi|salı|sali|çarşamba|carsamba|perşembe|persembe|cuma|cumartesi|pazar|bugün|bugun|haftaya|\d{1,2}\s+(?:ocak|şubat|mart|nisan|mayıs|haziran|temmuz|ağustos|eylül|ekim|kasım|aralık))/i);
   if (dayMatch) return dayMatch[0].trim();
 
   return null;
+}
+
+function extractPreferredDate(requestedTime = '') {
+  const match = String(requestedTime || '').match(/(?:yarın|yarin|bugün|bugun|pazartesi|salı|sali|çarşamba|carsamba|perşembe|persembe|cuma|cumartesi|pazar|haftaya)/i);
+  if (!match?.[0]) return null;
+  return /^yarin$/i.test(match[0]) ? 'yarın' : /^bugun$/i.test(match[0]) ? 'bugün' : match[0];
+}
+
+function extractPreferredTime(requestedTime = '') {
+  const match = String(requestedTime || '').match(/\b\d{1,2}(?::\d{2}|\.\d{2})?\b(?:\s*(?:gibi|civarı|civari|around|about))?/i);
+  return match?.[0] || null;
+}
+
+function resolveTimePrecision(requestedTime = '') {
+  if (!requestedTime) return null;
+  return /(?:gibi|civarı|civari|around|about)/i.test(requestedTime)
+    ? 'APPROXIMATE'
+    : 'EXACT_PREFERENCE';
 }
 
 export function inferRequestedService(text = '') {
@@ -145,21 +163,36 @@ export function deriveInstagramLeadQualification({ customerMessages = [], contac
       : /(?:utc|gmt)/iu.test(combined) ? 'UTC' : null;
   const serviceRequested = inferRequestedService(combined);
   const hasHighIntent = hasHighIntentAppointmentSignals(combined);
+  const purposeKnown = hasConcreteBusinessRequirement(combined);
+  const meetingReason = purposeKnown ? structuredRequirement : null;
+  const serviceInterest = purposeKnown ? serviceRequested : null;
+  const preferredDate = extractPreferredDate(requestedTime);
+  const preferredTime = extractPreferredTime(requestedTime);
+  const timePrecision = resolveTimePrecision(requestedTime);
   const missing = [];
 
+  if (!purposeKnown) missing.push('MEETING_PURPOSE');
   if (!phone) missing.push('CUSTOMER_PHONE');
   if (!requestedTime) missing.push('MEETING_AVAILABILITY');
 
   return {
     hasHighIntent,
-    complete: hasHighIntent && Boolean(phone && requestedTime),
+    complete: hasHighIntent && purposeKnown && Boolean(phone && requestedTime),
+    status: hasHighIntent && purposeKnown && Boolean(phone && requestedTime) ? 'READY_FOR_REQUEST' : 'COLLECTING',
+    purposeKnown,
+    meetingReason,
+    serviceInterest,
     customerName,
     phone,
     requestedTime,
+    preferredDate,
+    preferredTime,
+    timePrecision,
     timezone,
     serviceRequested,
     businessActivity: structuredRequirement,
     structuredRequirement,
+    calendarConfirmed: false,
     customerMessageCount: contents.length,
     missing,
     notificationLlmCalls: 0,

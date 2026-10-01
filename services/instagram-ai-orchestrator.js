@@ -23,6 +23,7 @@ import {
   extractVisaCount,
   extractShareholderCount,
   extractCustomerNameFromText,
+  deriveInstagramLeadQualification,
 } from './high-intent-lead-service.js';
 
 const INSTAGRAM_BEHAVIORAL_CHANNEL_RULES_LIMIT = 80_000;
@@ -190,6 +191,29 @@ function logInstagramRuntimeContextDiagnostics({ systemInstruction, persona, kno
     ` tenantContextLength=${tenantContext.length}` +
     ` activeConfiguration=${activeConfigurationId}`,
   );
+}
+
+function logInstagramAppointmentStateDiagnostics({ appointmentState }) {
+  if (!appointmentState?.hasHighIntent) return;
+  const missingFields = Array.isArray(appointmentState.missing) ? appointmentState.missing.join(',') : 'none';
+  console.info(
+    `APPOINTMENT_STATE channel=INSTAGRAM` +
+    ` intent=${appointmentState.hasHighIntent ? 'true' : 'false'}` +
+    ` purposeKnown=${appointmentState.purposeKnown ? 'true' : 'false'}` +
+    ` dateKnown=${appointmentState.preferredDate ? 'true' : 'false'}` +
+    ` timeKnown=${appointmentState.preferredTime ? 'true' : 'false'}` +
+    ` timePrecision=${appointmentState.timePrecision || 'NONE'}` +
+    ` missingFields=${missingFields}` +
+    ` status=${appointmentState.status || 'COLLECTING'}`,
+  );
+}
+
+function resolveInstagramAppointmentState({ rawMessages = [], currentText = '', contactPhone = null } = {}) {
+  const messages = [...(Array.isArray(rawMessages) ? rawMessages : [])];
+  if (currentText && !messages.some((message) => message?.sender_type === 'CUSTOMER' && message?.content === currentText)) {
+    messages.push({ sender_type: 'CUSTOMER', content: currentText });
+  }
+  return deriveInstagramLeadQualification({ customerMessages: messages, contactPhone });
 }
 
 export function extractReliableCustomerName(rawDisplayName) {
@@ -385,6 +409,22 @@ export function generateContextualConversationalFallback({ text = '', conversati
   const isGreeting = isGreetingOnly(cleanText);
   const hasMeeting = hasCurrentTurnMeetingIntent(cleanText);
   const isMediaOnly = isMediaOnlyInbound(cleanText);
+  const appointmentState = memory.appointmentState;
+  const appointmentContinuation = Boolean(appointmentState?.hasHighIntent && (hasMeeting || requestedTime));
+
+  if (!isGreeting && !isMediaOnly && appointmentContinuation && appointmentState.missing?.includes('MEETING_PURPOSE')) {
+    const date = appointmentState.preferredDate || 'uygun olduğunuz gün';
+    const timeMatch = appointmentState.preferredTime?.match(/^(\d{1,2})(?::(\d{2})|\.(\d{2}))?(?:\s*(?:gibi|civarı|civari|around|about))?$/i);
+    const normalizedTime = timeMatch
+      ? `${timeMatch[1].padStart(2, '0')}:${timeMatch[2] || timeMatch[3] || '00'}`
+      : appointmentState.preferredTime;
+    const time = normalizedTime
+      ? (appointmentState.timePrecision === 'APPROXIMATE'
+        ? `${normalizedTime.replace(/\s*(?:gibi|civarı|civari|around|about)/i, '')} civarı`
+        : normalizedTime)
+      : 'uygun olduğunuz saat';
+    return `${date} ${time} tercihinizi not ettim. Görüşmenin hangi konu veya amaç hakkında olacağını da paylaşabilir misiniz?`;
+  }
 
   // 0. If customer sends ONLY media without written text (Case 2):
   if (isMediaOnly) {
@@ -573,11 +613,14 @@ export async function resolveDurableConversationMemory({
  * Contains durable facts, topic continuity rules, current-turn intent priority, and strict anti-re-asking constraints.
  */
 export function buildStructuredMemoryInstruction(memory = {}) {
+  const appointmentPurposeUnknown = memory.appointmentState?.hasHighIntent && !memory.appointmentState?.purposeKnown;
   const lines = [
     'DURABLE CONVERSATION CONTEXT & PERSISTED CRM FACTS:',
-    `- Active Topic / Context: ${memory.serviceRequested || 'Company Formation & Consultancy (UAE / Dubai)'}`,
+    `- Active Topic / Context: ${memory.serviceRequested || (appointmentPurposeUnknown ? 'Appointment request (purpose unknown)' : 'Company Formation & Consultancy (UAE / Dubai)')}`,
     memory.customerName ? `- Customer Real Name: "${memory.customerName}"` : `- Customer Real Name: Unknown`,
-    memory.serviceRequested ? `- Service / Consultation Topic: "${memory.serviceRequested}"` : `- Service / Consultation Topic: General Consultancy`,
+    memory.serviceRequested
+      ? `- Service / Consultation Topic: "${memory.serviceRequested}"`
+      : appointmentPurposeUnknown ? '- Service / Consultation Topic: Unknown (meeting purpose required)' : '- Service / Consultation Topic: General Consultancy',
     memory.businessActivity ? `- Business Activity / Sector: "${memory.businessActivity}"` : `- Business Activity / Sector: Not specified`,
     memory.activityState === 'NOT_DECIDED' ? `- Business Activity State: NOT_DECIDED (Customer stated they have not decided on the sector yet. Accept this; do NOT ask again)` : null,
     memory.shareholderCount ? `- Shareholder / Partner Count: ${memory.shareholderCount}` : `- Shareholder / Partner Count: Not specified`,
@@ -585,6 +628,26 @@ export function buildStructuredMemoryInstruction(memory = {}) {
     memory.jurisdictionPreference ? `- Jurisdiction Preference: ${memory.jurisdictionPreference}` : `- Jurisdiction Preference: Free Zone (Default)`,
     memory.phone ? `- Contact Phone / WhatsApp: ${memory.phone}` : `- Contact Phone / WhatsApp: Missing`,
     memory.requestedTime ? `- Preferred Meeting Time: ${memory.requestedTime}${memory.timezone ? ` (${memory.timezone})` : ''}` : `- Preferred Meeting Time: Missing`,
+    memory.appointmentState?.hasHighIntent ? '' : null,
+    memory.appointmentState?.hasHighIntent ? 'APPOINTMENT QUALIFICATION STATE (CANONICAL, PROVIDER-INDEPENDENT):' : null,
+    memory.appointmentState?.hasHighIntent ? '- Appointment intent: TRUE' : null,
+    memory.appointmentState?.hasHighIntent
+      ? `- Known fields: ${[
+          memory.appointmentState.purposeKnown ? `meeting_reason=${memory.appointmentState.meetingReason}` : null,
+          memory.appointmentState.serviceInterest ? `service_interest=${memory.appointmentState.serviceInterest}` : null,
+          memory.appointmentState.preferredDate ? `preferred_date=${memory.appointmentState.preferredDate}` : null,
+          memory.appointmentState.preferredTime ? `preferred_time=${memory.appointmentState.preferredTime}` : null,
+          memory.appointmentState.timePrecision ? `time_precision=${memory.appointmentState.timePrecision}` : null,
+        ].filter(Boolean).join(', ') || 'none'}`
+      : null,
+    memory.appointmentState?.hasHighIntent
+      ? `- Missing required fields: ${memory.appointmentState.missing?.map((field) => field === 'MEETING_PURPOSE' ? 'meeting_reason' : field).join(', ') || 'none'}`
+      : null,
+    memory.appointmentState?.hasHighIntent ? `- Qualification status: ${memory.appointmentState.status || 'COLLECTING'}` : null,
+    memory.appointmentState?.hasHighIntent && memory.appointmentState.status !== 'READY_FOR_REQUEST'
+      ? '- Qualification is incomplete while any required field is missing. Ask only for the missing field(s); do not close the appointment flow.'
+      : null,
+    memory.appointmentState?.hasHighIntent ? '- A request/preference is not a confirmed calendar appointment. Never claim confirmation without a real calendar result.' : null,
     '',
     'CONVERSATION CONTINUITY & CURRENT-TURN INTENT RULES:',
     '1. CURRENT-TURN INTENT HAS HIGHEST PRIORITY:',
@@ -926,10 +989,15 @@ export async function orchestrateInstagramInboundAiResponse({
     conversation,
     rawMessages: historyData.rawMessages || [],
   });
+  const appointmentState = resolveInstagramAppointmentState({
+    rawMessages: historyData.rawMessages || [],
+    currentText: text,
+    contactPhone: durableMemory.phone,
+  });
 
   // Evaluate high-intent lead qualification in CRM (records PENDING consultation and leads in DB)
   let qualResult = null;
-  const isQualified = Boolean(durableMemory.phone && durableMemory.requestedTime);
+  const isQualified = appointmentState.complete;
   const isGreeting = isGreetingOnly(text);
   const hasMeetingIntent = hasCurrentTurnMeetingIntent(text);
 
@@ -946,7 +1014,8 @@ export async function orchestrateInstagramInboundAiResponse({
     }
   }
 
-  const structuredMemoryContext = buildStructuredMemoryInstruction(durableMemory);
+  logInstagramAppointmentStateDiagnostics({ appointmentState });
+  const structuredMemoryContext = buildStructuredMemoryInstruction({ ...durableMemory, appointmentState });
 
   // 7. Build System Instruction with Channel Presentation Rules and Structured Memory Context
   const rawCustomerName = durableMemory.customerName || conversation?.contact_display_name || conversation?.display_name || null;
@@ -1024,7 +1093,7 @@ export async function orchestrateInstagramInboundAiResponse({
         text,
         conversationHistory: history,
         model: assistantModel,
-        memory: durableMemory,
+        memory: { ...durableMemory, appointmentState },
       });
     }
 
@@ -1281,9 +1350,14 @@ export async function generateAndDeliverInstagramAssistantResponse({
       conversation,
       rawMessages: historyData.rawMessages || [],
     });
+    const appointmentState = resolveInstagramAppointmentState({
+      rawMessages: historyData.rawMessages || [],
+      currentText: textToAnswer,
+      contactPhone: durableMemory.phone,
+    });
 
     let qualResult = null;
-    const isQualified = Boolean(durableMemory.phone && durableMemory.requestedTime);
+    const isQualified = appointmentState.complete;
     const isGreeting = isGreetingOnly(textToAnswer);
     const hasMeetingIntent = hasCurrentTurnMeetingIntent(textToAnswer);
 
@@ -1300,7 +1374,8 @@ export async function generateAndDeliverInstagramAssistantResponse({
       }
     }
 
-    const structuredMemoryContext = buildStructuredMemoryInstruction(durableMemory);
+    logInstagramAppointmentStateDiagnostics({ appointmentState });
+    const structuredMemoryContext = buildStructuredMemoryInstruction({ ...durableMemory, appointmentState });
 
     const rawCustomerName = durableMemory.customerName || conversation?.contact_display_name || conversation?.display_name || null;
     const reliableCustomerName = extractReliableCustomerName(rawCustomerName);
@@ -1373,7 +1448,7 @@ export async function generateAndDeliverInstagramAssistantResponse({
           text: textToAnswer,
           conversationHistory: history,
           model: assistantModel,
-          memory: durableMemory,
+          memory: { ...durableMemory, appointmentState },
         });
       }
 
