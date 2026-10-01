@@ -45,7 +45,7 @@ const processedTgUpdates = new Set();
 // ============================================================================
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const SAMCHE_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`;
-const WP_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${GEMINI_API_KEY}`;
+const WP_GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro-preview:generateContent?key=${GEMINI_API_KEY}`;
 
 const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
