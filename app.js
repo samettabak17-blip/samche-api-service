@@ -4772,6 +4772,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
     try {
       if (isInstagramWebhookEvent(req.body)) {
         const events = extractInstagramInboundEvents(req.body);
+        console.info('INSTAGRAM_INGRESS_RECEIVED events_count=' + events.length);
         console.info('INSTAGRAM_WEBHOOK_PAYLOAD_SHAPE events_count=' + events.length);
         recordIngressObservation({
           event: 'INSTAGRAM_WEBHOOK_RECEIVED',
@@ -4782,12 +4783,14 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           is_echo: Boolean(events[0]?.isEcho),
         });
         for (const igEvent of events) {
+          console.info('INSTAGRAM_EVENT_CLASSIFIED type=' + (igEvent.rawEventType || 'message') + ' mid=' + (igEvent.messageId ? igEvent.messageId.slice(0, 8) : 'none'));
           if (igEvent.isEcho) {
             console.info('INSTAGRAM_ECHO_DROPPED mid=' + (igEvent.messageId ? igEvent.messageId.slice(0, 8) : 'unknown'));
             continue;
           }
           const igMid = igEvent.messageId;
           if (igMid && processedIgMessages.has(igMid)) {
+            console.info('INSTAGRAM_ORCHESTRATION_SUPPRESSED reason=DUPLICATE_MID mid=' + igMid.slice(0, 8));
             console.info('INSTAGRAM_DUPLICATE_RETRY_SKIPPED mid=' + igMid.slice(0, 8));
             continue;
           }
@@ -4808,6 +4811,13 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
               ensureConversationCrmIdentity,
               queueLeadQualification,
             });
+
+            if (inboundState?.integration?.tenant_id) {
+              console.info('INSTAGRAM_TENANT_RESOLVED tenant=' + String(inboundState.integration.tenant_id).slice(0, 8));
+            }
+            if (inboundState?.conversation?.id) {
+              console.info('INSTAGRAM_CONVERSATION_RESOLVED conversation=' + String(inboundState.conversation.id).slice(0, 8));
+            }
 
 
             recordIngressObservation({

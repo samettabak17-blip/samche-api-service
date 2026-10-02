@@ -1043,8 +1043,21 @@ export async function orchestrateInstagramInboundAiResponse({
     generateAiClassification,
   });
 
+  console.info(
+    `INSTAGRAM_AI_POLICY_RESOLVED decision=${activationEvaluation.decision}` +
+    ` reason=${activationEvaluation.reasonCode}` +
+    ` policy=${activationEvaluation.policy}` +
+    ` tenant=${tenantId ? tenantId.slice(0, 8) : 'unknown'}`
+  );
+
   if (!activationEvaluation.eligible) {
     const outcome = `SUPPRESSED_${activationEvaluation.reasonCode || 'UNKNOWN'}`;
+    console.info(
+      `INSTAGRAM_ORCHESTRATION_SUPPRESSED reason=${activationEvaluation.reasonCode || 'UNKNOWN'}` +
+      ` policy=${activationEvaluation.policy}` +
+      ` tenant=${tenantId ? tenantId.slice(0, 8) : 'unknown'}` +
+      ` conversation=${conversationId ? conversationId.slice(0, 8) : 'unknown'}`
+    );
     console.info(
       `INSTAGRAM_AI_TERMINAL_OUTCOME outcome=${outcome}` +
       ` tenant=${tenantId ? tenantId.slice(0, 8) : 'unknown'}` +
@@ -1060,6 +1073,12 @@ export async function orchestrateInstagramInboundAiResponse({
       activationEvaluation,
     };
   }
+
+  console.info(
+    `INSTAGRAM_ORCHESTRATION_STARTED tenant=${tenantId ? tenantId.slice(0, 8) : 'unknown'}` +
+    ` conversation=${conversationId ? conversationId.slice(0, 8) : 'unknown'}` +
+    ` inboundMid=${inboundState.customerMessage?.id ? String(inboundState.customerMessage.id).slice(0, 8) : 'none'}`
+  );
 
   // 4. Verify Latest Message is CUSTOMER and Unanswered (guards against duplicates/races)
   try {

@@ -109,9 +109,9 @@ export async function ensureConversationCrmIdentity(client, {
   const convOverride = conversation.ai_behavior_override;
 
   let effectiveOverride = 'AUTOMATIC';
-  if (contactOverride && contactOverride !== 'UNDECIDED') {
+  if (contactOverride === 'AI_ONLY' || contactOverride === 'NEVER_AI') {
     effectiveOverride = contactOverride;
-  } else if (convOverride && convOverride !== 'UNDECIDED') {
+  } else if (convOverride === 'AI_ONLY' || convOverride === 'NEVER_AI') {
     effectiveOverride = convOverride;
     await client.query(
       `UPDATE crm_contacts SET ai_behavior_override = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND tenant_id = $3`,
@@ -163,6 +163,17 @@ export async function ensureConversationCrmIdentity(client, {
       [tenantId]
     );
     defaultStageId = retryStage.rows[0]?.id ?? null;
+  }
+
+  if (!defaultStageId) {
+    const fallbackStage = await client.query(
+      `SELECT id FROM crm_pipeline_stages
+        WHERE tenant_id = $1
+        ORDER BY position ASC
+        LIMIT 1`,
+      [tenantId]
+    );
+    defaultStageId = fallbackStage.rows[0]?.id ?? null;
   }
 
   if (!defaultStageId) {

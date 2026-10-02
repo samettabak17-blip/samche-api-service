@@ -248,8 +248,8 @@ export async function upsertInstagramConversation(client, { tenantId, channelId,
 
   const result = await client.query(
     `INSERT INTO conversations
-      (tenant_id, channel_id, external_conversation_id, customer_external_id, last_activity_at)
-     VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+      (tenant_id, channel_id, external_conversation_id, customer_external_id, ai_behavior_override, last_activity_at)
+     VALUES ($1, $2, $3, $4, 'AUTOMATIC', CURRENT_TIMESTAMP)
      ON CONFLICT (channel_id, external_conversation_id)
      DO UPDATE SET last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
        WHERE conversations.tenant_id = EXCLUDED.tenant_id
@@ -391,6 +391,28 @@ export async function persistInstagramInbound({
     }
 
     // Insert canonical message into conversation_messages
+    const priorMsgCheck = await client.query(
+      `SELECT count(*)::int AS count FROM conversation_messages WHERE tenant_id = $1 AND conversation_id = $2`,
+      [tenantId, conversationId]
+    );
+    const priorCount = Number(priorMsgCheck.rows[0]?.count || 0);
+
+    // If conversation was on first-contact hold and receives a subsequent message,
+    // transition conversation to AUTOMATIC so canonical channel policy can evaluate
+    if (priorCount > 0 && conversation.ai_behavior_override === 'FIRST_CONTACT_HOLD') {
+      await client.query(
+        `UPDATE conversations
+            SET ai_behavior_override = 'AUTOMATIC',
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1 AND tenant_id = $2 AND ai_behavior_override = 'FIRST_CONTACT_HOLD'`,
+        [conversationId, tenantId]
+      );
+      conversation.ai_behavior_override = 'AUTOMATIC';
+      if (conversation.contact_ai_behavior_override === 'FIRST_CONTACT_HOLD') {
+        conversation.contact_ai_behavior_override = 'AUTOMATIC';
+      }
+    }
+
     const msgResult = await client.query(
       `INSERT INTO conversation_messages
         (tenant_id, conversation_id, sender_type, content, external_message_id, created_at)
