@@ -1011,15 +1011,14 @@ export async function orchestrateInstagramInboundAiResponse({
         );
         const row = contactCheck.rows?.[0];
         if (row) {
-          const effective = (row.contact_override && row.contact_override !== 'UNDECIDED')
+          const isExplicitOverride = (v) => v === 'AI_ONLY' || v === 'ALWAYS_AI' || v === 'NEVER_AI';
+          const effective = isExplicitOverride(row.contact_override)
             ? row.contact_override
-            : (row.conv_override && row.conv_override !== 'UNDECIDED')
+            : isExplicitOverride(row.conv_override)
             ? row.conv_override
-            : null;
-          if (effective) {
-            conversation.ai_behavior_override = effective;
-            conversation.contact_ai_behavior_override = effective;
-          }
+            : 'AUTOMATIC';
+          conversation.ai_behavior_override = effective;
+          conversation.contact_ai_behavior_override = effective;
         }
       } finally {
         if (isPool && typeof dbClient?.release === 'function') {
@@ -1279,6 +1278,14 @@ export async function orchestrateInstagramInboundAiResponse({
     const formattedResponse = formatInstagramDmResponse(sanitizedResponse);
 
     const durationMs = Date.now() - generationStartedAt;
+    console.info(
+      `INSTAGRAM_PROVIDER_COMPLETED` +
+      ` tenant=${tenantId ? tenantId.slice(0, 8) : 'unknown'}` +
+      ` conversation=${conversationId ? conversationId.slice(0, 8) : 'unknown'}` +
+      ` duration_ms=${durationMs}` +
+      ` fallback_used=${genResult.fallbackUsed ? '1' : '0'}` +
+      ` chars=${(formattedResponse || '').length}`
+    );
     console.info(
       `INSTAGRAM_AI_GENERATION` +
       ` tenant=${tenantId ? tenantId.slice(0, 8) : 'unknown'}` +

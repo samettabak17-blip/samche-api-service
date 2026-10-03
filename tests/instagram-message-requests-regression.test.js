@@ -548,3 +548,148 @@ test('TEST L: Appointment regression: natural qualification activates on meeting
   assert.equal(hasHighIntentAppointmentSignals('Yarın saat 14:00 için randevu alabilir miyim?'), true);
   assert.equal(hasHighIntentAppointmentSignals('Merhaba'), false);
 });
+
+// TEST M — Three independent new Instagram senders
+test('TEST M: Three independent new Instagram senders each get independent contact/conversation/AI processing', async () => {
+  const mockDb = createMockDb();
+  const senders = ['sender_alpha_1', 'sender_beta_2', 'sender_gamma_3'];
+  const outcomes = [];
+
+  for (const senderId of senders) {
+    const fakeHttp = {
+      async post(url, body) {
+        return { data: { recipient_id: senderId, message_id: `mid.out.${senderId}` } };
+      },
+    };
+
+    const inboundState = await persistInstagramInbound({
+      database: mockDb,
+      recipientId: pageIdA,
+      senderIgsid: senderId,
+      messageId: `mid.in.${senderId}`,
+      content: 'Dubai şirket kuruluşu hakkında bilgi rica ediyorum',
+    });
+
+    const outcome = await orchestrateInstagramInboundAiResponse({
+      database: mockDb,
+      inboundState,
+      senderIgsid: senderId,
+      text: 'Dubai şirket kuruluşu hakkında bilgi rica ediyorum',
+      http: fakeHttp,
+      generateAiResponse: async () => `Merhaba ${senderId}, size yardımcı olabilirim.`,
+      applyPacing: false,
+    });
+
+    outcomes.push({ senderId, inboundState, outcome });
+  }
+
+  assert.equal(outcomes.length, 3);
+  for (const o of outcomes) {
+    assert.equal(o.outcome.aiInvoked, true, `AI not invoked for ${o.senderId}`);
+    assert.equal(o.outcome.delivered, true, `Delivery failed for ${o.senderId}`);
+  }
+  assert.equal(mockDb.store.conversations.size, 3);
+  assert.equal(mockDb.store.contacts.size, 3);
+});
+
+// TEST N — Sender A cannot suppress Sender B/C
+test('TEST N: In-flight orchestration for Sender A never suppresses Sender B or Sender C', async () => {
+  const mockDb = createMockDb();
+  const fakeHttp = {
+    async post(url, body) {
+      return { data: { recipient_id: igsidCustomer2, message_id: 'mid.out.b' } };
+    },
+  };
+
+  const inboundA = await persistInstagramInbound({
+    database: mockDb,
+    recipientId: pageIdA,
+    senderIgsid: igsidCustomer1,
+    messageId: 'mid.in.a.flight',
+    content: 'Message A',
+  });
+
+  const inboundB = await persistInstagramInbound({
+    database: mockDb,
+    recipientId: pageIdA,
+    senderIgsid: igsidCustomer2,
+    messageId: 'mid.in.b.flight',
+    content: 'Message B',
+  });
+
+  assert.notEqual(inboundA.conversation.id, inboundB.conversation.id);
+
+  const outcomeB = await orchestrateInstagramInboundAiResponse({
+    database: mockDb,
+    inboundState: inboundB,
+    senderIgsid: igsidCustomer2,
+    text: 'Message B',
+    http: fakeHttp,
+    generateAiResponse: async () => 'Response to B',
+    applyPacing: false,
+  });
+
+  assert.equal(outcomeB.aiInvoked, true);
+  assert.equal(outcomeB.delivered, true);
+});
+
+// TEST O — Existing legacy FIRST_CONTACT_HOLD record
+test('TEST O: Legacy FIRST_CONTACT_HOLD record is normalized to AUTOMATIC and receives AI response under ALL_MESSAGES', async () => {
+  const mockDb = createMockDb();
+  const senderId = 'legacy_hold_sender_55';
+
+  const inboundState = await persistInstagramInbound({
+    database: mockDb,
+    recipientId: pageIdA,
+    senderIgsid: senderId,
+    messageId: 'mid.in.legacy',
+    content: 'Dubai şirket kuruluşu',
+  });
+
+  // Simulate existing DB conversation having legacy FIRST_CONTACT_HOLD
+  inboundState.conversation.ai_behavior_override = 'FIRST_CONTACT_HOLD';
+
+  const policyEval = await evaluateChannelAiActivationPolicy({
+    messageText: 'Dubai şirket kuruluşu',
+    conversation: inboundState.conversation,
+    channelConfig: { activation_policy: AI_ACTIVATION_MODES.ALL_MESSAGES },
+  });
+
+  assert.equal(policyEval.eligible, true);
+  assert.equal(policyEval.decision, 'ACTIVATED');
+  assert.equal(policyEval.reasonCode, 'POLICY_ALL_MESSAGES');
+});
+
+// TEST P — Meta outbound failure is surfaced and not falsely reported as AI suppression
+test('TEST P: Meta outbound failure is surfaced with failure code and not reported as AI suppression', async () => {
+  const mockDb = createMockDb();
+  const fakeFailingHttp = {
+    async post() {
+      const err = new Error('Graph API error: User is not reachable');
+      err.response = { status: 400, data: { error: { message: 'User is not reachable', code: 551 } } };
+      throw err;
+    },
+  };
+
+  const inboundState = await persistInstagramInbound({
+    database: mockDb,
+    recipientId: pageIdA,
+    senderIgsid: 'unreachable_user_77',
+    messageId: 'mid.in.fail.out',
+    content: 'Inquiry',
+  });
+
+  const outcome = await orchestrateInstagramInboundAiResponse({
+    database: mockDb,
+    inboundState,
+    senderIgsid: 'unreachable_user_77',
+    text: 'Inquiry',
+    http: fakeFailingHttp,
+    generateAiResponse: async () => 'AI reply',
+    applyPacing: false,
+  });
+
+  assert.equal(outcome.aiInvoked, true);
+  assert.equal(outcome.delivered, false);
+  assert.match(outcome.outcome, /DELIVERY_FAILED/);
+});

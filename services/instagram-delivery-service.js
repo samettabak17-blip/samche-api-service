@@ -225,6 +225,8 @@ export async function deliverInstagramText({
   const deliveredIds = [];
   let workingEndpoint = candidateEndpoints[0];
 
+  console.info(`INSTAGRAM_OUTBOUND_ATTEMPTED recipient=${cleanRecipientId.slice(0, 8)} chunks_count=${chunks.length}`);
+
   let i = 0;
   while (i < chunks.length) {
     const chunk = chunks[i];
@@ -272,6 +274,7 @@ export async function deliverInstagramText({
       sanitized.chunkIndex = i;
       sanitized.totalChunks = chunks.length;
       sanitized.deliveredProviderIds = [...deliveredIds];
+      console.warn(`INSTAGRAM_OUTBOUND_FAILED recipient=${cleanRecipientId.slice(0, 8)} status=${sanitized.status || 502} meta_code=${sanitized.metaErrorCode || 'none'} meta_subcode=${sanitized.metaErrorSubcode || 'none'} code=${sanitized.code}`);
       throw sanitized;
     }
 
@@ -285,6 +288,7 @@ export async function deliverInstagramText({
       error.chunkIndex = i;
       error.totalChunks = chunks.length;
       error.deliveredProviderIds = [...deliveredIds];
+      console.warn(`INSTAGRAM_OUTBOUND_FAILED recipient=${cleanRecipientId.slice(0, 8)} status=502 code=INSTAGRAM_PROVIDER_MESSAGE_ID_MISSING`);
       throw error;
     }
     if (!primaryProviderMessageId) primaryProviderMessageId = providerMessageId;
@@ -297,6 +301,8 @@ export async function deliverInstagramText({
 
     i++;
   }
+
+  console.info(`INSTAGRAM_OUTBOUND_SUCCEEDED recipient=${cleanRecipientId.slice(0, 8)} provider_mid=${primaryProviderMessageId || 'none'}`);
 
   const result = {
     delivery: 'SENT_TO_INSTAGRAM',

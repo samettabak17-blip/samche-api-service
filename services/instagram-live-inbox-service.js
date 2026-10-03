@@ -397,9 +397,9 @@ export async function persistInstagramInbound({
     );
     const priorCount = Number(priorMsgCheck.rows[0]?.count || 0);
 
-    // If conversation was on first-contact hold and receives a subsequent message,
+    // If conversation or contact was on first-contact hold,
     // transition conversation to AUTOMATIC so canonical channel policy can evaluate
-    if (priorCount > 0 && conversation.ai_behavior_override === 'FIRST_CONTACT_HOLD') {
+    if (conversation.ai_behavior_override === 'FIRST_CONTACT_HOLD') {
       await client.query(
         `UPDATE conversations
             SET ai_behavior_override = 'AUTOMATIC',
@@ -412,6 +412,8 @@ export async function persistInstagramInbound({
         conversation.contact_ai_behavior_override = 'AUTOMATIC';
       }
     }
+
+    console.info(`INSTAGRAM_IDENTITY_RESOLVED identity_hash=${conversation?.customer_external_id ? String(conversation.customer_external_id).slice(0, 16) : 'none'} source=${sourceKind}`);
 
     const msgResult = await client.query(
       `INSERT INTO conversation_messages
