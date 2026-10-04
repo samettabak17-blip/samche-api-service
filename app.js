@@ -4772,7 +4772,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
     try {
       if (isInstagramWebhookEvent(req.body)) {
         const events = extractInstagramInboundEvents(req.body);
-        console.info('INSTAGRAM_INGRESS_RECEIVED events_count=' + events.length);
+        console.info('INSTAGRAM_INGRESS_RECEIVED events_count=' + events.length + ' raw_recipient=' + (events[0]?.recipientId ? String(events[0].recipientId).slice(0, 8) : 'none'));
         console.info('INSTAGRAM_WEBHOOK_PAYLOAD_SHAPE events_count=' + events.length);
         recordIngressObservation({
           event: 'INSTAGRAM_WEBHOOK_RECEIVED',
@@ -4783,7 +4783,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
           is_echo: Boolean(events[0]?.isEcho),
         });
         for (const igEvent of events) {
-          console.info('INSTAGRAM_EVENT_CLASSIFIED type=' + (igEvent.rawEventType || 'message') + ' mid=' + (igEvent.messageId ? igEvent.messageId.slice(0, 8) : 'none'));
+          console.info('INSTAGRAM_EVENT_CLASSIFIED event_type=' + (igEvent.rawEventType || 'message') + ' is_echo=' + Boolean(igEvent.isEcho) + ' has_text=' + Boolean(igEvent.text) + ' attachments_count=' + igEvent.attachments.length + ' is_share=' + Boolean(igEvent.isShare));
           if (igEvent.isEcho) {
             console.info('INSTAGRAM_ECHO_DROPPED mid=' + (igEvent.messageId ? igEvent.messageId.slice(0, 8) : 'unknown'));
             continue;

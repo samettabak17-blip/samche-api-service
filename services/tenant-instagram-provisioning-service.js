@@ -976,7 +976,7 @@ export async function importTenantInstagramHistory({
         const contactRes = await convClient.query(
           `INSERT INTO crm_contacts
             (tenant_id, identity_kind, identity_hash, display_name, source, ai_behavior_override, created_at, updated_at)
-           VALUES ($1, 'EXTERNAL_CUSTOMER', $2, $3, 'INSTAGRAM', 'FIRST_CONTACT_HOLD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+           VALUES ($1, 'EXTERNAL_CUSTOMER', $2, $3, 'INSTAGRAM', 'AI_ONLY', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
            ON CONFLICT (tenant_id, identity_hash)
            DO UPDATE SET
              display_name = CASE
@@ -1035,7 +1035,7 @@ export async function importTenantInstagramHistory({
           const insertConvRes = await convClient.query(
             `INSERT INTO conversations
               (tenant_id, channel_id, contact_id, external_conversation_id, customer_external_id, status, handling_mode, handling_version, ai_behavior_override, created_at, updated_at, last_activity_at)
-             VALUES ($1, $2, $3, $4, $5, 'open', 'AI', 1, 'FIRST_CONTACT_HOLD', $6, $6, $6)
+             VALUES ($1, $2, $3, $4, $5, 'open', 'AI', 1, 'AI_ONLY', $6, $6, $6)
              ON CONFLICT (channel_id, external_conversation_id)
              DO UPDATE SET
                contact_id = COALESCE(conversations.contact_id, EXCLUDED.contact_id),

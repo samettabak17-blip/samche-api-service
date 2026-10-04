@@ -191,9 +191,9 @@ export async function importTenantInstagramHistory({
 
 
         const contact = contactRes.rows[0];
-        const contactOverride = contact.ai_behavior_override && contact.ai_behavior_override !== 'UNDECIDED'
+        const contactOverride = contact.ai_behavior_override && contact.ai_behavior_override !== 'UNDECIDED' && contact.ai_behavior_override !== 'FIRST_CONTACT_HOLD'
           ? contact.ai_behavior_override
-          : 'FIRST_CONTACT_HOLD';
+          : 'AI_ONLY';
 
         const targetChannelId = channel.channel_id || channel.id;
 

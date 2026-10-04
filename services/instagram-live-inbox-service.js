@@ -249,7 +249,7 @@ export async function upsertInstagramConversation(client, { tenantId, channelId,
   const result = await client.query(
     `INSERT INTO conversations
       (tenant_id, channel_id, external_conversation_id, customer_external_id, ai_behavior_override, last_activity_at)
-     VALUES ($1, $2, $3, $4, 'AUTOMATIC', CURRENT_TIMESTAMP)
+     VALUES ($1, $2, $3, $4, 'AI_ONLY', CURRENT_TIMESTAMP)
      ON CONFLICT (channel_id, external_conversation_id)
      DO UPDATE SET last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
        WHERE conversations.tenant_id = EXCLUDED.tenant_id
@@ -296,6 +296,11 @@ export async function persistInstagramInbound({
     const channelId = integration.channel_id;
     const sourceKind = (referral?.adId || referral?.source === 'ADS') ? 'INSTAGRAM_AD' : 'INSTAGRAM';
 
+    console.info(
+      `INSTAGRAM_TENANT_RESOLVED tenant=${tenantId ? String(tenantId).slice(0, 8) : 'unmapped'}` +
+      ` channel=${channelId ? String(channelId).slice(0, 8) : 'none'}`
+    );
+
     const conversation = await upsertInstagramConversation(client, {
       tenantId,
       channelId,
@@ -323,6 +328,11 @@ export async function persistInstagramInbound({
         }
       } catch {}
     }
+
+    console.info(
+      `INSTAGRAM_IDENTITY_RESOLVED sender_prefix=${senderIgsid ? String(senderIgsid).slice(0, 8) : 'none'}` +
+      ` has_display_name=${Boolean(resolvedDisplayName)}`
+    );
 
     // Resolve / establish canonical CRM identity for this contact
     const crmEnsureFn = typeof ensureConversationCrmIdentity === 'function'
@@ -352,6 +362,12 @@ export async function persistInstagramInbound({
         console.warn('INSTAGRAM_CRM_IDENTITY_WARN', crmErr?.message);
       }
     }
+
+    console.info(
+      `INSTAGRAM_CONVERSATION_RESOLVED conversation=${conversationId.slice(0, 8)}` +
+      ` ai_behavior=${conversation.ai_behavior_override || 'AI_ONLY'}` +
+      ` handling_mode=${conversation.handling_mode}`
+    );
 
 
 

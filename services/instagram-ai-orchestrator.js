@@ -1011,14 +1011,15 @@ export async function orchestrateInstagramInboundAiResponse({
         );
         const row = contactCheck.rows?.[0];
         if (row) {
-          const isExplicitOverride = (v) => v === 'AI_ONLY' || v === 'ALWAYS_AI' || v === 'NEVER_AI';
-          const effective = isExplicitOverride(row.contact_override)
+          const effective = (row.contact_override && row.contact_override !== 'UNDECIDED' && row.contact_override !== 'FIRST_CONTACT_HOLD')
             ? row.contact_override
-            : isExplicitOverride(row.conv_override)
+            : (row.conv_override && row.conv_override !== 'UNDECIDED' && row.conv_override !== 'FIRST_CONTACT_HOLD')
             ? row.conv_override
-            : 'AUTOMATIC';
-          conversation.ai_behavior_override = effective;
-          conversation.contact_ai_behavior_override = effective;
+            : 'AI_ONLY';
+          if (effective) {
+            conversation.ai_behavior_override = effective;
+            conversation.contact_ai_behavior_override = effective;
+          }
         }
       } finally {
         if (isPool && typeof dbClient?.release === 'function') {
@@ -1043,10 +1044,12 @@ export async function orchestrateInstagramInboundAiResponse({
   });
 
   console.info(
-    `INSTAGRAM_AI_POLICY_RESOLVED decision=${activationEvaluation.decision}` +
-    ` reason=${activationEvaluation.reasonCode}` +
+    `INSTAGRAM_AI_POLICY_RESOLVED tenant=${tenantId ? tenantId.slice(0, 8) : 'unknown'}` +
+    ` conversation=${conversationId ? conversationId.slice(0, 8) : 'unknown'}` +
+    ` override=${conversation.ai_behavior_override || 'AI_ONLY'}` +
     ` policy=${activationEvaluation.policy}` +
-    ` tenant=${tenantId ? tenantId.slice(0, 8) : 'unknown'}`
+    ` decision=${activationEvaluation.decision}` +
+    ` reason=${activationEvaluation.reasonCode || 'none'}`
   );
 
   if (!activationEvaluation.eligible) {
@@ -1122,6 +1125,12 @@ export async function orchestrateInstagramInboundAiResponse({
   // 5. Resolve Active Persona and Knowledge context
   let persona = null;
   let knowledge = null;
+
+  console.info(
+    `INSTAGRAM_ORCHESTRATION_STARTED conversation=${conversationId ? conversationId.slice(0, 8) : 'unknown'}` +
+    ` model=${assistantModel || 'default'}` +
+    ` triggerType=${triggerType}`
+  );
 
   try {
     persona = await resolveTenantRuntimePersona({
@@ -1279,12 +1288,11 @@ export async function orchestrateInstagramInboundAiResponse({
 
     const durationMs = Date.now() - generationStartedAt;
     console.info(
-      `INSTAGRAM_PROVIDER_COMPLETED` +
-      ` tenant=${tenantId ? tenantId.slice(0, 8) : 'unknown'}` +
-      ` conversation=${conversationId ? conversationId.slice(0, 8) : 'unknown'}` +
-      ` duration_ms=${durationMs}` +
-      ` fallback_used=${genResult.fallbackUsed ? '1' : '0'}` +
-      ` chars=${(formattedResponse || '').length}`
+      `INSTAGRAM_PROVIDER_COMPLETED conversation=${conversationId ? conversationId.slice(0, 8) : 'unknown'}` +
+      ` model=${genResult.model || assistantModel || 'default'}` +
+      ` chars=${(formattedResponse || '').length}` +
+      ` durationMs=${durationMs}` +
+      ` fallbackUsed=${genResult.fallbackUsed ? '1' : '0'}`
     );
     console.info(
       `INSTAGRAM_AI_GENERATION` +

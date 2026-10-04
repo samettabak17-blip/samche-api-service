@@ -18,12 +18,25 @@ function getDeliveryDedupeKey(recipientId, text) {
   return `${recipientId}:${hash}`;
 }
 
-function sanitizeMetaError(error) {
+export function sanitizeMetaError(error) {
   const metaError = error?.response?.data?.error;
-  const status = error?.response?.status || 502;
+  const status = error?.response?.status || (error instanceof InstagramDeliveryError ? error.status : 502);
   const message = metaError?.message || error?.message || 'Instagram delivery failed';
-  const code = metaError?.code ? `META_IG_ERROR_${metaError.code}` : (error?.code || 'INSTAGRAM_DELIVERY_FAILED');
-  return new InstagramDeliveryError(code, message, status >= 500 ? 502 : 409);
+  const metaCode = metaError?.code ?? null;
+  const metaSubcode = metaError?.error_subcode ?? null;
+  const code = metaCode ? `META_IG_ERROR_${metaCode}` : (error?.code || 'INSTAGRAM_DELIVERY_FAILED');
+  const reasonCategory = metaCode === 10 || metaCode === 200 || metaCode === 190 ? 'AUTH_PERMISSION'
+    : metaCode === 100 ? 'INVALID_PARAMETER'
+    : metaCode === 10900 ? 'MESSAGE_REQUEST_NOT_PERMITTED'
+    : metaCode === 4 ? 'RATE_LIMITED'
+    : (status >= 500 ? 'SERVER_ERROR' : 'DELIVERY_REJECTED');
+
+  const deliveryError = new InstagramDeliveryError(code, message, status >= 500 ? 502 : 409);
+  deliveryError.metaCode = metaCode;
+  deliveryError.metaSubcode = metaSubcode;
+  deliveryError.reasonCategory = reasonCategory;
+  deliveryError.status = status;
+  return deliveryError;
 }
 
 export function resolveInstagramDeliveryTarget({ authMode = null, instagramAccountId = null, pageId = 'me', instagramUserId = null } = {}) {
@@ -225,7 +238,12 @@ export async function deliverInstagramText({
   const deliveredIds = [];
   let workingEndpoint = candidateEndpoints[0];
 
-  console.info(`INSTAGRAM_OUTBOUND_ATTEMPTED recipient=${cleanRecipientId.slice(0, 8)} chunks_count=${chunks.length}`);
+  console.info(
+    `INSTAGRAM_OUTBOUND_ATTEMPTED recipient=${cleanRecipientId.slice(0, 8)}` +
+    ` chars=${String(content || '').length}` +
+    ` chunks=${chunks.length}` +
+    ` endpoint=${authMode === 'INSTAGRAM_LOGIN' ? 'ig_messages' : 'fb_messages'}`
+  );
 
   let i = 0;
   while (i < chunks.length) {
@@ -274,7 +292,14 @@ export async function deliverInstagramText({
       sanitized.chunkIndex = i;
       sanitized.totalChunks = chunks.length;
       sanitized.deliveredProviderIds = [...deliveredIds];
-      console.warn(`INSTAGRAM_OUTBOUND_FAILED recipient=${cleanRecipientId.slice(0, 8)} status=${sanitized.status || 502} meta_code=${sanitized.metaErrorCode || 'none'} meta_subcode=${sanitized.metaErrorSubcode || 'none'} code=${sanitized.code}`);
+      console.error(
+        `INSTAGRAM_OUTBOUND_FAILED recipient=${cleanRecipientId.slice(0, 8)}` +
+        ` code=${sanitized.code}` +
+        ` status=${sanitized.status || 502}` +
+        ` meta_code=${sanitized.metaCode || 'none'}` +
+        ` meta_subcode=${sanitized.metaSubcode || 'none'}` +
+        ` reason_category=${sanitized.reasonCategory || 'DELIVERY_FAILURE'}`
+      );
       throw sanitized;
     }
 
@@ -288,7 +313,11 @@ export async function deliverInstagramText({
       error.chunkIndex = i;
       error.totalChunks = chunks.length;
       error.deliveredProviderIds = [...deliveredIds];
-      console.warn(`INSTAGRAM_OUTBOUND_FAILED recipient=${cleanRecipientId.slice(0, 8)} status=502 code=INSTAGRAM_PROVIDER_MESSAGE_ID_MISSING`);
+      console.error(
+        `INSTAGRAM_OUTBOUND_FAILED recipient=${cleanRecipientId.slice(0, 8)}` +
+        ` code=${error.code}` +
+        ` status=502 meta_code=none meta_subcode=none reason_category=DELIVERY_FAILURE`
+      );
       throw error;
     }
     if (!primaryProviderMessageId) primaryProviderMessageId = providerMessageId;
@@ -302,7 +331,10 @@ export async function deliverInstagramText({
     i++;
   }
 
-  console.info(`INSTAGRAM_OUTBOUND_SUCCEEDED recipient=${cleanRecipientId.slice(0, 8)} provider_mid=${primaryProviderMessageId || 'none'}`);
+  console.info(
+    `INSTAGRAM_OUTBOUND_SUCCEEDED recipient=${cleanRecipientId.slice(0, 8)}` +
+    ` provider_mid=${primaryProviderMessageId ? String(primaryProviderMessageId).slice(0, 16) : 'present'}`
+  );
 
   const result = {
     delivery: 'SENT_TO_INSTAGRAM',

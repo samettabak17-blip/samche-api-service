@@ -108,10 +108,13 @@ export async function ensureConversationCrmIdentity(client, {
   const contactOverride = contact.ai_behavior_override;
   const convOverride = conversation.ai_behavior_override;
 
-  let effectiveOverride = 'AUTOMATIC';
-  if (contactOverride === 'AI_ONLY' || contactOverride === 'NEVER_AI') {
+  const isInstagram = source === 'INSTAGRAM' || source === 'INSTAGRAM_AD';
+  const defaultInitialOverride = isInstagram ? 'AI_ONLY' : 'AUTOMATIC';
+
+  let effectiveOverride = defaultInitialOverride;
+  if (contactOverride && contactOverride !== 'UNDECIDED' && (contactOverride !== 'FIRST_CONTACT_HOLD' || !isInstagram)) {
     effectiveOverride = contactOverride;
-  } else if (convOverride === 'AI_ONLY' || convOverride === 'NEVER_AI') {
+  } else if (convOverride && convOverride !== 'UNDECIDED' && (convOverride !== 'FIRST_CONTACT_HOLD' || !isInstagram)) {
     effectiveOverride = convOverride;
     await client.query(
       `UPDATE crm_contacts SET ai_behavior_override = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND tenant_id = $3`,
@@ -119,7 +122,12 @@ export async function ensureConversationCrmIdentity(client, {
     );
     contact.ai_behavior_override = effectiveOverride;
   } else {
-    effectiveOverride = 'AUTOMATIC';
+    effectiveOverride = defaultInitialOverride;
+    await client.query(
+      `UPDATE crm_contacts SET ai_behavior_override = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND tenant_id = $3`,
+      [effectiveOverride, contact.id, tenantId]
+    );
+    contact.ai_behavior_override = effectiveOverride;
   }
 
   if (conversation.contact_id !== contact.id || convOverride !== effectiveOverride) {

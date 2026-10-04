@@ -98,6 +98,23 @@ function operationError(res, error, label) {
   });
 }
 
+function resolveEffectiveConversationAiOverride(channelType, convOverride, contactOverride) {
+  const isInstagram = channelType === 'INSTAGRAM';
+  if (convOverride && convOverride !== 'FIRST_CONTACT_HOLD' && convOverride !== 'UNDECIDED' && convOverride !== 'AUTOMATIC') {
+    return convOverride;
+  }
+  if (convOverride === 'AUTOMATIC') {
+    return 'AUTOMATIC';
+  }
+  if (contactOverride && contactOverride !== 'FIRST_CONTACT_HOLD' && contactOverride !== 'UNDECIDED') {
+    return contactOverride;
+  }
+  if (isInstagram) {
+    return 'AI_ONLY';
+  }
+  return contactOverride || convOverride || 'FIRST_CONTACT_HOLD';
+}
+
 async function conversationContext(tenantId, conversationId) {
   const { query } = await import('../config/db.js');
   const result = await query(
@@ -133,9 +150,11 @@ async function conversationContext(tenantId, conversationId) {
   const conversation = result.rows[0] ?? null;
   if (!conversation) return null;
   const humanDelivery = await getHumanDeliveryCapability({ tenantId, conversationId });
-  const effectiveOverride = (conversation.ai_behavior_override && conversation.ai_behavior_override !== 'AUTOMATIC')
-    ? conversation.ai_behavior_override
-    : (conversation.contact_ai_behavior_override || conversation.ai_behavior_override || 'FIRST_CONTACT_HOLD');
+  const effectiveOverride = resolveEffectiveConversationAiOverride(
+    conversation.channel_type,
+    conversation.ai_behavior_override,
+    conversation.contact_ai_behavior_override
+  );
   return {
     ...conversation,
     ai_behavior_override: effectiveOverride,
@@ -242,9 +261,11 @@ router.get('/:tenantId/conversations', requireTenantAccess, async (req, res) => 
     );
     const rows = result.rows.map((row) => ({
       ...row,
-      ai_behavior_override: (row.ai_behavior_override && row.ai_behavior_override !== 'AUTOMATIC')
-        ? row.ai_behavior_override
-        : (row.contact_ai_behavior_override || row.ai_behavior_override || 'FIRST_CONTACT_HOLD'),
+      ai_behavior_override: resolveEffectiveConversationAiOverride(
+        row.channel_type,
+        row.ai_behavior_override,
+        row.contact_ai_behavior_override
+      ),
     }));
     return res.json(rows);
   } catch (error) {
