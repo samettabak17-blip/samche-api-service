@@ -51,7 +51,7 @@ export function AppRouter() {
     <Route path="/app" element={<RequireAuth><DashboardEntry /></RequireAuth>} />
     <Route path="/app/:tenantId" element={<RequireAuth><TenantDashboardLayout /></RequireAuth>}>
       <Route path="overview" element={<OverviewPage />} />
-      <Route path="conversations" element={<Navigate to="whatsapp" replace />} />
+      <Route path="conversations" element={<ConversationsPage />} />
       <Route path="conversations/:channel" element={<ConversationsPage />} />
       <Route path="conversations/:channel/:conversationId" element={<ConversationsPage />} />
       <Route path="leads" element={<LeadsPage />} />

@@ -11,7 +11,7 @@ export const conversationListLoadMoreLabel = 'Load more conversations';
 
 export type ConversationCapabilityKey = (typeof conversationCapabilities)[number]['key'];
 
-export function workspaceVisualIdentity(channelType: ConversationChannelType | 'ALL') {
+export function workspaceVisualIdentity(channelType?: ConversationChannelType | 'ALL') {
   if (channelType === 'WHATSAPP') {
     return { shell: 'whatsapp', outgoing: 'bg-[#087b4d] border-emerald-300/20 text-white', canvas: 'bg-[#071b18]' };
   }

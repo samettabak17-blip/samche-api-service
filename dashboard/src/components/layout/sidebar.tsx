@@ -51,6 +51,7 @@ function ConversationNavigation({ tenantId, active, open, onToggle, onNavigate }
     </button>
     {open && <div className="ml-5 space-y-1 border-l border-line pl-3">{
       [
+        { label: 'All / Inbox', route: 'inbox', icon: MessagesSquare },
         { label: 'WhatsApp', route: 'whatsapp', icon: MessageCircle },
         { label: 'Instagram DM', route: 'instagram', icon: Instagram },
         { label: 'Web Chatbot', route: 'web-chat', icon: MessageCircle },
