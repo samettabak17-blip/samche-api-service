@@ -4,8 +4,8 @@ export function canOperateConversation({ systemRole, tenantRole, action, assigne
   if (systemRole === 'OWNER' || tenantRole === 'ADMIN') return administrativeActions.has(action);
   if (tenantRole !== 'AGENT') return false;
 
-  if (action === 'takeover') return assignedAgentUserId === null || assignedAgentUserId === actorUserId;
-  if (action === 'send_message' || action === 'return_to_ai' || action === 'archive' || action === 'unarchive') return true;
+  if (action === 'takeover' || action === 'return_to_ai' || action === 'send_message') return assignedAgentUserId === null || assignedAgentUserId === actorUserId;
+  if (action === 'archive' || action === 'unarchive') return true;
   return false;
 }
 

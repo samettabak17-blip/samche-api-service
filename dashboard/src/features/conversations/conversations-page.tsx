@@ -477,9 +477,18 @@ export function ConversationsPage() {
   const isAdmin = user?.system_role === 'OWNER' || tenantRole === 'ADMIN';
   const isAgent = tenantRole === 'AGENT';
   const isOwn = conversation?.assigned_agent_user_id === user?.id;
-  const canTakeOver = canTakeOverConversation({ status: conversation?.status, handlingMode: conversation?.handling_mode, assignedAgentUserId: conversation?.assigned_agent_user_id, humanAttentionState: conversation?.human_attention_state, operatorAllowed: isAdmin || isAgent });
-  const canReturn = Boolean(conversation && conversation.status === 'open' && conversation.handling_mode === 'HUMAN' && (isAdmin || (isAgent && isOwn)));
-  const canSend = Boolean(conversation && conversation.status === 'open' && canUseHumanReplyComposer(conversation.channel_type, conversation.human_delivery_configured) && conversation.handling_mode === 'HUMAN' && (isAdmin || (isAgent && isOwn)));
+  const isInstagram = conversation?.channel_type === 'INSTAGRAM';
+  const canTakeOver = isInstagram ? false : canTakeOverConversation({ status: conversation?.status, handlingMode: conversation?.handling_mode, assignedAgentUserId: conversation?.assigned_agent_user_id, humanAttentionState: conversation?.human_attention_state, operatorAllowed: isAdmin || isAgent });
+  const canReturn = isInstagram ? false : Boolean(conversation && conversation.status === 'open' && conversation.handling_mode === 'HUMAN' && (isAdmin || (isAgent && isOwn)));
+  const canSend = Boolean(
+    conversation &&
+    conversation.status === 'open' &&
+    canUseHumanReplyComposer(conversation.channel_type, conversation.human_delivery_configured) &&
+    (
+      (isInstagram && (conversation.ai_behavior_override === 'NEVER_AI' || conversation.handling_mode === 'HUMAN') && (isAdmin || isAgent)) ||
+      (!isInstagram && conversation.handling_mode === 'HUMAN' && (isAdmin || (isAgent && isOwn)))
+    )
+  );
   const setHumanTyping = (active: boolean) => {
     if (!conversationId || !canSend) return;
     if (humanTypingStopTimerRef.current !== null) {
@@ -568,7 +577,7 @@ export function ConversationsPage() {
                 {content.trim() || pendingFile ? <button type="submit" disabled={send.isPending || sendMedia.isPending} className={'grid h-10 min-w-10 place-items-center rounded-full text-white disabled:opacity-50 ' + (channelContext.type === 'WHATSAPP' ? 'bg-[#159b61] hover:bg-[#118452]' : 'bg-signal hover:bg-signal/85')} aria-label={pendingFile ? 'Send attachment' : 'Send message'}><Send size={17} /></button> : (typeof window !== 'undefined' && Boolean(supportedWhatsAppVoiceFormat()) ? <button type="button" onClick={() => void startVoiceRecording()} className={'grid h-10 w-10 place-items-center rounded-full text-white ' + (channelContext.type === 'WHATSAPP' ? 'bg-[#159b61] hover:bg-[#118452]' : 'bg-signal hover:bg-signal/85')} aria-label="Record voice note"><Mic size={18} /></button> : <span className="grid h-10 w-10 place-items-center rounded-full bg-white/[.04] text-stone-600" title="Voice notes are unavailable in this browser"><Mic size={18} /></span>)}</>}</div>
               {pendingFile && !pendingFile.type.startsWith('audio/') && <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-line bg-black/15 px-3 py-2 text-xs"><span className="min-w-0 flex-1 truncate text-stone-300">{pendingFile.name} · {Math.ceil(pendingFile.size / 1024)} KB</span><button type="button" onClick={() => setPendingFile(null)} className="text-stone-400 hover:text-white">Remove</button></div>}
               {(send.error instanceof Error || (sendMedia.error instanceof Error && !pendingFile?.type.startsWith('audio/'))) && <p role="alert" className="mt-2 text-xs text-red-300">{(send.error ?? sendMedia.error as Error).message}</p>}
-            </form> : <p className="text-xs text-stone-400">{conversation.handling_mode === 'HUMAN' ? 'Only the assigned operator can reply.' : 'Take over to enable a supported human reply.'}</p>}
+            </form> : <p className="text-xs text-stone-400">{isInstagram ? (conversation.ai_behavior_override === 'AI_ONLY' ? 'Switch to Never AI to enable manual operator replies.' : (isAdmin || isAgent ? 'Manual replies available.' : 'Manual replies require an authorized operator.')) : (conversation.handling_mode === 'HUMAN' ? 'Only the assigned operator can reply.' : 'Take over to enable a supported human reply.')}</p>}
           </footer>
         </> : <EmptyState title="Conversation not found" description="This conversation is unavailable in the selected tenant." />}
       </section>

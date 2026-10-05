@@ -141,7 +141,7 @@ test('real PostgreSQL: canonical human support Take Over, Return to AI, and Live
     );
     const assistantId = assistantRes.rows[0].id;
 
-    const rawPhone = '948536645017374';
+    const rawPhone = '9485' + String(Date.now()).slice(-6) + String(Math.floor(Math.random() * 9000 + 1000));
     const channelRes = await client.query(
       `INSERT INTO tenant_channels (tenant_id, channel_type, external_channel_id, display_name, status, assistant_id)
        VALUES ($1, 'WHATSAPP', $2, 'Yeşil Vadi WhatsApp', 'active', $3) RETURNING id`,

@@ -1096,11 +1096,6 @@ export async function setConversationAiOverride({
       );
     }
 
-    if (cleanOverride === 'AI_ONLY' && convRow?.status === 'open' && convRow?.handling_mode !== 'HUMAN') {
-      shouldTriggerImmediateResponse = true;
-    }
-
-
     const actorUserId = actor?.id ?? actor?.userId ?? null;
     await writeAuditEvent(client, {
       tenantId,
@@ -1119,26 +1114,7 @@ export async function setConversationAiOverride({
     client.release();
   }
 
-  let immediateResponse = null;
-  if (shouldTriggerImmediateResponse) {
-    try {
-      const { generateAndDeliverInstagramAssistantResponse } = await import('./instagram-ai-orchestrator.js');
-      immediateResponse = await generateAndDeliverInstagramAssistantResponse({
-        database,
-        tenantId,
-        conversationId,
-        http,
-        generateAiResponse,
-      });
-    } catch (respErr) {
-      console.warn('AI_ONLY_IMMEDIATE_RESPONSE_WARN', respErr?.message);
-    }
-  }
-
-  return {
-    ...updatedConversation,
-    immediateResponse,
-  };
+  return updatedConversation;
 }
 
 
@@ -1191,7 +1167,13 @@ export async function appendAgentMessage({
     const conversation = details.rows[0];
     if (!conversation) throw new ConversationOperationError(404, 'Conversation not found', 'CONVERSATION_NOT_FOUND');
     if (conversation.status !== 'open') throw new ConversationOperationError(409, 'Conversation is closed', 'CONVERSATION_CLOSED');
-    if (conversation.handling_mode !== 'HUMAN') throw new ConversationOperationError(409, 'Human messages require human handling mode', 'CONVERSATION_NOT_HUMAN');
+
+    const isInstagramNeverAi = String(conversation.channel_type ?? '').toUpperCase() === 'INSTAGRAM' &&
+      String(conversation.ai_behavior_override ?? '').toUpperCase() === 'NEVER_AI';
+
+    if (conversation.handling_mode !== 'HUMAN' && !isInstagramNeverAi) {
+      throw new ConversationOperationError(409, 'Human messages require human handling mode', 'CONVERSATION_NOT_HUMAN');
+    }
 
     const allowed = canOperateConversation({
       systemRole: actor.systemRole,
@@ -1202,7 +1184,7 @@ export async function appendAgentMessage({
     });
     if (!allowed) throw new ConversationOperationError(403, 'Conversation operation is not permitted', 'CONVERSATION_OPERATION_DENIED');
 
-    // If conversation is currently unassigned in HUMAN handling mode, establish assignment to the operator
+    // If conversation is currently unassigned, establish assignment to the operator
     if (!conversation.assigned_agent_user_id) {
       const operatorTenantRole = actor.tenantRole || (actor.systemRole === 'OWNER' ? 'ADMIN' : 'AGENT');
       await client.query(
@@ -1366,8 +1348,16 @@ export async function appendAgentMediaMessage({
     const conversation = details.rows[0];
     if (!conversation) throw new ConversationOperationError(404, 'Conversation not found', 'CONVERSATION_NOT_FOUND');
     if (conversation.status !== 'open') throw new ConversationOperationError(409, 'Conversation is closed', 'CONVERSATION_CLOSED');
-    if (conversation.handling_mode !== 'HUMAN') throw new ConversationOperationError(409, 'Human messages require human handling mode', 'CONVERSATION_NOT_HUMAN');
-    if (!['WHATSAPP', 'SAMCHEGUIDE', 'WEB_CHAT'].includes(conversation.channel_type)) throw new ConversationOperationError(409, 'Media delivery is not configured for this channel', 'CHANNEL_DELIVERY_UNSUPPORTED');
+
+    const isInstagramNeverAi = String(conversation.channel_type ?? '').toUpperCase() === 'INSTAGRAM' &&
+      String(conversation.ai_behavior_override ?? '').toUpperCase() === 'NEVER_AI';
+
+    if (conversation.handling_mode !== 'HUMAN' && !isInstagramNeverAi) {
+      throw new ConversationOperationError(409, 'Human messages require human handling mode', 'CONVERSATION_NOT_HUMAN');
+    }
+    if (!['WHATSAPP', 'SAMCHEGUIDE', 'WEB_CHAT', 'INSTAGRAM'].includes(conversation.channel_type)) {
+      throw new ConversationOperationError(409, 'Media delivery is not configured for this channel', 'CHANNEL_DELIVERY_UNSUPPORTED');
+    }
 
     const allowed = canOperateConversation({
       systemRole: actor.systemRole,
@@ -1378,7 +1368,7 @@ export async function appendAgentMediaMessage({
     });
     if (!allowed) throw new ConversationOperationError(403, 'Conversation operation is not permitted', 'CONVERSATION_OPERATION_DENIED');
 
-    // If conversation is currently unassigned in HUMAN handling mode, establish assignment to the operator
+    // If conversation is currently unassigned, establish assignment to the operator
     if (!conversation.assigned_agent_user_id) {
       const operatorTenantRole = actor.tenantRole || (actor.systemRole === 'OWNER' ? 'ADMIN' : 'AGENT');
       await client.query(

@@ -96,6 +96,8 @@ export async function loadInstagramAgentDelivery(client, conversation) {
   const config = row.config || {};
   const accessToken = config.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN || null;
   const accountId = config.instagram_account_id || config.instagram_business_account_id || config.page_id || row.external_channel_id || 'me';
+  const pageId = config.page_id || config.facebook_page_id || row.external_channel_id || accountId;
+  const instagramAccountId = config.instagram_account_id || config.instagram_business_account_id || row.external_channel_id || accountId;
 
   if (!accessToken) return null;
 
@@ -103,10 +105,10 @@ export async function loadInstagramAgentDelivery(client, conversation) {
     channel_id: channelId,
     tenant_id: tenantId,
     external_channel_id: row.external_channel_id,
-    instagram_account_id: accountId,
+    instagram_account_id: instagramAccountId,
     instagram_user_id: config.instagram_user_id || null,
     auth_mode: config.auth_mode || null,
-    page_id: accountId,
+    page_id: pageId,
     access_token: accessToken,
     config,
   };
@@ -350,7 +352,7 @@ export class OutboundChannelDeliveryRegistry {
             http,
           });
           traceStage?.('DELIVERY_SUCCEEDED');
-          return result;
+          return { delivery: 'SENT_TO_INSTAGRAM', ...result };
         } catch (error) {
           if (error instanceof InstagramDeliveryError) {
             throw new ChannelDeliveryError(error.status, error.message, error.code);
@@ -383,7 +385,7 @@ export class OutboundChannelDeliveryRegistry {
             pageId: integration.page_id,
             http,
           });
-          return result;
+          return { delivery: 'SENT_TO_INSTAGRAM', ...result };
         } catch (error) {
           if (error instanceof InstagramDeliveryError) {
             throw new ChannelDeliveryError(error.status, error.message, error.code);
@@ -392,11 +394,7 @@ export class OutboundChannelDeliveryRegistry {
         }
       },
 
-      async deliverLifecycleNotice({ client, conversation, eventType }) {
-        if (eventType === 'return_to_ai') {
-          const content = await loadHumanSupportLifecycleNotice(client, conversation, 'return_to_ai');
-          return { handled: false, content, persistAssistantMessage: true, persistPublicAssistantMessage: true };
-        }
+      async deliverLifecycleNotice() {
         return { handled: false, content: null, persistAssistantMessage: false, persistPublicAssistantMessage: false };
       },
     });

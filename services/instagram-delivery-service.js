@@ -217,6 +217,7 @@ export async function deliverInstagramText({
   http = axios,
   graphVersion,
 }) {
+  const httpClient = http || axios;
   if (!recipientId || typeof recipientId !== 'string') {
     throw new InstagramDeliveryError('INSTAGRAM_RECIPIENT_REQUIRED', 'Valid Instagram recipient ID is required', 400);
   }
@@ -276,7 +277,7 @@ export async function deliverInstagramText({
 
     for (const endpoint of endpointsToTry) {
       try {
-        response = await http.post(endpoint, payload, {
+        response = await httpClient.post(endpoint, payload, {
           params: { access_token: token },
           headers: {
             Authorization: `Bearer ${token}`,
@@ -372,6 +373,7 @@ export async function deliverInstagramMedia({
   http = axios,
   graphVersion,
 }) {
+  const httpClient = http || axios;
   if (!recipientId || typeof recipientId !== 'string') {
     throw new InstagramDeliveryError('INSTAGRAM_RECIPIENT_REQUIRED', 'Valid Instagram recipient ID is required', 400);
   }
@@ -403,7 +405,7 @@ export async function deliverInstagramMedia({
   };
 
   try {
-    const response = await http.post(endpoint, payload, {
+    const response = await httpClient.post(endpoint, payload, {
       headers: {
         Authorization: `Bearer ${accessToken.trim()}`,
         'Content-Type': 'application/json',
@@ -424,7 +426,7 @@ export async function deliverInstagramMedia({
           instagramAccountId: targetId,
           instagramUserId,
           authMode,
-          http,
+          http: httpClient,
           graphVersion,
         });
       } catch (captionErr) {

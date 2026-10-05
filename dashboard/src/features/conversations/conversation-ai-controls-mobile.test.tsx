@@ -39,6 +39,7 @@ vi.mock('../dashboard/dashboard-api', async (importOriginal) => {
       closeConversation: vi.fn(),
       archiveConversation: vi.fn(),
       unarchiveConversation: vi.fn(),
+      sendAgentMessage: vi.fn(),
     },
   };
 });
@@ -77,6 +78,24 @@ const CONV_IG_2 = {
   last_message_preview: 'Second Instagram inquiry',
   created_at: '2026-10-01T11:00:00.000Z',
   last_activity_at: '2026-10-01T11:05:00.000Z',
+};
+
+const CONV_IG_NEVER_AI = {
+  id: 'conv-ig-never',
+  tenant_id: TENANT_ID,
+  channel_id: 'ch-ig-1',
+  channel_type: 'INSTAGRAM' as const,
+  channel_display_name: 'Instagram Direct',
+  contact_display_name: 'Miles Dyson',
+  customer_external_id: 'instagram:55443322',
+  status: 'open' as const,
+  handling_mode: 'AI' as const,
+  handling_version: 1,
+  ai_behavior_override: 'NEVER_AI' as const,
+  human_delivery_configured: true,
+  last_message_preview: 'Customer inquiry for human agent',
+  created_at: '2026-10-01T11:30:00.000Z',
+  last_activity_at: '2026-10-01T11:35:00.000Z',
 };
 
 const CONV_WA_1 = {
@@ -131,7 +150,7 @@ const CONV_GUIDE_1 = {
   last_activity_at: '2026-10-01T14:05:00.000Z',
 };
 
-const ALL_CONVERSATIONS = [CONV_IG_1, CONV_IG_2, CONV_WA_1, CONV_WEB_1, CONV_GUIDE_1];
+const ALL_CONVERSATIONS = [CONV_IG_1, CONV_IG_2, CONV_IG_NEVER_AI, CONV_WA_1, CONV_WEB_1, CONV_GUIDE_1];
 
 function renderPage(initialPath = `/app/${TENANT_ID}/conversations/inbox`) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -450,6 +469,35 @@ describe('Mobile Multi-Channel Conversation List & Filter Tests (TESTS A - P & R
       for (const select of selects) {
         expect((select as HTMLSelectElement).value).toBe('AI_ONLY');
       }
+    });
+  });
+
+  it('TEST OPERATOR 1 — Instagram conversation in NEVER_AI enables composer without Take Over requirement', async () => {
+    window.innerWidth = 390;
+    window.dispatchEvent(new Event('resize'));
+
+    renderPage(`/app/${TENANT_ID}/conversations/instagram/${CONV_IG_NEVER_AI.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/Type a message/i)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Take Over/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /Return to AI/i })).toBeNull();
+    });
+
+    const textarea = screen.getByPlaceholderText(/Type a message/i);
+    fireEvent.change(textarea, { target: { value: 'Merhaba, size nasıl yardımcı olabilirim?' } });
+
+    const sendBtn = screen.getByRole('button', { name: /Send message/i });
+    expect(sendBtn).toBeInTheDocument();
+    expect(sendBtn).not.toBeDisabled();
+  });
+
+  it('TEST OPERATOR 2 — Instagram conversation does not show Take Over button in AI mode', async () => {
+    renderPage(`/app/${TENANT_ID}/conversations/instagram/conv-ig-1`);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /Take Over/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /Return to AI/i })).toBeNull();
     });
   });
 });
