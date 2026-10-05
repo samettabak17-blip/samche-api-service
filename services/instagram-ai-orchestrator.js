@@ -924,10 +924,13 @@ export async function orchestrateInstagramInboundAiResponse({
   }
 
   try {
-    const accessToken = integration.config?.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
-    const accountId = integration.config?.instagram_account_id || integration.config?.instagram_business_account_id || integration.config?.page_id || integration.external_channel_id;
-    const instagramUserId = integration.config?.instagram_user_id || null;
-    const authMode = integration.config?.auth_mode || null;
+    const config = integration.config || {};
+    const accessToken = config.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
+    const accountId = config.instagram_account_id || config.instagram_business_account_id || integration.external_channel_id || config.page_id || 'me';
+    const pageId = config.page_id || integration.external_channel_id || config.instagram_business_account_id || config.instagram_account_id || 'me';
+    const instagramAccountId = config.instagram_account_id || config.instagram_business_account_id || integration.external_channel_id || null;
+    const instagramUserId = config.instagram_user_id || null;
+    const authMode = config.auth_mode || null;
 
   // 1. Human Support Intent check (Appointments qualify conversationally without visible transfer)
   const humanSupport = parseCustomerHumanSupportRequest(text);
@@ -1011,10 +1014,11 @@ export async function orchestrateInstagramInboundAiResponse({
         );
         const row = contactCheck.rows?.[0];
         if (row) {
-          const effective = (row.contact_override && row.contact_override !== 'UNDECIDED' && row.contact_override !== 'FIRST_CONTACT_HOLD')
-            ? row.contact_override
-            : (row.conv_override && row.conv_override !== 'UNDECIDED' && row.conv_override !== 'FIRST_CONTACT_HOLD')
-            ? row.conv_override
+          const isExplicitChoice = (v) => v === 'NEVER_AI' || v === 'AUTOMATIC' || v === 'AI_ONLY' || v === 'ALWAYS_AI';
+          const effective = (row.contact_override && isExplicitChoice(row.contact_override))
+            ? (row.contact_override === 'ALWAYS_AI' ? 'AI_ONLY' : row.contact_override)
+            : (row.conv_override && isExplicitChoice(row.conv_override))
+            ? (row.conv_override === 'ALWAYS_AI' ? 'AI_ONLY' : row.conv_override)
             : 'AI_ONLY';
           if (effective) {
             conversation.ai_behavior_override = effective;
@@ -1384,8 +1388,8 @@ export async function orchestrateInstagramInboundAiResponse({
         recipientId: cleanSenderId,
         content: formattedResponse,
         accessToken,
-        instagramAccountId: accountId,
-        pageId: accountId,
+        instagramAccountId,
+        pageId,
         instagramUserId,
         authMode,
         http,
@@ -1493,7 +1497,7 @@ export async function generateAndDeliverInstagramAssistantResponse({
     const convRes = await client.query(
       `SELECT c.id, c.tenant_id, c.channel_id, c.customer_external_id, c.handling_mode,
               c.handling_version, c.status, c.communication_language,
-              tc.channel_type, tc.assistant_id,
+              tc.channel_type, tc.assistant_id, tc.external_channel_id,
               a.model AS assistant_model,
               ci.config AS integration_config
          FROM conversations c
@@ -1505,6 +1509,10 @@ export async function generateAndDeliverInstagramAssistantResponse({
     );
     if (convRes.rowCount < 1) return { skipped: true, reason: 'CONVERSATION_NOT_FOUND' };
     const conversation = convRes.rows[0];
+
+    if (conversation.channel_type !== 'INSTAGRAM') {
+      return { skipped: true, reason: 'NOT_INSTAGRAM_CHANNEL' };
+    }
 
     if (conversation.status !== 'open' || conversation.handling_mode === 'HUMAN') {
       return { skipped: true, reason: 'HUMAN_MODE_ACTIVE' };
@@ -1529,7 +1537,9 @@ export async function generateAndDeliverInstagramAssistantResponse({
     const assistantModel = conversation.assistant_model || null;
     const config = conversation.integration_config || {};
     const accessToken = config.access_token || process.env.INSTAGRAM_ACCESS_TOKEN || process.env.INSTAGRAM_PAGE_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
-    const accountId = config.instagram_account_id || config.instagram_business_account_id || config.page_id || 'me';
+    const accountId = config.instagram_account_id || config.instagram_business_account_id || conversation.external_channel_id || config.page_id || 'me';
+    const pageId = config.page_id || conversation.external_channel_id || config.instagram_business_account_id || config.instagram_account_id || 'me';
+    const instagramAccountId = config.instagram_account_id || config.instagram_business_account_id || conversation.external_channel_id || null;
     const instagramUserId = config.instagram_user_id || null;
     const authMode = config.auth_mode || null;
     const recipientIgsid = String(conversation.customer_external_id || '').replace(/^instagram:\s*/i, '');
@@ -1743,8 +1753,8 @@ export async function generateAndDeliverInstagramAssistantResponse({
           recipientId: cleanRecipient,
           content: formattedResponse,
           accessToken,
-          instagramAccountId: accountId,
-          pageId: accountId,
+          instagramAccountId,
+          pageId,
           instagramUserId,
           authMode,
           http,

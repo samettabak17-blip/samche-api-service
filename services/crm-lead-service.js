@@ -86,10 +86,14 @@ export async function ensureConversationCrmIdentity(client, {
     externalCustomerId: externalCustomerId ?? conversation.customer_external_id,
   });
   const effectiveDisplayName = displayName || identity.displayName;
+  const isInstagram = source === 'INSTAGRAM' || source === 'INSTAGRAM_AD';
+  const defaultInitialOverride = isInstagram ? 'AI_ONLY' : 'AUTOMATIC';
+  const contactInitialOverride = isInstagram ? 'AI_ONLY' : 'UNDECIDED';
+
   const contactResult = await client.query(
     `INSERT INTO crm_contacts
-      (tenant_id, identity_kind, identity_hash, display_name, email, phone, source)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+      (tenant_id, identity_kind, identity_hash, display_name, email, phone, source, ai_behavior_override)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT (tenant_id, identity_hash)
      DO UPDATE SET
        display_name = CASE
@@ -101,34 +105,28 @@ export async function ensureConversationCrmIdentity(client, {
        END,
        updated_at = CURRENT_TIMESTAMP
      RETURNING *`,
-    [tenantId, identity.kind, identity.identityHash, effectiveDisplayName, identity.email, identity.phone, source]
+    [tenantId, identity.kind, identity.identityHash, effectiveDisplayName, identity.email, identity.phone, source, contactInitialOverride]
   );
 
   const contact = contactResult.rows[0];
   const contactOverride = contact.ai_behavior_override;
   const convOverride = conversation.ai_behavior_override;
 
-  const isInstagram = source === 'INSTAGRAM' || source === 'INSTAGRAM_AD';
-  const defaultInitialOverride = isInstagram ? 'AI_ONLY' : 'AUTOMATIC';
-
-  let effectiveOverride = defaultInitialOverride;
-  if (contactOverride && contactOverride !== 'UNDECIDED' && (contactOverride !== 'FIRST_CONTACT_HOLD' || !isInstagram)) {
-    effectiveOverride = contactOverride;
-  } else if (convOverride && convOverride !== 'UNDECIDED' && (convOverride !== 'FIRST_CONTACT_HOLD' || !isInstagram)) {
-    effectiveOverride = convOverride;
-    await client.query(
-      `UPDATE crm_contacts SET ai_behavior_override = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND tenant_id = $3`,
-      [effectiveOverride, contact.id, tenantId]
-    );
-    contact.ai_behavior_override = effectiveOverride;
+  const isExplicitChoice = (v) => v === 'NEVER_AI' || v === 'AUTOMATIC' || v === 'AI_ONLY' || v === 'ALWAYS_AI';
+  let effectiveOverride;
+  if (contactOverride && isExplicitChoice(contactOverride)) {
+    effectiveOverride = contactOverride === 'ALWAYS_AI' ? 'AI_ONLY' : contactOverride;
+  } else if (convOverride && isExplicitChoice(convOverride)) {
+    effectiveOverride = convOverride === 'ALWAYS_AI' ? 'AI_ONLY' : convOverride;
   } else {
     effectiveOverride = defaultInitialOverride;
-    await client.query(
-      `UPDATE crm_contacts SET ai_behavior_override = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND tenant_id = $3`,
-      [effectiveOverride, contact.id, tenantId]
-    );
-    contact.ai_behavior_override = effectiveOverride;
   }
+
+  await client.query(
+    `UPDATE crm_contacts SET ai_behavior_override = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND tenant_id = $3`,
+    [effectiveOverride, contact.id, tenantId]
+  );
+  contact.ai_behavior_override = effectiveOverride;
 
   if (conversation.contact_id !== contact.id || convOverride !== effectiveOverride) {
     await client.query(

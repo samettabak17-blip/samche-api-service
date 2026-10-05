@@ -100,14 +100,12 @@ function operationError(res, error, label) {
 
 function resolveEffectiveConversationAiOverride(channelType, convOverride, contactOverride) {
   const isInstagram = channelType === 'INSTAGRAM';
-  if (convOverride && convOverride !== 'FIRST_CONTACT_HOLD' && convOverride !== 'UNDECIDED' && convOverride !== 'AUTOMATIC') {
-    return convOverride;
+  const isExplicitChoice = (v) => v === 'NEVER_AI' || v === 'AUTOMATIC' || v === 'AI_ONLY' || v === 'ALWAYS_AI';
+  if (convOverride && isExplicitChoice(convOverride)) {
+    return convOverride === 'ALWAYS_AI' ? 'AI_ONLY' : convOverride;
   }
-  if (convOverride === 'AUTOMATIC') {
-    return 'AUTOMATIC';
-  }
-  if (contactOverride && contactOverride !== 'FIRST_CONTACT_HOLD' && contactOverride !== 'UNDECIDED') {
-    return contactOverride;
+  if (contactOverride && isExplicitChoice(contactOverride)) {
+    return contactOverride === 'ALWAYS_AI' ? 'AI_ONLY' : contactOverride;
   }
   if (isInstagram) {
     return 'AI_ONLY';

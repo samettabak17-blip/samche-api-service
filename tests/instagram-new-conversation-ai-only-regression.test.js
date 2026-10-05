@@ -47,7 +47,18 @@ class MockInMemoryDatabase {
       const conv = this.conversations.get(params[0]);
       if (conv) {
         const contact = conv.contact_id ? this.contacts.get(conv.contact_id) : null;
-        return { rowCount: 1, rows: [{ ...conv, contact_override: contact?.ai_behavior_override || null, conv_override: conv.ai_behavior_override || null }] };
+        return {
+          rowCount: 1,
+          rows: [{
+            ...conv,
+            channel_type: 'INSTAGRAM',
+            assistant_id: 'asst-1',
+            external_channel_id: '178414000000001',
+            integration_config: { access_token: 'meta_valid_token_123', page_id: '178414000000001' },
+            contact_override: contact?.ai_behavior_override || null,
+            conv_override: conv.ai_behavior_override || null,
+          }],
+        };
       }
       return { rowCount: 0, rows: [] };
     }
@@ -282,7 +293,68 @@ test('TEST H — Legacy FIRST_CONTACT_HOLD normalizes to AI_ONLY and does not pe
 });
 
 
-test('TEST I — Duplicate MID cannot produce duplicate response', async () => {
+test('TEST I — Manual AI_ONLY resume triggers real Instagram delivery adapter and persistence', async () => {
+  const db = new MockInMemoryDatabase();
+  const inboundState = await persistInstagramInbound({
+    database: db, recipientId: '178414000000001', senderIgsid: 'sender_manual_resume', messageId: 'mid_man_1', content: 'Inquiry waiting on hold',
+    http: mockHttpSuccess, ensureConversationCrmIdentity,
+  });
+
+  let deliveryCalled = false;
+  let deliveredRecipient = null;
+  const mockHttpDelivery = {
+    post: async (url, data) => {
+      deliveryCalled = true;
+      deliveredRecipient = data?.recipient?.id;
+      return { status: 200, data: { message_id: 'provider_mid_resumed_999', recipient_id: deliveredRecipient } };
+    },
+    get: async () => ({ status: 200, data: { id: 'sender_manual_resume', name: 'Manual User' } }),
+  };
+
+  const result = await setConversationAiOverride({
+    tenantId: db.tenantId,
+    conversationId: inboundState.conversation.id,
+    override: 'AI_ONLY',
+    database: db,
+    http: mockHttpDelivery,
+    generateAiResponse: async () => 'Immediate AI response after manual activation',
+  });
+
+  assert.equal(result.ai_behavior_override, 'AI_ONLY');
+  assert.equal(result.immediateResponse?.delivered, true);
+  assert.equal(deliveryCalled, true, 'Real Instagram outbound delivery adapter must have been invoked');
+  assert.equal(deliveredRecipient, 'sender_manual_resume', 'Recipient IGSID must be clean customer IGSID');
+});
+
+test('TEST J — Outbound recipient uses canonical customer IGSID without corruption', async () => {
+  const db = new MockInMemoryDatabase();
+  let requestedEndpoint = null;
+  let requestedRecipient = null;
+  const mockHttpCapture = {
+    post: async (url, data) => {
+      requestedEndpoint = url;
+      requestedRecipient = data?.recipient?.id;
+      return { status: 200, data: { message_id: 'provider_mid_igsid_test' } };
+    },
+    get: async () => ({ status: 200, data: { id: '998877665544' } }),
+  };
+
+  const inboundState = await persistInstagramInbound({
+    database: db, recipientId: '178414000000001', senderIgsid: 'instagram:998877665544', messageId: 'mid_igsid_1', content: 'IGSID test',
+    http: mockHttpSuccess, ensureConversationCrmIdentity,
+  });
+
+  const outcome = await orchestrateInstagramInboundAiResponse({
+    database: db, inboundState, senderIgsid: 'instagram:998877665544', text: 'IGSID test',
+    http: mockHttpCapture, applyPacing: false, generateAiResponse: async () => 'IGSID verified response',
+  });
+
+  assert.equal(outcome.delivered, true);
+  assert.equal(requestedRecipient, '998877665544', 'Must strip instagram: prefix and deliver to raw IGSID');
+  assert.ok(requestedEndpoint.includes('/messages'), 'Endpoint must target Meta messages');
+});
+
+test('TEST M — Duplicate MID cannot produce duplicate response', async () => {
   const db = new MockInMemoryDatabase();
   const inbound1 = await persistInstagramInbound({
     database: db, recipientId: '178414000000001', senderIgsid: 'sender_dup_test', messageId: 'mid_unique_123', content: 'Duplicate test message',

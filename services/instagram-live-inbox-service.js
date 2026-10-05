@@ -413,19 +413,19 @@ export async function persistInstagramInbound({
     );
     const priorCount = Number(priorMsgCheck.rows[0]?.count || 0);
 
-    // If conversation or contact was on first-contact hold,
-    // transition conversation to AUTOMATIC so canonical channel policy can evaluate
-    if (conversation.ai_behavior_override === 'FIRST_CONTACT_HOLD') {
+    // If conversation or contact was on first-contact hold or undecided,
+    // transition conversation to AI_ONLY for immediate canonical AI response
+    if (conversation.ai_behavior_override === 'FIRST_CONTACT_HOLD' || conversation.ai_behavior_override === 'UNDECIDED') {
       await client.query(
         `UPDATE conversations
-            SET ai_behavior_override = 'AUTOMATIC',
+            SET ai_behavior_override = 'AI_ONLY',
                 updated_at = CURRENT_TIMESTAMP
-          WHERE id = $1 AND tenant_id = $2 AND ai_behavior_override = 'FIRST_CONTACT_HOLD'`,
+          WHERE id = $1 AND tenant_id = $2 AND ai_behavior_override IN ('FIRST_CONTACT_HOLD', 'UNDECIDED')`,
         [conversationId, tenantId]
       );
-      conversation.ai_behavior_override = 'AUTOMATIC';
-      if (conversation.contact_ai_behavior_override === 'FIRST_CONTACT_HOLD') {
-        conversation.contact_ai_behavior_override = 'AUTOMATIC';
+      conversation.ai_behavior_override = 'AI_ONLY';
+      if (conversation.contact_ai_behavior_override === 'FIRST_CONTACT_HOLD' || conversation.contact_ai_behavior_override === 'UNDECIDED') {
+        conversation.contact_ai_behavior_override = 'AI_ONLY';
       }
     }
 

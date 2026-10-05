@@ -50,24 +50,31 @@ export const MAX_FINAL_INSTAGRAM_CHUNK_LENGTH = 900;
 export function resolveCandidateEndpoints({ authMode, instagramAccountId, pageId, instagramUserId, token }) {
   const igBaseUrl = instagramGraphApiBase();
   const fbBaseUrl = metaGraphApiBase();
-  const targetId = resolveInstagramDeliveryTarget({ authMode, instagramAccountId, pageId, instagramUserId });
   const isInstagramLoginToken = String(authMode || '').trim().toUpperCase() === 'INSTAGRAM_LOGIN'
     || String(token || '').startsWith('IGA')
     || String(token || '').startsWith('IGQ');
 
-  return isInstagramLoginToken
-    ? Array.from(new Set([
-        `${igBaseUrl}/me/messages`,
-        ...(targetId !== 'me' ? [`${igBaseUrl}/${targetId}/messages`] : []),
-        `${fbBaseUrl}/me/messages`,
-        ...(targetId !== 'me' ? [`${fbBaseUrl}/${targetId}/messages`] : []),
-      ]))
-    : Array.from(new Set([
-        `${fbBaseUrl}/${targetId}/messages`,
-        ...(targetId !== 'me' ? [`${fbBaseUrl}/me/messages`] : []),
-        `${igBaseUrl}/me/messages`,
-        ...(targetId !== 'me' ? [`${igBaseUrl}/${targetId}/messages`] : []),
-      ]));
+  const cleanTargetIds = Array.from(new Set([
+    pageId && pageId !== 'me' ? String(pageId).trim() : null,
+    instagramAccountId && instagramAccountId !== 'me' ? String(instagramAccountId).trim() : null,
+    instagramUserId && instagramUserId !== 'me' ? String(instagramUserId).trim() : null,
+  ].filter(Boolean)));
+
+  if (isInstagramLoginToken) {
+    return Array.from(new Set([
+      `${igBaseUrl}/me/messages`,
+      ...cleanTargetIds.map((id) => `${igBaseUrl}/${id}/messages`),
+      `${fbBaseUrl}/me/messages`,
+      ...cleanTargetIds.map((id) => `${fbBaseUrl}/${id}/messages`),
+    ]));
+  }
+
+  return Array.from(new Set([
+    ...cleanTargetIds.map((id) => `${fbBaseUrl}/${id}/messages`),
+    `${fbBaseUrl}/me/messages`,
+    `${igBaseUrl}/me/messages`,
+    ...cleanTargetIds.map((id) => `${igBaseUrl}/${id}/messages`),
+  ]));
 }
 
 /**
@@ -270,6 +277,7 @@ export async function deliverInstagramText({
     for (const endpoint of endpointsToTry) {
       try {
         response = await http.post(endpoint, payload, {
+          params: { access_token: token },
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
