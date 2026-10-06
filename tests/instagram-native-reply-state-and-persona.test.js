@@ -328,3 +328,113 @@ test('DELIVERY PARITY — Partial delivery failure (chunk 1 success, chunk 2 fai
     }
   );
 });
+
+test('GENERATION INDEPENDENCE — Outbound delivery failure does not prevent assistant persistence or poison next turn', async () => {
+  const { orchestrateInstagramInboundAiResponse } = await import('../services/instagram-ai-orchestrator.js');
+
+  const tenantId = 'test-tenant-gen-ind';
+  const conversationId = 'conv-gen-ind';
+  let persistedMessages = [];
+
+  const mockDatabase = {
+    connect: async () => mockDatabase,
+    release: () => {},
+    query: async (sql, params) => {
+      const s = String(sql).trim();
+      if (/^BEGIN|^COMMIT|^ROLLBACK/i.test(s)) return { rowCount: 0, rows: [] };
+      if (s.includes('FROM conversations conv') || s.includes('SELECT * FROM conversations')) {
+        return {
+          rowCount: 1,
+          rows: [{
+            id: conversationId,
+            tenant_id: tenantId,
+            status: 'open',
+            handling_mode: 'AI',
+            handling_version: 1,
+            ai_behavior_override: 'AI_ONLY',
+          }],
+        };
+      }
+      if (s.includes('FROM conversation_messages') && s.includes('ORDER BY created_at DESC')) {
+        return {
+          rowCount: 1,
+          rows: [{ id: 'msg-cust-1', sender_type: 'CUSTOMER', content: 'Merhaba' }],
+        };
+      }
+      if (s.includes('INSERT INTO conversation_messages')) {
+        const msg = { id: `msg-${persistedMessages.length + 1}`, tenant_id: params[0], conversation_id: params[1], sender_type: params[2], content: params[3] };
+        persistedMessages.push(msg);
+        return { rowCount: 1, rows: [msg] };
+      }
+      if (s.includes('UPDATE conversation_messages')) {
+        return { rowCount: 1, rows: [] };
+      }
+      return { rowCount: 0, rows: [] };
+    },
+  };
+
+  const mockInboundState = {
+    duplicate: false,
+    shouldInvokeAi: true,
+    handlingVersion: 1,
+    customerMessage: { id: 'cust-msg-unique-1', content: 'Merhaba Samed bey' },
+    conversation: {
+      id: conversationId,
+      status: 'open',
+      handling_mode: 'AI',
+      handling_version: 1,
+      ai_behavior_override: 'AI_ONLY',
+    },
+    integration: {
+      tenant_id: tenantId,
+      assistant_id: 'asst-1',
+      config: { access_token: 'valid_token_xyz', page_id: '123' },
+    },
+  };
+
+  // Mock HTTP that throws on outbound Meta send
+  const mockHttpFail = {
+    post: async () => {
+      const err = new Error('Meta API network disconnect');
+      err.response = { status: 502, data: { error: { message: 'Bad Gateway', code: 2 } } };
+      throw err;
+    },
+  };
+
+  const outcome = await orchestrateInstagramInboundAiResponse({
+    database: mockDatabase,
+    inboundState: mockInboundState,
+    senderIgsid: 'instagram:12345678',
+    text: 'Merhaba Samed bey. Ailem ve ben Dubaiye yerleşmek istiyoruz.',
+    http: mockHttpFail,
+    generateAiResponse: async () => 'Harika, Dubai yerleşim süreciyle ilgili size yardımcı olabilirim.',
+    applyPacing: false,
+  });
+
+  // Assertions:
+  // 1. AI was invoked
+  assert.equal(outcome.aiInvoked, true, 'AI must be invoked');
+  // 2. Outbound delivery failed
+  assert.equal(outcome.delivered, false, 'Delivery must report false');
+  // 3. Assistant response was persisted to Dashboard
+  assert.equal(persistedMessages.length, 1, 'Assistant message must be persisted to database');
+  assert.ok(persistedMessages[0].content.includes('Harika, Dubai yerleşim süreciyle ilgili'));
+  // 4. Next turn is not poisoned: can orchestrate another inbound turn immediately
+  const mockInboundTurn2 = {
+    ...mockInboundState,
+    customerMessage: { id: 'cust-msg-unique-2', content: 'Kiralar nasıl?' },
+  };
+
+  const outcomeTurn2 = await orchestrateInstagramInboundAiResponse({
+    database: mockDatabase,
+    inboundState: mockInboundTurn2,
+    senderIgsid: 'instagram:12345678',
+    text: 'Kiralar nasıl?',
+    http: mockHttpFail,
+    generateAiResponse: async () => 'Kira fiyatları ortalama 40.000 AED den başlar.',
+    applyPacing: false,
+  });
+
+  assert.equal(outcomeTurn2.aiInvoked, true, 'Next turn must invoke AI normally without being blocked by prior transport failure');
+  assert.equal(persistedMessages.length, 2, 'Second assistant response must also be persisted');
+});

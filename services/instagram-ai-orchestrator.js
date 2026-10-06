@@ -903,6 +903,10 @@ function trackInstagramOrchestration({ key, triggerId }) {
   if (active.has(triggerId)) return false;
   active.add(triggerId);
   activeInstagramOrchestrations.set(key, active);
+  const safetyTimer = setTimeout(() => {
+    untrackInstagramOrchestration({ key, triggerId });
+  }, 45000);
+  safetyTimer.unref?.();
   return true;
 }
 
@@ -1268,20 +1272,21 @@ export async function orchestrateInstagramInboundAiResponse({
   const generationStartedAt = Date.now();
 
   if (accessToken && cleanSenderId) {
-    try {
-      const typingRes = await sendInstagramTypingIndicator({
-        recipientId: cleanSenderId,
-        accessToken,
-        instagramAccountId: accountId,
-        pageId: accountId,
-        instagramUserId,
-        authMode,
-        http,
+    sendInstagramTypingIndicator({
+      recipientId: cleanSenderId,
+      accessToken,
+      instagramAccountId: accountId,
+      pageId: accountId,
+      instagramUserId,
+      authMode,
+      http,
+    })
+      .then((typingRes) => {
+        if (typingRes?.ok) typingActive = true;
+      })
+      .catch((typingErr) => {
+        console.warn('INSTAGRAM_TYPING_INDICATOR_NON_BLOCKING_WARN', typingErr?.message);
       });
-      if (typingRes?.ok) typingActive = true;
-    } catch (typingErr) {
-      console.warn('INSTAGRAM_TYPING_INDICATOR_NON_BLOCKING_WARN', typingErr?.message);
-    }
   }
 
   try {
@@ -1424,21 +1429,6 @@ export async function orchestrateInstagramInboundAiResponse({
         messageId: persisted.message?.id,
         providerMessageId: deliveryResult?.providerMessageId,
       });
-
-      // Synchronize native Instagram seen/read state (non-blocking)
-      try {
-        await sendInstagramMarkSeen({
-          recipientId: cleanSenderId,
-          accessToken,
-          instagramAccountId,
-          pageId,
-          instagramUserId,
-          authMode,
-          http,
-        });
-      } catch (syncErr) {
-        console.warn('INSTAGRAM_NATIVE_STATE_SYNC_AI_WARN', syncErr?.message);
-      }
 
       if (qualResult?.qualified || durableMemory.ctaUrl) {
         const isPool = typeof database?.connect === 'function' && typeof database?.query !== 'function';
@@ -1804,21 +1794,6 @@ export async function generateAndDeliverInstagramAssistantResponse({
           messageId: persisted.message?.id,
           providerMessageId: deliveryResult?.providerMessageId,
         });
-
-        // Synchronize native Instagram seen/read state (non-blocking)
-        try {
-          await sendInstagramMarkSeen({
-            recipientId: cleanRecipient,
-            accessToken,
-            instagramAccountId,
-            pageId,
-            instagramUserId,
-            authMode,
-            http,
-          });
-        } catch (syncErr) {
-          console.warn('INSTAGRAM_NATIVE_STATE_SYNC_AI_WARN', syncErr?.message);
-        }
 
         if (qualResult?.qualified || durableMemory.ctaUrl) {
           await client.query(

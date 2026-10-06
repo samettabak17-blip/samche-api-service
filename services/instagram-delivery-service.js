@@ -269,7 +269,7 @@ export async function deliverInstagramText({
   );
 
   // Inter-chunk sequential pacing
-  const INTER_CHUNK_PACING_MS = 600;
+  const INTER_CHUNK_PACING_MS = 250;
 
   let i = 0;
   while (i < chunks.length) {
