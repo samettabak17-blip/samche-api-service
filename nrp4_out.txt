@@ -1,0 +1,25 @@
+INSTAGRAM_NATIVE_STATE_SYNC_ATTEMPTED recipient=12345678 action=mark_seen
+INSTAGRAM_NATIVE_STATE_SYNC_SUCCEEDED recipient=12345678 action=mark_seen
+INSTAGRAM_NATIVE_STATE_SYNC_ATTEMPTED recipient=12345678 action=mark_seen
+INSTAGRAM_NATIVE_STATE_SYNC_FAILED recipient=12345678 reason=Meta API error: (#100) Parameter sender_action is invalid
+✔ NATIVE SYNC — sendInstagramMarkSeen sends sender_action: mark_seen to Meta Graph endpoint (1.5176ms)
+✔ NATIVE SYNC — sendInstagramMarkSeen handles failure safely without throwing (0.3812ms)
+✔ NATIVE SYNC — sendInstagramMarkSeen validates missing credentials fail closed without throwing (0.1189ms)
+✔ PERSONA RULE — buildNaturalCustomerConversationPolicy contains first-person direct voice and anti-narration rules (0.0995ms)
+✔ PERSONAL PERSONA — buildInstagramPersonalPersonaInstruction generates first-person directives for personal account (0.201ms)
+✔ PERSONAL PERSONA — Corporate accounts or unconfigured personas omit personal directive cleanly (0.0874ms)
+✔ PERSONA RULE — buildTenantRuntimeSystemInstruction integrates personal Instagram directive with highest precedence (0.4852ms)
+✔ PERSONA TEST A — General inquiry ("Dubai'de şirket kurmak istiyorum"): persona requires first-person Samed response and prohibits "kurucumuz Samed Tabak" (0.1485ms)
+✔ PERSONA TEST B — Earnings inquiry: persona requires first-person voice and prohibits "kurucumuzun deneyimleri" / "Samed Tabak'ın deneyimleri" (0.166ms)
+✔ PERSONA TEST C & D — YouTube inquiries: clickable YouTube URL format is preserved with first-person wording ("YouTube sayfam...") (0.2037ms)
+✔ PERSONA TEST E — Explicit founder inquiry ("Samed Tabak kim?"): allowed to answer directly without awkward third-person narration (0.1141ms)
+✔ PERSONA TEST F — Unsupported personal claims: instruction strictly forbids inventing ungrounded experiences (0.094ms)
+✔ PERSONA ISOLATION — WhatsApp, Web Chat, and AI Guide channel rules remain corporate and untouched (0.1554ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 510.6269
