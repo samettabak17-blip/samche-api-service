@@ -14,18 +14,11 @@ import {
   SAMCHE_STAGING_ASSISTANT_CONFIG,
 } from '../services/samche-canonical-knowledge-data.js';
 
-test('NATIVE SYNC — sendInstagramMarkSeen sends sender_action: mark_seen to Meta Graph endpoint', async () => {
-  let capturedUrl = null;
-  let capturedBody = null;
-  let capturedParams = null;
-  let capturedHeaders = null;
-
+test('NATIVE SYNC — sendInstagramMarkSeen safely returns NATIVE_STATE_SYNC_NOT_SUPPORTED without calling Meta API', async () => {
+  let httpCalled = false;
   const mockHttp = {
-    post: async (url, body, options) => {
-      capturedUrl = url;
-      capturedBody = body;
-      capturedParams = options?.params;
-      capturedHeaders = options?.headers;
+    post: async () => {
+      httpCalled = true;
       return { status: 200, data: { success: true } };
     },
   };
@@ -33,47 +26,12 @@ test('NATIVE SYNC — sendInstagramMarkSeen sends sender_action: mark_seen to Me
   const result = await sendInstagramMarkSeen({
     recipientId: 'instagram:1234567890',
     accessToken: 'test_token_abc',
-    pageId: 'page_999',
-    instagramAccountId: 'ig_acc_999',
-    authMode: 'FACEBOOK_LOGIN',
     http: mockHttp,
   });
 
-  assert.equal(result.ok, true);
-  assert.equal(capturedBody?.recipient?.id, '1234567890', 'Must strip instagram: prefix and use raw customer IGSID');
-  assert.equal(capturedBody?.sender_action, 'mark_seen', 'Must send sender_action: mark_seen');
-  assert.equal(capturedParams?.access_token, 'test_token_abc', 'Must pass access_token in URL params');
-  assert.equal(capturedHeaders?.Authorization, 'Bearer test_token_abc', 'Must pass Authorization header');
-  assert.ok(capturedUrl?.includes('/messages'), 'Target endpoint must be /messages');
-});
-
-test('NATIVE SYNC — sendInstagramMarkSeen handles failure safely without throwing', async () => {
-  const mockHttpFail = {
-    post: async () => {
-      const error = new Error('Meta API error: (#100) Parameter sender_action is invalid');
-      error.response = { status: 400, data: { error: { message: 'Invalid sender_action', code: 100 } } };
-      throw error;
-    },
-  };
-
-  const result = await sendInstagramMarkSeen({
-    recipientId: 'instagram:1234567890',
-    accessToken: 'test_token_abc',
-    http: mockHttpFail,
-  });
-
   assert.equal(result.ok, false);
-  assert.ok(result.reason.includes('sender_action') || result.reason.includes('100') || result.reason.includes('FAILED'));
-});
-
-test('NATIVE SYNC — sendInstagramMarkSeen validates missing credentials fail closed without throwing', async () => {
-  const result1 = await sendInstagramMarkSeen({ recipientId: null, accessToken: 'token' });
-  assert.equal(result1.ok, false);
-  assert.equal(result1.reason, 'CREDENTIALS_MISSING');
-
-  const result2 = await sendInstagramMarkSeen({ recipientId: '12345', accessToken: null });
-  assert.equal(result2.ok, false);
-  assert.equal(result2.reason, 'CREDENTIALS_MISSING');
+  assert.equal(result.reason, 'NATIVE_STATE_SYNC_NOT_SUPPORTED');
+  assert.equal(httpCalled, false, 'Must never make a network call to Meta for mark_seen');
 });
 test('PERSONA RULE — buildNaturalCustomerConversationPolicy contains first-person direct voice and anti-narration rules', () => {
   const policy = buildNaturalCustomerConversationPolicy('SamChe Company LLC');
@@ -217,3 +175,156 @@ test('PERSONA ISOLATION — WhatsApp, Web Chat, and AI Guide channel rules remai
   assert.ok(whatsappSystemInstruction.includes('WHATSAPP_CHANNEL_RULES_ONLY'));
 });
 
+
+test('DELIVERY PARITY — EXACT PHYSICAL SHAPE: Full Dubai living & rent response delivered completely across chunks with 100% parity', async () => {
+  const { deliverInstagramText } = await import('../services/instagram-delivery-service.js');
+
+  const canonicalResponse = `Dubai'de yaşam standartları oldukça yüksek, aileler için güvenli, konforlu ve sosyal olanakları zengin bir çevre sunmaktadır. Eğitim, sağlık ve altyapı uluslararası standartlardadır.
+
+Aile olarak gelmeyi düşündüğünüzde kiralık konut fiyatları seçeceğiniz bölgeye (Downtown, Marina, Business Bay, JVC, Dubai Hills vb.), mülk tipine ve büyüklüğüne göre değişir.
+
+Genel fikir vermesi açısından ortalama yıllık kira aralıkları:
+• Stüdyo Daireler: 40.000 - 65.000 AED
+• 1+1 Daireler: 60.000 - 100.000 AED
+• 2+1 ve Aile Daireleri: 95.000 - 170.000 AED
+• Villa ve Müstakil Konutlar: 180.000 AED ve üzeri
+
+Kira fiyatları ortalama olarak aylık 5.000 AED ile 15.000 AED civarından başlar ve genellikle yıllık 1 ila 4 çekle peşin/taksitli ödenir.
+
+Dubai'deki yaşam standartları ve kiralar hakkında daha detaylı bilgiler için, deneyimlerimi paylaştığım YouTube sayfamda daha fazla içerik bulabilirsiniz: [Samed Tabak YouTube](https://youtube.com/@sametttbk). Daha spesifik bir konuda yardımcı olmamı ister misiniz?`;
+
+  const sentPayloads = [];
+  const mockHttp = {
+    post: async (url, body) => {
+      sentPayloads.push(body);
+      return { status: 200, data: { message_id: `mid_msg_${sentPayloads.length}` } };
+    },
+  };
+
+  const deliveryResult = await deliverInstagramText({
+    recipientId: 'instagram:1234567890',
+    content: canonicalResponse,
+    accessToken: 'test_token_valid',
+    http: mockHttp,
+  });
+
+  assert.equal(deliveryResult.delivery, 'SENT_TO_INSTAGRAM');
+  assert.ok(sentPayloads.length >= 2, 'Must split into multiple chunks');
+  assert.equal(deliveryResult.chunksDelivered, sentPayloads.length);
+  assert.equal(deliveryResult.totalChunks, sentPayloads.length);
+
+  for (const p of sentPayloads) {
+    assert.ok(p.message?.text?.length <= 900, `Every chunk must be <= 900 chars, got ${p.message?.text?.length}`);
+  }
+
+  const allDeliveredText = sentPayloads.map((p) => p.message?.text).join('\n\n');
+
+  // Verify full fidelity across chunks
+  assert.ok(allDeliveredText.includes("Dubai'de yaşam standartları"), 'Beginning must be present');
+  assert.ok(allDeliveredText.includes('ortalama yıllık kira aralıkları'), 'Middle must be present');
+  assert.ok(allDeliveredText.includes('5.000 AED'), 'Rent amount 5.000 AED must be present');
+  assert.ok(allDeliveredText.includes('YouTube sayfamda daha fazla içerik'), 'YouTube guidance sentence must be present');
+  assert.ok(allDeliveredText.includes('https://youtube.com/@sametttbk'), 'Complete YouTube URL must be present');
+  assert.ok(allDeliveredText.includes('Daha spesifik bir konuda yardımcı olmamı ister misiniz?'), 'Final follow-up question after URL must be present');
+});
+
+
+
+test('DELIVERY PARITY — Boundary tests: Short, Exact 900, Over 901, and Substantially Long', async () => {
+  const { splitIntoInstagramDmChunks } = await import('../services/instagram-delivery-service.js');
+
+  // A. Short response
+  const shortText = 'Kısa yanıt. Yardımcı olabilir miyim?';
+  const shortChunks = splitIntoInstagramDmChunks(shortText, 900);
+  assert.equal(shortChunks.length, 1);
+  assert.equal(shortChunks[0], shortText);
+
+  // B. Exactly 900 chars
+  const exact900 = 'X'.repeat(900);
+  const exactChunks = splitIntoInstagramDmChunks(exact900, 900);
+  assert.equal(exactChunks.length, 1);
+  assert.equal(exactChunks[0].length, 900);
+
+  // C. Just over boundary (901 chars)
+  const over901 = 'Y'.repeat(890) + ' kelime ' + 'Z'.repeat(20);
+  const overChunks = splitIntoInstagramDmChunks(over901, 900);
+  assert.equal(overChunks.length, 2);
+  for (const c of overChunks) {
+    assert.ok(c.length <= 900, `Chunk exceeds 900 chars: ${c.length}`);
+  }
+  assert.ok(overChunks.join(' ').includes('kelime'));
+
+  // D. Substantially long response (3000 chars)
+  const longText = Array.from({ length: 6 }, (_, i) => `Paragraf ${i + 1}: ${'Açıklama metni '.repeat(30)}`).join('\n\n');
+  const longChunks = splitIntoInstagramDmChunks(longText, 900);
+  assert.ok(longChunks.length >= 3);
+  for (const c of longChunks) {
+    assert.ok(c.length <= 900, `Long chunk exceeds 900: ${c.length}`);
+  }
+});
+
+test('DELIVERY PARITY — URL at boundary remains completely intact without middle splits', async () => {
+  const { splitIntoInstagramDmChunks } = await import('../services/instagram-delivery-service.js');
+
+  const padding = 'P'.repeat(850);
+  const textWithUrlAtBoundary = `${padding} Bilgi için: [Samed Tabak YouTube](https://youtube.com/@sametttbk) kanalını inceleyebilirsiniz. Sonraki soru?`;
+  const chunks = splitIntoInstagramDmChunks(textWithUrlAtBoundary, 900);
+
+  assert.equal(chunks.length, 2);
+  assert.ok(chunks[0].length <= 900);
+  assert.ok(chunks[1].length <= 900);
+
+  const combined = chunks.join(' ');
+  assert.ok(combined.includes('[Samed Tabak YouTube](https://youtube.com/@sametttbk)'), 'Markdown link and URL must remain 100% intact');
+  assert.ok(combined.includes('Sonraki soru?'), 'Text after link must be preserved');
+});
+
+test('DELIVERY PARITY — Turkish Unicode characters preserved across chunk boundaries', async () => {
+  const { splitIntoInstagramDmChunks } = await import('../services/instagram-delivery-service.js');
+
+  const turkishText = "İstanbul'da yaşayan Çağlar Şimşek, Öğretmenlik ve Mühendislik süreçlerini araştırıyor. Ğüşıöç İĞÜŞÖÇ. ".repeat(15);
+  const chunks = splitIntoInstagramDmChunks(turkishText, 900);
+
+  assert.ok(chunks.length >= 2);
+  for (const c of chunks) {
+    assert.ok(c.length <= 900);
+    assert.ok(!c.includes('\uFFFD'), 'No corrupted Unicode replacement characters');
+    assert.ok(c.includes('Çağlar') || c.includes('Şimşek') || c.includes('Ğüşıöç'));
+  }
+});
+
+test('DELIVERY PARITY — Partial delivery failure (chunk 1 success, chunk 2 fail) throws observable error with failed chunk telemetry', async () => {
+  const { deliverInstagramText } = await import('../services/instagram-delivery-service.js');
+
+  const multiChunkText = 'Birinci Bölüm: ' + 'A'.repeat(850) + '\n\nİkinci Bölüm: ' + 'B'.repeat(500);
+
+  let calls = 0;
+  const mockHttpFailOnChunk2 = {
+    post: async () => {
+      calls++;
+      if (calls === 1) {
+        return { status: 200, data: { message_id: 'mid_chunk_1' } };
+      }
+      const err = new Error('Meta API error: (#4) Rate limit exceeded');
+      err.response = { status: 429, data: { error: { message: 'Rate limited', code: 4 } } };
+      throw err;
+    },
+  };
+
+  await assert.rejects(
+    async () => {
+      await deliverInstagramText({
+        recipientId: 'instagram:1234567890',
+        content: multiChunkText,
+        accessToken: 'test_token_valid',
+        http: mockHttpFailOnChunk2,
+      });
+    },
+    (err) => {
+      assert.equal(err.chunkIndex, 1, 'Must record chunkIndex = 1 as failed chunk');
+      assert.equal(err.totalChunks, 2, 'Must record totalChunks = 2');
+      assert.deepEqual(err.deliveredProviderIds, ['mid_chunk_1'], 'Must record chunk 1 as delivered');
+      return true;
+    }
+  );
+});
