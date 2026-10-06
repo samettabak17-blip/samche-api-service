@@ -155,7 +155,7 @@ export function buildInstagramPersonalPersonaInstruction(instagramConfig) {
     `   - You ARE ${speakerName} speaking directly to the customer. Express company services naturally in first person (e.g. "Bu süreçte size yardımcı olabilirim", "bu konuda danışmanlık ve süreç yönetimi desteği sağlıyorum", "SamChe üzerinden bu süreçte destek sağlıyoruz").`,
     `3. EXISTING APPROVED PROMPT REMAINS AUTHORITATIVE: All business rules, company formation info, pricing, visa guidelines, qualification criteria, and link formats in the approved assistant prompt remain strictly governing. Only the speaker identity changes to ${speakerName}'s first-person voice.`,
     `4. NO INVENTED PERSONAL CLAIMS: Only express personal experiences or achievements when grounded in approved assistant knowledge and business profile. If a fact belongs strictly to the company, state it accurately without fabricating personal anecdotes.`,
-    `5. YOUTUBE / SOCIAL MEDIA IN FIRST PERSON: When approved knowledge or prompts direct to YouTube or social channels, refer to them in first person as your own channel/page (e.g. "YouTube sayfamda da detaylı içerikler paylaşıyorum: [Samed Tabak YouTube](https://youtube.com/@sametttbk)", "YouTube sayfamdan da detaylara ulaşabilirsiniz: [Samed Tabak YouTube](https://youtube.com/@sametttbk)") preserving the existing approved link formatting. Do NOT refer to it in third person as "${speakerName}'ın YouTube kanalı" or "kurucumuzun YouTube kanalı".`,
+    `5. YOUTUBE / SOCIAL MEDIA IN FIRST PERSON: When approved knowledge or prompts direct to YouTube or social channels, refer to them in first person as your own channel/page with clean, clickable raw URL presentation (e.g. "YouTube sayfamda da detaylı içerikler paylaşıyorum:\nhttps://ytbe.app/u9j8qB2S" or "YouTube sayfamdan da detaylara ulaşabilirsiniz:\nhttps://ytbe.app/u9j8qB2S"). Do NOT refer to it in third person as "${speakerName}'ın YouTube kanalı" or "kurucumuzun YouTube kanalı".`,
     `6. EXPLICIT IDENTITY INQUIRIES: If the customer explicitly asks who you are or asks "${speakerName} kim?", answer directly and naturally using approved factual knowledge without awkward third-person self-narration.`,
   ].join('\n');
 }
@@ -382,7 +382,11 @@ export function formatInstagramDmResponse(rawText) {
   // 10. Ensure clean separation between bullet lists and following headings
   text = text.replace(/(•[^\n]+)\n([A-Za-z0-9ÇĞİÖŞÜçğıöşü\s]+:)/g, '$1\n\n$2');
 
-  // 11. Normalize excessive blank lines (more than 2 consecutive newlines -> 2)
+  // 11. Normalize markdown links to clean, mobile-friendly raw URLs for Instagram DMs
+  text = text.replace(/\[(?:Samed Tabak YouTube|YouTube|YouTube Kanalı)\]\((https?:\/\/[^\s\)]+)\)/gi, '$1');
+  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g, '$1:\n$2');
+
+  // 12. Normalize excessive blank lines (more than 2 consecutive newlines -> 2)
   text = text.replace(/\n{3,}/g, '\n\n');
 
   return text.trim();
@@ -1042,12 +1046,14 @@ export async function orchestrateInstagramInboundAiResponse({
         );
         const row = contactCheck.rows?.[0];
         if (row) {
-          const isExplicitChoice = (v) => v === 'NEVER_AI' || v === 'AUTOMATIC' || v === 'AI_ONLY' || v === 'ALWAYS_AI';
-          const effective = (row.contact_override && isExplicitChoice(row.contact_override))
-            ? (row.contact_override === 'ALWAYS_AI' ? 'AI_ONLY' : row.contact_override)
-            : (row.conv_override && isExplicitChoice(row.conv_override))
-            ? (row.conv_override === 'ALWAYS_AI' ? 'AI_ONLY' : row.conv_override)
-            : 'AI_ONLY';
+          const contactOverride = row.contact_override;
+          const convOverride = row.conv_override;
+          let effective;
+          if (contactOverride === 'NEVER_AI' || convOverride === 'NEVER_AI') {
+            effective = 'NEVER_AI';
+          } else {
+            effective = 'AI_ONLY';
+          }
           if (effective) {
             conversation.ai_behavior_override = effective;
             conversation.contact_ai_behavior_override = effective;

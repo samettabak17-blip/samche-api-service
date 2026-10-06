@@ -121,7 +121,7 @@ test('1. Authoritative Main File Integrity & Byte-for-Byte Hash Preservation', (
   const actualHash = createHash('sha256').update(canonicalLf).digest('hex');
 
   assert.equal(actualHash, SAMCHE_CANONICAL_MASTER_POLICY_HASH, 'Main policy file hash must match canonical SHA-256');
-  assert.equal(actualHash, 'c72bc5787e31ee788431fcb7b73a6f1f72fb3471c3910a00e87005d389edaf58');
+  assert.equal(actualHash, '563cbe98b2339a46155767d72398b7468c3c4a98402a5a0a25370caeb0cc81ee');
 
   const lines = canonicalLf.split('\n');
   assert.equal(lines.length, 793, 'Main policy must have exactly 793 lines');
@@ -262,7 +262,7 @@ test('8. Corporate Profile, Contact & WIO Bank Information', () => {
   assert.match(profSource.content, /\+971 50 179 38 80/);
   assert.match(profSource.content, /\+971 52 728 8586/);
   assert.match(profSource.content, /Sheikh Zayed Road Latifa Tower Office No 402/);
-  assert.match(profSource.content, /\[Samed Tabak YouTube\]\(https:\/\/youtube\.com\/@sametttbk\)/);
+  assert.match(profSource.content, /https:\/\/ytbe\.app\/u9j8qB2S/);
   assert.match(profSource.content, /Account Number.*9726414926/is);
   assert.match(profSource.content, /IBAN.*AE210860000009726414926/is);
   assert.match(profSource.content, /BIC.*WIOBAEADXXX/is);

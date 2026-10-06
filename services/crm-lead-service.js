@@ -112,14 +112,22 @@ export async function ensureConversationCrmIdentity(client, {
   const contactOverride = contact.ai_behavior_override;
   const convOverride = conversation.ai_behavior_override;
 
-  const isExplicitChoice = (v) => v === 'NEVER_AI' || v === 'AUTOMATIC' || v === 'AI_ONLY' || v === 'ALWAYS_AI';
   let effectiveOverride;
-  if (contactOverride && isExplicitChoice(contactOverride)) {
-    effectiveOverride = contactOverride === 'ALWAYS_AI' ? 'AI_ONLY' : contactOverride;
-  } else if (convOverride && isExplicitChoice(convOverride)) {
-    effectiveOverride = convOverride === 'ALWAYS_AI' ? 'AI_ONLY' : convOverride;
+  if (isInstagram) {
+    if (contactOverride === 'NEVER_AI' || convOverride === 'NEVER_AI') {
+      effectiveOverride = 'NEVER_AI';
+    } else {
+      effectiveOverride = 'AI_ONLY';
+    }
   } else {
-    effectiveOverride = defaultInitialOverride;
+    const isExplicitChoice = (v) => v === 'NEVER_AI' || v === 'AUTOMATIC' || v === 'AI_ONLY' || v === 'ALWAYS_AI';
+    if (contactOverride && isExplicitChoice(contactOverride)) {
+      effectiveOverride = contactOverride === 'ALWAYS_AI' ? 'AI_ONLY' : contactOverride;
+    } else if (convOverride && isExplicitChoice(convOverride)) {
+      effectiveOverride = convOverride === 'ALWAYS_AI' ? 'AI_ONLY' : convOverride;
+    } else {
+      effectiveOverride = defaultInitialOverride;
+    }
   }
 
   await client.query(

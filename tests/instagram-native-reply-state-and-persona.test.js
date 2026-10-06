@@ -115,7 +115,7 @@ test('PERSONA TEST B — Earnings inquiry: persona requires first-person voice a
   assert.ok(channelRules.includes('Samed Tabak\'ın...'));
 });
 
-test('PERSONA TEST C & D — YouTube inquiries: clickable YouTube URL format is preserved with first-person wording ("YouTube sayfam...")', () => {
+test('PERSONA TEST C & D — YouTube inquiries: clickable YouTube URL format is preserved with first-person wording ("YouTube sayfam...") and new approved URL', () => {
   const persona = {
     available: true,
     companyIdentity: 'SamChe Company LLC',
@@ -125,8 +125,9 @@ test('PERSONA TEST C & D — YouTube inquiries: clickable YouTube URL format is 
   };
 
   const channelRules = buildInstagramChannelRules({ persona });
-  assert.ok(channelRules.includes('YouTube sayfamda da detaylı içerikler paylaşıyorum: [Samed Tabak YouTube](https://youtube.com/@sametttbk)'));
-  assert.ok(channelRules.includes('YouTube sayfamdan da detaylara ulaşabilirsiniz: [Samed Tabak YouTube](https://youtube.com/@sametttbk)'));
+  assert.ok(channelRules.includes('https://ytbe.app/u9j8qB2S'));
+  assert.ok(channelRules.includes('YouTube sayfamda da detaylı içerikler paylaşıyorum'));
+  assert.ok(channelRules.includes('YouTube sayfamdan da detaylara ulaşabilirsiniz'));
 });
 
 test('PERSONA TEST E — Explicit founder inquiry ("Samed Tabak kim?"): allowed to answer directly without awkward third-person narration', () => {
@@ -191,7 +192,7 @@ Genel fikir vermesi açısından ortalama yıllık kira aralıkları:
 
 Kira fiyatları ortalama olarak aylık 5.000 AED ile 15.000 AED civarından başlar ve genellikle yıllık 1 ila 4 çekle peşin/taksitli ödenir.
 
-Dubai'deki yaşam standartları ve kiralar hakkında daha detaylı bilgiler için, deneyimlerimi paylaştığım YouTube sayfamda daha fazla içerik bulabilirsiniz: [Samed Tabak YouTube](https://youtube.com/@sametttbk). Daha spesifik bir konuda yardımcı olmamı ister misiniz?`;
+Dubai'deki yaşam standartları ve kiralar hakkında daha detaylı bilgiler için, deneyimlerimi paylaştığım YouTube sayfamda daha fazla içerik bulabilirsiniz:\nhttps://ytbe.app/u9j8qB2S\n\nDaha spesifik bir konuda yardımcı olmamı ister misiniz?`;
 
   const sentPayloads = [];
   const mockHttp = {
@@ -224,7 +225,7 @@ Dubai'deki yaşam standartları ve kiralar hakkında daha detaylı bilgiler içi
   assert.ok(allDeliveredText.includes('ortalama yıllık kira aralıkları'), 'Middle must be present');
   assert.ok(allDeliveredText.includes('5.000 AED'), 'Rent amount 5.000 AED must be present');
   assert.ok(allDeliveredText.includes('YouTube sayfamda daha fazla içerik'), 'YouTube guidance sentence must be present');
-  assert.ok(allDeliveredText.includes('https://youtube.com/@sametttbk'), 'Complete YouTube URL must be present');
+  assert.ok(allDeliveredText.includes('https://ytbe.app/u9j8qB2S'), 'Complete YouTube URL must be present');
   assert.ok(allDeliveredText.includes('Daha spesifik bir konuda yardımcı olmamı ister misiniz?'), 'Final follow-up question after URL must be present');
 });
 
@@ -267,7 +268,7 @@ test('DELIVERY PARITY — URL at boundary remains completely intact without midd
   const { splitIntoInstagramDmChunks } = await import('../services/instagram-delivery-service.js');
 
   const padding = 'P'.repeat(850);
-  const textWithUrlAtBoundary = `${padding} Bilgi için: [Samed Tabak YouTube](https://youtube.com/@sametttbk) kanalını inceleyebilirsiniz. Sonraki soru?`;
+  const textWithUrlAtBoundary = `${padding} Bilgi için: https://ytbe.app/u9j8qB2S sayfasını inceleyebilirsiniz. Sonraki soru?`;
   const chunks = splitIntoInstagramDmChunks(textWithUrlAtBoundary, 900);
 
   assert.equal(chunks.length, 2);
@@ -275,7 +276,7 @@ test('DELIVERY PARITY — URL at boundary remains completely intact without midd
   assert.ok(chunks[1].length <= 900);
 
   const combined = chunks.join(' ');
-  assert.ok(combined.includes('[Samed Tabak YouTube](https://youtube.com/@sametttbk)'), 'Markdown link and URL must remain 100% intact');
+  assert.ok(combined.includes('https://ytbe.app/u9j8qB2S'), 'New approved URL must remain 100% intact');
   assert.ok(combined.includes('Sonraki soru?'), 'Text after link must be preserved');
 });
 

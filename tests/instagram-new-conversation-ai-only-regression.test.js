@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { extractInstagramInboundEvents, isInstagramWebhookEvent } from '../services/instagram-inbound-adapter.js';
 import { persistInstagramInbound } from '../services/instagram-live-inbox-service.js';
 import { orchestrateInstagramInboundAiResponse } from '../services/instagram-ai-orchestrator.js';
-import { ensureConversationCrmIdentity } from '../services/crm-lead-service.js';
+import { ensureConversationCrmIdentity, crmContactIdentity } from '../services/crm-lead-service.js';
 import { setConversationAiOverride, appendAgentMessage } from '../services/live-inbox-service.js';
 
 import crypto from 'node:crypto';
@@ -97,7 +97,7 @@ class MockInMemoryDatabase {
     if (s.includes('FROM conversations') && s.includes('WHERE')) {
       const conv = this.conversations.get(params[0]);
       if (conv) {
-        const contact = conv.contact_id ? this.contacts.get(conv.contact_id) : null;
+        const contact = conv.contact_id ? (Array.from(this.contacts.values()).find((c) => c.id === conv.contact_id) || this.contacts.get(conv.contact_id)) : null;
         return {
           rowCount: 1,
           rows: [{
@@ -124,8 +124,10 @@ class MockInMemoryDatabase {
       if (!contact) {
         contact = { id: `contact-${this.nextId++}`, tenant_id: tId, identity_kind: iKind, identity_hash: iHash, display_name: dName, email, phone, source: src, ai_behavior_override: aiOverride || (src === 'INSTAGRAM' || src === 'INSTAGRAM_AD' ? 'AI_ONLY' : 'UNDECIDED') };
         this.contacts.set(iHash, contact);
-      } else if (aiOverride) {
-        contact.ai_behavior_override = aiOverride;
+      } else {
+        if (dName && (!contact.display_name || contact.display_name === 'Instagram User')) {
+          contact.display_name = dName;
+        }
       }
       return { rowCount: 1, rows: [{ ...contact }] };
     }
@@ -135,12 +137,15 @@ class MockInMemoryDatabase {
       return { rowCount: 0, rows: [] };
     }
     if (s.includes('UPDATE conversations')) {
-      const convId = s.includes('SET ai_behavior_override = $1') ? params[1] : (s.includes('SET assigned_agent_user_id = $1') ? params[1] : (params[2] || params[1] || params[0]));
+      const isContactAndOverride = /contact_id\s*=\s*\$1/i.test(s) && /ai_behavior_override\s*=\s*\$2/i.test(s);
+      const isOverrideOnly = /SET\s+ai_behavior_override\s*=\s*\$1/i.test(s);
+      const isAssignedOnly = /SET\s+assigned_agent_user_id\s*=\s*\$1/i.test(s);
+      const convId = isContactAndOverride ? params[2] : (isOverrideOnly ? params[1] : (isAssignedOnly ? params[1] : (params[2] || params[1] || params[0])));
       const conv = this.conversations.get(convId);
       if (conv) {
-        if (s.includes('SET contact_id = $1, ai_behavior_override = $2')) { conv.contact_id = params[0]; conv.ai_behavior_override = params[1]; }
-        else if (s.includes('SET ai_behavior_override = $1')) { conv.ai_behavior_override = params[0]; }
-        else if (s.includes('SET assigned_agent_user_id = $1')) { conv.assigned_agent_user_id = params[0]; }
+        if (isContactAndOverride) { conv.contact_id = params[0]; conv.ai_behavior_override = params[1]; }
+        else if (isOverrideOnly) { conv.ai_behavior_override = params[0]; }
+        else if (isAssignedOnly) { conv.assigned_agent_user_id = params[0]; }
         else if (s.includes("SET human_attention_state = 'ACKNOWLEDGED'")) { conv.human_attention_state = 'ACKNOWLEDGED'; }
         return { rowCount: 1, rows: [conv] };
       }
@@ -673,5 +678,144 @@ test('TEST P & Q — Vertex primary and OpenAI failover provider parity', async 
   });
   assert.equal(fallbackCalled, true);
   assert.equal(fallbackOutcome.delivered, true);
+});
+test('TEST R — Existing CRM Contact with legacy AUTOMATIC override defaults to AI_ONLY and invokes AI on Instagram inbound', async () => {
+  const db = new MockInMemoryDatabase();
+  const identity = crmContactIdentity({ tenantId: db.tenantId, source: 'INSTAGRAM', externalCustomerId: 'instagram:998877_auto_user' });
+
+  // Seed existing contact with legacy AUTOMATIC override
+  const existingContact = {
+    id: 'contact-legacy-auto',
+    tenant_id: db.tenantId,
+    identity_kind: identity.kind,
+    identity_hash: identity.identityHash,
+    display_name: 'Auto User',
+    source: 'INSTAGRAM',
+    ai_behavior_override: 'AUTOMATIC',
+  };
+  db.contacts.set(identity.identityHash, existingContact);
+
+  const inboundState = await persistInstagramInbound({
+    database: db,
+    recipientId: '178414000000001',
+    senderIgsid: '998877_auto_user',
+    messageId: 'mid_auto_user_1',
+    content: 'Merhaba Samed bey, yaşam giderleri ve kiralar konusunda bilgi alabilir miyim?',
+    http: mockHttpSuccess,
+    ensureConversationCrmIdentity,
+  });
+
+  assert.equal(inboundState.conversation.ai_behavior_override, 'AI_ONLY', 'Must normalize legacy AUTOMATIC to AI_ONLY for Instagram');
+
+  let aiCalled = false;
+  const outcome = await orchestrateInstagramInboundAiResponse({
+    database: db,
+    inboundState,
+    senderIgsid: '998877_auto_user',
+    text: 'Merhaba Samed bey, yaşam giderleri ve kiralar konusunda bilgi alabilir miyim?',
+    http: mockHttpSuccess,
+    applyPacing: false,
+    generateAiResponse: async () => {
+      aiCalled = true;
+      return 'Dubai yaşam maliyetleri ve kiralar hakkında detaylı bilgi paylaşıyorum.';
+    },
+  });
+
+  assert.equal(aiCalled, true, 'AI must be invoked for existing contact with legacy AUTOMATIC state');
+  assert.equal(outcome.aiInvoked, true);
+  assert.equal(outcome.delivered, true);
+});
+
+test('TEST S — Existing CRM Contact with legacy UNDECIDED/FIRST_CONTACT_HOLD override defaults to AI_ONLY and invokes AI', async () => {
+  const db = new MockInMemoryDatabase();
+  const identity = crmContactIdentity({ tenantId: db.tenantId, source: 'INSTAGRAM', externalCustomerId: 'instagram:112233_undecided_user' });
+
+  const existingContact = {
+    id: 'contact-legacy-undecided',
+    tenant_id: db.tenantId,
+    identity_kind: identity.kind,
+    identity_hash: identity.identityHash,
+    display_name: 'Undecided User',
+    source: 'INSTAGRAM',
+    ai_behavior_override: 'UNDECIDED',
+  };
+  db.contacts.set(identity.identityHash, existingContact);
+
+  const inboundState = await persistInstagramInbound({
+    database: db,
+    recipientId: '178414000000001',
+    senderIgsid: '112233_undecided_user',
+    messageId: 'mid_undecided_1',
+    content: 'Vize şartları nelerdir?',
+    http: mockHttpSuccess,
+    ensureConversationCrmIdentity,
+  });
+
+  assert.equal(inboundState.conversation.ai_behavior_override, 'AI_ONLY');
+
+  let aiCalled = false;
+  const outcome = await orchestrateInstagramInboundAiResponse({
+    database: db,
+    inboundState,
+    senderIgsid: '112233_undecided_user',
+    text: 'Vize şartları nelerdir?',
+    http: mockHttpSuccess,
+    applyPacing: false,
+    generateAiResponse: async () => {
+      aiCalled = true;
+      return 'BAE vize seçenekleri 2 yıllık oturum sağlamaktadır.';
+    },
+  });
+
+  assert.equal(aiCalled, true);
+  assert.equal(outcome.aiInvoked, true);
+  assert.equal(outcome.delivered, true);
+});
+
+test('TEST T — Explicit NEVER_AI is strictly preserved on existing contact/conversation', async () => {
+  const db = new MockInMemoryDatabase();
+  const identity = crmContactIdentity({ tenantId: db.tenantId, source: 'INSTAGRAM', externalCustomerId: 'instagram:445566_never_user' });
+
+  const existingContact = {
+    id: 'contact-never-ai',
+    tenant_id: db.tenantId,
+    identity_kind: identity.kind,
+    identity_hash: identity.identityHash,
+    display_name: 'Never User',
+    source: 'INSTAGRAM',
+    ai_behavior_override: 'NEVER_AI',
+  };
+  db.contacts.set(identity.identityHash, existingContact);
+
+  const inboundState = await persistInstagramInbound({
+    database: db,
+    recipientId: '178414000000001',
+    senderIgsid: '445566_never_user',
+    messageId: 'mid_never_1',
+    content: 'Destek istiyorum',
+    http: mockHttpSuccess,
+    ensureConversationCrmIdentity,
+  });
+
+  assert.equal(inboundState.conversation.ai_behavior_override, 'NEVER_AI', 'NEVER_AI must be preserved');
+
+  let aiCalled = false;
+  const outcome = await orchestrateInstagramInboundAiResponse({
+    database: db,
+    inboundState,
+    senderIgsid: '445566_never_user',
+    text: 'Destek istiyorum',
+    http: mockHttpSuccess,
+    applyPacing: false,
+    generateAiResponse: async () => {
+      aiCalled = true;
+      return 'Should not run';
+    },
+  });
+
+  assert.equal(aiCalled, false, 'AI must NOT be invoked when contact is NEVER_AI');
+  assert.equal(outcome.aiInvoked, false);
+  assert.equal(outcome.suppressed, true);
+  assert.equal(outcome.activationEvaluation.reasonCode, 'OVERRIDE_NEVER_AI');
 });
 

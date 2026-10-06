@@ -179,11 +179,14 @@ export async function evaluateChannelAiActivationPolicy({
   }
 
   // 2. Contact / Conversation Override Precedence
+  const channelType = String(channelConfig?.channel_type || conversation?.channel_type || '').toUpperCase();
+  const isInstagram = channelType === 'INSTAGRAM';
+
   const rawOverride = contact?.ai_behavior_override ||
     conversation?.contact_ai_behavior_override ||
     conversation?.contact?.ai_behavior_override ||
     conversation?.ai_behavior_override ||
-    AI_BEHAVIOR_OVERRIDES.AUTOMATIC;
+    (isInstagram ? 'AI_ONLY' : AI_BEHAVIOR_OVERRIDES.AUTOMATIC);
   const override = String(rawOverride).toUpperCase().trim();
 
   if (override === 'NEVER_AI') {
@@ -198,7 +201,7 @@ export async function evaluateChannelAiActivationPolicy({
     };
   }
 
-  if (override === 'AI_ONLY' || override === 'ALWAYS_AI') {
+  if (override === 'AI_ONLY' || override === 'ALWAYS_AI' || (isInstagram && override !== 'NEVER_AI')) {
     return {
       eligible: true,
       decision: 'ACTIVATED',
