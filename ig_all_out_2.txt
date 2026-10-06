@@ -1,0 +1,164 @@
+file:///C:/Users/smttb/samche-api-service/services/instagram-ai-orchestrator.js:1518
+}
+^
+
+SyntaxError: Missing catch or finally after try
+    at compileSourceTextModule (node:internal/modules/esm/utils:318:16)
+    at ModuleLoader.moduleStrategy (node:internal/modules/esm/translators:89:18)
+    at #translate (node:internal/modules/esm/loader:434:20)
+    at afterLoad (node:internal/modules/esm/loader:502:29)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:507:12)
+    at #getOrCreateModuleJobAfterResolve (node:internal/modules/esm/loader:560:36)
+    at afterResolve (node:internal/modules/esm/loader:607:52)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:613:12)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:163:33)
+    at ModuleJob.link (node:internal/modules/esm/module_job:253:17)
+
+Node.js v24.19.0
+✖ tests\instagram-appointment-qualification.test.js (162.2983ms)
+file:///C:/Users/smttb/samche-api-service/services/instagram-ai-orchestrator.js:1518
+}
+^
+
+SyntaxError: Missing catch or finally after try
+    at compileSourceTextModule (node:internal/modules/esm/utils:318:16)
+    at ModuleLoader.moduleStrategy (node:internal/modules/esm/translators:89:18)
+    at #translate (node:internal/modules/esm/loader:434:20)
+    at afterLoad (node:internal/modules/esm/loader:502:29)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:507:12)
+    at #getOrCreateModuleJobAfterResolve (node:internal/modules/esm/loader:560:36)
+    at afterResolve (node:internal/modules/esm/loader:607:52)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:613:12)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:163:33)
+    at ModuleJob.link (node:internal/modules/esm/module_job:253:17)
+
+Node.js v24.19.0
+✖ tests\instagram-behavioral-policy-service.test.js (70.9608ms)
+file:///C:/Users/smttb/samche-api-service/services/instagram-ai-orchestrator.js:1518
+}
+^
+
+SyntaxError: Missing catch or finally after try
+    at compileSourceTextModule (node:internal/modules/esm/utils:318:16)
+    at ModuleLoader.moduleStrategy (node:internal/modules/esm/translators:89:18)
+    at #translate (node:internal/modules/esm/loader:434:20)
+    at afterLoad (node:internal/modules/esm/loader:502:29)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:507:12)
+    at #getOrCreateModuleJobAfterResolve (node:internal/modules/esm/loader:560:36)
+    at afterResolve (node:internal/modules/esm/loader:607:52)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:613:12)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:163:33)
+    at ModuleJob.link (node:internal/modules/esm/module_job:253:17)
+
+Node.js v24.19.0
+✖ tests\instagram-media-text-intent-priority.test.js (81.2047ms)
+file:///C:/Users/smttb/samche-api-service/services/instagram-ai-orchestrator.js:1518
+}
+^
+
+SyntaxError: Missing catch or finally after try
+    at compileSourceTextModule (node:internal/modules/esm/utils:318:16)
+    at ModuleLoader.moduleStrategy (node:internal/modules/esm/translators:89:18)
+    at #translate (node:internal/modules/esm/loader:434:20)
+    at afterLoad (node:internal/modules/esm/loader:502:29)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:507:12)
+    at #getOrCreateModuleJobAfterResolve (node:internal/modules/esm/loader:560:36)
+    at afterResolve (node:internal/modules/esm/loader:607:52)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:613:12)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:163:33)
+    at ModuleJob.link (node:internal/modules/esm/module_job:253:17)
+
+Node.js v24.19.0
+✖ tests\instagram-native-reply-state-and-persona.test.js (170.4904ms)
+file:///C:/Users/smttb/samche-api-service/services/instagram-ai-orchestrator.js:1518
+}
+^
+
+SyntaxError: Missing catch or finally after try
+    at compileSourceTextModule (node:internal/modules/esm/utils:318:16)
+    at ModuleLoader.moduleStrategy (node:internal/modules/esm/translators:89:18)
+    at #translate (node:internal/modules/esm/loader:434:20)
+    at afterLoad (node:internal/modules/esm/loader:502:29)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:507:12)
+    at #getOrCreateModuleJobAfterResolve (node:internal/modules/esm/loader:560:36)
+    at afterResolve (node:internal/modules/esm/loader:607:52)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:613:12)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:163:33)
+    at ModuleJob.link (node:internal/modules/esm/module_job:253:17)
+
+Node.js v24.19.0
+✖ tests\instagram-new-conversation-ai-only-regression.test.js (163.41ms)
+file:///C:/Users/smttb/samche-api-service/services/instagram-ai-orchestrator.js:1518
+}
+^
+
+SyntaxError: Missing catch or finally after try
+    at compileSourceTextModule (node:internal/modules/esm/utils:318:16)
+    at ModuleLoader.moduleStrategy (node:internal/modules/esm/translators:89:18)
+    at #translate (node:internal/modules/esm/loader:434:20)
+    at afterLoad (node:internal/modules/esm/loader:502:29)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:507:12)
+    at #getOrCreateModuleJobAfterResolve (node:internal/modules/esm/loader:560:36)
+    at afterResolve (node:internal/modules/esm/loader:607:52)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:613:12)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:163:33)
+    at ModuleJob.link (node:internal/modules/esm/module_job:253:17)
+
+Node.js v24.19.0
+✖ tests\instagram-reel-concurrency.test.js (77.7342ms)
+file:///C:/Users/smttb/samche-api-service/services/instagram-ai-orchestrator.js:1518
+}
+^
+
+SyntaxError: Missing catch or finally after try
+    at compileSourceTextModule (node:internal/modules/esm/utils:318:16)
+    at ModuleLoader.moduleStrategy (node:internal/modules/esm/translators:89:18)
+    at #translate (node:internal/modules/esm/loader:434:20)
+    at afterLoad (node:internal/modules/esm/loader:502:29)
+    at ModuleLoader.loadAndTranslate (node:internal/modules/esm/loader:507:12)
+    at #getOrCreateModuleJobAfterResolve (node:internal/modules/esm/loader:560:36)
+    at afterResolve (node:internal/modules/esm/loader:607:52)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:613:12)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:163:33)
+    at ModuleJob.link (node:internal/modules/esm/module_job:253:17)
+
+Node.js v24.19.0
+✖ tests\instagram-reel-context.test.js (158.9555ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 0
+ℹ fail 7
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 215.2587
+
+✖ failing tests:
+
+test at tests\instagram-appointment-qualification.test.js:1:1
+✖ tests\instagram-appointment-qualification.test.js (162.2983ms)
+  'test failed'
+
+test at tests\instagram-behavioral-policy-service.test.js:1:1
+✖ tests\instagram-behavioral-policy-service.test.js (70.9608ms)
+  'test failed'
+
+test at tests\instagram-media-text-intent-priority.test.js:1:1
+✖ tests\instagram-media-text-intent-priority.test.js (81.2047ms)
+  'test failed'
+
+test at tests\instagram-native-reply-state-and-persona.test.js:1:1
+✖ tests\instagram-native-reply-state-and-persona.test.js (170.4904ms)
+  'test failed'
+
+test at tests\instagram-new-conversation-ai-only-regression.test.js:1:1
+✖ tests\instagram-new-conversation-ai-only-regression.test.js (163.41ms)
+  'test failed'
+
+test at tests\instagram-reel-concurrency.test.js:1:1
+✖ tests\instagram-reel-concurrency.test.js (77.7342ms)
+  'test failed'
+
+test at tests\instagram-reel-context.test.js:1:1
+✖ tests\instagram-reel-context.test.js (158.9555ms)
+  'test failed'

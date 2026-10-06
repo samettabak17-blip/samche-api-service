@@ -1,0 +1,353 @@
+INSTAGRAM_TENANT_RESOLVED tenant=1733491e channel=ch-9444d
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=99988811 has_display_name=true
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:999888 source=INSTAGRAM
+INSTAGRAM_AI_POLICY_RESOLVED tenant=1733491e conversation=conv-1 override=AI_ONLY policy=MANUAL_ONLY decision=ACTIVATED reason=OVERRIDE_AI_ONLY
+INSTAGRAM_ORCHESTRATION_STARTED tenant=1733491e conversation=conv-1 inboundMid=msg-3
+INSTAGRAM_ORCHESTRATION_STARTED conversation=conv-1 model=default triggerType=TEXT
+INSTAGRAM_AI_PERSONA_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_KNOWLEDGE_WARN Knowledge configuration identifier is invalid
+APPOINTMENT_STATE channel=INSTAGRAM intent=true purposeKnown=true dateKnown=false timeKnown=false timePrecision=NONE missingFields=CUSTOMER_PHONE,MEETING_AVAILABILITY status=COLLECTING
+APPOINTMENT_CONTEXT_RESOLUTION purposeKnown=true purposeSource=CURRENT_USER_MESSAGE activeTopicPresent=true dateKnown=false timeKnown=false missingFields=CUSTOMER_PHONE,MEETING_AVAILABILITY
+INSTAGRAM_AI_RUNTIME_CONTEXT finalSystemInstructionLength=8429 behavioralPromptPresent=0 behavioralPromptLength=0 tenantContextLength=0 sharedContentContextPresent=0 activeConfiguration=none
+INSTAGRAM_AI_GENERATION_START assistant=unknown activeConfiguration=none behavioralPromptPresent=0 behavioralPromptLength=0 behavioralPolicyVersion=none
+INSTAGRAM_PROVIDER_COMPLETED conversation=conv-1 model=default chars=65 durationMs=1 fallbackUsed=0
+INSTAGRAM_AI_GENERATION tenant=1733491e conversation=conv-1 inboundMid=msg-3 model=default durationMs=1 fallbackUsed=0 fallbackReason=none chars=65
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_STARTED
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_SUCCEEDED
+INSTAGRAM_AI_TURN_VALIDITY triggerType=TEXT triggerMid=msg-3 newerExplicitUserMessage=false turnStillCurrent=true responseSuppressedReason=none
+INSTAGRAM_OUTBOUND_ATTEMPTED recipient=99988811 chars=65 chunks=1 endpoint=fb_messages
+INSTAGRAM_OUTBOUND_SUCCEEDED recipient=99988811 provider_mid=provider_mid_179
+INSTAGRAM_NATIVE_STATE_SYNC_ATTEMPTED recipient=99988811 action=mark_seen
+INSTAGRAM_NATIVE_STATE_SYNC_SUCCEEDED recipient=99988811 action=mark_seen
+INSTAGRAM_AI_TERMINAL_OUTCOME outcome=RESPONDED tenant=1733491e conversation=conv-1 inboundMid=msg-3 orchestrationId=1733491e
+INSTAGRAM_TENANT_RESOLVED tenant=c5c89a6e channel=ch-abecd
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=msg_req_ has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:msg_re source=INSTAGRAM
+INSTAGRAM_AI_POLICY_RESOLVED tenant=c5c89a6e conversation=conv-1 override=AI_ONLY policy=MANUAL_ONLY decision=ACTIVATED reason=OVERRIDE_AI_ONLY
+INSTAGRAM_ORCHESTRATION_STARTED tenant=c5c89a6e conversation=conv-1 inboundMid=msg-3
+INSTAGRAM_ORCHESTRATION_STARTED conversation=conv-1 model=default triggerType=TEXT
+INSTAGRAM_AI_PERSONA_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_KNOWLEDGE_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_RUNTIME_CONTEXT finalSystemInstructionLength=7295 behavioralPromptPresent=0 behavioralPromptLength=0 tenantContextLength=0 sharedContentContextPresent=0 activeConfiguration=none
+INSTAGRAM_AI_GENERATION_START assistant=unknown activeConfiguration=none behavioralPromptPresent=0 behavioralPromptLength=0 behavioralPolicyVersion=none
+INSTAGRAM_PROVIDER_COMPLETED conversation=conv-1 model=default chars=56 durationMs=1 fallbackUsed=0
+INSTAGRAM_AI_GENERATION tenant=c5c89a6e conversation=conv-1 inboundMid=msg-3 model=default durationMs=1 fallbackUsed=0 fallbackReason=none chars=56
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_STARTED
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_SUCCEEDED
+INSTAGRAM_AI_TURN_VALIDITY triggerType=TEXT triggerMid=msg-3 newerExplicitUserMessage=false turnStillCurrent=true responseSuppressedReason=none
+INSTAGRAM_OUTBOUND_ATTEMPTED recipient=msg_req_ chars=56 chunks=1 endpoint=fb_messages
+INSTAGRAM_OUTBOUND_SUCCEEDED recipient=msg_req_ provider_mid=provider_mid_179
+INSTAGRAM_NATIVE_STATE_SYNC_ATTEMPTED recipient=msg_req_ action=mark_seen
+INSTAGRAM_NATIVE_STATE_SYNC_SUCCEEDED recipient=msg_req_ action=mark_seen
+INSTAGRAM_AI_TERMINAL_OUTCOME outcome=RESPONDED tenant=c5c89a6e conversation=conv-1 inboundMid=msg-3 orchestrationId=c5c89a6e
+INSTAGRAM_TENANT_RESOLVED tenant=a6f69a5e channel=ch-156d2
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_c has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+INSTAGRAM_TENANT_RESOLVED tenant=71c90807 channel=ch-89a35
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_d has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+INSTAGRAM_TENANT_RESOLVED tenant=71c90807 channel=ch-89a35
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_d has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=NEVER_AI handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+INSTAGRAM_AI_POLICY_RESOLVED tenant=71c90807 conversation=conv-1 override=NEVER_AI policy=MANUAL_ONLY decision=SUPPRESSED reason=OVERRIDE_NEVER_AI
+INSTAGRAM_ORCHESTRATION_SUPPRESSED reason=OVERRIDE_NEVER_AI policy=MANUAL_ONLY tenant=71c90807 conversation=conv-1
+INSTAGRAM_AI_TERMINAL_OUTCOME outcome=SUPPRESSED_OVERRIDE_NEVER_AI tenant=71c90807 conversation=conv-1 inboundMid=msg-4 orchestrationId=71c90807 policy=MANUAL_ONLY
+INSTAGRAM_TENANT_RESOLVED tenant=180899f7 channel=ch-81acc
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_e has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+INSTAGRAM_TENANT_RESOLVED tenant=180899f7 channel=ch-81acc
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_e has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=NEVER_AI handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+INSTAGRAM_AI_POLICY_RESOLVED tenant=180899f7 conversation=conv-1 override=NEVER_AI policy=MANUAL_ONLY decision=SUPPRESSED reason=OVERRIDE_NEVER_AI
+INSTAGRAM_ORCHESTRATION_SUPPRESSED reason=OVERRIDE_NEVER_AI policy=MANUAL_ONLY tenant=180899f7 conversation=conv-1
+INSTAGRAM_AI_TERMINAL_OUTCOME outcome=SUPPRESSED_OVERRIDE_NEVER_AI tenant=180899f7 conversation=conv-1 inboundMid=msg-4 orchestrationId=180899f7 policy=MANUAL_ONLY
+INSTAGRAM_TENANT_RESOLVED tenant=180899f7 channel=ch-81acc
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_e has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=NEVER_AI handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+INSTAGRAM_AI_POLICY_RESOLVED tenant=180899f7 conversation=conv-1 override=NEVER_AI policy=MANUAL_ONLY decision=SUPPRESSED reason=OVERRIDE_NEVER_AI
+INSTAGRAM_ORCHESTRATION_SUPPRESSED reason=OVERRIDE_NEVER_AI policy=MANUAL_ONLY tenant=180899f7 conversation=conv-1
+INSTAGRAM_AI_TERMINAL_OUTCOME outcome=SUPPRESSED_OVERRIDE_NEVER_AI tenant=180899f7 conversation=conv-1 inboundMid=msg-5 orchestrationId=180899f7 policy=MANUAL_ONLY
+INSTAGRAM_TENANT_RESOLVED tenant=180899f7 channel=ch-81acc
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_e has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=NEVER_AI handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+INSTAGRAM_AI_POLICY_RESOLVED tenant=180899f7 conversation=conv-1 override=NEVER_AI policy=MANUAL_ONLY decision=SUPPRESSED reason=OVERRIDE_NEVER_AI
+INSTAGRAM_ORCHESTRATION_SUPPRESSED reason=OVERRIDE_NEVER_AI policy=MANUAL_ONLY tenant=180899f7 conversation=conv-1
+INSTAGRAM_AI_TERMINAL_OUTCOME outcome=SUPPRESSED_OVERRIDE_NEVER_AI tenant=180899f7 conversation=conv-1 inboundMid=msg-6 orchestrationId=180899f7 policy=MANUAL_ONLY
+INSTAGRAM_TENANT_RESOLVED tenant=61cdf376 channel=ch-ac4fb
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_g has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+OPERATOR_SEND_STAGE stage=CONVERSATION_LOOKUP
+OPERATOR_SEND_STAGE stage=DELIVERY_STARTED
+INSTAGRAM_OUTBOUND_ATTEMPTED recipient=sender_g chars=40 chunks=1 endpoint=fb_messages
+INSTAGRAM_OUTBOUND_SUCCEEDED recipient=sender_g provider_mid=provider_mid_hum
+OPERATOR_SEND_STAGE stage=DELIVERY_SUCCEEDED
+OPERATOR_SEND_STAGE stage=AGENT_PERSIST_STARTED
+OPERATOR_SEND_STAGE stage=AGENT_PERSIST_SUCCEEDED
+OPERATOR_SEND_STAGE stage=ATTENTION_ACK_STARTED
+OPERATOR_SEND_STAGE stage=ATTENTION_ACK_SUCCEEDED
+OPERATOR_SEND_STAGE stage=ATTENTION_ACK_AUDIT_STARTED
+OPERATOR_SEND_STAGE stage=ATTENTION_ACK_AUDIT_SUCCEEDED
+OPERATOR_SEND_STAGE stage=SSE_PUBLISHED
+OPERATOR_SEND_STAGE stage=HTTP_SUCCESS
+INSTAGRAM_TENANT_RESOLVED tenant=5483e0e0 channel=ch-16e2f
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_h has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+OPERATOR_SEND_STAGE stage=CONVERSATION_LOOKUP
+OPERATOR_SEND_STAGE stage=DELIVERY_STARTED
+INSTAGRAM_OUTBOUND_ATTEMPTED recipient=sender_h chars=36 chunks=1 endpoint=fb_messages
+INSTAGRAM_OUTBOUND_FAILED recipient=sender_h code=META_IG_ERROR_100 status=400 meta_code=100 meta_subcode=none reason_category=INVALID_PARAMETER
+OPERATOR_SEND_FAILED stage=DELIVERY_STARTED reason=META_IG_ERROR_100
+INSTAGRAM_TENANT_RESOLVED tenant=d1bca281 channel=ch-da2cf
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_i has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+INSTAGRAM_TENANT_RESOLVED tenant=278c5591 channel=ch-a16c8
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_k has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+INSTAGRAM_TENANT_RESOLVED tenant=278c5591 channel=ch-a16c8
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_k has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+INSTAGRAM_AI_POLICY_RESOLVED tenant=278c5591 conversation=conv-1 override=AI_ONLY policy=MANUAL_ONLY decision=ACTIVATED reason=OVERRIDE_AI_ONLY
+INSTAGRAM_ORCHESTRATION_STARTED tenant=278c5591 conversation=conv-1 inboundMid=msg-4
+INSTAGRAM_ORCHESTRATION_STARTED conversation=conv-1 model=default triggerType=TEXT
+INSTAGRAM_AI_PERSONA_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_KNOWLEDGE_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_RUNTIME_CONTEXT finalSystemInstructionLength=7299 behavioralPromptPresent=0 behavioralPromptLength=0 tenantContextLength=0 sharedContentContextPresent=0 activeConfiguration=none
+INSTAGRAM_AI_GENERATION_START assistant=unknown activeConfiguration=none behavioralPromptPresent=0 behavioralPromptLength=0 behavioralPolicyVersion=none
+INSTAGRAM_PROVIDER_COMPLETED conversation=conv-1 model=default chars=66 durationMs=0 fallbackUsed=0
+INSTAGRAM_AI_GENERATION tenant=278c5591 conversation=conv-1 inboundMid=msg-4 model=default durationMs=0 fallbackUsed=0 fallbackReason=none chars=66
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_STARTED
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_SUCCEEDED
+INSTAGRAM_AI_TURN_VALIDITY triggerType=TEXT triggerMid=msg-4 newerExplicitUserMessage=false turnStillCurrent=true responseSuppressedReason=none
+INSTAGRAM_OUTBOUND_ATTEMPTED recipient=sender_k chars=66 chunks=1 endpoint=fb_messages
+INSTAGRAM_OUTBOUND_SUCCEEDED recipient=sender_k provider_mid=provider_mid_179
+INSTAGRAM_NATIVE_STATE_SYNC_ATTEMPTED recipient=sender_k action=mark_seen
+INSTAGRAM_NATIVE_STATE_SYNC_SUCCEEDED recipient=sender_k action=mark_seen
+INSTAGRAM_AI_TERMINAL_OUTCOME outcome=RESPONDED tenant=278c5591 conversation=conv-1 inboundMid=msg-4 orchestrationId=278c5591
+INSTAGRAM_TENANT_RESOLVED tenant=25a2f218 channel=ch-0ec32
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_l has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+OPERATOR_SEND_STAGE stage=CONVERSATION_LOOKUP
+OPERATOR_SEND_STAGE stage=DELIVERY_STARTED
+INSTAGRAM_OUTBOUND_ATTEMPTED recipient=sender_l chars=29 chunks=1 endpoint=fb_messages
+INSTAGRAM_OUTBOUND_SUCCEEDED recipient=sender_l provider_mid=provider_mid_179
+OPERATOR_SEND_STAGE stage=DELIVERY_SUCCEEDED
+OPERATOR_SEND_STAGE stage=AGENT_PERSIST_STARTED
+OPERATOR_SEND_STAGE stage=AGENT_PERSIST_SUCCEEDED
+OPERATOR_SEND_STAGE stage=ATTENTION_ACK_STARTED
+OPERATOR_SEND_STAGE stage=ATTENTION_ACK_SUCCEEDED
+OPERATOR_SEND_STAGE stage=ATTENTION_ACK_AUDIT_STARTED
+OPERATOR_SEND_STAGE stage=ATTENTION_ACK_AUDIT_SUCCEEDED
+OPERATOR_SEND_STAGE stage=SSE_PUBLISHED
+OPERATOR_SEND_STAGE stage=HTTP_SUCCESS
+INSTAGRAM_TENANT_RESOLVED tenant=03608e04 channel=ch-3666b
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_m has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+OPERATOR_SEND_STAGE stage=CONVERSATION_LOOKUP
+OPERATOR_SEND_STAGE stage=DELIVERY_STARTED
+INSTAGRAM_OUTBOUND_ATTEMPTED recipient=sender_m chars=19 chunks=1 endpoint=fb_messages
+INSTAGRAM_OUTBOUND_SUCCEEDED recipient=sender_m provider_mid=provider_mid_179
+OPERATOR_SEND_STAGE stage=DELIVERY_SUCCEEDED
+OPERATOR_SEND_STAGE stage=AGENT_PERSIST_STARTED
+OPERATOR_SEND_STAGE stage=AGENT_PERSIST_SUCCEEDED
+OPERATOR_SEND_STAGE stage=ATTENTION_ACK_STARTED
+OPERATOR_SEND_STAGE stage=ATTENTION_ACK_SUCCEEDED
+OPERATOR_SEND_STAGE stage=ATTENTION_ACK_AUDIT_STARTED
+OPERATOR_SEND_STAGE stage=ATTENTION_ACK_AUDIT_SUCCEEDED
+OPERATOR_SEND_STAGE stage=SSE_PUBLISHED
+OPERATOR_SEND_STAGE stage=HTTP_SUCCESS
+INSTAGRAM_TENANT_RESOLVED tenant=073f314e channel=ch-20c8a
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=instagra has_display_name=true
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:instag source=INSTAGRAM
+INSTAGRAM_AI_POLICY_RESOLVED tenant=073f314e conversation=conv-1 override=AI_ONLY policy=MANUAL_ONLY decision=ACTIVATED reason=OVERRIDE_AI_ONLY
+INSTAGRAM_ORCHESTRATION_STARTED tenant=073f314e conversation=conv-1 inboundMid=msg-3
+INSTAGRAM_ORCHESTRATION_STARTED conversation=conv-1 model=default triggerType=TEXT
+INSTAGRAM_AI_PERSONA_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_KNOWLEDGE_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_RUNTIME_CONTEXT finalSystemInstructionLength=7273 behavioralPromptPresent=0 behavioralPromptLength=0 tenantContextLength=0 sharedContentContextPresent=0 activeConfiguration=none
+INSTAGRAM_AI_GENERATION_START assistant=unknown activeConfiguration=none behavioralPromptPresent=0 behavioralPromptLength=0 behavioralPolicyVersion=none
+INSTAGRAM_PROVIDER_COMPLETED conversation=conv-1 model=default chars=23 durationMs=0 fallbackUsed=0
+INSTAGRAM_AI_GENERATION tenant=073f314e conversation=conv-1 inboundMid=msg-3 model=default durationMs=0 fallbackUsed=0 fallbackReason=none chars=23
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_STARTED
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_SUCCEEDED
+INSTAGRAM_AI_TURN_VALIDITY triggerType=TEXT triggerMid=msg-3 newerExplicitUserMessage=false turnStillCurrent=true responseSuppressedReason=none
+INSTAGRAM_OUTBOUND_ATTEMPTED recipient=99887766 chars=23 chunks=1 endpoint=fb_messages
+INSTAGRAM_OUTBOUND_SUCCEEDED recipient=99887766 provider_mid=provider_mid_igs
+INSTAGRAM_NATIVE_STATE_SYNC_ATTEMPTED recipient=99887766 action=mark_seen
+INSTAGRAM_NATIVE_STATE_SYNC_SUCCEEDED recipient=99887766 action=mark_seen
+INSTAGRAM_AI_TERMINAL_OUTCOME outcome=RESPONDED tenant=073f314e conversation=conv-1 inboundMid=msg-3 orchestrationId=073f314e
+INSTAGRAM_TENANT_RESOLVED tenant=ce3351ba channel=ch-ddc4f
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_d has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+INSTAGRAM_TENANT_RESOLVED tenant=ce3351ba channel=ch-ddc4f
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_d has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_TENANT_RESOLVED tenant=b70f52fa channel=ch-f4fee
+INSTAGRAM_TENANT_RESOLVED tenant=b70f52fa channel=ch-f4fee
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_c has_display_name=false
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_c has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-2 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+INSTAGRAM_AI_POLICY_RESOLVED tenant=b70f52fa conversation=conv-1 override=AI_ONLY policy=MANUAL_ONLY decision=ACTIVATED reason=OVERRIDE_AI_ONLY
+INSTAGRAM_ORCHESTRATION_STARTED tenant=b70f52fa conversation=conv-1 inboundMid=msg-5
+INSTAGRAM_AI_POLICY_RESOLVED tenant=b70f52fa conversation=conv-2 override=AI_ONLY policy=MANUAL_ONLY decision=ACTIVATED reason=OVERRIDE_AI_ONLY
+INSTAGRAM_ORCHESTRATION_STARTED tenant=b70f52fa conversation=conv-2 inboundMid=msg-6
+INSTAGRAM_ORCHESTRATION_STARTED conversation=conv-1 model=default triggerType=TEXT
+INSTAGRAM_ORCHESTRATION_STARTED conversation=conv-2 model=default triggerType=TEXT
+INSTAGRAM_AI_PERSONA_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_PERSONA_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_KNOWLEDGE_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_KNOWLEDGE_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_RUNTIME_CONTEXT finalSystemInstructionLength=7277 behavioralPromptPresent=0 behavioralPromptLength=0 tenantContextLength=0 sharedContentContextPresent=0 activeConfiguration=none
+INSTAGRAM_AI_RUNTIME_CONTEXT finalSystemInstructionLength=7277 behavioralPromptPresent=0 behavioralPromptLength=0 tenantContextLength=0 sharedContentContextPresent=0 activeConfiguration=none
+INSTAGRAM_AI_GENERATION_START assistant=unknown activeConfiguration=none behavioralPromptPresent=0 behavioralPromptLength=0 behavioralPolicyVersion=none
+INSTAGRAM_AI_GENERATION_START assistant=unknown activeConfiguration=none behavioralPromptPresent=0 behavioralPromptLength=0 behavioralPolicyVersion=none
+INSTAGRAM_PROVIDER_COMPLETED conversation=conv-1 model=default chars=10 durationMs=0 fallbackUsed=0
+INSTAGRAM_AI_GENERATION tenant=b70f52fa conversation=conv-1 inboundMid=msg-5 model=default durationMs=0 fallbackUsed=0 fallbackReason=none chars=10
+INSTAGRAM_PROVIDER_COMPLETED conversation=conv-2 model=default chars=10 durationMs=0 fallbackUsed=0
+INSTAGRAM_AI_GENERATION tenant=b70f52fa conversation=conv-2 inboundMid=msg-6 model=default durationMs=0 fallbackUsed=0 fallbackReason=none chars=10
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_STARTED
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_STARTED
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_SUCCEEDED
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_SUCCEEDED
+INSTAGRAM_AI_TURN_VALIDITY triggerType=TEXT triggerMid=msg-5 newerExplicitUserMessage=false turnStillCurrent=true responseSuppressedReason=none
+INSTAGRAM_OUTBOUND_ATTEMPTED recipient=sender_c chars=10 chunks=1 endpoint=fb_messages
+INSTAGRAM_AI_TURN_VALIDITY triggerType=TEXT triggerMid=msg-6 newerExplicitUserMessage=false turnStillCurrent=true responseSuppressedReason=none
+INSTAGRAM_OUTBOUND_ATTEMPTED recipient=sender_c chars=10 chunks=1 endpoint=fb_messages
+INSTAGRAM_OUTBOUND_SUCCEEDED recipient=sender_c provider_mid=provider_mid_179
+INSTAGRAM_OUTBOUND_SUCCEEDED recipient=sender_c provider_mid=provider_mid_179
+INSTAGRAM_NATIVE_STATE_SYNC_ATTEMPTED recipient=sender_c action=mark_seen
+INSTAGRAM_NATIVE_STATE_SYNC_ATTEMPTED recipient=sender_c action=mark_seen
+INSTAGRAM_NATIVE_STATE_SYNC_SUCCEEDED recipient=sender_c action=mark_seen
+INSTAGRAM_NATIVE_STATE_SYNC_SUCCEEDED recipient=sender_c action=mark_seen
+INSTAGRAM_AI_TERMINAL_OUTCOME outcome=RESPONDED tenant=b70f52fa conversation=conv-1 inboundMid=msg-5 orchestrationId=b70f52fa
+INSTAGRAM_AI_TERMINAL_OUTCOME outcome=RESPONDED tenant=b70f52fa conversation=conv-2 inboundMid=msg-6 orchestrationId=b70f52fa
+INSTAGRAM_TENANT_RESOLVED tenant=48adc5aa channel=ch-60ef0
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_f has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+INSTAGRAM_AI_POLICY_RESOLVED tenant=48adc5aa conversation=conv-1 override=AI_ONLY policy=MANUAL_ONLY decision=ACTIVATED reason=OVERRIDE_AI_ONLY
+INSTAGRAM_ORCHESTRATION_STARTED tenant=48adc5aa conversation=conv-1 inboundMid=msg-3
+INSTAGRAM_ORCHESTRATION_STARTED conversation=conv-1 model=default triggerType=TEXT
+INSTAGRAM_AI_PERSONA_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_KNOWLEDGE_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_RUNTIME_CONTEXT finalSystemInstructionLength=7287 behavioralPromptPresent=0 behavioralPromptLength=0 tenantContextLength=0 sharedContentContextPresent=0 activeConfiguration=none
+INSTAGRAM_AI_GENERATION_START assistant=unknown activeConfiguration=none behavioralPromptPresent=0 behavioralPromptLength=0 behavioralPolicyVersion=none
+INSTAGRAM_PROVIDER_COMPLETED conversation=conv-1 model=default chars=21 durationMs=0 fallbackUsed=0
+INSTAGRAM_AI_GENERATION tenant=48adc5aa conversation=conv-1 inboundMid=msg-3 model=default durationMs=0 fallbackUsed=0 fallbackReason=none chars=21
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_STARTED
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_SUCCEEDED
+INSTAGRAM_AI_TURN_VALIDITY triggerType=TEXT triggerMid=msg-3 newerExplicitUserMessage=false turnStillCurrent=true responseSuppressedReason=none
+INSTAGRAM_OUTBOUND_ATTEMPTED recipient=sender_f chars=21 chunks=1 endpoint=fb_messages
+INSTAGRAM_OUTBOUND_FAILED recipient=sender_f code=META_IG_ERROR_10 status=400 meta_code=10 meta_subcode=2018001 reason_category=AUTH_PERMISSION
+INSTAGRAM_OUTBOUND_DELIVERY_ERROR META_IG_ERROR_10 Message Request restriction
+INSTAGRAM_AI_TERMINAL_OUTCOME outcome=DELIVERY_FAILED_META_IG_ERROR_10 tenant=48adc5aa conversation=conv-1 inboundMid=msg-3 orchestrationId=48adc5aa
+INSTAGRAM_TENANT_RESOLVED tenant=3c3e681a channel=ch-a475f
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=shared_s has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:shared source=INSTAGRAM
+INSTAGRAM_TENANT_RESOLVED tenant=95ef26d6 channel=ch-37a0b
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_p has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+INSTAGRAM_AI_POLICY_RESOLVED tenant=95ef26d6 conversation=conv-1 override=AI_ONLY policy=MANUAL_ONLY decision=ACTIVATED reason=OVERRIDE_AI_ONLY
+INSTAGRAM_ORCHESTRATION_STARTED tenant=95ef26d6 conversation=conv-1 inboundMid=msg-3
+INSTAGRAM_ORCHESTRATION_STARTED conversation=conv-1 model=default triggerType=TEXT
+INSTAGRAM_AI_PERSONA_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_KNOWLEDGE_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_RUNTIME_CONTEXT finalSystemInstructionLength=7276 behavioralPromptPresent=0 behavioralPromptLength=0 tenantContextLength=0 sharedContentContextPresent=0 activeConfiguration=none
+INSTAGRAM_AI_GENERATION_START assistant=unknown activeConfiguration=none behavioralPromptPresent=0 behavioralPromptLength=0 behavioralPolicyVersion=none
+INSTAGRAM_PROVIDER_COMPLETED conversation=conv-1 model=gemini-2.0-flash chars=15 durationMs=0 fallbackUsed=0
+INSTAGRAM_AI_GENERATION tenant=95ef26d6 conversation=conv-1 inboundMid=msg-3 model=gemini-2.0-flash durationMs=0 fallbackUsed=0 fallbackReason=none chars=15
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_STARTED
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_SUCCEEDED
+INSTAGRAM_AI_TURN_VALIDITY triggerType=TEXT triggerMid=msg-3 newerExplicitUserMessage=false turnStillCurrent=true responseSuppressedReason=none
+INSTAGRAM_OUTBOUND_ATTEMPTED recipient=sender_p chars=15 chunks=1 endpoint=fb_messages
+INSTAGRAM_OUTBOUND_SUCCEEDED recipient=sender_p provider_mid=provider_mid_179
+INSTAGRAM_NATIVE_STATE_SYNC_ATTEMPTED recipient=sender_p action=mark_seen
+INSTAGRAM_NATIVE_STATE_SYNC_SUCCEEDED recipient=sender_p action=mark_seen
+INSTAGRAM_AI_TERMINAL_OUTCOME outcome=RESPONDED tenant=95ef26d6 conversation=conv-1 inboundMid=msg-3 orchestrationId=95ef26d6
+INSTAGRAM_TENANT_RESOLVED tenant=07a6b008 channel=ch-3979c
+INSTAGRAM_IDENTITY_RESOLVED sender_prefix=sender_p has_display_name=false
+INSTAGRAM_CONVERSATION_RESOLVED conversation=conv-1 ai_behavior=AI_ONLY handling_mode=AI
+INSTAGRAM_IDENTITY_RESOLVED identity_hash=instagram:sender source=INSTAGRAM
+INSTAGRAM_AI_POLICY_RESOLVED tenant=07a6b008 conversation=conv-1 override=AI_ONLY policy=MANUAL_ONLY decision=ACTIVATED reason=OVERRIDE_AI_ONLY
+INSTAGRAM_ORCHESTRATION_STARTED tenant=07a6b008 conversation=conv-1 inboundMid=msg-3
+INSTAGRAM_ORCHESTRATION_STARTED conversation=conv-1 model=default triggerType=TEXT
+INSTAGRAM_AI_PERSONA_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_KNOWLEDGE_WARN Knowledge configuration identifier is invalid
+INSTAGRAM_AI_RUNTIME_CONTEXT finalSystemInstructionLength=7276 behavioralPromptPresent=0 behavioralPromptLength=0 tenantContextLength=0 sharedContentContextPresent=0 activeConfiguration=none
+INSTAGRAM_AI_GENERATION_START assistant=unknown activeConfiguration=none behavioralPromptPresent=0 behavioralPromptLength=0 behavioralPolicyVersion=none
+INSTAGRAM_PROVIDER_COMPLETED conversation=conv-1 model=gpt-4o chars=24 durationMs=1 fallbackUsed=1
+INSTAGRAM_AI_GENERATION tenant=07a6b008 conversation=conv-1 inboundMid=msg-3 model=gpt-4o durationMs=1 fallbackUsed=1 fallbackReason=VERTEX_TIMEOUT chars=24
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_STARTED
+OPERATOR_SEND_STAGE stage=ASSISTANT_PERSIST_SUCCEEDED
+INSTAGRAM_AI_TURN_VALIDITY triggerType=TEXT triggerMid=msg-3 newerExplicitUserMessage=false turnStillCurrent=true responseSuppressedReason=none
+INSTAGRAM_OUTBOUND_ATTEMPTED recipient=sender_p chars=24 chunks=1 endpoint=fb_messages
+INSTAGRAM_OUTBOUND_SUCCEEDED recipient=sender_p provider_mid=provider_mid_179
+INSTAGRAM_NATIVE_STATE_SYNC_ATTEMPTED recipient=sender_p action=mark_seen
+INSTAGRAM_NATIVE_STATE_SYNC_SUCCEEDED recipient=sender_p action=mark_seen
+INSTAGRAM_AI_TERMINAL_OUTCOME outcome=RESPONDED tenant=07a6b008 conversation=conv-1 inboundMid=msg-3 orchestrationId=07a6b008
+✔ TEST A — Brand-new Instagram sender defaults to AI_ONLY and orchestrates without manual activation (24.6838ms)
+✔ TEST B — Message Request originates new conversation initialized as AI_ONLY without manual Accept requirement (4.931ms)
+✔ TEST C — AI_ONLY → NEVER_AI persists NEVER_AI durable state (0.8805ms)
+✔ TEST D — Customer inbound during NEVER_AI: persisted in Live Inbox, unread updated, AI suppressed (0.7788ms)
+✔ TEST E — Multiple customer messages during NEVER_AI: all inbound messages visible, state remains NEVER_AI, AI silent (3.5946ms)
+✖ TEST F & G — Manual operator outbound from Dashboard when NEVER_AI: invokes canonical delivery and persists AGENT message (2.2462ms)
+✔ TEST H — Manual Meta failure: real failure is surfaced and message is not falsely persisted as success (1.1494ms)
+✔ TEST I & J — NEVER_AI → AI_ONLY restore: state becomes AI_ONLY without unsolicited customer-facing support-ended message (0.4599ms)
+✔ TEST K — Next inbound after AI_ONLY restore invokes AI normally (3.526ms)
+✔ TEST L — Instagram manual reply in NEVER_AI does not require Take Over (0.9906ms)
+✔ TEST M — Message authorship is AGENT/HUMAN and not ASSISTANT (1.1224ms)
+✔ TEST J — Outbound recipient uses canonical customer IGSID without corruption (1.0384ms)
+✔ TEST M — Duplicate MID cannot produce duplicate response (0.3063ms)
+✔ TEST J — Concurrent independent senders execute without interference (1.3438ms)
+✔ TEST K — Meta outbound failure is observable and not misreported as AI-policy suppression (1.2339ms)
+✔ TEST O — Tenant isolation: channels and conversations remain strictly separated (0.2188ms)
+✔ TEST P & Q — Vertex primary and OpenAI failover provider parity (2.4989ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 16
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 561.0199
+
+✖ failing tests:
+
+test at tests\instagram-new-conversation-ai-only-regression.test.js:336:1
+✖ TEST F & G — Manual operator outbound from Dashboard when NEVER_AI: invokes canonical delivery and persists AGENT message (2.2462ms)
+  AssertionError [ERR_ASSERTION]: Must sync native seen state via mark_seen after successful delivery
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///C:/Users/smttb/samche-api-service/tests/instagram-new-conversation-ai-only-regression.test.js:377:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
