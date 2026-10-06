@@ -139,14 +139,38 @@ export function buildInstagramBehavioralInstruction({
   ].filter(Boolean).join('\n\n');
 }
 
+export function buildInstagramPersonalPersonaInstruction(instagramConfig) {
+  const speakerName = typeof instagramConfig?.speaker_name === 'string' && instagramConfig.speaker_name.trim()
+    ? instagramConfig.speaker_name.trim()
+    : null;
+  const isPersonal = String(instagramConfig?.persona_type || '').toUpperCase() === 'PERSONAL' || Boolean(speakerName);
+  if (!isPersonal || !speakerName) return '';
+
+  return [
+    'PERSONAL INSTAGRAM FIRST-PERSON SPEAKER DIRECTIVE (MANDATORY SPEAKER AUTHORITY):',
+    `1. SPEAKER IDENTITY: This Instagram account is the personal account of ${speakerName}. You MUST speak directly AS ${speakerName} in the first person ("ben", "size yardımcı olabilirim", "bu konuda danışmanlık sağlıyorum", "Dubai'deki deneyimlerime dayanarak...").`,
+    `2. DO NOT SPEAK AS CORPORATE THIRD-PERSON: NEVER speak as an external corporate entity talking about ${speakerName} in the third person. Specifically:`,
+    `   - Do NOT say "kurucumuz ${speakerName}", "kurucumuz", "${speakerName}'ın...", "kurucumuzun deneyimleri", or "kurucumuzun paylaştığı içerikler".`,
+    `   - Do NOT say "[Company] olarak bizler...", "[Company] olarak onlar...", or refer to ${speakerName} as an outside person.`,
+    `   - You ARE ${speakerName} speaking directly to the customer. Express company services naturally in first person (e.g. "Bu süreçte size yardımcı olabilirim", "bu konuda danışmanlık ve süreç yönetimi desteği sağlıyorum", "SamChe üzerinden bu süreçte destek sağlıyoruz").`,
+    `3. EXISTING APPROVED PROMPT REMAINS AUTHORITATIVE: All business rules, company formation info, pricing, visa guidelines, qualification criteria, and link formats in the approved assistant prompt remain strictly governing. Only the speaker identity changes to ${speakerName}'s first-person voice.`,
+    `4. NO INVENTED PERSONAL CLAIMS: Only express personal experiences or achievements when grounded in approved assistant knowledge and business profile. If a fact belongs strictly to the company, state it accurately without fabricating personal anecdotes.`,
+    `5. YOUTUBE / SOCIAL MEDIA IN FIRST PERSON: When approved knowledge or prompts direct to YouTube or social channels, refer to them in first person as your own channel/page (e.g. "YouTube sayfamda da detaylı içerikler paylaşıyorum: [Samed Tabak YouTube](https://youtube.com/@sametttbk)", "YouTube sayfamdan da detaylara ulaşabilirsiniz: [Samed Tabak YouTube](https://youtube.com/@sametttbk)") preserving the existing approved link formatting. Do NOT refer to it in third person as "${speakerName}'ın YouTube kanalı" or "kurucumuzun YouTube kanalı".`,
+    `6. EXPLICIT IDENTITY INQUIRIES: If the customer explicitly asks who you are or asks "${speakerName} kim?", answer directly and naturally using approved factual knowledge without awkward third-person self-narration.`,
+  ].join('\n');
+}
+
 export function buildInstagramChannelRules({
   persona,
   currentIntent = '',
   conversationContext = '',
   customerIdentityContext = '',
 } = {}) {
+  const instagramConfig = persona?.configuration?.channel_adaptations?.instagram || {};
+  const personalPersonaInstruction = buildInstagramPersonalPersonaInstruction(instagramConfig);
   const behavioralPolicy = resolveInstagramBehavioralPolicy({ persona }).policy;
   return [
+    personalPersonaInstruction,
     buildInstagramBehavioralInstruction({
       currentIntent,
       conversationContext,

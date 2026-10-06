@@ -6,6 +6,10 @@ import {
   buildTenantRuntimeSystemInstruction,
 } from '../services/tenant-runtime-persona-service.js';
 import {
+  buildInstagramPersonalPersonaInstruction,
+  buildInstagramChannelRules,
+} from '../services/instagram-ai-orchestrator.js';
+import {
   SAMCHE_STAGING_BUSINESS_PROFILE,
   SAMCHE_STAGING_ASSISTANT_CONFIG,
 } from '../services/samche-canonical-knowledge-data.js';
@@ -80,7 +84,30 @@ test('PERSONA RULE — buildNaturalCustomerConversationPolicy contains first-per
   assert.ok(policy.includes('TRUTHFUL AI IDENTITY DISCLOSURE'), 'Must retain truthful AI disclosure when explicitly asked');
 });
 
-test('PERSONA RULE — buildTenantRuntimeSystemInstruction integrates first-person rules into runtime instruction', () => {
+test('PERSONAL PERSONA — buildInstagramPersonalPersonaInstruction generates first-person directives for personal account', () => {
+  const instruction = buildInstagramPersonalPersonaInstruction({
+    persona_type: 'PERSONAL',
+    speaker_name: 'Samed Tabak',
+  });
+
+  assert.ok(instruction.includes('PERSONAL INSTAGRAM FIRST-PERSON SPEAKER DIRECTIVE'));
+  assert.ok(instruction.includes('This Instagram account is the personal account of Samed Tabak'));
+  assert.ok(instruction.includes('You MUST speak directly AS Samed Tabak in the first person'));
+  assert.ok(instruction.includes('Do NOT say "kurucumuz Samed Tabak"'));
+  assert.ok(instruction.includes('Do NOT say "[Company] olarak bizler..."'));
+  assert.ok(instruction.includes('YouTube sayfamda da detaylı içerikler paylaşıyorum'));
+  assert.ok(instruction.includes('EXISTING APPROVED PROMPT REMAINS AUTHORITATIVE'));
+});
+
+test('PERSONAL PERSONA — Corporate accounts or unconfigured personas omit personal directive cleanly', () => {
+  const instruction1 = buildInstagramPersonalPersonaInstruction({});
+  assert.equal(instruction1, '');
+
+  const instruction2 = buildInstagramPersonalPersonaInstruction({ persona_type: 'CORPORATE' });
+  assert.equal(instruction2, '');
+});
+
+test('PERSONA RULE — buildTenantRuntimeSystemInstruction integrates personal Instagram directive with highest precedence', () => {
   const persona = {
     available: true,
     companyIdentity: 'SamChe Company LLC',
@@ -89,43 +116,104 @@ test('PERSONA RULE — buildTenantRuntimeSystemInstruction integrates first-pers
     configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
   };
 
+  const channelRules = buildInstagramChannelRules({ persona });
   const systemInstruction = buildTenantRuntimeSystemInstruction({
     persona,
+    channelRules,
     knowledgeContext: 'Dubai şirket kuruluşu maliyetleri 12.500 AED den başlar. Kurucu Samed Tabak Dubai de 5 yıldır yaşamaktadır.',
   });
 
-  assert.ok(systemInstruction.includes('FIRST-PERSON DIRECT PROSE'));
-  assert.ok(systemInstruction.includes('NOT NARRATION TEMPLATE'));
-  assert.ok(systemInstruction.includes('NO UNSOLICITED FOUNDER OR SOCIAL PROMOTION'));
-  assert.ok(systemInstruction.includes('BİRİNCİ ŞAHIS DOĞRUDAN ANLATIM KURALI'));
-  assert.ok(systemInstruction.includes('KURUCU / ÜÇÜNCÜ ŞAHIS ANLATIM YASAĞI'));
-  assert.ok(systemInstruction.includes('UNSOLICITED YOUTUBE / VİDEO YÖNLENDİRME YASAĞI'));
+  assert.ok(systemInstruction.includes('PERSONAL INSTAGRAM FIRST-PERSON SPEAKER DIRECTIVE'));
+  assert.ok(systemInstruction.includes('You MUST speak directly AS Samed Tabak in the first person'));
+  assert.ok(systemInstruction.includes('Do NOT say "kurucumuz Samed Tabak"'));
+  assert.ok(systemInstruction.includes('YouTube sayfamda da detaylı içerikler paylaşıyorum'));
 });
 
-test('PERSONA TEST A — General inquiry ("Dubai\'de şirket kurmak istiyorum"): instructions prohibit third-person founder reference', () => {
-  const instructions = SAMCHE_STAGING_ASSISTANT_CONFIG.assistant_instructions;
+test('PERSONA TEST A — General inquiry ("Dubai\'de şirket kurmak istiyorum"): persona requires first-person Samed response and prohibits "kurucumuz Samed Tabak"', () => {
+  const persona = {
+    available: true,
+    companyIdentity: 'SamChe Company LLC',
+    assistantIdentity: 'SamChe AI',
+    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
+    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
+  };
 
-  assert.ok(instructions.includes('KURUCU / ÜÇÜNCÜ ŞAHIS ANLATIM YASAĞI'));
-  assert.ok(instructions.includes('SamChe Company olarak bizler'));
-  assert.ok(instructions.includes('kurucumuz Samed Tabak'));
+  const channelRules = buildInstagramChannelRules({ persona });
+  assert.ok(channelRules.includes('Do NOT say "kurucumuz Samed Tabak"'));
+  assert.ok(channelRules.includes('You MUST speak directly AS Samed Tabak in the first person'));
 });
 
-test('PERSONA TEST B — Uber inquiry: instruction requires first-person voice and forbids "kurucumuzun paylaştığı içerikler"', () => {
-  const instructions = SAMCHE_STAGING_ASSISTANT_CONFIG.assistant_instructions;
+test('PERSONA TEST B — Earnings inquiry: persona requires first-person voice and prohibits "kurucumuzun deneyimleri" / "Samed Tabak\'ın deneyimleri"', () => {
+  const persona = {
+    available: true,
+    companyIdentity: 'SamChe Company LLC',
+    assistantIdentity: 'SamChe AI',
+    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
+    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
+  };
 
-  assert.ok(instructions.includes('kurucumuzun paylaştığı içerikler'));
-  assert.ok(instructions.includes('BİRİNCİ ŞAHIS DOĞRUDAN ANLATIM KURALI'));
+  const channelRules = buildInstagramChannelRules({ persona });
+  assert.ok(channelRules.includes('kurucumuzun deneyimleri'));
+  assert.ok(channelRules.includes('Samed Tabak\'ın...'));
 });
 
-test('PERSONA TEST C — Explicit founder inquiry ("Samed Tabak kim?"): allowed to answer directly', () => {
-  const instructions = SAMCHE_STAGING_ASSISTANT_CONFIG.assistant_instructions;
+test('PERSONA TEST C & D — YouTube inquiries: clickable YouTube URL format is preserved with first-person wording ("YouTube sayfam...")', () => {
+  const persona = {
+    available: true,
+    companyIdentity: 'SamChe Company LLC',
+    assistantIdentity: 'SamChe AI',
+    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
+    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
+  };
 
-  assert.ok(instructions.includes('Kullanıcı doğrudan "Samed Tabak kim?", "Samed Tabak kimdir?"'));
+  const channelRules = buildInstagramChannelRules({ persona });
+  assert.ok(channelRules.includes('YouTube sayfamda da detaylı içerikler paylaşıyorum: [Samed Tabak YouTube](https://youtube.com/@sametttbk)'));
+  assert.ok(channelRules.includes('YouTube sayfamdan da detaylara ulaşabilirsiniz: [Samed Tabak YouTube](https://youtube.com/@sametttbk)'));
 });
 
-test('PERSONA TEST D — Explicit YouTube inquiry ("YouTube kanalınız var mı?"): allowed to answer with approved link', () => {
-  const instructions = SAMCHE_STAGING_ASSISTANT_CONFIG.assistant_instructions;
+test('PERSONA TEST E — Explicit founder inquiry ("Samed Tabak kim?"): allowed to answer directly without awkward third-person narration', () => {
+  const persona = {
+    available: true,
+    companyIdentity: 'SamChe Company LLC',
+    assistantIdentity: 'SamChe AI',
+    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
+    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
+  };
 
-  assert.ok(instructions.includes('"YouTube kanalınız var mı?" diye sorarsa doğrudan, net ve onaylı bilgiye sadık kalarak cevap ver'));
+  const channelRules = buildInstagramChannelRules({ persona });
+  assert.ok(channelRules.includes('EXPLICIT IDENTITY INQUIRIES'));
+  assert.ok(channelRules.includes('asks "Samed Tabak kim?", answer directly and naturally using approved factual knowledge'));
+});
+
+test('PERSONA TEST F — Unsupported personal claims: instruction strictly forbids inventing ungrounded experiences', () => {
+  const persona = {
+    available: true,
+    companyIdentity: 'SamChe Company LLC',
+    assistantIdentity: 'SamChe AI',
+    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
+    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
+  };
+
+  const channelRules = buildInstagramChannelRules({ persona });
+  assert.ok(channelRules.includes('NO INVENTED PERSONAL CLAIMS'));
+  assert.ok(channelRules.includes('Only express personal experiences or achievements when grounded in approved assistant knowledge'));
+});
+
+test('PERSONA ISOLATION — WhatsApp, Web Chat, and AI Guide channel rules remain corporate and untouched', () => {
+  const persona = {
+    available: true,
+    companyIdentity: 'SamChe Company LLC',
+    assistantIdentity: 'SamChe AI',
+    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
+    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
+  };
+
+  const whatsappSystemInstruction = buildTenantRuntimeSystemInstruction({
+    persona,
+    channelRules: 'WHATSAPP_CHANNEL_RULES_ONLY',
+  });
+
+  assert.ok(!whatsappSystemInstruction.includes('PERSONAL INSTAGRAM FIRST-PERSON SPEAKER DIRECTIVE'));
+  assert.ok(whatsappSystemInstruction.includes('WHATSAPP_CHANNEL_RULES_ONLY'));
 });
 
