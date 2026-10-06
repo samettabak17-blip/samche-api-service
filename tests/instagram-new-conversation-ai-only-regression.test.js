@@ -346,8 +346,13 @@ test('TEST F & G — Manual operator outbound from Dashboard when NEVER_AI: invo
 
   let deliveredRecipient = null;
   let deliveredText = null;
+  let markSeenCalled = false;
   const mockHttpSend = {
     post: async (url, data) => {
+      if (data?.sender_action === 'mark_seen') {
+        markSeenCalled = true;
+        return { status: 200, data: { success: true } };
+      }
       deliveredRecipient = data?.recipient?.id;
       deliveredText = data?.message?.text;
       return { status: 200, data: { message_id: 'provider_mid_human_reply_123', recipient_id: deliveredRecipient } };
@@ -369,6 +374,7 @@ test('TEST F & G — Manual operator outbound from Dashboard when NEVER_AI: invo
   assert.equal(replyResult.delivery, 'SENT_TO_INSTAGRAM');
   assert.equal(deliveredRecipient, 'sender_g_test', 'Must deliver to clean customer IGSID');
   assert.equal(deliveredText, 'Merhaba, size nasıl yardımcı olabilirim?');
+  assert.equal(markSeenCalled, true, 'Must sync native seen state via mark_seen after successful delivery');
   assert.equal(replyResult.message.sender_type, 'AGENT', 'Must be persisted as AGENT (HUMAN/OPERATOR), not ASSISTANT');
   assert.equal(replyResult.message.content, 'Merhaba, size nasıl yardımcı olabilirim?');
 });

@@ -1,5 +1,5 @@
 import { deliverWhatsAppText, deliverWhatsAppMedia, WhatsAppDeliveryError } from './whatsapp-delivery-service.js';
-import { deliverInstagramText, deliverInstagramMedia, InstagramDeliveryError } from './instagram-delivery-service.js';
+import { deliverInstagramText, deliverInstagramMedia, sendInstagramMarkSeen, InstagramDeliveryError } from './instagram-delivery-service.js';
 import { normalizeWhatsAppExternalId } from './whatsapp-channel-ownership-service.js';
 import { normalizeChannelType } from './channel-routing-service.js';
 import { loadPlatformLifecycleMessages, renderPlatformLifecycleMessage } from './platform-lifecycle-message-service.js';
@@ -352,6 +352,19 @@ export class OutboundChannelDeliveryRegistry {
             http,
           });
           traceStage?.('DELIVERY_SUCCEEDED');
+          try {
+            await sendInstagramMarkSeen({
+              recipientId: recipientIgsid,
+              accessToken: integration.access_token,
+              instagramAccountId: integration.instagram_account_id || integration.page_id,
+              instagramUserId: integration.instagram_user_id,
+              authMode: integration.auth_mode,
+              pageId: integration.page_id,
+              http,
+            });
+          } catch (syncErr) {
+            console.warn('INSTAGRAM_NATIVE_STATE_SYNC_OPERATOR_WARN', syncErr?.message);
+          }
           return { delivery: 'SENT_TO_INSTAGRAM', ...result };
         } catch (error) {
           if (error instanceof InstagramDeliveryError) {
@@ -385,6 +398,19 @@ export class OutboundChannelDeliveryRegistry {
             pageId: integration.page_id,
             http,
           });
+          try {
+            await sendInstagramMarkSeen({
+              recipientId: recipientIgsid,
+              accessToken: integration.access_token,
+              instagramAccountId: integration.instagram_account_id || integration.page_id,
+              instagramUserId: integration.instagram_user_id,
+              authMode: integration.auth_mode,
+              pageId: integration.page_id,
+              http,
+            });
+          } catch (syncErr) {
+            console.warn('INSTAGRAM_NATIVE_STATE_SYNC_OPERATOR_WARN', syncErr?.message);
+          }
           return { delivery: 'SENT_TO_INSTAGRAM', ...result };
         } catch (error) {
           if (error instanceof InstagramDeliveryError) {

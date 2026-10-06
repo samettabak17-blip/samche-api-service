@@ -456,6 +456,7 @@ export async function sendInstagramTypingIndicator({
   graphVersion,
 }) {
   if (!recipientId || !accessToken) return { ok: false, reason: 'CREDENTIALS_MISSING' };
+  const httpClient = http || axios;
   const cleanRecipientId = String(recipientId).replace(/^instagram:\s*/i, '').trim();
   const token = accessToken.trim();
   const candidateEndpoints = resolveCandidateEndpoints({ authMode, instagramAccountId, pageId, instagramUserId, token });
@@ -463,10 +464,11 @@ export async function sendInstagramTypingIndicator({
   let lastError = null;
   for (const endpoint of candidateEndpoints) {
     try {
-      await http.post(endpoint, {
+      await httpClient.post(endpoint, {
         recipient: { id: cleanRecipientId },
         sender_action: 'typing_on',
       }, {
+        params: { access_token: token },
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -492,6 +494,7 @@ export async function sendInstagramTypingOff({
   graphVersion,
 }) {
   if (!recipientId || !accessToken) return { ok: false, reason: 'CREDENTIALS_MISSING' };
+  const httpClient = http || axios;
   const cleanRecipientId = String(recipientId).replace(/^instagram:\s*/i, '').trim();
   const token = accessToken.trim();
   const candidateEndpoints = resolveCandidateEndpoints({ authMode, instagramAccountId, pageId, instagramUserId, token });
@@ -499,10 +502,11 @@ export async function sendInstagramTypingOff({
   let lastError = null;
   for (const endpoint of candidateEndpoints) {
     try {
-      await http.post(endpoint, {
+      await httpClient.post(endpoint, {
         recipient: { id: cleanRecipientId },
         sender_action: 'typing_off',
       }, {
+        params: { access_token: token },
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -515,6 +519,48 @@ export async function sendInstagramTypingOff({
     }
   }
   return { ok: false, reason: lastError?.message || 'TYPING_OFF_FAILED' };
+}
+
+export async function sendInstagramMarkSeen({
+  recipientId,
+  accessToken,
+  pageId = 'me',
+  instagramAccountId = null,
+  instagramUserId = null,
+  authMode = null,
+  http = axios,
+  graphVersion,
+}) {
+  if (!recipientId || !accessToken) return { ok: false, reason: 'CREDENTIALS_MISSING' };
+  const httpClient = http || axios;
+  const cleanRecipientId = String(recipientId).replace(/^instagram:\s*/i, '').trim();
+  const token = accessToken.trim();
+  const candidateEndpoints = resolveCandidateEndpoints({ authMode, instagramAccountId, pageId, instagramUserId, token });
+
+  console.info(`INSTAGRAM_NATIVE_STATE_SYNC_ATTEMPTED recipient=${cleanRecipientId.slice(0, 8)} action=mark_seen`);
+
+  let lastError = null;
+  for (const endpoint of candidateEndpoints) {
+    try {
+      await httpClient.post(endpoint, {
+        recipient: { id: cleanRecipientId },
+        sender_action: 'mark_seen',
+      }, {
+        params: { access_token: token },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 5000,
+      });
+      console.info(`INSTAGRAM_NATIVE_STATE_SYNC_SUCCEEDED recipient=${cleanRecipientId.slice(0, 8)} action=mark_seen`);
+      return { ok: true };
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  console.warn(`INSTAGRAM_NATIVE_STATE_SYNC_FAILED recipient=${cleanRecipientId.slice(0, 8)} reason=${lastError?.message || 'MARK_SEEN_FAILED'}`);
+  return { ok: false, reason: lastError?.message || 'MARK_SEEN_FAILED' };
 }
 
 

@@ -3,7 +3,7 @@ import { parseCustomerHumanSupportRequest } from './human-support-intent.js';
 import { resolvePlatformHumanSupportPolicy } from './platform-lifecycle-message-service.js';
 import { requestCustomerHumanSupport, triggerImmediateHumanSupportNotificationPipeline } from './human-support-service.js';
 import { persistAssistantResponseIfCurrent } from './live-inbox-service.js';
-import { deliverInstagramText, sendInstagramTypingIndicator, sendInstagramTypingOff } from './instagram-delivery-service.js';
+import { deliverInstagramText, sendInstagramTypingIndicator, sendInstagramTypingOff, sendInstagramMarkSeen } from './instagram-delivery-service.js';
 import { resolveTenantRuntimePersona, buildTenantRuntimeSystemInstruction } from './tenant-runtime-persona-service.js';
 import { resolveAssistantRuntimeKnowledgeContext } from './knowledge-runtime-context-service.js';
 import { resolveCommunicationLanguage } from './conversation-communication-language.js';
@@ -1401,6 +1401,21 @@ export async function orchestrateInstagramInboundAiResponse({
         providerMessageId: deliveryResult?.providerMessageId,
       });
 
+      // Synchronize native Instagram seen/read state (non-blocking)
+      try {
+        await sendInstagramMarkSeen({
+          recipientId: cleanSenderId,
+          accessToken,
+          instagramAccountId,
+          pageId,
+          instagramUserId,
+          authMode,
+          http,
+        });
+      } catch (syncErr) {
+        console.warn('INSTAGRAM_NATIVE_STATE_SYNC_AI_WARN', syncErr?.message);
+      }
+
       if (qualResult?.qualified || durableMemory.ctaUrl) {
         const isPool = typeof database?.connect === 'function' && typeof database?.query !== 'function';
         const client = isPool ? await database.connect() : database;
@@ -1765,6 +1780,21 @@ export async function generateAndDeliverInstagramAssistantResponse({
           messageId: persisted.message?.id,
           providerMessageId: deliveryResult?.providerMessageId,
         });
+
+        // Synchronize native Instagram seen/read state (non-blocking)
+        try {
+          await sendInstagramMarkSeen({
+            recipientId: cleanRecipient,
+            accessToken,
+            instagramAccountId,
+            pageId,
+            instagramUserId,
+            authMode,
+            http,
+          });
+        } catch (syncErr) {
+          console.warn('INSTAGRAM_NATIVE_STATE_SYNC_AI_WARN', syncErr?.message);
+        }
 
         if (qualResult?.qualified || durableMemory.ctaUrl) {
           await client.query(
