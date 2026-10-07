@@ -333,11 +333,50 @@ export async function inspectGuideExperiencePublication({ database, tenantId, as
     : published.length > 1
       ? 'MULTIPLE_PUBLISHED'
       : 'HEALTHY';
+
+  let hasActiveProfile = false;
+  let hasActiveConfig = false;
+  let profileMatchesConfig = false;
+  try {
+    const profileQuery = await database.query(
+      `SELECT p.active_version_id, v.status
+         FROM business_profiles p
+         LEFT JOIN business_profile_versions v ON v.id = p.active_version_id AND v.tenant_id = p.tenant_id
+        WHERE p.tenant_id = $1 LIMIT 1`,
+      [tenantId],
+    );
+    const assistantQuery = await database.query(
+      `SELECT a.active_configuration_version_id, c.status, c.source_profile_version_id
+         FROM ai_assistants a
+         LEFT JOIN assistant_configuration_versions c ON c.id = a.active_configuration_version_id AND c.tenant_id = a.tenant_id
+        WHERE a.id = $1 AND a.tenant_id = $2 LIMIT 1`,
+      [assistantId, tenantId],
+    );
+    hasActiveProfile = Boolean(profileQuery.rows?.[0]?.active_version_id && profileQuery.rows[0]?.status === 'APPROVED');
+    hasActiveConfig = Boolean(assistantQuery.rows?.[0]?.active_configuration_version_id && assistantQuery.rows[0]?.status === 'ACTIVE');
+    profileMatchesConfig = hasActiveProfile && hasActiveConfig && assistantQuery.rows[0]?.source_profile_version_id === profileQuery.rows[0]?.active_version_id;
+  } catch {}
+
+  const missingPrerequisites = [];
+  if (!hasActiveProfile) missingPrerequisites.push('ACTIVE_BUSINESS_PROFILE_REQUIRED');
+  if (!hasActiveConfig) missingPrerequisites.push('ACTIVE_ASSISTANT_CONFIGURATION_REQUIRED');
+  if (hasActiveProfile && hasActiveConfig && !profileMatchesConfig) missingPrerequisites.push('CONFIGURATION_PROFILE_VERSION_MISMATCH');
+
+  const prerequisites = {
+    ready: missingPrerequisites.length === 0 && Boolean(canonical),
+    business_profile_active: hasActiveProfile,
+    assistant_configuration_active: hasActiveConfig,
+    configuration_aligned: profileMatchesConfig,
+    guide_published: Boolean(canonical),
+    missing_prerequisites: missingPrerequisites,
+  };
+
   return {
     versions,
     current_published: canonical,
     public_bootstrap_version: canonical?.version ?? null,
     consistency,
+    prerequisites,
   };
 }
 

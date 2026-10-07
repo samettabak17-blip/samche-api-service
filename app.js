@@ -774,7 +774,29 @@ app.get(['/guide/health', '/:slug/guide/health', '/guide/:slug/health'], async (
     const integration = await resolveGuideRuntimeScope(req);
     if (!integration) return res.status(404).json({ status: 'UNAVAILABLE', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
     const resolved = await resolvePublishedGuideExperience({ database: pool, tenantId: integration.tenant_id, assistantId: integration.assistant_id });
-    return res.json({ status: 'READY', renderer: 'GUIDE_V1', experience_version: resolved.experience.version, modules: resolved.experience.modules, session_context: true, sector_configured: Boolean(resolved.experience.classification?.sector), roadmap_initialized: Boolean(resolved.experience.roadmap?.steps?.length), tool_initialized: Boolean(resolved.experience.interactive_tool?.fields?.length), assistant_initialized: Boolean(resolved.experience.modules?.chat), theme_initialized: Boolean(resolved.experience.theme?.primary_color) });
+    let persona = null;
+    try {
+      persona = await resolveTenantRuntimePersona({
+        database: pool,
+        tenantId: integration.tenant_id,
+        assistantId: integration.assistant_id,
+      });
+    } catch {}
+    const isReady = persona?.available === true;
+    return res.json({
+      status: isReady ? 'READY' : 'PENDING_PREREQUISITES',
+      code: isReady ? 'HEALTHY' : (persona?.code || 'ACTIVE_CONFIGURATION_UNAVAILABLE'),
+      runtime_ready: isReady,
+      renderer: 'GUIDE_V1',
+      experience_version: resolved.experience.version,
+      modules: resolved.experience.modules,
+      session_context: true,
+      sector_configured: Boolean(resolved.experience.classification?.sector),
+      roadmap_initialized: Boolean(resolved.experience.roadmap?.steps?.length),
+      tool_initialized: Boolean(resolved.experience.interactive_tool?.fields?.length),
+      assistant_initialized: Boolean(resolved.experience.modules?.chat),
+      theme_initialized: Boolean(resolved.experience.theme?.primary_color),
+    });
   } catch (error) {
     console.error('GUIDE_PUBLIC_HEALTH_FAILED code=' + (error?.code ?? error?.name ?? 'UNKNOWN'));
     return res.status(503).json({ status: 'UNAVAILABLE', code: 'GUIDE_EXPERIENCE_UNAVAILABLE' });
@@ -2035,6 +2057,14 @@ app.post("/chat", chatPostHandler = async (req, res) => {
         resolveModel: () => (req.app?.locals?.googleGeminiProvider || googleGeminiProvider).runtimeMetadata(),
       });
     } catch (error) {
+      if (['GUIDE_RUNTIME_UNAVAILABLE', 'ACTIVE_CONFIGURATION_UNAVAILABLE', 'ACTIVE_PROFILE_UNAVAILABLE', 'TENANT_PERSONA_NOT_ACTIVE'].includes(error?.code)) {
+        return res.status(503).json({
+          error: 'GUIDE_PREREQUISITES_PENDING',
+          code: error.code,
+          reply: 'This AI Guide assistant is currently being set up by the business. Please try again shortly or contact support.',
+          conversation_session: publicSession.token,
+        });
+      }
       return respondWithPublicChatFailure({
         stage: 'runtime_context',
         error,
