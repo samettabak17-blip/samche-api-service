@@ -710,7 +710,12 @@ async function resolveGuideExperienceForRequest({ req, integration }) {
   }
 
   const resolved = await resolvePublishedGuideExperience({ database, tenantId: integration.tenant_id, assistantId: integration.assistant_id });
-  if (resolved.experience.version !== durableSession.experienceVersion || (durableSession.experienceVersionId && resolved.version?.id !== durableSession.experienceVersionId)) throw new GuideConversationError('GUIDE_SESSION_EXPERIENCE_REVOKED');
+  if (resolved.experience.version !== durableSession.experienceVersion || (durableSession.experienceVersionId && resolved.version?.id !== durableSession.experienceVersionId)) {
+    if (durableSession.previewMode) {
+      throw new GuideConversationError('GUIDE_SESSION_EXPERIENCE_REVOKED');
+    }
+    return { resolved, durableSession: null };
+  }
   return { resolved, durableSession };
 }
 

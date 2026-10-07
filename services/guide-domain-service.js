@@ -281,7 +281,9 @@ export async function resolveGuideRuntimeScopeFromRequest({ database, req }) {
               [tokenHash],
             );
             if (sessionScope.rowCount && sessionScope.rows[0].tenant_id !== managedScope.tenant_id) {
-              return null;
+              if (req?.headers) {
+                delete req.headers['x-samcheguide-session'];
+              }
             }
           } catch {}
         }

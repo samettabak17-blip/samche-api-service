@@ -18,11 +18,17 @@ let guideState = null;
 let messages = [];
 let contextSyncState = 'idle';
 let contextSyncTimer;
+const explicitResumeToken = (typeof window !== 'undefined' && window.location)
+  ? (new URLSearchParams(window.location.search).get('resume') || new URLSearchParams(window.location.search).get('session') || '')
+  : '';
 const previewToken = (typeof window !== 'undefined' && window.location) ? new URLSearchParams(window.location.search).get('preview') || '' : '';
 const resumeStorageKey = previewToken
   ? `samcheguide-preview-resume:${previewToken.slice(-16)}`
   : `samcheguide-public-resume${guideBasePath ? `:${guideBasePath.slice(1)}` : ''}`;
-try { session = window.localStorage?.getItem(resumeStorageKey) || ''; } catch { session = ''; }
+try {
+  session = explicitResumeToken
+    || (typeof window !== 'undefined' && window.sessionStorage ? window.sessionStorage.getItem(resumeStorageKey) || '' : '');
+} catch { session = ''; }
 const MODULES = Object.freeze({ ROADMAP: 'ROADMAP', INTERACTIVE_TOOL: 'INTERACTIVE_TOOL', AI_ASSISTANT: 'AI_ASSISTANT' });
 export const PRESENTATION_TIMING = Object.freeze({
   chunk_words: 2,
@@ -57,6 +63,7 @@ function stateStorageKey() {
 function firstAvailableModule() { if (experience?.modules?.guide) return MODULES.ROADMAP; if (experience?.modules?.calculator) return MODULES.INTERACTIVE_TOOL; return MODULES.AI_ASSISTANT; }
 function loadState() {
   const fallback = { active_module: firstAvailableModule(), roadmap: {}, tool: {}, roadmap_step: 0, roadmap_reviewed: false, roadmap_validation_error: '', assistant_draft: '', assistant_draft_origin: 'NONE', roadmap_category: '', roadmap_goal: '', roadmap_result: null, roadmap_messages: [], shared_context: {} };
+  if (!session) return fallback;
   try {
     const saved = JSON.parse(window.sessionStorage?.getItem(stateStorageKey()) || '{}');
     if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return fallback;
@@ -92,7 +99,8 @@ function guideSessionPayloadState() {
     planningState: guideState.tool || {},
   };
 }
-function saveSession(token) { if (!token) return; session = token; try { window.localStorage?.setItem(resumeStorageKey, session); } catch {} }
+function saveSession(token) { if (!token) return; session = token; try { window.sessionStorage?.setItem(resumeStorageKey, session); window.localStorage?.setItem(resumeStorageKey, session); } catch {} }
+function clearSession() { session = ''; messages = []; try { window.sessionStorage?.removeItem(resumeStorageKey); window.localStorage?.removeItem(resumeStorageKey); } catch {} }
 async function resumeGuideSession() {
   if (!session || !experience) return;
   const headers = { 'X-Samcheguide-Session': session, ...(previewToken ? { 'X-Samcheguide-Preview': previewToken } : {}) };
@@ -136,6 +144,11 @@ async function resumeGuideSession() {
         if (saved.tool && typeof saved.tool === 'object') guideState.tool = { ...guideState.tool, ...saved.tool };
         if (Object.values(MODULES).includes(saved.active_module)) guideState.active_module = saved.active_module;
       }
+    } else if (response.status === 401 || response.status === 404) {
+      clearSession();
+      persistState();
+      renderActiveModule();
+      return;
     }
     const history = messages.length ? null : await fetch(guideApi('/chat/history'), { headers }).then((result) => result.ok ? result.json() : null).catch(() => null);
     if (Array.isArray(history?.messages)) {
@@ -407,6 +420,7 @@ async function submitGuideRequest({ value, module, board, input, submit, idempot
     }
   }
 
+  let payload = {};
   try {
     const response = await fetch(guideApi('/chat'), { // fetch("/chat"
       method: "POST",
@@ -419,18 +433,25 @@ async function submitGuideRequest({ value, module, board, input, submit, idempot
         attachment_resource_ids: attachmentResourceIds,
       }),
     });
-    const payload = await response.json().catch(() => ({}));
-    saveSession(payload.conversation_session);
+    payload = await response.json().catch(() => ({}));
+    if (payload.conversation_session) {
+      saveSession(payload.conversation_session);
+    }
     const remainingThinking = PRESENTATION_TIMING.thinking_minimum_ms - (Date.now() - startedAt);
     if (responseDelay(remainingThinking) > 0) await new Promise((resolve) => window.setTimeout(resolve, responseDelay(remainingThinking)));
     thinking.remove();
     if (!response.ok || !Array.isArray(payload.guide_events)) throw new Error("unavailable");
+    board.querySelectorAll('.guide-validation').forEach((el) => el.remove());
     await playGuideResponseEvents(board, payload.guide_events);
     if (typeof onResponse === "function") onResponse(payload);
   } catch {
     thinking.remove();
-    if (typeof onFailure === "function") onFailure();
-    board.append(element("p", "guide-validation", "The guide is temporarily unavailable. Please try again."));
+    if (typeof onFailure === "function") onFailure(payload);
+    board.querySelectorAll('.guide-validation').forEach((el) => el.remove());
+    const safeErrorText = (typeof payload?.reply === 'string' && payload.reply)
+      || (typeof payload?.error === 'string' && payload.error && !payload.error.includes('_') ? payload.error : null)
+      || "The guide is temporarily unavailable. Please try again.";
+    board.append(element("p", "guide-validation", safeErrorText));
   } finally {
     submit.disabled = false;
     input?.focus();
@@ -821,9 +842,23 @@ async function submitMessage(event) {
         if (aiResponseText) {
           messages.push({ value: aiResponseText, kind: 'assistant' });
         }
+        guideState.assistantConversation = {
+          messages: messages.map((m) => ({ role: m.kind === 'user' ? 'user' : 'assistant', content: m.value })),
+        };
+        guideState.assistant_draft = '';
+        guideState.assistant_draft_origin = 'NONE';
+        persistState();
         syncAssistantReminder();
       },
-      onFailure: () => { submittedMessage.remove(); if (input) input.value = value; },
+      onFailure: () => {
+        submittedMessage.remove();
+        if (input) {
+          input.value = value;
+          guideState.assistant_draft = value;
+          guideState.assistant_draft_origin = 'USER';
+          persistState();
+        }
+      },
     });
   } finally {
     delete form.dataset.submitting;
