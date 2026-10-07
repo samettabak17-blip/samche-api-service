@@ -31,12 +31,11 @@ BEGIN
          updated_at = CURRENT_TIMESTAMP
    WHERE configuration_data::text LIKE '%youtube.com/@sametttbk%';
 
-  -- 4. Business Profile Versions
+  -- 4. Business Profile Versions (table has created_at, no updated_at column)
   UPDATE business_profile_versions
      SET profile_data = REPLACE(REPLACE(REPLACE(profile_data::text,
            'https://www.youtube.com/@sametttbk', 'https://ytbe.app/u9j8qB2S'),
            'https://youtube.com/@sametttbk', 'https://ytbe.app/u9j8qB2S'),
-           'http://youtube.com/@sametttbk', 'https://ytbe.app/u9j8qB2S')::jsonb,
-         updated_at = CURRENT_TIMESTAMP
+           'http://youtube.com/@sametttbk', 'https://ytbe.app/u9j8qB2S')::jsonb
    WHERE profile_data::text LIKE '%youtube.com/@sametttbk%';
 END $$;
