@@ -156,7 +156,7 @@ export function buildInstagramPersonalPersonaInstruction(instagramConfig) {
     `   - You ARE ${speakerName} speaking directly to the customer. Express company services naturally in first person (e.g. "Bu süreçte size yardımcı olabilirim", "bu konuda danışmanlık ve süreç yönetimi desteği sağlıyorum", "SamChe üzerinden bu süreçte destek sağlıyoruz").`,
     `3. EXISTING APPROVED PROMPT REMAINS AUTHORITATIVE: All business rules, company formation info, pricing, visa guidelines, qualification criteria, and link formats in the approved assistant prompt remain strictly governing. Only the speaker identity changes to ${speakerName}'s first-person voice.`,
     `4. NO INVENTED PERSONAL CLAIMS: Only express personal experiences or achievements when grounded in approved assistant knowledge and business profile. If a fact belongs strictly to the company, state it accurately without fabricating personal anecdotes.`,
-    `5. YOUTUBE / SOCIAL MEDIA IN FIRST PERSON: When approved knowledge or prompts direct to YouTube or social channels, refer to them in first person as your own channel/page with clean, clickable raw URL presentation (e.g. "YouTube sayfamda da detaylı içerikler paylaşıyorum:\nhttps://ytbe.app/u9j8qB2S" or "YouTube sayfamdan da detaylara ulaşabilirsiniz:\nhttps://ytbe.app/u9j8qB2S"). Preferred customer-facing resource presentation:\n   ▶️ **YouTube'da detaylı anlatım:**\n   https://ytbe.app/u9j8qB2S\n   CRITICAL YOUTUBE URL RULE: The ONLY approved YouTube destination is https://ytbe.app/u9j8qB2S. NEVER output obsolete channel handles or any other YouTube link. NEVER use markdown anchor syntax like [Samed Tabak YouTube](...). Output the raw, standalone URL so Instagram can auto-link it natively. Do NOT refer to it in third person as "${speakerName}'ın YouTube kanalı" or "kurucumuzun YouTube kanalı".`,
+    `5. YOUTUBE / SOCIAL MEDIA IN FIRST PERSON & ANSWER-FIRST RESOURCE-SECOND STRUCTURE: When approved knowledge or prompts direct to YouTube or social channels, or when customer inquiries involve topics where supplementary video guidance is relevant (such as Dubai living expenses, rent, lifestyle, relocation), or when the user directly asks for YouTube/videos: First provide a direct, concise, grounded answer to their question. Second, provide the approved YouTube guidance on its own line ("YouTube sayfamda da detaylı içerikler paylaşıyorum:\nhttps://ytbe.app/u9j8qB2S" or "YouTube sayfamdan da detaylara ulaşabilirsiniz:\nhttps://ytbe.app/u9j8qB2S"). Preferred customer-facing resource presentation:\n   ▶️ **YouTube'da detaylı anlatım:**\n   https://ytbe.app/u9j8qB2S\n   Third, leave a blank line and place your conversational follow-up question on its own final line.\n   CRITICAL YOUTUBE URL RULE: The ONLY approved YouTube destination is https://ytbe.app/u9j8qB2S. NEVER output obsolete channel handles or any other YouTube link. NEVER use markdown anchor syntax like [Samed Tabak YouTube](...). Output the raw, standalone URL so Instagram can auto-link it natively. Do NOT refer to it in third person as "${speakerName}'ın YouTube kanalı" or "kurucumuzun YouTube kanalı".`,
     `6. EXPLICIT IDENTITY INQUIRIES: If the customer explicitly asks who you are or asks "${speakerName} kim?", answer directly and naturally using approved factual knowledge without awkward third-person self-narration.`,
   ].join('\n');
 }
@@ -332,10 +332,107 @@ export function sanitizeInstagramOutboundResponse(rawText) {
   // Clean up leftover phrases cleanly
   text = text
     .replace(/(?:için\s+)?notumu\s+aldım\s*\.?/giu, 'için görüşme talebinizi kaydettim.')
-    .replace(/\s{2,}/g, ' ')
+    .replace(/[^\S\r\n]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 
   return text;
+}
+
+
+/**
+ * Config-driven deterministic supplementary guidance enforcement.
+ * When tenant configuration specifies supplementary resources (e.g. YouTube channel guidance),
+ * validates that required guidance is present in the final canonical response whenever the
+ * conversation context or response content matches the tenant's configured guidance triggers.
+ *
+ * If missing, injects the configured presentation block in the canonical position:
+ *   [Main Answer Content]
+ *
+ *   [Configured Presentation Block]
+ *
+ *   [Follow-up Question]
+ *
+ * Preserves existing content, prevents duplication, and never injects into greetings or
+ * appointment field collection.
+ */
+export function enforceConfiguredSupplementaryGuidance({
+  content,
+  persona,
+  currentIntent = '',
+  isGreeting = false,
+  appointmentState = null,
+} = {}) {
+  if (!content || typeof content !== 'string') return content || '';
+  let text = content.trim();
+
+  // If greeting only or appointment field collection is active, do not inject supplementary resources
+  if (isGreeting) return text;
+  if (appointmentState && appointmentState.intent && !appointmentState.complete) return text;
+
+  // Resolve configured supplementary resources from persona configuration
+  const instagramConfig = persona?.configuration?.channel_adaptations?.instagram || {};
+  let resources = Array.isArray(instagramConfig.supplementary_resources)
+    ? instagramConfig.supplementary_resources
+    : (Array.isArray(persona?.configuration?.supplementary_resources) ? persona.configuration.supplementary_resources : []);
+
+  // Fallback: If not explicitly structured in channel_adaptations, detect from assistant_instructions
+  if (resources.length === 0 && persona?.configuration?.assistant_instructions) {
+    const inst = String(persona.configuration.assistant_instructions);
+    if (inst.includes('ytbe.app/u9j8qB2S')) {
+      resources = [
+        {
+          id: 'samed_youtube_channel',
+          type: 'YOUTUBE',
+          url: 'https://ytbe.app/u9j8qB2S',
+          presentation_header: "▶️ **YouTube'da detaylı anlatım:**",
+          presentation: "▶️ **YouTube'da detaylı anlatım:**\nhttps://ytbe.app/u9j8qB2S",
+          triggers: [
+            'yaşam', 'yasam', 'kira', 'kiralar', 'ev kiralama', 'market',
+            'maliyet', 'gider', 'masraf', 'living', 'rent', 'cost of living', 'youtube', 'video',
+          ],
+          disallowed_intents: ['GREETING', 'APPOINTMENT_COLLECTION'],
+        },
+      ];
+    }
+  }
+
+  if (resources.length === 0) return text;
+
+  const normalizedIntent = String(currentIntent || '').toLowerCase();
+  const normalizedText = text.toLowerCase();
+
+  for (const res of resources) {
+    if (!res?.url) continue;
+
+    // A. If the URL is already present in the response, do NOT duplicate it
+    if (text.includes(res.url)) continue;
+
+    // B. Check if triggers match either the customer's intent or the generated response
+    const triggers = Array.isArray(res.triggers) ? res.triggers : [];
+    const matchesTrigger = triggers.some((t) => {
+      const term = String(t).toLowerCase().trim();
+      return term && (normalizedIntent.includes(term) || normalizedText.includes(term));
+    });
+
+    if (!matchesTrigger) continue;
+
+    // C. Inject the guidance block before the final follow-up question if one exists
+    const presentation = res.presentation || `${res.presentation_header || "▶️ **YouTube'da detaylı anlatım:**"}\n${res.url}`;
+
+    // Split out trailing follow-up question if present at the end
+    const followUpMatch = text.match(/(?:\n\n|\n)?(\p{Lu}[^\n•]{10,}\?)\s*$/u);
+
+    if (followUpMatch && followUpMatch.index !== undefined) {
+      const mainPart = text.slice(0, followUpMatch.index).trim();
+      const followUp = followUpMatch[1].trim();
+      text = `${mainPart}\n\n${presentation}\n\n${followUp}`;
+    } else {
+      text = `${text}\n\n${presentation}`;
+    }
+  }
+
+  return text.trim();
 }
 
 
@@ -368,7 +465,7 @@ export function formatInstagramDmResponse(rawText) {
   text = text.replace(/(?:▶️|\u25B6\uFE0F|\u25B6)\s*(?:\*\*)?YouTube(?:'da|da)?\s+detaylı\s+anlatım:?(?:\*\*)?:?[ \t]*(https:\/\/ytbe\.app\/u9j8qB2S)/gu, "▶️ **YouTube'da detaylı anlatım:**\n$1");
 
   // 5. Separate inline bold titles before colons: e.g. "Item. **Mainland:** * ..." -> "Item.\n\n**Mainland:** * ..."
-  text = text.replace(/([^\n])\s+(\*\*[^\*\n]+:\*\*)/g, '$1\n\n$2');
+  text = text.replace(/([^\n•\-\*\+])\s+(\*\*[^\*\n]+:\*\*)/g, '$1\n\n$2');
 
   // 6. Strip code backticks: `code` -> code
   text = text.replace(/`([^`]+)`/g, '$1');
@@ -380,11 +477,12 @@ export function formatInstagramDmResponse(rawText) {
   // 8. Standardize bullet list markers (*, -, +) at line start to •
   text = text.replace(/^[\t ]*[\*\-\+]\s+/gm, '• ');
 
-  // 9. Put each bullet point on its own line if concatenated inline:
-  text = text.replace(/([^\n])\s+([•\-\*]\s+)/g, '$1\n$2');
+  // 9. Put each bullet point on its own line if concatenated inline (excluding numeric ranges like 80.000 - 140.000):
+  text = text.replace(/([^\n])\s+([•\*]\s+)/g, '$1\n$2');
+  text = text.replace(/([^\n\d])\s+-\s+(?!\d)/g, '$1\n• ');
 
   // 10. Put each numbered list item on its own paragraph if concatenated inline:
-  text = text.replace(/([^\n])\s+(\d+\.\s+)/g, '$1\n\n$2');
+  text = text.replace(/([^\n•\-\*\+])\s+(\d+\.\s+)/g, '$1\n\n$2');
 
   // 11. Strip single-asterisk italic markdown when not a bullet marker
   text = text.replace(/(^|[^\*])\*([^\*\n]+)\*([^\*]|$)/g, '$1$2$3');
@@ -1338,7 +1436,14 @@ export async function orchestrateInstagramInboundAiResponse({
 
     const rawAiResponseText = typeof genResult === 'string' ? genResult : genResult.text;
     const sanitizedResponse = sanitizeInstagramOutboundResponse(rawAiResponseText);
-    const formattedResponse = formatInstagramDmResponse(sanitizedResponse);
+    const guidedResponse = enforceConfiguredSupplementaryGuidance({
+      content: sanitizedResponse,
+      persona,
+      currentIntent: text,
+      isGreeting,
+      appointmentState,
+    });
+    const formattedResponse = formatInstagramDmResponse(guidedResponse);
 
     const durationMs = Date.now() - generationStartedAt;
     console.info(
@@ -1727,7 +1832,13 @@ export async function generateAndDeliverInstagramAssistantResponse({
 
       const rawAiResponseText = typeof genResult === 'string' ? genResult : genResult.text;
       const sanitizedResponse = sanitizeInstagramOutboundResponse(rawAiResponseText);
-      const formattedResponse = formatInstagramDmResponse(sanitizedResponse);
+      const guidedResponse = enforceConfiguredSupplementaryGuidance({
+        content: sanitizedResponse,
+        persona,
+        currentIntent: textToAnswer,
+        isGreeting: isGreetingOnly(textToAnswer),
+      });
+      const formattedResponse = formatInstagramDmResponse(guidedResponse);
 
       const durationMs = Date.now() - generationStartedAt;
       console.info(

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   formatInstagramDmResponse,
+  enforceConfiguredSupplementaryGuidance,
   buildInstagramPersonalPersonaInstruction,
   buildInstagramChannelRules,
   INSTAGRAM_CHANNEL_PRESENTATION_RULES,
@@ -211,6 +212,239 @@ test('TEST N, O, P: Reel, AI_ONLY, and NEVER_AI rules preserved', () => {
   const neverAiOutput = formatInstagramDmResponse('Bilgi için [YouTube](https://youtube.com/@sametttbk) adresine bakabilirsiniz.');
   assert.ok(!neverAiOutput.includes('youtube.com/@sametttbk'));
   assert.ok(neverAiOutput.includes('https://ytbe.app/u9j8qB2S'));
+});
+
+// ============================================================================
+// SECTION 18 FOCUSED TESTS: DETERMINISTIC CONFIG-DRIVEN YOUTUBE GUIDANCE
+// ============================================================================
+
+test('SECTION 18 A & E: Provider omits required YouTube link on living cost question -> injected before follow-up question', () => {
+  const persona = {
+    available: true,
+    companyIdentity: 'SamChe Company LLC',
+    assistantIdentity: 'SamChe AI',
+    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
+    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
+  };
+
+  const providerResponseWithoutLink = `Dubai'de yaşam giderleri tercih ettiğiniz bölge ve yaşam standardına göre değişiyor. 3 kişilik bir aile için genel tablo şöyle:
+• **Kira:** 2+1 daire için yıllık 80.000 - 140.000 AED arası
+• **Faturalar:** Aylık ortalama 1.200 - 2.000 AED
+• **Market / gıda:** Aylık 3.000 - 5.000 AED
+• **Ulaşım:** Araç kiralama veya taksi için aylık 2.000 - 3.500 AED
+• **Sağlık sigortası:** Kişi başı yıllık yaklaşık 1.500 - 3.000 AED
+Genel olarak aylık yaklaşık 15.000 - 22.000 AED bütçe düşünülebilir.
+Dubai'ye taşınırken oturum veya şirket kurulumu seçeneklerini de değerlendirmek ister misiniz?`;
+
+  const guided = enforceConfiguredSupplementaryGuidance({
+    content: providerResponseWithoutLink,
+    persona,
+    currentIntent: 'Merhaba Samed bey. Yaşam giderleri ve kiralar konusunda nasıl bir bütçe ayırmalıyız?',
+  });
+  const canonical = formatInstagramDmResponse(guided);
+
+  // A. Exactly one approved YouTube guidance block present
+  const occurrences = (canonical.match(/https:\/\/ytbe\.app\/u9j8qB2S/g) || []).length;
+  assert.equal(occurrences, 1, 'Canonical response must contain exactly one approved YouTube link');
+  assert.ok(canonical.includes("▶️ **YouTube'da detaylı anlatım:**\nhttps://ytbe.app/u9j8qB2S"), 'Must contain standard presentation header');
+
+  // E. Follow-up question exists in expected order: answer -> YouTube block -> follow-up question
+  const answerIdx = canonical.indexOf("Genel olarak aylık yaklaşık");
+  const youtubeIdx = canonical.indexOf("▶️ **YouTube'da detaylı anlatım:**");
+  const followUpIdx = canonical.indexOf("Dubai'ye taşınırken oturum veya şirket kurulumu seçeneklerini de değerlendirmek ister misiniz?");
+
+  assert.ok(answerIdx !== -1, 'Answer must be present');
+  assert.ok(youtubeIdx !== -1, 'YouTube block must be present');
+  assert.ok(followUpIdx !== -1, 'Follow-up question must be present');
+  assert.ok(answerIdx < youtubeIdx, 'Answer must precede YouTube block');
+  assert.ok(youtubeIdx < followUpIdx, 'YouTube block must precede follow-up question');
+
+  // Standalone raw clickable link on its own line
+  assert.ok(canonical.includes("\nhttps://ytbe.app/u9j8qB2S\n"), 'URL must be standalone on its own line');
+});
+
+test('SECTION 18 B: Provider already returned correct YouTube block -> no duplicate', () => {
+  const persona = {
+    available: true,
+    companyIdentity: 'SamChe Company LLC',
+    assistantIdentity: 'SamChe AI',
+    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
+    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
+  };
+
+  const providerResponseWithLink = `Dubai'de yaşam giderleri genel tablo:
+• **Kira:** Yıllık 80.000 - 140.000 AED
+• **Faturalar:** Aylık 1.500 AED
+
+▶️ **YouTube'da detaylı anlatım:**
+https://ytbe.app/u9j8qB2S
+
+Dubai'ye taşınırken oturum sürecini değerlendirmek ister misiniz?`;
+
+  const guided = enforceConfiguredSupplementaryGuidance({
+    content: providerResponseWithLink,
+    persona,
+    currentIntent: 'Yaşam giderleri nasıl?',
+  });
+  const canonical = formatInstagramDmResponse(guided);
+
+  const occurrences = (canonical.match(/https:\/\/ytbe\.app\/u9j8qB2S/g) || []).length;
+  assert.equal(occurrences, 1, 'Must not duplicate YouTube link if provider already returned it');
+});
+
+test('SECTION 18 C: Provider returns obsolete URL -> only approved URL remains', () => {
+  const persona = {
+    available: true,
+    companyIdentity: 'SamChe Company LLC',
+    assistantIdentity: 'SamChe AI',
+    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
+    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
+  };
+
+  const providerResponseWithObsolete = `Yaşam maliyetleri hakkında detaylar:
+• **Kira:** 80.000 AED
+YouTube kanalım: https://youtube.com/@sametttbk
+Başka sorunuz var mı?`;
+
+  const canonical = formatInstagramDmResponse(providerResponseWithObsolete);
+
+  assert.ok(!canonical.includes('youtube.com/@sametttbk'), 'Obsolete URL must be completely absent');
+  assert.ok(canonical.includes('https://ytbe.app/u9j8qB2S'), 'Approved URL must replace obsolete URL');
+  const occurrences = (canonical.match(/https:\/\/ytbe\.app\/u9j8qB2S/g) || []).length;
+  assert.equal(occurrences, 1, 'Approved URL must appear exactly once');
+});
+
+
+test('SECTION 18 D: Unrelated response where guidance is not required -> no YouTube block injected', () => {
+  const persona = {
+    available: true,
+    companyIdentity: 'SamChe Company LLC',
+    assistantIdentity: 'SamChe AI',
+    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
+    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
+  };
+
+  const unrelatedResponse = `SamChe Company LLC olarak Dubai'de serbest bölge (Free Zone) ve anakara (Mainland) şirket kurulumu danışmanlığı sağlıyoruz. Hangi sektörde faaliyet göstermeyi planlıyorsunuz?`;
+
+  const guided = enforceConfiguredSupplementaryGuidance({
+    content: unrelatedResponse,
+    persona,
+    currentIntent: 'Şirket kurmak istiyorum',
+  });
+  const canonical = formatInstagramDmResponse(guided);
+
+  assert.ok(!canonical.includes('ytbe.app'), 'Unrelated message must not contain YouTube link');
+  assert.ok(!canonical.includes("YouTube'da detaylı anlatım"), 'Unrelated message must not contain YouTube block');
+});
+
+test('SECTION 18 D (Greeting): Greeting-only customer inbound -> no YouTube block injected', () => {
+  const persona = {
+    available: true,
+    companyIdentity: 'SamChe Company LLC',
+    assistantIdentity: 'SamChe AI',
+    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
+    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
+  };
+
+  const greetingResponse = `Merhaba, SamChe üzerinden Dubai'de şirket kurulumu ve oturum süreçlerinizde size memnuniyetle yardımcı olabilirim. Nasıl yardımcı olabilirim?`;
+
+  const guided = enforceConfiguredSupplementaryGuidance({
+    content: greetingResponse,
+    persona,
+    currentIntent: 'Merhaba Samed bey',
+    isGreeting: true,
+  });
+  const canonical = formatInstagramDmResponse(guided);
+
+  assert.ok(!canonical.includes('ytbe.app'), 'Greeting message must not contain YouTube link');
+});
+
+test('SECTION 18 D (Appointment field collection): Active appointment collection -> no YouTube block injected', () => {
+  const persona = {
+    available: true,
+    companyIdentity: 'SamChe Company LLC',
+    assistantIdentity: 'SamChe AI',
+    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
+    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
+  };
+
+  const appointmentResponse = `Görüşme için hangi gün ve saat sizin için uygundur? Telefon numaranızı da paylaşırsanız randevunuzu hemen oluşturalım.`;
+
+  const guided = enforceConfiguredSupplementaryGuidance({
+    content: appointmentResponse,
+    persona,
+    currentIntent: 'Randevu almak istiyorum',
+    appointmentState: { intent: true, complete: false },
+  });
+  const canonical = formatInstagramDmResponse(guided);
+
+  assert.ok(!canonical.includes('ytbe.app'), 'Active appointment collection must not contain YouTube link');
+});
+
+test('SECTION 18 F: URL remains atomic through chunking with YouTube guidance block', () => {
+  const longLivingCostResponse = `Dubai'de yaşam giderleri tercih ettiğiniz bölge ve yaşam standardına göre değişiyor. 3 kişilik bir aile için genel tablo şöyle:
+
+• **Kira:** 2+1 daire için yıllık 80.000 - 140.000 AED arası
+• **Faturalar:** Aylık ortalama 1.200 - 2.000 AED (DEWA, internet, soğutma)
+• **Market / gıda:** Aylık 3.000 - 5.000 AED civarı
+• **Ulaşım:** Araç kiralama veya taksi için aylık 2.000 - 3.500 AED
+• **Sağlık sigortası:** Kişi başı yıllık yaklaşık 1.500 - 3.000 AED
+
+Genel olarak aylık yaklaşık 15.000 - 22.000 AED bütçe düşünülebilir.
+
+▶️ **YouTube'da detaylı anlatım:**
+https://ytbe.app/u9j8qB2S
+
+Dubai'ye taşınırken oturum veya şirket kurulumu seçeneklerini de birlikte değerlendirmek ister misiniz?`;
+
+  const chunks = splitIntoInstagramDmChunks(longLivingCostResponse, 450);
+
+  // URL must not be split across chunks
+  const urlChunks = chunks.filter((c) => c.includes('https://ytbe.app/u9j8qB2S'));
+  assert.equal(urlChunks.length, 1, 'URL must appear in exactly one chunk');
+  assert.ok(!chunks.some((c) => c.includes('ytbe.app') && !c.includes('https://ytbe.app/u9j8qB2S')), 'URL must never be broken');
+
+  // Guidance header and URL should be kept together if they fit
+  assert.ok(urlChunks[0].includes("▶️ **YouTube'da detaylı anlatım:**"), 'Guidance header and URL stay together in same chunk');
+});
+
+test('SECTION 18 G: Long response preserves all original content when YouTube guidance is injected', () => {
+  const persona = {
+    available: true,
+    companyIdentity: 'SamChe Company LLC',
+    assistantIdentity: 'SamChe AI',
+    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
+    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
+  };
+
+  const originalAnswer = `Dubai'de yaşam giderleri bölgeye göre değişmektedir. 3 kişilik bir aile için maliyet dağılımı:
+• **Kira:** Downtown veya Marina gibi merkezi bölgelerde 2+1 daireler 110.000 - 160.000 AED, JVC veya Silicon Oasis gibi aile bölgelerinde 70.000 - 95.000 AED arasındadır.
+• **Aidat / Hizmet:** Ejari kaydı yıllık yaklaşık 220 AED, konut vergisi (Housing Fee) ise kiranın %5'i olarak DEWA faturalarına 12 taksitle yansıtılır.
+• **Faturalar:** DEWA ve internet dahil aylık 1.500 - 2.500 AED civarındadır.
+• **Eğitim:** Çocuklar için özel uluslararası okul ücretleri yıllık 25.000 - 65.000 AED arasındadır.
+• **Market / Mutfak:** Aylık 3.500 - 6.000 AED civarında bir harcama öngörülebilir.
+Dubai'de şirket kuruluşu veya serbest çalışan oturum izni planınız var mı?`;
+
+  const guided = enforceConfiguredSupplementaryGuidance({
+    content: originalAnswer,
+    persona,
+    currentIntent: '3 kişilik aile için Dubai yaşam giderleri ve kira maliyetleri nedir?',
+  });
+  const canonical = formatInstagramDmResponse(guided);
+
+
+  // All original facts and figures preserved
+  assert.ok(canonical.includes('110.000 - 160.000 AED'), 'Downtown rent preserved');
+  assert.ok(canonical.includes('70.000 - 95.000 AED'), 'JVC rent preserved');
+  assert.ok(canonical.includes('220 AED'), 'Ejari fee preserved');
+  assert.ok(canonical.includes("Housing Fee"), 'Housing fee preserved');
+  assert.ok(canonical.includes('25.000 - 65.000 AED'), 'School fees preserved');
+  assert.ok(canonical.includes('3.500 - 6.000 AED'), 'Groceries preserved');
+
+  // YouTube guidance injected in correct place
+  assert.ok(canonical.includes("▶️ **YouTube'da detaylı anlatım:**\nhttps://ytbe.app/u9j8qB2S"));
+  // Closing question preserved at the end
+  assert.ok(canonical.endsWith("Dubai'de şirket kuruluşu veya serbest çalışan oturum izni planınız var mı?"));
 });
 
 

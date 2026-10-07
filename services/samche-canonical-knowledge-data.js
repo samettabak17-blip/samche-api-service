@@ -547,6 +547,20 @@ Aktarım sonrasında asistan hiçbir ek açıklama yapmaz ve sessiz kalır.`,
       dm_referral_awareness: true,
       persona_type: 'PERSONAL',
       speaker_name: 'Samed Tabak',
+      supplementary_resources: [
+        {
+          id: 'samed_youtube_channel',
+          type: 'YOUTUBE',
+          url: 'https://ytbe.app/u9j8qB2S',
+          presentation_header: "▶️ **YouTube'da detaylı anlatım:**",
+          presentation: "▶️ **YouTube'da detaylı anlatım:**\nhttps://ytbe.app/u9j8qB2S",
+          triggers: [
+            'yaşam', 'yasam', 'kira', 'kiralar', 'ev kiralama', 'market',
+            'maliyet', 'gider', 'masraf', 'living', 'rent', 'cost of living', 'youtube', 'video',
+          ],
+          disallowed_intents: ['GREETING', 'APPOINTMENT_COLLECTION'],
+        },
+      ],
     },
     web_chat: {
       widget_style: 'standard',
