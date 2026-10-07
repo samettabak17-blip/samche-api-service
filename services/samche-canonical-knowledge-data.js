@@ -545,8 +545,12 @@ Aktarım sonrasında asistan hiçbir ek açıklama yapmaz ve sessiz kalır.`,
     instagram: {
       formatting: 'concise conversational plain text without markdown headers',
       dm_referral_awareness: true,
-      persona_type: 'PERSONAL',
+      persona_type: 'PERSONAL_ASSISTANT',
       speaker_name: 'Samed Tabak',
+      represented_person: 'Samed Bey',
+      personal_assistant_title: "Samed Bey'in kişisel asistanı",
+      initial_greeting_introduction: "Merhaba, ben Samed Bey'in kişisel asistanıyım.",
+      meeting_handoff_wording: "Talebinizi ve iletişim bilgilerinizi aldıktan sonra Samed Bey'e ileteceğim. Kendisi sizinle görüşecek.",
       supplementary_resources: [
         {
           id: 'samed_youtube_living_guide',

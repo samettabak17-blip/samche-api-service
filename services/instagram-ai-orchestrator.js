@@ -23,6 +23,7 @@ import {
   extractVisaCount,
   extractShareholderCount,
   extractCustomerNameFromText,
+  extractEmailFromText,
   deriveInstagramLeadQualification,
 } from './high-intent-lead-service.js';
 
@@ -140,12 +141,64 @@ export function buildInstagramBehavioralInstruction({
   ].filter(Boolean).join('\n\n');
 }
 
-export function buildInstagramPersonalPersonaInstruction(instagramConfig) {
+export function buildInstagramPersonalAssistantPersonaInstruction(instagramConfig, { isFirstAssistantResponse = false } = {}) {
+  const speakerName = typeof instagramConfig?.speaker_name === 'string' && instagramConfig.speaker_name.trim()
+    ? instagramConfig.speaker_name.trim()
+    : 'Samed Tabak';
+  const representedPerson = instagramConfig?.represented_person || (speakerName ? `${speakerName.split(' ')[0]} Bey` : 'Samed Bey');
+  const personalAssistantTitle = instagramConfig?.personal_assistant_title || `${representedPerson}'in kişisel asistanı`;
+  const initialIntroduction = instagramConfig?.initial_greeting_introduction || `Merhaba, ben ${representedPerson}'in kişisel asistanıyım.`;
+  const handoffWording = instagramConfig?.meeting_handoff_wording || `Talebinizi ve iletişim bilgilerinizi aldıktan sonra ${representedPerson}'e ileteceğim. Kendisi sizinle görüşecek.`;
+
+  return [
+    'PERSONAL INSTAGRAM FIRST-PERSON SPEAKER DIRECTIVE (PERSONAL ASSISTANT MODE):',
+    `1. SPEAKER ROLE & IDENTITY: You represent ${speakerName} personally as ${personalAssistantTitle}.`,
+    isFirstAssistantResponse
+      ? `   - FIRST RESPONSE IN NEW CONVERSATION: Introduce yourself naturally at the beginning of your response: "${initialIntroduction}".`
+      : `   - ONGOING CONVERSATION: Identity has already been established in prior messages. DO NOT repeat your introduction or greeting. Do NOT say "${initialIntroduction}" again.`,
+    `   - NEVER IMPERSONATE ${speakerName.toUpperCase()}: You are NOT ${speakerName} himself. Do NOT say "ben ${speakerName}". If customer asks "${representedPerson} ile mi görüşüyorum?", "${representedPerson} ile mi konuşuyorum?", or "Siz ${representedPerson.split(' ')[0]} misiniz?", clarify politely: "Hayır, ben ${representedPerson}'in kişisel asistanıyım. Kendisine iletmek istediğiniz bir konu varsa memnuniyetle yardımcı olurum."`,
+    `   - DO NOT SPEAK AS CORPORATE THIRD-PERSON: NEVER speak as a detached corporate narrator. Do NOT say "kurucumuz ${speakerName}", "kurucumuzun deneyimleri", or "kurucumuzun paylaştığı içerikler".`,
+    `2. MEETING & APPOINTMENT ROLE:`,
+    `   - When customer requests a meeting, call, or appointment ("görüşme", "randevu", "toplantı", "görüşebilir miyiz"):`,
+    `     Explain naturally: "${handoffWording}".`,
+    `     Do NOT claim that ${representedPerson} has already accepted or confirmed the meeting.`,
+    `3. QUALIFY BEFORE SCHEDULING:`,
+    `   - ${representedPerson} does NOT meet every unqualified lead automatically.`,
+    `   - Before completing an appointment request, qualify what the customer wants to discuss. If the subject is already known from conversation history (e.g. Dubai company formation), do NOT ask "Görüşme konunuz nedir?". Instead, ask a useful qualification question relevant to the known subject (e.g. intended business activity / sector, partners, residency/visa requirement).`,
+    `   - If meeting purpose/subject is unknown (e.g. customer only asked "Görüşebilir miyiz?"), ask what subject they want to discuss before scheduling.`,
+    `   - Required appointment intake fields before completion: Customer name, phone number, email address, meeting subject/context, and preferred date/time.`,
+    `   - Collect missing fields naturally (1–2 at a time); do NOT over-interrogate or re-ask fields already provided.`,
+    `4. DATE/TIME PREFERENCE & CALENDAR SAFETY (STRICT):`,
+    `   - Customer's date/time preference (e.g. "Yarın 12 gibi") is strictly a user preference, NOT a confirmed booking.`,
+    `   - There is NO active calendar integration in this runtime. NEVER claim: "Takvim uygunluğunu kontrol ettim", "Randevunuz onaylandı", "12:00 için ayarladım", "Görüşmeniz kesinleşti", or "Takvimi kontrol edip onay göndereceğim".`,
+    `   - Acknowledge their preference naturally (e.g. "Yarın saat 12:00 civarı tercihinizi not aldım. Bilgilerinizi ve görüşme talebinizi ${representedPerson}'e ileteceğim. Kendisi sizinle görüşme için iletişime geçecek.").`,
+    `5. COMPLETION SUMMARY:`,
+    `   - When all required fields are collected, produce a concise structured summary:`,
+    `     Görüşme talebiniz:`,
+    `     • İsim: ...`,
+    `     • Telefon: ...`,
+    `     • E-posta: ...`,
+    `     • Konu: ...`,
+    `     • İhtiyaç özeti: ...`,
+    `     • Tercih edilen tarih / saat: ...`,
+    `     Conclude: "Bilgilerinizi ${representedPerson}'e ileteceğim. Kendisi sizinle görüşmek üzere iletişime geçecek."`,
+    `6. YOUTUBE / SOCIAL MEDIA IN FIRST PERSON & STRICT LIVING/RENT/SALARY SCOPING: When customer inquiries are specifically about Dubai living conditions, cost of living, rent/housing, or salaries/income in Dubai, or when the user directly asks for YouTube/videos: First provide a direct, concise, useful answer to their question. Second, add a natural first-person guidance sentence relevant to what was asked (e.g. "Dubai'de yaşam giderleri ve kiralar hakkında daha fazla bilgi edinmek isterseniz YouTube sayfamı ziyaret edebilirsiniz, orada detaylı anlattım.", "YouTube sayfamda da detaylı içerikler paylaşıyorum" or "YouTube sayfamdan da detaylara ulaşabilirsiniz"). Third, add a blank line and provide the approved raw URL on its own line: https://ytbe.app/u9j8qB2S. If a follow-up question is appropriate, place it on its own final line separated by a blank line.\n   CRITICAL SCOPING RESTRICTION: NEVER include YouTube guidance for company formation, business licenses, visas, residency/oturum, taxes, banking, appointments, or general greetings. The YouTube link belongs ONLY to living-cost, rent, and salary topics.\n   CRITICAL YOUTUBE URL RULE: The ONLY approved YouTube destination is https://ytbe.app/u9j8qB2S. NEVER output obsolete channel handles or any other YouTube link. NEVER use markdown anchor syntax like [${speakerName} YouTube](...). Output the raw, standalone URL so Instagram can auto-link it natively. Do NOT use generic headers like "▶️ YouTube'da detaylı anlatım". Do NOT refer to it in third person as "${speakerName}'ın YouTube kanalı" or "kurucumuzun YouTube kanalı".`,
+  ].join('\n');
+}
+
+
+export function buildInstagramPersonalPersonaInstruction(instagramConfig, { isFirstAssistantResponse = false } = {}) {
   const speakerName = typeof instagramConfig?.speaker_name === 'string' && instagramConfig.speaker_name.trim()
     ? instagramConfig.speaker_name.trim()
     : null;
-  const isPersonal = String(instagramConfig?.persona_type || '').toUpperCase() === 'PERSONAL' || Boolean(speakerName);
+  const personaType = String(instagramConfig?.persona_type || '').toUpperCase();
+  const isPersonal = personaType.includes('PERSONAL') || Boolean(speakerName);
   if (!isPersonal || !speakerName) return '';
+
+  const isAssistant = personaType === 'PERSONAL_ASSISTANT' || Boolean(instagramConfig?.represented_person) || Boolean(instagramConfig?.personal_assistant_title);
+  if (isAssistant) {
+    return buildInstagramPersonalAssistantPersonaInstruction(instagramConfig, { isFirstAssistantResponse });
+  }
 
   return [
     'PERSONAL INSTAGRAM FIRST-PERSON SPEAKER DIRECTIVE (MANDATORY SPEAKER AUTHORITY):',
@@ -166,9 +219,10 @@ export function buildInstagramChannelRules({
   currentIntent = '',
   conversationContext = '',
   customerIdentityContext = '',
+  isFirstAssistantResponse = false,
 } = {}) {
   const instagramConfig = persona?.configuration?.channel_adaptations?.instagram || {};
-  const personalPersonaInstruction = buildInstagramPersonalPersonaInstruction(instagramConfig);
+  const personalPersonaInstruction = buildInstagramPersonalPersonaInstruction(instagramConfig, { isFirstAssistantResponse });
   const behavioralPolicy = resolveInstagramBehavioralPolicy({ persona }).policy;
   return [
     personalPersonaInstruction,
@@ -247,7 +301,14 @@ function logInstagramSharedContentDiagnostics({ sharedContentContext, explicitTe
   );
 }
 
-function resolveInstagramAppointmentState({ rawMessages = [], currentText = '', contactPhone = null, activeConversationTopic = null } = {}) {
+function resolveInstagramAppointmentState({
+  rawMessages = [],
+  currentText = '',
+  contactName = null,
+  contactPhone = null,
+  contactEmail = null,
+  activeConversationTopic = null,
+} = {}) {
   const messages = [...(Array.isArray(rawMessages) ? rawMessages : [])];
   if (currentText && !messages.some((message) => message?.sender_type === 'CUSTOMER' && message?.content === currentText)) {
     messages.push({ sender_type: 'CUSTOMER', content: currentText });
@@ -256,7 +317,10 @@ function resolveInstagramAppointmentState({ rawMessages = [], currentText = '', 
     customerMessages: messages,
     currentMessage: currentText,
     activeConversationTopic,
+    contactName,
     contactPhone,
+    contactEmail,
+    fullIntake: true,
   });
 }
 
@@ -319,6 +383,7 @@ export function sanitizeInstagramOutboundResponse(rawText) {
   text = text.replace(/[^.!?\n]*\b(?:Aşağıdaki\s+bağlantı|bağlantı\s+üzerinden\s+WhatsApp|WhatsApp'tan\s+doğrudan\s+iletişime)[^.!?\n]*[.!?]?/giu, '');
 
   // 3. Patterns for false contact promises (e.g. "telefon numarası üzerinden sizinle iletişime geçeceğiz", "ekibimiz sizi arayacak")
+  // Preserves authorized personal assistant handoffs to Samed Bey (e.g. "Kendisi sizinle görüşecek", "Samed Bey'e ileteceğim", "sizinle görüşmek üzere iletişime geçecek")
   const sentencePatterns = [
     /[^.!?\n]*\b(?:iletişime\s+geç\w*|arayacağ\w*|ulaşacağ\w*|ulaşılacak\w*|aranacak\w*)[^.!?\n]*[.!?]?/giu,
     /[^.!?\n]*\b(?:numara\w*\s+üzerinden)[^.!?\n]*[.!?]?/giu,
@@ -326,8 +391,16 @@ export function sanitizeInstagramOutboundResponse(rawText) {
   ];
 
   for (const pattern of sentencePatterns) {
-    text = text.replace(pattern, '');
+    text = text.replace(pattern, (match) => {
+      if (/(?:Samed\s+Bey|Kendisi)/iu.test(match)) {
+        return match;
+      }
+      return '';
+    });
   }
+
+  // 4. Strip unauthorized fake calendar check / confirmation claims
+  text = text.replace(/[^.!?\n]*\b(?:takvim\w*\s+(?:uygunluğu\w*\s+)?kontrol\s+ed\w*|onay\s+göndereceğ\w*|randevunuz\s+onaylan\w*|görüşmeniz\s+kesinleş\w*)[^.!?\n]*[.!?]?/giu, '');
 
   // Clean up leftover phrases cleanly
   text = text
@@ -765,6 +838,7 @@ export async function resolveDurableConversationMemory({
 }) {
   let customerName = extractReliableCustomerName(conversation?.contact_display_name || conversation?.display_name);
   let phone = conversation?.contact_phone || null;
+  let email = conversation?.contact_email || null;
   let serviceRequested = null;
   let activity = null;
   let activityState = null;
@@ -850,6 +924,9 @@ export async function resolveDurableConversationMemory({
     const parsedPhone = extractPhoneNumberFromText(text);
     if (parsedPhone) phone = parsedPhone;
 
+    const parsedEmail = extractEmailFromText(text);
+    if (parsedEmail) email = parsedEmail;
+
     if (extractBothTopicsSignals(text)) {
       serviceRequested = 'Şirket Kuruluşu ve Sponsorlu Oturum';
     } else if (/sponsorlu\s+oturum|oturum\s+izni|residency|ikamet/i.test(text)) {
@@ -886,6 +963,7 @@ export async function resolveDurableConversationMemory({
   return {
     customerName,
     phone,
+    email,
     serviceRequested,
     businessActivity: activity,
     activityState,
@@ -917,6 +995,7 @@ export function buildStructuredMemoryInstruction(memory = {}) {
     memory.visaCount ? `- Visa Requirement: ${memory.visaCount}` : `- Visa Requirement: Not specified`,
     memory.jurisdictionPreference ? `- Jurisdiction Preference: ${memory.jurisdictionPreference}` : `- Jurisdiction Preference: Free Zone (Default)`,
     memory.phone ? `- Contact Phone / WhatsApp: ${memory.phone}` : `- Contact Phone / WhatsApp: Missing`,
+    memory.email ? `- Contact Email: ${memory.email}` : `- Contact Email: Missing`,
     memory.requestedTime ? `- Preferred Meeting Time: ${memory.requestedTime}${memory.timezone ? ` (${memory.timezone})` : ''}` : `- Preferred Meeting Time: Missing`,
     memory.appointmentState?.hasHighIntent ? '' : null,
     memory.appointmentState?.hasHighIntent ? 'APPOINTMENT QUALIFICATION STATE (CANONICAL, PROVIDER-INDEPENDENT):' : null,
@@ -944,6 +1023,10 @@ export function buildStructuredMemoryInstruction(memory = {}) {
     memory.appointmentState?.hasHighIntent
       ? '- SLOT INVENTION GUARD: If preferred date or preferred time is UNKNOWN and calendar availability is not verified, never propose, invent, assume, or claim a specific day, date, time, time range, appointment slot, or availability. Ask for the missing user-provided preference; if meeting purpose is also missing, ask for purpose first.'
       : null,
+    memory.appointmentState?.hasHighIntent
+      ? '- QUALIFY BEFORE SCHEDULING: If meeting purpose is known (e.g. company formation), ask a relevant qualification question (e.g. intended business activity / sector and visa/residency need) before scheduling or asking for day/time.'
+      : null,
+
     memory.sharedContentContext?.present ? '' : null,
     memory.sharedContentContext?.present ? memory.sharedContentContext.instruction : null,
     '',
@@ -959,6 +1042,7 @@ export function buildStructuredMemoryInstruction(memory = {}) {
     '3. NEVER RE-ASK KNOWN FACTS (ANTI-INTERROGATION):',
     '   - Never re-ask any fact listed above as already known or answered!',
     memory.phone ? '   - Customer Phone is ALREADY KNOWN. DO NOT ask for their phone number again.' : null,
+    memory.email ? '   - Customer Email is ALREADY KNOWN. DO NOT ask for their email address again.' : null,
     memory.serviceRequested ? '   - Service / Consultation Topic is ALREADY KNOWN. DO NOT ask them what service or to choose between options again.' : null,
     memory.businessActivity || memory.activityState === 'NOT_DECIDED' ? '   - Business Activity is ALREADY ANSWERED (known or undecided). DO NOT ask for their business activity or sector again.' : null,
     memory.requestedTime ? '   - Preferred Meeting Time is ALREADY KNOWN. DO NOT ask for their preferred time or availability again.' : null,
@@ -1416,10 +1500,17 @@ export async function orchestrateInstagramInboundAiResponse({
     sharedContentContext,
     currentText: text,
   });
+  const hasPriorAssistantTurn = (historyData.rawMessages || []).some(
+    (m) => m?.sender_type === 'ASSISTANT' || m?.sender_type === 'AGENT'
+  );
+  const isFirstAssistantResponse = !hasPriorAssistantTurn;
+
   const appointmentState = resolveInstagramAppointmentState({
     rawMessages: historyData.rawMessages || [],
     currentText: text,
+    contactName: durableMemory.customerName,
     contactPhone: durableMemory.phone,
+    contactEmail: durableMemory.email,
     activeConversationTopic,
   });
 
@@ -1459,6 +1550,7 @@ export async function orchestrateInstagramInboundAiResponse({
     currentIntent: text,
     conversationContext: structuredMemoryContext,
     customerIdentityContext,
+    isFirstAssistantResponse,
   });
 
   const systemInstruction = persona?.available
@@ -1819,10 +1911,17 @@ export async function generateAndDeliverInstagramAssistantResponse({
       sharedContentContext,
       currentText: textToAnswer,
     });
+    const hasPriorAssistantTurn = (historyData.rawMessages || []).some(
+      (m) => m?.sender_type === 'ASSISTANT' || m?.sender_type === 'AGENT'
+    );
+    const isFirstAssistantResponse = !hasPriorAssistantTurn;
+
     const appointmentState = resolveInstagramAppointmentState({
       rawMessages: historyData.rawMessages || [],
       currentText: textToAnswer,
+      contactName: durableMemory.customerName,
       contactPhone: durableMemory.phone,
+      contactEmail: durableMemory.email,
       activeConversationTopic,
     });
 
@@ -1860,6 +1959,7 @@ export async function generateAndDeliverInstagramAssistantResponse({
       currentIntent: textToAnswer,
       conversationContext: structuredMemoryContext,
       customerIdentityContext,
+      isFirstAssistantResponse,
     });
 
     const systemInstruction = persona?.available

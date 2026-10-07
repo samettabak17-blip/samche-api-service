@@ -69,12 +69,26 @@ export function extractPhoneNumberFromText(text = '') {
 }
 
 /**
+ * Extracts email address from text safely.
+ */
+export function extractEmailFromText(text = '') {
+  if (typeof text !== 'string') return null;
+  const match = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  return match ? match[0].trim().toLowerCase() : null;
+}
+
+/**
  * Extracts customer name from Turkish introduction patterns if present.
  */
 export function extractCustomerNameFromText(text = '') {
   if (typeof text !== 'string') return null;
-  const match = text.match(/(?:ben|adım|ismim|adim|isim)\s+([A-ZÇĞİÖŞÜa-zçğıöşü]{2,20}(?:\s+[A-ZÇĞİÖŞÜa-zçğıöşü]{2,20})?)/i);
-  if (match?.[1]) return match[1].trim();
+  const match = text.match(/(?:^|[\s,.\n])(?:ben|adım|adim|ismim|isim|ad\s*soyad|adınız|adiniz)[:\s]+([A-ZÇĞİÖŞÜa-zçğıöşü]{2,20}(?:\s+[A-ZÇĞİÖŞÜa-zçğıöşü]{2,20})?)/iu);
+  if (match?.[1]) {
+    const candidate = match[1].trim();
+    if (!/^(?:de|da|ise|zaten|şimdi|simdi|dubai|bae|uae|şirket|sirket|burada|orada|merhaba|selam|samed|samed\s+bey)$/iu.test(candidate)) {
+      return candidate;
+    }
+  }
   return null;
 }
 
@@ -106,7 +120,8 @@ export function extractMeetingTimePreference(text = '') {
 function extractPreferredDate(requestedTime = '') {
   const match = String(requestedTime || '').match(/(?:yarın|yarin|bugün|bugun|pazartesi|salı|sali|çarşamba|carsamba|perşembe|persembe|cuma|cumartesi|pazar|haftaya)/i);
   if (!match?.[0]) return null;
-  return /^yarin$/i.test(match[0]) ? 'yarın' : /^bugun$/i.test(match[0]) ? 'bugün' : match[0];
+  const lower = match[0].toLowerCase();
+  return lower === 'yarin' ? 'yarın' : lower === 'bugun' ? 'bugün' : lower;
 }
 
 function extractPreferredTime(requestedTime = '') {
@@ -151,6 +166,8 @@ export function deriveInstagramLeadQualification({
   activeConversationTopic = null,
   contactName = null,
   contactPhone = null,
+  contactEmail = null,
+  fullIntake = false,
 } = {}) {
   const historicalContents = customerMessages
     .map((message) => typeof message === 'string' ? message : message?.content)
@@ -158,11 +175,19 @@ export function deriveInstagramLeadQualification({
     .filter(Boolean);
   const currentTurn = typeof currentMessage === 'string' ? currentMessage.trim() : '';
   const startsNewAppointmentRequest = Boolean(currentTurn && hasHighIntentAppointmentSignals(currentTurn));
-  const contents = startsNewAppointmentRequest ? [currentTurn] : historicalContents;
+
+  // Multi-turn continuity: For full intake, combine all historical customer turns with current turn
+  // so earlier fields (name, phone, email, purpose, activity) are never lost.
+  const contents = startsNewAppointmentRequest && !fullIntake ? [currentTurn] : historicalContents;
+  if (fullIntake && currentTurn && !contents.includes(currentTurn)) {
+    contents.push(currentTurn);
+  }
   const combined = contents.join('\n');
   const detailCandidates = contents.filter(isQualificationDetail);
   const structuredRequirement = detailCandidates.at(-1)?.slice(0, 240) || null;
+
   const phone = extractPhoneNumberFromText(combined) || contactPhone || null;
+  const email = extractEmailFromText(combined) || contactEmail || null;
   const customerName = extractCustomerNameFromText(combined) || contactName || null;
   const requestedTime = extractMeetingTimePreference(currentTurn) || extractMeetingTimePreference(combined);
   const timezone = /(?:dubai|bae|uae)(?:\s+saati)?/iu.test(combined)
@@ -178,10 +203,26 @@ export function deriveInstagramLeadQualification({
     ? 'CURRENT_USER_MESSAGE'
     : activeTopic
       ? 'ACTIVE_CONVERSATION_TOPIC'
-      : 'UNKNOWN';
+      : hasConcreteBusinessRequirement(combined)
+        ? 'CONVERSATION_HISTORY'
+        : 'UNKNOWN';
   const purposeKnown = currentMessage !== null
-    ? currentTurnPurposeKnown || Boolean(activeTopic)
+    ? currentTurnPurposeKnown || Boolean(activeTopic) || hasConcreteBusinessRequirement(combined)
     : hasConcreteBusinessRequirement(combined);
+
+  const businessActivity = extractBusinessActivity(combined);
+  const shareholderCount = extractShareholderCount(combined);
+  const jurisdictionPreference = extractJurisdictionPreference(combined);
+
+  // Qualification context: has customer articulated specific context (business activity/sector, partners, visa count, or undecided)?
+  const qualificationContextKnown = Boolean(
+    businessActivity ||
+    shareholderCount ||
+    jurisdictionPreference ||
+    /(?:henüz\s+karar\s+vermedim|karar\s+vermedim|bilmiyorum|fark\s+etmez|netleşmedi)/iu.test(combined) ||
+    !purposeKnown
+  );
+
   const meetingReason = currentTurnPurposeKnown
     ? structuredRequirement
     : activeTopic || (purposeKnown ? structuredRequirement : null);
@@ -191,28 +232,46 @@ export function deriveInstagramLeadQualification({
   const preferredDate = extractPreferredDate(requestedTime);
   const preferredTime = extractPreferredTime(requestedTime);
   const timePrecision = resolveTimePrecision(requestedTime);
-  const missing = [];
 
-  if (!purposeKnown) missing.push('MEETING_PURPOSE');
-  if (!phone) missing.push('CUSTOMER_PHONE');
-  if (!requestedTime) missing.push('MEETING_AVAILABILITY');
+  const intakeMissing = [];
+  if (!purposeKnown) intakeMissing.push('MEETING_PURPOSE');
+  if (purposeKnown && !qualificationContextKnown) intakeMissing.push('QUALIFICATION_CONTEXT');
+  if (!customerName) intakeMissing.push('CUSTOMER_NAME');
+  if (!phone) intakeMissing.push('CUSTOMER_PHONE');
+  if (!email) intakeMissing.push('CUSTOMER_EMAIL');
+  if (!preferredDate) intakeMissing.push('PREFERRED_DATE');
+  if (!preferredTime) intakeMissing.push('PREFERRED_TIME');
+
+  const baselineMissing = [];
+  if (!purposeKnown) baselineMissing.push('MEETING_PURPOSE');
+  if (!phone) baselineMissing.push('CUSTOMER_PHONE');
+  if (!requestedTime) baselineMissing.push('MEETING_AVAILABILITY');
+
+  const missing = fullIntake ? intakeMissing : baselineMissing;
+  const complete = fullIntake
+    ? (hasHighIntent && intakeMissing.length === 0)
+    : (hasHighIntent && purposeKnown && Boolean(phone && requestedTime));
 
   return {
     hasHighIntent,
-    complete: hasHighIntent && purposeKnown && Boolean(phone && requestedTime),
-    status: hasHighIntent && purposeKnown && Boolean(phone && requestedTime) ? 'READY_FOR_REQUEST' : 'COLLECTING',
+    complete,
+    status: complete ? 'READY_FOR_REQUEST' : 'COLLECTING',
     purposeKnown,
+    qualificationContextKnown,
     meetingReason,
     serviceInterest,
     customerName,
     phone,
+    email,
     requestedTime,
     preferredDate,
     preferredTime,
     timePrecision,
     timezone,
     serviceRequested,
-    businessActivity: structuredRequirement,
+    businessActivity,
+    shareholderCount,
+    jurisdictionPreference,
     structuredRequirement,
     purposeSource,
     calendarConfirmed: false,
@@ -220,6 +279,8 @@ export function deriveInstagramLeadQualification({
     timeSource: requestedTime ? 'USER_PROVIDED_PREFERENCE' : 'NONE',
     customerMessageCount: contents.length,
     missing,
+    intakeMissing,
+    intakeComplete: hasHighIntent && intakeMissing.length === 0,
     notificationLlmCalls: 0,
     notificationAiTokens: 0,
   };

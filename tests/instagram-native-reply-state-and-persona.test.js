@@ -82,12 +82,12 @@ test('PERSONA RULE — buildTenantRuntimeSystemInstruction integrates personal I
   });
 
   assert.ok(systemInstruction.includes('PERSONAL INSTAGRAM FIRST-PERSON SPEAKER DIRECTIVE'));
-  assert.ok(systemInstruction.includes('You MUST speak directly AS Samed Tabak in the first person'));
+  assert.ok(systemInstruction.includes("Samed Bey'in kişisel asistanı"));
   assert.ok(systemInstruction.includes('Do NOT say "kurucumuz Samed Tabak"'));
   assert.ok(systemInstruction.includes('YouTube sayfamda da detaylı içerikler paylaşıyorum'));
 });
 
-test('PERSONA TEST A — General inquiry ("Dubai\'de şirket kurmak istiyorum"): persona requires first-person Samed response and prohibits "kurucumuz Samed Tabak"', () => {
+test('PERSONA TEST A — General inquiry ("Dubai\'de şirket kurmak istiyorum"): persona requires personal assistant role and prohibits "kurucumuz Samed Tabak"', () => {
   const persona = {
     available: true,
     companyIdentity: 'SamChe Company LLC',
@@ -98,10 +98,10 @@ test('PERSONA TEST A — General inquiry ("Dubai\'de şirket kurmak istiyorum"):
 
   const channelRules = buildInstagramChannelRules({ persona });
   assert.ok(channelRules.includes('Do NOT say "kurucumuz Samed Tabak"'));
-  assert.ok(channelRules.includes('You MUST speak directly AS Samed Tabak in the first person'));
+  assert.ok(channelRules.includes("Samed Bey'in kişisel asistanı"));
 });
 
-test('PERSONA TEST B — Earnings inquiry: persona requires first-person voice and prohibits "kurucumuzun deneyimleri" / "Samed Tabak\'ın deneyimleri"', () => {
+test('PERSONA TEST B — Earnings inquiry: persona requires assistant voice and prohibits "kurucumuzun deneyimleri" / Samed impersonation', () => {
   const persona = {
     available: true,
     companyIdentity: 'SamChe Company LLC',
@@ -112,7 +112,7 @@ test('PERSONA TEST B — Earnings inquiry: persona requires first-person voice a
 
   const channelRules = buildInstagramChannelRules({ persona });
   assert.ok(channelRules.includes('kurucumuzun deneyimleri'));
-  assert.ok(channelRules.includes('Samed Tabak\'ın...'));
+  assert.ok(channelRules.includes('NEVER IMPERSONATE SAMED TABAK'));
 });
 
 test('PERSONA TEST C & D — YouTube inquiries: clickable YouTube URL format is preserved with first-person wording ("YouTube sayfam...") and new approved URL', () => {
@@ -130,7 +130,7 @@ test('PERSONA TEST C & D — YouTube inquiries: clickable YouTube URL format is 
   assert.ok(channelRules.includes('YouTube sayfamdan da detaylara ulaşabilirsiniz'));
 });
 
-test('PERSONA TEST E — Explicit founder inquiry ("Samed Tabak kim?"): allowed to answer directly without awkward third-person narration', () => {
+test('PERSONA TEST E — Explicit founder inquiry ("Samed Bey ile mi görüşüyorum?"): clarifies assistant identity without impersonation', () => {
   const persona = {
     available: true,
     companyIdentity: 'SamChe Company LLC',
@@ -140,11 +140,10 @@ test('PERSONA TEST E — Explicit founder inquiry ("Samed Tabak kim?"): allowed 
   };
 
   const channelRules = buildInstagramChannelRules({ persona });
-  assert.ok(channelRules.includes('EXPLICIT IDENTITY INQUIRIES'));
-  assert.ok(channelRules.includes('asks "Samed Tabak kim?", answer directly and naturally using approved factual knowledge'));
+  assert.ok(channelRules.includes('Hayır, ben Samed Bey\'in kişisel asistanıyım.'));
 });
 
-test('PERSONA TEST F — Unsupported personal claims: instruction strictly forbids inventing ungrounded experiences', () => {
+test('PERSONA TEST F — Appointment claim safety: instruction strictly forbids claiming unconfirmed acceptance', () => {
   const persona = {
     available: true,
     companyIdentity: 'SamChe Company LLC',
@@ -154,8 +153,7 @@ test('PERSONA TEST F — Unsupported personal claims: instruction strictly forbi
   };
 
   const channelRules = buildInstagramChannelRules({ persona });
-  assert.ok(channelRules.includes('NO INVENTED PERSONAL CLAIMS'));
-  assert.ok(channelRules.includes('Only express personal experiences or achievements when grounded in approved assistant knowledge'));
+  assert.ok(channelRules.includes('Do NOT claim that Samed Bey has already accepted or confirmed the meeting.'));
 });
 
 test('PERSONA ISOLATION — WhatsApp, Web Chat, and AI Guide channel rules remain corporate and untouched', () => {
