@@ -482,7 +482,7 @@ app.get("/api/v1/health/instagram-diagnostics", async (_req, res) => {
 
     const recentMsgs = await pool.query(
       `SELECT m.id, m.tenant_id, m.sender_type, m.external_message_id, m.created_at,
-              c.id AS conversation_id, c.handling_mode, c.ai_behavior_override,
+              c.id AS conversation_id, c.status AS conversation_status, c.handling_mode, c.ai_behavior_override,
               contact.ai_behavior_override AS contact_ai_behavior_override
          FROM conversation_messages m
          JOIN conversations c ON c.id = m.conversation_id
@@ -4855,6 +4855,7 @@ app.post("/webhook", verifyWhatsAppSignature, (req, res) => {
               event: 'INSTAGRAM_AI_OUTCOME',
               tenant_prefix: String(inboundState.integration.tenant_id).slice(0, 8),
               conversation_prefix: String(inboundState.conversation.id).slice(0, 8),
+              conversation_status: inboundState.conversation?.status || null,
               ai_invoked: Boolean(aiOutcome?.aiInvoked),
               delivered: Boolean(aiOutcome?.delivered),
               reason: aiOutcome?.reason || aiOutcome?.activationEvaluation?.reasonCode || null,

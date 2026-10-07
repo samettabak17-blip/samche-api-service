@@ -248,10 +248,17 @@ export async function upsertInstagramConversation(client, { tenantId, channelId,
 
   const result = await client.query(
     `INSERT INTO conversations
-      (tenant_id, channel_id, external_conversation_id, customer_external_id, ai_behavior_override, last_activity_at)
-     VALUES ($1, $2, $3, $4, 'AI_ONLY', CURRENT_TIMESTAMP)
+      (tenant_id, channel_id, external_conversation_id, customer_external_id, status, handling_mode, ai_behavior_override, last_activity_at)
+     VALUES ($1, $2, $3, $4, 'open', 'AI', 'AI_ONLY', CURRENT_TIMESTAMP)
      ON CONFLICT (channel_id, external_conversation_id)
-     DO UPDATE SET last_activity_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+     DO UPDATE SET
+       status = 'open',
+       handling_mode = CASE
+         WHEN conversations.status != 'open' AND conversations.handling_mode != 'AI' THEN 'AI'
+         ELSE conversations.handling_mode
+       END,
+       last_activity_at = CURRENT_TIMESTAMP,
+       updated_at = CURRENT_TIMESTAMP
        WHERE conversations.tenant_id = EXCLUDED.tenant_id
          AND conversations.channel_id = EXCLUDED.channel_id
      RETURNING *`,
@@ -429,6 +436,25 @@ export async function persistInstagramInbound({
       }
     }
 
+    // Reopen closed/archived conversation on legitimate new customer inbound
+    if (conversation.status !== 'open') {
+      await client.query(
+        `UPDATE conversations
+            SET status = 'open',
+                handling_mode = CASE
+                  WHEN handling_mode != 'AI' AND assigned_agent_user_id IS NULL THEN 'AI'
+                  ELSE handling_mode
+                END,
+                updated_at = CURRENT_TIMESTAMP
+          WHERE id = $1 AND tenant_id = $2`,
+        [conversationId, tenantId]
+      );
+      conversation.status = 'open';
+      if (conversation.handling_mode !== 'AI' && !conversation.assigned_agent_user_id) {
+        conversation.handling_mode = 'AI';
+      }
+    }
+
     console.info(`INSTAGRAM_IDENTITY_RESOLVED identity_hash=${conversation?.customer_external_id ? String(conversation.customer_external_id).slice(0, 16) : 'none'} source=${sourceKind}`);
 
     const msgResult = await client.query(
@@ -486,10 +512,11 @@ export async function persistInstagramInbound({
       conversationId,
     }).catch(() => {});
 
-    // Update conversation last_activity_at
+    // Update conversation last_activity_at and ensure status is open
     await client.query(
       `UPDATE conversations
-          SET last_activity_at = CURRENT_TIMESTAMP,
+          SET status = 'open',
+              last_activity_at = CURRENT_TIMESTAMP,
               human_support_last_activity_at = CASE
                 WHEN handling_mode = 'HUMAN' AND human_attention_state = 'ACKNOWLEDGED'
                   THEN CURRENT_TIMESTAMP
@@ -517,7 +544,7 @@ export async function persistInstagramInbound({
     }
 
 
-    const shouldInvokeAi = conversation.status === 'open' && conversation.handling_mode === 'AI';
+    const shouldInvokeAi = (conversation.status === 'open' || !conversation.status) && conversation.handling_mode === 'AI';
 
     return {
       duplicate: false,

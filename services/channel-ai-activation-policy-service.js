@@ -165,7 +165,10 @@ export async function evaluateChannelAiActivationPolicy({
   const text = String(messageText ?? '').trim();
 
   // 1. Human Mode / Takeover Precedence (Authoritative)
-  const isHumanHandling = conversation?.handling_mode === 'HUMAN' || conversation?.status === 'closed';
+  const channelType = String(channelConfig?.channel_type || conversation?.channel_type || '').toUpperCase();
+  const isInstagram = channelType === 'INSTAGRAM';
+
+  const isHumanHandling = conversation?.handling_mode === 'HUMAN' || (!isInstagram && conversation?.status === 'closed');
   if (isHumanHandling) {
     return {
       eligible: false,
@@ -179,9 +182,6 @@ export async function evaluateChannelAiActivationPolicy({
   }
 
   // 2. Contact / Conversation Override Precedence
-  const channelType = String(channelConfig?.channel_type || conversation?.channel_type || '').toUpperCase();
-  const isInstagram = channelType === 'INSTAGRAM';
-
   const rawOverride = contact?.ai_behavior_override ||
     conversation?.contact_ai_behavior_override ||
     conversation?.contact?.ai_behavior_override ||
