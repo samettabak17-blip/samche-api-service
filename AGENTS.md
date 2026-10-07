@@ -89,10 +89,15 @@ focused regression evidence.
 #### Instagram
 
 - Instagram DM orchestration
-- Reel/video priority handling
+- Instagram personal assistant identity (natural configuration-driven assistant persona, non-impersonation, tenant-reusable generic runtime)
+- Reel/video priority handling (customer text priority, stale response suppression, no unsolicited media hallucination)
 - stale response prevention
-- human takeover behavior
-- appointment qualification
+- human takeover behavior (NEVER_AI persistence and manual operator isolation)
+- AI reply reliability (AI_ONLY default, message request folder ingress, deduplication, closed conversation recovery, long-response & unicode parity)
+- appointment qualification (intake fields, multi-turn memory, customer forwarding summary, silent internal qualified-lead forwarding)
+- appointment date/time safety (no invented calendar availability or fake confirmations, preserving approximate times)
+- scoped YouTube guidance (Dubai living/cost topics only, approved URL, non-footer)
+- native app state sync non-blocker (mark_seen unsupported; SamChe Dashboard is operational source)
 - provider parity
 
 #### WhatsApp
