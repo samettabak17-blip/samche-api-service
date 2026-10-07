@@ -71,11 +71,12 @@ export const INSTAGRAM_CHANNEL_PRESENTATION_RULES = Object.freeze([
   'INSTAGRAM CHANNEL PRESENTATION & FORMATTING RULES:',
   '1. CHANNEL MEDIUM: You are conversing directly with a customer inside an Instagram Direct Message (DM). Present concise, clear, and natural responses suitable for mobile screens.',
   '2. PLAIN TEXT FORMATTING & READABILITY (CRITICAL):',
-  '   - Keep responses mobile-friendly (typically under 800 characters).',
+  '   - Keep responses mobile-friendly and visually structured with clean semantic sections.',
   '   - When presenting lists of items (numbered 1., 2. or bullet points •), EACH item MUST be placed on its own separate line.',
   '   - NEVER concatenate list items horizontally onto the same line.',
-  '   - Separate distinct points or paragraphs with clean line breaks for effortless mobile reading.',
-  '   - Do NOT use markdown bolding (**) or markdown headers (###); write plain, cleanly spaced text with bullet points (• ).',
+  '   - Separate distinct points, lists, and closing questions with clean blank lines for effortless mobile reading.',
+  '   - FOLLOW-UP QUESTION ISOLATION: The closing question MUST be on its own final line preceded by a blank line. NEVER attach it to the end of a URL or bullet point.',
+  '   - Do NOT use markdown headers (###); write plain, cleanly spaced structured text with bullet points (• ).',
   '3. INSTAGRAM TEXT-ONLY & NO VISUAL GENERATION:',
   '   - Instagram Direct Messaging is strictly text-only. Never generate images or invoke visual generation.',
   '   - If the customer asks to generate or create an image, respond naturally in text explaining that direct messages are text-only, and assist them directly with their business inquiry.',
@@ -155,7 +156,7 @@ export function buildInstagramPersonalPersonaInstruction(instagramConfig) {
     `   - You ARE ${speakerName} speaking directly to the customer. Express company services naturally in first person (e.g. "Bu süreçte size yardımcı olabilirim", "bu konuda danışmanlık ve süreç yönetimi desteği sağlıyorum", "SamChe üzerinden bu süreçte destek sağlıyoruz").`,
     `3. EXISTING APPROVED PROMPT REMAINS AUTHORITATIVE: All business rules, company formation info, pricing, visa guidelines, qualification criteria, and link formats in the approved assistant prompt remain strictly governing. Only the speaker identity changes to ${speakerName}'s first-person voice.`,
     `4. NO INVENTED PERSONAL CLAIMS: Only express personal experiences or achievements when grounded in approved assistant knowledge and business profile. If a fact belongs strictly to the company, state it accurately without fabricating personal anecdotes.`,
-    `5. YOUTUBE / SOCIAL MEDIA IN FIRST PERSON: When approved knowledge or prompts direct to YouTube or social channels, refer to them in first person as your own channel/page with clean, clickable raw URL presentation (e.g. "YouTube sayfamda da detaylı içerikler paylaşıyorum:\nhttps://ytbe.app/u9j8qB2S" or "YouTube sayfamdan da detaylara ulaşabilirsiniz:\nhttps://ytbe.app/u9j8qB2S"). Do NOT refer to it in third person as "${speakerName}'ın YouTube kanalı" or "kurucumuzun YouTube kanalı".`,
+    `5. YOUTUBE / SOCIAL MEDIA IN FIRST PERSON: When approved knowledge or prompts direct to YouTube or social channels, refer to them in first person as your own channel/page with clean, clickable raw URL presentation (e.g. "YouTube sayfamda da detaylı içerikler paylaşıyorum:\nhttps://ytbe.app/u9j8qB2S" or "YouTube sayfamdan da detaylara ulaşabilirsiniz:\nhttps://ytbe.app/u9j8qB2S"). Preferred customer-facing resource presentation:\n   ▶️ **YouTube'da detaylı anlatım:**\n   https://ytbe.app/u9j8qB2S\n   CRITICAL YOUTUBE URL RULE: The ONLY approved YouTube destination is https://ytbe.app/u9j8qB2S. NEVER output obsolete channel handles or any other YouTube link. NEVER use markdown anchor syntax like [Samed Tabak YouTube](...). Output the raw, standalone URL so Instagram can auto-link it natively. Do NOT refer to it in third person as "${speakerName}'ın YouTube kanalı" or "kurucumuzun YouTube kanalı".`,
     `6. EXPLICIT IDENTITY INQUIRIES: If the customer explicitly asks who you are or asks "${speakerName} kim?", answer directly and naturally using approved factual knowledge without awkward third-person self-narration.`,
   ].join('\n');
 }
@@ -350,43 +351,57 @@ export function formatInstagramDmResponse(rawText) {
   // 1. Strip markdown headers like ### or ## or # at line starts
   text = text.replace(/^#{1,6}\s*(.+)$/gm, '$1');
 
-  // 2. Separate inline bold titles before colons: e.g. "Item. **Mainland:** * ..." -> "Item.\n\n**Mainland:** * ..."
+  // 2. Normalize obsolete/legacy YouTube URLs to the single approved destination
+  text = text.replace(/https?:\/\/(?:www\.)?youtube\.com\/@?sametttbk[^\s\)]*/gi, 'https://ytbe.app/u9j8qB2S');
+
+  // 3. Normalize markdown links to clean, mobile-friendly raw URLs for Instagram DMs
+  text = text.replace(/\[(?:Samed Tabak YouTube|YouTube|YouTube Kanalı|YouTube'da detaylı anlatım|detaylı anlatım)\]\s*\(?(https?:\/\/[^\s\)]+)\)?/gi, "▶️ **YouTube'da detaylı anlatım:**\n$1");
+  text = text.replace(/\[([^\]]+)\]\s*\((https?:\/\/ytbe\.app\/u9j8qB2S)\)/gi, "▶️ **YouTube'da detaylı anlatım:**\n$2");
+  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g, '$1:\n$2');
+
+  // 4. Ensure standalone YouTube link has clean clickable presentation
+  if (text.includes('https://ytbe.app/u9j8qB2S') && !text.includes("YouTube'da detaylı anlatım")) {
+    text = text.replace(/(https:\/\/ytbe\.app\/u9j8qB2S)/g, "▶️ **YouTube'da detaylı anlatım:**\n$1");
+  }
+  text = text.replace(/([^\n])\n*(?:▶️|\u25B6\uFE0F|\u25B6)\s*(?:\*\*)?YouTube(?:'da|da)?\s+detaylı\s+anlatım:?(?:\*\*)?:?/gu, "$1\n\n▶️ **YouTube'da detaylı anlatım:**");
+  text = text.replace(/^(?:▶️|\u25B6\uFE0F|\u25B6)\s*(?:\*\*)?YouTube(?:'da|da)?\s+detaylı\s+anlatım:?(?:\*\*)?:?/gu, "▶️ **YouTube'da detaylı anlatım:**");
+  text = text.replace(/(?:▶️|\u25B6\uFE0F|\u25B6)\s*(?:\*\*)?YouTube(?:'da|da)?\s+detaylı\s+anlatım:?(?:\*\*)?:?[ \t]*(https:\/\/ytbe\.app\/u9j8qB2S)/gu, "▶️ **YouTube'da detaylı anlatım:**\n$1");
+
+  // 5. Separate inline bold titles before colons: e.g. "Item. **Mainland:** * ..." -> "Item.\n\n**Mainland:** * ..."
   text = text.replace(/([^\n])\s+(\*\*[^\*\n]+:\*\*)/g, '$1\n\n$2');
 
-  // 3. Strip bold wrappers like **text** or __text__
-  text = text.replace(/\*\*(.*?)\*\*/g, '$1');
-  text = text.replace(/__(.*?)__/g, '$1');
-
-  // 4. Strip code backticks: `code` -> code
+  // 6. Strip code backticks: `code` -> code
   text = text.replace(/`([^`]+)`/g, '$1');
 
-  // 5. Put paragraph break between heading with colon and first bullet or numbered item:
-  // e.g. "Free Zone:\n* Item 1" or "Free Zone: * Item 1" -> "Free Zone:\n\n• Item 1"
+  // 7. Put paragraph break between heading with colon and first bullet or numbered item:
   text = text.replace(/([^\n]+:)\s*([•\-\*]\s+)/g, '$1\n\n$2');
   text = text.replace(/([^\n]+:)\s*(\d+\.\s+)/g, '$1\n\n$2');
-
-  // 6. Put each bullet point on its own line if concatenated inline:
-  // e.g. "• Item 1 • Item 2" or "* Item 1 * Item 2" -> "• Item 1\n• Item 2"
-  text = text.replace(/([^\n])\s+([•\-\*]\s+)/g, '$1\n$2');
-
-  // 7. Put each numbered list item on its own paragraph if concatenated inline:
-  // e.g. "1. First 2. Second" -> "1. First\n\n2. Second"
-  text = text.replace(/([^\n])\s+(\d+\.\s+)/g, '$1\n\n$2');
 
   // 8. Standardize bullet list markers (*, -, +) at line start to •
   text = text.replace(/^[\t ]*[\*\-\+]\s+/gm, '• ');
 
-  // 9. Strip single-asterisk italic markdown when not a bullet marker
+  // 9. Put each bullet point on its own line if concatenated inline:
+  text = text.replace(/([^\n])\s+([•\-\*]\s+)/g, '$1\n$2');
+
+  // 10. Put each numbered list item on its own paragraph if concatenated inline:
+  text = text.replace(/([^\n])\s+(\d+\.\s+)/g, '$1\n\n$2');
+
+  // 11. Strip single-asterisk italic markdown when not a bullet marker
   text = text.replace(/(^|[^\*])\*([^\*\n]+)\*([^\*]|$)/g, '$1$2$3');
 
-  // 10. Ensure clean separation between bullet lists and following headings
+  // 12. Ensure clean separation between bullet lists and following text / headings / links
   text = text.replace(/(•[^\n]+)\n([A-Za-z0-9ÇĞİÖŞÜçğıöşü\s]+:)/g, '$1\n\n$2');
+  text = text.replace(/(•[^\n]+)\n(▶️|Yaklaşık|Toplam|Not:)/gu, '$1\n\n$2');
 
-  // 11. Normalize markdown links to clean, mobile-friendly raw URLs for Instagram DMs
-  text = text.replace(/\[(?:Samed Tabak YouTube|YouTube|YouTube Kanalı)\]\((https?:\/\/[^\s\)]+)\)/gi, '$1');
-  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g, '$1:\n$2');
+  // 13. Ensure YouTube resource block is preceded by a blank line
+  text = text.replace(/([^\n])\n*(?:▶️|\u25B6\uFE0F|\u25B6)\s*(?:\*\*)?YouTube(?:'da|da)?\s+detaylı\s+anlatım:?(?:\*\*)?:?/gu, "$1\n\n▶️ **YouTube'da detaylı anlatım:**");
 
-  // 12. Normalize excessive blank lines (more than 2 consecutive newlines -> 2)
+  // 14. Follow-up question isolation: Ensure closing question is on its own separate paragraph
+  text = text.replace(/(https?:\/\/[^\s]+)\s+([A-ZÇĞİÖŞÜ][^\n]+\?)\s*$/gu, '$1\n\n$2');
+  text = text.replace(/(https?:\/\/[^\s]+)\n([A-ZÇĞİÖŞÜ][^\n]+\?)\s*$/gu, '$1\n\n$2');
+  text = text.replace(/([^\n•])\n([A-ZÇĞİÖŞÜ][^\n•]+(?:ister misiniz|düşünür müsünüz|yardımcı olabilir miyim|merak ettiğiniz|sorunuz var mı|ulaşabilirsiniz)[^\n]*\?)\s*$/gu, '$1\n\n$2');
+
+  // 15. Normalize excessive blank lines (more than 2 consecutive newlines -> 2)
   text = text.replace(/\n{3,}/g, '\n\n');
 
   return text.trim();

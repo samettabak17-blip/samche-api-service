@@ -140,8 +140,8 @@ export function splitIntoInstagramDmChunks(content, maxChunkLength = MAX_FINAL_I
       return leaves;
     }
 
-    // Priority 4: Words / whitespace, keeping Markdown links [Label](URL) and URLs intact
-    const tokenRegex = /\[[^\]\n]+\]\([^\)\s]+\)|https?:\/\/[^\s]+|\S+/gu;
+    // Priority 4: Words / whitespace, keeping Markdown links [Label](URL), bold tokens, amounts, and URLs intact
+    const tokenRegex = /https?:\/\/[^\s]+|\[[^\]\n]+\]\([^\)\s]+\)|\*\*[^\*\n]+\*\*|(?:\d{1,3}(?:\.\d{3})+|\d+)\s*(?:AED|USD|EUR|TL|TRY)\b|•\s+\*\*[^\*\n]+:\*\*|•\s+[^\n:]+:|\S+/gu;
     const tokens = block.match(tokenRegex) || [];
     if (tokens.length > 1) {
       const wordLeaves = [];
@@ -191,7 +191,11 @@ export function splitIntoInstagramDmChunks(content, maxChunkLength = MAX_FINAL_I
     const candidateSingleNewline = currentChunk + '\n' + trimmedLeaf;
     const candidateSpace = currentChunk + ' ' + trimmedLeaf;
 
-    if (candidateDoubleNewline.length <= limit && (currentChunk.endsWith(':') || trimmedLeaf.startsWith('•') || trimmedLeaf.startsWith('-') || currentChunk.endsWith('.') || currentChunk.endsWith('!') || currentChunk.endsWith('?'))) {
+    const isConsecutiveBullet = trimmedLeaf.startsWith('•') && (currentChunk.endsWith('•') || /•[^\n]*$/.test(currentChunk));
+
+    if (isConsecutiveBullet && candidateSingleNewline.length <= limit) {
+      currentChunk = candidateSingleNewline;
+    } else if (candidateDoubleNewline.length <= limit && (currentChunk.endsWith(':') || trimmedLeaf.startsWith('•') || trimmedLeaf.startsWith('▶️') || trimmedLeaf.startsWith('-') || currentChunk.endsWith('.') || currentChunk.endsWith('!') || currentChunk.endsWith('?'))) {
       currentChunk = candidateDoubleNewline;
     } else if (candidateSingleNewline.length <= limit && (trimmedLeaf.startsWith('•') || currentChunk.startsWith('•') || trimmedLeaf.startsWith('-'))) {
       currentChunk = candidateSingleNewline;
