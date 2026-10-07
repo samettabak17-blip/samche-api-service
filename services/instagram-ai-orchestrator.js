@@ -156,7 +156,7 @@ export function buildInstagramPersonalPersonaInstruction(instagramConfig) {
     `   - You ARE ${speakerName} speaking directly to the customer. Express company services naturally in first person (e.g. "Bu süreçte size yardımcı olabilirim", "bu konuda danışmanlık ve süreç yönetimi desteği sağlıyorum", "SamChe üzerinden bu süreçte destek sağlıyoruz").`,
     `3. EXISTING APPROVED PROMPT REMAINS AUTHORITATIVE: All business rules, company formation info, pricing, visa guidelines, qualification criteria, and link formats in the approved assistant prompt remain strictly governing. Only the speaker identity changes to ${speakerName}'s first-person voice.`,
     `4. NO INVENTED PERSONAL CLAIMS: Only express personal experiences or achievements when grounded in approved assistant knowledge and business profile. If a fact belongs strictly to the company, state it accurately without fabricating personal anecdotes.`,
-    `5. YOUTUBE / SOCIAL MEDIA IN FIRST PERSON & ANSWER-FIRST RESOURCE-SECOND STRUCTURE: When approved knowledge or prompts direct to YouTube or social channels, or when customer inquiries involve topics where supplementary video guidance is relevant (such as Dubai living expenses, rent, lifestyle, relocation), or when the user directly asks for YouTube/videos: First provide a direct, concise, grounded answer to their question. Second, provide the approved YouTube guidance on its own line ("YouTube sayfamda da detaylı içerikler paylaşıyorum:\nhttps://ytbe.app/u9j8qB2S" or "YouTube sayfamdan da detaylara ulaşabilirsiniz:\nhttps://ytbe.app/u9j8qB2S"). Preferred customer-facing resource presentation:\n   ▶️ **YouTube'da detaylı anlatım:**\n   https://ytbe.app/u9j8qB2S\n   Third, leave a blank line and place your conversational follow-up question on its own final line.\n   CRITICAL YOUTUBE URL RULE: The ONLY approved YouTube destination is https://ytbe.app/u9j8qB2S. NEVER output obsolete channel handles or any other YouTube link. NEVER use markdown anchor syntax like [Samed Tabak YouTube](...). Output the raw, standalone URL so Instagram can auto-link it natively. Do NOT refer to it in third person as "${speakerName}'ın YouTube kanalı" or "kurucumuzun YouTube kanalı".`,
+    `5. YOUTUBE / SOCIAL MEDIA IN FIRST PERSON & STRICT LIVING/RENT/SALARY SCOPING: When customer inquiries are specifically about Dubai living conditions, cost of living, rent/housing, or salaries/income in Dubai, or when the user directly asks for YouTube/videos: First provide a direct, concise, useful answer to their question. Second, add a natural first-person guidance sentence relevant to what was asked (e.g. "Dubai'de yaşam giderleri ve kiralar hakkında daha fazla bilgi edinmek isterseniz YouTube sayfamı ziyaret edebilirsiniz, orada detaylı anlattım.", "YouTube sayfamda da detaylı içerikler paylaşıyorum" or "YouTube sayfamdan da detaylara ulaşabilirsiniz"). Third, add a blank line and provide the approved raw URL on its own line: https://ytbe.app/u9j8qB2S. If a follow-up question is appropriate, place it on its own final line separated by a blank line.\n   CRITICAL SCOPING RESTRICTION: NEVER include YouTube guidance for company formation, business licenses, visas, residency/oturum, taxes, banking, appointments, or general greetings. The YouTube link belongs ONLY to living-cost, rent, and salary topics.\n   CRITICAL YOUTUBE URL RULE: The ONLY approved YouTube destination is https://ytbe.app/u9j8qB2S. NEVER output obsolete channel handles or any other YouTube link. NEVER use markdown anchor syntax like [Samed Tabak YouTube](...). Output the raw, standalone URL so Instagram can auto-link it natively. Do NOT use generic headers like "▶️ YouTube'da detaylı anlatım". Do NOT refer to it in third person as "${speakerName}'ın YouTube kanalı" or "kurucumuzun YouTube kanalı".`,
     `6. EXPLICIT IDENTITY INQUIRIES: If the customer explicitly asks who you are or asks "${speakerName} kim?", answer directly and naturally using approved factual knowledge without awkward third-person self-narration.`,
   ].join('\n');
 }
@@ -339,22 +339,102 @@ export function sanitizeInstagramOutboundResponse(rawText) {
   return text;
 }
 
+function escapeRegex(str) {
+  return String(str || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Evaluates whether a customer's incoming intent matches the configured semantic scope
+ * of a supplementary resource.
+ *
+ * Tenant-generic: Evaluates solely against the resource's configured semantic_scope topics
+ * without hardcoding tenant identities or topic names in generic runtime.
+ */
+export function evaluateResourceSemanticScope({ intentText = '', resource = {} } = {}) {
+  if (!intentText || typeof intentText !== 'string') return { applies: false, guidanceText: '' };
+  const text = intentText.trim();
+  if (!text) return { applies: false, guidanceText: '' };
+
+  const scope = resource?.semantic_scope || {};
+  const topics = Array.isArray(scope.topics) ? scope.topics : [];
+
+  if (topics.length > 0) {
+    for (const topic of topics) {
+      if (!topic?.pattern) continue;
+      try {
+        const re = new RegExp(topic.pattern, 'iu');
+        if (re.test(text)) {
+          const guidanceText = topic.guidance_text || resource.default_guidance_text || '';
+          return { applies: true, guidanceText, topicId: topic.id };
+        }
+      } catch {
+        if (text.toLowerCase().includes(String(topic.pattern).toLowerCase())) {
+          return { applies: true, guidanceText: topic.guidance_text || resource.default_guidance_text || '', topicId: topic.id };
+        }
+      }
+    }
+    return { applies: false, guidanceText: '' };
+  }
+
+  // Fallback for legacy format with trigger keywords
+  const triggers = Array.isArray(resource?.triggers) ? resource.triggers : [];
+  if (triggers.length > 0) {
+    const lower = text.toLowerCase();
+    const matched = triggers.some((t) => lower.includes(String(t).toLowerCase().trim()));
+    return {
+      applies: matched,
+      guidanceText: resource.default_guidance_text || resource.presentation || '',
+    };
+  }
+
+  return { applies: false, guidanceText: '' };
+}
+
+
+
+const DEFAULT_SAMCHE_YOUTUBE_TOPICS = Object.freeze([
+  {
+    id: 'RENT_AND_HOUSING',
+    pattern: '(?:kira|ev\\s*kira|konut\\s*kira|konut\\s*maliyet|\\brent|\\brents|\\brental|housing\\s*costs?)',
+    guidance_text: "Dubai'de yaşam giderleri ve kiralar hakkında daha fazla bilgi edinmek isterseniz YouTube sayfamı ziyaret edebilirsiniz, orada detaylı anlattım.",
+  },
+  {
+    id: 'SALARIES_AND_INCOME',
+    pattern: '(?:maaş|maas|gelir\\s*seviye|gelir\\s*düzey|\\bsalary|\\bsalaries|\\bincome)',
+    guidance_text: "Dubai'de yaşam koşulları ve maaşlar hakkında daha fazla bilgi edinmek isterseniz YouTube sayfamı ziyaret edebilirsiniz, orada detaylı anlattım.",
+  },
+  {
+    id: 'LIVING_CONDITIONS_AND_BUDGET',
+    pattern: '(?:yaşam\\s*koşul|yasam\\s*kosul|yaşam\\s*şart|yasam\\s*sart|yaşam\\s*standart|yasam\\s*standart|yaşam\\s*gider|yasam\\s*gider|yaşam\\s*maliyet|yasam\\s*maliyet|yaşam\\s*masraf|yasam\\s*masraf|geçim|gecim|geçin|gecin|aylık\\s*bütçe|aylik\\s*butce|aile\\s*bütçe|aile\\s*butce|cost\\s+of\\s+living|living\\s+costs?|living\\s+expenses?)',
+    guidance_text: "Dubai'de yaşam giderleri ve kiralar hakkında daha fazla bilgi edinmek isterseniz YouTube sayfamı ziyaret edebilirsiniz, orada detaylı anlattım.",
+  },
+  {
+    id: 'DIRECT_YOUTUBE_INQUIRY',
+    pattern: '(?:youtube|video|kanal[ıi]n[ıi]z|videonuz|videolar[ıi]n[ıi]z)',
+    guidance_text: "Dubai ve süreçler hakkında detaylı videolarıma YouTube sayfamdan ulaşabilirsiniz.",
+  },
+]);
+
 
 /**
  * Config-driven deterministic supplementary guidance enforcement.
- * When tenant configuration specifies supplementary resources (e.g. YouTube channel guidance),
- * validates that required guidance is present in the final canonical response whenever the
- * conversation context or response content matches the tenant's configured guidance triggers.
+ * Validates that configured supplementary guidance is present in the final canonical response
+ * ONLY when the customer's incoming intent matches the tenant's configured semantic scope.
  *
- * If missing, injects the configured presentation block in the canonical position:
+ * When applicable:
  *   [Main Answer Content]
  *
- *   [Configured Presentation Block]
+ *   [Natural Guidance Sentence]
+ *
+ *   [Approved Standalone Raw URL]
  *
  *   [Follow-up Question]
  *
- * Preserves existing content, prevents duplication, and never injects into greetings or
- * appointment field collection.
+ * If intent does NOT qualify:
+ *   Ensures resource is NOT included (strips accidental occurrences).
+ *
+ * Guarantees exactly ONE URL occurrence, prevents duplication, and never injects into greetings
+ * or active appointment collection.
  */
 export function enforceConfiguredSupplementaryGuidance({
   content,
@@ -366,32 +446,23 @@ export function enforceConfiguredSupplementaryGuidance({
   if (!content || typeof content !== 'string') return content || '';
   let text = content.trim();
 
-  // If greeting only or appointment field collection is active, do not inject supplementary resources
-  if (isGreeting) return text;
-  if (appointmentState && appointmentState.intent && !appointmentState.complete) return text;
-
-  // Resolve configured supplementary resources from persona configuration
   const instagramConfig = persona?.configuration?.channel_adaptations?.instagram || {};
   let resources = Array.isArray(instagramConfig.supplementary_resources)
     ? instagramConfig.supplementary_resources
     : (Array.isArray(persona?.configuration?.supplementary_resources) ? persona.configuration.supplementary_resources : []);
 
-  // Fallback: If not explicitly structured in channel_adaptations, detect from assistant_instructions
   if (resources.length === 0 && persona?.configuration?.assistant_instructions) {
     const inst = String(persona.configuration.assistant_instructions);
     if (inst.includes('ytbe.app/u9j8qB2S')) {
       resources = [
         {
-          id: 'samed_youtube_channel',
+          id: 'samed_youtube_living_guide',
           type: 'YOUTUBE',
           url: 'https://ytbe.app/u9j8qB2S',
-          presentation_header: "▶️ **YouTube'da detaylı anlatım:**",
-          presentation: "▶️ **YouTube'da detaylı anlatım:**\nhttps://ytbe.app/u9j8qB2S",
-          triggers: [
-            'yaşam', 'yasam', 'kira', 'kiralar', 'ev kiralama', 'market',
-            'maliyet', 'gider', 'masraf', 'living', 'rent', 'cost of living', 'youtube', 'video',
-          ],
-          disallowed_intents: ['GREETING', 'APPOINTMENT_COLLECTION'],
+          default_guidance_text: "Dubai'de yaşam giderleri ve kiralar hakkında daha fazla bilgi edinmek isterseniz YouTube sayfamı ziyaret edebilirsiniz, orada detaylı anlattım.",
+          semantic_scope: {
+            topics: DEFAULT_SAMCHE_YOUTUBE_TOPICS,
+          },
         },
       ];
     }
@@ -399,37 +470,55 @@ export function enforceConfiguredSupplementaryGuidance({
 
   if (resources.length === 0) return text;
 
-  const normalizedIntent = String(currentIntent || '').toLowerCase();
-  const normalizedText = text.toLowerCase();
+  const isExcludedContext = Boolean(isGreeting || (appointmentState && appointmentState.intent && !appointmentState.complete));
 
   for (const res of resources) {
     if (!res?.url) continue;
 
-    // A. If the URL is already present in the response, do NOT duplicate it
-    if (text.includes(res.url)) continue;
+    const evaluation = !isExcludedContext
+      ? evaluateResourceSemanticScope({ intentText: currentIntent, resource: res })
+      : { applies: false };
 
-    // B. Check if triggers match either the customer's intent or the generated response
-    const triggers = Array.isArray(res.triggers) ? res.triggers : [];
-    const matchesTrigger = triggers.some((t) => {
-      const term = String(t).toLowerCase().trim();
-      return term && (normalizedIntent.includes(term) || normalizedText.includes(term));
-    });
-
-    if (!matchesTrigger) continue;
-
-    // C. Inject the guidance block before the final follow-up question if one exists
-    const presentation = res.presentation || `${res.presentation_header || "▶️ **YouTube'da detaylı anlatım:**"}\n${res.url}`;
-
-    // Split out trailing follow-up question if present at the end
-    const followUpMatch = text.match(/(?:\n\n|\n)?(\p{Lu}[^\n•]{10,}\?)\s*$/u);
-
-    if (followUpMatch && followUpMatch.index !== undefined) {
-      const mainPart = text.slice(0, followUpMatch.index).trim();
-      const followUp = followUpMatch[1].trim();
-      text = `${mainPart}\n\n${presentation}\n\n${followUp}`;
-    } else {
-      text = `${text}\n\n${presentation}`;
+    if (!evaluation.applies) {
+      if (text.includes(res.url)) {
+        text = text.replace(new RegExp(`\\n*${escapeRegex(res.url)}`, 'g'), '');
+        text = text.replace(/[^\n.]*YouTube sayfam[^\n.]*\.?[ \t]*/gi, '');
+        text = text.replace(/[^\n.]*detaylı anlattım[^\n.]*\.?[ \t]*/gi, '');
+        text = text.replace(/(?:▶️|\u25B6\uFE0F|\u25B6)\s*(?:\*\*)?YouTube(?:'da|da)?\s+detaylı\s+anlatım:?(?:\*\*)?:?\s*/gu, '');
+        text = text.replace(/\n{3,}/g, '\n\n').trim();
+      }
+      continue;
     }
+
+    const sentence = evaluation.guidanceText || res.default_guidance_text || "Dubai'de yaşam giderleri ve kiralar hakkında daha fazla bilgi edinmek isterseniz YouTube sayfamı ziyaret edebilirsiniz, orada detaylı anlattım.";
+    const block = `${sentence}\n\n${res.url}`;
+
+    if (text.includes(res.url)) {
+      text = text.replace(/(?:▶️|\u25B6\uFE0F|\u25B6)\s*(?:\*\*)?YouTube(?:'da|da)?\s+detaylı\s+anlatım:?(?:\*\*)?:?\s*/gu, '');
+      const hasSentence = /YouTube sayfam/i.test(text) || /detaylı anlattım/i.test(text);
+      if (!hasSentence) {
+        text = text.replace(new RegExp(escapeRegex(res.url), 'g'), `${sentence}\n\n${res.url}`);
+      }
+    } else {
+      const followUpMatch = text.match(/(?:\n\n|\n)?(\p{Lu}[^\n•]{10,}\?)\s*$/u);
+      if (followUpMatch && followUpMatch.index !== undefined) {
+        const mainPart = text.slice(0, followUpMatch.index).trim();
+        const followUp = followUpMatch[1].trim();
+        text = `${mainPart}\n\n${block}\n\n${followUp}`;
+      } else {
+        text = `${text}\n\n${block}`;
+      }
+    }
+
+    let seen = false;
+    text = text.replace(new RegExp(escapeRegex(res.url), 'g'), () => {
+      if (!seen) {
+        seen = true;
+        return res.url;
+      }
+      return '';
+    });
+    text = text.replace(/\n{3,}/g, '\n\n').trim();
   }
 
   return text.trim();
@@ -438,7 +527,6 @@ export function enforceConfiguredSupplementaryGuidance({
 
 /**
  * Normalizes and formats AI response text for optimal readability in Instagram Direct Messages.
-
  * Guarantees vertical separation of list items, strips raw markdown fences, and formats clean paragraph breaks.
  */
 export function formatInstagramDmResponse(rawText) {
@@ -451,55 +539,61 @@ export function formatInstagramDmResponse(rawText) {
   // 2. Normalize obsolete/legacy YouTube URLs to the single approved destination
   text = text.replace(/https?:\/\/(?:www\.)?youtube\.com\/@?sametttbk[^\s\)]*/gi, 'https://ytbe.app/u9j8qB2S');
 
-  // 3. Normalize markdown links to clean, mobile-friendly raw URLs for Instagram DMs
-  text = text.replace(/\[(?:Samed Tabak YouTube|YouTube|YouTube Kanalı|YouTube'da detaylı anlatım|detaylı anlatım)\]\s*\(?(https?:\/\/[^\s\)]+)\)?/gi, "▶️ **YouTube'da detaylı anlatım:**\n$1");
-  text = text.replace(/\[([^\]]+)\]\s*\((https?:\/\/ytbe\.app\/u9j8qB2S)\)/gi, "▶️ **YouTube'da detaylı anlatım:**\n$2");
+  // 3. Normalize markdown links to clean raw URLs for Instagram DMs (no [Title](url) syntax)
+  text = text.replace(/\[(?:Samed Tabak YouTube|YouTube|YouTube Kanalı|YouTube'da detaylı anlatım|detaylı anlatım)\]\s*\(?(https?:\/\/[^\s\)]+)\)?/gi, '$1');
+  text = text.replace(/\[([^\]]+)\]\s*\((https?:\/\/ytbe\.app\/u9j8qB2S)\)/gi, '$2');
   text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g, '$1:\n$2');
 
-  // 4. Ensure standalone YouTube link has clean clickable presentation
-  if (text.includes('https://ytbe.app/u9j8qB2S') && !text.includes("YouTube'da detaylı anlatım")) {
-    text = text.replace(/(https:\/\/ytbe\.app\/u9j8qB2S)/g, "▶️ **YouTube'da detaylı anlatım:**\n$1");
-  }
-  text = text.replace(/([^\n])\n*(?:▶️|\u25B6\uFE0F|\u25B6)\s*(?:\*\*)?YouTube(?:'da|da)?\s+detaylı\s+anlatım:?(?:\*\*)?:?/gu, "$1\n\n▶️ **YouTube'da detaylı anlatım:**");
-  text = text.replace(/^(?:▶️|\u25B6\uFE0F|\u25B6)\s*(?:\*\*)?YouTube(?:'da|da)?\s+detaylı\s+anlatım:?(?:\*\*)?:?/gu, "▶️ **YouTube'da detaylı anlatım:**");
-  text = text.replace(/(?:▶️|\u25B6\uFE0F|\u25B6)\s*(?:\*\*)?YouTube(?:'da|da)?\s+detaylı\s+anlatım:?(?:\*\*)?:?[ \t]*(https:\/\/ytbe\.app\/u9j8qB2S)/gu, "▶️ **YouTube'da detaylı anlatım:**\n$1");
+  // 4. Strip forced generic YouTube headers like ▶️ **YouTube'da detaylı anlatım:**
+  text = text.replace(/(?:▶️|\u25B6\uFE0F|\u25B6)\s*(?:\*\*)?YouTube(?:'da|da)?\s+detaylı\s+anlatım:?(?:\*\*)?:?\s*/gu, '');
 
-  // 5. Separate inline bold titles before colons: e.g. "Item. **Mainland:** * ..." -> "Item.\n\n**Mainland:** * ..."
+  // 5. Ensure raw YouTube link is on its own standalone line preceded and followed by blank lines
+  text = text.replace(/([^\n])\n*(https:\/\/ytbe\.app\/u9j8qB2S)/g, '$1\n\n$2');
+  text = text.replace(/(https:\/\/ytbe\.app\/u9j8qB2S)\n*([^\n])/g, '$1\n\n$2');
+
+  // 6. Separate inline bold titles before colons: e.g. "Item. **Mainland:** * ..." -> "Item.\n\n**Mainland:** * ..."
   text = text.replace(/([^\n•\-\*\+])\s+(\*\*[^\*\n]+:\*\*)/g, '$1\n\n$2');
 
-  // 6. Strip code backticks: `code` -> code
+  // 7. Strip code backticks: `code` -> code
   text = text.replace(/`([^`]+)`/g, '$1');
 
-  // 7. Put paragraph break between heading with colon and first bullet or numbered item:
+  // 8. Put paragraph break between heading with colon and first bullet or numbered item:
   text = text.replace(/([^\n]+:)\s*([•\-\*]\s+)/g, '$1\n\n$2');
   text = text.replace(/([^\n]+:)\s*(\d+\.\s+)/g, '$1\n\n$2');
 
-  // 8. Standardize bullet list markers (*, -, +) at line start to •
+  // 9. Standardize bullet list markers (*, -, +) at line start to •
   text = text.replace(/^[\t ]*[\*\-\+]\s+/gm, '• ');
 
-  // 9. Put each bullet point on its own line if concatenated inline (excluding numeric ranges like 80.000 - 140.000):
+  // 10. Put each bullet point on its own line if concatenated inline (excluding numeric ranges like 80.000 - 140.000):
   text = text.replace(/([^\n])\s+([•\*]\s+)/g, '$1\n$2');
   text = text.replace(/([^\n\d])\s+-\s+(?!\d)/g, '$1\n• ');
 
-  // 10. Put each numbered list item on its own paragraph if concatenated inline:
+  // 11. Put each numbered list item on its own paragraph if concatenated inline:
   text = text.replace(/([^\n•\-\*\+])\s+(\d+\.\s+)/g, '$1\n\n$2');
 
-  // 11. Strip single-asterisk italic markdown when not a bullet marker
+  // 12. Strip single-asterisk italic markdown when not a bullet marker
   text = text.replace(/(^|[^\*])\*([^\*\n]+)\*([^\*]|$)/g, '$1$2$3');
 
-  // 12. Ensure clean separation between bullet lists and following text / headings / links
+  // 13. Ensure clean separation between bullet lists and following text / headings / links
   text = text.replace(/(•[^\n]+)\n([A-Za-z0-9ÇĞİÖŞÜçğıöşü\s]+:)/g, '$1\n\n$2');
-  text = text.replace(/(•[^\n]+)\n(▶️|Yaklaşık|Toplam|Not:)/gu, '$1\n\n$2');
-
-  // 13. Ensure YouTube resource block is preceded by a blank line
-  text = text.replace(/([^\n])\n*(?:▶️|\u25B6\uFE0F|\u25B6)\s*(?:\*\*)?YouTube(?:'da|da)?\s+detaylı\s+anlatım:?(?:\*\*)?:?/gu, "$1\n\n▶️ **YouTube'da detaylı anlatım:**");
+  text = text.replace(/(•[^\n]+)\n(Yaklaşık|Toplam|Not:|Dubai'de|Yaşam)/gu, '$1\n\n$2');
 
   // 14. Follow-up question isolation: Ensure closing question is on its own separate paragraph
   text = text.replace(/(https?:\/\/[^\s]+)\s+([A-ZÇĞİÖŞÜ][^\n]+\?)\s*$/gu, '$1\n\n$2');
   text = text.replace(/(https?:\/\/[^\s]+)\n([A-ZÇĞİÖŞÜ][^\n]+\?)\s*$/gu, '$1\n\n$2');
   text = text.replace(/([^\n•])\n([A-ZÇĞİÖŞÜ][^\n•]+(?:ister misiniz|düşünür müsünüz|yardımcı olabilir miyim|merak ettiğiniz|sorunuz var mı|ulaşabilirsiniz)[^\n]*\?)\s*$/gu, '$1\n\n$2');
 
-  // 15. Normalize excessive blank lines (more than 2 consecutive newlines -> 2)
+  // 15. Invariant: Guarantee URL exactly once
+  let seenYt = false;
+  text = text.replace(/https:\/\/ytbe\.app\/u9j8qB2S/g, () => {
+    if (!seenYt) {
+      seenYt = true;
+      return 'https://ytbe.app/u9j8qB2S';
+    }
+    return '';
+  });
+
+  // 16. Normalize excessive blank lines (more than 2 consecutive newlines -> 2)
   text = text.replace(/\n{3,}/g, '\n\n');
 
   return text.trim();

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   formatInstagramDmResponse,
+  evaluateResourceSemanticScope,
   enforceConfiguredSupplementaryGuidance,
   buildInstagramPersonalPersonaInstruction,
   buildInstagramChannelRules,
@@ -48,7 +49,10 @@ test('TEST A & B: Obsolete YouTube URL is absent, approved URL is present exactl
 
   // B. Approved URL present exactly
   assert.ok(channelRules.includes('https://ytbe.app/u9j8qB2S'), 'Approved YouTube URL must be present in Instagram channel rules');
-  assert.ok(channelRules.includes("▶️ **YouTube'da detaylı anlatım:**"), 'Preferred customer-facing YouTube header must be in rules');
+  assert.ok(
+    channelRules.includes('YouTube sayfamı ziyaret edebilirsiniz') || channelRules.includes('YouTube sayfamda da detaylı içerikler paylaşıyorum'),
+    'Natural first-person YouTube guidance rule must be in rules'
+  );
 });
 
 // ============================================================================
@@ -64,7 +68,7 @@ test('TEST C & D: Markdown anchor output is normalized to clean clickable raw UR
   // D. No Markdown anchor output for YouTube link
   assert.ok(!formatted.includes('[Samed Tabak YouTube]'), 'Markdown anchor label must be removed');
   assert.ok(!formatted.includes(']('), 'Markdown anchor syntax must not exist');
-  assert.ok(formatted.includes("▶️ **YouTube'da detaylı anlatım:**"), 'Must format with clean preferred header');
+  assert.ok(!formatted.includes("▶️ **YouTube'da detaylı anlatım:**"), 'Generic header must not be forced');
 });
 
 test('TEST C & D (Legacy URL input): Obsolete URL in raw response is normalized to approved destination', () => {
@@ -96,8 +100,9 @@ https://ytbe.app/u9j8qB2S Dubai'ye taşınırken şirket kurma veya oturum seçe
   assert.ok(formatted.includes('• **Faturalar:**'), 'Bullets must be on separate lines');
   assert.ok(formatted.includes('• **Market / gıda:**'), 'Bullets must be on separate lines');
 
-  // Preferred YouTube presentation
-  assert.ok(formatted.includes("▶️ **YouTube'da detaylı anlatım:**\nhttps://ytbe.app/u9j8qB2S"), 'YouTube resource must have clean header and URL');
+  // URL preserved without forced header
+  assert.ok(formatted.includes('https://ytbe.app/u9j8qB2S'), 'YouTube URL must be present');
+  assert.ok(!formatted.includes("▶️ **YouTube'da detaylı anlatım:**"), 'Generic header must not be forced');
 
   // E. Paragraph separation before follow-up question
   assert.ok(
@@ -119,7 +124,8 @@ test('TEST G, H, I, J, K, L: Semantic chunking respects boundaries, amounts, URL
 
 Yaklaşık toplam aylık bütçe: 15.000 - 22.000 AED civarındadır. SamChe olarak bu süreçte şirket kurulumu, serbest meslek izinleri ve tüm aile bireyleriniz için oturum vizesi işlemlerinizi eksiksiz yönetiyoruz.
 
-▶️ **YouTube'da detaylı anlatım:**
+Dubai'de yaşam giderleri ve kiralar hakkında daha fazla bilgi edinmek isterseniz YouTube sayfamı ziyaret edebilirsiniz, orada detaylı anlattım.
+
 https://ytbe.app/u9j8qB2S
 
 Dubai'ye taşınırken şirket kurma veya oturum seçeneklerini de değerlendirmek ister misiniz? Detaylı danışmanlık ve süreç adımları için sorularınızı yanıtlamaktan memnuniyet duyarım.`;
@@ -186,7 +192,8 @@ Yaklaşık toplam bütçe: 15.000 - 22.000 AED civarındadır.
 
   // Presentation structure verified
   assert.ok(formatted.includes('• **Kira:**'));
-  assert.ok(formatted.includes("▶️ **YouTube'da detaylı anlatım:**\nhttps://ytbe.app/u9j8qB2S"));
+  assert.ok(formatted.includes('https://ytbe.app/u9j8qB2S'));
+  assert.ok(!formatted.includes("▶️ **YouTube'da detaylı anlatım:**"));
   assert.ok(formatted.includes("https://ytbe.app/u9j8qB2S\n\nDubai'ye taşınırken"));
 });
 
@@ -215,200 +222,254 @@ test('TEST N, O, P: Reel, AI_ONLY, and NEVER_AI rules preserved', () => {
 });
 
 // ============================================================================
-// SECTION 18 FOCUSED TESTS: DETERMINISTIC CONFIG-DRIVEN YOUTUBE GUIDANCE
+// SECTION 18 & 19 FOCUSED TESTS: STRICTLY SCOPED LIVING/RENT/SALARY YOUTUBE GUIDANCE
 // ============================================================================
 
-test('SECTION 18 A & E: Provider omits required YouTube link on living cost question -> injected before follow-up question', () => {
-  const persona = {
-    available: true,
-    companyIdentity: 'SamChe Company LLC',
-    assistantIdentity: 'SamChe AI',
-    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
-    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
-  };
+const samchePersona = {
+  available: true,
+  companyIdentity: 'SamChe Company LLC',
+  assistantIdentity: 'SamChe AI',
+  profile: SAMCHE_STAGING_BUSINESS_PROFILE,
+  configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
+};
 
-  const providerResponseWithoutLink = `Dubai'de yaşam giderleri tercih ettiğiniz bölge ve yaşam standardına göre değişiyor. 3 kişilik bir aile için genel tablo şöyle:
-• **Kira:** 2+1 daire için yıllık 80.000 - 140.000 AED arası
-• **Faturalar:** Aylık ortalama 1.200 - 2.000 AED
-• **Market / gıda:** Aylık 3.000 - 5.000 AED
-• **Ulaşım:** Araç kiralama veya taksi için aylık 2.000 - 3.500 AED
-• **Sağlık sigortası:** Kişi başı yıllık yaklaşık 1.500 - 3.000 AED
-Genel olarak aylık yaklaşık 15.000 - 22.000 AED bütçe düşünülebilir.
-Dubai'ye taşınırken oturum veya şirket kurulumu seçeneklerini de değerlendirmek ister misiniz?`;
+test('SECTION 18 POSITIVE MATRIX (A - G): Qualifying living/rent/salary intents include YouTube guidance exactly once', () => {
+  const qualifyingQueries = [
+    { query: "Dubai'de yaşam koşulları nasıl?", expectedTopic: 'yaşam' },
+    { query: "3 kişilik aile için yaşam giderleri ne kadar?", expectedTopic: 'yaşam giderleri' },
+    { query: "Dubai'de kiralar nasıl?", expectedTopic: 'kiralar' },
+    { query: "Dubai'de geçinmek için aylık ne kadar gerekir?", expectedTopic: 'geçinmek' },
+    { query: "Dubai'de maaşlar nasıl?", expectedTopic: 'maaşlar' },
+    { query: "10.000 AED maaşla Dubai'de geçinebilir miyim?", expectedTopic: 'maaş' },
+    { query: "What is the cost of living in Dubai?", expectedTopic: 'cost of living' },
+  ];
+
+  for (const item of qualifyingQueries) {
+    const rawAnswer = `Dubai'de yaşam standartları bölgeye göre değişmektedir. Aylık bütçe tercihlere bağlıdır.\n\nBaşka sorunuz var mı?`;
+    const guided = enforceConfiguredSupplementaryGuidance({
+      content: rawAnswer,
+      persona: samchePersona,
+      currentIntent: item.query,
+    });
+    const canonical = formatInstagramDmResponse(guided);
+
+    const occurrences = (canonical.match(/https:\/\/ytbe\.app\/u9j8qB2S/g) || []).length;
+    assert.equal(occurrences, 1, `Query "${item.query}" must contain approved URL exactly once`);
+    assert.ok(canonical.includes('https://ytbe.app/u9j8qB2S'), `URL must be present for "${item.query}"`);
+    assert.ok(!canonical.includes("▶️ **YouTube'da detaylı anlatım:**"), `Generic header must not be forced for "${item.query}"`);
+    assert.ok(
+      canonical.includes("YouTube sayfamı ziyaret edebilirsiniz") || canonical.includes("YouTube sayfamdan ulaşabilirsiniz"),
+      `Natural sentence must be present for "${item.query}"`
+    );
+
+    // Order: answer -> guidance sentence -> URL -> follow-up
+    const answerIdx = canonical.indexOf("Aylık bütçe tercihlere bağlıdır");
+    const urlIdx = canonical.indexOf("https://ytbe.app/u9j8qB2S");
+    const followUpIdx = canonical.indexOf("Başka sorunuz var mı?");
+    assert.ok(answerIdx < urlIdx, 'Answer must precede URL');
+    assert.ok(urlIdx < followUpIdx, 'URL must precede follow-up');
+  }
+});
+
+test('SECTION 18 NEGATIVE MATRIX (H - N): Unrelated business/visa/tax/greeting intents receive ZERO YouTube link', () => {
+  const unqualifiedQueries = [
+    "Dubai'de şirket kurmak istiyorum.",
+    "Şirket kurarsam oturum alabilir miyim?",
+    "Oturum izni nasıl alınır?",
+    "Aile vizesi ne kadar?",
+    "Corporate Tax oranı nedir?",
+    "Randevu oluşturmak istiyorum.",
+    "Merhaba nasılsınız?",
+  ];
+
+  for (const query of unqualifiedQueries) {
+    const rawAnswer = `SamChe Company LLC olarak resmi danışmanlık hizmeti sunuyoruz. Süreç hakkında yardımcı olabilirim.`;
+    const guided = enforceConfiguredSupplementaryGuidance({
+      content: rawAnswer,
+      persona: samchePersona,
+      currentIntent: query,
+      isGreeting: query.includes('Merhaba'),
+      appointmentState: query.includes('Randevu') ? { intent: true, complete: false } : null,
+    });
+    const canonical = formatInstagramDmResponse(guided);
+
+    assert.ok(!canonical.includes('ytbe.app'), `Query "${query}" must NOT receive YouTube link`);
+    assert.ok(!canonical.includes('YouTube sayfam'), `Query "${query}" must NOT receive YouTube guidance sentence`);
+  }
+});
+
+test('SECTION 18 NEGATIVE MATRIX: Hallucinated YouTube link in unqualified response is stripped by validator', () => {
+  const rawWithHallucinatedLink = `Dubai'de şirket kurulumu Free Zone otoritesi üzerinden 12.500 AED maliyetle başlamaktadır.\n\nYouTube sayfamı ziyaret edebilirsiniz: https://ytbe.app/u9j8qB2S\n\nHangi sektörde şirket açmayı düşünüyorsunuz?`;
 
   const guided = enforceConfiguredSupplementaryGuidance({
-    content: providerResponseWithoutLink,
-    persona,
-    currentIntent: 'Merhaba Samed bey. Yaşam giderleri ve kiralar konusunda nasıl bir bütçe ayırmalıyız?',
+    content: rawWithHallucinatedLink,
+    persona: samchePersona,
+    currentIntent: "Dubai'de şirket kurmak istiyorum.",
   });
   const canonical = formatInstagramDmResponse(guided);
 
-  // A. Exactly one approved YouTube guidance block present
-  const occurrences = (canonical.match(/https:\/\/ytbe\.app\/u9j8qB2S/g) || []).length;
-  assert.equal(occurrences, 1, 'Canonical response must contain exactly one approved YouTube link');
-  assert.ok(canonical.includes("▶️ **YouTube'da detaylı anlatım:**\nhttps://ytbe.app/u9j8qB2S"), 'Must contain standard presentation header');
+  assert.ok(!canonical.includes('ytbe.app'), 'Hallucinated YouTube link must be stripped for company formation');
+  assert.ok(!canonical.includes('YouTube sayfam'), 'Hallucinated guidance sentence must be stripped');
+  assert.ok(canonical.includes('12.500 AED'), 'Business answer content must be preserved');
+});
 
-  // E. Follow-up question exists in expected order: answer -> YouTube block -> follow-up question
-  const answerIdx = canonical.indexOf("Genel olarak aylık yaklaşık");
-  const youtubeIdx = canonical.indexOf("▶️ **YouTube'da detaylı anlatım:**");
-  const followUpIdx = canonical.indexOf("Dubai'ye taşınırken oturum veya şirket kurulumu seçeneklerini de değerlendirmek ister misiniz?");
+test('SECTION 18 O (MIXED INTENT): Mixed living/rent + residency question includes YouTube guidance', () => {
+  const mixedQuery = "Dubai'de kiralar nasıl ve ailem için oturum nasıl alırım?";
+  const rawAnswer = `Dubai'de 2+1 daire kiraları yıllık 80.000 - 140.000 AED arasındadır. Aile oturumu için ise önce şirket kurulumu veya ana sponsor oturumu tamamlanmalıdır.\n\nSüreci birlikte planlamamızı ister misiniz?`;
+
+  const guided = enforceConfiguredSupplementaryGuidance({
+    content: rawAnswer,
+    persona: samchePersona,
+    currentIntent: mixedQuery,
+  });
+  const canonical = formatInstagramDmResponse(guided);
+
+  const occurrences = (canonical.match(/https:\/\/ytbe\.app\/u9j8qB2S/g) || []).length;
+  assert.equal(occurrences, 1, 'Mixed rent inquiry must qualify for YouTube guidance exactly once');
+  assert.ok(canonical.includes('https://ytbe.app/u9j8qB2S'));
+  assert.ok(canonical.includes('80.000 - 140.000 AED'), 'Living cost answer must be preserved');
+  assert.ok(canonical.includes('Aile oturumu için'), 'Residency answer must be preserved');
+});
+
+test('SECTION 18 P, Q, R: Duplication, provider omission on qualifying intent, and obsolete URL normalization', () => {
+  // P. Provider already outputs approved URL -> no duplicate
+  const rawWithApproved = `Dubai'de kira maliyetleri ve yaşam bütçesi:\n\nDubai'de yaşam giderleri ve kiralar hakkında daha fazla bilgi edinmek isterseniz YouTube sayfamı ziyaret edebilirsiniz, orada detaylı anlattım.\n\nhttps://ytbe.app/u9j8qB2S\n\nBaşka sorunuz var mı?`;
+  const guidedP = enforceConfiguredSupplementaryGuidance({
+    content: rawWithApproved,
+    persona: samchePersona,
+    currentIntent: "Dubai'de kiralar nasıl?",
+  });
+  const canonicalP = formatInstagramDmResponse(guidedP);
+  const occurrencesP = (canonicalP.match(/https:\/\/ytbe\.app\/u9j8qB2S/g) || []).length;
+  assert.equal(occurrencesP, 1, 'Provider already outputting URL must produce exactly one URL');
+
+  // Q. Provider omits approved URL on qualifying intent -> validator adds exactly once
+  const rawWithoutUrl = `Dubai'de 2+1 daire kiraları yıllık 80.000 - 140.000 AED civarındadır.\n\nTaşınma planınızı ne zaman düşünüyorsunuz?`;
+  const guidedQ = enforceConfiguredSupplementaryGuidance({
+    content: rawWithoutUrl,
+    persona: samchePersona,
+    currentIntent: "Dubai'de kiralar nasıl?",
+  });
+  const canonicalQ = formatInstagramDmResponse(guidedQ);
+  const occurrencesQ = (canonicalQ.match(/https:\/\/ytbe\.app\/u9j8qB2S/g) || []).length;
+  assert.equal(occurrencesQ, 1, 'Validator must add URL exactly once when omitted by provider');
+  assert.ok(canonicalQ.includes('https://ytbe.app/u9j8qB2S'));
+  assert.ok(canonicalQ.includes('YouTube sayfamı ziyaret edebilirsiniz'));
+
+  // R. Provider outputs obsolete URL -> normalized to approved URL exactly once
+  const rawWithObsolete = `Dubai yaşam giderleri için YouTube sayfam: https://youtube.com/@sametttbk\n\nDetayları inceleyebilirsiniz.`;
+  const canonicalR = formatInstagramDmResponse(rawWithObsolete);
+  assert.ok(!canonicalR.includes('youtube.com/@sametttbk'), 'Obsolete URL must be completely absent');
+  assert.ok(canonicalR.includes('https://ytbe.app/u9j8qB2S'), 'Approved URL must be substituted');
+  const occurrencesR = (canonicalR.match(/https:\/\/ytbe\.app\/u9j8qB2S/g) || []).length;
+  assert.equal(occurrencesR, 1, 'Approved URL must appear exactly once');
+});
+
+test('SECTION 19 PRESENTATION TEST: Short useful answer -> natural sentence -> raw URL -> optional follow-up', () => {
+  const rawResponse = `Dubai'de yaşam giderleri tercih ettiğiniz bölge ve yaşam standardına göre değişir. 3 kişilik bir aile için genel tablo şöyle:\n• **Kira:** 2+1 daire için yıllık 80.000 - 140.000 AED arası\n• **Faturalar:** Aylık ortalama 1.200 - 2.000 AED\nGenel olarak aylık yaklaşık 15.000 - 22.000 AED bütçe düşünülebilir.\nDubai'ye taşınırken oturum seçeneklerini de değerlendirmek ister misiniz?`;
+
+  const guided = enforceConfiguredSupplementaryGuidance({
+    content: rawResponse,
+    persona: samchePersona,
+    currentIntent: "Dubai'de yaşam giderleri ve kiralar nasıl?",
+  });
+  const canonical = formatInstagramDmResponse(guided);
+
+  // 1. Useful answer first
+  const answerIdx = canonical.indexOf("Genel olarak aylık yaklaşık 15.000 - 22.000 AED bütçe düşünülebilir.");
+  // 2. Natural guidance sentence second
+  const sentenceIdx = canonical.indexOf("Dubai'de yaşam giderleri ve kiralar hakkında daha fazla bilgi edinmek isterseniz YouTube sayfamı ziyaret edebilirsiniz, orada detaylı anlattım.");
+  // 3. Raw URL third
+  const urlIdx = canonical.indexOf("https://ytbe.app/u9j8qB2S");
+  // 4. Optional follow-up last
+  const followUpIdx = canonical.indexOf("Dubai'ye taşınırken oturum seçeneklerini de değerlendirmek ister misiniz?");
 
   assert.ok(answerIdx !== -1, 'Answer must be present');
-  assert.ok(youtubeIdx !== -1, 'YouTube block must be present');
-  assert.ok(followUpIdx !== -1, 'Follow-up question must be present');
-  assert.ok(answerIdx < youtubeIdx, 'Answer must precede YouTube block');
-  assert.ok(youtubeIdx < followUpIdx, 'YouTube block must precede follow-up question');
+  assert.ok(sentenceIdx !== -1, 'Natural guidance sentence must be present');
+  assert.ok(urlIdx !== -1, 'URL must be present');
+  assert.ok(followUpIdx !== -1, 'Follow-up must be present');
 
-  // Standalone raw clickable link on its own line
-  assert.ok(canonical.includes("\nhttps://ytbe.app/u9j8qB2S\n"), 'URL must be standalone on its own line');
+  assert.ok(answerIdx < sentenceIdx, 'Answer must precede natural guidance sentence');
+  assert.ok(sentenceIdx < urlIdx, 'Sentence must precede raw URL');
+  assert.ok(urlIdx < followUpIdx, 'Raw URL must precede follow-up question');
+
+  // Blank-line separation
+  assert.ok(canonical.includes("\n\nhttps://ytbe.app/u9j8qB2S\n\n"), 'URL must be standalone with blank-line separation');
+
+  // No generic YouTube header
+  assert.ok(!canonical.includes("▶️"), 'Generic emoji header must not be present');
+  assert.ok(!canonical.includes("YouTube'da detaylı anlatım:"), 'Generic header must not be present');
+
+  // No Markdown anchor syntax
+  assert.ok(!canonical.includes('[YouTube]'));
+  assert.ok(!canonical.includes(']('));
+
+  // No old URL
+  assert.ok(!canonical.includes('youtube.com/@sametttbk'));
 });
 
-test('SECTION 18 B: Provider already returned correct YouTube block -> no duplicate', () => {
-  const persona = {
-    available: true,
-    companyIdentity: 'SamChe Company LLC',
-    assistantIdentity: 'SamChe AI',
-    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
-    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
+test('SECTION 20 GENERIC ARCHITECTURE TEST: Synthetic second tenant with completely different semantic scope', () => {
+  const tenantBClinicResource = {
+    id: 'acme_appointment_portal',
+    type: 'PORTAL',
+    url: 'https://acme-health.example.com/booking',
+    default_guidance_text: 'Online randevu almak için hasta portalımızı ziyaret edebilirsiniz.',
+    semantic_scope: {
+      topics: [
+        {
+          id: 'DOCTOR_APPOINTMENT',
+          pattern: '\\b(?:doktor|muayene|randevu|poliklinik|clinic|doctor|appointment|checkup)\\b',
+          guidance_text: 'Doktor muayene randevunuzu online portalımız üzerinden kolayca oluşturabilirsiniz.',
+        },
+      ],
+    },
   };
 
-  const providerResponseWithLink = `Dubai'de yaşam giderleri genel tablo:
-• **Kira:** Yıllık 80.000 - 140.000 AED
-• **Faturalar:** Aylık 1.500 AED
+  const tenantBPersona = {
+    available: true,
+    companyIdentity: 'Acme Health Clinic',
+    configuration: {
+      channel_adaptations: {
+        instagram: {
+          supplementary_resources: [tenantBClinicResource],
+        },
+      },
+    },
+  };
 
-▶️ **YouTube'da detaylı anlatım:**
-https://ytbe.app/u9j8qB2S
-
-Dubai'ye taşınırken oturum sürecini değerlendirmek ister misiniz?`;
-
-  const guided = enforceConfiguredSupplementaryGuidance({
-    content: providerResponseWithLink,
-    persona,
-    currentIntent: 'Yaşam giderleri nasıl?',
+  // 1. Qualifying appointment intent for Tenant B -> qualifies
+  const evalPositive = evaluateResourceSemanticScope({
+    intentText: 'Doktor muayenesi için randevu almak istiyorum.',
+    resource: tenantBClinicResource,
   });
-  const canonical = formatInstagramDmResponse(guided);
+  assert.equal(evalPositive.applies, true);
+  assert.equal(evalPositive.topicId, 'DOCTOR_APPOINTMENT');
 
-  const occurrences = (canonical.match(/https:\/\/ytbe\.app\/u9j8qB2S/g) || []).length;
-  assert.equal(occurrences, 1, 'Must not duplicate YouTube link if provider already returned it');
-});
-
-test('SECTION 18 C: Provider returns obsolete URL -> only approved URL remains', () => {
-  const persona = {
-    available: true,
-    companyIdentity: 'SamChe Company LLC',
-    assistantIdentity: 'SamChe AI',
-    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
-    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
-  };
-
-  const providerResponseWithObsolete = `Yaşam maliyetleri hakkında detaylar:
-• **Kira:** 80.000 AED
-YouTube kanalım: https://youtube.com/@sametttbk
-Başka sorunuz var mı?`;
-
-  const canonical = formatInstagramDmResponse(providerResponseWithObsolete);
-
-  assert.ok(!canonical.includes('youtube.com/@sametttbk'), 'Obsolete URL must be completely absent');
-  assert.ok(canonical.includes('https://ytbe.app/u9j8qB2S'), 'Approved URL must replace obsolete URL');
-  const occurrences = (canonical.match(/https:\/\/ytbe\.app\/u9j8qB2S/g) || []).length;
-  assert.equal(occurrences, 1, 'Approved URL must appear exactly once');
-});
-
-
-test('SECTION 18 D: Unrelated response where guidance is not required -> no YouTube block injected', () => {
-  const persona = {
-    available: true,
-    companyIdentity: 'SamChe Company LLC',
-    assistantIdentity: 'SamChe AI',
-    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
-    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
-  };
-
-  const unrelatedResponse = `SamChe Company LLC olarak Dubai'de serbest bölge (Free Zone) ve anakara (Mainland) şirket kurulumu danışmanlığı sağlıyoruz. Hangi sektörde faaliyet göstermeyi planlıyorsunuz?`;
-
-  const guided = enforceConfiguredSupplementaryGuidance({
-    content: unrelatedResponse,
-    persona,
-    currentIntent: 'Şirket kurmak istiyorum',
+  const guidedPositive = enforceConfiguredSupplementaryGuidance({
+    content: 'Pazartesi ve Çarşamba günleri kardiyoloji uzmanımız klinikte hizmet vermektedir.',
+    persona: tenantBPersona,
+    currentIntent: 'Doktor muayenesi için randevu almak istiyorum.',
   });
-  const canonical = formatInstagramDmResponse(guided);
+  assert.ok(guidedPositive.includes('https://acme-health.example.com/booking'));
+  assert.ok(guidedPositive.includes('Doktor muayene randevunuzu online portalımız'));
 
-  assert.ok(!canonical.includes('ytbe.app'), 'Unrelated message must not contain YouTube link');
-  assert.ok(!canonical.includes("YouTube'da detaylı anlatım"), 'Unrelated message must not contain YouTube block');
-});
-
-test('SECTION 18 D (Greeting): Greeting-only customer inbound -> no YouTube block injected', () => {
-  const persona = {
-    available: true,
-    companyIdentity: 'SamChe Company LLC',
-    assistantIdentity: 'SamChe AI',
-    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
-    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
-  };
-
-  const greetingResponse = `Merhaba, SamChe üzerinden Dubai'de şirket kurulumu ve oturum süreçlerinizde size memnuniyetle yardımcı olabilirim. Nasıl yardımcı olabilirim?`;
-
-  const guided = enforceConfiguredSupplementaryGuidance({
-    content: greetingResponse,
-    persona,
-    currentIntent: 'Merhaba Samed bey',
-    isGreeting: true,
+  // 2. Living cost query for Tenant B -> does NOT qualify (Tenant B has no living cost resource)
+  const evalNegative = evaluateResourceSemanticScope({
+    intentText: "Dubai'de kiralar nasıl?",
+    resource: tenantBClinicResource,
   });
-  const canonical = formatInstagramDmResponse(guided);
+  assert.equal(evalNegative.applies, false);
 
-  assert.ok(!canonical.includes('ytbe.app'), 'Greeting message must not contain YouTube link');
-});
-
-test('SECTION 18 D (Appointment field collection): Active appointment collection -> no YouTube block injected', () => {
-  const persona = {
-    available: true,
-    companyIdentity: 'SamChe Company LLC',
-    assistantIdentity: 'SamChe AI',
-    profile: SAMCHE_STAGING_BUSINESS_PROFILE,
-    configuration: SAMCHE_STAGING_ASSISTANT_CONFIG,
-  };
-
-  const appointmentResponse = `Görüşme için hangi gün ve saat sizin için uygundur? Telefon numaranızı da paylaşırsanız randevunuzu hemen oluşturalım.`;
-
-  const guided = enforceConfiguredSupplementaryGuidance({
-    content: appointmentResponse,
-    persona,
-    currentIntent: 'Randevu almak istiyorum',
-    appointmentState: { intent: true, complete: false },
+  const guidedNegative = enforceConfiguredSupplementaryGuidance({
+    content: 'Kliniğimiz sadece sağlık hizmeti vermektedir.',
+    persona: tenantBPersona,
+    currentIntent: "Dubai'de kiralar nasıl?",
   });
-  const canonical = formatInstagramDmResponse(guided);
-
-  assert.ok(!canonical.includes('ytbe.app'), 'Active appointment collection must not contain YouTube link');
+  assert.ok(!guidedNegative.includes('booking'));
+  assert.ok(!guidedNegative.includes('acme-health'));
 });
 
-test('SECTION 18 F: URL remains atomic through chunking with YouTube guidance block', () => {
-  const longLivingCostResponse = `Dubai'de yaşam giderleri tercih ettiğiniz bölge ve yaşam standardına göre değişiyor. 3 kişilik bir aile için genel tablo şöyle:
-
-• **Kira:** 2+1 daire için yıllık 80.000 - 140.000 AED arası
-• **Faturalar:** Aylık ortalama 1.200 - 2.000 AED (DEWA, internet, soğutma)
-• **Market / gıda:** Aylık 3.000 - 5.000 AED civarı
-• **Ulaşım:** Araç kiralama veya taksi için aylık 2.000 - 3.500 AED
-• **Sağlık sigortası:** Kişi başı yıllık yaklaşık 1.500 - 3.000 AED
-
-Genel olarak aylık yaklaşık 15.000 - 22.000 AED bütçe düşünülebilir.
-
-▶️ **YouTube'da detaylı anlatım:**
-https://ytbe.app/u9j8qB2S
-
-Dubai'ye taşınırken oturum veya şirket kurulumu seçeneklerini de birlikte değerlendirmek ister misiniz?`;
-
-  const chunks = splitIntoInstagramDmChunks(longLivingCostResponse, 450);
-
-  // URL must not be split across chunks
-  const urlChunks = chunks.filter((c) => c.includes('https://ytbe.app/u9j8qB2S'));
-  assert.equal(urlChunks.length, 1, 'URL must appear in exactly one chunk');
-  assert.ok(!chunks.some((c) => c.includes('ytbe.app') && !c.includes('https://ytbe.app/u9j8qB2S')), 'URL must never be broken');
-
-  // Guidance header and URL should be kept together if they fit
-  assert.ok(urlChunks[0].includes("▶️ **YouTube'da detaylı anlatım:**"), 'Guidance header and URL stay together in same chunk');
-});
-
-test('SECTION 18 G: Long response preserves all original content when YouTube guidance is injected', () => {
+test('SECTION 18 F & G: Long response chunking and content preservation with natural guidance sentence', () => {
   const persona = {
     available: true,
     companyIdentity: 'SamChe Company LLC',
@@ -432,7 +493,6 @@ Dubai'de şirket kuruluşu veya serbest çalışan oturum izni planınız var m�
   });
   const canonical = formatInstagramDmResponse(guided);
 
-
   // All original facts and figures preserved
   assert.ok(canonical.includes('110.000 - 160.000 AED'), 'Downtown rent preserved');
   assert.ok(canonical.includes('70.000 - 95.000 AED'), 'JVC rent preserved');
@@ -441,10 +501,18 @@ Dubai'de şirket kuruluşu veya serbest çalışan oturum izni planınız var m�
   assert.ok(canonical.includes('25.000 - 65.000 AED'), 'School fees preserved');
   assert.ok(canonical.includes('3.500 - 6.000 AED'), 'Groceries preserved');
 
-  // YouTube guidance injected in correct place
-  assert.ok(canonical.includes("▶️ **YouTube'da detaylı anlatım:**\nhttps://ytbe.app/u9j8qB2S"));
+  // Natural guidance sentence and URL injected in correct place
+  assert.ok(canonical.includes('YouTube sayfamı ziyaret edebilirsiniz'));
+  assert.ok(canonical.includes('https://ytbe.app/u9j8qB2S'));
+  assert.ok(!canonical.includes("▶️"), 'No generic emoji header');
+
   // Closing question preserved at the end
   assert.ok(canonical.endsWith("Dubai'de şirket kuruluşu veya serbest çalışan oturum izni planınız var mı?"));
-});
 
+  // Chunking respects atomic URL
+  const chunks = splitIntoInstagramDmChunks(canonical, 450);
+  const urlChunks = chunks.filter((c) => c.includes('https://ytbe.app/u9j8qB2S'));
+  assert.equal(urlChunks.length, 1, 'URL must appear in exactly one chunk');
+  assert.ok(!chunks.some((c) => c.includes('ytbe.app') && !c.includes('https://ytbe.app/u9j8qB2S')), 'URL must never be broken');
+});
 

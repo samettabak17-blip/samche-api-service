@@ -4,6 +4,7 @@ import fs from 'node:fs';
 
 const sql108 = fs.readFileSync(new URL('../migrations/108_update_samche_youtube_link.sql', import.meta.url), 'utf8');
 const sql109 = fs.readFileSync(new URL('../migrations/109_configure_samche_instagram_supplementary_resources.sql', import.meta.url), 'utf8');
+const sql110 = fs.readFileSync(new URL('../migrations/110_scope_samche_instagram_supplementary_resources.sql', import.meta.url), 'utf8');
 
 test('Migration 108: business_profile_versions update statement must NOT reference updated_at column', () => {
   // Extract business_profile_versions UPDATE statement
@@ -97,4 +98,13 @@ test('Migration 108 & 109: Idempotency and sequential execution invariant', () =
   assert.match(sql109, /supplementary_resources/i);
   assert.match(sql109, /https:\/\/ytbe\.app\/u9j8qB2S/);
   assert.match(sql109, /b85d7e7b-d52e-4541-92e7-284a6a67024b/);
+
+  // Migration 110 structure verification (scoped semantic topics)
+  assert.match(sql110, /jsonb_set/i);
+  assert.match(sql110, /semantic_scope/i);
+  assert.match(sql110, /RENT_AND_HOUSING/i);
+  assert.match(sql110, /SALARIES_AND_INCOME/i);
+  assert.match(sql110, /LIVING_CONDITIONS_AND_BUDGET/i);
+  assert.match(sql110, /https:\/\/ytbe\.app\/u9j8qB2S/);
+  assert.match(sql110, /b85d7e7b-d52e-4541-92e7-284a6a67024b/);
 });
