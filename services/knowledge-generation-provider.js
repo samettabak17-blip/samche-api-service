@@ -25,6 +25,30 @@ const IMAGE_SEMANTIC_TIMEOUT_MS = 60_000;
 const transportContext = new AsyncLocalStorage();
 let transportTelemetryInstalled = false;
 
+function sanitizedDiagnosticString(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  return normalized ? normalized.slice(0, 128) : null;
+}
+
+function openaiRejectionDiagnostics(error) {
+  const status = Number(error?.status);
+  if (!Number.isInteger(status) || status < 400 || status > 599) return null;
+  const diagnostics = { http_status: status };
+  const allowlistedStrings = [
+    ['provider_error_type', error?.type],
+    ['provider_error_code', error?.code],
+    ['rejected_parameter', error?.param],
+    ['sdk_error_class', error?.constructor?.name],
+    ['openai_request_id', error?.request_id],
+  ];
+  for (const [field, value] of allowlistedStrings) {
+    const sanitized = sanitizedDiagnosticString(value);
+    if (sanitized) diagnostics[field] = sanitized;
+  }
+  return diagnostics;
+}
+
 function installTransportTelemetry() {
   if (transportTelemetryInstalled) return;
   transportTelemetryInstalled = true;
@@ -312,12 +336,23 @@ export function createKnowledgeGenerationProvider({
             if (!client?.chat?.completions?.create) {
               throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_PROVIDER_UNAVAILABLE', 'OpenAI knowledge generation is unavailable');
             }
-            const completion = await client.chat.completions.create({
-              model: policy.secondaryModel,
-              temperature: 0,
-              messages: [{ role: 'user', content: prompt.trim() }],
-              response_format: { type: 'json_object' },
-            }, { signal });
+            let completion;
+            try {
+              completion = await client.chat.completions.create({
+                model: policy.secondaryModel,
+                temperature: 0,
+                messages: [{ role: 'user', content: prompt.trim() }],
+                response_format: { type: 'json_object' },
+              }, { signal });
+            } catch (error) {
+              const diagnostics = openaiRejectionDiagnostics(error);
+              if (diagnostics) emit('openai_request_rejected', {
+                provider: 'OPENAI',
+                model: policy.secondaryModel,
+                ...diagnostics,
+              });
+              throw error;
+            }
             return { text: completion?.choices?.[0]?.message?.content };
           },
         });

@@ -153,6 +153,7 @@ export async function prepareAssistantRecommendationGeneration({ database, provi
   provenance.source_hashes = sourceHashes;
   const prompt = [
       'Create a concise AI recommendation with schema_version 2 for the current tenant Assistant using only the ACTIVE factual Business Profile below. Return only 1 to 4 directly supported recommendation fields; omit every unsupported field.',
+    'Return one valid JSON object only.',
     'Never use SamChe or another tenant as a default. Do not import another tenant identity, service, price, geography, or behavior.',
     'Recommendations are proposals, not source-derived facts. Mark unsupported behavior in evidence_gaps instead of inventing policy. Never treat platform or operator Assistant metadata as tenant identity; derive identity only from tenant-owned profile/source evidence.',
     `ACTIVE factual Business Profile: ${JSON.stringify(context.rows[0].profile_data)}`,

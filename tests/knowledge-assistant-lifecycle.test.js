@@ -8,6 +8,7 @@ import {
   reviewAssistantRecommendation,
   rejectAssistantConfigurationVersion,
 } from '../services/knowledge-assistant-lifecycle.js';
+import { createKnowledgeGenerationProvider } from '../services/knowledge-generation-provider.js';
 
 const tenantId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const actorId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -52,6 +53,51 @@ test('generates an assistant-scoped review recommendation from the active approv
   assert.equal(insert.params[5], 2);
   assert.equal(insert.params[3].business_identity_id, '55555555-5555-4555-8555-555555555555');
   assert.deepEqual(insert.params[3].source_scope.source_ids, ['source-meridian']);
+});
+
+test('Dashboard recommendation OpenAI fallback receives an explicit JSON instruction and preserves the review lifecycle', async () => {
+  const calls = [];
+  let openaiRequest;
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/FROM ai_assistants assistant/i.test(sql)) return { rows: [{ assistant_name: 'Tenant Assistant', profile_version_id: '11111111-1111-4111-8111-111111111111', business_identity_id: '55555555-5555-4555-8555-555555555555', source_scope: { source_ids: ['tenant-source'] }, evidence: { source_hashes: ['tenant-source-hash'] }, profile_data: { company_summary: 'Approved tenant facts' } }] };
+    if (/INSERT INTO knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'RUNNING' }] };
+    if (/INSERT INTO assistant_knowledge_recommendations/i.test(sql)) return { rows: [{ id: '33333333-3333-4333-8333-333333333333', status: 'NEEDS_REVIEW' }] };
+    if (/UPDATE knowledge_generation_runs/i.test(sql)) return { rows: [{ id: params[0], status: 'SUCCEEDED' }] };
+    return { rows: [] };
+  } };
+  const dashboardProvider = createKnowledgeGenerationProvider({
+    env: {
+      DASHBOARD_AI_PROVIDER_FAILOVER_ENABLED: 'true',
+      GOOGLE_GENAI_MODE: 'vertex',
+      OPENAI_API_KEY: 'test-openai-key',
+    },
+    googleProviderFactory: () => ({
+      generateContent: async () => { throw Object.assign(new Error('Vertex unavailable'), { status: 503 }); },
+    }),
+    openaiClient: { chat: { completions: { create: async (request) => {
+      openaiRequest = request;
+      return { choices: [{ message: { content: JSON.stringify({ schema_version: 2, tone: 'Professional' }) } }] };
+    } } } },
+  });
+
+  const result = await generateAssistantRecommendation({
+    database,
+    provider: dashboardProvider,
+    tenantId,
+    assistantId,
+    businessProfileVersionId: '11111111-1111-4111-8111-111111111111',
+    requestedBy: actorId,
+  });
+
+  assert.equal(openaiRequest.model, 'gpt-4o-mini');
+  assert.deepEqual(openaiRequest.response_format, { type: 'json_object' });
+  assert.equal(openaiRequest.messages.length, 1);
+  assert.match(openaiRequest.messages[0].content, /Return one valid JSON object only\./);
+  assert.equal(result.recommendation.status, 'NEEDS_REVIEW');
+  const insert = calls.find(({ sql }) => /INSERT INTO assistant_knowledge_recommendations/i.test(sql));
+  assert.deepEqual(insert.params[2], { schema_version: 2, tone: 'Professional' });
+  assert.equal(insert.params[5], 2);
 });
 
 test('a queued recommendation retains its approved profile-version snapshot when the active profile changes', async () => {

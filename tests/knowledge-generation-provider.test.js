@@ -205,6 +205,94 @@ test('suspended Vertex project falls back to OpenAI and preserves Recommendation
   assert.equal(JSON.stringify(events).includes('suspended'), false);
 });
 
+test('OpenAI fallback rejection emits only allowlisted diagnostics with generation correlation', async () => {
+  const events = [];
+  class BadRequestError extends Error {}
+  const rejection = new BadRequestError('PRIVATE PROVIDER MESSAGE with sk-secret-value and customer content');
+  Object.assign(rejection, {
+    status: 400,
+    type: 'invalid_request_error',
+    code: 'unsupported_value',
+    param: 'temperature',
+    request_id: 'req_safe123',
+    headers: { authorization: 'Bearer sk-secret-value' },
+    error: { message: 'PRIVATE RESPONSE BODY', customer: 'PRIVATE CUSTOMER CONTENT' },
+    response: { body: 'PRIVATE RAW RESPONSE' },
+    request: { body: 'PRIVATE RAW REQUEST' },
+  });
+  const provider = failoverProvider({
+    telemetry: (event) => events.push(event),
+    vertex: async () => { throw Object.assign(new Error('unavailable'), { status: 503 }); },
+    openai: async () => { throw rejection; },
+  });
+
+  await assert.rejects(
+    provider.generateAssistantRecommendation({
+      prompt: 'PRIVATE PROMPT',
+      runId: 'run-openai-rejection',
+      requestFingerprint: '229bad1b44a8a41d-extra',
+    }),
+    (error) => error === rejection,
+  );
+
+  const diagnostic = events.find((event) => event.event === 'openai_request_rejected');
+  assert.deepEqual(diagnostic, {
+    event: 'openai_request_rejected',
+    run_id: 'run-openai-rejection',
+    operation: 'ASSISTANT_RECOMMENDATION',
+    provider: 'OPENAI',
+    model: 'gpt-4o-mini',
+    correlation: '229bad1b44a8a41d',
+    timestamp: diagnostic.timestamp,
+    http_status: 400,
+    provider_error_type: 'invalid_request_error',
+    provider_error_code: 'unsupported_value',
+    rejected_parameter: 'temperature',
+    sdk_error_class: 'BadRequestError',
+    openai_request_id: 'req_safe123',
+  });
+  assert.match(diagnostic.timestamp, /^\d{4}-\d{2}-\d{2}T/);
+  const serialized = JSON.stringify(events);
+  for (const sensitiveValue of [
+    'PRIVATE PROVIDER MESSAGE',
+    'sk-secret-value',
+    'PRIVATE CUSTOMER CONTENT',
+    'PRIVATE RESPONSE BODY',
+    'PRIVATE RAW RESPONSE',
+    'PRIVATE RAW REQUEST',
+    'PRIVATE PROMPT',
+    '"authorization"',
+    '"headers"',
+    '"request"',
+    '"response"',
+    '"message"',
+    '"error"',
+  ]) assert.equal(serialized.includes(sensitiveValue), false, sensitiveValue);
+});
+
+test('OpenAI fallback network errors preserve existing behavior without rejection diagnostics', async () => {
+  const events = [];
+  const networkError = Object.assign(new Error('PRIVATE NETWORK DETAIL'), { code: 'ECONNRESET' });
+  const provider = failoverProvider({
+    telemetry: (event) => events.push(event),
+    vertex: async () => { throw Object.assign(new Error('unavailable'), { status: 503 }); },
+    openai: async () => { throw networkError; },
+  });
+
+  await assert.rejects(
+    provider.generateAssistantRecommendation({
+      prompt: 'PRIVATE PROMPT',
+      runId: 'run-openai-network',
+      requestFingerprint: 'network-correlation-safe',
+    }),
+    (error) => error.code === 'KNOWLEDGE_GENERATION_PROVIDERS_UNAVAILABLE'
+      && error.cause?.safeMetadata?.secondaryClassification === 'PROVIDER_NETWORK_ERROR',
+  );
+  assert.equal(events.some((event) => event.event === 'openai_request_rejected'), false);
+  assert.equal(JSON.stringify(events).includes('PRIVATE NETWORK DETAIL'), false);
+  assert.equal(JSON.stringify(events).includes('PRIVATE PROMPT'), false);
+});
+
 test('Vertex network and timeout failures use independent OpenAI attempts', async () => {
   for (const vertexError of [
     Object.assign(new Error('socket'), { code: 'ECONNRESET' }),
