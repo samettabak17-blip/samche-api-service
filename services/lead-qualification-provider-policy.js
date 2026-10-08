@@ -3,6 +3,7 @@ const DEFAULT_LEAD_QUALIFICATION_MAX_OUTPUT_TOKENS = 512;
 const DEFAULT_LEAD_QUALIFICATION_THINKING_LEVEL = 'low';
 
 export function getLeadQualificationProviderPolicy(env = process.env) {
+  const dashboardPolicy = getDashboardAiProviderPolicy('CRM_LEAD_QUALIFICATION', env);
   const configuredTimeout = Number(env.LEAD_QUALIFICATION_TIMEOUT_MS ?? DEFAULT_LEAD_QUALIFICATION_TIMEOUT_MS);
   const timeoutMs = Number.isInteger(configuredTimeout) && configuredTimeout >= 5_000 && configuredTimeout <= 60_000
     ? configuredTimeout
@@ -15,5 +16,14 @@ export function getLeadQualificationProviderPolicy(env = process.env) {
     // Deferred qualification is non-critical. One bounded attempt avoids retrying
     // deterministic provider/schema failures and never delays a WhatsApp reply.
     maxAttempts: 1,
+    ...(dashboardPolicy.failoverEnabled ? {
+      failoverEnabled: true,
+      primaryModel: dashboardPolicy.primaryModel,
+      secondaryModel: dashboardPolicy.secondaryModel,
+      primaryTimeoutMs: dashboardPolicy.primaryTimeoutMs,
+      secondaryTimeoutMs: dashboardPolicy.secondaryTimeoutMs,
+      totalTimeoutMs: dashboardPolicy.totalTimeoutMs,
+    } : {}),
   });
 }
+import { getDashboardAiProviderPolicy } from './dashboard-ai-provider-policy.js';

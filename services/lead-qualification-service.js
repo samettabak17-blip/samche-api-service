@@ -130,12 +130,17 @@ export function buildQualificationPrompt(messages) {
 export async function qualifyConversation({ messages, contact, existingAnalysis = null, force = false, invokeModel, provider = 'GEMINI', model = 'gemini-3-flash-preview', modelVersion = null }) {
   if (!shouldRunQualification({ messages, existingAnalysis, force })) return null;
   if (typeof invokeModel !== 'function') throw new Error('LEAD_QUALIFICATION_MODEL_UNAVAILABLE');
-  const raw = await invokeModel(buildQualificationPrompt(messages));
+  const invoked = await invokeModel(buildQualificationPrompt(messages));
+  const isEnvelope = invoked && typeof invoked === 'object' && !Array.isArray(invoked)
+    && Object.prototype.hasOwnProperty.call(invoked, 'output');
+  const raw = isEnvelope ? invoked.output : invoked;
+  const selectedProvider = isEnvelope ? invoked.provider : provider;
+  const selectedModel = isEnvelope ? invoked.model : model;
   const customerContext = messages.filter((message) => message.sender_type === 'CUSTOMER').map((message) => message.content).join('\n');
   const normalized = normalizeQualificationOutput(raw, customerContext);
   const checkpoint = createAnalysisCheckpoint(messages);
   const scoring = computeLeadScore({ signals: normalized.signals, contact });
-  return { ...normalized, ...scoring, checkpoint, provider, model, modelVersion };
+  return { ...normalized, ...scoring, checkpoint, provider: selectedProvider, model: selectedModel, modelVersion };
 }
 
 export async function persistLeadQualification(client, { tenantId, leadId, conversationId, qualification }) {

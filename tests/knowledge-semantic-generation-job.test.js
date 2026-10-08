@@ -83,6 +83,25 @@ test('provider or persistence failure always writes a terminal-or-retryable stat
   assert.doesNotMatch(transition.sql, /CASE WHEN \$3/i);
 });
 
+test('image semantic jobs retry provider availability but fail deterministic persistence errors', async () => {
+  for (const [code, expectedStatus] of [
+    ['KNOWLEDGE_GENERATION_PROVIDERS_UNAVAILABLE', 'PENDING'],
+    ['KNOWLEDGE_DATABASE_UNAVAILABLE', 'FAILED'],
+  ]) {
+    const calls = [];
+    const database = { query: async (sql, params = []) => { calls.push({ sql, params }); return { rows: [] }; } };
+    await assert.rejects(
+      processImageSemanticGenerationJob({
+        database,
+        job: { id: `job-${code}`, tenant_id: tenantId, source_id: sourceId, content_hash: extractionHash, attempts: 1 },
+        createCandidates: async () => { throw Object.assign(new Error(code), { code }); },
+      }),
+      { code },
+    );
+    assert.ok(calls.some(({ sql }) => new RegExp(`SET status = '${expectedStatus}'`, 'i').test(sql)));
+  }
+});
+
 test('recovers an expired semantic PROCESSING lease before a worker claims the next job', async () => {
   const calls = [];
   const database = { query: async (sql, params = []) => {

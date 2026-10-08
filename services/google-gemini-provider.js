@@ -298,14 +298,14 @@ function normalizeRequestError(error, mode, model) {
   if (error?.name === 'AbortError' || /timeout|deadline exceeded/i.test(msg)) {
     return new GoogleGeminiProviderError('GOOGLE_GEMINI_TIMEOUT', 'Google Gemini request timed out', { cause: error, safeMetadata });
   }
+  if (status === 404 || /404|not found|no longer available|is not found/i.test(msg)) {
+    return new GoogleGeminiProviderError('GOOGLE_GEMINI_MODEL_UNAVAILABLE', `Gemini model is unavailable: ${model}`, { cause: error, safeMetadata });
+  }
   if (status === 503 || /503|high demand|overloaded|service unavailable|temporarily unavailable|unavailable/i.test(msg)) {
     return new GoogleGeminiProviderError('GOOGLE_GEMINI_CAPACITY_UNAVAILABLE', 'Google Gemini service is temporarily unavailable due to high demand', { cause: error, safeMetadata });
   }
   if (status === 429 || /429|resource exhausted|rate limit|quota/i.test(msg)) {
     return new GoogleGeminiProviderError('GOOGLE_GEMINI_RATE_LIMITED', 'Google Gemini rate limit or quota exceeded', { cause: error, safeMetadata });
-  }
-  if (status === 404 || /404|not found|no longer available|is not found/i.test(msg)) {
-    return new GoogleGeminiProviderError('GOOGLE_GEMINI_MODEL_UNAVAILABLE', `Gemini model is unavailable: ${model}`, { cause: error, safeMetadata });
   }
   if (status === 401 || status === 403 || /401|403|unauthenticated|permission denied|permission was denied|forbidden/i.test(msg)) {
     return new GoogleGeminiProviderError(mode === 'vertex' ? 'GOOGLE_VERTEX_PERMISSION_DENIED' : 'GOOGLE_GEMINI_AUTH_FAILED', mode === 'vertex' ? 'Vertex AI authentication or permission was denied' : 'Gemini Developer API authentication failed', { cause: error, safeMetadata });
@@ -416,30 +416,31 @@ export function createGoogleGeminiProvider({ env = process.env, clientFactory, f
         const response = await client.models.generateContent(request);
         return normalizeResponse(response);
       } catch (error) {
-        // If Vertex primary model failed and differed from default runtime model, retry Vertex with default model
-        if (config.mode === 'vertex' && activeModel !== defaultModel) {
+        const normalizedError = normalizeRequestError(error, config.mode, activeModel);
+        // Retry only a genuine model-availability failure. Permission, auth,
+        // transport, timeout, invalid-request, and already-aborted attempts
+        // must preserve their first failure and settle without a second call.
+        if (config.mode === 'vertex'
+          && normalizedError.code === 'GOOGLE_GEMINI_MODEL_UNAVAILABLE'
+          && activeModel !== defaultModel
+          && !signal?.aborted) {
           try {
             const retryRequest = { ...request, model: defaultModel };
             const retryResponse = await client.models.generateContent(retryRequest);
             return normalizeResponse(retryResponse);
           } catch (retryError) {
-            console.warn(`GOOGLE_VERTEX_RETRY_WARN model=${defaultModel}`, retryError?.message);
+            const normalizedRetryError = normalizeRequestError(retryError, config.mode, defaultModel);
+            console.warn('GOOGLE_VERTEX_MODEL_RETRY_FAILED', {
+              ...normalizedRetryError.safeMetadata,
+              code: normalizedRetryError.code,
+            });
           }
         }
-        console.error('GOOGLE_VERTEX_RAW_ERROR', {
-          constructor: error?.constructor?.name,
-          name: error?.name,
-          status: error?.status ?? error?.statusCode ?? error?.code,
-          code: error?.code,
-          message: error?.message,
-          responseStatus: error?.response?.status,
-          responseDataStatus: error?.response?.data?.error?.status,
-          responseDataCode: error?.response?.data?.error?.code,
-          responseDataMessage: error?.response?.data?.error?.message,
-          permission: error?.permission || error?.error?.details?.[0]?.metadata?.permission,
-          resource: error?.resource || error?.error?.details?.[0]?.metadata?.resource,
+        console.error('GOOGLE_GEMINI_REQUEST_FAILED', {
+          ...normalizedError.safeMetadata,
+          code: normalizedError.code,
         });
-        throw normalizeRequestError(error, config.mode, activeModel);
+        throw normalizedError;
       }
     },
   });

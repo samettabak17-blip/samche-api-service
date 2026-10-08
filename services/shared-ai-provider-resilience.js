@@ -24,6 +24,32 @@ export const MODEL_REGISTRY = Object.freeze({
   }),
 });
 
+export const AI_PROVIDER_CAPABILITIES = Object.freeze({
+  CONVERSATIONAL_TEXT: 'CONVERSATIONAL_TEXT',
+  STRUCTURED_TEXT: 'STRUCTURED_TEXT',
+  IMAGE_UNDERSTANDING_STRUCTURED: 'IMAGE_UNDERSTANDING_STRUCTURED',
+  EMBEDDING: 'EMBEDDING',
+  IMAGE_GENERATION: 'IMAGE_GENERATION',
+});
+
+const IMMEDIATE_CIRCUIT_FAILURES = new Set([
+  'PROVIDER_AUTHENTICATION_FAILED',
+  'PROVIDER_PERMISSION_DENIED',
+]);
+
+const FAILOVER_ELIGIBLE_FAILURES = new Set([
+  'PROVIDER_AUTHENTICATION_FAILED',
+  'PROVIDER_PERMISSION_DENIED',
+  'PROVIDER_TIMEOUT',
+  'PROVIDER_NETWORK_ERROR',
+  'PROVIDER_CAPACITY_UNAVAILABLE',
+  'PROVIDER_RATE_LIMITED',
+  'PROVIDER_INTERNAL_ERROR',
+  'MODEL_UNAVAILABLE',
+  'EMPTY_RESPONSE',
+  'CIRCUIT_BREAKER_OPEN',
+]);
+
 export class AllAiProvidersFailedError extends Error {
   constructor(message = 'All AI providers failed to generate a response', options = {}) {
     super(message, options);
@@ -82,7 +108,8 @@ export function classifyAiProviderError(error, provider = 'VERTEX') {
   if (status === 403 || /403|permission denied|permission was denied|forbidden|denied/i.test(msg) || code === 'GOOGLE_VERTEX_PERMISSION_DENIED') {
     return 'PROVIDER_PERMISSION_DENIED';
   }
-  if (/ECONNRESET|ENOTFOUND|fetch failed|network|socket/i.test(msg)) {
+  if (['ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EPIPE'].includes(code.toUpperCase())
+    || /ECONNRESET|ENOTFOUND|fetch failed|network|socket/i.test(msg)) {
     return 'PROVIDER_NETWORK_ERROR';
   }
   if (/empty response|empty text|no usable response|no text returned/i.test(msg) || code === 'EMPTY_RESPONSE') {
@@ -132,7 +159,9 @@ export class ProviderCircuitBreaker {
   recordFailure(classification = 'UNKNOWN') {
     this.consecutiveFailures += 1;
     this.lastFailureTime = Date.now();
-    if (this.state === 'HALF_OPEN' || this.consecutiveFailures >= this.failureThreshold) {
+    if (IMMEDIATE_CIRCUIT_FAILURES.has(classification)
+      || this.state === 'HALF_OPEN'
+      || this.consecutiveFailures >= this.failureThreshold) {
       const prevState = this.state;
       this.state = 'OPEN';
       this.logger.warn?.(`CIRCUIT_BREAKER_TRIPPED previous_state=${prevState} new_state=OPEN consecutive_failures=${this.consecutiveFailures} reason=${classification}`);
@@ -144,6 +173,283 @@ export class ProviderCircuitBreaker {
     this.consecutiveFailures = 0;
     this.lastFailureTime = null;
   }
+}
+
+export function providerCircuitKey({ provider, model, capability } = {}) {
+  const normalizedProvider = String(provider ?? '').trim().toUpperCase();
+  const normalizedModel = String(model ?? '').trim().toLowerCase();
+  const normalizedCapability = String(capability ?? '').trim().toUpperCase();
+  if (!normalizedProvider || !normalizedModel || !normalizedCapability) {
+    throw new TypeError('Provider circuit key requires provider, model, and capability');
+  }
+  return `${normalizedProvider}:${normalizedModel}:${normalizedCapability}`;
+}
+
+export class ProviderCircuitBreakerRegistry {
+  constructor({ createBreaker = null, logger = console } = {}) {
+    this.createBreaker = typeof createBreaker === 'function'
+      ? createBreaker
+      : (options) => new ProviderCircuitBreaker(options);
+    this.logger = logger;
+    this.breakers = new Map();
+  }
+
+  get(boundary) {
+    const key = providerCircuitKey(boundary);
+    if (!this.breakers.has(key)) {
+      this.breakers.set(key, this.createBreaker({ logger: this.logger }));
+    }
+    return this.breakers.get(key);
+  }
+
+  reset(boundary = {}) {
+    const hasBoundary = boundary?.provider || boundary?.model || boundary?.capability;
+    if (!hasBoundary) {
+      for (const breaker of this.breakers.values()) breaker.reset();
+      return;
+    }
+    const breaker = this.breakers.get(providerCircuitKey(boundary));
+    breaker?.reset();
+  }
+}
+
+export const defaultAiCircuitBreakerRegistry = new ProviderCircuitBreakerRegistry();
+
+function callerAbortError(signal) {
+  const error = new Error('Request was aborted by caller', { cause: signal?.reason });
+  error.name = 'AbortError';
+  error.code = 'CALLER_REQUEST_ABORTED';
+  return error;
+}
+
+function isApplicationFailure(error) {
+  const code = String(error?.code ?? '').toUpperCase();
+  return /(?:SCHEMA|VALIDATION|INPUT|GROUNDING|TENANT|AUTHORIZATION|PERSISTENCE|PROVENANCE|IDENTITY|UNSUPPORTED|CONFLICT)/.test(code);
+}
+
+function executionFailureClassification(error, provider) {
+  if (error?.code === 'AI_PROVIDER_ATTEMPT_TIMEOUT') return 'PROVIDER_TIMEOUT';
+  if (isApplicationFailure(error)) return 'APPLICATION_ERROR';
+  return classifyAiProviderError(error, provider);
+}
+
+async function emitProviderTelemetry(telemetry, payload) {
+  if (typeof telemetry !== 'function') return;
+  try {
+    await telemetry(Object.freeze(payload));
+  } catch {
+    // Observability must never change the originating domain outcome.
+  }
+}
+
+async function executeProviderAttempt({ invoke, timeoutMs, signal, provider }) {
+  if (signal?.aborted) throw callerAbortError(signal);
+  const controller = new AbortController();
+  const boundedTimeoutMs = Math.max(1, Number(timeoutMs));
+  const timeoutError = new Error(`${provider} provider attempt timed out`);
+  timeoutError.code = 'AI_PROVIDER_ATTEMPT_TIMEOUT';
+  let timeoutId;
+  let onCallerAbort;
+
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      controller.abort(timeoutError);
+      reject(timeoutError);
+    }, boundedTimeoutMs);
+  });
+  const races = [Promise.resolve().then(() => invoke({ signal: controller.signal })), timeoutPromise];
+
+  if (signal) {
+    races.push(new Promise((_, reject) => {
+      onCallerAbort = () => {
+        const abortError = callerAbortError(signal);
+        controller.abort(abortError);
+        reject(abortError);
+      };
+      signal.addEventListener('abort', onCallerAbort, { once: true });
+    }));
+  }
+
+  try {
+    return await Promise.race(races);
+  } finally {
+    clearTimeout(timeoutId);
+    if (signal && onCallerAbort) signal.removeEventListener('abort', onCallerAbort);
+  }
+}
+
+export async function executeAiProviderFailover({
+  operation,
+  capability,
+  correlationId = null,
+  primary,
+  secondary = null,
+  primaryProvider = 'VERTEX',
+  primaryModel,
+  secondaryProvider = 'OPENAI',
+  secondaryModel,
+  primaryTimeoutMs,
+  secondaryTimeoutMs,
+  totalTimeoutMs,
+  circuitRegistry = defaultAiCircuitBreakerRegistry,
+  failoverEnabled = true,
+  signal = null,
+  telemetry = null,
+  logger = console,
+} = {}) {
+  if (typeof primary !== 'function') throw new TypeError('Primary AI provider attempt is required');
+  if (signal?.aborted) throw callerAbortError(signal);
+
+  const startedAt = Date.now();
+  const safeOperation = String(operation || 'AI_OPERATION').replace(/[^A-Z0-9_]/gi, '_').slice(0, 80);
+  const safeCapability = String(capability || '').trim().toUpperCase();
+  const safeCorrelationId = correlationId == null ? null : String(correlationId).slice(0, 64);
+  const totalBudgetMs = Math.max(1, Number(totalTimeoutMs));
+  const primaryBoundary = { provider: primaryProvider, model: primaryModel, capability: safeCapability };
+  const secondaryBoundary = { provider: secondaryProvider, model: secondaryModel, capability: safeCapability };
+  const primaryBreaker = circuitRegistry.get(primaryBoundary);
+  const baseTelemetry = {
+    operation: safeOperation,
+    capability: safeCapability,
+    correlation_id: safeCorrelationId,
+  };
+  const emit = (event, extra = {}) => emitProviderTelemetry(telemetry, {
+    ...baseTelemetry,
+    event,
+    timestamp: new Date().toISOString(),
+    ...extra,
+  });
+  const remainingBudget = () => Math.max(0, totalBudgetMs - (Date.now() - startedAt));
+  let primaryAttempted = false;
+  let primaryError = null;
+  let primaryClassification = null;
+
+  if (primaryBreaker.getState() === 'OPEN') {
+    primaryClassification = 'CIRCUIT_BREAKER_OPEN';
+    await emit('primary_skipped', { primary_provider: String(primaryProvider).toUpperCase(), primary_classification: primaryClassification });
+  } else {
+    primaryAttempted = true;
+    await emit('primary_attempted', { primary_provider: String(primaryProvider).toUpperCase() });
+    try {
+      const output = await executeProviderAttempt({
+        invoke: primary,
+        timeoutMs: Math.min(Number(primaryTimeoutMs), remainingBudget()),
+        signal,
+        provider: primaryProvider,
+      });
+      primaryBreaker.recordSuccess();
+      await emit('primary_succeeded', {
+        primary_provider: String(primaryProvider).toUpperCase(),
+        selected_provider: String(primaryProvider).toUpperCase(),
+        selected_model: primaryModel,
+        total_duration_ms: Date.now() - startedAt,
+      });
+      return Object.freeze({
+        output,
+        provider: String(primaryProvider).toUpperCase(),
+        model: primaryModel,
+        primaryAttempted: true,
+        fallbackAttempted: false,
+        fallbackUsed: false,
+        totalDurationMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      if (signal?.aborted || error?.code === 'CALLER_REQUEST_ABORTED') throw callerAbortError(signal);
+      primaryError = error;
+      primaryClassification = executionFailureClassification(error, primaryProvider);
+      if (!FAILOVER_ELIGIBLE_FAILURES.has(primaryClassification)) {
+        await emit('terminal_error', { terminal_error_category: primaryClassification, total_duration_ms: Date.now() - startedAt });
+        throw error;
+      }
+      primaryBreaker.recordFailure(primaryClassification);
+      logger.warn?.(`AI_PROVIDER_PRIMARY_FAILED operation=${safeOperation} provider=${String(primaryProvider).toUpperCase()} classification=${primaryClassification}`);
+      await emit('primary_failed', {
+        primary_provider: String(primaryProvider).toUpperCase(),
+        primary_classification: primaryClassification,
+      });
+    }
+  }
+
+  if (!failoverEnabled) {
+    if (primaryError) throw primaryError;
+    const error = new Error('Primary provider circuit is open and failover is disabled');
+    error.code = 'CIRCUIT_BREAKER_OPEN';
+    throw error;
+  }
+
+  let secondaryClassification = null;
+  const secondaryBreaker = circuitRegistry.get(secondaryBoundary);
+  if (typeof secondary === 'function' && secondaryBreaker.getState() !== 'OPEN' && remainingBudget() > 0) {
+    await emit('fallback_attempted', {
+      primary_provider: String(primaryProvider).toUpperCase(),
+      primary_classification: primaryClassification,
+      fallback_provider: String(secondaryProvider).toUpperCase(),
+    });
+    try {
+      const output = await executeProviderAttempt({
+        invoke: secondary,
+        timeoutMs: Math.min(Number(secondaryTimeoutMs), remainingBudget()),
+        signal,
+        provider: secondaryProvider,
+      });
+      secondaryBreaker.recordSuccess();
+      await emit('fallback_succeeded', {
+        primary_provider: String(primaryProvider).toUpperCase(),
+        primary_classification: primaryClassification,
+        fallback_provider: String(secondaryProvider).toUpperCase(),
+        selected_provider: String(secondaryProvider).toUpperCase(),
+        selected_model: secondaryModel,
+        total_duration_ms: Date.now() - startedAt,
+      });
+      return Object.freeze({
+        output,
+        provider: String(secondaryProvider).toUpperCase(),
+        model: secondaryModel,
+        primaryAttempted,
+        fallbackAttempted: true,
+        fallbackUsed: true,
+        failoverFrom: String(primaryProvider).toUpperCase(),
+        failoverReason: primaryClassification,
+        totalDurationMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      if (signal?.aborted || error?.code === 'CALLER_REQUEST_ABORTED') throw callerAbortError(signal);
+      secondaryClassification = executionFailureClassification(error, secondaryProvider);
+      if (!FAILOVER_ELIGIBLE_FAILURES.has(secondaryClassification)) {
+        await emit('terminal_error', { terminal_error_category: secondaryClassification, total_duration_ms: Date.now() - startedAt });
+        throw error;
+      }
+      secondaryBreaker.recordFailure(secondaryClassification);
+      logger.error?.(`AI_PROVIDER_FALLBACK_FAILED operation=${safeOperation} provider=${String(secondaryProvider).toUpperCase()} classification=${secondaryClassification}`);
+    }
+  } else {
+    secondaryClassification = secondaryBreaker.getState() === 'OPEN'
+      ? 'CIRCUIT_BREAKER_OPEN'
+      : (remainingBudget() <= 0 ? 'PROVIDER_TIMEOUT' : 'PROVIDER_UNAVAILABLE');
+  }
+
+  await emit('fallback_failed', {
+    primary_provider: String(primaryProvider).toUpperCase(),
+    primary_classification: primaryClassification,
+    fallback_provider: String(secondaryProvider).toUpperCase(),
+    fallback_classification: secondaryClassification,
+    terminal_error_category: 'ALL_AI_PROVIDERS_FAILED',
+    total_duration_ms: Date.now() - startedAt,
+  });
+  throw new AllAiProvidersFailedError('Both primary and secondary AI providers are unavailable', {
+    cause: primaryError,
+    safeMetadata: {
+      operation: safeOperation,
+      capability: safeCapability,
+      primaryProvider: String(primaryProvider).toUpperCase(),
+      primaryModel,
+      primaryClassification,
+      secondaryProvider: String(secondaryProvider).toUpperCase(),
+      secondaryModel,
+      secondaryClassification,
+      totalDurationMs: Date.now() - startedAt,
+    },
+  });
 }
 
 export const defaultAiCircuitBreaker = new ProviderCircuitBreaker();
@@ -476,6 +782,19 @@ export function createSharedAiRuntime({
     return activeOpenai;
   }
 
+  const secondaryCircuitRegistry = new ProviderCircuitBreakerRegistry({ logger });
+  const runtimeCircuitRegistry = {
+    get(boundary) {
+      return String(boundary?.provider ?? '').toUpperCase() === 'VERTEX'
+        ? circuitBreaker
+        : secondaryCircuitRegistry.get(boundary);
+    },
+    reset(boundary = {}) {
+      if (!boundary?.provider || String(boundary.provider).toUpperCase() === 'VERTEX') circuitBreaker.reset();
+      secondaryCircuitRegistry.reset(boundary?.provider ? boundary : {});
+    },
+  };
+
   return {
     circuitBreaker,
     runtimeMetadata(provider = 'VERTEX') {
@@ -508,27 +827,24 @@ export function createSharedAiRuntime({
     } = {}) {
       const cleanPrompt = normalizeUserPromptText(prompt, text, userMessage);
       const vertexModel = resolveCanonicalPlatformModel({ model, provider: 'VERTEX', env });
-      const cbState = circuitBreaker.getState();
-      let vertexError = null;
-      let vertexClassification = null;
+      const openaiModel = resolveCanonicalPlatformModel({ model, provider: 'OPENAI', env });
 
-      // Check if upstream caller already aborted before initiating work
-      if (signal?.aborted) {
-        const callerAbortErr = signal.reason || new Error('Request was aborted by caller');
-        callerAbortErr.name = 'AbortError';
-        throw callerAbortErr;
-      }
-
-      // 1. PRIMARY PROVIDER: Vertex AI / Google Gemini (if circuit is NOT OPEN)
-      if (cbState !== 'OPEN') {
-        const primaryController = new AbortController();
-        const primaryTimeoutId = setTimeout(() => primaryController.abort(new Error('Vertex primary timeout exceeded')), 12000);
-        const onCallerAbortPrimary = () => primaryController.abort(signal?.reason || new Error('Request was aborted by caller'));
-        if (signal) {
-          signal.addEventListener('abort', onCallerAbortPrimary, { once: true });
-        }
-
-        try {
+      const execution = await executeAiProviderFailover({
+        operation: `CHANNEL_${String(channel || 'UNKNOWN').toUpperCase()}`,
+        capability: AI_PROVIDER_CAPABILITIES.CONVERSATIONAL_TEXT,
+        correlationId: null,
+        primaryProvider: 'VERTEX',
+        primaryModel: vertexModel,
+        secondaryProvider: 'OPENAI',
+        secondaryModel: openaiModel,
+        primaryTimeoutMs: 12_000,
+        secondaryTimeoutMs: 15_000,
+        totalTimeoutMs: 28_000,
+        circuitRegistry: runtimeCircuitRegistry,
+        failoverEnabled: !disableFailover,
+        signal,
+        logger,
+        primary: async ({ signal: attemptSignal }) => {
           const provider = callerGemini || getGemini();
           const geminiContents = buildGeminiContents({
             conversationHistory,
@@ -538,77 +854,29 @@ export function createSharedAiRuntime({
             multimodalParts,
           });
           const sysInstrText = normalizeSystemInstructionText(systemInstruction);
-
           const geminiResponse = await provider.generateContent({
             model: vertexModel,
             contents: geminiContents,
             systemInstruction: sysInstrText ? { parts: [{ text: sysInstrText }] } : undefined,
             generationConfig,
-            signal: primaryController.signal,
+            signal: attemptSignal,
           });
-
           const extractedText = extractGeminiResponseText(geminiResponse);
           if (!extractedText || !extractedText.trim()) {
-            const emptyErr = new Error('Gemini returned an empty response');
-            emptyErr.code = 'EMPTY_RESPONSE';
-            emptyErr.status = 502;
-            throw emptyErr;
+            const error = new Error('Gemini returned an empty response');
+            error.code = 'EMPTY_RESPONSE';
+            error.status = 502;
+            throw error;
           }
-
-          circuitBreaker.recordSuccess();
-          return {
-            text: extractedText,
-            model: vertexModel,
-            provider: 'vertex',
-            canonicalSharedRuntime: true,
-            providerSuccess: true,
-            fallbackUsed: false,
-            channel,
-          };
-        } catch (err) {
-          vertexError = err;
-          vertexClassification = classifyAiProviderError(err, 'VERTEX');
-          circuitBreaker.recordFailure(vertexClassification);
-          logger.warn?.(`SHARED_AI_PRIMARY_FAILURE channel=${channel} model=${vertexModel} classification=${vertexClassification} err=${err?.message}`);
-        } finally {
-          clearTimeout(primaryTimeoutId);
-          if (signal) {
-            signal.removeEventListener('abort', onCallerAbortPrimary);
+          return extractedText;
+        },
+        secondary: async ({ signal: attemptSignal }) => {
+          const openai = callerOpenai || getOpenAi();
+          if (!openai?.chat?.completions?.create) {
+            const error = new Error('OpenAI secondary provider is unavailable');
+            error.code = 'OPENAI_PROVIDER_UNAVAILABLE';
+            throw error;
           }
-        }
-      } else {
-        vertexClassification = 'CIRCUIT_BREAKER_OPEN';
-        logger.warn?.(`SHARED_AI_PRIMARY_CIRCUIT_OPEN channel=${channel} model=${vertexModel}`);
-      }
-
-      // If caller aborted or failover is explicitly disabled:
-      if (signal?.aborted) {
-        const callerAbortErr = signal.reason || new Error('Request was aborted by caller');
-        callerAbortErr.name = 'AbortError';
-        throw callerAbortErr;
-      }
-
-      if (disableFailover) {
-        if (vertexError) throw vertexError;
-        const cbErr = new Error('Circuit breaker is open and failover is disabled');
-        cbErr.code = 'CIRCUIT_BREAKER_OPEN';
-        throw cbErr;
-      }
-
-
-      // 2. SECONDARY PROVIDER: OpenAI Automatic Failover with a FRESH unpoisoned controller
-      const openaiModel = resolveCanonicalPlatformModel({ model, provider: 'OPENAI', env });
-      const openai = callerOpenai || getOpenAi();
-
-      if (openai) {
-        const secondaryController = new AbortController();
-        const secondaryTimeoutId = setTimeout(() => secondaryController.abort(new Error('OpenAI secondary timeout exceeded')), 15000);
-        const onCallerAbortSecondary = () => secondaryController.abort(signal?.reason || new Error('Request was aborted by caller'));
-        if (signal) {
-          signal.addEventListener('abort', onCallerAbortSecondary, { once: true });
-        }
-
-        try {
           const openAiMessages = buildOpenAiMessages({
             systemInstruction,
             conversationHistory,
@@ -617,58 +885,46 @@ export function createSharedAiRuntime({
             prompt: cleanPrompt,
             multimodalParts,
           });
-
           const completion = await openai.chat.completions.create({
             model: openaiModel,
             messages: openAiMessages,
             ...(generationConfig?.temperature !== undefined ? { temperature: generationConfig.temperature } : {}),
             ...(generationConfig?.maxOutputTokens ? { max_tokens: generationConfig.maxOutputTokens } : {}),
-          }, { signal: secondaryController.signal });
-
+          }, { signal: attemptSignal });
           const openAiText = completion?.choices?.[0]?.message?.content?.trim();
           if (!openAiText) {
-            const emptyErr = new Error('OpenAI returned an empty response');
-            emptyErr.code = 'EMPTY_RESPONSE';
-            emptyErr.status = 502;
-            throw emptyErr;
+            const error = new Error('OpenAI returned an empty response');
+            error.code = 'EMPTY_RESPONSE';
+            error.status = 502;
+            throw error;
           }
-
-          logger.info?.(`SHARED_AI_FAILOVER_SUCCESS channel=${channel} primary=vertex failover=openai failover_model=${openaiModel} reason=${vertexClassification}`);
-
-          return {
-            text: openAiText,
-            model: openaiModel,
-            provider: 'openai',
-            canonicalSharedRuntime: true,
-            providerSuccess: true,
-            fallbackUsed: false,
-            failoverFrom: 'vertex',
-            failoverReason: vertexClassification,
-            channel,
-          };
-        } catch (openaiErr) {
-          const openaiClassification = classifyAiProviderError(openaiErr, 'OPENAI');
-          logger.error?.(`SHARED_AI_FAILOVER_FAILURE channel=${channel} provider=openai classification=${openaiClassification} err=${openaiErr?.message}`);
-        } finally {
-          clearTimeout(secondaryTimeoutId);
-          if (signal) {
-            signal.removeEventListener('abort', onCallerAbortSecondary);
-          }
-        }
-      } else {
-        logger.warn?.(`SHARED_AI_OPENAI_UNAVAILABLE channel=${channel} reason=NO_API_KEY`);
-      }
-
-      // 3. BOTH PROVIDERS FAILED — NO STATIC CUSTOMER FAKE AI
-      throw new AllAiProvidersFailedError('Both primary Vertex and secondary OpenAI providers failed to generate a response', {
-        cause: vertexError,
-        safeMetadata: {
-          channel,
-          vertexModel,
-          openaiModel,
-          vertexClassification,
+          return openAiText;
         },
       });
+
+      if (execution.provider === 'VERTEX') {
+        return {
+          text: execution.output,
+          model: execution.model,
+          provider: 'vertex',
+          canonicalSharedRuntime: true,
+          providerSuccess: true,
+          fallbackUsed: false,
+          channel,
+        };
+      }
+
+      return {
+        text: execution.output,
+        model: execution.model,
+        provider: 'openai',
+        canonicalSharedRuntime: true,
+        providerSuccess: true,
+        fallbackUsed: true,
+        failoverFrom: 'vertex',
+        failoverReason: execution.failoverReason,
+        channel,
+      };
     },
   };
 }

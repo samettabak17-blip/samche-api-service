@@ -401,6 +401,16 @@ export async function generateBusinessProfileVersion({ database, provider, tenan
         elapsedMs: event.elapsed_ms,
         abortBeforeHttpResponse: event.http_response_received === false,
         networkErrorClass: event.classification,
+        operation: event.operation,
+        correlationId: event.correlation_id,
+        primaryProvider: event.primary_provider,
+        primaryClassification: event.primary_classification,
+        fallbackProvider: event.fallback_provider,
+        fallbackClassification: event.fallback_classification,
+        selectedProvider: event.selected_provider,
+        selectedModel: event.selected_model,
+        totalDurationMs: event.total_duration_ms,
+        terminalErrorCategory: event.terminal_error_category,
       }),
     });
     runStage = 'PERSISTENCE';

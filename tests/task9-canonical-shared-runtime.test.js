@@ -833,7 +833,8 @@ test('TASK 9.1 PHYSICAL FIX: Real Orchestration Paths for WhatsApp, Instagram, W
     assert.equal(res.provider, 'openai');
     assert.equal(res.text, `OpenAI response for channel ${ch}`);
     assert.equal(capturedOpenAiChannel, ch);
-    assert.equal(res.fallbackUsed, false);
+    assert.equal(res.fallbackUsed, true);
+    assert.equal(res.failoverFrom, 'vertex');
   }
 });
 

@@ -1,7 +1,10 @@
 import diagnosticsChannel from 'node:diagnostics_channel';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import OpenAI from 'openai';
 import { validateImageKnowledgeSemanticOutput } from './image-knowledge-semantic-service.js';
 import { createGoogleGeminiProvider } from './google-gemini-provider.js';
+import { executeAiProviderFailover, defaultAiCircuitBreakerRegistry, AllAiProvidersFailedError } from './shared-ai-provider-resilience.js';
+import { getDashboardAiProviderPolicy } from './dashboard-ai-provider-policy.js';
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const ASSISTANT_GENERATION_TIMEOUT_MS = 30_000;
@@ -208,12 +211,39 @@ function timeoutSignal(timeoutMs) {
   return { signal: controller.signal, clear: () => clearTimeout(timer) };
 }
 
-export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl = globalThis.fetch, openaiClient = null, telemetry: telemetryImpl = null } = {}) {
+export function createKnowledgeGenerationProvider({
+  env = process.env,
+  fetchImpl = globalThis.fetch,
+  openaiClient = null,
+  telemetry: telemetryImpl = null,
+  googleProviderFactory = null,
+  openaiClientFactory = null,
+  circuitRegistry = defaultAiCircuitBreakerRegistry,
+} = {}) {
   installTransportTelemetry();
   const config = getKnowledgeGenerationConfig(env);
-  const googleProvider = config.provider === 'GEMINI'
-    ? createGoogleGeminiProvider({ env, fetchImpl: fetchImpl === globalThis.fetch ? null : fetchImpl })
-    : null;
+  const dashboardStructuredPolicy = getDashboardAiProviderPolicy('BUSINESS_PROFILE', env);
+  const usesGeminiPrimary = dashboardStructuredPolicy.failoverEnabled || config.provider === 'GEMINI';
+  const providerIdentity = dashboardStructuredPolicy.failoverEnabled ? 'GEMINI' : config.provider;
+  const modelIdentity = dashboardStructuredPolicy.failoverEnabled ? dashboardStructuredPolicy.primaryModel : config.model;
+  let googleProvider = null;
+  let resolvedOpenaiClient = openaiClient;
+  const getGoogleProvider = () => {
+    if (!googleProvider) {
+      googleProvider = typeof googleProviderFactory === 'function'
+        ? googleProviderFactory()
+        : createGoogleGeminiProvider({ env, fetchImpl: fetchImpl === globalThis.fetch ? null : fetchImpl });
+    }
+    return googleProvider;
+  };
+  const getOpenaiClient = () => {
+    if (!resolvedOpenaiClient) {
+      resolvedOpenaiClient = typeof openaiClientFactory === 'function'
+        ? openaiClientFactory({ apiKey: env.OPENAI_API_KEY })
+        : new OpenAI({ apiKey: env.OPENAI_API_KEY });
+    }
+    return resolvedOpenaiClient;
+  };
   const telemetry = typeof telemetryImpl === 'function'
     ? telemetryImpl
     : (event) => console.log(`KNOWLEDGE_GENERATION_PROVIDER ${JSON.stringify(event)}`);
@@ -222,7 +252,6 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
     if (typeof prompt !== 'string' || !prompt.trim()) {
       throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_INPUT_REQUIRED', 'Knowledge generation input is required');
     }
-    const timeout = timeoutSignal(timeoutMs);
     const startedAt = Date.now();
     const correlation = typeof requestFingerprint === 'string' ? requestFingerprint.slice(0, 16) : null;
     const telemetrySinks = [telemetry, ...(typeof callTelemetry === 'function' ? [callTelemetry] : [])];
@@ -238,12 +267,89 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
         ...(event === 'transport_error' ? { classification: 'TRANSPORT_ERROR' } : {}),
       }),
     }, () => fetchImpl(...args));
+    const policy = getDashboardAiProviderPolicy(operation, env);
+
+    if (policy.failoverEnabled) {
+      try {
+        const result = await executeAiProviderFailover({
+          operation,
+          capability: policy.capability,
+          correlationId: correlation,
+          primaryProvider: policy.primaryProvider,
+          primaryModel: policy.primaryModel,
+          secondaryProvider: policy.secondaryProvider,
+          secondaryModel: policy.secondaryModel,
+          primaryTimeoutMs: policy.primaryTimeoutMs,
+          secondaryTimeoutMs: policy.secondaryTimeoutMs,
+          totalTimeoutMs: policy.totalTimeoutMs,
+          circuitRegistry,
+          telemetry: (event) => emit(event.event, event),
+          primary: async ({ signal }) => {
+            emit('request_started', { provider: 'VERTEX', model: policy.primaryModel });
+            const response = await getGoogleProvider().generateContent({
+              model: policy.primaryModel,
+              contents: [{ role: 'user', parts: [{ text: prompt.trim() }] }],
+              generationConfig: {
+                temperature: 0,
+                responseMimeType: 'application/json',
+                responseSchema: schema,
+                ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
+                ...(Number.isInteger(maxOutputTokens) && maxOutputTokens > 0 ? { maxOutputTokens } : {}),
+              },
+              signal,
+            });
+            return {
+              text: response?.structured_text,
+              responseShape: response?.response_shape ?? null,
+              structuredPayloadError: response?.structured_payload_error ?? null,
+            };
+          },
+          secondary: async ({ signal }) => {
+            if (!env.OPENAI_API_KEY) {
+              throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_PROVIDER_UNAVAILABLE', 'OpenAI knowledge generation is unavailable');
+            }
+            const client = getOpenaiClient();
+            if (!client?.chat?.completions?.create) {
+              throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_PROVIDER_UNAVAILABLE', 'OpenAI knowledge generation is unavailable');
+            }
+            const completion = await client.chat.completions.create({
+              model: policy.secondaryModel,
+              temperature: 0,
+              messages: [{ role: 'user', content: prompt.trim() }],
+              response_format: { type: 'json_object' },
+            }, { signal });
+            return { text: completion?.choices?.[0]?.message?.content };
+          },
+        });
+
+        if (result.output?.responseShape) emit('structured_response_shape', { response_shape: result.output.responseShape });
+        if (result.output?.responseShape?.finish_reason === 'MAX_TOKENS') {
+          emit('structured_parse_result', { parser: { phase: 'STRUCTURED_PAYLOAD_SELECTION', classification: 'PROVIDER_MAX_OUTPUT_TOKENS' } });
+          throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_OUTPUT_TRUNCATED', 'Knowledge generation output exceeded its bounded budget');
+        }
+        if (result.output?.structuredPayloadError) {
+          emit('structured_parse_result', { parser: { phase: 'STRUCTURED_PAYLOAD_SELECTION', classification: result.output.structuredPayloadError } });
+          throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_RESPONSE_INVALID', 'Knowledge generation returned an ambiguous structured response');
+        }
+        const output = validate(parseJson(result.output?.text, (parser) => emit('structured_parse_result', { parser })));
+        await flushTelemetry();
+        return output;
+      } catch (error) {
+        await flushTelemetry();
+        if (error instanceof AllAiProvidersFailedError) {
+          throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_PROVIDERS_UNAVAILABLE', 'Knowledge generation providers are temporarily unavailable', { cause: error });
+        }
+        throw error;
+      }
+    }
+
+    const timeout = timeoutSignal(timeoutMs);
     let responseReceived = false;
     try {
       let text;
       if (config.provider === 'GEMINI') {
         emit('request_started');
-        const response = await googleProvider.generateContent({
+        const response = await getGoogleProvider().generateContent({
           model: config.model,
           contents: [{ role: 'user', parts: [{ text: prompt.trim() }] }],
           generationConfig: {
@@ -269,10 +375,11 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
         }
         text = response?.structured_text;
       } else {
-        if (!env.OPENAI_API_KEY || !openaiClient?.chat?.completions?.create) {
+        const client = env.OPENAI_API_KEY ? getOpenaiClient() : null;
+        if (!env.OPENAI_API_KEY || !client?.chat?.completions?.create) {
           throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_PROVIDER_UNAVAILABLE', 'OpenAI knowledge generation is unavailable');
         }
-        const completion = await openaiClient.chat.completions.create({
+        const completion = await client.chat.completions.create({
           model: config.model,
           temperature: 0,
           messages: [{ role: 'user', content: prompt.trim() }],
@@ -302,27 +409,27 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
   }
 
   return Object.freeze({
-    provider: config.provider,
-    model: config.model,
+    provider: providerIdentity,
+    model: modelIdentity,
     timeoutMs: config.timeoutMs,
     businessProfileTimeoutMs: BUSINESS_PROFILE_TIMEOUT_MS,
     identityAnalysisTimeoutMs: config.timeoutMs,
     recommendationTimeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS,
     configurationTimeoutMs: ASSISTANT_CONFIGURATION_TIMEOUT_MS,
-    assistantGenerationPolicy: config.provider === 'GEMINI'
+    assistantGenerationPolicy: usesGeminiPrimary
       ? 'gemini-structured-v3:thinking-minimal:max-output-1024:timeout-30000'
       : 'openai-structured-v2:timeout-30000',
-    assistantConfigurationGenerationPolicy: config.provider === 'GEMINI'
+    assistantConfigurationGenerationPolicy: usesGeminiPrimary
       ? 'gemini-assistant-configuration-v4:thinking-minimal:max-output-4096:timeout-90000'
       : 'openai-assistant-configuration-v4:timeout-90000',
-    businessProfileGenerationPolicy: config.provider === 'GEMINI'
+    businessProfileGenerationPolicy: usesGeminiPrimary
       ? 'gemini-business-profile-v2:thinking-low:timeout-30000'
       : 'openai-business-profile-v2:timeout-30000',
     generateBusinessProfile: ({ prompt, runId, requestFingerprint, telemetry: callTelemetry }) => generate({
       prompt,
       fields: BUSINESS_PROFILE_FIELDS,
       validate: validateBusinessProfileOutput,
-      thinkingLevel: config.provider === 'GEMINI' ? 'low' : null,
+      thinkingLevel: usesGeminiPrimary ? 'low' : null,
       timeoutMs: BUSINESS_PROFILE_TIMEOUT_MS,
       runId,
       requestFingerprint,
@@ -337,9 +444,10 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
       ].join('\n\n'),
       fields: BUSINESS_IDENTITY_ANALYSIS_FIELDS,
       validate: (value) => validateOutput(value, BUSINESS_IDENTITY_ANALYSIS_FIELDS),
+      operation: 'BUSINESS_IDENTITY_ANALYSIS',
     }),
-    generateAssistantRecommendation: ({ prompt, runId, requestFingerprint, telemetry: callTelemetry }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'minimal' : null, maxOutputTokens: ASSISTANT_RECOMMENDATION_MAX_OUTPUT_TOKENS, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_RECOMMENDATION', telemetry: callTelemetry, schema: buildRecommendationResponseSchema() }),
-    generateAssistantConfiguration: ({ prompt, runId, requestFingerprint, telemetry: callTelemetry }) => generate({ prompt, fields: ASSISTANT_CONFIGURATION_FIELDS, validate: validateAssistantConfigurationOutput, thinkingLevel: config.provider === 'GEMINI' ? 'minimal' : null, maxOutputTokens: ASSISTANT_CONFIGURATION_MAX_OUTPUT_TOKENS, timeoutMs: ASSISTANT_CONFIGURATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_CONFIGURATION', telemetry: callTelemetry }),
+    generateAssistantRecommendation: ({ prompt, runId, requestFingerprint, telemetry: callTelemetry }) => generate({ prompt, fields: ASSISTANT_RECOMMENDATION_FIELDS, validate: validateAssistantRecommendationOutput, thinkingLevel: usesGeminiPrimary ? 'minimal' : null, maxOutputTokens: ASSISTANT_RECOMMENDATION_MAX_OUTPUT_TOKENS, timeoutMs: ASSISTANT_GENERATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_RECOMMENDATION', telemetry: callTelemetry, schema: buildRecommendationResponseSchema() }),
+    generateAssistantConfiguration: ({ prompt, runId, requestFingerprint, telemetry: callTelemetry }) => generate({ prompt, fields: ASSISTANT_CONFIGURATION_FIELDS, validate: validateAssistantConfigurationOutput, thinkingLevel: usesGeminiPrimary ? 'minimal' : null, maxOutputTokens: ASSISTANT_CONFIGURATION_MAX_OUTPUT_TOKENS, timeoutMs: ASSISTANT_CONFIGURATION_TIMEOUT_MS, runId, requestFingerprint, operation: 'ASSISTANT_CONFIGURATION', telemetry: callTelemetry }),
     classifyImageKnowledgeSegments: ({ segments }) => {
       const safeSegments = Array.isArray(segments) ? segments : [];
       return generate({
@@ -357,7 +465,7 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
         },
         schema: buildImageSemanticResponseSchema(),
         operation: 'IMAGE_SEMANTIC_CLASSIFICATION',
-        thinkingLevel: config.provider === 'GEMINI' ? 'low' : null,
+        thinkingLevel: usesGeminiPrimary ? 'low' : null,
         timeoutMs: Math.max(config.timeoutMs, IMAGE_SEMANTIC_TIMEOUT_MS),
       });
     },

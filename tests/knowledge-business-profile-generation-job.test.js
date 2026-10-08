@@ -103,6 +103,21 @@ test('provider timeout remains a retryable durable job instead of a false comple
   assert.equal(updates[0].params[2], 'KNOWLEDGE_GENERATION_TIMEOUT');
 });
 
+test('all-provider unavailability remains retryable for Business Profile jobs', async () => {
+  const updates = [];
+  const database = { async query(sql, params) { updates.push({ sql, params }); return { rowCount: 1, rows: [] }; } };
+  const error = Object.assign(new Error('providers unavailable'), { code: 'KNOWLEDGE_GENERATION_PROVIDERS_UNAVAILABLE' });
+  await assert.rejects(
+    processBusinessProfileGenerationJob({
+      database,
+      job: job({ status: 'PROCESSING', attempts: 1 }),
+      generateProfile: async () => { throw error; },
+    }),
+    error,
+  );
+  assert.match(updates[0].sql, /SET status = 'PENDING'/);
+});
+
 test('invalid profile output is terminal and stale processing leases are recovered', async () => {
   const terminal = [];
   const invalid = Object.assign(new Error('invalid'), { code: 'KNOWLEDGE_GENERATION_SCHEMA_INVALID' });

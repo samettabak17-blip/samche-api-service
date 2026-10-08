@@ -1,5 +1,8 @@
+import OpenAI from 'openai';
 import { buildGeminiImagePart } from './whatsapp-multimodal-service.js';
 import { createGoogleGeminiProvider, GoogleGeminiProviderError } from './google-gemini-provider.js';
+import { executeAiProviderFailover, defaultAiCircuitBreakerRegistry, AllAiProvidersFailedError } from './shared-ai-provider-resilience.js';
+import { getDashboardAiProviderPolicy } from './dashboard-ai-provider-policy.js';
 import {
   IMAGE_KNOWLEDGE_EXTRACTION_VERSION,
   validateImageKnowledgeExtraction,
@@ -53,8 +56,7 @@ export function readBoundedImageDimensions({ mimeType, bytes }) {
   return dimensions;
 }
 
-function parseProviderText(body) {
-  const text = body?.candidates?.[0]?.content?.parts?.map((part) => part?.text || '').join('')?.trim();
+function parseProviderTextValue(text) {
   if (!text) throw new GeminiImageKnowledgeExtractionError('IMAGE_PROVIDER_RESPONSE_EMPTY', 'Image provider returned no extraction');
   try {
     const trimmed = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
@@ -64,7 +66,11 @@ function parseProviderText(body) {
   }
 }
 
-function normalizeProviderOutput(value, { sourceHash, mimeType }) {
+function parseProviderText(body) {
+  return parseProviderTextValue(body?.structured_text ?? body?.candidates?.[0]?.content?.parts?.map((part) => part?.text || '').join('')?.trim());
+}
+
+function normalizeProviderOutput(value, { sourceHash, mimeType, extractionMethod = 'GEMINI_VISION' }) {
   if (!value || typeof value !== 'object' || !Array.isArray(value.segments)) {
     throw new GeminiImageKnowledgeExtractionError('IMAGE_PROVIDER_RESPONSE_INVALID', 'Image provider response is invalid');
   }
@@ -86,7 +92,7 @@ function normalizeProviderOutput(value, { sourceHash, mimeType }) {
       text: value.text,
       segments,
       extractionConfidence,
-      extractionMethod: 'GEMINI_VISION',
+      extractionMethod,
     });
   } catch (error) {
     if (error instanceof ImageKnowledgeExtractionError) {
@@ -145,6 +151,119 @@ export function createGeminiImageKnowledgeExtractor({ env = process.env, fetchIm
         throw new GeminiImageKnowledgeExtractionError('IMAGE_PROVIDER_NETWORK_ERROR', 'Gemini image extraction failed');
       } finally {
         clearTimeout(timer);
+      }
+    },
+  });
+}
+
+const OPENAI_VISION_MODELS = new Set(['gpt-4o-mini', 'gpt-4o']);
+
+export function createImageKnowledgeExtractor({
+  env = process.env,
+  fetchImpl = globalThis.fetch,
+  googleProviderFactory = null,
+  openaiClient = null,
+  openaiClientFactory = null,
+  circuitRegistry = defaultAiCircuitBreakerRegistry,
+  telemetry = null,
+} = {}) {
+  const policy = getDashboardAiProviderPolicy('IMAGE_KNOWLEDGE_EXTRACTION', env);
+  if (!policy.failoverEnabled) return createGeminiImageKnowledgeExtractor({ env, fetchImpl });
+
+  let googleProvider = null;
+  let resolvedOpenaiClient = openaiClient;
+  const prompt = 'Extract visible text from this image. Preserve reading order. For conversation-like content classify each segment as BUSINESS, CUSTOMER, or UNKNOWN; use UNKNOWN when role is uncertain. Return concise JSON only.';
+  const responseSchema = {
+    type: 'OBJECT',
+    properties: {
+      text: { type: 'STRING' },
+      extractionConfidence: { type: 'NUMBER' },
+      segments: { type: 'ARRAY', items: { type: 'OBJECT', properties: {
+        order: { type: 'INTEGER' }, text: { type: 'STRING' }, role: { type: 'STRING' }, confidence: { type: 'NUMBER' },
+        sourceLocator: { type: 'OBJECT', properties: { page: { type: 'NUMBER' }, x: { type: 'NUMBER' }, y: { type: 'NUMBER' }, width: { type: 'NUMBER' }, height: { type: 'NUMBER' } } },
+      } } },
+    },
+  };
+
+  return Object.freeze({
+    provider: 'VERTEX_OPENAI',
+    model: policy.primaryModel,
+    timeoutMs: policy.totalTimeoutMs,
+    async extract({ bytes, mimeType, sourceHash }) {
+      const input = validateImageKnowledgeInput({ originalname: mimeType === 'image/png' ? 'image.png' : 'image.jpg', mimetype: mimeType, buffer: bytes, size: bytes?.length });
+      if (!/^[a-f0-9]{64}$/i.test(String(sourceHash ?? ''))) throw new GeminiImageKnowledgeExtractionError('IMAGE_SOURCE_HASH_INVALID', 'Image source hash is invalid');
+      readBoundedImageDimensions({ mimeType: input.mimeType, bytes: input.buffer });
+      if (!OPENAI_VISION_MODELS.has(policy.secondaryModel)) {
+        throw new GeminiImageKnowledgeExtractionError('IMAGE_PROVIDER_CAPABILITY_UNAVAILABLE', 'Configured fallback does not support structured image understanding');
+      }
+      if (!env.OPENAI_API_KEY) {
+        throw new GeminiImageKnowledgeExtractionError('IMAGE_PROVIDER_UNAVAILABLE', 'Image extraction fallback is unavailable');
+      }
+
+      try {
+        const result = await executeAiProviderFailover({
+          operation: policy.operation,
+          capability: policy.capability,
+          correlationId: String(sourceHash).slice(0, 16),
+          primaryProvider: policy.primaryProvider,
+          primaryModel: policy.primaryModel,
+          secondaryProvider: policy.secondaryProvider,
+          secondaryModel: policy.secondaryModel,
+          primaryTimeoutMs: policy.primaryTimeoutMs,
+          secondaryTimeoutMs: policy.secondaryTimeoutMs,
+          totalTimeoutMs: policy.totalTimeoutMs,
+          circuitRegistry,
+          telemetry,
+          primary: async ({ signal }) => {
+            googleProvider ??= typeof googleProviderFactory === 'function'
+              ? googleProviderFactory()
+              : createGoogleGeminiProvider({ env, fetchImpl: fetchImpl === globalThis.fetch ? null : fetchImpl });
+            const response = await googleProvider.generateContent({
+              model: policy.primaryModel,
+              contents: [{ role: 'user', parts: [
+                { text: prompt },
+                buildGeminiImagePart({ mimeType: input.mimeType, bytes: input.buffer }),
+              ] }],
+              generationConfig: {
+                temperature: 0,
+                responseMimeType: 'application/json',
+                thinkingConfig: { thinkingLevel: 'low' },
+                responseSchema,
+              },
+              signal,
+            });
+            return response?.structured_text ?? response?.candidates?.[0]?.content?.parts?.map((part) => part?.text || '').join('')?.trim();
+          },
+          secondary: async ({ signal }) => {
+            resolvedOpenaiClient ??= typeof openaiClientFactory === 'function'
+              ? openaiClientFactory({ apiKey: env.OPENAI_API_KEY })
+              : new OpenAI({ apiKey: env.OPENAI_API_KEY });
+            if (!resolvedOpenaiClient?.chat?.completions?.create) {
+              throw new GeminiImageKnowledgeExtractionError('IMAGE_PROVIDER_UNAVAILABLE', 'OpenAI image extraction is unavailable');
+            }
+            const completion = await resolvedOpenaiClient.chat.completions.create({
+              model: policy.secondaryModel,
+              temperature: 0,
+              response_format: { type: 'json_object' },
+              messages: [{ role: 'user', content: [
+                { type: 'text', text: prompt },
+                { type: 'image_url', image_url: { url: `data:${input.mimeType};base64,${input.buffer.toString('base64')}` } },
+              ] }],
+            }, { signal });
+            return completion?.choices?.[0]?.message?.content;
+          },
+        });
+        return normalizeProviderOutput(parseProviderTextValue(result.output), {
+          sourceHash: String(sourceHash).toLowerCase(),
+          mimeType: input.mimeType,
+          extractionMethod: result.provider === 'OPENAI' ? 'OPENAI_VISION' : 'GEMINI_VISION',
+        });
+      } catch (error) {
+        if (error instanceof GeminiImageKnowledgeExtractionError) throw error;
+        if (error instanceof AllAiProvidersFailedError) {
+          throw new GeminiImageKnowledgeExtractionError('IMAGE_PROVIDERS_UNAVAILABLE', 'Image extraction providers are temporarily unavailable', { cause: error });
+        }
+        throw error;
       }
     },
   });

@@ -102,6 +102,11 @@ async function generate({ database, provider, tenantId, requestedBy, targetType,
         database: generationDatabase, tenantId, runId: run.id, event: event.event, timestamp: event.timestamp,
         httpStatus: event.http_status, elapsedMs: event.elapsed_ms, abortBeforeHttpResponse: event.http_response_received === false,
         networkErrorClass: event.classification, responseShape: event.response_shape, parser: event.parser,
+        operation: event.operation, correlationId: event.correlation_id,
+        primaryProvider: event.primary_provider, primaryClassification: event.primary_classification,
+        fallbackProvider: event.fallback_provider, fallbackClassification: event.fallback_classification,
+        selectedProvider: event.selected_provider, selectedModel: event.selected_model,
+        totalDurationMs: event.total_duration_ms, terminalErrorCategory: event.terminal_error_category,
       });
       const output = targetType === 'RECOMMENDATION'
         ? await provider.generateAssistantRecommendation({ prompt, runId: run.id, requestFingerprint: fingerprint, telemetry: persistProviderTelemetry })

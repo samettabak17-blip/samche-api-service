@@ -93,11 +93,12 @@ import pool from "./config/db.js";
 import { runMigrations } from "./migrations/runMigrations.js";
 import { createOpenAIEmbedder } from "./services/knowledge-intelligence-service.js";
 import { startKnowledgeProcessingWorker } from "./services/knowledge-source-processing-service.js";
-import { createGeminiImageKnowledgeExtractor } from "./services/image-knowledge-gemini-extractor.js";
+import { createImageKnowledgeExtractor } from "./services/image-knowledge-gemini-extractor.js";
 import { createImageKnowledgeSemanticClassifier } from "./services/image-knowledge-semantic-service.js";
 import { createKnowledgeGenerationProvider } from "./services/knowledge-generation-provider.js";
 import { createGoogleGeminiProvider } from "./services/google-gemini-provider.js";
 import { canonicalSharedAiRuntime, resolveCanonicalPlatformModel, AllAiProvidersFailedError } from "./services/shared-ai-provider-resilience.js";
+import { getDashboardAiProviderPolicy } from "./services/dashboard-ai-provider-policy.js";
 import { startImageSemanticGenerationWorker } from "./services/knowledge-semantic-generation-job-service.js";
 import { generateAssistantConfigurationVersion, generateAssistantRecommendation } from "./services/knowledge-assistant-lifecycle.js";
 import { generateBusinessProfileVersion } from "./services/knowledge-profile-lifecycle.js";
@@ -1053,9 +1054,13 @@ try {
 }
 const googleGeminiEnabled = process.env.GOOGLE_GENAI_MODE?.trim().toLowerCase() === 'vertex' || Boolean(process.env.GEMINI_API_KEY);
 const knowledgeGenerationProviderName = String(process.env.KNOWLEDGE_GENERATION_PROVIDER || 'GEMINI').trim().toUpperCase();
-const knowledgeGenerationEnabled = knowledgeGenerationProviderName === 'OPENAI'
+const legacyKnowledgeGenerationEnabled = knowledgeGenerationProviderName === 'OPENAI'
   ? Boolean(process.env.OPENAI_API_KEY)
   : googleGeminiEnabled;
+const dashboardStructuredFailoverEnabled = getDashboardAiProviderPolicy('BUSINESS_PROFILE', process.env).failoverEnabled;
+const dashboardFailoverGenerationEnabled = dashboardStructuredFailoverEnabled && Boolean(process.env.OPENAI_API_KEY);
+const knowledgeGenerationEnabled = legacyKnowledgeGenerationEnabled || dashboardFailoverGenerationEnabled;
+const dashboardMultimodalFailoverEnabled = getDashboardAiProviderPolicy('IMAGE_KNOWLEDGE_EXTRACTION', process.env).failoverEnabled;
 // The WhatsApp runtime uses the same Vertex-compatible Gemini model family as
 // the accepted Knowledge Intelligence generation paths. The environment may
 // choose another platform-approved model without exposing that choice to tenants.
@@ -1072,7 +1077,9 @@ const salesChatService = createSalesChatService({ openaiClient, commercialFacts:
 const salesChatRateLimiter = createSalesChatRateLimiter();
 registerSalesChatRoute({ app, service: salesChatService, rateLimiter: salesChatRateLimiter });
 const knowledgeEmbedder = process.env.OPENAI_API_KEY ? createOpenAIEmbedder(openaiClient) : null;
-const knowledgeImageExtractor = googleGeminiEnabled ? createGeminiImageKnowledgeExtractor() : null;
+const knowledgeImageExtractor = googleGeminiEnabled || (dashboardMultimodalFailoverEnabled && Boolean(process.env.OPENAI_API_KEY))
+  ? createImageKnowledgeExtractor()
+  : null;
 
 let knowledgeProcessingWorker = null;
 

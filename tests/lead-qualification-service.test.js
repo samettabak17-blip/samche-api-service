@@ -106,3 +106,27 @@ test('model invocation occurs only for an eligible persisted customer checkpoint
   assert.equal(result.score, 83);
 });
 
+test('qualification consumes provider result envelopes while preserving raw-object injection compatibility', async () => {
+  const messages = [
+    { id: 'm1', sender_type: 'CUSTOMER', content: 'I need pricing and want to book a call.', created_at: new Date().toISOString() },
+  ];
+  const output = {
+    intent: 'PURCHASE', service_interest: 'Consulting', summary: 'Pricing request', reasons: [],
+    signals: {
+      purchase_intent: 'EXPLICIT', service_fit: 'STRONG', decision_readiness: 'HIGH',
+      pricing_request: true, appointment_interest: true, human_consultant_request: false,
+      budget: { amount: null, currency: null, evidence: null }, timeline: { value: null, evidence: null },
+    },
+  };
+  const enveloped = await qualifyConversation({
+    messages, contact: {}, force: true,
+    invokeModel: async () => ({ output, provider: 'OPENAI', model: 'gpt-4o-mini', fallbackUsed: true }),
+  });
+  assert.equal(enveloped.provider, 'OPENAI');
+  assert.equal(enveloped.model, 'gpt-4o-mini');
+
+  const raw = await qualifyConversation({ messages, contact: {}, force: true, invokeModel: async () => output });
+  assert.equal(raw.provider, 'GEMINI');
+  assert.equal(raw.model, 'gemini-3-flash-preview');
+});
+

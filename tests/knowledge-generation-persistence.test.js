@@ -110,6 +110,39 @@ test('provider telemetry updates only the matching tenant run with safe JSON fie
   assert.equal(JSON.stringify(calls[0].params).includes('prompt'), false);
 });
 
+test('provider failover telemetry persists only bounded operational metadata', async () => {
+  const calls = [];
+  const database = { query: async (sql, params) => { calls.push({ sql, params }); return { rows: [{ id: params[0] }] }; } };
+  await recordKnowledgeGenerationProviderTelemetry({
+    database,
+    tenantId,
+    runId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    event: 'fallback_succeeded',
+    operation: 'ASSISTANT_RECOMMENDATION',
+    correlationId: 'abcd1234',
+    primaryProvider: 'VERTEX',
+    primaryClassification: 'PROVIDER_PERMISSION_DENIED',
+    fallbackProvider: 'OPENAI',
+    selectedProvider: 'OPENAI',
+    selectedModel: 'gpt-4o-mini',
+    totalDurationMs: 91,
+    terminalErrorCategory: null,
+  });
+  const payload = JSON.parse(calls[0].params[2]);
+  assert.deepEqual(payload, {
+    provider_failover_event: 'fallback_succeeded',
+    provider_operation: 'ASSISTANT_RECOMMENDATION',
+    provider_correlation_id: 'abcd1234',
+    provider_primary: 'VERTEX',
+    provider_primary_classification: 'PROVIDER_PERMISSION_DENIED',
+    provider_fallback: 'OPENAI',
+    provider_selected: 'OPENAI',
+    provider_selected_model: 'gpt-4o-mini',
+    provider_total_duration_ms: 91,
+  });
+  assert.equal(JSON.stringify(payload).match(/prompt|authorization|apikey|body|content|credential/gi), null);
+});
+
 test('provider transport telemetry persists only safe connection fields', async () => {
   const calls = [];
   const database = { query: async (sql, params) => { calls.push({ sql, params }); return { rows: [{ id: params[0] }] }; } };

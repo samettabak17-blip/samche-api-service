@@ -59,21 +59,16 @@ test('developer mode requires GEMINI_API_KEY', () => {
   );
 });
 
-test('vertex mode requires project and location', () => {
-  assert.throws(
-    () => getGoogleGeminiConfig({ GOOGLE_GENAI_MODE: 'vertex', GOOGLE_CLOUD_LOCATION: 'us-central1' }),
-    (error) => error instanceof GoogleGeminiProviderError && error.code === 'GOOGLE_CLOUD_PROJECT_REQUIRED',
-  );
-  assert.throws(
-    () => getGoogleGeminiConfig({ GOOGLE_GENAI_MODE: 'vertex', GOOGLE_CLOUD_PROJECT: 'samche-test' }),
-    (error) => error instanceof GoogleGeminiProviderError && error.code === 'GOOGLE_CLOUD_LOCATION_REQUIRED',
-  );
+test('vertex mode uses platform defaults when project and location are omitted', () => {
+  const config = getGoogleGeminiConfig({ GOOGLE_GENAI_MODE: 'vertex' });
+  assert.equal(config.project, 'samche-ai-development-2');
+  assert.equal(config.location, 'global');
 });
 
 test('adapter normalizes text and multimodal requests without exposing SDK response types', async () => {
   let request;
   const provider = createGoogleGeminiProvider({
-    env: { GEMINI_API_KEY: 'developer-key' },
+    env: { GOOGLE_GENAI_MODE: 'developer', GEMINI_API_KEY: 'developer-key' },
     clientFactory: () => ({
       models: {
         generateContent: async (params) => {
@@ -181,7 +176,7 @@ test('adapter preserves an SDK abort as GOOGLE_GEMINI_TIMEOUT', async () => {
 
 test('adapter retains safe HTTP rejection metadata without retaining provider response content', async () => {
   const provider = createGoogleGeminiProvider({
-    env: { GEMINI_API_KEY: 'developer-key' },
+    env: { GOOGLE_GENAI_MODE: 'developer', GEMINI_API_KEY: 'developer-key' },
     clientFactory: () => ({
       models: {
         generateContent: async () => {
@@ -212,6 +207,49 @@ test('adapter retains safe HTTP rejection metadata without retaining provider re
       return true;
     },
   );
+});
+
+test('adapter logs only normalized provider metadata and never raw upstream content', async () => {
+  const logEntries = [];
+  const originalError = console.error;
+  console.error = (...args) => logEntries.push(args);
+  try {
+    const provider = createGoogleGeminiProvider({
+      env: { GOOGLE_GENAI_MODE: 'developer', GEMINI_API_KEY: 'developer-key' },
+      clientFactory: () => ({
+        models: {
+          generateContent: async () => {
+            const error = new Error('private customer message must never be logged');
+            error.status = 403;
+            error.response = { data: { error: { message: 'secret upstream response' } } };
+            throw error;
+          },
+        },
+      }),
+    });
+
+    await assert.rejects(
+      provider.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: [{ role: 'user', parts: [{ text: 'private prompt' }] }],
+      }),
+      (error) => error instanceof GoogleGeminiProviderError && error.code === 'GOOGLE_GEMINI_AUTH_FAILED',
+    );
+  } finally {
+    console.error = originalError;
+  }
+
+  assert.equal(logEntries.length, 1);
+  assert.equal(logEntries[0][0], 'GOOGLE_GEMINI_REQUEST_FAILED');
+  assert.deepEqual(logEntries[0][1], {
+    provider: 'GOOGLE_GEMINI',
+    mode: 'developer',
+    model: 'gemini-3-flash-preview',
+    endpoint_class: 'GEMINI_DEVELOPER_GENERATE_CONTENT',
+    http_status: 403,
+    code: 'GOOGLE_GEMINI_AUTH_FAILED',
+  });
+  assert.doesNotMatch(JSON.stringify(logEntries), /private|secret|response|prompt/i);
 });
 
 test('requested runtime callers route through the centralized adapter', async () => {
@@ -343,6 +381,81 @@ test('vertex mode retries with default model when primary model fails', async ()
 
   assert.deepEqual(modelsCalled, ['gemini-2.5-pro', 'gemini-3.7-flash']);
   assert.equal(res.structured_text, 'retry-success');
+});
+
+test('vertex permission failure does not retry another model', async () => {
+  const modelsCalled = [];
+  const provider = createGoogleGeminiProvider({
+    env: {
+      GOOGLE_GENAI_MODE: 'vertex',
+      GOOGLE_CLOUD_PROJECT: 'samche-test',
+      GOOGLE_CLOUD_LOCATION: 'global',
+      GOOGLE_GEMINI_RUNTIME_MODEL: 'gemini-3.7-flash',
+    },
+    clientFactory: () => ({
+      models: {
+        generateContent: async ({ model }) => {
+          modelsCalled.push(model);
+          const error = new Error('Permission denied');
+          error.status = 403;
+          throw error;
+        },
+      },
+    }),
+  });
+
+  await assert.rejects(
+    () => provider.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: [{ role: 'user', parts: [{ text: 'test' }] }],
+    }),
+    (error) => {
+      assert.equal(error.code, 'GOOGLE_VERTEX_PERMISSION_DENIED');
+      assert.equal(error.safeMetadata.model, 'gemini-3-flash-preview');
+      assert.equal(error.safeMetadata.http_status, 403);
+      return true;
+    },
+  );
+  assert.deepEqual(modelsCalled, ['gemini-3-flash-preview']);
+});
+
+test('vertex timeout with an aborted signal does not retry another model', async () => {
+  const modelsCalled = [];
+  const controller = new AbortController();
+  const provider = createGoogleGeminiProvider({
+    env: {
+      GOOGLE_GENAI_MODE: 'vertex',
+      GOOGLE_CLOUD_PROJECT: 'samche-test',
+      GOOGLE_CLOUD_LOCATION: 'global',
+      GOOGLE_GEMINI_RUNTIME_MODEL: 'gemini-3.7-flash',
+    },
+    clientFactory: () => ({
+      models: {
+        generateContent: async ({ model }) => {
+          modelsCalled.push(model);
+          controller.abort();
+          const error = new Error('request aborted');
+          error.name = 'AbortError';
+          throw error;
+        },
+      },
+    }),
+  });
+
+  await assert.rejects(
+    () => provider.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: [{ role: 'user', parts: [{ text: 'test' }] }],
+      signal: controller.signal,
+    }),
+    (error) => {
+      assert.equal(error.code, 'GOOGLE_GEMINI_TIMEOUT');
+      assert.equal(error.safeMetadata.model, 'gemini-3-flash-preview');
+      return true;
+    },
+  );
+  assert.equal(controller.signal.aborted, true);
+  assert.deepEqual(modelsCalled, ['gemini-3-flash-preview']);
 });
 
 test('normalizeRequestError correctly distinguishes 404 model unavailable from permission denied', async () => {

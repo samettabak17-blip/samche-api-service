@@ -121,6 +121,29 @@ test('configuration worker retries a provider failure without creating a partial
   assert.equal(calls.some(({ sql }) => /active_configuration_version_id/i.test(sql)), false);
 });
 
+test('configuration worker retries canonical all-provider unavailability', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => { calls.push({ sql, params }); return { rows: [] }; } };
+  await assert.rejects(
+    processAssistantConfigurationGenerationJob({
+      database,
+      job: {
+        id: 'job-configuration-unavailable', tenant_id: tenantId, attempts: 1,
+        metadata: {
+          assistant_id: assistantId, recommendation_id: recommendationId,
+          business_profile_version_id: profileVersionId, requested_by: actorId,
+          request_fingerprint: fingerprint,
+        },
+      },
+      generateConfiguration: async () => {
+        throw Object.assign(new Error('all providers unavailable'), { code: 'KNOWLEDGE_GENERATION_PROVIDERS_UNAVAILABLE' });
+      },
+    }),
+    { code: 'KNOWLEDGE_GENERATION_PROVIDERS_UNAVAILABLE' },
+  );
+  assert.equal(calls.some(({ sql }) => /SET status = 'PENDING'/i.test(sql)), true);
+});
+
 test('configuration worker fails a deterministic structured-response error without multiplying provider attempts', async () => {
   const calls = [];
   const database = { query: async (sql, params = []) => {

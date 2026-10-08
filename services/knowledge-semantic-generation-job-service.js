@@ -575,8 +575,17 @@ function businessProfileJobMetadata(job) {
   return metadata;
 }
 
-function retryableBusinessProfileError(error) {
-  return ['KNOWLEDGE_GENERATION_TIMEOUT', 'KNOWLEDGE_GENERATION_PROVIDER_FAILED'].includes(String(error?.code ?? '').toUpperCase());
+export function isRetryableKnowledgeProviderError(error, operation) {
+  const code = String(error?.code ?? '').toUpperCase();
+  if (code === 'KNOWLEDGE_GENERATION_PROVIDERS_UNAVAILABLE' || code === 'KNOWLEDGE_GENERATION_PROVIDER_FAILED') {
+    return true;
+  }
+  // Business Profile, Recommendation, and image semantic generation retain
+  // their established durable timeout recovery. Configuration generation
+  // already consumes a bounded total provider budget, so repeating that timeout
+  // would multiply an exhausted request rather than recover a transport blip.
+  return code === 'KNOWLEDGE_GENERATION_TIMEOUT'
+    && ['BUSINESS_PROFILE', 'ASSISTANT_RECOMMENDATION', 'IMAGE_KNOWLEDGE'].includes(operation);
 }
 
 export async function processBusinessProfileGenerationJob({ database, job, generateProfile }) {
@@ -603,7 +612,7 @@ export async function processBusinessProfileGenerationJob({ database, job, gener
     return { status: 'READY', profile: result.profile, reused: result.reused === true };
   } catch (error) {
     const code = String(error?.code ?? 'KNOWLEDGE_BUSINESS_PROFILE_GENERATION_FAILED').replace(/[^A-Z0-9_]/gi, '_').slice(0, 80) || 'KNOWLEDGE_BUSINESS_PROFILE_GENERATION_FAILED';
-    const retry = retryableBusinessProfileError(error) && Number(job.attempts ?? 1) < 3;
+    const retry = isRetryableKnowledgeProviderError(error, 'BUSINESS_PROFILE') && Number(job.attempts ?? 1) < 3;
     await database.query(
       retry
         ? `UPDATE knowledge_processing_jobs SET status = 'PENDING', locked_at = NULL, locked_until = NULL,
@@ -641,7 +650,7 @@ export async function processAssistantRecommendationGenerationJob({ database, jo
     return { status: 'READY', recommendation: result.recommendation, reused: result.reused === true };
   } catch (error) {
     const code = String(error?.code ?? 'KNOWLEDGE_ASSISTANT_RECOMMENDATION_FAILED').replace(/[^A-Z0-9_]/gi, '_').slice(0, 80) || 'KNOWLEDGE_ASSISTANT_RECOMMENDATION_FAILED';
-    const retry = Number(job.attempts ?? 1) < 3;
+    const retry = isRetryableKnowledgeProviderError(error, 'ASSISTANT_RECOMMENDATION') && Number(job.attempts ?? 1) < 3;
     await database.query(
       retry
         ? `UPDATE knowledge_processing_jobs SET status = 'PENDING', locked_at = NULL, locked_until = NULL,
@@ -661,13 +670,6 @@ function configurationJobMetadata(job) {
     throw new KnowledgeSemanticGenerationJobError('KNOWLEDGE_ASSISTANT_CONFIGURATION_JOB_INVALID', 'Assistant Configuration job metadata is invalid');
   }
   return metadata;
-}
-
-function isRetryableAssistantConfigurationGenerationError(error) {
-  // A second request cannot repair a deterministic structured-output contract,
-  // a completed provider timeout, or any validation/persistence failure. Keep
-  // retries for the single transient provider boundary exposed by the adapter.
-  return String(error?.code ?? '').toUpperCase() === 'KNOWLEDGE_GENERATION_PROVIDER_FAILED';
 }
 
 export async function processAssistantConfigurationGenerationJob({ database, job, generateConfiguration }) {
@@ -696,7 +698,7 @@ export async function processAssistantConfigurationGenerationJob({ database, job
     return { status: 'READY', configuration: result.configuration, reused: result.reused === true };
   } catch (error) {
     const code = String(error?.code ?? 'KNOWLEDGE_ASSISTANT_CONFIGURATION_FAILED').replace(/[^A-Z0-9_]/gi, '_').slice(0, 80) || 'KNOWLEDGE_ASSISTANT_CONFIGURATION_FAILED';
-    const retry = isRetryableAssistantConfigurationGenerationError(error) && Number(job.attempts ?? 1) < 2;
+    const retry = isRetryableKnowledgeProviderError(error, 'ASSISTANT_CONFIGURATION') && Number(job.attempts ?? 1) < 2;
     await database.query(
       retry
         ? `UPDATE knowledge_processing_jobs SET status = 'PENDING', locked_at = NULL, locked_until = NULL,
@@ -726,7 +728,7 @@ export async function processImageSemanticGenerationJob({ database, job, semanti
     return { status: 'READY', candidateCount: candidates.length, behaviorRecommendationCount: behavior.length, warnings };
   } catch (error) {
     const code = String(error?.code ?? 'KNOWLEDGE_IMAGE_GENERATION_FAILED').replace(/[^A-Z0-9_]/gi, '_').slice(0, 80);
-    const retry = Number(job.attempts ?? 1) < 3;
+    const retry = isRetryableKnowledgeProviderError(error, 'IMAGE_KNOWLEDGE') && Number(job.attempts ?? 1) < 3;
     await database.query(
       retry
         ? `UPDATE knowledge_processing_jobs SET status = 'PENDING', locked_at = NULL, locked_until = NULL,

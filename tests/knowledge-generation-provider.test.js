@@ -8,6 +8,27 @@ import {
   validateAssistantConfigurationOutput,
   buildRecommendationResponseSchema,
 } from '../services/knowledge-generation-provider.js';
+import { ProviderCircuitBreakerRegistry } from '../services/shared-ai-provider-resilience.js';
+
+const validRecommendationJson = JSON.stringify({
+  schema_version: 2,
+  tone: 'Professional',
+  recommendation_rationale: 'Approved tenant evidence supports this tone.',
+});
+
+function failoverProvider({ vertex, openai, telemetry = null, circuitRegistry = new ProviderCircuitBreakerRegistry() }) {
+  return createKnowledgeGenerationProvider({
+    env: {
+      DASHBOARD_AI_PROVIDER_FAILOVER_ENABLED: 'true',
+      GOOGLE_GENAI_MODE: 'vertex',
+      OPENAI_API_KEY: 'test-openai-key',
+    },
+    googleProviderFactory: () => ({ generateContent: vertex }),
+    openaiClient: { chat: { completions: { create: openai } } },
+    telemetry,
+    circuitRegistry,
+  });
+}
 
 test('defaults knowledge generation centrally to Gemini 3 Flash Preview', () => {
   assert.deepEqual(getKnowledgeGenerationConfig({}), {
@@ -142,6 +163,120 @@ test('Recommendation validator remains fail-closed with safe contract diagnostic
   assert.throws(() => validateAssistantRecommendationOutput({ tone: ['x'.repeat(1001)] }), (error) => error.details?.code === 'ARRAY_ITEM_TOO_LONG' && error.details?.field === 'tone');
   assert.throws(() => validateAssistantRecommendationOutput({ unexpected: 'x' }), (error) => error.details?.code === 'UNEXPECTED_FIELD' && error.details?.field === 'unexpected');
   assert.deepEqual(validateAssistantRecommendationOutput({ schema_version: 2, tone: 'Professional' }), { schema_version: 2, tone: 'Professional' });
+});
+
+test('Vertex success does not call OpenAI for Assistant Recommendation', async () => {
+  let openaiCalls = 0;
+  const provider = failoverProvider({
+    vertex: async () => ({ structured_text: validRecommendationJson }),
+    openai: async () => { openaiCalls += 1; throw new Error('must not run'); },
+  });
+
+  const output = await provider.generateAssistantRecommendation({ prompt: 'ACTIVE tenant profile' });
+  assert.equal(output.tone, 'Professional');
+  assert.equal(openaiCalls, 0);
+});
+
+test('suspended Vertex project falls back to OpenAI and preserves Recommendation V2', async () => {
+  const signals = [];
+  const events = [];
+  const provider = failoverProvider({
+    telemetry: (event) => events.push(event),
+    vertex: async ({ signal }) => {
+      signals.push(signal);
+      const error = new Error("Consumer project has been suspended");
+      error.code = 'GOOGLE_VERTEX_PERMISSION_DENIED';
+      throw error;
+    },
+    openai: async (_request, { signal }) => {
+      signals.push(signal);
+      return { choices: [{ message: { content: validRecommendationJson } }] };
+    },
+  });
+
+  const output = await provider.generateAssistantRecommendation({
+    prompt: 'ACTIVE tenant profile',
+    requestFingerprint: 'tenant-safe-correlation-1234',
+  });
+  assert.deepEqual(output, JSON.parse(validRecommendationJson));
+  assert.equal(signals.length, 2);
+  assert.notEqual(signals[0], signals[1]);
+  assert.equal(events.some((event) => event.event === 'fallback_succeeded' && event.selected_provider === 'OPENAI'), true);
+  assert.equal(JSON.stringify(events).includes('suspended'), false);
+});
+
+test('Vertex network and timeout failures use independent OpenAI attempts', async () => {
+  for (const vertexError of [
+    Object.assign(new Error('socket'), { code: 'ECONNRESET' }),
+    Object.assign(new Error('deadline exceeded'), { code: 'GOOGLE_GEMINI_TIMEOUT' }),
+  ]) {
+    let fallbackCalls = 0;
+    const provider = failoverProvider({
+      circuitRegistry: new ProviderCircuitBreakerRegistry(),
+      vertex: async () => { throw vertexError; },
+      openai: async () => {
+        fallbackCalls += 1;
+        return { choices: [{ message: { content: validRecommendationJson } }] };
+      },
+    });
+    assert.equal((await provider.generateAssistantRecommendation({ prompt: 'profile' })).schema_version, 2);
+    assert.equal(fallbackCalls, 1);
+  }
+});
+
+test('open primary circuit selects OpenAI without a Vertex request', async () => {
+  const registry = new ProviderCircuitBreakerRegistry();
+  registry.get({ provider: 'VERTEX', model: 'gemini-3-flash-preview', capability: 'STRUCTURED_TEXT' })
+    .recordFailure('PROVIDER_PERMISSION_DENIED');
+  let vertexCalls = 0;
+  const provider = failoverProvider({
+    circuitRegistry: registry,
+    vertex: async () => { vertexCalls += 1; throw new Error('must not run'); },
+    openai: async () => ({ choices: [{ message: { content: validRecommendationJson } }] }),
+  });
+  assert.equal((await provider.generateAssistantRecommendation({ prompt: 'profile' })).tone, 'Professional');
+  assert.equal(vertexCalls, 0);
+});
+
+test('both structured providers unavailable returns bounded safe failure', async () => {
+  const provider = failoverProvider({
+    vertex: async () => { throw Object.assign(new Error('private vertex detail'), { code: 'ECONNRESET' }); },
+    openai: async () => { throw Object.assign(new Error('private OpenAI detail'), { status: 503 }); },
+  });
+  await assert.rejects(
+    provider.generateAssistantRecommendation({ prompt: 'private prompt' }),
+    (error) => error.code === 'KNOWLEDGE_GENERATION_PROVIDERS_UNAVAILABLE'
+      && !/private|vertex|openai/i.test(error.message),
+  );
+});
+
+test('invalid OpenAI output is terminal schema failure', async () => {
+  let openaiCalls = 0;
+  const provider = failoverProvider({
+    vertex: async () => { throw Object.assign(new Error('suspended'), { status: 403 }); },
+    openai: async () => {
+      openaiCalls += 1;
+      return { choices: [{ message: { content: '{"schema_version":2,"unexpected":"value"}' } }] };
+    },
+  });
+  await assert.rejects(
+    provider.generateAssistantRecommendation({ prompt: 'profile' }),
+    (error) => error.code === 'KNOWLEDGE_GENERATION_SCHEMA_INVALID',
+  );
+  assert.equal(openaiCalls, 1);
+});
+
+test('Vertex schema failure does not invoke OpenAI', async () => {
+  let openaiCalls = 0;
+  const provider = failoverProvider({
+    vertex: async () => ({ structured_text: '{"schema_version":2,"unexpected":"value"}' }),
+    openai: async () => { openaiCalls += 1; return { choices: [] }; },
+  });
+  await assert.rejects(
+    provider.generateAssistantRecommendation({ prompt: 'profile' }),
+    (error) => error.code === 'KNOWLEDGE_GENERATION_SCHEMA_INVALID',
+  );
+  assert.equal(openaiCalls, 0);
 });
 
 test('Gemini Assistant Recommendation uses bounded minimal thinking and a concise output budget without changing the global timeout', async () => {

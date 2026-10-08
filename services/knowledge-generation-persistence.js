@@ -8,7 +8,13 @@ const STAGES = new Set([
   'IDENTITY_ANALYSIS', 'PROFILE_GENERATION', 'PROFILE_CONTEXT',
   'RECOMMENDATION_GENERATION', 'CONFIGURATION_GENERATION', 'PERSISTENCE',
 ]);
-const PROVIDER_EVENTS = new Set(['request_started', 'http_status_received', 'fetch_fulfilled', 'fetch_aborted', 'network_error', 'transport_connect_started', 'transport_connected', 'tls_established', 'request_body_sent', 'response_headers_received', 'transport_error', 'structured_response_shape', 'structured_parse_result']);
+const PROVIDER_EVENTS = new Set([
+  'request_started', 'http_status_received', 'fetch_fulfilled', 'fetch_aborted', 'network_error',
+  'transport_connect_started', 'transport_connected', 'tls_established', 'request_body_sent',
+  'response_headers_received', 'transport_error', 'structured_response_shape', 'structured_parse_result',
+  'primary_attempted', 'primary_skipped', 'primary_failed', 'primary_succeeded',
+  'fallback_attempted', 'fallback_succeeded', 'fallback_failed', 'terminal_error',
+]);
 
 export class KnowledgeGenerationPersistenceError extends Error {
   constructor(code, message) {
@@ -163,7 +169,14 @@ export async function failKnowledgeGenerationRun({ database, tenantId, runId, er
   return result.rows[0];
 }
 
-export async function recordKnowledgeGenerationProviderTelemetry({ database, tenantId, runId, event, timestamp = new Date().toISOString(), httpStatus = null, elapsedMs = null, abortBeforeHttpResponse = null, networkErrorClass = null, responseShape = null, parser = null }) {
+export async function recordKnowledgeGenerationProviderTelemetry({
+  database, tenantId, runId, event, timestamp = new Date().toISOString(), httpStatus = null,
+  elapsedMs = null, abortBeforeHttpResponse = null, networkErrorClass = null,
+  responseShape = null, parser = null, operation = null, correlationId = null,
+  primaryProvider = null, primaryClassification = null, fallbackProvider = null,
+  fallbackClassification = null, selectedProvider = null, selectedModel = null,
+  totalDurationMs = null, terminalErrorCategory = null,
+}) {
   const normalizedEvent = String(event ?? '').toLowerCase();
   if (!PROVIDER_EVENTS.has(normalizedEvent)) throw new KnowledgeGenerationPersistenceError('KNOWLEDGE_PROVIDER_EVENT_INVALID', 'Provider event is invalid');
   const payload = {};
@@ -187,6 +200,31 @@ export async function recordKnowledgeGenerationProviderTelemetry({ database, ten
   if (normalizedEvent === 'transport_error') payload.provider_transport_error_class = String(networkErrorClass ?? 'TRANSPORT_ERROR').slice(0, 64);
   if (normalizedEvent === 'structured_response_shape') payload.structured_response_shape = safeResponseShape(responseShape);
   if (normalizedEvent === 'structured_parse_result') payload.structured_parse_result = safeParser(parser);
+  if (normalizedEvent.startsWith('primary_') || normalizedEvent.startsWith('fallback_') || normalizedEvent === 'terminal_error') {
+    const safeToken = (value, max = 80) => {
+      if (value == null) return null;
+      const normalized = String(value).slice(0, max);
+      return /^[A-Za-z0-9._:-]+$/.test(normalized) ? normalized : null;
+    };
+    payload.provider_failover_event = normalizedEvent;
+    const fields = {
+      provider_operation: safeToken(operation),
+      provider_correlation_id: safeToken(correlationId, 64),
+      provider_primary: safeToken(primaryProvider, 24),
+      provider_primary_classification: safeToken(primaryClassification),
+      provider_fallback: safeToken(fallbackProvider, 24),
+      provider_fallback_classification: safeToken(fallbackClassification),
+      provider_selected: safeToken(selectedProvider, 24),
+      provider_selected_model: safeToken(selectedModel, 120),
+      provider_terminal_error_category: safeToken(terminalErrorCategory),
+    };
+    for (const [key, value] of Object.entries(fields)) {
+      if (value !== null) payload[key] = value;
+    }
+    if (totalDurationMs !== null && totalDurationMs !== undefined) {
+      payload.provider_total_duration_ms = boundedInteger(Number(totalDurationMs), 'KNOWLEDGE_PROVIDER_ELAPSED_INVALID');
+    }
+  }
   const result = await databaseQuery(database)(
     `UPDATE knowledge_generation_runs
         SET provider_telemetry = COALESCE(provider_telemetry, '{}'::jsonb) || $3::jsonb

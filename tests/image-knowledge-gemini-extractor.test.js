@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createGeminiImageKnowledgeExtractor } from '../services/image-knowledge-gemini-extractor.js';
+import { createGeminiImageKnowledgeExtractor, createImageKnowledgeExtractor } from '../services/image-knowledge-gemini-extractor.js';
+import { ProviderCircuitBreakerRegistry } from '../services/shared-ai-provider-resilience.js';
 
 const png = (width = 1, height = 2) => {
   const bytes = Buffer.alloc(24);
@@ -61,7 +62,7 @@ test('rejects malformed JSON, empty output, and provider HTTP failures safely', 
 test('maps timeout and missing configuration without exposing provider details', async () => {
   const extractor = createGeminiImageKnowledgeExtractor({ env: { GEMINI_API_KEY: 'key', IMAGE_KNOWLEDGE_EXTRACTION_TIMEOUT_MS: '1000' }, fetchImpl: (_url, request) => new Promise((resolve, reject) => request.signal.addEventListener('abort', () => reject(Object.assign(new Error('abort'), { name: 'AbortError' })))) });
   await assert.rejects(() => extractor.extract({ bytes: png(), mimeType: 'image/png', sourceHash: 'd'.repeat(64) }), { code: 'IMAGE_PROVIDER_TIMEOUT' });
-  await assert.rejects(() => createGeminiImageKnowledgeExtractor({ env: {} }).extract({ bytes: png(), mimeType: 'image/png', sourceHash: 'e'.repeat(64) }), { code: 'IMAGE_PROVIDER_UNAVAILABLE' });
+  await assert.rejects(() => createGeminiImageKnowledgeExtractor({ env: { GOOGLE_GENAI_MODE: 'developer' } }).extract({ bytes: png(), mimeType: 'image/png', sourceHash: 'e'.repeat(64) }), { code: 'IMAGE_PROVIDER_UNAVAILABLE' });
 });
 
 test('rejects pathological decoded dimensions before any provider request', async () => {
@@ -69,4 +70,75 @@ test('rejects pathological decoded dimensions before any provider request', asyn
   const extractor = createGeminiImageKnowledgeExtractor({ env: { GEMINI_API_KEY: 'key' }, fetchImpl: async () => { requests += 1; return response(output); } });
   await assert.rejects(() => extractor.extract({ bytes: png(10000, 10000), mimeType: 'image/png', sourceHash: 'f'.repeat(64) }), { code: 'IMAGE_DIMENSIONS_INVALID' });
   assert.equal(requests, 0);
+});
+
+test('suspended Vertex image extraction falls back to OpenAI vision with provider-accurate provenance', async () => {
+  const calls = [];
+  const extractor = createImageKnowledgeExtractor({
+    env: {
+      DASHBOARD_AI_MULTIMODAL_FAILOVER_ENABLED: 'true',
+      OPENAI_API_KEY: 'test-key',
+    },
+    circuitRegistry: new ProviderCircuitBreakerRegistry(),
+    googleProviderFactory: () => ({ generateContent: async () => {
+      calls.push('vertex');
+      throw Object.assign(new Error('suspended'), { code: 'GOOGLE_VERTEX_PERMISSION_DENIED' });
+    } }),
+    openaiClient: { chat: { completions: { create: async (request) => {
+      calls.push(request.messages[0].content[1].type);
+      return { choices: [{ message: { content: output } }] };
+    } } } },
+  });
+  const result = await extractor.extract({ bytes: png(), mimeType: 'image/png', sourceHash: 'a'.repeat(64) });
+  assert.deepEqual(calls, ['vertex', 'image_url']);
+  assert.equal(result.extractionMethod, 'OPENAI_VISION');
+  assert.equal(result.sourceHash, 'a'.repeat(64));
+});
+
+test('multimodal fallback remains disabled independently of structured failover', async () => {
+  let openaiCalls = 0;
+  const extractor = createImageKnowledgeExtractor({
+    env: {
+      DASHBOARD_AI_PROVIDER_FAILOVER_ENABLED: 'true',
+      DASHBOARD_AI_MULTIMODAL_FAILOVER_ENABLED: 'false',
+      GEMINI_API_KEY: 'key',
+      OPENAI_API_KEY: 'test-key',
+    },
+    fetchImpl: async () => response(output),
+    openaiClient: { chat: { completions: { create: async () => { openaiCalls += 1; } } } },
+  });
+  const result = await extractor.extract({ bytes: png(), mimeType: 'image/png', sourceHash: 'b'.repeat(64) });
+  assert.equal(result.extractionMethod, 'GEMINI_VISION');
+  assert.equal(openaiCalls, 0);
+});
+
+test('unsupported OpenAI vision model fails capability verification before provider invocation', async () => {
+  let calls = 0;
+  const extractor = createImageKnowledgeExtractor({
+    env: {
+      DASHBOARD_AI_MULTIMODAL_FAILOVER_ENABLED: 'true',
+      DASHBOARD_AI_OPENAI_VISION_MODEL: 'text-only-model',
+      OPENAI_API_KEY: 'test-key',
+    },
+    googleProviderFactory: () => ({ generateContent: async () => { calls += 1; } }),
+    openaiClient: { chat: { completions: { create: async () => { calls += 1; } } } },
+  });
+  await assert.rejects(
+    extractor.extract({ bytes: png(), mimeType: 'image/png', sourceHash: 'c'.repeat(64) }),
+    { code: 'IMAGE_PROVIDER_CAPABILITY_UNAVAILABLE' },
+  );
+  assert.equal(calls, 0);
+});
+
+test('invalid OpenAI vision JSON is terminal and creates no fabricated extraction', async () => {
+  const extractor = createImageKnowledgeExtractor({
+    env: { DASHBOARD_AI_MULTIMODAL_FAILOVER_ENABLED: 'true', OPENAI_API_KEY: 'test-key' },
+    circuitRegistry: new ProviderCircuitBreakerRegistry(),
+    googleProviderFactory: () => ({ generateContent: async () => { throw Object.assign(new Error('suspended'), { status: 403 }); } }),
+    openaiClient: { chat: { completions: { create: async () => ({ choices: [{ message: { content: '{bad' } }] }) } } },
+  });
+  await assert.rejects(
+    extractor.extract({ bytes: png(), mimeType: 'image/png', sourceHash: 'd'.repeat(64) }),
+    { code: 'IMAGE_PROVIDER_JSON_INVALID' },
+  );
 });

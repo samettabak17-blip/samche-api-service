@@ -90,3 +90,22 @@ test('provider timeout makes the assistant recommendation job retryable without 
   );
   assert.ok(calls.some(({ sql, params }) => /SET status = 'PENDING'/i.test(sql) && params.includes('KNOWLEDGE_GENERATION_TIMEOUT')));
 });
+
+test('all-provider unavailability retries recommendation generation but schema failure is terminal', async () => {
+  for (const [code, expectedStatus] of [
+    ['KNOWLEDGE_GENERATION_PROVIDERS_UNAVAILABLE', 'PENDING'],
+    ['KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'FAILED'],
+  ]) {
+    const calls = [];
+    const database = { query: async (sql, params = []) => { calls.push({ sql, params }); return { rows: [] }; } };
+    await assert.rejects(
+      processAssistantRecommendationGenerationJob({
+        database,
+        job: { id: `job-${code}`, tenant_id: tenantId, attempts: 1, metadata: { assistant_id: assistantId, business_profile_version_id: profileVersionId, requested_by: actorId, request_fingerprint: fingerprint } },
+        generateRecommendation: async () => { throw Object.assign(new Error(code), { code }); },
+      }),
+      { code },
+    );
+    assert.ok(calls.some(({ sql }) => new RegExp(`SET status = '${expectedStatus}'`, 'i').test(sql)));
+  }
+});
