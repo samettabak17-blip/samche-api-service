@@ -243,66 +243,31 @@ export function createKnowledgeGenerationProvider({ env = process.env, fetchImpl
       let text;
       if (config.provider === 'GEMINI') {
         emit('request_started');
-        try {
-          const response = await googleProvider.generateContent({
-            model: config.model,
-            contents: [{ role: 'user', parts: [{ text: prompt.trim() }] }],
-            generationConfig: {
-              temperature: 0,
-              responseMimeType: 'application/json',
-              responseSchema: schema,
-              ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
-              ...(Number.isInteger(maxOutputTokens) && maxOutputTokens > 0 ? { maxOutputTokens } : {}),
-            },
-            signal: timeout.signal,
-          });
-          responseReceived = true;
-          if (response?.status) emit('http_status_received', { http_status: response.status });
-          emit('fetch_fulfilled', { elapsed_ms: Date.now() - startedAt });
-          emit('structured_response_shape', { response_shape: response?.response_shape ?? null });
-          if (response?.response_shape?.finish_reason === 'MAX_TOKENS') {
-            emit('structured_parse_result', { parser: { phase: 'STRUCTURED_PAYLOAD_SELECTION', classification: 'PROVIDER_MAX_OUTPUT_TOKENS' } });
-            throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_OUTPUT_TRUNCATED', 'Knowledge generation output exceeded its bounded budget');
-          }
-          if (response?.structured_payload_error) {
-            emit('structured_parse_result', { parser: { phase: 'STRUCTURED_PAYLOAD_SELECTION', classification: response.structured_payload_error } });
-            throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_RESPONSE_INVALID', 'Knowledge generation returned an ambiguous structured response');
-          }
-          text = response?.structured_text;
-        } catch (geminiError) {
-          if (geminiError instanceof KnowledgeGenerationError && geminiError.code === 'KNOWLEDGE_GENERATION_OUTPUT_TRUNCATED') {
-            throw geminiError;
-          }
-          const hasOpenAi = Boolean(openaiClient?.chat?.completions?.create || env.OPENAI_API_KEY);
-          if (hasOpenAi && !timeout.signal.aborted) {
-            emit('provider_failover_started', { primary: 'GEMINI', secondary: 'OPENAI', primary_error: String(geminiError?.message || 'UNKNOWN').slice(0, 80) });
-            try {
-              let client = openaiClient;
-              if (!client?.chat?.completions?.create && env.OPENAI_API_KEY) {
-                const OpenAIModule = (await import('openai')).default;
-                client = new OpenAIModule({ apiKey: env.OPENAI_API_KEY });
-              }
-              if (client?.chat?.completions?.create) {
-                const failoverModel = env.KNOWLEDGE_GENERATION_OPENAI_FALLBACK_MODEL || 'gpt-4o-mini';
-                const completion = await client.chat.completions.create({
-                  model: failoverModel,
-                  temperature: 0,
-                  messages: [{ role: 'user', content: prompt.trim() }],
-                  response_format: { type: 'json_object' },
-                }, { signal: timeout.signal });
-                text = completion?.choices?.[0]?.message?.content;
-                emit('provider_failover_fulfilled', { secondary: 'OPENAI', elapsed_ms: Date.now() - startedAt });
-              } else {
-                throw geminiError;
-              }
-            } catch (failoverError) {
-              emit('provider_failover_failed', { primary: 'GEMINI', secondary: 'OPENAI', elapsed_ms: Date.now() - startedAt });
-              throw geminiError;
-            }
-          } else {
-            throw geminiError;
-          }
+        const response = await googleProvider.generateContent({
+          model: config.model,
+          contents: [{ role: 'user', parts: [{ text: prompt.trim() }] }],
+          generationConfig: {
+            temperature: 0,
+            responseMimeType: 'application/json',
+            responseSchema: schema,
+            ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
+            ...(Number.isInteger(maxOutputTokens) && maxOutputTokens > 0 ? { maxOutputTokens } : {}),
+          },
+          signal: timeout.signal,
+        });
+        responseReceived = true;
+        if (response?.status) emit('http_status_received', { http_status: response.status });
+        emit('fetch_fulfilled', { elapsed_ms: Date.now() - startedAt });
+        emit('structured_response_shape', { response_shape: response?.response_shape ?? null });
+        if (response?.response_shape?.finish_reason === 'MAX_TOKENS') {
+          emit('structured_parse_result', { parser: { phase: 'STRUCTURED_PAYLOAD_SELECTION', classification: 'PROVIDER_MAX_OUTPUT_TOKENS' } });
+          throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_OUTPUT_TRUNCATED', 'Knowledge generation output exceeded its bounded budget');
         }
+        if (response?.structured_payload_error) {
+          emit('structured_parse_result', { parser: { phase: 'STRUCTURED_PAYLOAD_SELECTION', classification: response.structured_payload_error } });
+          throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_RESPONSE_INVALID', 'Knowledge generation returned an ambiguous structured response');
+        }
+        text = response?.structured_text;
       } else {
         if (!env.OPENAI_API_KEY || !openaiClient?.chat?.completions?.create) {
           throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_PROVIDER_UNAVAILABLE', 'OpenAI knowledge generation is unavailable');

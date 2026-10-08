@@ -138,21 +138,7 @@ export async function advanceKnowledgeGenerationRun({ database, tenantId, runId,
 }
 
 export async function completeKnowledgeGenerationRun({ database, tenantId, runId, targetId, output, elapsedMs = null }) {
-  const query = databaseQuery(database);
-  const currentRun = await query(
-    `SELECT target_type, request_fingerprint FROM knowledge_generation_runs WHERE id = $1 AND tenant_id = $2`,
-    [uuid(runId, 'KNOWLEDGE_GENERATION_RUN_INVALID'), uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID')],
-  );
-  if (currentRun.rows[0]?.request_fingerprint) {
-    await query(
-      `UPDATE knowledge_generation_runs
-          SET status = 'FAILED', error_code = 'SUPERSEDED_BY_NEW_GENERATION'
-        WHERE tenant_id = $1 AND target_type = $2 AND request_fingerprint = $3
-          AND status = 'SUCCEEDED' AND id != $4`,
-      [uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID'), currentRun.rows[0].target_type, currentRun.rows[0].request_fingerprint, uuid(runId, 'KNOWLEDGE_GENERATION_RUN_INVALID')],
-    );
-  }
-  const result = await query(
+  const result = await databaseQuery(database)(
     `UPDATE knowledge_generation_runs
         SET status = 'SUCCEEDED', target_id = $3, output_hash = $4, elapsed_ms = COALESCE($5, elapsed_ms), completed_at = CURRENT_TIMESTAMP
       WHERE id = $1 AND tenant_id = $2 AND status = 'RUNNING'

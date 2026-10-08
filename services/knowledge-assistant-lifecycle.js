@@ -111,6 +111,13 @@ async function generate({ database, provider, tenantId, requestedBy, targetType,
       await generationDatabase.query('BEGIN');
       try {
         const artifact = await persist(generationDatabase, output, run.id);
+        await generationDatabase.query(
+          `UPDATE knowledge_generation_runs
+              SET status = 'FAILED', error_code = 'SUPERSEDED_BY_NEW_GENERATION'
+            WHERE tenant_id = $1 AND target_type = $2 AND request_fingerprint = $3
+              AND status = 'SUCCEEDED' AND id != $4`,
+          [tenantId, targetType, fingerprint, run.id],
+        );
         await completeKnowledgeGenerationRun({ database: generationDatabase, tenantId, runId: run.id, targetId: artifact.id, output, elapsedMs: Date.now() - startedAt });
         await generationDatabase.query('COMMIT');
         return { artifact, reused: false, run_id: run.id };
