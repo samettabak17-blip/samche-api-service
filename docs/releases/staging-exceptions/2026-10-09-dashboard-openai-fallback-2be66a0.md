@@ -338,3 +338,86 @@ STAGING_RELEASE: SCOPED_EXCEPTION_ELIGIBLE
 
 `GOLDEN_PATH` remains `FAIL`, and production remains `BLOCKED` until the full
 mandatory gate is genuinely GREEN.
+
+## Candidate 6bdaae89 evidence amendment (2026-10-09)
+
+This amendment supersedes the earlier `2e0383a0` evidence decision for the
+new application candidate. It does not authorize push or deployment.
+
+### Exact identity and scope
+
+- Current `origin/staging`: `2e0383a0c7638f0cf21f8bdaf321eaed892c1e20`
+- Application candidate: `6bdaae89c91afec0007490383ed84304f8ec19e4`
+- Rollback: `b0a7b13d6d12348c5508fef8aa1fe7718e3bcd9a`
+- Base-to-candidate diff: exactly the four application paths listed above;
+  no protected channel implementation, prompt, configuration, or test path
+  changed.
+- Candidate worktree was clean before evidence execution.
+
+### Fresh isolated Golden Path comparison
+
+Both runs used the unchanged command
+`npm.cmd run test:fresh-tenant-golden-path`, `DATABASE_SSL=false`, separate
+loopback PostgreSQL 16.15 + pgvector 0.8.6 clusters, and newly created clean
+databases. No staging, production, customer, Render, or development database
+was accessed.
+
+| Revision | Result | Tests | Pass | Fail | Skipped | Exit | Evidence |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `2e0383a0` | **FAIL** at `TASKS_1_TO_7_AND_FRESH_TENANT_TESTS` | 2,253 | 2,222 | 29 | 2 | 1 | `base-2e0383-golden-path.log`; SHA-256 `6E56212F3C463AE17F225E1E969F8893A4FEABEF11326A29661E4C4C6CE27DB7` |
+| `6bdaae89` | **FAIL** at `TASKS_1_TO_7_AND_FRESH_TENANT_TESTS` | 2,254 | 2,221 | 31 | 2 | 1 | `candidate-6bdaae8-golden-path.log`; SHA-256 `53ABC33366FB6BF413293B3ABE5B17AC04AB69D0AD9C1B44F16B7117B597D658` |
+
+The 29 normalized base failures are identical on both revisions:
+
+1. `test/channelAiActivationPolicy.test.js` — FIRST CONTACT; AI_ONLY selection
+2. `test/guideAcceptanceTask7L.test.js` — Task 7L2 runtime context contract
+3. `test/instagramBehaviorCorrection.test.js` — TEST F policy SHA-256
+4. `test/instagramDeliveryMemoryAndQualification.test.js` — tests 32 and 33
+5. `test/instagramWebhookAcceptance.test.js` — CRM fallback stage
+6. `test/internalWhatsAppDeliveryObservability.test.js` — phases 4.1, 4.8–4.12, 4.14, 4.17
+7. `test/migrationConstraintIdempotency.test.js` — migration regression
+8. `test/samcheInstagramAiOnlyOverride.test.js` — test 4
+9. `test/samcheKnowledgeMigrationRetrieval.test.js` — canonical sources/hash
+10. `test/samcheWhatsAppCandidateParity.test.js` — scenarios 4–6, 19–22, baseline hash
+11. `test/task9CustomerInitiatedWhatsAppCta.test.js` — master policy hash
+12. `test/task9FinalInstagramMainParity.test.js` — master policy hash
+13. `test/task9InstagramInboxHistoryAndLeadQualification.test.js` — TEST O hash
+14. `test/whatsappAuthoritativePolicy.test.js` — canonical policy bytes
+15. `test/whatsappDeliveryStatus.test.js` — delivery correlation, tenant mutation, early status reconciliation (3 tests)
+16. `tests/guide-lifecycle-postgres.test.js` — CASES 1–7
+17. `tests/public-web-chat-runtime-integration.test.js` — signed Web Chat persona resolution
+18. `tests/web-chat-productization.test.js` — cross-tenant logo authorization
+
+The candidate additionally failed two unchanged Web Chat browser tests:
+
+- `tests/web-chat-e2e-browser.test.js` — Responsive Viewports (414px panel width)
+- `tests/web-chat-e2e-browser.test.js` — Adversarial Host CSS Isolation (launcher sizing)
+
+These are candidate-only failures under the governance contract. They are not
+reclassified as baseline failures, and the Golden Path remains FAIL.
+
+### Focused regression evidence
+
+The required Dashboard/provider/lifecycle/security/tenant suite was rerun with
+the exact command recorded in the task evidence: **88 tests, 88 passed, 0
+failed, 0 skipped**, exit 0. Safe schema diagnostics, provider failover,
+`NEEDS_REVIEW` persistence, authorization, tenant isolation, and security
+checks remained successful.
+
+### Binding decision for this candidate
+
+```text
+GOLDEN_PATH: FAIL
+FAILURE_SET_EQUIVALENCE: NO — candidate-only failures: 2
+EXCEPTION_ELIGIBILITY: NOT_ELIGIBLE
+STAGING_RELEASE: HOLD
+PUSH: NO
+DEPLOY: NO
+PRODUCTION_RELEASE: BLOCKED
+READY_FOR_FINAL_STAGING_APPROVAL: NO
+```
+
+The prior exception approval does not cover `6bdaae89`. A fresh comparison is
+required after the candidate-only browser failures are resolved or independently
+proven equivalent under an approved, unchanged test environment. No failure,
+skip, or protected-channel result has been reclassified.
