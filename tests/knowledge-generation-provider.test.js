@@ -165,6 +165,29 @@ test('Recommendation validator remains fail-closed with safe contract diagnostic
   assert.deepEqual(validateAssistantRecommendationOutput({ schema_version: 2, tone: 'Professional' }), { schema_version: 2, tone: 'Professional' });
 });
 
+test('Recommendation schema diagnostics identify an empty array by safe field path', async () => {
+  const events = [];
+  const provider = failoverProvider({
+    telemetry: (event) => events.push(event),
+    vertex: async () => { throw Object.assign(new Error('unavailable'), { status: 503 }); },
+    openai: async () => ({ choices: [{ message: { content: JSON.stringify({ schema_version: 2, evidence_gaps: [] }) } }] }),
+  });
+
+  await assert.rejects(
+    provider.generateAssistantRecommendation({ prompt: 'PRIVATE TENANT PROFILE' }),
+    (error) => error.details?.code === 'EMPTY_ARRAY'
+      && error.details?.field === 'evidence_gaps'
+      && error.details?.field_path === 'evidence_gaps',
+  );
+  const diagnostic = events.find((event) => event.event === 'structured_parse_result' && event.parser?.phase === 'SCHEMA_VALIDATION');
+  assert.deepEqual(diagnostic.parser, {
+    phase: 'SCHEMA_VALIDATION',
+    classification: 'EMPTY_ARRAY',
+    field_path: 'evidence_gaps',
+  });
+  assert.equal(JSON.stringify(events).includes('PRIVATE TENANT PROFILE'), false);
+});
+
 test('Vertex success does not call OpenAI for Assistant Recommendation', async () => {
   let openaiCalls = 0;
   const provider = failoverProvider({

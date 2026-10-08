@@ -152,40 +152,53 @@ export function buildRecommendationResponseSchema() {
 }
 
 function validateOutput(value, fields) {
+  const schemaError = (code, fieldPath = null, message = 'Knowledge generation field is invalid') => {
+    const field = fieldPath ? fieldPath.split('[')[0] : null;
+    throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', message, {
+      details: { code, field, field_path: fieldPath },
+    });
+  };
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation output must be an object', { details: { code: 'INVALID_FIELD_TYPE', field: null } });
+    schemaError('INVALID_FIELD_TYPE', null, 'Knowledge generation output must be an object');
   }
   const allowed = new Set(fields);
   const entries = Object.entries(value);
   if (!entries.length) {
-    throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation output contains no supported fields', { details: { code: 'NO_RECOMMENDATION_FIELDS', field: null } });
+    schemaError('NO_RECOMMENDATION_FIELDS');
   }
   if (entries.some(([key]) => !allowed.has(key))) {
     const field = entries.find(([key]) => !allowed.has(key))?.[0];
-    throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation output contains unsupported fields', { details: { code: 'UNEXPECTED_FIELD', field } });
+    schemaError('UNEXPECTED_FIELD', field, 'Knowledge generation output contains unsupported fields');
   }
   const normalized = {};
   for (const [key, item] of entries) {
     if (key === 'schema_version') {
-      if (item !== 2) throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation schema version is invalid', { details: { code: 'INVALID_SCHEMA_VERSION', field: key } });
+      if (item !== 2) schemaError('INVALID_SCHEMA_VERSION', key, 'Knowledge generation schema version is invalid');
       normalized[key] = 2;
       continue;
     }
     if (typeof item === 'string') {
       const text = item.trim();
-      if (!text) throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation field is invalid', { details: { code: 'EMPTY_FIELD', field: key } });
-      if (text.length > 4000) throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation field is invalid', { details: { code: 'STRING_TOO_LONG', field: key } });
+      if (!text) schemaError('EMPTY_FIELD', key);
+      if (text.length > 4000) schemaError('STRING_TOO_LONG', key);
       normalized[key] = text;
       continue;
     }
-    if (Array.isArray(item) && item.length > 0 && item.length <= 50 && item.every((entry) => typeof entry === 'string' && entry.trim() && entry.trim().length <= 1000)) {
+    if (Array.isArray(item)) {
+      if (!item.length) schemaError('EMPTY_ARRAY', key);
+      if (item.length > 50) schemaError('ARRAY_TOO_LARGE', key);
+      const invalidIndex = item.findIndex((entry) => typeof entry !== 'string' || !entry.trim() || entry.trim().length > 1000);
+      if (invalidIndex >= 0) {
+        const entry = item[invalidIndex];
+        const entryPath = `${key}[${invalidIndex}]`;
+        if (typeof entry !== 'string') schemaError('INVALID_FIELD_TYPE', entryPath);
+        if (!entry.trim()) schemaError('EMPTY_FIELD', entryPath);
+        if (entry.trim().length > 1000) schemaError('ARRAY_ITEM_TOO_LONG', entryPath);
+      }
       normalized[key] = item.map((entry) => entry.trim());
       continue;
     }
-    const code = Array.isArray(item)
-      ? (item.length > 50 ? 'ARRAY_TOO_LARGE' : item.some((entry) => typeof entry === 'string' && entry.trim().length > 1000) ? 'ARRAY_ITEM_TOO_LONG' : item.some((entry) => typeof entry === 'string' && !entry.trim()) ? 'EMPTY_FIELD' : 'INVALID_FIELD_TYPE')
-      : 'INVALID_FIELD_TYPE';
-    throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_SCHEMA_INVALID', 'Knowledge generation field is invalid', { details: { code, field: key } });
+    schemaError('INVALID_FIELD_TYPE', key);
   }
   return normalized;
 }
@@ -292,6 +305,23 @@ export function createKnowledgeGenerationProvider({
       }),
     }, () => fetchImpl(...args));
     const policy = getDashboardAiProviderPolicy(operation, env);
+    const parseAndValidate = (text) => {
+      const parsed = parseJson(text, (parser) => emit('structured_parse_result', { parser }));
+      try {
+        return validate(parsed);
+      } catch (error) {
+        if (error?.code === 'KNOWLEDGE_GENERATION_SCHEMA_INVALID') {
+          emit('structured_parse_result', {
+            parser: {
+              phase: 'SCHEMA_VALIDATION',
+              classification: error.details?.code ?? 'SCHEMA_INVALID',
+              field_path: error.details?.field_path ?? null,
+            },
+          });
+        }
+        throw error;
+      }
+    };
 
     if (policy.failoverEnabled) {
       try {
@@ -366,7 +396,7 @@ export function createKnowledgeGenerationProvider({
           emit('structured_parse_result', { parser: { phase: 'STRUCTURED_PAYLOAD_SELECTION', classification: result.output.structuredPayloadError } });
           throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_RESPONSE_INVALID', 'Knowledge generation returned an ambiguous structured response');
         }
-        const output = validate(parseJson(result.output?.text, (parser) => emit('structured_parse_result', { parser })));
+        const output = parseAndValidate(result.output?.text);
         await flushTelemetry();
         return output;
       } catch (error) {
@@ -422,7 +452,7 @@ export function createKnowledgeGenerationProvider({
         }, { signal: timeout.signal });
         text = completion?.choices?.[0]?.message?.content;
       }
-      const output = validate(parseJson(text, (parser) => emit('structured_parse_result', { parser })));
+      const output = parseAndValidate(text);
       await flushTelemetry();
       return output;
     } catch (error) {

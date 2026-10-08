@@ -94,6 +94,9 @@ test('Dashboard recommendation OpenAI fallback receives an explicit JSON instruc
   assert.deepEqual(openaiRequest.response_format, { type: 'json_object' });
   assert.equal(openaiRequest.messages.length, 1);
   assert.match(openaiRequest.messages[0].content, /Return one valid JSON object only\./);
+  assert.match(openaiRequest.messages[0].content, /schema_version must be the JSON number 2/i);
+  assert.match(openaiRequest.messages[0].content, /non-empty JSON array of non-empty strings/i);
+  assert.match(openaiRequest.messages[0].content, /Never emit empty arrays/i);
   assert.equal(result.recommendation.status, 'NEEDS_REVIEW');
   const insert = calls.find(({ sql }) => /INSERT INTO assistant_knowledge_recommendations/i.test(sql));
   assert.deepEqual(insert.params[2], { schema_version: 2, tone: 'Professional' });
