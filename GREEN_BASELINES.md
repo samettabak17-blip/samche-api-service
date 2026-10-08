@@ -304,6 +304,26 @@ Korunan:
 
 ## Governance & Next Roadmap Gates (Gelecek Doğrulama Kapıları — HENÜZ GREEN DEĞİL)
 
+### Scoped Staging Exception Governance (GREEN Durumu Değişmez)
+
+- Yalnızca `AGENTS.md` içindeki insan onaylı scoped staging exception
+  sözleşmesine uygun, tek kullanımlık staging kararları verilebilir.
+- Bu mekanizma hiçbir başarısız testi, capability'yi veya Fresh Tenant Golden
+  Path sonucunu GREEN/PASS olarak yeniden sınıflandırmaz.
+- Production, `main` ve production promotion için istisna yoktur; eksiksiz ve
+  gerçek full GREEN zorunludur.
+- Her karar exact application candidate/base/rollback commitlerini, varsa
+  allowlist ile sınırlı governance-only descendant release HEAD'ini, exact diff
+  allowlistini, değiştirilmemiş golden-path çıktısını, base/candidate failure
+  karşılaştırmasını, security ve tenant-isolation kanıtını, shared-provider
+  dolaylı etki incelemesini, insan onayını ve rollback planını içeren bir kayıtla
+  denetlenebilir olmalıdır.
+- Kayıt `docs/releases/staging-exceptions/` altında tutulur; eksik, eski veya
+  kapsamı değişmiş kayıt staging yayın yetkisi vermez.
+- Instagram, WhatsApp, Web Chatbot ve AI Guide için burada kayıtlı GREEN
+  değişmezler aynen korunur. Scoped exception bu alanların koduna, testlerine,
+  promptlarına, fixture'larına veya policy'lerine dokunma yetkisi vermez.
+
 Aşağıdaki alanlar henüz fiziksel olarak test edilip kabul edilmemiştir; KESİNLİKLE GREEN OLARAK İŞARETLENEMEZ:
 
 ### Fresh Tenant Gate #1 (Sıradaki Yürütme Kapısı)

@@ -467,3 +467,84 @@ modify files outside the authorized scope.
   a parallel frontend source of identity truth. PostgreSQL-backed identity and
   provenance decisions require disposable real-PostgreSQL regression coverage.
 - Tenant-specific factual claims require eligible canonical tenant authority (ACTIVE Business Profile, ACTIVE Assistant Configuration, or approved canonical Knowledge Intelligence). General model/world knowledge may support reasoning, generic domain concepts, or general educational explanation, but must never be promoted into unsupported facts about a tenant.
+
+## 12. Human-approved scoped staging exception
+
+The cumulative Fresh Tenant Golden Path remains the mandatory release contract.
+A scoped exception does not make a failing test, capability, suite, or Golden
+Path GREEN. It is a documented, one-time human decision to permit one exact
+commit to one staging release while a separately owned, pre-existing failure
+remains unresolved.
+
+### Absolute boundary
+
+- This mechanism applies to staging only. Production, `main`, production
+  promotion, and any production-equivalent release require the complete
+  mandatory gate to be genuinely GREEN with zero exceptions.
+- The unchanged `npm run test:fresh-tenant-golden-path` command MUST be run and
+  its non-zero result, failing stage, and exact failures MUST be preserved in
+  the evidence record. The runner, tests, classifications, and assertions MUST
+  NOT be changed, skipped, filtered, quarantined, muted, or reclassified to
+  create eligibility.
+- An exception never authorizes a push, deployment, merge, production action,
+  or physical-acceptance claim by itself. Those actions require their own
+  explicit human approval after the evidence record is complete.
+- Agents MUST report the Golden Path as `FAIL`, the staging decision as either
+  `HOLD` or `SCOPED_EXCEPTION_ELIGIBLE`, and production as `BLOCKED`. They MUST
+  NOT use `GREEN`, `PASS`, or `TASK_COMPLETE = YES` for the cumulative gate.
+
+### Eligibility requirements
+
+Before an exception can become `SCOPED_EXCEPTION_ELIGIBLE`, all of the
+following are mandatory:
+
+1. A record exists under `docs/releases/staging-exceptions/` and identifies the
+   exact application candidate commit, exact staging base, exact rollback
+   commit, intended staging release, creation time, expiry condition, and human
+   approval source. If the governance record is committed after the application
+   candidate, the release HEAD may be a direct descendant only when every
+   intervening path is an explicitly allowlisted governance document. The
+   resulting release HEAD must be captured in the external final approval and
+   deployment evidence; application code outside the candidate is forbidden.
+2. The candidate and base run the unchanged cumulative gate in equivalent,
+   isolated test environments. The same explicitly recorded pre-existing
+   failures must be present on both. Any additional, renamed, missing, or
+   differently behaving failure invalidates the exception.
+3. The record contains exact commands, timestamps, exit codes, failing stage,
+   test names, and artifact/log references. Prior task summaries alone are not
+   fresh release evidence.
+4. A strict base-to-candidate diff review records every changed path. The
+   changed-path set must exactly match the human-approved allowlist; no wildcard
+   or directory-wide approval is allowed.
+5. Focused tests for the candidate change, tenant-isolation tests, security and
+   authorization tests, provider-failure tests, and all other tests affected by
+   the diff pass with zero skips introduced by the candidate.
+6. Shared dependencies and provider layers receive an explicit indirect-impact
+   review. The record must list their callers and explain why customer-channel
+   behavior is unchanged, with focused regression evidence where a shared path
+   could affect Instagram, WhatsApp, Web Chatbot, or AI Guide.
+7. Protected customer-channel implementation, tests, fixtures, prompts, and
+   policies are unchanged unless separately and explicitly authorized. A
+   staging exception cannot authorize such a change implicitly.
+8. The record contains detection signals, rollback owner, rollback steps, and
+   the last known safe rollback commit. Rollback must use normal auditable Git
+   and deployment history; force-push, destructive reset, or history rewriting
+   is forbidden.
+9. A human reviews the completed evidence and explicitly approves the exact
+   candidate for the exact staging release. An agent cannot approve its own
+   exception or infer approval from a general request to continue.
+
+### Validity and closure
+
+The exception is single-use and becomes invalid when the candidate hash,
+approved governance-only descendant, staging base, diff, test files, test
+runner, failure set, release target, or approval scope changes; when the remote
+staging branch advances; when evidence is incomplete or stale; or when any
+security, tenant-isolation, authorization, data-integrity, migration, or
+customer-channel regression is observed.
+
+After staging deployment, the requested Dashboard behavior and protected
+customer-channel smoke checks require human physical acceptance. A failed
+acceptance triggers the recorded rollback. The underlying red tests remain an
+open blocker and must be resolved before production or removal of the evidence
+record's unresolved-risk status.
