@@ -318,6 +318,12 @@ Korunan:
   karşılaştırmasını, security ve tenant-isolation kanıtını, shared-provider
   dolaylı etki incelemesini, insan onayını ve rollback planını içeren bir kayıtla
   denetlenebilir olmalıdır.
+- Tek kullanımlık staging uygunluğu, eşdeğer izole ortamlarda değiştirilmemiş
+  komutla üretilen base ve candidate tam normalize failure identity kümelerinin
+  birebir eşitliğine dayanabilir. Base kümesi yalnız o exact release için
+  immutable allowlist olur; candidate-only, yeniden adlandırılmış, eksik veya
+  farklı davranan failure ya da ek skip istisnayı geçersiz kılar. Bu eşitlik
+  hiçbir suite'i veya Golden Path'i GREEN/PASS yapmaz.
 - Kayıt `docs/releases/staging-exceptions/` altında tutulur; eksik, eski veya
   kapsamı değişmiş kayıt staging yayın yetkisi vermez.
 - Instagram, WhatsApp, Web Chatbot ve AI Guide için burada kayıtlı GREEN

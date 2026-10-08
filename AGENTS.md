@@ -473,8 +473,8 @@ modify files outside the authorized scope.
 The cumulative Fresh Tenant Golden Path remains the mandatory release contract.
 A scoped exception does not make a failing test, capability, suite, or Golden
 Path GREEN. It is a documented, one-time human decision to permit one exact
-commit to one staging release while a separately owned, pre-existing failure
-remains unresolved.
+commit to one staging release while a separately owned, explicitly recorded
+set of pre-existing failures remains unresolved.
 
 ### Absolute boundary
 
@@ -507,9 +507,13 @@ following are mandatory:
    resulting release HEAD must be captured in the external final approval and
    deployment evidence; application code outside the candidate is forbidden.
 2. The candidate and base run the unchanged cumulative gate in equivalent,
-   isolated test environments. The same explicitly recorded pre-existing
-   failures must be present on both. Any additional, renamed, missing, or
-   differently behaving failure invalidates the exception.
+   isolated test environments. Eligibility is based on exact equality of the
+   complete normalized failure identities recorded for those runs, not on a
+   globally fixed failure count. The record's base failure set becomes the
+   immutable allowlist for that one release only. The candidate must have zero
+   candidate-only failures, zero renamed, missing, or differently behaving
+   failures, and no additional skipped tests. Baseline equality never makes
+   the cumulative gate or any failing suite GREEN.
 3. The record contains exact commands, timestamps, exit codes, failing stage,
    test names, and artifact/log references. Prior task summaries alone are not
    fresh release evidence.
