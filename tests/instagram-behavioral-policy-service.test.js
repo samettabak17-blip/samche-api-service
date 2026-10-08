@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { resolveInstagramBehavioralPolicy } from '../services/instagram-behavioral-policy-service.js';
+import { resolveTenantRuntimePersona } from '../services/tenant-runtime-persona-service.js';
 import {
   buildInstagramBehavioralInstruction,
   buildInstagramChannelRules,
@@ -52,6 +53,40 @@ test('accepts a complete uploaded behavioral prompt within the default bound', (
     }),
     { policy: uploadedPrompt, configured: true },
   );
+});
+
+test('an active assistant configuration carries its Instagram behavioral policy into the Instagram runtime', async () => {
+  const activeConfiguration = {
+    id: '11111111-1111-4111-8111-111111111111',
+    configuration_schema_version: 2,
+    configuration_data: {
+      schema_version: 2,
+      assistant_identity: 'Tenant One Assistant',
+      channel_adaptations: {
+        instagram: {
+          behavioral_prompt: 'PREPARED INSTAGRAM POLICY',
+          behavioral_policy_version: 'v1',
+        },
+      },
+    },
+    active_business_profile_version_id: '22222222-2222-4222-8222-222222222222',
+    profile_schema_version: 2,
+    active_business_profile: { schema_version: 2, company_identity: 'Tenant One LLC' },
+  };
+  const persona = await resolveTenantRuntimePersona({
+    database: {},
+    tenantId: '33333333-3333-4333-8333-333333333333',
+    assistantId: '44444444-4444-4444-8444-444444444444',
+    resolveConfiguration: async () => activeConfiguration,
+  });
+  const channelRules = buildInstagramChannelRules({ persona, currentIntent: 'Merhaba' });
+
+  assert.equal(persona.configurationVersionId, '11111111-1111-4111-8111-111111111111');
+  assert.deepEqual(resolveInstagramBehavioralPolicy({ persona }), {
+    policy: 'PREPARED INSTAGRAM POLICY',
+    configured: true,
+  });
+  assert.match(channelRules, /PREPARED INSTAGRAM POLICY/);
 });
 
 test('makes tenant behavioral policy mandatory after current intent and conversation context', () => {

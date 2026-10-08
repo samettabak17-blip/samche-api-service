@@ -26,6 +26,37 @@ function safeInternalErrorCode(error) {
     ?? (String(error?.code ?? '').startsWith('KNOWLEDGE_') ? safeDiagnosticText(error.code, 80) : null);
 }
 
+function workerFailureCode(error) {
+  return String(error?.code ?? 'KNOWLEDGE_SEMANTIC_GENERATION_FAILED').replace(/[^A-Z0-9_]/gi, '_').slice(0, 80)
+    || 'KNOWLEDGE_SEMANTIC_GENERATION_FAILED';
+}
+
+function safeRecommendationFailureMessage(errorCode) {
+  const messages = {
+    KNOWLEDGE_GENERATION_PROVIDER_FAILED: 'Recommendation generation provider request failed',
+    KNOWLEDGE_GENERATION_TIMEOUT: 'Recommendation generation provider timed out',
+    KNOWLEDGE_GENERATION_OUTPUT_TRUNCATED: 'Recommendation generation output was truncated',
+    KNOWLEDGE_GENERATION_RESPONSE_INVALID: 'Recommendation generation response was invalid',
+    KNOWLEDGE_GENERATION_SCHEMA_INVALID: 'Recommendation generation response did not satisfy the required schema',
+    KNOWLEDGE_RECOMMENDATION_CONTEXT_NOT_FOUND: 'Recommendation generation context was unavailable',
+    KNOWLEDGE_RECOMMENDATION_POLICY_CHANGED: 'Recommendation generation context changed before completion',
+  };
+  return messages[errorCode] ?? 'Recommendation generation failed';
+}
+
+function safeWorkerFailureDiagnostic({ job = null, error }) {
+  const metadata = job?.metadata && typeof job.metadata === 'object' ? job.metadata : {};
+  const errorCode = workerFailureCode(error);
+  return {
+    job_id: safeDiagnosticText(job?.id, 80),
+    tenant_id: safeDiagnosticText(job?.tenant_id, 80),
+    assistant_id: safeDiagnosticText(metadata.assistant_id, 80),
+    last_error_code: errorCode,
+    error_class: safeDiagnosticText(error?.name ?? error?.constructor?.name, 80) ?? 'UnknownError',
+    safe_error_message: safeRecommendationFailureMessage(errorCode),
+  };
+}
+
 export async function recordAssistantRecommendationEnqueueFailureDiagnostic({
   database,
   requestId,
@@ -186,7 +217,7 @@ export async function getBusinessProfileGenerationJob({ database, tenantId, jobI
   return result.rows[0] ? safeBusinessProfileJob(result.rows[0]) : null;
 }
 
-export async function enqueueAssistantRecommendationGenerationJob({ database, tenantId, assistantId, businessProfileVersionId, requestedBy, fingerprint, providerPolicy }) {
+export async function enqueueAssistantRecommendationGenerationJob({ database, tenantId, assistantId, businessProfileVersionId, requestedBy, fingerprint, providerPolicy, retryRequested = false }) {
   if (!database?.query || !UUID.test(String(tenantId)) || !UUID.test(String(assistantId)) || !UUID.test(String(businessProfileVersionId)) || !UUID.test(String(requestedBy)) || !HASH.test(String(fingerprint))) {
     throw new KnowledgeSemanticGenerationJobError('KNOWLEDGE_ASSISTANT_RECOMMENDATION_JOB_INVALID', 'Assistant Recommendation generation request is invalid');
   }
@@ -204,13 +235,26 @@ export async function enqueueAssistantRecommendationGenerationJob({ database, te
      ON CONFLICT (tenant_id, job_type, content_hash, embedding_model, embedding_version)
        WHERE job_type = 'GENERATE_ASSISTANT_RECOMMENDATION'
      DO UPDATE SET
-       status = CASE WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') THEN knowledge_processing_jobs.status ELSE 'PENDING' END,
-       available_at = CASE WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') THEN knowledge_processing_jobs.available_at ELSE CURRENT_TIMESTAMP END,
-       last_error_code = CASE WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') THEN knowledge_processing_jobs.last_error_code ELSE NULL END,
+       status = CASE
+         WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') AND NOT $4::boolean THEN knowledge_processing_jobs.status
+         ELSE 'PENDING'
+       END,
+       attempts = CASE
+         WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') AND NOT $4::boolean THEN knowledge_processing_jobs.attempts
+         ELSE 0
+       END,
+       available_at = CASE
+         WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') AND NOT $4::boolean THEN knowledge_processing_jobs.available_at
+         ELSE CURRENT_TIMESTAMP
+       END,
+       last_error_code = CASE
+         WHEN knowledge_processing_jobs.status IN ('PENDING', 'PROCESSING', 'READY') AND NOT $4::boolean THEN knowledge_processing_jobs.last_error_code
+         ELSE NULL
+       END,
        metadata = knowledge_processing_jobs.metadata || EXCLUDED.metadata,
        updated_at = CURRENT_TIMESTAMP
      RETURNING id, tenant_id, job_type, status, attempts, available_at, last_error_code, metadata, created_at, updated_at`,
-    [tenantId, String(fingerprint).toLowerCase(), JSON.stringify(metadata)],
+    [tenantId, String(fingerprint).toLowerCase(), JSON.stringify(metadata), retryRequested === true],
   );
   return safeAssistantRecommendationJob(result.rows[0]);
 }
@@ -711,6 +755,7 @@ export function startImageSemanticGenerationWorker({ database, semanticClassifie
     if (stopped || running) return;
     running = true;
     lastTickAt = new Date().toISOString();
+    let failedJob = null;
     try {
       await recoverStaleImageSemanticGenerationJobs(database);
       await recoverStaleBusinessProfileGenerationJobs(database);
@@ -738,6 +783,7 @@ export function startImageSemanticGenerationWorker({ database, semanticClassifie
           const recommendationJob = await claimNextAssistantRecommendationGenerationJob(database);
           if (recommendationJob) {
             lastClaimedAt = new Date().toISOString();
+            failedJob = recommendationJob;
             await processAssistantRecommendationGenerationJob({ database, job: recommendationJob, generateRecommendation });
             lastCompletedAt = new Date().toISOString();
             lastFailureCode = null;
@@ -756,8 +802,8 @@ export function startImageSemanticGenerationWorker({ database, semanticClassifie
       }
     } catch (error) {
       lastFailureAt = new Date().toISOString();
-      lastFailureCode = String(error?.code ?? 'KNOWLEDGE_SEMANTIC_GENERATION_FAILED').replace(/[^A-Z0-9_]/gi, '_').slice(0, 80);
-      logger.error('KNOWLEDGE_SEMANTIC_GENERATION_WORKER_FAILED', String(error?.code ?? 'UNKNOWN'));
+      lastFailureCode = workerFailureCode(error);
+      logger.error('KNOWLEDGE_SEMANTIC_GENERATION_WORKER_FAILED', safeWorkerFailureDiagnostic({ job: failedJob, error }));
     } finally { running = false; }
   };
   void tick();

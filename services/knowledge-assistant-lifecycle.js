@@ -56,12 +56,18 @@ async function existingSuccessfulArtifact({ database, tenantId, targetType, fing
   const relation = targetType === 'RECOMMENDATION'
     ? 'assistant_knowledge_recommendations'
     : 'assistant_configuration_versions';
+  const validStatusFilter = targetType === 'RECOMMENDATION'
+    ? "artifact.status IN ('NEEDS_REVIEW', 'APPROVED')"
+    : "artifact.status IN ('NEEDS_REVIEW', 'APPROVED', 'ACTIVE')";
   const result = await database.query(
     `SELECT artifact.*, run.id AS run_id
        FROM knowledge_generation_runs run
        JOIN ${relation} artifact ON artifact.id = run.target_id AND artifact.tenant_id = run.tenant_id
       WHERE run.tenant_id = $1 AND run.target_type = $2 AND run.request_fingerprint = $3
-        AND run.status = 'SUCCEEDED' LIMIT 1`,
+        AND run.status = 'SUCCEEDED'
+        AND ${validStatusFilter}
+      ORDER BY artifact.created_at DESC
+      LIMIT 1`,
     [tenantId, targetType, fingerprint],
   );
   return result.rows[0] ?? null;
@@ -127,7 +133,7 @@ export async function prepareAssistantRecommendationGeneration({ database, provi
             profile_version.source_scope, profile_version.evidence, profile_version.profile_data
        FROM ai_assistants assistant
        JOIN business_profiles profile ON profile.tenant_id = assistant.tenant_id ${allowInactiveProfileSnapshot ? '' : 'AND profile.active_version_id = $3'}
-       JOIN business_profile_versions profile_version ON profile_version.id = $3 AND profile_version.tenant_id = profile.tenant_id AND profile_version.status = 'APPROVED'
+       JOIN business_profile_versions profile_version ON profile_version.id = $3 AND profile_version.profile_id = profile.id AND profile_version.tenant_id = profile.tenant_id AND profile_version.status = 'APPROVED'
       WHERE assistant.id = $1 AND assistant.tenant_id = $2 AND profile_version.id = $3 AND assistant.status = 'active'`, [assistantId, tenantId, businessProfileVersionId]);
   if (!context.rows[0] || (!allowInactiveProfileSnapshot && context.rows[0].profile_version_id !== businessProfileVersionId)) throw new KnowledgeAssistantLifecycleError('KNOWLEDGE_RECOMMENDATION_CONTEXT_NOT_FOUND', 'An active approved Business Profile is required');
   const provenance = { profile_version_id: context.rows[0].profile_version_id, business_identity_id: context.rows[0].business_identity_id, source_scope: context.rows[0].source_scope, assistant_id: assistantId };
@@ -217,10 +223,18 @@ export async function reviewAssistantRecommendation({ database, tenantId, assist
   const status = String(decision).toUpperCase();
   if (!['APPROVED', 'REJECTED'].includes(status)) throw new KnowledgeAssistantLifecycleError('KNOWLEDGE_RECOMMENDATION_DECISION_INVALID', 'Recommendation decision is invalid');
   const result = await database.query(`UPDATE assistant_knowledge_recommendations SET status = $5, reviewed_by = $4, reviewed_at = CURRENT_TIMESTAMP
-    WHERE id = $1 AND tenant_id = $2 AND assistant_id = $3 AND status IN ('DRAFT', 'NEEDS_REVIEW') RETURNING id, status`,
+    WHERE id = $1 AND tenant_id = $2 AND assistant_id = $3 AND status IN ('DRAFT', 'NEEDS_REVIEW') RETURNING id, status, generation_run_id`,
   [uuid(recommendationId, 'KNOWLEDGE_RECOMMENDATION_INVALID'), uuid(tenantId, 'KNOWLEDGE_TENANT_INVALID'), uuid(assistantId, 'KNOWLEDGE_ASSISTANT_INVALID'), uuid(reviewedBy, 'KNOWLEDGE_REVIEWER_INVALID'), status]);
   if (!result.rows[0]) throw new KnowledgeAssistantLifecycleError('KNOWLEDGE_RECOMMENDATION_NOT_REVIEWABLE', 'Recommendation is not reviewable');
-  return result.rows[0];
+  if (status === 'REJECTED' && result.rows[0].generation_run_id) {
+    await database.query(
+      `UPDATE knowledge_generation_runs
+          SET status = 'FAILED', error_code = 'RECOMMENDATION_REJECTED'
+        WHERE id = $1 AND tenant_id = $2 AND status = 'SUCCEEDED'`,
+      [result.rows[0].generation_run_id, tenantId],
+    ).catch(() => {});
+  }
+  return { id: result.rows[0].id, status: result.rows[0].status };
 }
 
 export async function rejectAssistantConfigurationVersion({ database, tenantId, assistantId, versionId, reviewedBy }) {

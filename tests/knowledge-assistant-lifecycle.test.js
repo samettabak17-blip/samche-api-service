@@ -72,6 +72,49 @@ test('a queued recommendation retains its approved profile-version snapshot when
   assert.match(context.sql, /profile_version\.id = \$3/i);
 });
 
+test('prepares a queued recommendation only from the business profile that owns its tenant-scoped version', async () => {
+  const businessProfileVersionId = '11111111-1111-4111-8111-111111111111';
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/FROM ai_assistants assistant/i.test(sql)) {
+      if (!/profile_version\.profile_id = profile\.id/i.test(sql)) return { rows: [] };
+      return { rows: [{
+        assistant_name: 'Tenant A Sales',
+        profile_version_id: businessProfileVersionId,
+        business_identity_id: '55555555-5555-4555-8555-555555555555',
+        source_scope: { source_ids: ['tenant-a-approved-source'] },
+        evidence: { source_hashes: ['tenant-a-approved-hash'] },
+        profile_data: { company_identity: 'Tenant A Business' },
+      }] };
+    }
+    if (/INSERT INTO knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'RUNNING' }] };
+    if (/INSERT INTO assistant_knowledge_recommendations/i.test(sql)) return { rows: [{ id: '33333333-3333-4333-8333-333333333333', status: 'NEEDS_REVIEW' }] };
+    if (/UPDATE knowledge_generation_runs/i.test(sql)) return { rows: [{ id: params[0], status: 'SUCCEEDED' }] };
+    return { rows: [] };
+  } };
+
+  const result = await generateAssistantRecommendation({
+    database,
+    provider: provider({ schema_version: 2, tone: 'Professional' }),
+    tenantId,
+    assistantId,
+    businessProfileVersionId,
+    requestedBy: actorId,
+    allowInactiveProfileSnapshot: true,
+  });
+
+  assert.equal(result.recommendation.status, 'NEEDS_REVIEW');
+  const context = calls.find(({ sql }) => /FROM ai_assistants assistant/i.test(sql));
+  assert.match(context.sql, /profile_version\.profile_id = profile\.id/i);
+  assert.match(context.sql, /assistant\.tenant_id = \$2/i);
+  const insert = calls.find(({ sql }) => /INSERT INTO assistant_knowledge_recommendations/i.test(sql));
+  assert.equal(insert.params[0], tenantId);
+  assert.equal(insert.params[1], assistantId);
+  assert.equal(insert.params[3].business_identity_id, '55555555-5555-4555-8555-555555555555');
+  assert.deepEqual(insert.params[3].source_scope.source_ids, ['tenant-a-approved-source']);
+});
+
 test('generates a review-only configuration from an approved recommendation', async () => {
   const calls = [];
   const recommendationId = '33333333-3333-4333-8333-333333333333';
@@ -219,6 +262,30 @@ test('review transitions remain explicit and tenant scoped', async () => {
   assert.equal(configuration.status, 'REJECTED');
 });
 
+test('does not reuse a REJECTED recommendation and generates a fresh reviewable recommendation', async () => {
+  let providerCalls = 0;
+  const activeProvider = provider({ schema_version: 2, tone: 'Fresh Tone' });
+  activeProvider.generateAssistantRecommendation = async () => { providerCalls += 1; return { schema_version: 2, tone: 'Fresh Tone' }; };
+  const database = { query: async (sql, params = []) => {
+    if (/FROM ai_assistants assistant/i.test(sql)) return { rows: [{ assistant_name: 'Sales', profile_version_id: '11111111-1111-4111-8111-111111111111', business_identity_id: '55555555-5555-4555-8555-555555555555', source_scope: { source_ids: [] }, evidence: { source_hashes: [] }, profile_data: {} }] };
+    // Artifact query with validStatusFilter must NOT match REJECTED
+    if (/JOIN assistant_knowledge_recommendations artifact/i.test(sql)) {
+      if (/artifact\.status IN \('NEEDS_REVIEW', 'APPROVED'\)/i.test(sql)) return { rows: [] };
+      return { rows: [{ id: '33333333-3333-4333-8333-333333333333', status: 'REJECTED', run_id: '22222222-2222-4222-8222-222222222222' }] };
+    }
+    if (/INSERT INTO knowledge_generation_runs/i.test(sql)) return { rows: [{ id: '22222222-2222-4222-8222-222222222222', status: 'RUNNING' }] };
+    if (/SELECT target_type, request_fingerprint FROM knowledge_generation_runs/i.test(sql)) return { rows: [{ target_type: 'RECOMMENDATION', request_fingerprint: 'fp' }] };
+    if (/UPDATE knowledge_generation_runs/i.test(sql)) return { rows: [{ id: params[0], status: 'SUCCEEDED' }] };
+    if (/INSERT INTO assistant_knowledge_recommendations/i.test(sql)) return { rows: [{ id: '44444444-4444-4444-8444-444444444444', status: 'NEEDS_REVIEW' }] };
+    return { rows: [] };
+  } };
+  const result = await generateAssistantRecommendation({ database, provider: activeProvider, tenantId, assistantId, businessProfileVersionId: '11111111-1111-4111-8111-111111111111', requestedBy: actorId });
+  assert.equal(result.reused, false);
+  assert.equal(result.recommendation.id, '44444444-4444-4444-8444-444444444444');
+  assert.equal(result.recommendation.status, 'NEEDS_REVIEW');
+  assert.equal(providerCalls, 1);
+});
+
 test('reuses the exact successful Recommendation without invoking the provider', async () => {
   let providerCalls = 0;
   const exactProvider = provider({ schema_version: 2 });
@@ -233,6 +300,7 @@ test('reuses the exact successful Recommendation without invoking the provider',
   assert.equal(result.recommendation.id, '33333333-3333-4333-8333-333333333333');
   assert.equal(providerCalls, 0);
 });
+
 
 test('classifies Recommendation timeout at provider stage and leaves no artifact', async () => {
   const calls = [];

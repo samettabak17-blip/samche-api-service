@@ -1001,10 +1001,16 @@ router.post('/:tenantId/knowledge-intelligence/assistants/:assistantId/recommend
       database: pool, provider, tenantId, assistantId,
       businessProfileVersionId, requestedBy: req.user.user_id,
     });
+    const existingRec = await pool.query(
+      `SELECT id FROM assistant_knowledge_recommendations WHERE tenant_id = $1 AND assistant_id = $2 AND status IN ('NEEDS_REVIEW', 'APPROVED') LIMIT 1`,
+      [tenantId, assistantId]
+    );
+    const retryRequested = req.body?.retry === true || !existingRec.rows[0];
     phase = 'ENQUEUE';
     const job = await enqueueAssistantRecommendationGenerationJob({
       database: pool, tenantId, assistantId, businessProfileVersionId,
       requestedBy: req.user.user_id, fingerprint: prepared.fingerprint, providerPolicy: provider.assistantGenerationPolicy,
+      retryRequested,
     });
     phase = 'RESPONSE';
     return res.status(202).json({ job, reused: job.status === 'READY' });

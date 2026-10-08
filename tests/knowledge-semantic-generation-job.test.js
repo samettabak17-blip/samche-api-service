@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   claimNextImageSemanticGenerationJob,
+  enqueueAssistantRecommendationGenerationJob,
   enqueueImageSemanticGenerationJob,
   processImageSemanticGenerationJob,
   recoverStaleImageSemanticGenerationJobs,
@@ -161,3 +162,80 @@ test('semantic worker exposes only safe operational status for deployment health
   worker();
   assert.equal(worker.status().state, 'STOPPED');
 });
+
+test('recommendation worker logs safe failure diagnostics without provider error content', async () => {
+  const logged = [];
+  const recommendationJob = {
+    id: 'job-1',
+    tenant_id: tenantId,
+    attempts: 3,
+    metadata: {
+      assistant_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      business_profile_version_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      requested_by: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      request_fingerprint: extractionHash,
+    },
+  };
+  const database = { query: async (sql) => {
+    if (/job_type = 'GENERATE_ASSISTANT_RECOMMENDATION'/i.test(sql) && /FOR UPDATE SKIP LOCKED/i.test(sql)) {
+      return { rows: [recommendationJob] };
+    }
+    return { rows: [] };
+  } };
+  const worker = startImageSemanticGenerationWorker({
+    database,
+    semanticClassifier: { classify: async () => ({}) },
+    generateRecommendation: async () => {
+      throw Object.assign(new Error('provider returned token=should-not-be-logged'), {
+        code: 'KNOWLEDGE_GENERATION_PROVIDER_FAILED',
+      });
+    },
+    intervalMs: 60_000,
+    logger: { error: (...args) => logged.push(args) },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  worker();
+
+  const event = logged.find(([eventName]) => eventName === 'KNOWLEDGE_SEMANTIC_GENERATION_WORKER_FAILED');
+  assert.ok(event);
+  const diagnostic = event[1];
+  assert.deepEqual(diagnostic, {
+    job_id: 'job-1',
+    tenant_id: tenantId,
+    assistant_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    last_error_code: 'KNOWLEDGE_GENERATION_PROVIDER_FAILED',
+    error_class: 'Error',
+    safe_error_message: 'Recommendation generation provider request failed',
+  });
+  assert.doesNotMatch(JSON.stringify(diagnostic), /should-not-be-logged/);
+});
+
+test('enqueues fresh recommendation job as PENDING with zero attempts when retryRequested is true or job failed', async () => {
+  const calls = [];
+  const database = { query: async (sql, params = []) => {
+    calls.push({ sql, params });
+    if (/INSERT INTO knowledge_processing_jobs/i.test(sql)) {
+      return { rows: [{ id: 'job-rec-1', status: 'PENDING', attempts: 0, last_error_code: null }] };
+    }
+    return { rows: [] };
+  } };
+
+  const job = await enqueueAssistantRecommendationGenerationJob({
+    database,
+    tenantId,
+    assistantId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    businessProfileVersionId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    requestedBy: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    fingerprint: extractionHash,
+    providerPolicy: 'gemini-policy',
+    retryRequested: true,
+  });
+
+  assert.equal(job.status, 'PENDING');
+  assert.equal(job.attempts, 0);
+  const insertCall = calls.find(({ sql }) => /INSERT INTO knowledge_processing_jobs/i.test(sql));
+  assert.ok(insertCall);
+  assert.equal(insertCall.params[3], true);
+});
+
