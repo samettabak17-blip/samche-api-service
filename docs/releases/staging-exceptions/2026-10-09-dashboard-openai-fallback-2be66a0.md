@@ -464,3 +464,65 @@ The exception remains one-time, staging-only, and limited to the exact
 application candidate, exact rollback commit, immutable 29-entry failure set,
 and this evidence record. Golden Path is not GREEN and production remains
 blocked.
+
+## Strict Structured Outputs candidate evidence (e44888b, 2026-10-09)
+
+This section records the recovered, equivalent Golden Path comparison for the
+strict Structured Outputs application/test candidate. Earlier
+`unsupported_claims` staging evidence and the prior Web Chat browser
+instability remain unchanged above and are retained as historical audit
+evidence.
+
+Scope and rollback:
+
+```text
+BASE: 2a589c10459f5276838bdf7976c89319a6df742a
+APPLICATION_CANDIDATE: e44888bdbdceedd16de05e69d8f5c35d89e0a5dd
+ROLLBACK: b0a7b13d6d12348c5508fef8aa1fe7718e3bcd9a
+APPLICATION_DIFF: exactly the three approved Dashboard provider/test files
+```
+
+The unchanged command `npm.cmd run test:fresh-tenant-golden-path` was run
+sequentially from clean base and candidate worktrees against separate fresh
+PostgreSQL 16.15 / pgvector 0.8.6 databases, with `--test-concurrency=1` and
+the runner's unchanged browser/setup chain. `TEST_DATABASE_URL` was accepted
+only after using the existing `testing` isolation marker; no staging,
+production, customer, or development database was used.
+
+| Revision | Timestamp/log prefix | Tests | Pass | Fail | Skipped | Exit | Evidence SHA-256 (stdout / stderr) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `2a589c10` | `2026-10-09 03:40` | 2254 | 2223 | 29 | 2 | 1 | `E4F9B9E22EC7F32898AFAC23D2CD9542326938544D997006D6858161C2755C55` / `1159FA68E9D11D15F529CAC3E3750422DD6997C6BECEA447AD6BC68EC72F0A6B` |
+| `e44888bd` | `2026-10-09 04:10` | 2258 | 2227 | 29 | 2 | 1 | `3218D6CD70D8B421E95CEDEAEC0EA68153CC820A1EBBD79CD598042D6A8C392F` / `1159FA68E9D11D15F529CAC3E3750422DD6997C6BECEA447AD6BC68EC72F0A6B` |
+
+The complete normalized failure identity sets are exactly equal (29 entries);
+candidate-only failures: **0**. The skip count and skip conditions are equal
+(2 each): the unavailable staging CRM fixture lifecycle test and the runtime
+WhatsApp delivery-status SQL-contract skip due to no staging conversation.
+No test was skipped, reclassified, or allowlisted by this run. The candidate's
+four additional tests all passed.
+
+The focused Dashboard/provider/lifecycle/security/tenant command was rerun and
+returned **103 tests, 103 passed, 0 failed, 0 skipped, exit 0** (the original
+101-test baseline plus two strict-schema regressions). Its stdout SHA-256 is
+`C94DA70B0BC556B250217A093A3DF567093F98BF0DFEB4EF8CFC46FD6DC2E46A` and its
+stderr SHA-256 is
+`E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855`.
+
+The environment incident was recovered by stopping only four verified,
+connection-free disposable PostgreSQL clusters left by earlier evidence
+runs. Existing logs, application files, protected channels, credentials, and
+services were not modified. Golden Path remains **FAIL**; this exact candidate
+meets the one-time staging-only exception comparison and remains pending final
+human release approval.
+
+```text
+GOLDEN_PATH: FAIL
+FAILURE_SET_EQUIVALENCE: YES (29 == 29)
+CANDIDATE_ONLY_FAILURES: 0
+EXCEPTION_ELIGIBILITY: SCOPED_EXCEPTION_ELIGIBLE
+STAGING_RELEASE: HOLD_PENDING_FINAL_HUMAN_APPROVAL
+PUSH: NO
+DEPLOY: NO
+PRODUCTION_RELEASE: BLOCKED
+READY_FOR_FINAL_STAGING_APPROVAL: YES
+```
