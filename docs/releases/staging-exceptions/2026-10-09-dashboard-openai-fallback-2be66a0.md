@@ -421,3 +421,46 @@ The prior exception approval does not cover `6bdaae89`. A fresh comparison is
 required after the candidate-only browser failures are resolved or independently
 proven equivalent under an approved, unchanged test environment. No failure,
 skip, or protected-channel result has been reclassified.
+
+## Final equivalent Golden Path evidence for 6bdaae89 (2026-10-09)
+
+The prior complete candidate run and its two candidate-only browser failures
+remain preserved above. A final clean comparison was then executed with the
+same unchanged runner, fresh isolated PostgreSQL 16.15/pgvector 0.8.6
+databases, serialized test execution, and the same browser environment.
+
+| Revision | Result | Tests | Pass | Fail | Skipped | Exit | Evidence |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `2e0383a0` | **FAIL** at `TASKS_1_TO_7_AND_FRESH_TENANT_TESTS` | 2,253 | 2,222 | 29 | 2 | 1 | `base-2e0383-golden-path-final.log`; SHA-256 `2AAAE756616629E816C19A9CDB35CFF7F093FFFEA0380B29A4A011B749680C22` |
+| `6bdaae89` | **FAIL** at `TASKS_1_TO_7_AND_FRESH_TENANT_TESTS` | 2,254 | 2,223 | 29 | 2 | 1 | `candidate-6bdaae8-golden-path-final.log`; SHA-256 `B117F1D6FAF1E04C87BC53269BD584F7E06B766E7B71D86868CC339E23BE7CCB` |
+
+The complete normalized 29-entry failure identities are byte-for-byte equal
+between these final runs. Candidate-only failures: **0**. Additional skips:
+**0**. The 3/3 controlled repetitions of each previously failing browser test
+also passed on both revisions with the setup chain, fresh browser profile,
+serialized execution, identical Edge `154.0.4258.62`, Node `v24.19.0`, default
+device scale factor `1`, and unchanged Web Chat test/helper/asset hashes.
+
+The focused Dashboard/provider/security/tenant suite remains **88/88 passed,
+0 failed, 0 skipped**.
+
+This final evidence supersedes the temporary HOLD decision for the exact
+`6bdaae89` application candidate while retaining the earlier browser anomaly
+as historical audit evidence:
+
+```text
+GOLDEN_PATH: FAIL
+FAILURE_SET_EQUIVALENCE: YES
+CANDIDATE_ONLY_FAILURES: 0
+EXCEPTION_ELIGIBILITY: SCOPED_EXCEPTION_ELIGIBLE
+STAGING_RELEASE: HOLD_PENDING_FINAL_HUMAN_APPROVAL
+PUSH: NO
+DEPLOY: NO
+PRODUCTION_RELEASE: BLOCKED
+READY_FOR_FINAL_STAGING_APPROVAL: YES
+```
+
+The exception remains one-time, staging-only, and limited to the exact
+application candidate, exact rollback commit, immutable 29-entry failure set,
+and this evidence record. Golden Path is not GREEN and production remains
+blocked.
