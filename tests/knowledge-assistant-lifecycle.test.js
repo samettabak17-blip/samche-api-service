@@ -91,7 +91,11 @@ test('Dashboard recommendation OpenAI fallback receives an explicit JSON instruc
   });
 
   assert.equal(openaiRequest.model, 'gpt-4o-mini');
-  assert.deepEqual(openaiRequest.response_format, { type: 'json_object' });
+  assert.equal(openaiRequest.response_format.type, 'json_schema');
+  assert.equal(openaiRequest.response_format.json_schema.name, 'assistant_recommendation_v2');
+  assert.equal(openaiRequest.response_format.json_schema.strict, true);
+  assert.equal(openaiRequest.response_format.json_schema.schema.additionalProperties, false);
+  assert.equal(openaiRequest.response_format.json_schema.schema.properties.unsupported_claims, undefined);
   assert.equal(openaiRequest.messages.length, 1);
   assert.match(openaiRequest.messages[0].content, /Return one valid JSON object only\./);
   assert.match(openaiRequest.messages[0].content, /schema_version must be the JSON number 2/i);

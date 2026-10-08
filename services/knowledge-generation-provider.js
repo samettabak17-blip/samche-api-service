@@ -146,6 +146,36 @@ function responseSchema(fields) {
   };
 }
 
+function openAiStructuredResponseFormat(fields, operation) {
+  const properties = Object.fromEntries(fields.map((field) => [field, field === 'schema_version'
+    ? { type: 'integer' }
+    : {
+      anyOf: [
+        { type: 'string' },
+        { type: 'array', items: { type: 'string' } },
+        { type: 'null' },
+      ],
+    }]));
+  return {
+    type: 'json_schema',
+    json_schema: {
+      name: `${String(operation).toLowerCase()}_v2`,
+      strict: true,
+      schema: {
+        type: 'object',
+        properties,
+        required: fields,
+        additionalProperties: false,
+      },
+    },
+  };
+}
+
+function omitNullOptionalFields(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== null));
+}
+
 export function buildRecommendationResponseSchema() {
   const schema = responseSchema(ASSISTANT_RECOMMENDATION_FIELDS);
   return schema;
@@ -305,10 +335,15 @@ export function createKnowledgeGenerationProvider({
       }),
     }, () => fetchImpl(...args));
     const policy = getDashboardAiProviderPolicy(operation, env);
-    const parseAndValidate = (text) => {
+    const parseAndValidate = (text, providerName = null) => {
       const parsed = parseJson(text, (parser) => emit('structured_parse_result', { parser }));
+      // Strict OpenAI schemas require every property to be present. Null is the
+      // provider-level representation for an omitted optional Recommendation V2
+      // field; unknown properties are deliberately preserved for fail-closed
+      // validation and are never silently stripped.
+      const candidate = providerName === 'OPENAI' ? omitNullOptionalFields(parsed) : parsed;
       try {
-        return validate(parsed);
+        return validate(candidate);
       } catch (error) {
         if (error?.code === 'KNOWLEDGE_GENERATION_SCHEMA_INVALID') {
           emit('structured_parse_result', {
@@ -372,7 +407,7 @@ export function createKnowledgeGenerationProvider({
                 model: policy.secondaryModel,
                 temperature: 0,
                 messages: [{ role: 'user', content: prompt.trim() }],
-                response_format: { type: 'json_object' },
+                response_format: openAiStructuredResponseFormat(fields, operation),
               }, { signal });
             } catch (error) {
               const diagnostics = openaiRejectionDiagnostics(error);
@@ -383,7 +418,7 @@ export function createKnowledgeGenerationProvider({
               });
               throw error;
             }
-            return { text: completion?.choices?.[0]?.message?.content };
+            return { text: completion?.choices?.[0]?.message?.content, provider: 'OPENAI' };
           },
         });
 
@@ -396,7 +431,7 @@ export function createKnowledgeGenerationProvider({
           emit('structured_parse_result', { parser: { phase: 'STRUCTURED_PAYLOAD_SELECTION', classification: result.output.structuredPayloadError } });
           throw new KnowledgeGenerationError('KNOWLEDGE_GENERATION_RESPONSE_INVALID', 'Knowledge generation returned an ambiguous structured response');
         }
-        const output = parseAndValidate(result.output?.text);
+        const output = parseAndValidate(result.output?.text, result.output?.provider);
         await flushTelemetry();
         return output;
       } catch (error) {
@@ -448,11 +483,11 @@ export function createKnowledgeGenerationProvider({
           model: config.model,
           temperature: 0,
           messages: [{ role: 'user', content: prompt.trim() }],
-          response_format: { type: 'json_object' },
+          response_format: openAiStructuredResponseFormat(fields, operation),
         }, { signal: timeout.signal });
         text = completion?.choices?.[0]?.message?.content;
       }
-      const output = parseAndValidate(text);
+      const output = parseAndValidate(text, config.provider === 'OPENAI' ? 'OPENAI' : null);
       await flushTelemetry();
       return output;
     } catch (error) {

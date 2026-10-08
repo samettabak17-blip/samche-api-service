@@ -165,6 +165,77 @@ test('Recommendation validator remains fail-closed with safe contract diagnostic
   assert.deepEqual(validateAssistantRecommendationOutput({ schema_version: 2, tone: 'Professional' }), { schema_version: 2, tone: 'Professional' });
 });
 
+test('Recommendation V2 rejects the staging payload field unsupported_claims', () => {
+  assert.throws(
+    () => validateAssistantRecommendationOutput({ schema_version: 2, unsupported_claims: ['Do not invent policy.'] }),
+    (error) => error.details?.code === 'UNEXPECTED_FIELD'
+      && error.details?.field === 'unsupported_claims'
+      && error.details?.field_path === 'unsupported_claims',
+  );
+});
+
+test('OpenAI Recommendation fallback requests a provider-enforced closed schema', async () => {
+  let request = null;
+  const provider = failoverProvider({
+    vertex: async () => { throw Object.assign(new Error('unavailable'), { status: 503 }); },
+    openai: async (body) => {
+      request = body;
+      return { choices: [{ message: { content: JSON.stringify({ schema_version: 2, tone: 'Professional' }) } }] };
+    },
+  });
+
+  await provider.generateAssistantRecommendation({ prompt: 'profile' });
+
+  assert.equal(request.response_format.type, 'json_schema');
+  assert.equal(request.response_format.json_schema.strict, true);
+  assert.equal(request.response_format.json_schema.schema.additionalProperties, false);
+  assert.equal(request.response_format.json_schema.schema.properties.unsupported_claims, undefined);
+});
+
+test('OpenAI strict nullable optionals are omitted before the authoritative validator', async () => {
+  const provider = failoverProvider({
+    vertex: async () => { throw Object.assign(new Error('unavailable'), { status: 503 }); },
+    openai: async (body) => {
+      const payload = Object.fromEntries(body.response_format.json_schema.schema.required.map((field) => [field, null]));
+      payload.schema_version = 2;
+      payload.tone = 'Professional';
+      return { choices: [{ message: { content: JSON.stringify(payload) } }] };
+    },
+  });
+
+  assert.deepEqual(await provider.generateAssistantRecommendation({ prompt: 'profile' }), {
+    schema_version: 2,
+    tone: 'Professional',
+  });
+});
+
+test('Vertex failure plus OpenAI unsupported_claims remains a terminal schema error', async () => {
+  const events = [];
+  const provider = failoverProvider({
+    telemetry: (event) => events.push(event),
+    vertex: async () => { throw Object.assign(new Error('unavailable'), { status: 503 }); },
+    openai: async () => ({ choices: [{ message: { content: JSON.stringify({
+      schema_version: 2,
+      tone: 'Professional',
+      unsupported_claims: ['Do not invent policy.'],
+    }) } }] }),
+  });
+
+  await assert.rejects(
+    provider.generateAssistantRecommendation({ prompt: 'PRIVATE TENANT PROFILE' }),
+    (error) => error.details?.code === 'UNEXPECTED_FIELD'
+      && error.details?.field === 'unsupported_claims'
+      && error.details?.field_path === 'unsupported_claims',
+  );
+  const diagnostic = events.find((event) => event.event === 'structured_parse_result' && event.parser?.phase === 'SCHEMA_VALIDATION');
+  assert.deepEqual(diagnostic.parser, {
+    phase: 'SCHEMA_VALIDATION',
+    classification: 'UNEXPECTED_FIELD',
+    field_path: 'unsupported_claims',
+  });
+  assert.equal(JSON.stringify(events).includes('PRIVATE TENANT PROFILE'), false);
+});
+
 test('Recommendation schema diagnostics identify an empty array by safe field path', async () => {
   const events = [];
   const provider = failoverProvider({
